@@ -94,21 +94,48 @@ const config = {
       },
       footer: {
         style: 'dark',
+        logo: {
+          alt: 'SurrealDB Logo',
+          src: 'img/logo-footer.svg',
+          href: 'https://surrealdb.com',
+          width: 213,
+          height: 60,
+        },
         links: [
           {
-            title: 'Docs',
+            title: 'PRODUCT',
             items: [
               {
-                label: 'Tutorial',
+                label: 'Documentation',
+                to: '/docs/intro',
+              },
+              {
+                label: 'Why',
+                to: '/docs/intro',
+              },
+              {
+                label: 'Install',
+                to: '/docs/intro',
+              },
+              {
+                label: 'Features',
+                to: '/docs/intro',
+              },
+              {
+                label: 'Releases',
+                to: '/docs/intro',
+              },
+              {
+                label: 'Roadmap',
                 to: '/docs/intro',
               },
             ],
           },
           {
-            title: 'Community',
+            title: 'COMMUNITY',
             items: [
               {
-                label: 'Stack Overflow',
+                label: 'Github',
                 href: 'https://stackoverflow.com/questions/tagged/docusaurus',
               },
               {
@@ -119,23 +146,103 @@ const config = {
                 label: 'Twitter',
                 href: 'https://twitter.com/docusaurus',
               },
+              {
+                label: 'YouTube',
+                href: 'https://twitter.com/docusaurus',
+              },
+              {
+                label: 'LinkedIn',
+                href: 'https://twitter.com/docusaurus',
+              },
+              {
+                label: 'Reddit',
+                href: 'https://twitter.com/docusaurus',
+              },
+              {
+                label: 'Instagram',
+                href: 'https://twitter.com/docusaurus',
+              },
+              {
+                label: 'Stack Overflow',
+                href: 'https://twitter.com/docusaurus',
+              },
+              {
+                label: 'Threads',
+                href: 'https://twitter.com/docusaurus',
+              },
+              {
+                label: 'Medium',
+                href: 'https://twitter.com/docusaurus',
+              },
+              {
+                label: 'Dev',
+                href: 'https://twitter.com/docusaurus',
+              },
             ],
           },
           {
-            title: 'More',
+            title: 'LEGAL',
             items: [
               {
-                label: 'Blog',
+                label: 'Privacy policy',
                 to: '/blog',
               },
               {
-                label: 'GitHub',
+                label: 'Cookies policy',
+                href: 'https://github.com/facebook/docusaurus',
+              },
+              {
+                label: 'Security policy',
+                href: 'https://github.com/facebook/docusaurus',
+              },
+              {
+                label: 'Licence FAQs',
+                href: 'https://github.com/facebook/docusaurus',
+              },
+              {
+                label: 'security.txt',
+                href: 'https://github.com/facebook/docusaurus',
+              },
+            ],
+          },
+          {
+            title: 'ABOUT',
+            items: [
+              {
+                label: 'About us',
+                to: '/blog',
+              },
+              {
+                label: 'Carrers',
+                href: 'https://github.com/facebook/docusaurus',
+              },
+              {
+                label: 'Community',
+                href: 'https://github.com/facebook/docusaurus',
+              },
+              {
+                label: 'Open source',
+                href: 'https://github.com/facebook/docusaurus',
+              },
+              {
+                label: 'Blog',
+                href: 'https://github.com/facebook/docusaurus',
+              },
+              {
+                label: 'Media',
+                href: 'https://github.com/facebook/docusaurus',
+              },
+              {
+                label: 'Store',
                 href: 'https://github.com/facebook/docusaurus',
               },
             ],
           },
         ],
-        copyright: `Copyright © ${new Date().getFullYear()} My Project, Inc. Built with Docusaurus.`,
+        copyright: `Copyright © SurrealDB Ltd.
+        Registered in England and Wales, no. 13615201
+        Registered address: 16 Great Queen Street, Covent Garden, London, WC2B 5AH, United Kingdom
+        Trading address: Huckletree Oxford Circus, 213 Oxford Street, London, W1D 2LG`,
       },
       prism: {
         theme: lightCodeTheme,
