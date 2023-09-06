@@ -136,47 +136,47 @@ const config = {
             items: [
               {
                 label: 'Github',
-                href: 'https://stackoverflow.com/questions/tagged/docusaurus',
+                to: 'https://stackoverflow.com/questions/tagged/docusaurus',
               },
               {
                 label: 'Discord',
-                href: 'https://discordapp.com/invite/docusaurus',
+                to: 'https://discordapp.com/invite/docusaurus',
               },
               {
                 label: 'Twitter',
-                href: 'https://twitter.com/docusaurus',
+                to: 'https://twitter.com/docusaurus',
               },
               {
                 label: 'YouTube',
-                href: 'https://twitter.com/docusaurus',
+                to: 'https://twitter.com/docusaurus',
               },
               {
                 label: 'LinkedIn',
-                href: 'https://twitter.com/docusaurus',
+                to: 'https://twitter.com/docusaurus',
               },
               {
                 label: 'Reddit',
-                href: 'https://twitter.com/docusaurus',
+                to: 'https://twitter.com/docusaurus',
               },
               {
                 label: 'Instagram',
-                href: 'https://twitter.com/docusaurus',
+                to: 'https://twitter.com/docusaurus',
               },
               {
                 label: 'Stack Overflow',
-                href: 'https://twitter.com/docusaurus',
+                to: 'https://twitter.com/docusaurus',
               },
               {
                 label: 'Threads',
-                href: 'https://twitter.com/docusaurus',
+                to: 'https://twitter.com/docusaurus',
               },
               {
                 label: 'Medium',
-                href: 'https://twitter.com/docusaurus',
+                to: 'https://twitter.com/docusaurus',
               },
               {
                 label: 'Dev',
-                href: 'https://twitter.com/docusaurus',
+                to: 'https://twitter.com/docusaurus',
               },
             ],
           },
@@ -189,19 +189,19 @@ const config = {
               },
               {
                 label: 'Cookies policy',
-                href: 'https://github.com/facebook/docusaurus',
+                to: 'https://github.com/facebook/docusaurus',
               },
               {
                 label: 'Security policy',
-                href: 'https://github.com/facebook/docusaurus',
+                to: 'https://github.com/facebook/docusaurus',
               },
               {
                 label: 'Licence FAQs',
-                href: 'https://github.com/facebook/docusaurus',
+                to: 'https://github.com/facebook/docusaurus',
               },
               {
                 label: 'security.txt',
-                href: 'https://github.com/facebook/docusaurus',
+                to: 'https://github.com/facebook/docusaurus',
               },
             ],
           },
@@ -214,27 +214,27 @@ const config = {
               },
               {
                 label: 'Carrers',
-                href: 'https://github.com/facebook/docusaurus',
+                to: 'https://github.com/facebook/docusaurus',
               },
               {
                 label: 'Community',
-                href: 'https://github.com/facebook/docusaurus',
+                to: 'https://github.com/facebook/docusaurus',
               },
               {
                 label: 'Open source',
-                href: 'https://github.com/facebook/docusaurus',
+                to: 'https://github.com/facebook/docusaurus',
               },
               {
                 label: 'Blog',
-                href: 'https://github.com/facebook/docusaurus',
+                to: 'https://github.com/facebook/docusaurus',
               },
               {
                 label: 'Media',
-                href: 'https://github.com/facebook/docusaurus',
+                to: 'https://github.com/facebook/docusaurus',
               },
               {
                 label: 'Store',
-                href: 'https://github.com/facebook/docusaurus',
+                to: 'https://github.com/facebook/docusaurus',
               },
             ],
           },
