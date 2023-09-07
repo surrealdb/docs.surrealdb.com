@@ -1,41 +1,65 @@
-// @ts-check
-// Note: type annotations allow type checking and IDEs autocompletion
-
 const lightCodeTheme = require('prism-react-renderer/themes/github');
 const darkCodeTheme = require('prism-react-renderer/themes/dracula');
-
-// @type {import('@docusaurus/types').Config}
 const config = {
   title: 'SurrealDB Docs',
   tagline: 'SurrealDB Documentation',
   favicon: 'img/favicon.ico',
-
   // Set the production url of your site here
-  url: 'https://your-docusaurus-test-site.com',
+  url: 'https://surrealdb.com',
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: '/',
-
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
-  organizationName: 'facebook', // Usually your GitHub org/user name.
-  projectName: 'docusaurus', // Usually your repo name.
-
+  organizationName: 'SurrealDB', // Usually your GitHub org/user name.
+  projectName: 'SurrealDB docs', // Usually your repo name.
   onBrokenLinks: 'throw',
   onBrokenMarkdownLinks: 'warn',
-
-  // Even if you don't use internalization, you can use this field to set useful
-  // metadata like html lang. For example, if your site is Chinese, you may want
-  // to replace "en" with "zh-Hans".
   i18n: {
     defaultLocale: 'en',
     locales: ['en'],
   },
-
+  plugins: [
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'rust',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'golang',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'node',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'python',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'deno',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'java',
+      },
+    ],
+  ],
   presets: [
     [
       'classic',
-      /** @type {import('@docusaurus/preset-classic').Options} */
       ({
         docs: {
           lastVersion: 'current',
@@ -46,15 +70,11 @@ const config = {
             },
           },
           sidebarPath: require.resolve('./sidebars.js'),
-          // Please change this to your repo.
-          // Remove this to remove the "edit this page" links.
           editUrl:
             'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
         },
         blog: {
           showReadingTime: true,
-          // Please change this to your repo.
-          // Remove this to remove the "edit this page" links.
           editUrl:
             'https://github.com/surrealdb/docs.surrealdb.com',
         },
@@ -64,9 +84,7 @@ const config = {
       }),
     ],
   ],
-
   themeConfig:
-    /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
       colorMode: {
         defaultMode: 'dark',
@@ -111,23 +129,23 @@ const config = {
               },
               {
                 label: 'Why',
-                to: '/docs/intro',
+                to: 'https://surrealdb.com/why',
               },
               {
                 label: 'Install',
-                to: '/docs/intro',
+                to: 'https://surrealdb.com/install',
               },
               {
                 label: 'Features',
-                to: '/docs/intro',
+                to: 'https://surrealdb.com/features',
               },
               {
                 label: 'Releases',
-                to: '/docs/intro',
+                to: 'https://surrealdb.com/releases',
               },
               {
                 label: 'Roadmap',
-                to: '/docs/intro',
+                to: 'https://surrealdb.com/roadmap',
               },
             ],
           },
@@ -136,47 +154,47 @@ const config = {
             items: [
               {
                 label: 'Github',
-                to: 'https://stackoverflow.com/questions/tagged/docusaurus',
+                to: 'https://github.com/surrealdb/surrealdb',
               },
               {
                 label: 'Discord',
-                to: 'https://discordapp.com/invite/docusaurus',
+                to: 'https://discord.gg/surrealdb',
               },
               {
                 label: 'Twitter',
-                to: 'https://twitter.com/docusaurus',
+                to: 'https://twitter.com/surrealdb',
               },
               {
                 label: 'YouTube',
-                to: 'https://twitter.com/docusaurus',
+                to: 'https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w',
               },
               {
                 label: 'LinkedIn',
-                to: 'https://twitter.com/docusaurus',
+                to: 'https://www.linkedin.com/company/surrealdb/',
               },
               {
                 label: 'Reddit',
-                to: 'https://twitter.com/docusaurus',
+                to: 'https://www.reddit.com/r/surrealdb/',
               },
               {
                 label: 'Instagram',
-                to: 'https://twitter.com/docusaurus',
+                to: 'https://www.instagram.com/surrealdb',
               },
               {
                 label: 'Stack Overflow',
-                to: 'https://twitter.com/docusaurus',
+                to: 'https://stackoverflow.com/questions/tagged/surrealdb',
               },
               {
                 label: 'Threads',
-                to: 'https://twitter.com/docusaurus',
+                to: 'https://www.threads.net/@surrealdb',
               },
               {
                 label: 'Medium',
-                to: 'https://twitter.com/docusaurus',
+                to: 'https://medium.com/surrealdb',
               },
               {
                 label: 'Dev',
-                to: 'https://twitter.com/docusaurus',
+                to: 'https://dev.to/surrealdb',
               },
             ],
           },
@@ -185,23 +203,23 @@ const config = {
             items: [
               {
                 label: 'Privacy policy',
-                to: '/blog',
+                to: 'https://surrealdb.com/legal/privacy',
               },
               {
                 label: 'Cookies policy',
-                to: 'https://github.com/facebook/docusaurus',
+                to: 'https://surrealdb.com/legal/cookies',
               },
               {
                 label: 'Security policy',
-                to: 'https://github.com/facebook/docusaurus',
+                to: 'https://surrealdb.com/legal/security',
               },
               {
                 label: 'Licence FAQs',
-                to: 'https://github.com/facebook/docusaurus',
+                to: 'https://surrealdb.com/licence',
               },
               {
                 label: 'security.txt',
-                to: 'https://github.com/facebook/docusaurus',
+                to: 'https://surrealdb.com/.well-known/security.txt',
               },
             ],
           },
@@ -210,31 +228,31 @@ const config = {
             items: [
               {
                 label: 'About us',
-                to: '/blog',
+                to: 'https://surrealdb.com/about',
               },
               {
                 label: 'Carrers',
-                to: 'https://github.com/facebook/docusaurus',
+                to: 'https://surrealdb.com/careers',
               },
               {
                 label: 'Community',
-                to: 'https://github.com/facebook/docusaurus',
+                to: 'https://surrealdb.com/community',
               },
               {
                 label: 'Open source',
-                to: 'https://github.com/facebook/docusaurus',
+                to: 'https://surrealdb.com/opensource',
               },
               {
                 label: 'Blog',
-                to: 'https://github.com/facebook/docusaurus',
+                to: 'https://surrealdb.com/blog',
               },
               {
                 label: 'Media',
-                to: 'https://github.com/facebook/docusaurus',
+                to: 'https://surrealdb.com/media',
               },
               {
                 label: 'Store',
-                to: 'https://github.com/facebook/docusaurus',
+                to: 'https://surrealdb.com/store',
               },
             ],
           },
