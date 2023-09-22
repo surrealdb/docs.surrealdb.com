@@ -1,5 +1,5 @@
-const lightCodeTheme = require('prism-react-renderer/themes/github');
-const darkCodeTheme = require('prism-react-renderer/themes/dracula');
+const lightCodeTheme = require('prism-react-renderer/themes/okaidia');
+const darkCodeTheme = require('prism-react-renderer/themes/okaidia');
 const config = {
   title: 'SurrealDB Docs',
   tagline: 'SurrealDB Documentation',
@@ -293,6 +293,7 @@ const config = {
       prism: {
         theme: lightCodeTheme,
         darkTheme: darkCodeTheme,
+        additionalLanguages: ['powershell'],
       },
     }),
 };
