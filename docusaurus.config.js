@@ -131,11 +131,7 @@ const config = {
           {
             type: 'localeDropdown',
             position: 'right',
-          },
-          {
-            type: 'docsVersionDropdown',
-            docsPluginId: 'java',
-          },
+          }
         ],
       },
       footer: {
