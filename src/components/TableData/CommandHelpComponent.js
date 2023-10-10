@@ -1,42 +1,34 @@
 import React from 'react';
-import commandData from './commandData.json';
 
-function CommandHelp() {
-  const {
-    commandLine,
-    usageHeading,
-    usage,
-    args,
-    options,
-  } = commandData;
-
+function CommandHelpComponent({helpData = []}) {
   return (
     <codes vertical=''>
-      <div className='codes'>
+    {helpData.map((item, index) => (
+      <div key={index} className='codes'>
         <div>
           <pre>
             <code>
-              {usageHeading}
+              {item.usageHeading}
             </code>
           </pre>
           <pre>
             <h5>USAGE:</h5>
             <code className='language-txt'>
-              {usage}
+              {item.usage}
             </code>
           </pre>
           <pre>
             <h5>ARGS:</h5>
             <code className='language-txt'>
-              {args}
+              {item.args}
             </code>
           </pre>
         </div>
         <div className='options'>
           <h4>OPTIONS:</h4>
           <div className='option-description-container'>
-            {options.map((option, index) => (
-              <div key={index} className='option-description'>
+            {item.options && item.options.map((option, idx) => (
+              <div key={idx} className='option-description'>
                 <div className='option-column'>
                   <span className='option-align'>{option.option}</span>
                 </div>
@@ -47,10 +39,10 @@ function CommandHelp() {
             ))}
           </div>
         </div>
-
       </div>
+    ))}
     </codes>
   );
 }
 
-export default CommandHelp;
+export default CommandHelpComponent;
