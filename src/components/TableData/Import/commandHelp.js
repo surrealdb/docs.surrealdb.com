@@ -14,15 +14,6 @@ function CommandHelp() {
     <codes vertical=''>
       <div className='codes'>
         <div>
-          <pre className='language-shell'>
-            <code className='language-shell' text='Command line'>
-              <div className='token copy'>COMMAND LINE</div>
-              <span className='token prompt'>{commandLine.prompt}</span>
-              <span className='token command'>{commandLine.command}</span>
-            </code>
-          </pre>
-        </div>
-        <div>
           <pre>
             <code>
               {usageHeading}
