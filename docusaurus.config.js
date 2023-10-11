@@ -1,5 +1,4 @@
-const lightCodeTheme = require('prism-react-renderer/themes/okaidia');
-const darkCodeTheme = require('prism-react-renderer/themes/okaidia');
+const fs = require('fs');
 const config = {
   title: 'SurrealDB Docs',
   tagline: 'SurrealDB Documentation',
@@ -118,13 +117,13 @@ const config = {
     [
       'docusaurus-preset-shiki-twoslash',
       {
-        themes: ["min-light", "nord"],
+        theme: JSON.parse(fs.readFileSync('./src/grammars/surrealql-theme.json', 'utf-8')),
         langs: [{
           id: 'surql',
           scopeName: 'source.surrealql',
-          path: '../../../../../surrealql.tmLanguage.json' // or `plist`
+          grammar: JSON.parse(fs.readFileSync('./src/grammars/surrealql.tmLanguage.json', 'utf-8')),
+          aliases: ['surrealql']
         }],
-        
       },
     ],
   ],
@@ -307,11 +306,6 @@ const config = {
         Registered in England and Wales, no. 13615201
         Registered address: 16 Great Queen Street, Covent Garden, London, WC2B 5AH, United Kingdom
         Trading address: Huckletree Oxford Circus, 213 Oxford Street, London, W1D 2LG`,
-      },
-      prism: {
-        theme: lightCodeTheme,
-        darkTheme: darkCodeTheme,
-        additionalLanguages: ['powershell'],
       },
     }),
 };
