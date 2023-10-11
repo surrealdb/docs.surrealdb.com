@@ -82,6 +82,12 @@ const config = {
         sidebarPath: require.resolve('./sdks/java/sidebarsJava.js'),
       },
     ],
+    // [
+    //   './plugins/shiki',
+    //   {
+    //     themes: ["min-light", "nord"],
+    //   },
+    // ],
   ],
   presets: [
     [
@@ -108,6 +114,18 @@ const config = {
           customCss: require.resolve('./src/css/custom.scss'),
         },
       }),
+    ],
+    [
+      'docusaurus-preset-shiki-twoslash',
+      {
+        themes: ["min-light", "nord"],
+        langs: [{
+          id: 'surql',
+          scopeName: 'source.surrealql',
+          path: '../../../../../surrealql.tmLanguage.json' // or `plist`
+        }],
+        
+      },
     ],
   ],
   themeConfig:
