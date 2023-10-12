@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkdocs_surrealdb_com=self.webpackChunkdocs_surrealdb_com||[]).push([[4390],{369:s=>{s.exports=JSON.parse('{"name":"docusaurus-plugin-content-docs","id":"rust"}')}}]);
