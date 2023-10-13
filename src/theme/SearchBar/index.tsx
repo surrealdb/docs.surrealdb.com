@@ -45,7 +45,7 @@ function SearchBar(): JSX.Element | null {
             </a>
             <dialog className={styles.modal} ref={dialogRef}>
                 <form method="dialog">
-                    <input className={styles.input} onChange={(e)=>handleChange(e.target.value)} type="text" placeholder="Search.." />
+                    <input className={styles.input} onChange={(e)=>handleChange(e.target.value)} type="text" placeholder="Search.." value={keywords} />
                 </form>
                 {(results && results.length > 0) ? (
                     <div className={styles.results}>
