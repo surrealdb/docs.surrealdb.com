@@ -13,6 +13,7 @@ const config = {
   // If you aren't using GitHub pages, you don't need these.
   organizationName: 'SurrealDB', // Usually your GitHub org/user name.
   projectName: 'docs.surrealdb.com', // Usually your repo name.
+  // TODO We need to fix these issues, just not doing it now :)
   onBrokenLinks: 'warn',
   onBrokenMarkdownLinks: 'warn',
   i18n: {
