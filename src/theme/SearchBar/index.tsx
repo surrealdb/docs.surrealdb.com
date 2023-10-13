@@ -1,19 +1,29 @@
 import React, { useCallback, useRef, useState } from 'react';
 import styles from './styles.module.css';
+import { Doc, search } from './search';
 
 
 function SearchBar(): JSX.Element | null {
     const dialog = useRef<HTMLDialogElement | null>(null);
     const [keywords, setKeywords] = useState('');
+    const [results, setResults] = useState<Doc[]>([]);
 
-    const handleChange = useCallback((value: string) => {
-        if (value !== keywords) {
-            console.log(value);
+    const handleChange = useCallback(async (value: string) => {
+        console.log('handleChange: ' + value);
+        if (!value) {
+            setResults([]);
+            setKeywords('');
+        } else if (value !== keywords) {
             setKeywords(value);
+            try {
+                let res = await search(value);
+                console.log(res);
+                setResults(res);
+            } catch (err) {
+                console.error(err);
+            }
         }
       }, [dialog]);
-
-    
 
     return (
         <>
@@ -23,10 +33,31 @@ function SearchBar(): JSX.Element | null {
                 </svg>
                 Search
             </a>
-            <dialog className={styles.searchmodal} ref={dialog}>
+            <dialog className={styles.modal} ref={dialog}>
                 <form method="dialog">
-                    <input className={styles.searchinput} onChange={(e)=>handleChange(e.target.value)} type="text" placeholder="Search.." value={keywords} />
+                    <input className={styles.input} onChange={(e)=>handleChange(e.target.value)} type="text" placeholder="Search.." />
                 </form>
+                {results && results.length > 0 &&
+                    results.map((doc)=>{
+                        return (
+                    <div className={styles.result} key={doc.url}>
+                        <a href={doc.url}>
+                            <h4 className={styles.title}>{doc.title}</h4>
+                            <h6 className={styles.url}>{doc.url}</h6>
+                            <p className={styles.match}>
+                            { doc.chunks && doc.chunks.length > 0 && doc.chunks.map((ch, idx) => {
+                                    if (ch.bold) {
+                                        return (<b key={idx}>{ch.value} </b>);
+                                    } else {
+                                        return (<span key={idx}>{ch.value} </span>);
+                                    }
+                                }
+                                )
+                            }
+                            </p>
+                        </a>
+                        </div>
+                       )})}
             </dialog>
         </>
     );

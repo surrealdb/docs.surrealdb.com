@@ -1,13 +1,31 @@
-export async function search(keywords) {
-    let sql = templatedQuery(keywords);
-    let raw = await query(sql);
-    const processed = raw
-        .filter((match) => match.offsets)
-        .map(processResult);
-    return processed;
+interface Offset {
+	e: number;
+	s: number;
 }
 
-const templatedQuery = (keywords) => {
+interface Chunks {
+	bold: boolean;
+	value: string;
+}
+
+export interface Doc {
+	url: string;
+	title: string;
+	content: string[];
+	offsets: Record<number, Offset[]>;
+	chunks?: Chunks[];
+}
+
+export async function search(keywords: string): Promise<Doc[]> {
+    const sql = templatedQuery(keywords);
+    const docs = await query(sql);
+    const processed = docs
+        .filter((match) => match.offsets)
+        .map(processResult);
+  	return processed;
+}
+
+const templatedQuery = (keywords: string) => {
 	const escaped = JSON.stringify(keywords);
 	return /* surrealql */ `
 		SELECT
@@ -25,38 +43,37 @@ const templatedQuery = (keywords) => {
 			OR h3 @4@ ${escaped}
 			OR h4 @5@ ${escaped}
 			OR content @6@ ${escaped}
-		ORDER BY score DESC;
+		ORDER BY score DESC LIMIT 10;
 	`;
 };
 
-async function query(sql) {
-	const raw = await fetch('http://localhost:4201/sql', {
+async function query(sql: string) {
+	const raw = await fetch('https://blog-db.surrealdb.com/sql', {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			Authorization: `Basic ${btoa('root:surrealdb')}`,
-			NS: 'test',
-			DB: 'test',
+			NS: 'doc',
+			DB: 'search',
 		},
 		body: sql,
 	});
-
 	const json = await raw.json();
-	return json[0].result ?? [];
+	const result: Doc[] = json[0].result ?? []
+	return result;
 }
 
-function processResult(result) {
+function processResult(doc: Doc) {
 	// Will:
 	// - group offsets per line (see groupOffsets() function)
 	// - Sort descending based on the length of the offsets
 	// - pick the biggest offset
-	const [linenumber, offsets] = Object.entries(result.offsets).sort(
+	const [linenumber, offsets] = Object.entries(doc.offsets).sort(
 		([, a], [, b]) => findBiggestOffsets(b) - findBiggestOffsets(a)
 	)[0];
 
 	// - Grab the actual content of the line.
 	// - Split up in chunks of what to highlight and what not.
-	const line = result.content[linenumber];
+	const line = doc.content[Number(linenumber)];
 	const chunks = offsets
 		.flatMap(({ s, e }, i, arr) => {
 			const next = arr[i + 1];
@@ -69,7 +86,7 @@ function processResult(result) {
 		.filter((a) => a);
 
 	return {
-		...result,
+		...doc,
 		chunks,
 	};
 }

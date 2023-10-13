@@ -12,7 +12,7 @@ const config = {
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
   organizationName: 'SurrealDB', // Usually your GitHub org/user name.
-  projectName: 'SurrealDB docs', // Usually your repo name.
+  projectName: 'docs.surrealdb.com', // Usually your repo name.
   onBrokenLinks: 'warn',
   onBrokenMarkdownLinks: 'warn',
   i18n: {
