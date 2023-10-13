@@ -1,6 +1,6 @@
 export const data = [
   {
-    functionKey: '-c / --conn',
+    functionKey: '-e / --endpoint',
     description: 'Sets the url of the database server to connect to',
     required: false,
   },
@@ -17,12 +17,33 @@ export const data = [
   {
     functionKey: '--ns',
     description: 'Sets the desired namespace into which to import data',
-    required: true,
+    required: false,
   },
   {
     functionKey: '--db',
     description: 'Sets the desired database into which to import data',
-    required: true,
+    required: false,
   },
+  {
+    functionKey: '--pretty',
+    description: 'Sets whether database responses should be pretty printed',
+    required: false,
+  },
+  {
+    functionKey: '--json',
+    description: 'Sets whether to emit results in JSON',
+    required: false,
+  },
+  {
+    functionKey: '--multi',
+    description: 'Sets whether omitting semicolon causes a newline',
+    required: false,
+  },
+  {
+    functionKey: '-h / --help',
+    description: 'Prints help',
+    required: false,
+  }
+  
 ];
 
