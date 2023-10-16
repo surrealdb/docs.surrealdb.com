@@ -8,6 +8,7 @@ const FunctionKeyword = styled.p`
 
 const DescriptionText = styled.p`
   color: white;
+  pointer-events: none;
 `;
 
 const FirstWord = styled.span`
@@ -28,8 +29,17 @@ function TableComponent({ data }) {
   const [hoveredLink, setHoveredLink] = useState("#");
 
   const extractMethodFromFunctionKey = (functionKey) => {
-    const methodWord = functionKey.split(' ').find(word => word.includes('.') && word.includes('('));
-    return methodWord && `#${methodWord.split('.')[1].split('(')[0]}`;
+    let methodWord = functionKey.split(' ').find(word => (word.includes('.') || word.includes('::')) && word.includes('('));
+    
+    if (methodWord) {
+      if (methodWord.includes('.')) {
+        return `#${methodWord.split('.')[1].split('(')[0]}`;
+      }
+      if (methodWord.includes('::')) {
+        return `#${methodWord.split('::')[1].split('(')[0]}`;
+      }
+    }
+    return "#";
   };
 
   return (
@@ -39,17 +49,17 @@ function TableComponent({ data }) {
           <div className='table-cell'>Function</div>
           <div className='table-cell'>Description</div>
         </div>
-        <a href={hoveredLink}>
-          <div className='table-body'>
-            {data.map((item, index) => {
-              const words = item.functionKey.split(' ');
-              return (
-                <div 
-                  className='table-row' 
-                  key={index}
-                  onMouseEnter={() => setHoveredLink(extractMethodFromFunctionKey(item.functionKey))}
-                >
-                  <div className='table-cell'>
+        <div className='table-body'>
+          {data.map((item, index) => {
+            const words = item.functionKey.split(' ');
+            return (
+              <div 
+                className='table-row' 
+                key={index}
+                onMouseEnter={() => setHoveredLink(extractMethodFromFunctionKey(item.functionKey))}
+              >
+                <div className='table-cell'>
+                  <a href={hoveredLink}>
                     <FunctionKeyword>
                       {words.map((word, idx) => {
                         if (idx === 0) return <FirstWord key={idx}>{word}</FirstWord>;
@@ -62,18 +72,28 @@ function TableComponent({ data }) {
                             </span>
                           );
                         }
+                        if (word.includes('::') && word.includes('(')) {
+                          const [beforeColon, afterColon] = word.split('::');
+                          const [method, params] = afterColon.split('(');
+                          return (
+                            <span key={idx}>
+                              {beforeColon}::<WordAfterDot>{method}</WordAfterDot>({params}
+                            </span>
+                          );
+                        }
+
                         return <RestOfFunction key={idx}>{word}</RestOfFunction>;
                       }).reduce((prev, curr) => [prev, ' ', curr])}
                     </FunctionKeyword>
-                  </div>
-                  <div className='table-cell'>
-                    <DescriptionText>{item.description}</DescriptionText>
-                  </div>          
+                  </a>
                 </div>
-              );
-            })}
-          </div>
-        </a>
+                <div className='table-cell'>
+                  <DescriptionText>{item.description}</DescriptionText>
+                </div>          
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
