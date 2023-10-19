@@ -8,27 +8,40 @@ function SearchBar(): JSX.Element | null {
     const [keywords, setKeywords] = useState('');
     const [results, setResults] = useState<Doc[]>([]);
 
-    const handleChange = useCallback(async (value: string) => {
-        console.log('handleChange: ' + value);
+    function debounce<F extends (...args: any[]) => void>(func: F, delay: number): (...args: Parameters<F>) => void {
+        let inDebounce: NodeJS.Timeout | undefined;
+      
+        return function(...args: Parameters<F>) {
+            const context = this;
+            if (inDebounce) {
+                clearTimeout(inDebounce);
+            }
+            inDebounce = setTimeout(() => func.apply(context, args), delay);
+        };
+    }
+
+    const debouncedSearch = useCallback(debounce(async (value: string) => {
         if (!value) {
             setResults([]);
-            setKeywords('');
         } else if (value !== keywords) {
-            setKeywords(value);
             try {
-                let res = await search(value);
-                console.log(res);
-                setResults(res);
+                setResults(await search(value));
             } catch (err) {
                 console.error(err);
             }
         }
-    }, [dialogRef]);
+    }, 150), [keywords]);
+    
+    const handleChange = (value: string) => {
+        setKeywords(value);
+        debouncedSearch(value);
+    };
 
     useEffect(() => {
         const handler = (e) => {
-            if (dialogRef.current && !dialogRef.current.contains(e.target))
+            if (dialogRef.current && !dialogRef.current.contains(e.target)) {
                 dialogRef.current.close();
+            }
         };
 
         document.addEventListener("mousedown", handler);

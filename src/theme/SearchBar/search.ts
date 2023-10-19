@@ -67,9 +67,18 @@ function processResult(doc: Doc) {
 	// - group offsets per line (see groupOffsets() function)
 	// - Sort descending based on the length of the offsets
 	// - pick the biggest offset
-	const [linenumber, offsets] = Object.entries(doc.offsets).sort(
-		([, a], [, b]) => findBiggestOffsets(b) - findBiggestOffsets(a)
-	)[0];
+	let maxOffsetSize = -1;
+	let linenumber = null;
+	let offsets = null;
+
+	for (const [line, off] of Object.entries(doc.offsets)) {
+    const currentOffsetSize = findBiggestOffsets(off);
+		if (currentOffsetSize > maxOffsetSize) {
+			maxOffsetSize = currentOffsetSize;
+			linenumber = line;
+			offsets = off;
+		}
+	}
 
 	// - Grab the actual content of the line.
 	// - Split up in chunks of what to highlight and what not.
@@ -92,5 +101,5 @@ function processResult(doc: Doc) {
 }
 
 function findBiggestOffsets(offsets) {
-	return offsets.map(({ s, e }) => e - s).reduce((a, b) => a + b, 0);
+	return offsets.reduce((sum, { s, e }) => sum + (e - s), 0);
 }
