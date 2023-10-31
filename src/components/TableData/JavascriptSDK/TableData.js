@@ -12,7 +12,7 @@ export const data = [
     description: 'Closes the persistent connection to the database',
   },
   {
-    functionKey: 'async db.use({ ns, db })',
+    functionKey: 'async db.use({ namespace, database })',
     description: 'Switch to a specific namespace and database',
   },
   {
