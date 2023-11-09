@@ -123,7 +123,8 @@ const config = {
         title: 'Documentation',
         logo: {
           alt: 'SurrealDB Logo',
-          src: 'img/logo-surrealdb.svg',
+          src: 'img/logo-surrealdb-dark.svg',
+          srcDark: 'img/logo-surrealdb.svg',
         },
         items: [
           {
