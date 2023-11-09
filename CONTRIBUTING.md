@@ -104,21 +104,6 @@ To summarize, fork the project and use `git clone` command to download the repos
 
 10. Wait for code review and approval.
 
-## Scalability and Performance
-
-SurrealDB is designed to be fast, and to scale. It is built to work in both a single-node setup, and as a distributed cluster. In distributed mode, SurrealDB builds upon [TiKV](https://tikv.org). Please keep in mind that SurrealDB and the Client SDKs are designed to be run in different environments, with different configurations, and at differing scales.
-
-When contributing code to the database or to the Client SDKs, please take into account the following considerations:
-
-- SurrealDB startup time
-- Query execution time
-- Query response times
-- Query throughput
-- Requests per second
-- Websocket connections
-- Network usage
-- Memory usage
-
 ## Security and Privacy
 
 We take the security of SurrealDB code, software, cloud platform, and client SDKs very seriously. If you believe you have found a security vulnerability in SurrealDB, we encourage you to let us know right away. We will investigate all legitimate reports and do our best to quickly fix the problem.
