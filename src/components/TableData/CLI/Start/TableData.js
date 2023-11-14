@@ -20,6 +20,11 @@ export const data = [
       required: false,
     },
     {
+      functionKey: '-auth',
+      description: 'Enables authentication for the database',
+      required: false,
+    },
+    {
       functionKey: '-s / --strict',
       description: 'Sets whether strict mode is enabled on this database instance',
       required: false,
