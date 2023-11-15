@@ -1,5 +1,4 @@
-const lightCodeTheme = require('prism-react-renderer/themes/okaidia');
-const darkCodeTheme = require('prism-react-renderer/themes/okaidia');
+const fs = require('fs');
 const config = {
   title: 'SurrealDB Docs',
   tagline: 'SurrealDB Documentation',
@@ -82,6 +81,12 @@ const config = {
         sidebarPath: require.resolve('./sdks/java/sidebarsJava.js'),
       },
     ],
+    // [
+    //   './plugins/shiki',
+    //   {
+    //     themes: ["min-light", "nord"],
+    //   },
+    // ],
   ],
   presets: [
     [
@@ -108,6 +113,32 @@ const config = {
           customCss: require.resolve('./src/css/custom.scss'),
         },
       }),
+    ],
+    [
+      './src/plugins/shiki',
+      {
+        theme: JSON.parse(fs.readFileSync('./src/grammars/surrealql-theme.json', 'utf-8')),
+        langs: [
+          {
+            id: 'surql',
+            scopeName: 'source.surrealql',
+            grammar: JSON.parse(fs.readFileSync('./src/grammars/surrealql.tmLanguage.json', 'utf-8')),
+            aliases: ['surrealql']
+          },
+          'javascript',
+          'bash',
+          'shell',
+          'yaml',
+          'markdown',
+          'python',
+          'json',
+          'rust',
+          'jsx',
+          'sql',
+          'java',
+          'go',
+        ],
+      },
     ],
   ],
   themeConfig:
@@ -289,11 +320,6 @@ const config = {
         Registered in England and Wales, no. 13615201
         Registered address: 16 Great Queen Street, Covent Garden, London, WC2B 5AH, United Kingdom
         Trading address: Huckletree Oxford Circus, 213 Oxford Street, London, W1D 2LG`,
-      },
-      prism: {
-        theme: lightCodeTheme,
-        darkTheme: darkCodeTheme,
-        additionalLanguages: ['powershell'],
       },
     }),
 };
