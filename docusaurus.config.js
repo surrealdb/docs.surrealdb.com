@@ -115,7 +115,7 @@ const config = {
       }),
     ],
     [
-      'docusaurus-preset-shiki-twoslash',
+      './src/plugins/shiki',
       {
         theme: JSON.parse(fs.readFileSync('./src/grammars/surrealql-theme.json', 'utf-8')),
         langs: [{
