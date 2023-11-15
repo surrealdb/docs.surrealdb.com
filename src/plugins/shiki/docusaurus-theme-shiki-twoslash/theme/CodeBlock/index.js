@@ -8,6 +8,7 @@ import React, { useRef, useState } from "react"
 import Translate, { translate } from "@docusaurus/Translate"
 
 const CodeBlock = ({ children, ...props }) => {
+  console.log(props);
   const pre = useRef(null)
   const [showCopied, setShowCopied] = useState(false)
 
