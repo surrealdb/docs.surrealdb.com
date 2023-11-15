@@ -118,12 +118,24 @@ const config = {
       './src/plugins/shiki',
       {
         theme: JSON.parse(fs.readFileSync('./src/grammars/surrealql-theme.json', 'utf-8')),
-        langs: [{
-          id: 'surql',
-          scopeName: 'source.surrealql',
-          grammar: JSON.parse(fs.readFileSync('./src/grammars/surrealql.tmLanguage.json', 'utf-8')),
-          aliases: ['surrealql']
-        }],
+        langs: [
+          {
+            id: 'surql',
+            scopeName: 'source.surrealql',
+            grammar: JSON.parse(fs.readFileSync('./src/grammars/surrealql.tmLanguage.json', 'utf-8')),
+            aliases: ['surrealql']
+          },
+          'javascript',
+          'bash',
+          'shell',
+          'yaml',
+          'markdown',
+          'python',
+          'json',
+          'rust',
+          'jsx',
+          'sql',
+        ],
       },
     ],
   ],
