@@ -135,6 +135,8 @@ const config = {
           'rust',
           'jsx',
           'sql',
+          'java',
+          'go',
         ],
       },
     ],
