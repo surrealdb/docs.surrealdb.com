@@ -126,6 +126,7 @@ const config = {
             aliases: ['surrealql']
           },
           'javascript',
+          'typescript',
           'bash',
           'shell',
           'yaml',
@@ -137,6 +138,7 @@ const config = {
           'sql',
           'java',
           'go',
+          'jsx',
         ],
       },
     ],
