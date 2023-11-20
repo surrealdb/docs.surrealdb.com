@@ -1,7 +1,14 @@
-# Website
+## Getting started 
 
-This website is built using [Docusaurus 2](https://docusaurus.io/), a modern static website generator.
+Visit [www.docs.surrealdb.com/introduction/start](docs.surrealdb.com/introduction/start) to get started with SurrealDB. 
 
+## Contributing
+
+Please see our [contributing.md](/CONTRIBUTING.md).
+
+### Good First Issues
+
+We have a list of [good first issues](https://github.com/surrealdb/docs.surrealdb.com/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22) that contain bugs that have a relatively limited scope. This is a great place to get started, gain experience, and get familiar with our contribution process.
 ### Installation
 
 ```
@@ -37,5 +44,3 @@ Not using SSH:
 ```
 $ GIT_USER=<Your GitHub username> pnpm deploy
 ```
-
-If you are using GitHub pages for hosting, this command is a convenient way to build the website and push to the `gh-pages` branch.
