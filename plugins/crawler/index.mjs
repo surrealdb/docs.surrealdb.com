@@ -58,13 +58,15 @@ export async function onSuccess() {
             console.log(`[IX] Indexing "${recordId}"`);
             await db.delete(recordId);
             const start = Date.now();
-            await db.create("page_test", { id: pathname, title, path, h1, h2, h3, h4, content, code, date: jobDate });
+            await db
+                .create("page_test", { id: pathname, title, path, h1, h2, h3, h4, content, code, date: jobDate })
+                .catch((e) => `[IX] Indexing for ${pathname} failed: ${e}`);
             const elapsed = Date.now() - start;
             console.log(`[IX] Elapsed time: ${elapsed} ms`);
         }
     }));
 
-    await db.query(/* surql */ `DELETE page_test WHERE date IS NONE OR date < ${jobDate}`);
+    await db.query(/* surql */ `DELETE page_test WHERE date IS NONE OR date < $jobDate`, { jobDate });
 }
 
 const extractText = (blocks) => {
