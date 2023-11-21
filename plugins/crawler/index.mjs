@@ -57,7 +57,7 @@ export async function onSuccess() {
             console.log(`[IX] Indexing "${recordId}"`);
             await db.delete(recordId);
             const start = Date.now();
-            await db.create("page", { id: pathname, title, path, h1, h2, h3, h4, content, code });
+            await db.create("page_test", { id: pathname, title, path, h1, h2, h3, h4, content, code });
             const elapsed = Date.now() - start;
             console.log(`[IX] Elapsed time: ${elapsed} ms`);
         }
