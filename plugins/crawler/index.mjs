@@ -25,7 +25,7 @@ export async function onSuccess() {
     });
 
     const buildDir = `${cwd()}/build/`;
-    const deployUrl = new URL(process.env.DEPLOY_URL);
+    const deployUrl = new URL(process.env.DEPLOY_PRIME_URL);
     const sitemapPath = buildDir + "sitemap.xml";
     console.log(`[CW] Build dir is: "${buildDir}"`);
     console.log(`[CW] Deploy URL is: "${deployUrl}"`);
@@ -66,18 +66,37 @@ export async function onSuccess() {
 
         if (!isLocalBuild && content.length > 0) {
             const start = Date.now();
-            const recordId = `page_test:⟨${pathname}⟩`;
+            const recordId = `page:⟨${pathname}⟩`;
 
             console.log(`[IX] Removing old index for "${recordId}"`);
             await db.delete(recordId);
 
             console.log(`[IX] Indexing "${recordId}"`);
-            await db.create(recordId, { title, path: pathname, h1, h2, h3, h4, content, code, date: jobDate })
+            await db.create(recordId, { 
+                title, 
+                path: pathname,
+                hostname: deployUrl.hostname,
+                h1, h2, h3, h4, content, code, 
+                date: jobDate 
+            })
 
             const elapsed = Date.now() - start;
             console.log(`[IX] Took ${elapsed}ms to index "${recordId}"`);
         }
     }));
 
-    if (!isLocalBuild) await db.query(/* surql */ `DELETE page_test WHERE date IS NONE OR date < $jobDate`, { jobDate });
+    if (!isLocalBuild) {
+        console.log(`[CW] Removing stale pages`);
+        await db.query(
+            /* surql */ `
+                DELETE page WHERE 
+                    hostname = $hostname AND 
+                    (date IS NONE OR date < $jobDate)
+            `, 
+            { 
+                jobDate, 
+                hostname: deployUrl.hostname 
+            }
+        );
+    }
 }
