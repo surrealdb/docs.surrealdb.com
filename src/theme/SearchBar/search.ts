@@ -25,9 +25,18 @@ export async function search(keywords: string): Promise<Doc[]> {
   	return processed;
 }
 
+function getHostname() {
+	const mapped = {
+		'docs.surrealdb.com': 'main--surrealdb-docs.netlify.app',
+		'surrealdb-docs.netlify.app': 'main--surrealdb-docs.netlify.app',
+	};
+
+	return mapped[location.hostname] || location.hostname;
+}
+
 const templatedQuery = (keywords: string) => {
 	const escaped = JSON.stringify(keywords);
-	const hostname = JSON.stringify(location.hostname);
+	const hostname = JSON.stringify(getHostname());
 	return /* surrealql */ `
 		SELECT
 			meta::id(id) as url,
