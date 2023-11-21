@@ -5,11 +5,6 @@ import puppeteer, { Page } from "puppeteer";
 import { Surreal } from "surrealdb.js";
 
 export async function onSuccess() {
-    if (process.env.DEPLOY_URL == 'https://0--surrealdb-docs.netlify.app') {
-        console.log('!!!!! NOT RUNNING POST DEPLOY CRAWLER !!!!!');
-        return;
-    }
-
     const config = {
         "sitemap": `${process.env.DEPLOY_URL}/sitemap.xml`,
         "surreal": {
@@ -20,6 +15,13 @@ export async function onSuccess() {
             "pass": process.env.SURREAL_PASSWORD
         }
     };
+
+    console.log(JSON.stringify(config));
+
+    if (process.env.DEPLOY_URL == 'https://0--surrealdb-docs.netlify.app') {
+        console.log('!!!!! NOT RUNNING POST DEPLOY CRAWLER !!!!!');
+        return;
+    }
 
     const db = await initSurreal(config);
     await crawl(config, db);
