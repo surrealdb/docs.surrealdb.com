@@ -1,5 +1,5 @@
-export const onPostBuild = function() {
-    console.log("Hello world from onPostBuild event!");
-    console.log(JSON.stringify({arguments}));
+export const onSuccess = async function() {
+    console.log(process.env.DEPLOY_URL);
+    console.log('can fetch: ' + (await fetch(process.env.DEPLOY_URL)).status);
 }
   
