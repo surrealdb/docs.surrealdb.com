@@ -44,7 +44,18 @@ export async function onSuccess() {
         const fileContent = fs.readFileSync(filePath, "utf-8");
         const document = parseHTML(fileContent);
 
-        const scrapByQuerySelector = (query) => extractText(document.querySelectorAll(query).map(el => el.textContent));
+        const scrapByQuerySelector = (query) => document.querySelectorAll(query)
+            .map((el) => {
+                const block = el.textContent;
+                if (!block) return;
+
+                const parts = block.split(/\s+/);
+                const trimmedParts = parts.filter(Boolean); // This removes any empty strings
+                const trimmedBlock = trimmedParts.join(" ");
+                if (trimmedBlock.length > 0) return trimmedBlock;
+            })
+            .filter(a => a);
+
         const title = document.querySelector('title').textContent;
         const h1 = scrapByQuerySelector('h1');
         const h2 = scrapByQuerySelector('h2');
@@ -54,14 +65,15 @@ export async function onSuccess() {
         const content = scrapByQuerySelector('p,h1,h2,h3,h4,h5,h6,tr,th,td,code');
 
         if (!isLocalBuild && content.length > 0) {
-            const recordId = `page_test:⟨${pathname}⟩`;
-            console.log(`[IX] Removing old index for "${recordId}"`);
             const start = Date.now();
-            await db.delete(recordId).catch((e) => `[IX] Removing old index for ${pathname} failed: ${e}`);
+            const recordId = `page_test:⟨${pathname}⟩`;
+
+            console.log(`[IX] Removing old index for "${recordId}"`);
+            await db.delete(recordId);
+
             console.log(`[IX] Indexing "${recordId}"`);
-            await db
-                .create(recordId, { title, path: pathname, h1, h2, h3, h4, content, code, date: jobDate })
-                .catch((e) => `[IX] Indexing for ${pathname} failed: ${e}`);
+            await db.create(recordId, { title, path: pathname, h1, h2, h3, h4, content, code, date: jobDate })
+
             const elapsed = Date.now() - start;
             console.log(`[IX] Took ${elapsed}ms to index "${recordId}"`);
         }
@@ -69,19 +81,3 @@ export async function onSuccess() {
 
     if (!isLocalBuild) await db.query(/* surql */ `DELETE page_test WHERE date IS NONE OR date < $jobDate`, { jobDate });
 }
-
-const extractText = (blocks) => {
-  const text = [];
-  for (const block of blocks) {
-    if (block) {
-      // Make the block prettier, by removing any extra spaces.
-      const parts = block.split(/\s+/);
-      const trimmedParts = parts.filter(Boolean); // This removes any empty strings
-      const trimmedBlock = trimmedParts.join(" ");
-      if (trimmedBlock.length > 0) {
-        text.push(trimmedBlock);
-      }
-    }
-  }
-  return text;
-};
