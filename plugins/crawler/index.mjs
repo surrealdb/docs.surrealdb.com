@@ -6,6 +6,7 @@ import { cwd } from "process";
 
 export async function onSuccess() {
     const isLocalBuild = process.env.DEPLOY_URL == 'https://0--surrealdb-docs.netlify.app';
+    const jobDate = new Date();
     const db = new Surreal({
         onConnect: () => console.log("[DB] Connected to SurrealDB"),
         onClose: () => console.log("[DB] Disconnected from SurrealDB"),
@@ -57,11 +58,13 @@ export async function onSuccess() {
             console.log(`[IX] Indexing "${recordId}"`);
             await db.delete(recordId);
             const start = Date.now();
-            await db.create("page_test", { id: pathname, title, path, h1, h2, h3, h4, content, code });
+            await db.create("page_test", { id: pathname, title, path, h1, h2, h3, h4, content, code, date: jobDate });
             const elapsed = Date.now() - start;
             console.log(`[IX] Elapsed time: ${elapsed} ms`);
         }
     }));
+
+    await db.query(/* surql */ `DELETE page_test WHERE date IS NONE OR date < ${jobDate}`);
 }
 
 const extractText = (blocks) => {
