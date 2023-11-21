@@ -36,8 +36,8 @@ export async function onSuccess() {
     const urls = sitemap.urlset.url;
     console.log(`[CW] The sitemap contains ${urls.length} url(s)`);
 
-    const pathnames = urls.map((url) => new URL(url.loc[0]).pathname);
-    await Promise.allSettled(pathnames.map(async (pathname, index) => {
+    const pathnames = urls.map((url) => decodeURI(new URL(url.loc[0]).pathname));
+    await Promise.all(pathnames.map(async (pathname, index) => {
         console.log(`[CW] Crawling page ${index + 1}/${pathnames.length}: ${pathname}`);
 
         const filePath = `${buildDir}${pathname}/index.html`;
@@ -55,18 +55,19 @@ export async function onSuccess() {
 
         if (!isLocalBuild && content.length > 0) {
             const recordId = `page_test:⟨${pathname}⟩`;
-            console.log(`[IX] Indexing "${recordId}"`);
-            await db.delete(recordId);
+            console.log(`[IX] Removing old index for "${recordId}"`);
             const start = Date.now();
+            await db.delete(recordId).catch((e) => `[IX] Removing old index for ${pathname} failed: ${e}`);
+            console.log(`[IX] Indexing "${recordId}"`);
             await db
-                .create("page_test", { id: pathname, title, path, h1, h2, h3, h4, content, code, date: jobDate })
+                .create(recordId, { title, path: pathname, h1, h2, h3, h4, content, code, date: jobDate })
                 .catch((e) => `[IX] Indexing for ${pathname} failed: ${e}`);
             const elapsed = Date.now() - start;
-            console.log(`[IX] Elapsed time: ${elapsed} ms`);
+            console.log(`[IX] Took ${elapsed}ms to index "${recordId}"`);
         }
     }));
 
-    await db.query(/* surql */ `DELETE page_test WHERE date IS NONE OR date < $jobDate`, { jobDate });
+    if (!isLocalBuild) await db.query(/* surql */ `DELETE page_test WHERE date IS NONE OR date < $jobDate`, { jobDate });
 }
 
 const extractText = (blocks) => {
