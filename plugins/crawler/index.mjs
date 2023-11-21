@@ -1,4 +1,4 @@
-const fetch = require('node-fetch');
+import fetch from 'node-fetch';
 
 export const onSuccess = async function() {
     console.log(process.env.DEPLOY_URL);
