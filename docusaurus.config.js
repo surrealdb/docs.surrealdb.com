@@ -104,11 +104,6 @@ const config = {
           editUrl:
             'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
         },
-        blog: {
-          showReadingTime: true,
-          editUrl:
-            'https://github.com/surrealdb/docs.surrealdb.com',
-        },
         theme: {
           customCss: require.resolve('./src/css/custom.scss'),
         },
@@ -308,10 +303,6 @@ const config = {
               {
                 label: 'Open source',
                 to: 'https://surrealdb.com/opensource',
-              },
-              {
-                label: 'Blog',
-                to: 'https://surrealdb.com/blog',
               },
               {
                 label: 'Media',
