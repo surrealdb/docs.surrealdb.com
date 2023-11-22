@@ -25,8 +25,18 @@ export async function search(keywords: string): Promise<Doc[]> {
   	return processed;
 }
 
+function getHostname() {
+	const mapped = {
+		'docs.surrealdb.com': 'main--surrealdb-docs.netlify.app',
+		'surrealdb-docs.netlify.app': 'main--surrealdb-docs.netlify.app',
+	};
+
+	return mapped[location.hostname] || location.hostname;
+}
+
 const templatedQuery = (keywords: string) => {
 	const escaped = JSON.stringify(keywords);
+	const hostname = JSON.stringify(getHostname());
 	return /* surrealql */ `
 		SELECT
 			meta::id(id) as url,
@@ -36,13 +46,17 @@ const templatedQuery = (keywords: string) => {
 			search::score(0) * 7 + search::score(1) * 6 + search::score(2) * 5 + search::score(3) * 4
 			+ search::score(4) * 3 + search::score(5) * 2 + search::score(6) AS score
 		FROM page
-			WHERE title @0@ ${escaped}
-			OR path @1@ ${escaped}
-			OR h1 @2@ ${escaped}
-			OR h2 @3@ ${escaped}
-			OR h3 @4@ ${escaped}
-			OR h4 @5@ ${escaped}
-			OR content @6@ ${escaped}
+			WHERE 
+				hostname = ${hostname}
+				AND (
+					title @0@ ${escaped}
+					OR path @1@ ${escaped}
+					OR h1 @2@ ${escaped}
+					OR h2 @3@ ${escaped}
+					OR h3 @4@ ${escaped}
+					OR h4 @5@ ${escaped}
+					OR content @6@ ${escaped}
+				)
 		ORDER BY score DESC LIMIT 10;
 	`;
 };
