@@ -1,0 +1,220 @@
+---
+sidebar_position: 3
+---
+
+# Deploy on Kubernetes
+
+## Deploy on Kubernetes
+
+In this guide, we will deploy SurrealDB to KIND (Kubernetes in Docker) using TiKV as the storage engine: TiKV is a cloud-native transactional key/value store that integrates well with Kubernetes thanks to their tidb-operator.
+
+At the end, we will run a few experiments using SurrealQL to verify that we can interact with the new cluster and will destroy some Kubernetes pods to see that data is highly available.
+
+## Requirements
+
+For this guide, we need to install:
+
+- [`kubectl`](https://kubernetes.io/docs/tasks/tools/install-kubectl/) : To manage the Kubernetes cluster
+- [`helm`](https://helm.sh/docs/intro/install/) : To install SurrealDB server and TiKV
+- [`KIND`](https://kind.sigs.k8s.io/) and [Docker](https://www.docker.com/) :To run a local Kubernetes cluster inside a Docker container
+- [`Surreal CLI`](https://surrealdb.com/install) : To interact with the SurrealDB server
+
+## Create [`KIND`](https://kind.sigs.k8s.io/) Cluster
+
+First, we need to create a [`KIND`](https://kind.sigs.k8s.io/) cluster. KIND is a tool for running local Kubernetes clusters using Docker container “nodes”. It’s a great tool for experimenting with Kubernetes without spending a lot of time creating a full-featured cluster.
+
+Run the following command to create a cluster:
+
+### 1. Let’s create a new cluster:
+
+```bash title="Crete new cluster"
+kind create cluster -n surreal-demo
+```
+
+### 2. Verify we can interact with the created cluster
+
+```bash
+kubectl config current-context
+kind-surreal-demo
+kubectl get ns
+NAME                 STATUS   AGE
+default              Active   79s
+kube-node-lease      Active   79s
+kube-public          Active   79s
+kube-system          Active   79s
+local-path-storage   Active   75s
+```
+
+## Deploy TiDB operator
+
+Now that we have a Kubernetes cluster, we can deploy the [`TiDB operator`](https://github.com/pingcap/tidb-operator). TiDB operator is a Kubernetes operator that manages the lifecycle of TiDB clusters deployed to Kubernetes.
+
+You can deploy it following these steps:
+
+1. Install CRDS:
+
+```bash title="Install"
+kubectl create -f https://raw.githubusercontent.com/pingcap/tidb-operator/v1.4.5/manifests/crd.yaml
+```
+
+2. Install TiDB Operator Helm chart:
+
+```bash title="Update HELM repositories"
+helm repo add pingcap https://charts.pingcap.org
+helm repo update
+helm install \
+	-n tidb-operator \
+  --create-namespace \
+	tidb-operator \
+	pingcap/tidb-operator \
+	--version v1.4.5
+```
+
+3. Verify that the Pods are running:
+
+```bash
+kubectl get pods --namespace tidb-operator -l app.kubernetes.io/instance=tidb-operator
+NAME                                       READY   STATUS    RESTARTS   AGE
+tidb-controller-manager-56f49794d7-hnfz7   1/1     Running   0          20s
+tidb-scheduler-8655bcbc86-66h2d            2/2     Running   0          20s
+```
+
+## Create TiDB cluster
+Now that we have the TiDB Operator running, it’s time to define a TiDB Cluster and let the Operator do the rest. One of the TiDB Cluster components is the TiKV, which we are interested in.
+Given this is a demo, we will use a basic example cluster, but there are several examples in the official GitHub repo in case you need a more production-grade deployment
+
+
+Run the following commands to deploy the TiKV cluster:
+
+### 1. Create a namespace for the TiDB cluster:
+
+```bash
+kubectl create ns tikv
+```
+
+### 2. Create the TiDB cluster:
+
+```bash title="Create TIDB Cluster"
+kubectl apply -n tikv -f https://raw.githubusercontent.com/pingcap/tidb-operator/v1.4.5/examples/basic/tidb-cluster.yaml
+```
+### 3. Check the cluster status and wait until it’s ready:
+
+```bash title="Verify TIDB Cluster"
+kubectl get -n tikv tidbcluster
+NAME    READY   PD                  STORAGE   READY   DESIRE   TIKV   STORAGE   READY   DESIRE   TIDB   READY   DESIRE   AGE
+basic   False   pingcap/pd:v6.5.0   1Gi       1       1               1Gi               1                       1        41s
+$ kubectl get -n tikv tidbcluster
+NAME    READY   PD                  STORAGE   READY   DESIRE   TIKV                  STORAGE   READY   DESIRE   TIDB                  READY   DESIRE   AGE
+basic   True    pingcap/pd:v6.5.0   1Gi       1       1        pingcap/tikv:v6.5.0   1Gi       1       1        pingcap/tidb:v6.5.0   1       1        5m
+```
+
+## Deploy SurrealDB
+
+Now that we have a TiDB cluster running, we can deploy SurrealDB.
+For this guide, we will use the SurrealDB Helm chart. Run the following commands to deploy SurrealDB:
+
+### 1. Add the SurrealDB Charts repository:
+
+```bash title="Add SurrealDB Helm repository" 
+helm repo add surrealdb https://helm.surrealdb.com
+helm repo update
+```
+### 2. Get the TIKV PD service url:
+
+```bash title="Get TIKV PD service URL"
+kubectl get -n tikv svc/basic-pd
+NAME       TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE
+basic-pd   ClusterIP   10.96.208.25   <none>        2379/TCP   10h
+
+export TIKV_URL=tikv://basic-pd.tikv:2379
+```
+### 3. Install the SurrealDB Helm chart with the TIKV_URL defined above and with auth disabled so we can create the initial credentials:
+
+```bash title="Install SurrealDB HELM chart"
+helm install --set surrealdb.path=$TIKV_URL --set surrealdb.auth=false surrealdb-tikv surrealdb/surrealdb
+```
+
+### 4. Connect to the cluster and define the initial credentials (see in the section below how to connect):
+
+```bash
+surreal sql -e http://...
+> DEFINE USER root ON ROOT PASSWORD 'StrongSecretPassword!' ROLES OWNER;
+
+Verify you can connect to the database with the new credentials:
+surreal sql -u root -p 'StrongSecretPassword!' -e http://...
+> INFO FOR ROOT
+[{ namespaces: { }, users: { root: "DEFINE USER root ON ROOT PASSHASH '...' ROLES OWNER" } }]
+```
+
+### 5. Now that the initial credentials have been created, enable authentication:
+
+```bash title="Update SurrealDB Helm Chart"
+helm upgrade --set surrealdb.path=$TIKV_URL surrealdb-tikv surrealdb/surrealdb
+```
+
+## Run SurrealDB experiments
+
+Now that we have SurrealDB running, we can run some experiments to verify that everything is working as expected.
+For this guide, we will use the Surreal CLI. Run the following commands to run some experiments:
+
+### 1. Start port-forwarding to the SurrealDB service:
+
+```bash
+kubectl port-forward svc/surrealdb-tikv 8000
+Forwarding from 127.0.0.1:8000 -> 8000
+Forwarding from [::1]:8000 -> 8000
+```
+
+### 2. Connect to the SurrealDB server using the CLI from another shell:
+```bash 
+surreal sql --conn 'http://localhost:8000' --user root --pass surrealdb 
+```
+
+### 3. Create a SurrealDB database:
+
+```bash
+surreal sql --conn 'http://localhost:8000' --user root --pass surrealdb
+> USE NS ns DB db;
+
+ns/db> CREATE record;
+{ id: record:wbd69kmc81l4fbee7pit }
+ns/db> CREATE record;
+{ id: record:vnyfsr22ovhmmtcm5y1t }
+ns/db> CREATE record;
+{ id: record:se49petzb7c4bc7yge0z }
+ns/db> SELECT * FROM record;
+[{ id: record:se49petzb7c4bc7yge0z }, { id: record:vnyfsr22ovhmmtcm5y1t }, { id: record:wbd69kmc81l4fbee7pit }]
+ns/db>
+```
+
+The data created above has been persisted to the TiKV cluster. Let’s verify it by deleting the SurrealDB server and let Kubernetes recreate it.
+
+```bash
+kubectl get pod
+NAME                              READY   STATUS    RESTARTS   AGE
+surrealdb-tikv-7488f6f654-lsrwp   1/1     Running   0          13m
+kubectl delete pod surrealdb-tikv-7488f6f654-lsrwp
+pod "surrealdb-tikv-7488f6f654-lsrwp" deleted
+kubectl get pod
+NAME                              READY   STATUS    RESTARTS   AGE
+surrealdb-tikv-7488f6f654-bnkjz   1/1     Running   0          4s
+```
+
+Connect again and verify the data is still there (you may need to re-run the port-forwarding command):
+
+```bash
+surreal sql --conn 'http://localhost:8000' --user root --pass surrealdb
+> USE NS ns DB db;
+
+ns/db> SELECT * FROM record;
+[{ id: record:se49petzb7c4bc7yge0z }, { id: record:vnyfsr22ovhmmtcm5y1t }, { id: record:wbd69kmc81l4fbee7pit }]
+ns/db>
+```
+
+:::note
+Given we are using KIND, we use  `port-forwarding`  for demonstration purposes.
+In a full-featured Kubernetes cluster, you could set  `ingress.enabled=true`  when installing the SurrealDB Helm Chart and it would create a Load Balancer in front of the SurrealDB server pods.
+:::
+
+## Conclusion
+This guide demonstrated how to deploy SurrealDB on Kubernetes using TiKV as a datastore. From here, you could try and deploy to [`EKS`](https://aws.amazon.com/eks/) , [`GKE`](https://cloud.google.com/kubernetes-engine) or [`AKS`](https://azure.microsoft.com/en-us/products/kubernetes-service) , and play with the different configurations for the TiKV cluster.
