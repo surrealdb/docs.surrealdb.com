@@ -149,19 +149,26 @@ const config = {
       // Replace with your project's social card
       image: 'img/docusaurus-social-card.jpg',
       navbar: {
-        title: 'Documentation',
+        title: 'Docs',
         logo: {
           alt: 'SurrealDB Logo',
           src: 'img/logo-surrealdb-dark.svg',
           srcDark: 'img/logo-surrealdb.svg',
+          width: 120,
+          height: 30,
         },
         items: [
           {
-            type: 'docsVersionDropdown',
+            to: 'https://surrealdb.com',
             position: 'right',
+            className: 'navbar-surreal',
+            'aria-label': 'SurrealDB.com',
+            label: 'SurrealDB.com',
+            target: '_blank',
+            icon: 'none'
           },
           {
-            type: 'localeDropdown',
+            type: 'docsVersionDropdown',
             position: 'right',
           },
           {
@@ -182,140 +189,6 @@ const config = {
           width: 213,
           height: 60,
         },
-        links: [
-          {
-            title: 'PRODUCT',
-            items: [
-              {
-                label: 'Documentation',
-                to: '/docs/intro',
-              },
-              {
-                label: 'Why',
-                to: 'https://surrealdb.com/why',
-              },
-              {
-                label: 'Install',
-                to: 'https://surrealdb.com/install',
-              },
-              {
-                label: 'Features',
-                to: 'https://surrealdb.com/features',
-              },
-              {
-                label: 'Releases',
-                to: 'https://surrealdb.com/releases',
-              },
-              {
-                label: 'Roadmap',
-                to: 'https://surrealdb.com/roadmap',
-              },
-            ],
-          },
-          {
-            title: 'COMMUNITY',
-            items: [
-              {
-                label: 'Github',
-                to: 'https://github.com/surrealdb/surrealdb',
-              },
-              {
-                label: 'Discord',
-                to: 'https://discord.gg/surrealdb',
-              },
-              {
-                label: 'Twitter',
-                to: 'https://twitter.com/surrealdb',
-              },
-              {
-                label: 'YouTube',
-                to: 'https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w',
-              },
-              {
-                label: 'LinkedIn',
-                to: 'https://www.linkedin.com/company/surrealdb/',
-              },
-              {
-                label: 'Reddit',
-                to: 'https://www.reddit.com/r/surrealdb/',
-              },
-              {
-                label: 'Instagram',
-                to: 'https://www.instagram.com/surrealdb',
-              },
-              {
-                label: 'Stack Overflow',
-                to: 'https://stackoverflow.com/questions/tagged/surrealdb',
-              },
-              {
-                label: 'Threads',
-                to: 'https://www.threads.net/@surrealdb',
-              },
-              {
-                label: 'Medium',
-                to: 'https://medium.com/surrealdb',
-              },
-              {
-                label: 'Dev',
-                to: 'https://dev.to/surrealdb',
-              },
-            ],
-          },
-          {
-            title: 'LEGAL',
-            items: [
-              {
-                label: 'Privacy policy',
-                to: 'https://surrealdb.com/legal/privacy',
-              },
-              {
-                label: 'Cookies policy',
-                to: 'https://surrealdb.com/legal/cookies',
-              },
-              {
-                label: 'Security policy',
-                to: 'https://surrealdb.com/legal/security',
-              },
-              {
-                label: 'Licence FAQs',
-                to: 'https://surrealdb.com/licence',
-              },
-              {
-                label: 'security.txt',
-                to: 'https://surrealdb.com/.well-known/security.txt',
-              },
-            ],
-          },
-          {
-            title: 'ABOUT',
-            items: [
-              {
-                label: 'About us',
-                to: 'https://surrealdb.com/about',
-              },
-              {
-                label: 'Carrers',
-                to: 'https://surrealdb.com/careers',
-              },
-              {
-                label: 'Community',
-                to: 'https://surrealdb.com/community',
-              },
-              {
-                label: 'Open source',
-                to: 'https://surrealdb.com/opensource',
-              },
-              {
-                label: 'Media',
-                to: 'https://surrealdb.com/media',
-              },
-              {
-                label: 'Store',
-                to: 'https://surrealdb.com/store',
-              },
-            ],
-          },
-        ],
         copyright: `Copyright © SurrealDB Ltd.
         Registered in England and Wales, no. 13615201
         Registered address: 16 Great Queen Street, Covent Garden, London, WC2B 5AH, United Kingdom
