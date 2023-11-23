@@ -172,10 +172,6 @@ const config = {
             position: 'right',
           },
           {
-            type: 'localeDropdown',
-            position: 'right',
-          },
-          {
             href: 'https://github.com/surrealdb',
             position: 'right',
             className: 'header-github-link',
