@@ -134,6 +134,7 @@ const config = {
           'java',
           'go',
           'jsx',
+          'csharp'
         ],
       },
     ],
