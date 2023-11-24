@@ -37,7 +37,7 @@ function UnmaintainedVersionLabel({siteTitle, versionMetadata}) {
         versionLabel: <b>{versionMetadata.label}</b>,
       }}>
       {
-        'This is documentation for {siteTitle} {versionLabel}, which is no longer actively maintained.'
+        'This is documentation for {siteTitle} {versionLabel}, which is updated bi-weekly.'
       }
     </Translate>
   );
