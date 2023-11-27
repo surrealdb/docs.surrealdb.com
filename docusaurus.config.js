@@ -1,7 +1,7 @@
 const fs = require('fs');
 const config = {
   title: 'SurrealDB Docs',
-  tagline: 'SurrealDB Documentation',
+  tagline: 'SurrealDB Docs',
   favicon: 'img/favicon.ico',
   // Set the production url of your site here
   url: 'https://surrealdb.com',
@@ -181,14 +181,6 @@ const config = {
       },
       footer: {
         style: 'dark',
-        logo: {
-          alt: 'SurrealDB Logo',
-          src: 'img/logo-surrealdb-dark.svg',
-          srcDark: 'img/logo-footer.svg',
-          href: 'https://surrealdb.com',
-          width: 213,
-          height: 60,
-        },
         copyright: `Copyright © SurrealDB Ltd.
         Registered in England and Wales, no. 13615201
         Registered address: 16 Great Queen Street, Covent Garden, London, WC2B 5AH, United Kingdom
