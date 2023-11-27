@@ -181,10 +181,7 @@ const config = {
       },
       footer: {
         style: 'dark',
-        copyright: `Copyright © SurrealDB Ltd.
-        Registered in England and Wales, no. 13615201
-        Registered address: 16 Great Queen Street, Covent Garden, London, WC2B 5AH, United Kingdom
-        Trading address: Huckletree Oxford Circus, 213 Oxford Street, London, W1D 2LG`,
+        copyright: `&copy; SurrealDB - <a href='https://github.com/surrealdb'>Github</a> - <a href='https://discord.gg/surrealdb'>Discord</a> `,
       },
     }),
 };
