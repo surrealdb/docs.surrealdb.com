@@ -149,13 +149,13 @@ const config = {
       // Replace with your project's social card
       image: 'img/docusaurus-social-card.jpg',
       navbar: {
-        title: 'Docs',
+        title: '',
         logo: {
           alt: 'SurrealDB Logo',
           src: 'img/logo-surrealdb-dark.svg',
           srcDark: 'img/logo-surrealdb.svg',
-          width: 120,
-          height: 30,
+          width: 300,
+          height: 44,
         },
         items: [
           {
