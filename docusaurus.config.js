@@ -99,6 +99,10 @@ const config = {
               label: '1.0.0',
               path: '',
             },
+            nightly: {
+              label: 'Nightly',
+              path: 'nightly',
+            },
           },
           sidebarPath: require.resolve('./sidebars.js'),
           editUrl:
