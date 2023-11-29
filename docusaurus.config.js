@@ -113,35 +113,35 @@ const config = {
         },
       }),
     ],
-    [
-      './src/plugins/shiki',
-      {
-        theme: JSON.parse(fs.readFileSync('./src/grammars/surrealql-theme.json', 'utf-8')),
-        langs: [
-          {
-            id: 'surql',
-            scopeName: 'source.surrealql',
-            grammar: JSON.parse(fs.readFileSync('./src/grammars/surrealql.tmLanguage.json', 'utf-8')),
-            aliases: ['surrealql']
-          },
-          'javascript',
-          'typescript',
-          'bash',
-          'shell',
-          'yaml',
-          'markdown',
-          'python',
-          'json',
-          'rust',
-          'jsx',
-          'sql',
-          'java',
-          'go',
-          'jsx',
-          'csharp'
-        ],
-      },
-    ],
+    // [
+    //   './src/plugins/shiki',
+    //   {
+    //     theme: JSON.parse(fs.readFileSync('./src/grammars/surrealql-theme.json', 'utf-8')),
+    //     langs: [
+    //       {
+    //         id: 'surql',
+    //         scopeName: 'source.surrealql',
+    //         grammar: JSON.parse(fs.readFileSync('./src/grammars/surrealql.tmLanguage.json', 'utf-8')),
+    //         aliases: ['surrealql']
+    //       },
+    //       'javascript',
+    //       'typescript',
+    //       'bash',
+    //       'shell',
+    //       'yaml',
+    //       'markdown',
+    //       'python',
+    //       'json',
+    //       'rust',
+    //       'jsx',
+    //       'sql',
+    //       'java',
+    //       'go',
+    //       'jsx',
+    //       'csharp'
+    //     ],
+    //   },
+    // ],
   ],
   themeConfig:
     ({
@@ -185,6 +185,25 @@ const config = {
         style: 'dark',
         copyright: `&copy; SurrealDB - <a href='https://github.com/surrealdb'>Github</a> - <a href='https://discord.gg/surrealdb'>Discord</a> `,
       },
+      prism: {
+        additionalLanguages: [
+          'javascript',
+          'typescript',
+          'bash',
+          'shell',
+          'yaml',
+          'markdown',
+          'python',
+          'json',
+          'rust',
+          'jsx',
+          'sql',
+          'java',
+          'go',
+          'jsx',
+          'csharp'
+        ]
+      }
     }),
 };
 
