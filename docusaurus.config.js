@@ -154,8 +154,6 @@ const config = {
           alt: 'SurrealDB Logo',
           src: 'img/logo-surrealdb-dark.svg',
           srcDark: 'img/logo-surrealdb.svg',
-          width: 300,
-          height: 44,
         },
         items: [
           {
