@@ -190,7 +190,6 @@ const config = {
           'javascript',
           'typescript',
           'bash',
-          'shell',
           'yaml',
           'markdown',
           'python',
