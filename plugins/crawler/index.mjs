@@ -5,7 +5,7 @@ import { Surreal } from "surrealdb.js";
 import { cwd } from "process";
 
 export async function onSuccess() {
-    const isLocalBuild = process.env.DEPLOY_URL !== 'https://0--surrealdb-docs.netlify.app';
+    const isLocalBuild = process.env.DEPLOY_URL == 'https://0--surrealdb-docs.netlify.app';
     const jobDate = new Date();
     const db = new Surreal({
         onConnect: () => console.log("[DB] Connected to SurrealDB"),
