@@ -29,6 +29,7 @@ function getHostname() {
 	const mapped = {
 		'docs.surrealdb.com': 'main--surrealdb-docs.netlify.app',
 		'surrealdb-docs.netlify.app': 'main--surrealdb-docs.netlify.app',
+		'localhost': 'main--surrealdb-docs.netlify.app',
 	};
 
 	return mapped[location.hostname] || location.hostname;
