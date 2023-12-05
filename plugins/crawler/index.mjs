@@ -13,7 +13,7 @@ export async function onSuccess() {
         onError: () => console.log("[DB] Error occurred"),
     });
 
-    if (!applyIndexes) await db.connect(process.env.SURREAL_ENDPOINT, {
+    if (applyIndexes) await db.connect(process.env.SURREAL_ENDPOINT, {
         namespace: process.env.SURREAL_NAMESPACE,
         database: process.env.SURREAL_DATABASE,
         auth: {
@@ -70,7 +70,7 @@ export async function onSuccess() {
             const code = scrapByQuerySelector('code');
             const content = scrapByQuerySelector('p,h1,h2,h3,h4,h5,h6,tr,th,td,code');
 
-            if (!applyIndexes && content.length > 0) {
+            if (applyIndexes && content.length > 0) {
                 const start = Date.now();
                 const recordId = `page:[${JSON.stringify(hostname)}, ${JSON.stringify(pathname)}]`;
 
@@ -110,7 +110,7 @@ export async function onSuccess() {
         }));
     }
 
-    if (!applyIndexes) {
+    if (applyIndexes) {
         console.log(`[CW] Removing stale pages`);
         await db.query(
             /* surql */ `
