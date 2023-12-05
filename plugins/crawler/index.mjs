@@ -78,7 +78,7 @@ export async function onSuccess() {
                 await db.query(/* surql */ `DELETE page:[$hostname, $pathname];`, { hostname, pathname });
 
                 console.log(`[IX] Indexing "${recordId}"`);
-                await db.create(
+                await db.query(
                     /* surql */ `
                         CREATE page:[$hostname, $path] CONTENT { 
                             title: $title, 
