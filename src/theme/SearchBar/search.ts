@@ -66,10 +66,8 @@ async function query(sql: string) {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			NS: 'docs',
-			DB: 'search',
 		},
-		body: sql,
+		body: `USE NS docs DB search; ${sql}`,
 	});
 	const json = await raw.json();
 	const result: Doc[] = json[0].result ?? []
