@@ -39,7 +39,7 @@ const templatedQuery = (keywords: string) => {
 	const hostname = JSON.stringify(getHostname());
 	return /* surrealql */ `
 		SELECT
-			meta::id(id) as url,
+			path as url,
 			title,
 			content,
 			search::offsets(6) AS offsets,

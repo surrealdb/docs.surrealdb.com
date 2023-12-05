@@ -37,53 +37,59 @@ export async function onSuccess() {
     console.log(`[CW] The sitemap contains ${urls.length} url(s)`);
 
     const pathnames = urls.map((url) => decodeURI(new URL(url.loc[0]).pathname));
-    await Promise.all(pathnames.map(async (pathname, index) => {
-        console.log(`[CW] Crawling page ${index + 1}/${pathnames.length}: ${pathname}`);
+    const chunkSize = 10;
 
-        const filePath = `${buildDir}${pathname}/index.html`;
-        const fileContent = fs.readFileSync(filePath, "utf-8");
-        const document = parseHTML(fileContent);
+    for (let i = 0; i < pathnames.length; i += chunkSize) {
+        const chunk = pathnames.slice(i, i + chunkSize);
+        await Promise.all(chunk.map(async (pathname, index) => {
+            index += i;
+            console.log(`[CW] Crawling page ${index + 1}/${pathnames.length}: ${pathname}`);
 
-        const scrapByQuerySelector = (query) => document.querySelectorAll(query)
-            .map((el) => {
-                const block = el.textContent;
-                if (!block) return;
+            const filePath = `${buildDir}${pathname}/index.html`;
+            const fileContent = fs.readFileSync(filePath, "utf-8");
+            const document = parseHTML(fileContent);
 
-                const parts = block.split(/\s+/);
-                const trimmedParts = parts.filter(Boolean); // This removes any empty strings
-                const trimmedBlock = trimmedParts.join(" ");
-                if (trimmedBlock.length > 0) return trimmedBlock;
-            })
-            .filter(a => a);
+            const scrapByQuerySelector = (query) => document.querySelectorAll(query)
+                .map((el) => {
+                    const block = el.textContent;
+                    if (!block) return;
 
-        const title = document.querySelector('title').textContent;
-        const h1 = scrapByQuerySelector('h1');
-        const h2 = scrapByQuerySelector('h2');
-        const h3 = scrapByQuerySelector('h3');
-        const h4 = scrapByQuerySelector('h4');
-        const code = scrapByQuerySelector('code');
-        const content = scrapByQuerySelector('p,h1,h2,h3,h4,h5,h6,tr,th,td,code');
+                    const parts = block.split(/\s+/);
+                    const trimmedParts = parts.filter(Boolean); // This removes any empty strings
+                    const trimmedBlock = trimmedParts.join(" ");
+                    if (trimmedBlock.length > 0) return trimmedBlock;
+                })
+                .filter(a => a);
 
-        if (!isLocalBuild && content.length > 0) {
-            const start = Date.now();
-            const recordId = `page:⟨${pathname}⟩`;
+            const title = document.querySelector('title').textContent;
+            const h1 = scrapByQuerySelector('h1');
+            const h2 = scrapByQuerySelector('h2');
+            const h3 = scrapByQuerySelector('h3');
+            const h4 = scrapByQuerySelector('h4');
+            const code = scrapByQuerySelector('code');
+            const content = scrapByQuerySelector('p,h1,h2,h3,h4,h5,h6,tr,th,td,code');
 
-            console.log(`[IX] Removing old index for "${recordId}"`);
-            await db.delete(recordId);
+            if (!isLocalBuild && content.length > 0) {
+                const start = Date.now();
+                const recordId = `page:[${JSON.stringify(hostname)}, ${JSON.stringify(pathname)}]`;
 
-            console.log(`[IX] Indexing "${recordId}"`);
-            await db.create(recordId, { 
-                title, 
-                path: pathname,
-                hostname: deployUrl.hostname,
-                h1, h2, h3, h4, content, code, 
-                date: jobDate 
-            })
+                console.log(`[IX] Removing old index for "${recordId}"`);
+                await db.delete(recordId);
 
-            const elapsed = Date.now() - start;
-            console.log(`[IX] Took ${elapsed}ms to index "${recordId}"`);
-        }
-    }));
+                console.log(`[IX] Indexing "${recordId}"`);
+                await db.create(recordId, { 
+                    title, 
+                    path: pathname,
+                    hostname: deployUrl.hostname,
+                    h1, h2, h3, h4, content, code, 
+                    date: jobDate 
+                })
+
+                const elapsed = Date.now() - start;
+                console.log(`[IX] Took ${elapsed}ms to index "${recordId}"`);
+            }
+        }));
+    }
 
     if (!isLocalBuild) {
         console.log(`[CW] Removing stale pages`);
@@ -99,4 +105,6 @@ export async function onSuccess() {
             }
         );
     }
+
+    await db.close();
 }
