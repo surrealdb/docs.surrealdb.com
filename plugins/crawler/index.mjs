@@ -71,7 +71,7 @@ export async function onSuccess() {
 
             if (!isLocalBuild && content.length > 0) {
                 const start = Date.now();
-                const recordId = `page:[${JSON.stringify(hostname)}, ${JSON.stringify(pathname)}]`;
+                const recordId = `page:[${JSON.stringify(deployUrl.hostname)}, ${JSON.stringify(pathname)}]`;
 
                 console.log(`[IX] Removing old index for "${recordId}"`);
                 await db.delete(recordId);
