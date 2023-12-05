@@ -5,7 +5,7 @@ import { Surreal } from "surrealdb.js";
 import { cwd } from "process";
 
 export async function onSuccess() {
-    const isLocalBuild = process.env.DEPLOY_URL == 'https://0--surrealdb-docs.netlify.app';
+    const isLocalBuild = process.env.DEPLOY_URL !== 'https://0--surrealdb-docs.netlify.app';
     const jobDate = new Date();
     const db = new Surreal({
         onConnect: () => console.log("[DB] Connected to SurrealDB"),
@@ -26,6 +26,7 @@ export async function onSuccess() {
 
     const buildDir = `${cwd()}/build/`;
     const deployUrl = new URL(process.env.DEPLOY_PRIME_URL);
+    const hostname = deployUrl.hostname;
     const sitemapPath = buildDir + "sitemap.xml";
     console.log(`[CW] Build dir is: "${buildDir}"`);
     console.log(`[CW] Deploy URL is: "${deployUrl}"`);
@@ -71,19 +72,35 @@ export async function onSuccess() {
 
             if (!isLocalBuild && content.length > 0) {
                 const start = Date.now();
-                const recordId = `page:[${JSON.stringify(deployUrl.hostname)}, ${JSON.stringify(pathname)}]`;
+                const recordId = `page:[${JSON.stringify(hostname)}, ${JSON.stringify(pathname)}]`;
 
                 console.log(`[IX] Removing old index for "${recordId}"`);
-                await db.delete(recordId);
+                await db.query(/* surql */ `DELETE page:[$hostname, $pathname];`, { hostname, pathname });
 
                 console.log(`[IX] Indexing "${recordId}"`);
-                await db.create(recordId, { 
-                    title, 
-                    path: pathname,
-                    hostname: deployUrl.hostname,
-                    h1, h2, h3, h4, content, code, 
-                    date: jobDate 
-                })
+                await db.create(
+                    /* surql */ `
+                        CREATE page:[$hostname, $path] CONTENT { 
+                            title: $title, 
+                            path: $path,
+                            hostname: $hostname,
+                            h1: $h1, 
+                            h2: $h2, 
+                            h3: $h3, 
+                            h4: $h4, 
+                            content: $content, 
+                            code: $code, 
+                            date: $date, 
+                        };
+                    `, 
+                    { 
+                        title, 
+                        path: pathname,
+                        hostname,
+                        h1, h2, h3, h4, content, code, 
+                        date: jobDate 
+                    }
+                )
 
                 const elapsed = Date.now() - start;
                 console.log(`[IX] Took ${elapsed}ms to index "${recordId}"`);
@@ -101,7 +118,7 @@ export async function onSuccess() {
             `, 
             { 
                 jobDate, 
-                hostname: deployUrl.hostname 
+                hostname: hostname 
             }
         );
     }
