@@ -26,6 +26,7 @@ export async function onSuccess() {
 
     const buildDir = `${cwd()}/build/`;
     const deployUrl = new URL(process.env.DEPLOY_PRIME_URL);
+    const hostname = deployUrl.hostname;
     const sitemapPath = buildDir + "sitemap.xml";
     console.log(`[CW] Build dir is: "${buildDir}"`);
     console.log(`[CW] Deploy URL is: "${deployUrl}"`);
@@ -37,53 +38,75 @@ export async function onSuccess() {
     console.log(`[CW] The sitemap contains ${urls.length} url(s)`);
 
     const pathnames = urls.map((url) => decodeURI(new URL(url.loc[0]).pathname));
-    await Promise.all(pathnames.map(async (pathname, index) => {
-        console.log(`[CW] Crawling page ${index + 1}/${pathnames.length}: ${pathname}`);
+    const chunkSize = 1;
 
-        const filePath = `${buildDir}${pathname}/index.html`;
-        const fileContent = fs.readFileSync(filePath, "utf-8");
-        const document = parseHTML(fileContent);
+    for (let i = 0; i < pathnames.length; i += chunkSize) {
+        const chunk = pathnames.slice(i, i + chunkSize);
+        await Promise.all(chunk.map(async (pathname, index) => {
+            index += i;
+            console.log(`[CW] Crawling page ${index + 1}/${pathnames.length}: ${pathname}`);
 
-        const scrapByQuerySelector = (query) => document.querySelectorAll(query)
-            .map((el) => {
-                const block = el.textContent;
-                if (!block) return;
+            const filePath = `${buildDir}${pathname}/index.html`;
+            const fileContent = fs.readFileSync(filePath, "utf-8");
+            const document = parseHTML(fileContent);
 
-                const parts = block.split(/\s+/);
-                const trimmedParts = parts.filter(Boolean); // This removes any empty strings
-                const trimmedBlock = trimmedParts.join(" ");
-                if (trimmedBlock.length > 0) return trimmedBlock;
-            })
-            .filter(a => a);
+            const scrapByQuerySelector = (query) => document.querySelectorAll(query)
+                .map((el) => {
+                    const block = el.textContent;
+                    if (!block) return;
 
-        const title = document.querySelector('title').textContent;
-        const h1 = scrapByQuerySelector('h1');
-        const h2 = scrapByQuerySelector('h2');
-        const h3 = scrapByQuerySelector('h3');
-        const h4 = scrapByQuerySelector('h4');
-        const code = scrapByQuerySelector('code');
-        const content = scrapByQuerySelector('p,h1,h2,h3,h4,h5,h6,tr,th,td,code');
+                    const parts = block.split(/\s+/);
+                    const trimmedParts = parts.filter(Boolean); // This removes any empty strings
+                    const trimmedBlock = trimmedParts.join(" ");
+                    if (trimmedBlock.length > 0) return trimmedBlock;
+                })
+                .filter(a => a);
 
-        if (!isLocalBuild && content.length > 0) {
-            const start = Date.now();
-            const recordId = `page:⟨${pathname}⟩`;
+            const title = document.querySelector('title').textContent;
+            const h1 = scrapByQuerySelector('h1');
+            const h2 = scrapByQuerySelector('h2');
+            const h3 = scrapByQuerySelector('h3');
+            const h4 = scrapByQuerySelector('h4');
+            const code = scrapByQuerySelector('code');
+            const content = scrapByQuerySelector('p,h1,h2,h3,h4,h5,h6,tr,th,td,code');
 
-            console.log(`[IX] Removing old index for "${recordId}"`);
-            await db.delete(recordId);
+            if (!isLocalBuild && content.length > 0) {
+                const start = Date.now();
+                const recordId = `page:[${JSON.stringify(hostname)}, ${JSON.stringify(pathname)}]`;
 
-            console.log(`[IX] Indexing "${recordId}"`);
-            await db.create(recordId, { 
-                title, 
-                path: pathname,
-                hostname: deployUrl.hostname,
-                h1, h2, h3, h4, content, code, 
-                date: jobDate 
-            })
+                console.log(`[IX] Removing old index for "${recordId}"`);
+                await db.query(/* surql */ `DELETE page:[$hostname, $pathname];`, { hostname, pathname });
 
-            const elapsed = Date.now() - start;
-            console.log(`[IX] Took ${elapsed}ms to index "${recordId}"`);
-        }
-    }));
+                console.log(`[IX] Indexing "${recordId}"`);
+                await db.query(
+                    /* surql */ `
+                        CREATE page:[$hostname, $path] CONTENT { 
+                            title: $title, 
+                            path: $path,
+                            hostname: $hostname,
+                            h1: $h1, 
+                            h2: $h2, 
+                            h3: $h3, 
+                            h4: $h4, 
+                            content: $content, 
+                            code: $code, 
+                            date: $date, 
+                        };
+                    `, 
+                    { 
+                        title, 
+                        path: pathname,
+                        hostname,
+                        h1, h2, h3, h4, content, code, 
+                        date: jobDate 
+                    }
+                )
+
+                const elapsed = Date.now() - start;
+                console.log(`[IX] Took ${elapsed}ms to index "${recordId}"`);
+            }
+        }));
+    }
 
     if (!isLocalBuild) {
         console.log(`[CW] Removing stale pages`);
@@ -95,8 +118,10 @@ export async function onSuccess() {
             `, 
             { 
                 jobDate, 
-                hostname: deployUrl.hostname 
+                hostname: hostname 
             }
         );
     }
+
+    await db.close();
 }
