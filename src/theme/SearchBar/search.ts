@@ -69,7 +69,7 @@ async function query(sql: string) {
 		},
 		body: `USE NS docs DB search; ${sql}`,
 	});
-	const json = await raw.json();
+	const json = (await raw.json()).slice(1);
 	const result: Doc[] = json[0].result ?? []
 	return result;
 }
