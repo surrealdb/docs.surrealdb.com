@@ -38,7 +38,7 @@ export async function onSuccess() {
     console.log(`[CW] The sitemap contains ${urls.length} url(s)`);
 
     const pathnames = urls.map((url) => decodeURI(new URL(url.loc[0]).pathname));
-    const chunkSize = 10;
+    const chunkSize = 1;
 
     for (let i = 0; i < pathnames.length; i += chunkSize) {
         const chunk = pathnames.slice(i, i + chunkSize);

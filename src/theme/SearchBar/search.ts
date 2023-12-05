@@ -66,7 +66,7 @@ async function query(sql: string) {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			NS: 'doc',
+			NS: 'docs',
 			DB: 'search',
 		},
 		body: sql,
