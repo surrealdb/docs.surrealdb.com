@@ -5,7 +5,7 @@ import { Surreal } from "surrealdb.js";
 import { cwd } from "process";
 
 export async function onSuccess() {
-    const isLocalBuild = process.env.DEPLOY_URL == 'https://0--surrealdb-docs.netlify.app';
+    const applyIndexes = process.env.DEPLOY_URL == 'https://main--surrealdb-docs.netlify.app/';
     const jobDate = new Date();
     const db = new Surreal({
         onConnect: () => console.log("[DB] Connected to SurrealDB"),
@@ -13,7 +13,7 @@ export async function onSuccess() {
         onError: () => console.log("[DB] Error occurred"),
     });
 
-    if (!isLocalBuild) await db.connect(process.env.SURREAL_ENDPOINT, {
+    if (applyIndexes) await db.connect(process.env.SURREAL_ENDPOINT, {
         namespace: process.env.SURREAL_NAMESPACE,
         database: process.env.SURREAL_DATABASE,
         auth: {
@@ -70,7 +70,7 @@ export async function onSuccess() {
             const code = scrapByQuerySelector('code');
             const content = scrapByQuerySelector('p,h1,h2,h3,h4,h5,h6,tr,th,td,code');
 
-            if (!isLocalBuild && content.length > 0) {
+            if (applyIndexes && content.length > 0) {
                 const start = Date.now();
                 const recordId = `page:[${JSON.stringify(hostname)}, ${JSON.stringify(pathname)}]`;
 
@@ -104,11 +104,13 @@ export async function onSuccess() {
 
                 const elapsed = Date.now() - start;
                 console.log(`[IX] Took ${elapsed}ms to index "${recordId}"`);
+            } else {
+                console.log(`[IX] Skipping indexing, not on prod`);
             }
         }));
     }
 
-    if (!isLocalBuild) {
+    if (applyIndexes) {
         console.log(`[CW] Removing stale pages`);
         await db.query(
             /* surql */ `
@@ -121,6 +123,8 @@ export async function onSuccess() {
                 hostname: hostname 
             }
         );
+    } else {
+        console.log(`[CW] Skipping stale page removal, not on prod`);
     }
 
     await db.close();
