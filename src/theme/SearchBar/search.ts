@@ -39,7 +39,7 @@ const templatedQuery = (keywords: string) => {
 	const hostname = JSON.stringify(getHostname());
 	return /* surrealql */ `
 		SELECT
-			meta::id(id) as url,
+			path as url,
 			title,
 			content,
 			search::offsets(6) AS offsets,
@@ -66,12 +66,10 @@ async function query(sql: string) {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			NS: 'doc',
-			DB: 'search',
 		},
-		body: sql,
+		body: `USE NS docs DB search; ${sql}`,
 	});
-	const json = await raw.json();
+	const json = (await raw.json()).slice(1);
 	const result: Doc[] = json[0].result ?? []
 	return result;
 }

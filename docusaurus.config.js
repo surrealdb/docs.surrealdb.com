@@ -183,7 +183,7 @@ const config = {
       },
       footer: {
         style: 'dark',
-        copyright: `&copy; SurrealDB - <a href='https://surrealdb.com'>Surrealdb.com</a> - <a href='https://github.com/surrealdb'>GitHub</a> - <a href='https://discord.gg/surrealdb'>Discord</a> -  <a href='https://surrealdb.com/community'>Community</a> - <a href='https://surrealdb.com/products'>Products</a> - <a href='https://surrealdb.com/features'>Features</a> - <a href='https://surrealdb.com/releases'>Releases</a> `,
+        copyright: `&copy; SurrealDB - <a href='https://surrealdb.com'>SurrealDB.com</a> - <a href='https://github.com/surrealdb'>GitHub</a> - <a href='https://discord.gg/surrealdb'>Discord</a> -  <a href='https://surrealdb.com/community'>Community</a> - <a href='https://surrealdb.com/products'>Products</a> - <a href='https://surrealdb.com/features'>Features</a> - <a href='https://surrealdb.com/releases'>Releases</a> `,
       },
       prism: {
         additionalLanguages: [

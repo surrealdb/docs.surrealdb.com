@@ -1,6 +1,6 @@
 ## Getting started 
 
-Visit https://www.docs.surrealdb.com/introduction/start to get started with SurrealDB. 
+Visit https://docs.surrealdb.com/docs/introduction/start to get started with SurrealDB. 
 
 ## Contributing
 
