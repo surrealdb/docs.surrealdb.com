@@ -1,0 +1,121 @@
+---
+sidebar_position: 1
+---
+
+import ThemedImage from '@theme/ThemedImage';
+import useBaseUrl from '@docusaurus/useBaseUrl';
+
+# Run with Docker
+
+<ThemedImage
+  alt="Docker"
+  width="50"
+  className="sdk-logo"
+  sources={{
+    light: useBaseUrl('img/light/docker.png'),
+    dark: useBaseUrl('img/docker-icon.png'),
+  }}
+/>
+
+# Run with Docker
+
+Use this tutorial to run SurrealDB from within Docker.
+
+## Running the SurrealDB server using Docker
+
+To get started using Docker, you can use the `latest` tag. To start a server use the [`start`](/docs/cli/start) command. By default SurrealDB runs on port `8000`. To view all the available versions and tags, or to use a specific tag visit the [Docker Hub](https://hub.docker.com/r/surrealdb/surrealdb) page.
+
+```bash
+docker run --rm --pull always -p 8000:8000 surrealdb/surrealdb:latest start
+```
+
+In order to persist data when the Docker instance is restarted or shutdown, specify a Docker folder using the Docker *`-v`* command line argument, and use the on-disk storage engine in SurrealDB using the path prefix chosen as a Docker folder.
+
+```bash
+docker run --rm --pull always -p 8000:8000 -v /mydata:/mydata surrealdb/surrealdb:latest start file:/mydata/mydatabase.db
+```
+
+The default logging level for the database server is `info`, resulting in any informational logs to be output to the standard output. To control the logging verbosity, specify the *`--log`* argument. The following command starts the database with `trace` level logging, resulting in most logs being output to the terminal.
+
+```bash
+docker run --rm --pull always -p 8000:8000 -v /mydata:/mydata surrealdb/surrealdb:latest start --log trace file:/mydata/mydatabase.db
+```
+
+In order to keep SurrealDB secure, configure your initial root-level user by setting the *`--user`* and *`--pass`* command-line arguments. The following command starts the database with a top-level user named `root` with a password also set to `root`. The root user will be persisted in storage, which means you don't have to include the command line arguments next time you start SurrealDB.
+
+```bash
+docker run --rm --pull always -p 80:8000 -v /mydata:/mydata surrealdb/surrealdb:latest start --log trace --auth --user root --pass root file:mydatabase.db
+```
+
+In order to change the default port that SurrealDB uses for web connections and from database clients you can use the Docker *`-p`* command line argument to tunnel the port to the internal SurrealDB port which SurrealDB is served on. The following command starts the database on port `80`.
+
+```bash
+docker run --rm --pull always -p 80:8000 -v /mydata:/mydata surrealdb/surrealdb:latest start --log trace --user root --pass root file:/mydata/mydatabase.db
+```
+
+After running the above command, you should see the SurrealDB server startup successfully.
+
+```bash
+docker run --rm --pull always -p 80:8000 -v /local-dir:/container-dir surrealdb/surrealdb:latest start --auth --user root --pass root file:/container-dir/mydatabase.db
+
+2023-08-30T15:06:34.788739Z  INFO surreal::dbs: ✅🔒 Authentication is enabled 🔒✅
+2023-08-30T15:06:34.788821Z  INFO surrealdb::kvs::ds: Starting kvs store in file:/container-dir/mydatabase.db
+2023-08-30T15:06:34.788859Z  INFO surrealdb::kvs::ds: Started kvs store in file:/container-dir/mydatabase.db
+2023-08-30T15:06:34.789222Z  INFO surrealdb::kvs::ds: Initial credentials were provided and no existing root-level users were found: create the initial user 'root'.
+2023-08-30T15:06:35.205123Z  INFO surrealdb::node: Started node agent
+2023-08-30T15:06:35.205827Z  INFO surrealdb::net: Started web server on 0.0.0.0:8080
+```
+
+For details on the [`start`](/docs/cli/start) command, and all of the available configuration options and arguments, view the [`start command documentation`](/docs/cli/start).
+
+## Using the command-line tools within Docker
+The Docker container contains both the server, and the command line tools for importing, exporting, and querying a remote SurrealDB server.
+
+```bash
+docker run --rm --pull always surrealdb/surrealdb:latest help
+```
+
+The result should look similar to the output below, confirming that the SurrealDB command-line tool was installed successfully.
+
+```bash
+.d8888b.                                             888 8888888b.  888888b.
+d88P  Y88b                                            888 888  'Y88b 888  '88b
+Y88b.                                                 888 888    888 888  .88P
+ 'Y888b.   888  888 888d888 888d888  .d88b.   8888b.  888 888    888 8888888K.
+	'Y88b. 888  888 888P'   888P'   d8P  Y8b     '88b 888 888    888 888  'Y88b
+	  '888 888  888 888     888     88888888 .d888888 888 888    888 888    888
+Y88b  d88P Y88b 888 888     888     Y8b.     888  888 888 888  .d88P 888   d88P
+ 'Y8888P'   'Y88888 888     888      'Y8888  'Y888888 888 8888888P'  8888888P'
+
+
+SurrealDB command-line interface and server
+
+To get started using SurrealDB, and for guides on connecting to and building applications
+on top of SurrealDB, check out the SurrealDB documentation (https://surrealdb.com/docs).
+
+If you have questions or ideas, join the SurrealDB community (https://surrealdb.com/community).
+
+If you find a bug, submit an issue on Github (https://github.com/surrealdb/surrealdb/issues).
+
+We would love it if you could star the repository (https://github.com/surrealdb/surrealdb).
+
+----------
+
+USAGE:
+	surreal [SUBCOMMAND]
+
+OPTIONS:
+	-h, --help    Print help information
+
+SUBCOMMANDS:
+	start      Start the database server
+	backup     Backup data to or from an existing database
+	import     Import a SQL script into an existing database
+	export     Export an existing database into a SQL script
+	version    Output the command-line tool version information
+	sql        Start an SQL REPL in your terminal with pipe support
+	help       Print this message or the help of the given subcommand(s)
+
+```
+
+For details on the different commands available, visit the [CLI tool documentation](/docs/cli/overview).
