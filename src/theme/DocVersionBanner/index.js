@@ -7,12 +7,12 @@ import {
   useActivePlugin,
   useDocVersionSuggestions,
 } from '@docusaurus/plugin-content-docs/client';
-import {ThemeClassNames} from '@docusaurus/theme-common';
+import { ThemeClassNames } from '@docusaurus/theme-common';
 import {
   useDocsPreferredVersion,
   useDocsVersion,
 } from '@docusaurus/theme-common/internal';
-function UnreleasedVersionLabel({siteTitle, versionMetadata}) {
+function UnreleasedVersionLabel({ siteTitle, versionMetadata }) {
   return (
     <Translate
       id="theme.docs.versions.unreleasedVersionLabel"
@@ -27,7 +27,7 @@ function UnreleasedVersionLabel({siteTitle, versionMetadata}) {
     </Translate>
   );
 }
-function UnmaintainedVersionLabel({siteTitle, versionMetadata}) {
+function UnmaintainedVersionLabel({ siteTitle, versionMetadata }) {
   return (
     <Translate
       id="theme.docs.versions.unmaintainedVersionLabel"
@@ -51,7 +51,7 @@ function BannerLabel(props) {
     BannerLabelComponents[props.versionMetadata.banner];
   return <BannerLabelComponent {...props} />;
 }
-function LatestVersionSuggestionLabel({versionLabel, to, onClick}) {
+function LatestVersionSuggestionLabel({ versionLabel, to, onClick }) {
   return (
     <Translate
       id="theme.docs.versions.latestVersionSuggestionLabel"
@@ -71,20 +71,20 @@ function LatestVersionSuggestionLabel({versionLabel, to, onClick}) {
         ),
       }}>
       {
-        'For up-to-date documentation, see the {latestVersionLink} ({versionLabel}).'
+        'For the latest stable release, see the {latestVersionLink} ({versionLabel}).'
       }
     </Translate>
   );
 }
-function DocVersionBannerEnabled({className, versionMetadata}) {
+function DocVersionBannerEnabled({ className, versionMetadata }) {
   const {
-    siteConfig: {title: siteTitle},
+    siteConfig: { title: siteTitle },
   } = useDocusaurusContext();
-  const {pluginId} = useActivePlugin({failfast: true});
+  const { pluginId } = useActivePlugin({ failfast: true });
   const getVersionMainDoc = (version) =>
     version.docs.find((doc) => doc.id === version.mainDocId);
-  const {savePreferredVersionName} = useDocsPreferredVersion(pluginId);
-  const {latestDocSuggestion, latestVersionSuggestion} =
+  const { savePreferredVersionName } = useDocsPreferredVersion(pluginId);
+  const { latestDocSuggestion, latestVersionSuggestion } =
     useDocVersionSuggestions(pluginId);
   // Try to link to same doc in latest version (not always possible), falling
   // back to main doc of latest version
@@ -111,7 +111,7 @@ function DocVersionBannerEnabled({className, versionMetadata}) {
     </div>
   );
 }
-export default function DocVersionBanner({className}) {
+export default function DocVersionBanner({ className }) {
   const versionMetadata = useDocsVersion();
   if (versionMetadata.banner) {
     return (
