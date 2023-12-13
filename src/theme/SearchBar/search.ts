@@ -82,7 +82,7 @@ const templatedQuery = (keywords: string) => {
 					OR h4 @5@ ${escaped}
 					OR content @6@ ${escaped}
 				-- )
-		ORDER BY score DESC LIMIT 20;
+		ORDER BY score DESC LIMIT 100;
 	`;
 };
 
