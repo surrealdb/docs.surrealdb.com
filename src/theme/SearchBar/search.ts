@@ -48,7 +48,6 @@ function getVersion(pathname: string) {
 }
 
 function validateUrl(url: string, version?: string) {
-	console.log(1, getVersion(url));
 	return getVersion(url) == version
 }
 
