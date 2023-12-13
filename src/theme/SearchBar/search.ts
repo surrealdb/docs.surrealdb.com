@@ -23,7 +23,6 @@ export async function search(keywords: string): Promise<Doc[]> {
     const docs = await query(sql);
 	const hostname = getHostname();
 	const version = getVersion(location.pathname);
-	console.log(version);
     const processed = docs
         .filter((match) => {
 			return match.offsets && match.hostname == hostname && validateUrl(match.url, version)
