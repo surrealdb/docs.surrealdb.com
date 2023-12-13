@@ -81,30 +81,27 @@ const config = {
         sidebarPath: require.resolve('./sdks/java/sidebarsJava.js'),
       },
     ],
-    // [
-    //   './plugins/shiki',
-    //   {
-    //     themes: ["min-light", "nord"],
-    //   },
-    // ],
   ],
   presets: [
     [
       'classic',
       ({
         docs: {
-          lastVersion: 'current',
           versions: {
-            current: {
-              label: '1.0.0',
+            '1.0.0': {
+              label: '1.0.0 (Latest)',
               path: '',
             },
             nightly: {
               label: 'Nightly',
               path: 'nightly',
             },
+            '1.1.0': {
+              label: '1.1.0 (Beta)',
+              path: '1.1.0',
+            },
           },
-          sidebarPath: require.resolve('./sidebars.js'),
+          includeCurrentVersion: false,
           editUrl:
             'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
         },
@@ -113,35 +110,6 @@ const config = {
         },
       }),
     ],
-    // [
-    //   './src/plugins/shiki',
-    //   {
-    //     theme: JSON.parse(fs.readFileSync('./src/grammars/surrealql-theme.json', 'utf-8')),
-    //     langs: [
-    //       {
-    //         id: 'surql',
-    //         scopeName: 'source.surrealql',
-    //         grammar: JSON.parse(fs.readFileSync('./src/grammars/surrealql.tmLanguage.json', 'utf-8')),
-    //         aliases: ['surrealql']
-    //       },
-    //       'javascript',
-    //       'typescript',
-    //       'bash',
-    //       'shell',
-    //       'yaml',
-    //       'markdown',
-    //       'python',
-    //       'json',
-    //       'rust',
-    //       'jsx',
-    //       'sql',
-    //       'java',
-    //       'go',
-    //       'jsx',
-    //       'csharp'
-    //     ],
-    //   },
-    // ],
   ],
   themeConfig:
     ({
