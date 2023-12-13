@@ -13,14 +13,21 @@ export interface Doc {
 	title: string;
 	content: string[];
 	offsets: Record<number, Offset[]>;
+	score: number;
+	hostname: string;
 	chunks?: Chunks[];
 }
 
 export async function search(keywords: string): Promise<Doc[]> {
     const sql = templatedQuery(keywords);
     const docs = await query(sql);
+	const hostname = getHostname();
+	const version = getVersion(location.pathname);
+	console.log(version);
     const processed = docs
-        .filter((match) => match.offsets)
+        .filter((match) => {
+			return match.offsets && match.hostname == hostname && validateUrl(match.url, version)
+		})
         .map(processResult);
   	return processed;
 }
@@ -29,9 +36,22 @@ function getHostname() {
 	const mapped = {
 		'docs.surrealdb.com': 'main--surrealdb-docs.netlify.app',
 		'surrealdb-docs.netlify.app': 'main--surrealdb-docs.netlify.app',
+		'localhost': 'main--surrealdb-docs.netlify.app',
 	};
 
 	return mapped[location.hostname] || location.hostname;
+}
+
+function getVersion(pathname: string) {
+	pathname = pathname.startsWith('/') ? pathname : `/${pathname}`;
+	const part = pathname.split('/')[2];
+	if (part === 'nightly' || part.match(/\d.\d.\d/i)) return part;
+	return undefined;
+}
+
+function validateUrl(url: string, version?: string) {
+	console.log(1, getVersion(url));
+	return getVersion(url) == version
 }
 
 const templatedQuery = (keywords: string) => {
@@ -40,15 +60,23 @@ const templatedQuery = (keywords: string) => {
 	return /* surrealql */ `
 		SELECT
 			path as url,
+			hostname,
 			title,
 			content,
 			search::offsets(6) AS offsets,
-			search::score(0) * 7 + search::score(1) * 6 + search::score(2) * 5 + search::score(3) * 4
-			+ search::score(4) * 3 + search::score(5) * 2 + search::score(6) AS score
+			(
+				  (search::score(0) * 8) 
+				+ (search::score(1) * 7)
+				+ (search::score(2) * 5)
+				+ (search::score(3) * 4)
+				+ (search::score(4) * 3)
+				+ (search::score(5) * 2)
+				+ search::score(6) 
+			) AS score
 		FROM page
 			WHERE 
-				hostname = ${hostname}
-				AND (
+				-- hostname = ${hostname}
+				-- AND (
 					title @0@ ${escaped}
 					OR path @1@ ${escaped}
 					OR h1 @2@ ${escaped}
@@ -56,8 +84,8 @@ const templatedQuery = (keywords: string) => {
 					OR h3 @4@ ${escaped}
 					OR h4 @5@ ${escaped}
 					OR content @6@ ${escaped}
-				)
-		ORDER BY score DESC LIMIT 10;
+				-- )
+		ORDER BY score DESC LIMIT 100;
 	`;
 };
 
