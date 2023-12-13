@@ -7,6 +7,7 @@ function SearchBar(): JSX.Element | null {
     const dialogRef = useRef<HTMLDialogElement>();
     const [keywords, setKeywords] = useState('');
     const [results, setResults] = useState<Doc[]>([]);
+    const iterRef = useRef<number>(0);
 
     function debounce<F extends (...args: any[]) => void>(func: F, delay: number): (...args: Parameters<F>) => void {
         let inDebounce: NodeJS.Timeout | undefined;
@@ -21,11 +22,13 @@ function SearchBar(): JSX.Element | null {
     }
 
     const debouncedSearch = useCallback(debounce(async (value: string) => {
+        const iter = iterRef.current = iterRef.current + 1;
         if (!value) {
             setResults([]);
         } else if (value !== keywords) {
             try {
-                setResults(await search(value));
+                const res = await search(value);
+                if (iter == iterRef.current) setResults(res);
             } catch (err) {
                 console.error(err);
             }
