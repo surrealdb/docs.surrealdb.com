@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './styles.module.css';
 import { Doc, search } from './search';
 
-
 function SearchBar(): JSX.Element | null {
     const dialogRef = useRef<HTMLDialogElement>();
     const [keywords, setKeywords] = useState('');
@@ -34,6 +33,10 @@ function SearchBar(): JSX.Element | null {
             }
         }
     }, 150), [keywords]);
+
+    const openDialog = useCallback(() => {
+        dialogRef.current.showModal();
+    }, [dialogRef]);
     
     const handleChange = (value: string) => {
         setKeywords(value);
@@ -51,13 +54,43 @@ function SearchBar(): JSX.Element | null {
         return () => document.removeEventListener("mousedown", handler);
     }, [dialogRef]);
 
+    useEffect(() => {
+        const isSearchHotkey = (event: KeyboardEvent) => (event.metaKey || event.ctrlKey) && event.key === 'k';
+
+        const handleKeyUp = (event: KeyboardEvent) => {
+            if (isSearchHotkey(event)) {
+                openDialog();
+            }
+        };
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (isSearchHotkey(event)) {
+                event.preventDefault();
+            }
+        };
+    
+        window.addEventListener("keyup", handleKeyUp);
+        window.addEventListener('keydown', handleKeyDown);
+    
+        return () => {
+            window.removeEventListener("keyup", handleKeyUp);
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+      }, [openDialog]);
+
+    const isMacOs = typeof window != "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+    const searchHotKeyIndicator = isMacOs ? '⌘ K' : 'Ctrl K';
+
     return (
         <>
-            <a className={styles.link + ' navbar__link'} aria-label="Search" onClick={()=>dialogRef.current.showModal()}>
+            <a className={styles.link + ' navbar__link'} aria-label="Search" onClick={openDialog}>
                 <svg className={styles.linkicon} width="20" height="20" viewBox='0 -4 24 24'>
                     <path d="M14.386 14.386l4.0877 4.0877-4.0877-4.0877c-2.9418 2.9419-7.7115 2.9419-10.6533 0-2.9419-2.9418-2.9419-7.7115 0-10.6533 2.9418-2.9419 7.7115-2.9419 10.6533 0 2.9419 2.9418 2.9419 7.7115 0 10.6533z" stroke="currentColor" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round"></path>
                 </svg>
                 Search
+                {searchHotKeyIndicator && (
+                    <span className={styles.hotkey}>{searchHotKeyIndicator}</span>
+                )}
             </a>
             <dialog className={styles.modal} ref={dialogRef}>
                 <form method="dialog">
