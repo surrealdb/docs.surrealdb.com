@@ -59,21 +59,22 @@ function SearchBar(): JSX.Element | null {
 
         const handleKeyUp = (event: KeyboardEvent) => {
             if (isSearchHotkey(event)) {
-                openDialog();
+                event.preventDefault();
             }
         };
 
         const handleKeyDown = (event: KeyboardEvent) => {
             if (isSearchHotkey(event)) {
                 event.preventDefault();
+                openDialog();
             }
         };
     
-        window.addEventListener("keyup", handleKeyUp);
+        // window.addEventListener("keyup", handleKeyUp);
         window.addEventListener('keydown', handleKeyDown);
     
         return () => {
-            window.removeEventListener("keyup", handleKeyUp);
+            // window.removeEventListener("keyup", handleKeyUp);
             window.removeEventListener('keydown', handleKeyDown);
         };
       }, [openDialog]);
