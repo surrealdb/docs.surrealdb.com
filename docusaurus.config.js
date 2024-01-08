@@ -93,18 +93,22 @@ const config = {
       'classic',
       ({
         docs: {
-          lastVersion: 'current',
+          lastVersion: '1.0.x',
           versions: {
-            current: {
-              label: '1.0.2',
-              path: '',
+            "1.1.x": {
+              label: '1.1.x',
+              path: '1.1.x',
             },
             nightly: {
               label: 'Nightly',
               path: 'nightly',
             },
+            '1.0.x': { 
+              label: '1.0.x',
+              path: '',
+            },
           },
-          sidebarPath: require.resolve('./sidebars.js'),
+          includeCurrentVersion: false,
           editUrl:
             'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
         },
