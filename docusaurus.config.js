@@ -93,7 +93,7 @@ const config = {
       'classic',
       ({
         docs: {
-          lastVersion: '1.0.x',
+          lastVersion: '1.1.x',
           versions: {
             "1.1.x": {
               label: '1.1.x',
