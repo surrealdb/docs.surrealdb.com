@@ -97,7 +97,7 @@ const config = {
           versions: {
             "1.1.x": {
               label: '1.1.x',
-              path: '1.1.x',
+              path: '',
             },
             nightly: {
               label: 'Nightly',
@@ -105,7 +105,7 @@ const config = {
             },
             '1.0.x': { 
               label: '1.0.x',
-              path: '',
+              path: '1.0.x',
             },
           },
           includeCurrentVersion: false,
