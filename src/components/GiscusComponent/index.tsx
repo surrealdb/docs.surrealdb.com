@@ -10,7 +10,7 @@ export default function GiscusComponent() {
       repo="surrealdb/docs.surrealdb.com"
       repoId="MDEwOlJlcG9zaXRvcnkyMjc4MTY1NzM="
       category="General"
-      categoryId="IdOfDiscussionCategory" //id of the category above (General)
+      categoryId="DIC_kwDODZQ0fc4CayrW"
       mapping="url"                      // Important! To map comments to URL
       term="Welcome to @giscus/react component!"
       strict="0"
