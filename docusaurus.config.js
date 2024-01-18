@@ -178,7 +178,7 @@ const config = {
             position: 'right',
           },
           {
-            href: 'https://github.com/surrealdb',
+            href: 'https://github.com/surrealdb/docs.surrealdb.com',
             position: 'right',
             className: 'header-github-link',
             'aria-label': 'GitHub repository',
