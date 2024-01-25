@@ -1,5 +1,5 @@
 import React from 'react';
-import { ModalProvider } from './ModalContext';
+import { ModalProvider } from '../../utils/ModalContext';
 import GlobalModal from './GlobalModal';
 
 const Feedback: React.FC = () => {

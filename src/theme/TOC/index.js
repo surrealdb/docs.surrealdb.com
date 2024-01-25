@@ -2,7 +2,7 @@ import React, { useContext } from 'react';
 import clsx from 'clsx';
 import TOCItems from '@theme/TOCItems';
 import styles from './styles.module.css';
-import { ModalContext } from '../../components/FeedbackDialog/ModalContext';
+import { ModalContext } from '../../utils/ModalContext';
 // Using a custom className
 // This prevents TOCInline/TOCCollapsible getting highlighted by mistake
 const LINK_CLASS_NAME = 'table-of-contents__link toc-highlight';

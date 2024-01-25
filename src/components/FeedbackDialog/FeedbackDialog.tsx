@@ -7,7 +7,7 @@ interface FeedbackDialogProps {
 const FeedbackDialog: React.FC<FeedbackDialogProps> = ({ onClose }) => {
 
     console.log("feedback dialog");
-    
+
     return (
         <div className="modal-container">
         <div className="box-container">
@@ -23,3 +23,4 @@ const FeedbackDialog: React.FC<FeedbackDialogProps> = ({ onClose }) => {
 };
 
 export default FeedbackDialog;
+
