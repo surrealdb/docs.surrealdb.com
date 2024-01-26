@@ -93,18 +93,22 @@ const config = {
       'classic',
       ({
         docs: {
-          lastVersion: 'current',
+          lastVersion: '1.1.x',
           versions: {
-            current: {
-              label: '1.0.2',
+            "1.1.x": {
+              label: '1.1.x',
               path: '',
             },
             nightly: {
               label: 'Nightly',
               path: 'nightly',
             },
+            '1.0.x': { 
+              label: '1.0.x',
+              path: '1.0.x',
+            },
           },
-          sidebarPath: require.resolve('./sidebars.js'),
+          includeCurrentVersion: false,
           editUrl:
             'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
         },
@@ -174,7 +178,7 @@ const config = {
             position: 'right',
           },
           {
-            href: 'https://github.com/surrealdb',
+            href: 'https://github.com/surrealdb/docs.surrealdb.com',
             position: 'right',
             className: 'header-github-link',
             'aria-label': 'GitHub repository',
