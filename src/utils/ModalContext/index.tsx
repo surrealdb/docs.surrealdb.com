@@ -1,33 +1,30 @@
-import React, { createContext, useState, ReactNode, FC } from 'react';
+import React, { createContext, useState, useContext, ReactNode } from 'react';
 
-interface ModalContextType {
+type ModalContextType = {
   isModalOpen: boolean;
   openModal: () => void;
   closeModal: () => void;
-}
+};
 
-export const ModalContext = createContext<ModalContextType>({
-  isModalOpen: false,
-  openModal: () => {},
-  closeModal: () => {},
-});
+const ModalContext = createContext<ModalContextType | undefined>(undefined);
 
-interface ModalProviderProps {
+export const useModal = () => {
+  const context = useContext(ModalContext);
+  if (context === undefined) {
+    throw new Error('useModal must be used within a ModalProvider');
+  }
+  return context;
+};
+
+type ModalProviderProps = {
   children: ReactNode;
-}
+};
 
-export const ModalProvider: FC<ModalProviderProps> = ({ children }) => {
-  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+export const ModalProvider: React.FC<ModalProviderProps> = ({ children }) => {
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
-  const openModal = () => {
-    console.log('openModal');
-    setIsModalOpen(true);
-  };
-
-  const closeModal = () => {
-    console.log('closeModal');
-    setIsModalOpen(false);
-  };
+  const openModal = () => setIsModalOpen(true);
+  const closeModal = () => setIsModalOpen(false);
 
   return (
     <ModalContext.Provider value={{ isModalOpen, openModal, closeModal }}>
