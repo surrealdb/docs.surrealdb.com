@@ -11,16 +11,36 @@ const FeedbackDialog = () => {
         dialogRef.current?.close();
     }, []);
 
-    useEffect(() => {
-        const handleOpenModalEvent = () => openDialog();
+    const checkIfClickedOutside = e => {
+        if (dialogRef.current && !dialogRef.current.contains(e.target)) {
+            closeDialog()
+        }
+    }
 
+    useEffect(() => {
+
+        const handleOpenModalEvent = () => openDialog();
         window.addEventListener('openFeedbackModal', handleOpenModalEvent);
 
-        return () => window.removeEventListener('openFeedbackModal', handleOpenModalEvent);
-    }, [openDialog]);
+        document.addEventListener('mousedown', checkIfClickedOutside);
+
+        return () => {
+            window.removeEventListener('openFeedbackModal', handleOpenModalEvent);
+            document.removeEventListener('click', checkIfClickedOutside, false);
+
+            
+        };
+    }, [openDialog, closeDialog]);
+
+    useEffect(() => {
+        document.body.style.overflow = "hidden"
+        return () => {
+            document.body.style.overflow = "auto"
+        }
+    }, [])
 
     return (
-        <dialog ref={dialogRef} className="modal-container">
+        <dialog ref={dialogRef} className="modal-container" id="modal-container">
             <div className="modal-container">
                 <span className="github-heading">What's on your mind?</span>
                 <div className="select-pane">
