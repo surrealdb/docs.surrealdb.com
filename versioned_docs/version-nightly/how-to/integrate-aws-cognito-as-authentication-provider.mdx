@@ -1,0 +1,167 @@
+---
+sidebar_position: 2
+---
+
+# Integrate AWS Cognito as an Authentication Provider
+
+# Integrate AWS Cognito as an Authentication Provider
+
+This guide will cover using [AWS Cognito](https://aws.amazon.com/cognito/) as the authentication provider for client-side web applications using SurrealDB as the only backend. In this guide you will learn how to:
+
+- Configure AWS Cognito to issue tokens that can be used with SurrealDB.
+- Configure SurrealDB to accept tokens issued by AWS Cognito.
+- Define user-level authorization using SurrealDB scopes.
+- Authenticate users with AWS Cognito in a client-side web application.
+- Retrieve and update information from SurrealDB using the authenticated user.
+
+This guide will cover the most general case, in which SurrealDB is the only backend for your application. You can still follow this guide even if you have additional backends, but in that case you may have other options available to request and validate tokens issued by AWS Cognito.
+
+## Prerequities
+
+This guide assumes the following: 
+
+- You have a [fresh instance of SurrealDB running](/docs/introduction/start) with version `1.2.0` or later.
+
+- You can [use a local Docker container](/docs/installation/running/docker) without volumes for the purposes of this guide.
+
+```bash
+docker run --rm --pull always -p 8000:8000 surrealdb/surrealdb:latest \
+  start --log trace --auth --user root --pass root
+```
+
+To run the SurrealQL statements mentioned in this guide, you will also need an interactive shell.
+
+```bash
+surrealql -u root -p root --pretty
+```
+
+You will also need to [have an Amazon Web Services account](https://aws.amazon.com/resources/create-account/). By following this guide you be subject to at least [AWS Cognito](https://aws.amazon.com/cognito/pricing/) and [AWS Lambda](https://aws.amazon.com/lambda/pricing/) pricing plans. Although the resources used in this guide should be well within the free tier for both, we cannot guarantee that this will be the case in your particular situation.
+
+## Configuring AWS Cognito 
+
+### Creating a User Pool
+
+Cognito offers [User Pools](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-identity-pools.html) as a user directory for mobile and web applications. This directory can hold users defined directly withing Cognito, but can also integrate with third-party identity providers like Google and Facebook. Additionally, it provides the ability to handle user registrations directly in the Cognito UI, which can also take care of requiring specific information, verifying user email addresses and phone numbers or even enforcing multi-factor authentication.
+
+You will need to [create a User Pool](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-as-user-directory.html) that meets your requirements. It is important that TBD. When you have created your User Pool, open it and store the value of the "User pool ID" from the "User pool overview" section in the main view and the value of the "Cognito domain" from the "Configuration for all app clients" section in the "App integration" tab.
+
+### Creating an Integration Client
+
+While you are in the "App integration" tab, you will need to [create an integration client](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-client-apps.html#cognito-user-pools-app-idp-settings-console-create) which will be used by our web application. In the "App clients and analytics" section, click on "Create app client" to create a client that meets your requirements. It is important that TBD. When you have created your client, store the value of its "Client ID".
+
+### Creating a Pre-Token Generation Lambda
+
+Now, Cognito is ready to perform authentication and issue tokens for your application. However, SurrealDB expects these tokens to contain some specific claims. Cognito allows modifying token claims through [pre-token generation lambda](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-lambda-pre-token-generation.html#cognito-user-pools-lambda-trigger-syntax-pre-token-generation) triggers. Specifically, we well be [adding custom claims](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-lambda-pre-token-generation.html#aws-lambda-triggers-pre-token-generation-example-2).
+
+To create the trigger, just [create an AWS Lambda function](https://docs.aws.amazon.com/lambda/latest/dg/getting-started.html#getting-started-create-function) with the following code:
+
+```js
+const handler = async (event) => {
+  event.response = {
+    claimsOverrideDetails: {
+      claimsToAddOrOverride: {
+        tk: "cognito",
+        ns: "test",
+        db: "test",
+        sc: "user",
+      },
+    },
+  };
+
+  return event;
+};
+
+export { handler };
+```
+
+You can give it a descriptive name like `AddSurrealDBClaims`. After the Lambda trigger has been created, we will need to [associate it with our client integration](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-identity-pools-working-with-aws-lambda-triggers.html), visit your Cognito User Pool and, under the "User pool properties" tab, in the "Lambda triggers" section, click on "Add Lambda trigger". For this guide, the trigger type will be "Authentication", specifically a "Pre token generation trigger".
+
+## Configuring SurrealDB
+
+### Defining a token verification method in SurrealDB
+
+Next, we should configure SurrealDB so that it can verify tokens sent to it through the [HTTP REST API](/docs/integration/http) via the “Authorization” header or through any of the [SDKs](/docs/integration/sdks/Overview) via the “Authenticate” methods.
+
+To do that, we will leverage the JWKS support in SurrealDB in order to define a token verification mechanism pointing to a JWKS object served by Auth0. This JWKS object can be found in an endpoint [build from your AWS region and User Pool ID](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-tokens-verifying-a-jwt.html) in the format `https://cognito-idp.<Region>.amazonaws.com/<userPoolId>/.well-known/jwks.json`.
+
+Pointing to a JWKS file ensures that token verification will work seamlessly even in the case that AWS rotates their encryption keys and that tokens signed with revoked keys will no longer be accepted by SurrealDB.
+
+:::note
+<em> Note: </em> Remote JWKS objects are locally cached by SurrealDB to prevent unnecessary network requests. Due to this, revoked keys may not become untrusted immediately. If you wish to immediately update the cache, you may delete the files under the <code>storage/jwks/</code> and <code>cache/jwks/</code> directories created in the directory from which you run SurrealDB.
+:::
+
+The following queries will create the required resources to authenticate a token for a scope:
+
+```surql
+-- Specify the namespace and database that will be used.
+-- These values should match the custom claims that we configured before.
+USE NS test DB test;            
+                                        
+-- Define the scope where the token will be used.
+-- The name of the scope should match the custom claim that we configured before.
+DEFINE SCOPE user;              
+                                        
+-- Define the public key to verify tokens issued by Auth0 for our application.
+-- The name of the token should match the custom claim that we configured before.
+DEFINE TOKEN cognito ON SCOPE user TYPE JWKS VALUE "https://cognito-idp.<YOUR_AWS_REGION>.amazonaws.com/<YOUR_COGNITO_USER_POOL_ID>/.well-known/jwks.json";
+```
+
+In the example above, replace the placeholders with values applicable to your Cognito User Pool.
+
+:::note
+<em> Note: </em> In order to allow SurrealDB to establish a connection with AWS Cognito to download the JWKS object, you will require running it with the network <a href="/docs/security/capabilities">capability</a>. For the strongest security, provide your specific Auth0 domain when starting SurrealDB with <code>--allow-net</code>. For example: <code>--allow-net cognito-idp.eu-west-1.amazonaws.com</code>.
+:::
+
+### Defining authorization criteria in SurrealDB
+
+For this simple example, we will create a single table named “user”, where any user that authenticates through AWS Cognito using your application with a verified email address will be able to register, view and update their data. For this to work as intended, we will need to verify some information in the token claims.
+
+```surql
+DEFINE TABLE user SCHEMAFULL            
+  -- Authorized users can select, update, delete and create user records.
+  -- Records that do not match the permissions will not be modified nor returned.
+  PERMISSIONS FOR select, update, delete, create
+  WHERE
+    -- The token scope must match the scope that we defined.
+    -- The name of the scope should match the scope that we defined before.
+    $scope = "user"
+    -- The issuer claim must match the URL of your AWS Cognito User Pool ID.
+    AND $token.iss = "https://cognito-idp.<YOUR_AWS_REGION>.amazonaws.com/<YOUR_COGNITO_USER_POOL_ID>"
+    -- The audience claim must match you AWS Cognito Client ID.
+    AND $token.aud = "<YOUR_COGNITO_CLIENT_ID>"
+    -- The email claim must match the email of the user being queried.
+    AND email = $token.email
+    -- If you configure AWS Cognito to verify email addresses, you can check it.
+    -- AND email_verified = true        
+;
+
+-- In this example, we will use the email as the primary identifier for a user.
+DEFINE INDEX email ON user FIELDS email UNIQUE;
+DEFINE FIELD email ON user TYPE string ASSERT string::is::email($value);
+-- We define some other information present in the token that we want to store.
+DEFINE FIELD cognito_username ON user TYPE string;
+DEFINE FIELD country ON user TYPE string;
+;                                       
+```
+
+It is important to know that [validating the issuer and audience of the token is a requirement of AWS Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-tokens-verifying-a-jwt.html), other providers may require validating additional claims to ensure that the token is being used as intended.
+
+It is also important to note that the `$auth` variable accessible from SurrealQL will not contain any values in this case, as it requires the `id` claim to be added to the JWT, containing the value of the identifier of a SurrealDB record. For the current example, the `$auth` variable will not be necessary.
+
+## Creating a Simple Web Application
+
+For this guide, we will create a simple client web application that will direct the user to log in with AWS Cognito, redirect the user back your our application with a query parameter containing an authentication code and exchange that code to Cognito for the user identity token which we will use to authenticate with SurrealDB. The application will create a SurrealDB user containing some data from the token claims. This user will later be able visit our web application and retrieve their information from SurrealDB.
+
+:::note
+<em> Note: </em> Warning about identity vs. access token.
+:::
+
+You can develop this application yourself following the [Cognito Developer Guide for authentication], the [Cognito SDK](https://docs.aws.amazon.com/cognito/latest/developerguide/service_code_examples_cognito-identity-provider.html) or the new [Amplify SDK](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-integrate-apps.html#cognito-integrate-apps-amplify).
+
+Alternatively, we have developed an [example application](https://github.com/surrealdb/examples/tree/main/aws-cognito) that uses plain JavaScript to authenticate with Cognito using the first method. For the purposes of following this guide, we would recommend using our example code. However, keep in mind that this code aims to be as simple as possible and is not suitable for production applications.
+
+## Annex
+
+## Example Single Page Application
+
+You can view and download a minimal example of an web application using AWS Cognito and SurrealDB [here](https://github.com/surrealdb/examples/tree/main/cognito).
