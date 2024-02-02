@@ -19,7 +19,7 @@ function FeedbackForm({ onBack, closeDialog }) {
         setInputFocus(false);
     };
 
-    const isFormValid = category && message && url;
+    const isFormValid = category && message;
 
     const handleSubmit = (e) => {
         e.preventDefault();
