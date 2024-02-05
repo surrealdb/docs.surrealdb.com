@@ -107,8 +107,10 @@ function FeedbackForm({ onBack, closeDialog }) {
                         type="button"
                         onClick={() => handleCategoryClick('other')}
                     >
-                        <svg width="24" height="21" viewBox="0 0 24 21" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path fill-rule="evenodd" clip-rule="evenodd" d="M13.732 1C12.9622 -0.333332 11.0377 -0.333334 10.2679 0.999999L0.741636 17.5C-0.028164 18.8333 0.934085 20.5 2.47369 20.5H21.5262C23.0658 20.5 24.0281 18.8333 23.2583 17.5L13.732 1ZM12.9668 7.13281H11.2099L11.3466 13.7432H12.83L12.9668 7.13281ZM11.0937 16.1631C11.0937 16.7031 11.5312 17.1338 12.0849 17.1338C12.6455 17.1338 13.083 16.7031 13.083 16.1631C13.083 15.623 12.6455 15.1992 12.0849 15.1992C11.5312 15.1992 11.0937 15.623 11.0937 16.1631Z" fill="#24292F"/>
+                        <svg width="27" height="6" viewBox="0 0 27 6" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="3.5" cy="3" r="3" fill="#24292F"/>
+                            <circle cx="13.5" cy="3" r="3" fill="#24292F"/>
+                            <circle cx="23.5" cy="3" r="3" fill="#24292F"/>
                         </svg>
                         <h2 className="github-issue">Other</h2>
                     </button>
