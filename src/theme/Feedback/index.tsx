@@ -21,46 +21,50 @@ function FeedbackForm({ onBack, closeDialog }) {
 
     const isFormValid = category && message;
 
-    const handleSubmit = (e) => {
+
+    const handleSubmit = async (e) => {
         e.preventDefault();
     
-        fetch('https://form.surrealdb.com/feedback', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Accept: 'application/json',
-            },
-            body: JSON.stringify({
-                type: category,
-                text: message,
-                url: url,
-                date: new Date(),
-            }),
-            })
-            .then((response) => response.json())
-            .then((data) => {        
-                setCategory('');
-                setMessage('');
-                setUrl('');
-                setIsSubmitted(true);
-            })
-            .catch((error) => {
-                console.error('Error:', error);
+        try {
+            const response = await fetch('https://form.surrealdb.com/feedback', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                },
+                body: JSON.stringify({
+                    type: category,
+                    text: message,
+                    url: url,
+                    date: new Date(),
+                }),
             });
-        };
-
-        if (isSubmitted) {
-            return (
-                <form onSubmit={handleSubmit}>
-                    <div className="feedbackform">
-                        <div>
-                            <p>Thanks, your form has been submitted.</p>
-                            <button type="button" onClick={onBack}>Back</button>
-                        </div>
-                    </div>
-                </form>
-            );
+    
+            if (!response.ok) {
+                throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+            }
+    
+            const contentType = response.headers.get('Content-Type');
+            if (contentType && contentType.includes('application/json')) {
+                const data = await response.json();
+                console.log('Success:', data);
+                setIsSubmitted(true);
+            } else {
+                setIsSubmitted(true);
+            }
+        } catch (error) {
+            console.error('Submission Error:', error);
         }
+    };
+        
+    if (isSubmitted) {
+        return (
+            <div className="feedback-success">
+                <p>Thanks, your form has been submitted.</p>
+                <button className="feedbackform-submit-btn" type="button" onClick={closeDialog}>Close</button>
+            </div>
+        );
+    }
 
     return (
         <form onSubmit={handleSubmit}>
