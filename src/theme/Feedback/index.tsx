@@ -47,7 +47,6 @@ function FeedbackForm({ onBack, closeDialog }) {
             const contentType = response.headers.get('Content-Type');
             if (contentType && contentType.includes('application/json')) {
                 const data = await response.json();
-                console.log('Success:', data);
                 setIsSubmitted(true);
             } else {
                 setIsSubmitted(true);
