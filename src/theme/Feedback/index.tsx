@@ -68,8 +68,8 @@ function FeedbackForm({ onBack, closeDialog }) {
                 <div className="feedback-controls">
                     <div className="feedback-controls-left">
                         <button type="button" onClick={onBack} className='feedbackform-back-btn'>
-                        <svg width="11" height="18" viewBox="0 0 11 18" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M10 1L2 9L10 17" stroke="black" stroke-width="1.5" stroke-linecap="round"/>
+                        <svg width="11" height="18" viewBox="0 0 11 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M10 1L2 9L10 17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                         </svg>
                         </button>
                     </div>
