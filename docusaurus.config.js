@@ -103,6 +103,10 @@ const config = {
               label: 'Nightly',
               path: 'nightly',
             },
+            '1.2.x': { 
+              label: '1.2.x (Beta)',
+              path: '1.2.x',
+            },
             '1.0.x': { 
               label: '1.0.x',
               path: '1.0.x',
