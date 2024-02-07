@@ -1,0 +1,301 @@
+---
+sidebar_position: 2
+---
+
+# Integrate Auth0 as an Authentication Provider
+
+# Integrate Auth0 as an Authentication provider
+
+This guide will cover using [Auth0](https://auth0.com/) as the authentication provider for single-page web applications using SurrealDB as the only backend. In this guide you will learn how to:
+
+- Configure Auth0 to issue tokens that can be used with SurrealDB.
+- Configure SurrealDB to accept tokens issued by Auth0.
+- Define user-level authorization using SurrealDB scopes.
+- Authenticate users with Auth0 in a single-page application.
+- Retrieve and update information from SurrealDB using the authenticated user.
+
+This guide will cover the most general case, in which SurrealDB is the only backend for your application. You can still follow this guide even if you have additional backends, but in that case you may have other options available to request and validate tokens issued by Auth0. Likewise, even if your application is not strictly a  Single-Page Application (SPA), you may still follow and benefit from this guide.
+
+## Prerequities
+
+This guide assumes the following: 
+
+- You have a [fresh instance of SurrealDB running.](/docs/1.2.x/introduction/start)
+
+- You can [use a local Docker container](/docs/1.2.x/installation/running/docker) without volumes for the purposes of this guide.
+
+```bash
+docker run --rm --pull always -p 8000:8000 surrealdb/surrealdb:latest \
+  start --log trace --auth --user root --pass root
+```
+
+To run the SurrealQL statements mentioned in this guide, you will also need an interactive shell.
+
+```bash
+surreal sql -u root -p root --pretty
+```
+
+You will also need to [create an Auth0 account](https://auth0.com/signup), which can be on the free plan.
+
+## Configuring Auth0
+
+### Creating a simple SPA, an Auth0 application and an Auth0 API
+
+First of all, you will need to complete the regular setup for creating a Single-Page Application and an API resource within Auth0. You can do this by following the official Auth0 [documentation](https://auth0.com/docs/quickstart/spa) for your SPA. 
+
+If you are using plain JavaScript, follow [the vanillajs guide](https://auth0.com/docs/quickstart/spa/vanillajs/01-login) to create an application in Auth0 and [the API guide](https://auth0.com/docs/quickstart/spa/vanillajs/02-calling-an-api) to create an API in Auth0.
+
+:::note
+<em> Note: </em> You will not need to create an actual backend API (e.g. using backend languages like NodeJS or Go) as the documentation suggests when using SurrealDB. A simple file server (e.g. python3 -m http.server 8080, for local testing or any static web server for production) that can serve the static content of your website will suffice. However, creating an API resource in Auth0 is necessary, as it will generate an “audience” string which will be required for Auth0 to add claims to its access tokens.
+:::
+
+At the end of those tutorials, you should have both an application and an API created in your Auth0 account and a simple client-side web application that authenticates with Auth0 using those two resources. This website will capture the access token issued by Auth0, which is the token that we are using with SurrealDB. If you were not able to create a working website, you can also use this [minimal example created by SurrealDB](https://github.com/surrealdb/examples/tree/main/auth0).
+
+When completing the actions above, make sure to keep the following information handy:
+
+- Auth0 Client ID, generated when creating the application.
+- Auth0 Domain, generated when creating the application.
+- Auth0 Audience, generated when creating the API.
+
+### Creating a custom Auth0 action to add claims for SurrealDB
+
+Now, Auth0 is ready to perform authentication and issue tokens for your application. However, SurrealDB expects these tokens to contain some specific claims. Auth0 allows adding custom claims through its “actions” and “flows” features.
+
+To add custom claims, you must [create an Auth0 action](https://auth0.com/docs/customize/actions/write-your-first-action#create-an-action) with the “Login / Post Login” trigger.
+
+For this example, you can use the following code:
+
+```js
+exports.onExecutePostLogin = async (event, api) => {
+  if (event.authorization) {
+    // The claims in this block are expected by SurrealDB.
+    // These values should match your SurrealDB installation.
+    api.accessToken.setCustomClaim(`ns`, "test");
+    api.accessToken.setCustomClaim(`db`, "test");
+    // These values correspond to the names of the SCOPE and TOKEN resources 
+    // which will be created in SurrealDB during the next section.
+    api.accessToken.setCustomClaim(`sc`, "user");
+    api.accessToken.setCustomClaim(`tk`, "auth0");
+
+    // In this block, we will add additional claims which are not required by SurrealDB.
+    // These claims can be used from SurrealQL to implement application logic.
+    // In this example, we will add the data that we will store for each user.
+    // We will also use some of this data to perform authorization.
+    api.accessToken.setCustomClaim(`email`, event.user.email);
+    api.accessToken.setCustomClaim(`email_verified`, event.user.email_verified);
+    api.accessToken.setCustomClaim(`name`, event.user.name);
+    api.accessToken.setCustomClaim(`nickname`, event.user.nickname);
+    api.accessToken.setCustomClaim(`picture`, event.user.picture);
+  }
+};
+```
+
+This action should be saved and added to the “Login” flow in the “Actions > Flows” section.
+
+## Configuring SurrealDB
+
+### Defining a token verification method in SurrealDB
+
+Next, we should configure SurrealDB so that it can verify tokens sent to it through the [HTTP REST API](/docs/1.2.x/integration/http) via the “Authorization” header or through any of the [SDKs](/docs/1.2.x/integration/sdks/Overview) via the “Authenticate” methods.
+
+To do that, we will require the public key of the key pair that Auth0 will use to sign the tokens that it will issue for our application. This key can be [obtained by querying the following endpoint](https://auth0.com/docs/secure/tokens/json-web-tokens/locate-json-web-key-sets):
+
+```surql
+https://<YOUR_AUTH0_DOMAIN>/.well-known/jwks.json
+```
+
+Where the placeholder text is to be replaced by the domain value defined for your Auth0 application.
+
+This will return a JSON (more specifically [JWKS](https://auth0.com/docs/secure/tokens/json-web-tokens/json-web-key-sets)) file with an array of public keys, the first of which is the public key that will be used to sign all tokens issued by Auth0 for your application. Store the value of the `x5c` attribute for that first key. This is the value of your current public key.
+
+Here is an example JWKS file, indented and with the relevant value highlighted:
+
+```json
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "use": "sig",
+      "n": "2nsSvrRnuw6OLJCqltkiRAGV07-35isdPwyTrrWQ3PwxEZc-lDbquQ7Z9Fkx5Y-ldVzBbTHEsbmhDYjBubUlS4dhstvpYD93963Sw6Q6gQjow_T4xWqsaeuj4PpcajPjI_ybbDwLa7bIXEBz7AC3UAgxY0khiERfq2quWIaeK0MLJ7bBcpyGF7hZy1SUehQ187-yBrM9Dsi2qKxQX981JFsctEnJLaabvoWUMQsMucTJXBRp5X_bGJ70XjgB85DNWTVqw7XwEfe_piM5DcvjVcR86bYMw-Qs46a3IzvIDs54X9--frM35IHLNrpwVbfsg4qgmya_GTPF4NSVab0xaQ",
+      "e": "AQAB",
+      "kid": "_8kKMct_togebAwqQ8Uos",
+      "x5t": "ZffK9pHzOtCslIK_800RhfZZ_ks",
+      "x5c": [
+         // highlight-next-line
+        "MIIDBTCCAe2gAwIBAgIJdeyDfUXHLwX+MA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMTFWdlcmF1c2VyLmV1LmF1dGgwLmNvbTAeFw0yMzEwMzExNzI5MDBaFw0zNzA3MDkxNzI5MDBaMCAxHjAcBgNVBAMTFWdlcmF1c2VyLmV1LmF1dGgwLmNvbTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANp7Er60Z7sOjiyQqpbZIkQBldO/t+YrHT8Mk661kNz8MRGXPpQ26rkO2fRZMeWPpXVcwW0xxLG5oQ2Iwbm1JUuHYbLb6WA/d/et0sOkOoEI6MP0+MVqrGnro+D6XGoz4yP8m2w8C2u2yFxAc+wAt1AIMWNJIYhEX6tqrliGnitDCye2wXKchhe4WctUlHoUNfO/sgazPQ7ItqisUF/fNSRbHLRJyS2mm76FlDELDLnEyVwUaeV/2xie9F44AfOQzVk1asO18BH3v6YjOQ3L41XEfOm2DMPkLOOmtyM7yA7OeF/fvn6zN+SByza6cFW37IOKoJsmvxkzxeDUlWm9MWkCAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUOeOmT9I3/MJ/zI/lS74gPQmAQfEwDgYDVR0PAQH/BAQDAgKEMA0GCSqGSIb3DQEBCwUAA4IBAQBDue8iM90XJcLORvr6e+h15f5tlvVjZ/cAzv09487QSHJtUd6qwTlunEABS5818TgMEMFDRafQ7CDX3KaAAXFpo2bnyWY9c+Ozp0PWtp8ChunOs94ayaG+viO0AiTrIY28cc26ehNBZ/4gC4/1k0IlXEk8rd1e03hQuhNiy7SQaxS2f1xkJfR4vCeF8HTN5omjKvIMcWRqkkwFZm4gdgkMfi2lNsV8V6+HXyTc3XUIdcwOUcC+Ms/m+vKxnyxw0UGh0RliB1qBc0ADg83hOsXEqZjneHh1ZhqqVF4IkKSJTfK5ofcc14GqvpLjjTR3s2eX6zxdujzwf4gnHdxjVvdJ"
+      ],
+      "alg": "RS256"
+    },
+    {
+      "kty": "RSA",
+      "use": "sig",
+      "n": "vtOCOuiM_JI87mQ8E6ICCJLSC5KliR9vQC0s1XJV4A17m-CMmgFAN7u8AabrxId-3zjUZAE-nkpanENM76WIQJUCdt1H1gfC5lY4a49FVXA2q1WZLwDvlgb-ZNYZXi2vaH50uONXeO9XSG9dEnBUVKGVRL34GqB68UGgXrPGLkAcjH-TW0KDXLZ-FKXNhQfESIVGDHRGG0l-LPK_1AegtJjdEUjhA4CQ-1jA3kLVfr2cQc8rRD5b486R5XvC4xBlZNFFP7Fm5if4khhAJC-JnnYWgmytPM4Q7mOWatRr08wQmmfQDDrw53IseNA-yKnwHYlJ6ChU_UtNzS0OipUapQ",
+      "e": "AQAB",
+      "kid": "fwrcOmV26mBUkeqbXfL_4",
+      "x5t": "RhdLvYxnXgM6TYxpzbG-K-RleqQ",
+      "x5c": [
+        "MIIDBTCCAe2gAwIBAgIJUzJ062XCgOVQMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMTFWdlcmF1c2VyLmV1LmF1dGgwLmNvbTAeFw0yMzEwMzExNzI5MDBaFw0zNzA3MDkxNzI5MDBaMCAxHjAcBgNVBAMTFWdlcmF1c2VyLmV1LmF1dGgwLmNvbTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAL7TgjrojPySPO5kPBOiAgiS0guSpYkfb0AtLNVyVeANe5vgjJoBQDe7vAGm68SHft841GQBPp5KWpxDTO+liECVAnbdR9YHwuZWOGuPRVVwNqtVmS8A75YG/mTWGV4tr2h+dLjjV3jvV0hvXRJwVFShlUS9+BqgevFBoF6zxi5AHIx/k1tCg1y2fhSlzYUHxEiFRgx0RhtJfizyv9QHoLSY3RFI4QOAkPtYwN5C1X69nEHPK0Q+W+POkeV7wuMQZWTRRT+xZuYn+JIYQCQviZ52FoJsrTzOEO5jlmrUa9PMEJpn0Aw68OdyLHjQPsip8B2JSegoVP1LTc0tDoqVGqUCAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUYp67WM42b2pqF7ES0LsFvAI/Qy8wDgYDVR0PAQH/BAQDAgKEMA0GCSqGSIb3DQEBCwUAA4IBAQANOhmYz0jxNJG6pZ0klNtH00E6SoEsM/MNYH+atraTVZNeqPLAZH9514gMcqdu7+rBfQ/pRjpQG1YbkdZGQBaq5cZNlE6hNCT4BSgKddBYsN0WbfTGxstDVdoXLySgGCYpyKO6Hek4ULxwAf1LmMyOYpn4JrECy4mYShsCcfe504qfzUTd7pz1VaZ4minclOhz0dZbgYa+slUepe0C2+w+T3US138x0lPB9C266SLDakb6n/JTum+Czn2xlFBf4K4w6eWuSknvTlRrqTGE8RX3vzOiKTM3hpDdjU7Tu7eNsZpLkDR1e+w33m5NMi9iYgJcyTGsIeeHr0xjrRPD9Dwh"
+      ],
+      "alg": "RS256"
+    }
+  ]
+}
+```
+
+Subsequent keys found in the JWKS object are those that Auth0 will use next to sign tokens if you were to [rotate the signing keys](https://auth0.com/docs/get-started/tenant-settings/signing-keys/rotate-signing-keys) from Auth0. **It is important to note that, if you follow this guide,  rotating keys in Auth0 will require that you also update the public key defined in SurrealDB.** This will simply require running the `DEFINE TOKEN` query to update the public key value, but it cannot be done unilaterally from Auth0. This will be possible once SurrealDB natively supports JWKS.
+
+Although what is described in this guide is the recommended approach, if you require an alternative to using public key cryptography in this manner, you may also use an HMAC algorithm to sign tokens as explained in the “Alternative: Using HMAC” [Annex](#annex) section below.
+
+The following queries will create the required resources to authenticate a token for a scope:
+
+```surql
+-- Specify the namespace and database that will be used.
+-- These values should match the custom claims that we configured before.
+USE NS test DB test;
+
+-- Define the scope where the token will be used.
+-- The name of the scope should match the custom claim that we configured before.
+DEFINE SCOPE user;
+
+-- Define the public key to verify tokens issued by Auth0 for our application.
+-- The name of the token should match the custom claim that we configured before.
+DEFINE TOKEN auth0 ON SCOPE user TYPE RS256 VALUE "-----BEGIN PUBLIC KEY-----
+<YOUR_AUTH0_PUBLIC_KEY_VALUE>
+-----END PUBLIC KEY-----";
+```
+
+In the example above, replace the placeholder with the `x5c` value retrieved from the JWKS object.
+
+### Defining authorization criteria in SurrealDB
+
+For this simple example, we will create a single table named “user”, where any user that authenticates through Auth0 using your application with a verified email address will be able to register, view and update their data. For this to work as intended, we will need to verify some information in the token claims.
+
+```surql
+DEFINE TABLE user SCHEMAFULL
+  -- Authorized users can select, update, delete and create user records.
+  -- Records that do not match the permissions will not be modified nor returned.
+  PERMISSIONS FOR select, update, delete, create
+  WHERE
+    -- The token scope must match the scope that we defined.
+    -- The name of the scope should match the scope that we defined before.
+    $scope = "user"
+    -- The audience claim must contain the audience of you application.
+    -- This is the value that you defined when creating the API in Auth0.
+    AND $token.aud CONTAINS "<YOUR_AUTH0_AUDIENCE_VALUE>"
+    -- The audience claim must contain your Auth0 user information endpoint.
+    -- It contains the domain generated when when creating the application in Auth0.
+    AND $token.aud CONTAINS "https://<YOUR_AUTH0_DOMAIN>/userinfo"
+    -- The email claim must match the email of the user being queried.
+    AND email = $token.email
+    -- The email must be verified as belonging to the user.
+    AND $token.email_verified = true
+;
+
+-- In this example, we will use the email as the primary identifier for a user.
+DEFINE INDEX email ON user FIELDS email UNIQUE;
+DEFINE FIELD email ON user TYPE string ASSERT string::is::email($value);
+-- We define some other information present in the token that we want to store.
+DEFINE FIELD name ON user TYPE string;
+DEFINE FIELD nickname ON user TYPE string;
+DEFINE FIELD picture ON user TYPE string;
+```
+
+It is important to know that [validating the audience of the token is a requirement of Auth0](https://auth0.com/docs/secure/tokens/access-tokens/validate-access-tokens), other providers may require validating additional claims (e.g. `iss`, `sub`) to ensure that the token is being used as intended. With Auth0, you can also make use of [OpenID Connect scopes](https://auth0.com/docs/get-started/apis/scopes/openid-connect-scopes), which can be accessed through the `scopes` claim via `$token.scopes` and contain the OIDC scopes requested by the application and granted by the user, which we will not do for this example.
+
+It is also important to note that the `$auth` variable accessible from SurrealQL will not contain any values in this case, as it requires the `id` claim to be added to the JWT, containing the value of the identifier of a SurrealDB record. For the current example, the `$auth` variable will not be necessary.
+
+## Configuring the Application
+
+Now that we have everything ready for Auth0 to generate tokens and for SurrealDB to receive and verify them, we will modify our simple web application to use the token issued by Auth0 to register a new user or to update its information if the user already exists.
+
+Because of the diversity of SDKs that both SurrealDB and Auth0 support, it is difficult to provide examples that will work for everyone. In this guide, we will provide code examples for the most unspecific use case of using the [SurrealDB HTTP REST API](/docs/1.2.x/integration/http) and [Auth0 SPA JS](https://github.com/auth0/auth0-spa-js).
+
+This code will run entirely on the client and can be added to the static website that you created while following the Auth0 quick start documentation linked at the beginning of this guide.
+
+With the aforementioned interfaces, we can use the following functions to authenticate users:
+
+```js
+// Returns users in that the token is authorized to select.
+// Should return only the user matching the email in the token.
+const getUser = async () => {
+	// We fetch an access token from Auth0 with the ID token.
+	const auth0Token = await auth0Client.getTokenSilently();
+
+	const response = await fetch(surrealDbConfig.endpoint + "/key/user", {
+		method: "GET",
+		headers: {
+			"Accept": "application/json",
+			"Authorization": "Bearer " + auth0Token
+		}
+	});
+
+	return response.json();
+};
+
+// Creates a user matching the information in the token.
+// If the user already exists, updates the existing user with the new data.
+const createUpdateUser = async () => {
+	// We collect the user data from the Auth0 ID token.
+	const auth0User = await auth0Client.getUser();
+	// We fetch an access token from Auth0 with the ID token.
+	const auth0Token = await auth0Client.getTokenSilently();
+
+	// We define the general query to create or update a user.
+	// We leave the method to be defined later.
+	let query = {
+		body: JSON.stringify({
+			email: auth0User.email,
+			name: auth0User.name,
+			nickname: auth0User.nickname,
+			picture: auth0User.picture
+		}),
+		headers: {
+			"Accept": "application/json",
+			"Authorization": "Bearer " + auth0Token
+		}
+	};
+	// We get the user that the token is authorized to access.
+	const surrealDbUser = await getUser();
+	if (surrealDbUser[0].result.length == 0) {
+		// If a user for the token does not exist, we create the record.
+		console.log("Token user does not exist in database. Creating record.");
+		query.method = "POST";
+	} else {
+		// If a user for the token already exists, we update the record.
+		console.log("Token user already exists in database. Updating record.");
+		query.method = "PUT";
+	}
+
+	// We perform the query and return the created/updated record.
+	let response = await fetch(surrealDbConfig.endpoint + "/key/user", query);
+	return response.json();
+};
+```
+
+If you want to see how this code would fit inside the web application that you built, you can view this [minimal example created by SurrealDB](https://github.com/surrealdb/examples/tree/main/auth0).
+
+To learn about other potential uses for the SurrealDB token functionality, you can read the [`DEFINE TOKEN` documentation page](/docs/1.2.x/surrealql/statements/define/token).
+
+## Annex
+
+## Example Single Page Application
+
+You can view and download a minimal example of an SPA using Auth0 and SurrealDB below.
+
+[](https://github.com/surrealdb/examples/tree/main/auth0)
+
+## Alternative: Using HMAC
+
+Using public key cryptography algorithms for signing tokens prevents you from having to store any secrets at all in SurrealDB. However, some SurrealDB administrators may prefer to use HMAC algorithms, which use the same secret to both sign and verify the signature of the JWT. This secret will be stored in SurrealDB when provided as value for the `DEFINE TOKEN` statement and its access should be restricted, as it can be used to issue arbitrary tokens which will be trusted by SurrealDB.
+
+According to the OAuth 2.0 specification (part of OpenID Connect), only confidential (as opposed to public) applications should be allowed to use HMAC algorithms, as it requires being able to keep the secret secure. For this reason, Auth0 will not allow using HMAC algorithms with applications of the SPA (Single-Page Application) type, as they generally would have to store the secret in the client, which is publicly accessible. However, because of the particular case of SurrealDB, the secret will not need to be exposed to the client and will instead be stored in SurrealDB.
+
+Auth0 can support scenarios like these through the option to [disable OIDC-conformant authentication](https://auth0.com/docs/authenticate/login/oidc-conformant-authentication). Once disabled, Auth0 will allow selecting HMAC algorithms for SPA. Keep in mind that other options may become available in Auth0 after this change which, if modified without proper care, may compromise the security of your application.
+
+If the choice of using HMAC is made, the rest of the guide can be followed as is, with the exception of specifying the proper HMAC algorithm and placing the secret as the value when defining a token. In Auth0, the secret used to sign using HMAC algorithm corresponds to the [Auth0 Client Secret](https://auth0.com/docs/secure/application-credentials#client-secret-authentication) string. The example below shows how a token using the HS256 algorithm can be defined:
+
+```surql
+-- Define the secret to verify tokens issued by Auth0 for our application.
+-- The name of the token should match the custom claim that we configured before.
+DEFINE TOKEN auth0 ON SCOPE user TYPE HS256 VALUE "<YOUR_AUTH0_CLIENT_SECRET_VALUE>";
+```

@@ -103,6 +103,10 @@ const config = {
               label: 'Nightly',
               path: 'nightly',
             },
+            '1.2.x': { 
+              label: '1.2.x (Beta)',
+              path: '1.2.x',
+            },
             '1.0.x': { 
               label: '1.0.x',
               path: '1.0.x',
@@ -178,7 +182,7 @@ const config = {
             position: 'right',
           },
           {
-            href: 'https://github.com/surrealdb',
+            href: 'https://github.com/surrealdb/docs.surrealdb.com',
             position: 'right',
             className: 'header-github-link',
             'aria-label': 'GitHub repository',
