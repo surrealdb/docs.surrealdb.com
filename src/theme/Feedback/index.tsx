@@ -24,6 +24,8 @@ function FeedbackForm({ onBack, closeDialog }) {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+
+        const finalUrl = url || window.location.href;
     
         try {
             const response = await fetch('https://form.surrealdb.com/feedback', {
@@ -35,7 +37,7 @@ function FeedbackForm({ onBack, closeDialog }) {
                 body: JSON.stringify({
                     type: category,
                     text: message,
-                    url: url,
+                    url: finalUrl,
                     date: new Date(),
                 }),
             });
@@ -51,6 +53,10 @@ function FeedbackForm({ onBack, closeDialog }) {
             } else {
                 setIsSubmitted(true);
             }
+            setCategory('');
+            setMessage('');
+            setUrl('');
+            closeDialog();
         } catch (error) {
             console.error('Submission Error:', error);
         }
@@ -129,7 +135,7 @@ function FeedbackForm({ onBack, closeDialog }) {
                             onChange={(e) => setUrl(e.target.value)}
                             onFocus={handleInputFocus}
                             onBlur={handleInputBlur}
-                            placeholder="URL where the issue was found"
+                            placeholder="URL where the issue was found (leave blank if same)"
                         />
                     </div>
                     <div className="feedbackform-textarea">
