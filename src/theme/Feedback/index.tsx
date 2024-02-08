@@ -6,6 +6,7 @@ function FeedbackForm({ onBack, closeDialog }) {
     const [url, setUrl] = useState('');
     const [isSubmitted, setIsSubmitted] = useState(false);
     const [inputFocus, setInputFocus] = useState(false);
+    const [isUrlValid, setIsUrlValid] = useState(true); 
 
     const handleCategoryClick = (cat) => {
         setCategory(cat);
@@ -19,11 +20,27 @@ function FeedbackForm({ onBack, closeDialog }) {
         setInputFocus(false);
     };
 
+    const validateUrl = (inputUrl) => {
+        const urlPattern = new RegExp(/^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/);
+        return urlPattern.test(inputUrl);
+    };
+
+    const handleUrlChange = (e) => {
+        const inputUrl = e.target.value;
+        setUrl(inputUrl);
+        setIsUrlValid(validateUrl(inputUrl) || inputUrl === '');
+    };
+
     const isFormValid = category && message;
 
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+
+        if (!isUrlValid) {
+            alert('Please enter a valid URL or leave the field empty to use the current page URL.');
+            return;
+        }
 
         const finalUrl = url || window.location.href;
     
@@ -136,7 +153,10 @@ function FeedbackForm({ onBack, closeDialog }) {
                             onFocus={handleInputFocus}
                             onBlur={handleInputBlur}
                             placeholder="URL where the issue was found (leave blank if same)"
+                            style={{ borderColor: isUrlValid ? 'inherit' : 'red' }}
                         />
+                        {!isUrlValid && <p style={{ color: 'red' }}>Please enter a valid URL.</p>}
+
                     </div>
                     <div className="feedbackform-textarea">
                         <textarea
