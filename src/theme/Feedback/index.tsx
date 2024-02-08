@@ -3,46 +3,19 @@ import React, { useState } from 'react';
 function FeedbackForm({ onBack, closeDialog }) {
     const [category, setCategory] = useState('');
     const [message, setMessage] = useState('');
-    const [url, setUrl] = useState('');
     const [isSubmitted, setIsSubmitted] = useState(false);
-    const [inputFocus, setInputFocus] = useState(false);
-    const [isUrlValid, setIsUrlValid] = useState(true); 
 
-    const handleCategoryClick = (cat) => {
-        setCategory(cat);
-    };
-    
-    const handleInputFocus = () => {
-        setInputFocus(true);
+    const handleCategoryClick = (category) => {
+        setCategory(category);
     };
 
-    const handleInputBlur = () => {
-        setInputFocus(false);
-    };
-
-    const validateUrl = (inputUrl) => {
-        const urlPattern = new RegExp(/^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/);
-        return urlPattern.test(inputUrl);
-    };
-
-    const handleUrlChange = (e) => {
-        const inputUrl = e.target.value;
-        setUrl(inputUrl);
-        setIsUrlValid(validateUrl(inputUrl) || inputUrl === '');
-    };
 
     const isFormValid = category && message;
-
 
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        if (!isUrlValid) {
-            alert('Please enter a valid URL or leave the field empty to use the current page URL.');
-            return;
-        }
-
-        const finalUrl = url || window.location.href;
+        const url = window.location.href;
     
         try {
             const response = await fetch('https://form.surrealdb.com/feedback', {
@@ -54,7 +27,7 @@ function FeedbackForm({ onBack, closeDialog }) {
                 body: JSON.stringify({
                     type: category,
                     text: message,
-                    url: finalUrl,
+                    url: url,
                     date: new Date(),
                 }),
             });
@@ -70,15 +43,19 @@ function FeedbackForm({ onBack, closeDialog }) {
             } else {
                 setIsSubmitted(true);
             }
-            setCategory('');
-            setMessage('');
-            setUrl('');
-            closeDialog();
+            setIsSubmitted(true);
+
+            setTimeout(() => {
+                setCategory('');
+                setMessage('');
+                closeDialog();
+                setIsSubmitted(false);
+            }, 5000);
         } catch (error) {
             console.error('Submission Error:', error);
         }
     };
-        
+
     if (isSubmitted) {
         return (
             <div className="feedback-success">
@@ -87,7 +64,7 @@ function FeedbackForm({ onBack, closeDialog }) {
             </div>
         );
     }
-
+        
     return (
         <form onSubmit={handleSubmit}>
             <div className="feedbackform">
@@ -145,18 +122,8 @@ function FeedbackForm({ onBack, closeDialog }) {
                         <h2 className="github-issue">Other</h2>
                     </button>
                     </div>
-                    <div className={`feedbackform-input-url ${inputFocus ? 'input-focus' : ''}`}>
-                        <input
-                            type="text"
-                            value={url}
-                            onChange={(e) => setUrl(e.target.value)}
-                            onFocus={handleInputFocus}
-                            onBlur={handleInputBlur}
-                            placeholder="URL where the issue was found (leave blank if same)"
-                            style={{ borderColor: isUrlValid ? 'inherit' : 'red' }}
-                        />
-                        {!isUrlValid && <p style={{ color: 'red' }}>Please enter a valid URL.</p>}
-
+                    <div className="feedbackform-input-url">
+                        <p className="current-url-placeholder">URL: {window.location.href}</p>
                     </div>
                     <div className="feedbackform-textarea">
                         <textarea
