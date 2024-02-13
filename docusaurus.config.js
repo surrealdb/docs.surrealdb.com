@@ -93,19 +93,19 @@ const config = {
       'classic',
       ({
         docs: {
-          lastVersion: '1.1.x',
+          lastVersion: '1.2.x',
           versions: {
             "1.1.x": {
               label: '1.1.x',
-              path: '',
+              path: '1.1.x',
             },
             nightly: {
               label: 'Nightly',
               path: 'nightly',
             },
             '1.2.x': { 
-              label: '1.2.x (Beta)',
-              path: '1.2.x',
+              label: '1.2.x',
+              path: '',
             },
             '1.0.x': { 
               label: '1.0.x',
