@@ -1,4 +1,5 @@
 const fs = require('fs');
+const isProd = process.env.IS_PROD_BUILD == "true";
 const config = {
   title: 'SurrealDB Docs',
   tagline: 'SurrealDB Docs',
@@ -87,6 +88,44 @@ const config = {
     //     themes: ["min-light", "nord"],
     //   },
     // ],
+    ...(isProd ? [
+      [
+        'docusaurus-plugin-sentry',
+        {
+          DSN: "https://0fe0e9353babce33f5c128474af95ebf@o4506711289757696.ingest.sentry.io/4506711303127040",
+          sentry: {
+            init: {
+              ignoreErrors: [
+                'Non-Error promise rejection captured with value',
+              ],
+              // Enable session replay
+              // integrations: [
+              //   Sentry.replayIntegration({
+              //     maskAllText: false,
+              //     blockAllMedia: false,
+              //     workerUrl: "/assets/replay-worker.js",
+              //   }),
+              // ],
+              // Monitor performance for 100% of sessions
+              tracesSampleRate: 1.0,
+              // Enable session replays for 10% of all sessions
+              replaysSessionSampleRate: 0.1,
+              // Enable session replays for 100% of all sessions with errors
+              replaysOnErrorSampleRate: 1.0,
+            }
+          }
+        },
+      ],
+      [
+        '@docusaurus/plugin-google-gtag',
+        {
+          gtag: {
+            trackingID: 'G-J1NWM32T1V',
+            anonymizeIP: true,
+          },
+        },
+      ],
+    ] : []),
   ],
   presets: [
     [
@@ -213,6 +252,9 @@ const config = {
         ]
       }
     }),
+  scripts: isProd ? [
+    { src: '/js/script.js', defer: true, 'data-domain': 'surrealdb.com' },
+  ] : []
 };
 
 module.exports = config;
