@@ -67,7 +67,7 @@ Visit [docs.surrealdb.com](https://docs.surrealdb.com/docs/introduction/start) t
 
 ## Contributing to the documentation
 
-Please see our [contributing.md](/CONTRIBUTING.md).
+Please see our [contributing guidelines](/CONTRIBUTING.md).
 
 ### Good First Issues
 
@@ -81,7 +81,7 @@ To get started with contributing to the SurrealDB documentation, first install t
 $ pnpm install
 ```
 
-### Local Development
+### Development
 
 The following command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
 
@@ -89,7 +89,7 @@ The following command starts a local development server and opens up a browser w
 $ pnpm start
 ```
 
-### Build
+### Building
 
 The following command builds and generates static content into the `build` directory, and can then be served using any static contents hosting service.
 
