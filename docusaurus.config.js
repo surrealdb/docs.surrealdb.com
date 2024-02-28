@@ -8,7 +8,7 @@ const config = {
   url: 'https://surrealdb.com',
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
-  baseUrl: isProd ? '/docs/' : '/',
+  baseUrl: '/docs/',
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
   organizationName: 'SurrealDB', // Usually your GitHub org/user name.
