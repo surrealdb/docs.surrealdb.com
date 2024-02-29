@@ -92,7 +92,7 @@ const config = {
       [
         'docusaurus-plugin-sentry',
         {
-          DSN: "https://0fe0e9353babce33f5c128474af95ebf@o4506711289757696.ingest.sentry.io/4506711303127040",
+          DSN: "7494265ecc6f4f0d2a2d26c9cbae3262",
           sentry: {
             init: {
               ignoreErrors: [
@@ -119,10 +119,8 @@ const config = {
       [
         '@docusaurus/plugin-google-gtag',
         {
-          gtag: {
-            trackingID: 'G-J1NWM32T1V',
-            anonymizeIP: true,
-          },
+          trackingID: 'G-J1NWM32T1V',
+          anonymizeIP: true,
         },
       ],
     ] : []),
@@ -143,11 +141,11 @@ const config = {
               label: 'Nightly',
               path: 'nightly',
             },
-            '1.2.x': { 
+            '1.2.x': {
               label: '1.2.x',
               path: '',
             },
-            '1.0.x': { 
+            '1.0.x': {
               label: '1.0.x',
               path: '1.0.x',
             },
