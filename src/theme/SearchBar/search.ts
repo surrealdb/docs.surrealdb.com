@@ -33,6 +33,8 @@ export async function search(keywords: string): Promise<Doc[]> {
 
 function getHostname() {
 	const mapped = {
+		'surrealdb.com': 'main--surrealdb-docs.netlify.app',
+		'www.surrealdb.com': 'main--surrealdb-docs.netlify.app',
 		'docs.surrealdb.com': 'main--surrealdb-docs.netlify.app',
 		'surrealdb-docs.netlify.app': 'main--surrealdb-docs.netlify.app',
 	};

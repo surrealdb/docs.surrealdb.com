@@ -1,4 +1,5 @@
 const fs = require('fs');
+const isProd = process.env.IS_PROD_BUILD == "true";
 const config = {
   title: 'SurrealDB Docs',
   tagline: 'SurrealDB Docs',
@@ -7,11 +8,7 @@ const config = {
   url: 'https://surrealdb.com',
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
-  baseUrl: '/',
-  // GitHub pages deployment config.
-  // If you aren't using GitHub pages, you don't need these.
-  organizationName: 'SurrealDB', // Usually your GitHub org/user name.
-  projectName: 'docs.surrealdb.com', // Usually your repo name.
+  baseUrl: '/docs/',
   // TODO We need to fix these issues, just not doing it now :)
   onBrokenLinks: 'warn',
   onBrokenMarkdownLinks: 'warn',
@@ -87,12 +84,49 @@ const config = {
     //     themes: ["min-light", "nord"],
     //   },
     // ],
+    ...(isProd ? [
+      [
+        'docusaurus-plugin-sentry',
+        {
+          DSN: "7494265ecc6f4f0d2a2d26c9cbae3262",
+          sentry: {
+            init: {
+              ignoreErrors: [
+                'Non-Error promise rejection captured with value',
+              ],
+              // Enable session replay
+              // integrations: [
+              //   Sentry.replayIntegration({
+              //     maskAllText: false,
+              //     blockAllMedia: false,
+              //     workerUrl: "/assets/replay-worker.js",
+              //   }),
+              // ],
+              // Monitor performance for 100% of sessions
+              tracesSampleRate: 1.0,
+              // Enable session replays for 10% of all sessions
+              replaysSessionSampleRate: 0.1,
+              // Enable session replays for 100% of all sessions with errors
+              replaysOnErrorSampleRate: 1.0,
+            }
+          }
+        },
+      ],
+      [
+        '@docusaurus/plugin-google-gtag',
+        {
+          trackingID: 'G-J1NWM32T1V',
+          anonymizeIP: true,
+        },
+      ],
+    ] : []),
   ],
   presets: [
     [
       'classic',
       ({
         docs: {
+          routeBasePath: '/surrealdb',
           lastVersion: '1.2.x',
           versions: {
             "1.1.x": {
@@ -103,11 +137,11 @@ const config = {
               label: 'Nightly',
               path: 'nightly',
             },
-            '1.2.x': { 
+            '1.2.x': {
               label: '1.2.x',
               path: '',
             },
-            '1.0.x': { 
+            '1.0.x': {
               label: '1.0.x',
               path: '1.0.x',
             },
@@ -212,6 +246,9 @@ const config = {
         ]
       }
     }),
+  scripts: isProd ? [
+    { src: '/js/script.js', defer: true, 'data-domain': 'surrealdb.com' },
+  ] : []
 };
 
 module.exports = config;
