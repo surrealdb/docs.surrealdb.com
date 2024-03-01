@@ -9,10 +9,6 @@ const config = {
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: '/docs/',
-  // GitHub pages deployment config.
-  // If you aren't using GitHub pages, you don't need these.
-  organizationName: 'SurrealDB', // Usually your GitHub org/user name.
-  projectName: 'docs.surrealdb.com', // Usually your repo name.
   // TODO We need to fix these issues, just not doing it now :)
   onBrokenLinks: 'warn',
   onBrokenMarkdownLinks: 'warn',
