@@ -5,10 +5,9 @@ function Version(): JSX.Element | null {
 
   useEffect(() => {
     const fetchVersion = async () => {
-      const result = await fetch("https://crates.io/api/v1/crates/surrealdb/versions");
-      const data = await result.json();
-
-      setVersion(data["versions"][0]["num"]);
+      const result = await fetch("https://version.surrealdb.com");
+      const data = await result.text();
+      setVersion(data);
     };
 
     fetchVersion();
@@ -18,7 +17,7 @@ function Version(): JSX.Element | null {
     return null;
   }
 
-  return <code>v{version}</code>;
+  return <code>{version}</code>;
 }
 
 export default React.memo(Version);
