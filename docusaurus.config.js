@@ -7,7 +7,6 @@ const config = {
   // Set the production url of your site here
   url: 'https://surrealdb.com',
   // Set the /<baseUrl>/ pathname under which your site is served
-  // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: '/docs/',
   // TODO We need to fix these issues, just not doing it now :)
   onBrokenLinks: 'warn',
@@ -225,7 +224,7 @@ const config = {
       },
       footer: {
         style: 'dark',
-        copyright: `&copy; SurrealDB - <a href='https://surrealdb.com'>SurrealDB.com</a> - <a href='https://github.com/surrealdb'>GitHub</a> - <a href='https://discord.gg/surrealdb'>Discord</a> -  <a href='https://surrealdb.com/community'>Community</a> - <a href='https://surrealdb.com/products'>Products</a> - <a href='https://surrealdb.com/features'>Features</a> - <a href='https://surrealdb.com/releases'>Releases</a> `,
+        copyright: `&copy; <a href='https://surrealdb.com'>SurrealDB</a> &bull; <a href='https://github.com/surrealdb'>GitHub</a> &bull; <a href='https://discord.gg/surrealdb'>Discord</a> &bull; <a href='https://surrealdb.com/community'>Community</a> &bull; <a href='https://surrealdb.com/products'>Products</a> &bull; <a href='https://surrealdb.com/features'>Features</a> &bull; <a href='https://surrealdb.com/releases'>Releases</a> &bull; <a href='https://surrealdb.com/install'>Install</a>`,
       },
       prism: {
         additionalLanguages: [
