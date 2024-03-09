@@ -1,4 +1,3 @@
-const fs = require('fs');
 const isProd = process.env.IS_PROD_BUILD == "true";
 const config = {
   title: 'SurrealDB Docs',
@@ -77,12 +76,6 @@ const config = {
         sidebarPath: require.resolve('./sdks/java/sidebarsJava.js'),
       },
     ],
-    // [
-    //   './plugins/shiki',
-    //   {
-    //     themes: ["min-light", "nord"],
-    //   },
-    // ],
     ...(isProd ? [
       [
         'docusaurus-plugin-sentry',
@@ -154,35 +147,6 @@ const config = {
         },
       }),
     ],
-    // [
-    //   './src/plugins/shiki',
-    //   {
-    //     theme: JSON.parse(fs.readFileSync('./src/grammars/surrealql-theme.json', 'utf-8')),
-    //     langs: [
-    //       {
-    //         id: 'surql',
-    //         scopeName: 'source.surrealql',
-    //         grammar: JSON.parse(fs.readFileSync('./src/grammars/surrealql.tmLanguage.json', 'utf-8')),
-    //         aliases: ['surrealql']
-    //       },
-    //       'javascript',
-    //       'typescript',
-    //       'bash',
-    //       'shell',
-    //       'yaml',
-    //       'markdown',
-    //       'python',
-    //       'json',
-    //       'rust',
-    //       'jsx',
-    //       'sql',
-    //       'java',
-    //       'go',
-    //       'jsx',
-    //       'csharp'
-    //     ],
-    //   },
-    // ],
   ],
   themeConfig:
     ({
