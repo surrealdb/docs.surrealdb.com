@@ -2,14 +2,12 @@ const isProd = process.env.IS_PROD_BUILD == "true";
 const config = {
   title: 'SurrealDB Docs',
   tagline: 'SurrealDB Docs',
-  favicon: 'img/favicon.ico',
-  // Set the production url of your site here
+  favicon: '/img/favicon.ico',
   url: 'https://surrealdb.com',
-  // Set the /<baseUrl>/ pathname under which your site is served
   baseUrl: '/docs/',
-  // TODO We need to fix these issues, just not doing it now :)
-  onBrokenLinks: 'warn',
-  onBrokenMarkdownLinks: 'warn',
+  onBrokenLinks: 'throw',
+  onBrokenAnchors: 'throw',
+  onBrokenMarkdownLinks: 'throw',
   i18n: {
     defaultLocale: 'en',
     locales: ['en'],
@@ -139,8 +137,7 @@ const config = {
             },
           },
           includeCurrentVersion: false,
-          editUrl:
-            'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+          editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
         },
         theme: {
           customCss: require.resolve('./src/css/custom.scss'),
@@ -156,13 +153,13 @@ const config = {
         respectPrefersColorScheme: false,
       },
       // Replace with your project's social card
-      image: 'img/docusaurus-social-card.jpg',
+      image: '/img/docusaurus-social-card.jpg',
       navbar: {
         title: '',
         logo: {
           alt: 'SurrealDB Logo',
-          src: 'img/logo-surrealdb-dark.svg',
-          srcDark: 'img/logo-surrealdb.svg',
+          src: '/img/logo-surrealdb-dark.svg',
+          srcDark: '/img/logo-surrealdb.svg',
         },
         items: [
           {
