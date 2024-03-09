@@ -119,23 +119,11 @@ const config = {
           sidebarCollapsible: true,
           includeCurrentVersion: false,
           routeBasePath: '/surrealdb',
-          lastVersion: '1.2.x',
+          lastVersion: '1.x',
           versions: {
-            "1.1.x": {
-              label: '1.1.x',
-              path: '1.1.x',
-            },
-            nightly: {
-              label: 'Nightly',
-              path: 'nightly',
-            },
-            '1.2.x': {
-              label: '1.2.x',
+            "1.x": {
+              label: '1.x',
               path: '',
-            },
-            '1.0.x': {
-              label: '1.0.x',
-              path: '1.0.x',
             },
           },
           editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
