@@ -6,7 +6,6 @@ const config = {
   url: 'https://surrealdb.com',
   baseUrl: '/docs/',
   onBrokenLinks: 'throw',
-  onBrokenAnchors: 'throw',
   onBrokenMarkdownLinks: 'throw',
   i18n: {
     defaultLocale: 'en',
@@ -116,6 +115,9 @@ const config = {
       'classic',
       ({
         docs: {
+          sidebarCollapsed: true,
+          sidebarCollapsible: true,
+          includeCurrentVersion: false,
           routeBasePath: '/surrealdb',
           lastVersion: '1.2.x',
           versions: {
@@ -136,7 +138,6 @@ const config = {
               path: '1.0.x',
             },
           },
-          includeCurrentVersion: false,
           editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
         },
         theme: {
