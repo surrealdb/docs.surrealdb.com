@@ -11,6 +11,30 @@ const config = {
     defaultLocale: 'en',
     locales: ['en'],
   },
+  presets: [
+    [
+      '@docusaurus/preset-classic',
+      {
+        docs: {
+          sidebarCollapsed: true,
+          sidebarCollapsible: true,
+          includeCurrentVersion: false,
+          routeBasePath: '/surrealdb',
+          lastVersion: '1.x',
+          versions: {
+            "1.x": {
+              label: '1.x',
+              path: '',
+            },
+          },
+          editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+        },
+        theme: {
+          customCss: require.resolve('./src/css/custom.scss'),
+        },
+      },
+    ],
+  ],
   plugins: [
     'docusaurus-plugin-sass',
     [
@@ -109,30 +133,6 @@ const config = {
         },
       ],
     ] : []),
-  ],
-  presets: [
-    [
-      'classic',
-      ({
-        docs: {
-          sidebarCollapsed: true,
-          sidebarCollapsible: true,
-          includeCurrentVersion: false,
-          routeBasePath: '/surrealdb',
-          lastVersion: '1.x',
-          versions: {
-            "1.x": {
-              label: '1.x',
-              path: '',
-            },
-          },
-          editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
-        },
-        theme: {
-          customCss: require.resolve('./src/css/custom.scss'),
-        },
-      }),
-    ],
   ],
   themeConfig:
     ({
