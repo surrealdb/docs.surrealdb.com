@@ -37,66 +37,6 @@ const config = {
   ],
   plugins: [
     'docusaurus-plugin-sass',
-    [
-      '@docusaurus/plugin-content-docs',
-      {
-        id: 'rust',
-        path: "./sdks/rust",
-        routeBasePath: "./sdks/rust",
-        include: ["**/*.md"],
-        sidebarPath: require.resolve('./sdks/rust/sidebarsRust.js'),
-      },
-    ],
-    [
-      '@docusaurus/plugin-content-docs',
-      {
-        id: 'golang',
-        path: "./sdks/golang",
-        routeBasePath: "./sdks/golang",
-        include: ["**/*.md"],
-        sidebarPath: require.resolve('./sdks/golang/sidebarsGolang.js'),
-      },
-    ],
-    [
-      '@docusaurus/plugin-content-docs',
-      {
-        id: 'node',
-        path: "./sdks/node",
-        routeBasePath: "./sdks/node",
-        include: ["**/*.md"],
-        sidebarPath: require.resolve('./sdks/node/sidebarsNode.js'),
-      },
-    ],
-    [
-      '@docusaurus/plugin-content-docs',
-      {
-        id: 'python',
-        path: "./sdks/python",
-        routeBasePath: "./sdks/node",
-        include: ["**/*.md"],
-        sidebarPath: require.resolve('./sdks/python/sidebarsPython.js'),
-      },
-    ],
-    [
-      '@docusaurus/plugin-content-docs',
-      {
-        id: 'deno',
-        path: "./sdks/deno",
-        routeBasePath: "./sdks/deno",
-        include: ["**/*.md"],
-        sidebarPath: require.resolve('./sdks/deno/sidebarsDeno.js'),
-      },
-    ],
-    [
-      '@docusaurus/plugin-content-docs',
-      {
-        id: 'java',
-        path: "./sdks/java",
-        routeBasePath: "./sdks/java",
-        include: ["**/*.md"],
-        sidebarPath: require.resolve('./sdks/java/sidebarsJava.js'),
-      },
-    ],
     ...(isProd ? [
       [
         'docusaurus-plugin-sentry',
