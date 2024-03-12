@@ -7,7 +7,8 @@ function Version(): JSX.Element | null {
     const fetchVersion = async () => {
       const result = await fetch("https://version.surrealdb.com");
       const data = await result.text();
-      setVersion(data);
+      const text = data?.trim();
+      setVersion(text);
     };
 
     fetchVersion();
