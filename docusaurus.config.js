@@ -24,7 +24,7 @@ const config = {
           versions: {
             "1.x": {
               label: '1.x',
-              path: '',
+              path: '1.x',
             },
           },
           editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
