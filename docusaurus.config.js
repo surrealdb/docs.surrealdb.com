@@ -16,17 +16,11 @@ const config = {
       '@docusaurus/preset-classic',
       {
         docs: {
-          sidebarCollapsed: true,
-          sidebarCollapsible: true,
-          includeCurrentVersion: false,
-          routeBasePath: '/surrealdb',
-          lastVersion: '1.x',
-          versions: {
-            "1.x": {
-              label: '1.x',
-              path: '',
-            },
-          },
+          path: 'root',
+          routeBasePath: '/',
+          sidebarPath: './sidebars.js',
+          sidebarCollapsed: false,
+          sidebarCollapsible: false,
           editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
         },
         theme: {
@@ -36,6 +30,46 @@ const config = {
     ],
   ],
   plugins: [
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'doc-surrealdb',
+        sidebarCollapsed: true,
+        sidebarCollapsible: true,
+        includeCurrentVersion: false,
+        routeBasePath: '/surrealdb',
+        lastVersion: '1.x',
+        versions: {
+          "1.x": {
+            label: '1.x',
+            path: '',
+          },
+        },
+        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'doc-surrealml',
+        sidebarCollapsed: true,
+        sidebarCollapsible: true,
+        includeCurrentVersion: false,
+        routeBasePath: '/surrealml',
+        lastVersion: '1.x',
+        versions: {
+          "1.x": {
+            label: '1.x',
+            path: '',
+          },
+          "2.x": {
+            label: '2.x',
+            path: '2.x',
+          },
+        },
+        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+      },
+    ],
     'docusaurus-plugin-sass',
     ...(isProd ? [
       [
@@ -99,10 +133,6 @@ const config = {
             label: 'SurrealDB.com',
             target: '_blank',
             icon: 'none'
-          },
-          {
-            type: 'docsVersionDropdown',
-            position: 'right',
           },
           {
             href: 'https://github.com/surrealdb/docs.surrealdb.com',
