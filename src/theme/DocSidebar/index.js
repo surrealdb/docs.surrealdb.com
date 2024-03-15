@@ -8,6 +8,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faChevronLeft } from '@fortawesome/free-solid-svg-icons';
 import ThemedImage from "@theme/ThemedImage";
 import useBaseUrl from '@docusaurus/useBaseUrl';
+import Link from '@docusaurus/Link';
 
 const mappedDocTitle = {
     'doc-surrealml': {
@@ -32,10 +33,10 @@ export default function DocSidebarWrapper(props) {
             {plugin.pluginId !== 'default' && (
                 <>
                     <div className='custom-sidebarBackToHome'>
-                        <a href="/docs">
+                        <Link href="/docs">
                             <FontAwesomeIcon icon={faChevronLeft} />
                             Back to Home
-                        </a>
+                        </Link>
                     </div>
                     <div className="custom-sidebarDocIdentifier">
                         <div className='custom-sidebarDocTitle'>
