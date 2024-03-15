@@ -28,7 +28,7 @@ export default function DocSidebarWrapper(props) {
     const docTitle = mappedDocTitle[plugin.pluginId];
 
     return (
-        <>
+        <div className="custom-sidebarContainer">
             <div style={{paddingTop: 'var(--ifm-navbar-height)'}}></div>
             {plugin.pluginId !== 'default' && (
                 <>
@@ -75,6 +75,6 @@ export default function DocSidebarWrapper(props) {
             <div className="doc-sidebar-container">
                 <DocSidebar {...props} />
             </div>
-        </>
+        </div>
     );
 }
