@@ -22,10 +22,12 @@ export async function search(keywords: string): Promise<Doc[]> {
     const sql = templatedQuery(keywords);
     const docs = await query(sql);
 	const hostname = getHostname();
-	const version = getVersion(location.pathname);
+	// const version = getVersion(location.pathname);
     const processed = docs
         .filter((match) => {
-			return match.offsets && match.hostname == hostname && validateUrl(match.url, version)
+			return match.offsets 
+			&& match.hostname == hostname 
+			// && validateUrl(match.url, version)
 		})
         .map(processResult);
   	return processed;
@@ -33,56 +35,62 @@ export async function search(keywords: string): Promise<Doc[]> {
 
 function getHostname() {
 	const mapped = {
+		'surrealdb.com': 'main--surrealdb-docs.netlify.app',
+		'www.surrealdb.com': 'main--surrealdb-docs.netlify.app',
 		'docs.surrealdb.com': 'main--surrealdb-docs.netlify.app',
 		'surrealdb-docs.netlify.app': 'main--surrealdb-docs.netlify.app',
+		'localhost': 'main--surrealdb-docs.netlify.app',
 	};
 
 	return mapped[location.hostname] || location.hostname;
 }
 
-function getVersion(pathname: string) {
-	pathname = pathname.startsWith('/') ? pathname : `/${pathname}`;
-	const part = pathname.split('/')[2];
-	if (part === 'nightly' || part.match(/\d.\d.\d/i)) return part;
-	return undefined;
-}
+// function getVersion(pathname: string) {
+// 	pathname = pathname.startsWith('/') ? pathname : `/${pathname}`;
+// 	const part = pathname.split('/')[2];
+// 	if (part === 'nightly' || part.match(/\d.\d.\d/i)) return part;
+// 	return undefined;
+// }
 
-function validateUrl(url: string, version?: string) {
-	return getVersion(url) == version
-}
+// function validateUrl(url: string, version?: string) {
+// 	return getVersion(url) == version
+// }
 
 const templatedQuery = (keywords: string) => {
 	const escaped = JSON.stringify(keywords);
 	const hostname = JSON.stringify(getHostname());
 	return /* surrealql */ `
+		LET $escaped = ${escaped};
 		SELECT
 			path as url,
 			hostname,
 			title,
 			content,
-			search::offsets(6) AS offsets,
+			search::offsets(7) AS offsets,
 			(
-				  (search::score(0) * 8) 
-				+ (search::score(1) * 7)
-				+ (search::score(2) * 5)
-				+ (search::score(3) * 4)
-				+ (search::score(4) * 3)
-				+ (search::score(5) * 2)
-				+ search::score(6) 
+				  (search::score(0) * 10) 
+				+ (search::score(1) * 9)
+				+ (search::score(2) * 7)
+				+ (search::score(3) * 6)
+				+ (search::score(4) * 5)
+				+ (search::score(5) * 4)
+				+ (search::score(6) * 2)
+				+ search::score(7) 
 			) AS score
 		FROM page
 			WHERE 
-				-- hostname = ${hostname}
-				-- AND (
-					title @0@ ${escaped}
-					OR path @1@ ${escaped}
-					OR h1 @2@ ${escaped}
-					OR h2 @3@ ${escaped}
-					OR h3 @4@ ${escaped}
-					OR h4 @5@ ${escaped}
-					OR content @6@ ${escaped}
-				-- )
-		ORDER BY score DESC LIMIT 100;
+				hostname = ${hostname}
+				AND (
+					title @0@ $escaped
+					OR path @1@ $escaped
+					OR h1 @2@ $escaped
+					OR h2 @3@ $escaped
+					OR h3 @4@ $escaped
+					OR h4 @5@ $escaped
+					OR code @6@ $escaped
+					OR content @7@ $escaped
+				)
+		ORDER BY score DESC LIMIT 10;
 	`;
 };
 
@@ -95,7 +103,7 @@ async function query(sql: string) {
 		body: `USE NS docs DB search; ${sql}`,
 	});
 	const json = (await raw.json()).slice(1);
-	const result: Doc[] = json[0].result ?? []
+	const result: Doc[] = json[1].result ?? []
 	return result;
 }
 
