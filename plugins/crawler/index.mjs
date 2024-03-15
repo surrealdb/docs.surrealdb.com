@@ -28,7 +28,7 @@ export async function onSuccess() {
     const buildDir = `${cwd()}/build/`;
     const deployUrl = new URL(process.env.DEPLOY_PRIME_URL);
     const hostname = deployUrl.hostname;
-    const sitemapPath = buildDir + "sitemap.xml";
+    const sitemapPath = buildDir + "docs/sitemap.xml";
     console.log(`[CW] Build dir is: "${buildDir}"`);
     console.log(`[CW] Deploy URL is: "${deployUrl}"`);
     console.log(`[CW] Sitemap path is: "${sitemapPath}"`);
