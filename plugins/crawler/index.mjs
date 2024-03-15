@@ -53,11 +53,17 @@ export async function onSuccess() {
 
             const filePath = `${buildDir}${pathname}/index.html`;
             const fileContent = fs.readFileSync(filePath, "utf-8").replace(/\0/g, '');
-            const document = parseHTML(fileContent);
+            const document = parseHTML(fileContent, {
+                blockTextElements: {
+                    script: true,
+                    style: true,
+                    noscript: true,
+                }
+            });
 
-            const scrapByQuerySelector = (query) => document.querySelectorAll(query)
+            const scrapByQuerySelector = (query, blockContent) => document.querySelectorAll(query)
                 .map((el) => {
-                    const block = el.textContent;
+                    const block = blockContent?.(el) ?? el.textContent;
                     if (!block) return;
 
                     const parts = block.split(/\s+/);
@@ -72,8 +78,11 @@ export async function onSuccess() {
             const h2 = scrapByQuerySelector('h2');
             const h3 = scrapByQuerySelector('h3');
             const h4 = scrapByQuerySelector('h4');
-            const code = scrapByQuerySelector('code');
-            const content = scrapByQuerySelector('p,h1,h2,h3,h4,h5,h6,tr,th,td,code');
+            const code = scrapByQuerySelector('code', (el) => [...el.childNodes].map(el => el.textContent).join('\n'));
+            const content = [
+                ...scrapByQuerySelector('p,h1,h2,h3,h4,h5,h6,tr,th,td'),
+                ...code,
+            ];
 
             if (applyIndexes && content.length > 0) {
                 const start = Date.now();
