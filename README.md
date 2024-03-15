@@ -63,7 +63,7 @@
 
 ## Getting started with SurrealDB
 
-Visit [docs.surrealdb.com](https://docs.surrealdb.com/docs/introduction/start) to get started with SurrealDB. 
+Visit [surrealdb.com/docs](https://surrealdb.com/docs/surrealdb/) to get started with SurrealDB. 
 
 ## Contributing to the documentation
 

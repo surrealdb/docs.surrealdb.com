@@ -28,7 +28,7 @@ export async function onSuccess() {
     const buildDir = `${cwd()}/build/`;
     const deployUrl = new URL(process.env.DEPLOY_PRIME_URL);
     const hostname = deployUrl.hostname;
-    const sitemapPath = buildDir + "sitemap.xml";
+    const sitemapPath = buildDir + "docs/sitemap.xml";
     console.log(`[CW] Build dir is: "${buildDir}"`);
     console.log(`[CW] Deploy URL is: "${deployUrl}"`);
     console.log(`[CW] Sitemap path is: "${sitemapPath}"`);
@@ -38,7 +38,11 @@ export async function onSuccess() {
     const urls = sitemap.urlset.url;
     console.log(`[CW] The sitemap contains ${urls.length} url(s)`);
 
-    const pathnames = urls.map((url) => decodeURI(new URL(url.loc[0]).pathname));
+    const pathnames = urls.map((url) => {
+        let pathname = decodeURI(new URL(url.loc[0]).pathname);
+        if (pathname.endsWith('/')) pathname = pathname.slice(0, -1);
+        return pathname;
+    });
     const chunkSize = 1;
 
     for (let i = 0; i < pathnames.length; i += chunkSize) {
@@ -48,12 +52,18 @@ export async function onSuccess() {
             console.log(`[CW] Crawling page ${index + 1}/${pathnames.length}: ${pathname}`);
 
             const filePath = `${buildDir}${pathname}/index.html`;
-            const fileContent = fs.readFileSync(filePath, "utf-8");
-            const document = parseHTML(fileContent);
+            const fileContent = fs.readFileSync(filePath, "utf-8").replace(/\0/g, '');
+            const document = parseHTML(fileContent, {
+                blockTextElements: {
+                    script: true,
+                    style: true,
+                    noscript: true,
+                }
+            });
 
-            const scrapByQuerySelector = (query) => document.querySelectorAll(query)
+            const scrapByQuerySelector = (query, blockContent) => document.querySelectorAll(query)
                 .map((el) => {
-                    const block = el.textContent;
+                    const block = blockContent?.(el) ?? el.textContent;
                     if (!block) return;
 
                     const parts = block.split(/\s+/);
@@ -68,8 +78,11 @@ export async function onSuccess() {
             const h2 = scrapByQuerySelector('h2');
             const h3 = scrapByQuerySelector('h3');
             const h4 = scrapByQuerySelector('h4');
-            const code = scrapByQuerySelector('code');
-            const content = scrapByQuerySelector('p,h1,h2,h3,h4,h5,h6,tr,th,td,code');
+            const code = scrapByQuerySelector('code', (el) => [...el.childNodes].map(el => el.textContent).join('\n'));
+            const content = [
+                ...scrapByQuerySelector('p,h1,h2,h3,h4,h5,h6,tr,th,td'),
+                ...code,
+            ];
 
             if (applyIndexes && content.length > 0) {
                 const start = Date.now();
@@ -128,5 +141,6 @@ export async function onSuccess() {
         console.log(`[CW] Skipping stale page removal, not on prod`);
     }
 
+    console.log(`[CW] Closing connection to SurrealDB`);
     await db.close();
 }
