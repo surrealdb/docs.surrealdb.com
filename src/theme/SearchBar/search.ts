@@ -22,10 +22,12 @@ export async function search(keywords: string): Promise<Doc[]> {
     const sql = templatedQuery(keywords);
     const docs = await query(sql);
 	const hostname = getHostname();
-	const version = getVersion(location.pathname);
+	// const version = getVersion(location.pathname);
     const processed = docs
         .filter((match) => {
-			return match.offsets && match.hostname == hostname && validateUrl(match.url, version)
+			return match.offsets 
+			&& match.hostname == hostname 
+			// && validateUrl(match.url, version)
 		})
         .map(processResult);
   	return processed;
@@ -43,16 +45,16 @@ function getHostname() {
 	return mapped[location.hostname] || location.hostname;
 }
 
-function getVersion(pathname: string) {
-	pathname = pathname.startsWith('/') ? pathname : `/${pathname}`;
-	const part = pathname.split('/')[2];
-	if (part === 'nightly' || part.match(/\d.\d.\d/i)) return part;
-	return undefined;
-}
+// function getVersion(pathname: string) {
+// 	pathname = pathname.startsWith('/') ? pathname : `/${pathname}`;
+// 	const part = pathname.split('/')[2];
+// 	if (part === 'nightly' || part.match(/\d.\d.\d/i)) return part;
+// 	return undefined;
+// }
 
-function validateUrl(url: string, version?: string) {
-	return getVersion(url) == version
-}
+// function validateUrl(url: string, version?: string) {
+// 	return getVersion(url) == version
+// }
 
 const templatedQuery = (keywords: string) => {
 	const escaped = JSON.stringify(keywords);
