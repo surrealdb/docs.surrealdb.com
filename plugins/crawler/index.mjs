@@ -38,7 +38,11 @@ export async function onSuccess() {
     const urls = sitemap.urlset.url;
     console.log(`[CW] The sitemap contains ${urls.length} url(s)`);
 
-    const pathnames = urls.map((url) => decodeURI(new URL(url.loc[0]).pathname));
+    const pathnames = urls.map((url) => {
+        let pathname = decodeURI(new URL(url.loc[0]).pathname);
+        if (pathname.endsWith('/')) pathname = pathname.slice(0, -1);
+        return pathname;
+    });
     const chunkSize = 1;
 
     for (let i = 0; i < pathnames.length; i += chunkSize) {
@@ -48,7 +52,7 @@ export async function onSuccess() {
             console.log(`[CW] Crawling page ${index + 1}/${pathnames.length}: ${pathname}`);
 
             const filePath = `${buildDir}${pathname}/index.html`;
-            const fileContent = fs.readFileSync(filePath, "utf-8");
+            const fileContent = fs.readFileSync(filePath, "utf-8").replace(/\0/g, '');
             const document = parseHTML(fileContent);
 
             const scrapByQuerySelector = (query) => document.querySelectorAll(query)
@@ -128,5 +132,6 @@ export async function onSuccess() {
         console.log(`[CW] Skipping stale page removal, not on prod`);
     }
 
+    console.log(`[CW] Closing connection to SurrealDB`);
     await db.close();
 }
