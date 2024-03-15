@@ -12,13 +12,13 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 const mappedDocTitle = {
     'doc-surrealml': {
         title: "SurrealML",
-        iconLight: "img/light/rust.png",
-        iconDark: "img/rust-icon.png",
+        iconLight: "img/light/doc-surrealml.png",
+        iconDark: "img/doc-surrealml.png",
     },
     'doc-surrealdb': {
         title: "SurrealDB",
-        iconLight: "img/light/rust.png",
-        iconDark: "img/rust-icon.png",
+        iconLight: "img/light/doc-surrealdb.png",
+        iconDark: "img/doc-surrealdb.png",
     }
 }
 
