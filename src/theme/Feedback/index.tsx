@@ -129,9 +129,9 @@ function FeedbackForm({ onBack, closeDialog }) {
                         <textarea
                         value={message}
                         onChange={(e) => setMessage(e.target.value)}
-                        placeholder="What do you want us to know?"
+                        placeholder="What do you want us to know? (max 280 chars)"
                         minLength={10}
-                        maxLength={50}
+                        maxLength={280}
                         />
                     </div>
                     <div className="feedback-controls">
