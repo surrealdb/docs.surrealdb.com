@@ -62,10 +62,6 @@ const config = {
             label: '1.x',
             path: '',
           },
-          "2.x": {
-            label: '2.x',
-            path: '2.x',
-          },
         },
         editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
       },
