@@ -50,12 +50,6 @@ export default {
           label: "Deno",
           href: "/docs/surrealdb/integration/sdks/deno"
         },
-      ]
-    },
-    {
-      type: "category",
-      label: "Community SDKs",
-      items: [
         {
           type: "link",
           label: ".NET",
