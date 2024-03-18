@@ -42,7 +42,7 @@ export default {
         },
         {
           type: "link",
-          label: "NodeJS",
+          label: "Node.js",
           href: "/docs/surrealdb/integration/sdks/nodejs"
         },
         {
@@ -50,12 +50,6 @@ export default {
           label: "Deno",
           href: "/docs/surrealdb/integration/sdks/deno"
         },
-      ]
-    },
-    {
-      type: "category",
-      label: "Community SDKs",
-      items: [
         {
           type: "link",
           label: ".NET",
