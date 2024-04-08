@@ -57,12 +57,6 @@ function SearchBar(): JSX.Element | null {
     useEffect(() => {
         const isSearchHotkey = (event: KeyboardEvent) => (event.metaKey || event.ctrlKey) && event.key === 'k';
 
-        const handleKeyUp = (event: KeyboardEvent) => {
-            if (isSearchHotkey(event)) {
-                event.preventDefault();
-            }
-        };
-
         const handleKeyDown = (event: KeyboardEvent) => {
             if (isSearchHotkey(event)) {
                 event.preventDefault();
@@ -70,11 +64,9 @@ function SearchBar(): JSX.Element | null {
             }
         };
     
-        // window.addEventListener("keyup", handleKeyUp);
         window.addEventListener('keydown', handleKeyDown);
     
         return () => {
-            // window.removeEventListener("keyup", handleKeyUp);
             window.removeEventListener('keydown', handleKeyDown);
         };
       }, [openDialog]);
@@ -98,23 +90,24 @@ function SearchBar(): JSX.Element | null {
                     <input className={styles.input} onChange={(e)=>handleChange(e.target.value)} type="text" placeholder="Search.." value={keywords} />
                 </form>
                 {(results && results.length > 0) ? (
-                    <div className={styles.results}>
+                    <ol className={styles.results}>
                         {results.map((doc)=>(
-                            <a href={doc.url} className={styles.result} key={doc.url}>
-                                <h4 className={styles.title}>{doc.title}</h4>
-                                <h6 className={styles.url}>{doc.url}</h6>
-                                <p className={styles.match}>
-                                    {doc.chunks && doc.chunks.length > 0 && doc.chunks.map((ch, idx) => {
-                                        if (ch.bold) {
-                                            return (<b key={idx}>{ch.value} </b>);
-                                        } else {
+                           <li key={doc.url} className={styles.result}>
+                                <a href={doc.url}>
+                                    <h4 className={styles.title}>{doc.title}</h4>
+                                    <h6 className={styles.url}>{doc.url}</h6>
+                                    <p className={styles.match}>
+                                        {doc.chunks && doc.chunks.length > 0 && doc.chunks.map((ch, idx) => {
+                                            if (ch.bold) {
+                                                return (<b key={idx}>{ch.value} </b>);
+                                            }
                                             return (<span key={idx}>{ch.value} </span>);
-                                        }
-                                    })}
-                                </p>
-                            </a>
+                                        })}
+                                    </p>
+                                </a>
+                           </li>
                         ))}
-                    </div>
+                    </ol>
                 ) : (
                     <div className={styles.empty}>
                         <p>{keywords == '' ? 'Enter a search term' : 'No results'}</p>
