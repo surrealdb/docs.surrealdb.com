@@ -76,6 +76,11 @@ export default {
           label: "CLI Tool",
           href: "/docs/surrealdb/cli"
         },
+        {
+          type: "link",
+          label: "Surrealist",
+          href: "/docs/surrealist"
+        }
       ]
     }
   ]
