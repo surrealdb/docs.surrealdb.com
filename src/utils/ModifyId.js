@@ -1,40 +1,48 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 function ModifyIds() {
-    useEffect(() => {
+    const [isHydrated, setHydrated] = useState(false);
 
-        const modifyIds = () => {
-            const headers = document.querySelectorAll('h2');
-            const substringsToRemove = [
-                '-websocket-only', 
-                '-since-110', 
-                '-since-120', 
-                '-since-130', 
-                '-since-140'
-            ];
+    const ModifyIds = () => {
+        const headers = document.querySelectorAll('h2');
+        const substringsToRemove = [
+            '-websocket-only', 
+            '-since-110', 
+            '-since-120', 
+            '-since-130', 
+            '-since-140'
+        ];
 
-            headers.forEach(header => {
-                substringsToRemove.forEach(substring => {
-                    if (header.id.includes(substring)) {
-                        header.id = header.id.replace(substring, '');
-                    }
-                });
-            });
-        };
-
-        const observer = new MutationObserver(mutations => {
-            mutations.forEach(mutation => {
-                if (mutation.type === 'childList') {
-                    modifyIds();
+        headers.forEach(header => {
+            substringsToRemove.forEach(substring => {
+                if (header.id.includes(substring)) {
+                    header.id = header.id.replace(substring, '');
                 }
             });
         });
-    
-        observer.observe(document.body, { childList: true, subtree: true });
-    
-        return () => observer.disconnect();
+    };
 
+    useEffect(() => {
+        setHydrated(true);
     }, []);
+
+    useEffect(() => {
+        if (isHydrated) {
+            ModifyIds();
+
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    if (mutation.type === 'childList' && mutation.addedNodes.length) {
+                        ModifyIds();
+                    }
+                });
+            });
+
+            observer.observe(document.body, { childList: true, subtree: true });
+
+            return () => observer.disconnect();
+        }
+    }, [isHydrated]);
 
     return null;
 }

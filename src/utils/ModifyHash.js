@@ -22,7 +22,7 @@ function ModifyHash() {
             history.replace({ ...location, hash: newHash });
         }
 
-        const modifyH2Ids = () => {
+        const ModifyIds = () => {
             const headers = document.querySelectorAll('h2');
             headers.forEach(header => {
                 if (header.id.includes('kill-websocket-only')) {
@@ -31,7 +31,7 @@ function ModifyHash() {
             });
         };
 
-        modifyH2Ids();
+        ModifyIds();
 
     }, [location, history]);
 
