@@ -21,6 +21,18 @@ function ModifyHash() {
         if (modified && newHash !== location.hash) {
             history.replace({ ...location, hash: newHash });
         }
+
+        const modifyH2Ids = () => {
+            const headers = document.querySelectorAll('h2');
+            headers.forEach(header => {
+                if (header.id.includes('kill-websocket-only')) {
+                    header.id = '';
+                }
+            });
+        };
+
+        modifyH2Ids();
+
     }, [location, history]);
 
     return null;

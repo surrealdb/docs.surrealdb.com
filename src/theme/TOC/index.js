@@ -3,12 +3,13 @@ import clsx from 'clsx';
 import TOCItems from '@theme/TOCItems';
 import styles from './styles.module.css';
 import { dispatchOpenFeedbackModalEvent } from '@site/src/theme/FeedbackDialog/globalEventDispatcher';
-import ModifyHash from '@site/src/utils/ModifyHash';
+// import ModifyHash from '@site/src/utils/ModifyHash';
+import ModifyId from '@site/src/utils/ModifyId';
 
 export default function TOC({ className, ...props }) {
     return (
         <>
-            <ModifyHash />
+            <ModifyId />
             <div className={clsx(styles.tableOfContents, 'thin-scrollbar', className)}>
                 <TOCItems
                     {...props}
