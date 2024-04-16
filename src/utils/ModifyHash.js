@@ -18,8 +18,7 @@ function ModifyHash() {
             }
         });
         
-
-        if (modified) {
+        if (modified && newHash !== location.hash) {
             history.replace({ ...location, hash: newHash });
         }
     }, [location, history]);
