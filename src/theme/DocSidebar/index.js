@@ -13,7 +13,7 @@ import Link from '@docusaurus/Link';
 const mappedDocTitle = {
     'doc-surrealist': {
         title: "Surrealist",
-        iconLight: "img/light/doc-surrealist.png",
+        iconLight: "img/doc-surrealist.png",
         iconDark: "img/doc-surrealist.png",
     },
     'doc-surrealml': {
