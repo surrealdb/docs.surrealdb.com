@@ -5,6 +5,9 @@ function ModifyIds() {
 
     const ModifyIds = () => {
         const headers = document.querySelectorAll('h2');
+
+        const sinceRegex = /-since-\d+/g;
+
         const substringsToRemove = [
             '-websocket-only', 
             '-since-110', 
@@ -14,11 +17,11 @@ function ModifyIds() {
         ];
 
         headers.forEach(header => {
-            substringsToRemove.forEach(substring => {
-                if (header.id.includes(substring)) {
-                    header.id = header.id.replace(substring, '');
-                }
-            });
+            if (header.id.includes('-websocket-only')) {
+                header.id = header.id.replace('-websocket-only', '');
+            }
+            
+            header.id = header.id.replace(sinceRegex, '');
         });
     };
 
