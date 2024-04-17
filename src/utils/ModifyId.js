@@ -8,14 +8,6 @@ function ModifyIds() {
 
         const sinceRegex = /-since-\d+/g;
 
-        const substringsToRemove = [
-            '-websocket-only', 
-            '-since-110', 
-            '-since-120', 
-            '-since-130', 
-            '-since-140'
-        ];
-
         headers.forEach(header => {
             if (header.id.includes('-websocket-only')) {
                 header.id = header.id.replace('-websocket-only', '');
