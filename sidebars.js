@@ -23,6 +23,22 @@ export default {
     },
     {
       type: "category",
+      label: "Tools",
+      items: [
+        {
+          type: "link",
+          label: "CLI Tool",
+          href: "/docs/surrealdb/cli"
+        },
+        {
+          type: "link",
+          label: "Surrealist",
+          href: "/docs/surrealist"
+        }
+      ]
+    },
+    {
+      type: "category",
       label: "SDKs",
       items: [
         {
@@ -65,22 +81,6 @@ export default {
           label: "Java",
           href: "/docs/surrealdb/integration/sdks/java"
         },
-      ]
-    },
-    {
-      type: "category",
-      label: "Tools",
-      items: [
-        {
-          type: "link",
-          label: "CLI Tool",
-          href: "/docs/surrealdb/cli"
-        },
-        {
-          type: "link",
-          label: "Surrealist",
-          href: "/docs/surrealist"
-        }
       ]
     }
   ]
