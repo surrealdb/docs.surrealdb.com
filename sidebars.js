@@ -18,17 +18,6 @@ export default {
           type: "link",
           label: "SurrealML",
           href: "/docs/surrealml"
-        }
-      ]
-    },
-    {
-      type: "category",
-      label: "Tools",
-      items: [
-        {
-          type: "link",
-          label: "CLI Tool",
-          href: "/docs/surrealdb/cli"
         },
         {
           type: "link",
