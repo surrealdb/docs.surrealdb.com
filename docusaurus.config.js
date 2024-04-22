@@ -74,10 +74,10 @@ const config = {
         sidebarCollapsible: true,
         includeCurrentVersion: false,
         routeBasePath: '/surrealist',
-        lastVersion: '1.x',
+        lastVersion: '2.x',
         versions: {
-          "1.x": {
-            label: '1.x',
+          "2.x": {
+            label: '2.x',
             path: '',
           },
         },
