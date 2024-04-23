@@ -18,6 +18,11 @@ export default {
           type: "link",
           label: "SurrealML",
           href: "/docs/surrealml"
+        },
+        {
+          type: "link",
+          label: "Surrealist",
+          href: "/docs/surrealist"
         }
       ]
     },
@@ -64,17 +69,6 @@ export default {
           type: "link",
           label: "Java",
           href: "/docs/surrealdb/integration/sdks/java"
-        },
-      ]
-    },
-    {
-      type: "category",
-      label: "Tools",
-      items: [
-        {
-          type: "link",
-          label: "CLI Tool",
-          href: "/docs/surrealdb/cli"
         },
       ]
     }
