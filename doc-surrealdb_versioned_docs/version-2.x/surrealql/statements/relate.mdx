@@ -1,0 +1,350 @@
+---
+sidebar_position: 16
+sidebar_label: RELATE
+title: RELATE statement | SurrealQL
+description: The RELATE statement can be used to generate graph edges between two records in the database.
+---
+
+# `RELATE` statement
+
+The `RELATE` statement can be used to generate graph edges between two records in the database.
+
+This allows you to traverse related records efficiently without needing to pull data from multiple tables and merging that data together using SQL JOINs.
+
+Edges created using the RELATE statement are nearly identical to tables created using other statements.
+The key differences are that
+
+- Edge tables are deleted once there are no existing relationships left.
+- Edge tables have two required fields `in` and `out`, which specify the directions of the relationships. These cannot be modified in schema declarations except to specify that they must be of a certain record type.
+
+Thus, the following field declarations will work:
+
+```surql
+DEFINE FIELD in ON TABLE wrote TYPE record<author>;
+DEFINE FIELD out ON TABLE wrote TYPE record<book>;
+```
+
+But this will be ignored:
+
+```surql
+DEFINE FIELD in ON TABLE wrote TYPE string;
+DEFINE FIELD out ON TABLE wrote TYPE int;
+```
+
+Otherwise, edge tables behave like normal tables in terms of [updating](/docs/surrealdb/2.x/surrealql/statements/update), [defining a schema](/docs/surrealdb/2.x/surrealql/statements/define/table) or [indexes](/docs/surrealdb/2.x/surrealql/statements/define/indexes).
+
+[Record links](/docs/surrealdb/2.x/surrealql/datamodel/records) are the alternative option when connecting data, and simply consist of a field with record IDs that serve as uni-directional links. The key differences are that graph relations
+
+- Are kept in a separate table as opposed to a field inside a record.
+- Offer bi-directional querying.
+- Offer referential integrity.
+- Allow you to store data alongside the relationship.
+
+### Statement syntax
+
+```surql title="SurrealQL Syntax"
+RELATE [ ONLY ] @from_record -> @table -> @to_record
+	[ CONTENT @value
+	  | SET @field = @value ...
+	]
+	[ RETURN NONE | RETURN BEFORE | RETURN AFTER | RETURN DIFF | RETURN @statement_param, ... ]
+	[ TIMEOUT @duration ]
+	[ PARALLEL ]
+;
+```
+
+## Example usage
+### Basic usage
+
+The following query shows the basic structure of the `RELATE` statement, which creates a relationship between a record in the person table and a record in the article table.
+
+For table names we prioritise readability, such that normal tables are singular, person instead of persons, but edge tables can be plural.
+
+```surql
+RELATE person:l19zjikkw1p1h9o6ixrg->wrote->article:8nkk6uj4yprt49z7y3zm;
+```
+
+```bash title="Response"
+[
+	{
+		"id": "wrote:ctwsll49k37a7rmqz9rr",
+		"in": "person:l19zjikkw1p1h9o6ixrg",
+		"out": "article:8nkk6uj4yprt49z7y3zm"
+	}
+]
+```
+
+There is no relationship information stored in either the person or article table.
+
+Instead, an edge table (in this case a table called `wrote`) stores the relationship information. The structure `in -> id -> out` mirrors the record IDs from the `RELATE` statement, with the addition of the automatically generated ID for the wrote edge table.
+
+By default, the edge table gets created as a schemaless table when you execute the `RELATE` statement. You can however make the table schemafull by either [defining a schema](/docs/surrealdb/2.x/surrealql/statements/define/table) before or after executing the RELATE statement.
+
+A common use case is to make sure only unique relationships get created. You can do that by [defining an index](/docs/surrealdb/2.x/surrealql/statements/define/indexes).
+
+```surql
+DEFINE INDEX unique_relationships 
+    ON TABLE wrote 
+    COLUMNS in, out UNIQUE;
+```
+Edge tables are bi-directional by default. To enforce unidirectional relationships, you can restrict the type definition using field definition.
+
+```surql
+DEFINE FIELD in ON TABLE wrote TYPE record<person>;
+DEFINE FIELD out ON TABLE wrote TYPE record<article>;
+```
+
+### Always two there are - no more, no less
+
+A `RELATE` statement that involves an array instead of a single id will not fail. Instead, it will create a graph edge for each record in the array:
+
+```surql
+INSERT INTO cat (id) VALUES ("mr_meow", "mrs_meow", "kitten");
+RELATE [cat:mr_meow, cat:mrs_meow]->parent_of->cat:kitten;
+```
+
+```bash title="Response"
+[
+    {
+        "id": "parent_of:7ypx27tgoa9lrsa4s6fm",
+        "in": "cat:mr_meow",
+        "out": "cat:kitten"
+    },
+    {
+        "id": "parent_of:mw08ri5e1jgh78wp1c1p",
+        "in": "cat:mrs_meow",
+        "out": "cat:kitten"
+    }
+]
+```
+
+Similarly, a `RELATE` statement that involves two arrays will return a number of graph edges equal to their product (in this case 2 * 2):
+
+```surql
+CREATE cat:kitten2;
+RELATE [cat:mr_meow, cat:mrs_meow]->parent_of->[cat:kitten, cat:kitten2];
+```
+
+```bash title="Response"
+[
+    {
+        "id": "parent_of:kvgu19yulq347b8xksxw",
+        "in": "cat:mr_meow",
+        "out": "cat:kitten"
+    },
+    {
+        "id": "parent_of:xxvj5pkxci3k9bqm6br9",
+        "in": "cat:mr_meow",
+        "out": "cat:kitten2"
+    },
+    {
+        "id": "parent_of:e4xwvecwwm6sxq1xe0yr",
+        "in": "cat:mrs_meow",
+        "out": "cat:kitten"
+    },
+    {
+        "id": "parent_of:ub9t2mm948jfuup6r6c4",
+        "in": "cat:mrs_meow",
+        "out": "cat:kitten2"
+    }
+]
+```
+
+### Adding data using `SET` and `CONTENT`
+
+Graph edges are standalone tables that can hold other fields besides the default `in`, `out`, and `id`. These can be added during a `RELATE` statement or during an `UPDATE` in the same manner as any other SurrealDB table.
+
+Let's look at the two ways you can add record data in the `RELATE` statement. Both of these queries will produce the same result.
+
+```surql
+RELATE person:l19zjikkw1p1h9o6ixrg->wrote->article:8nkk6uj4yprt49z7y3zm 
+    SET time.written = time::now();
+
+
+RELATE person:l19zjikkw1p1h9o6ixrg->wrote->article:8nkk6uj4yprt49z7y3zm 
+	CONTENT {
+		time: {
+			written: time::now()
+		}
+	};
+```
+
+Here is an example of a graph edge being updated in the same way as any other SurrealDB record:
+
+```surql
+-- Add a small synopsis composed of the table name and article ID
+UPDATE wrote SET
+    description = meta::tb(out) + ' written by ' + <string>in;
+```
+
+```bash title="Response"
+    {
+        "id": "wrote:s51jjewpw953ahysbhak",
+        "in": "person:l19zjikkw1p1h9o6ixrg",
+        "out": "article:8nkk6uj4yprt49z7y3zm",
+        "description": "article written by person:l19zjikkw1p1h9o6ixrg"
+    }
+```
+
+### Creating a single relation with the ONLY keyword
+Using the ONLY keyword, just an object for the relation in question will be returned. This, instead of an array with a single object.
+
+```surql
+RELATE ONLY person:l19zjikkw1p1h9o6ixrg->wrote->article:8nkk6uj4yprt49z7y3zm;
+```
+## Basics of querying graphs
+Let's look at how the above gets queried, for more examples see the [SELECT docs](/docs/surrealdb/2.x/surrealql/statements/select).
+
+For the questions below, each of the queries will give you the same answer. Note that whether `->` and `<-` are parsed as `in` or `out` depends on their direction in relation to the graph edge `wrote`. An arrow pointing towards `wrote` corresponds to `in`, and vice versa.
+
+```surql
+-- Who wrote the articles?
+SELECT in FROM wrote;
+
+SELECT ->wrote.in FROM person;
+SELECT ->wrote<-person FROM person;
+
+SELECT <-wrote.in FROM article;
+SELECT <-wrote<-person FROM article;
+
+-- Which articles did the person write?
+SELECT out FROM wrote;
+
+SELECT ->wrote.out FROM person;
+SELECT ->wrote->article FROM person;
+
+SELECT <-wrote.out FROM article;
+SELECT <-wrote->article FROM article;
+
+-- When was the article written?
+SELECT time.written as time_written FROM wrote;
+SELECT ->wrote.time.written as time_written FROM person;
+SELECT <-wrote.time.written as time_written FROM article;
+```
+
+For a more complicated query like the one below you can use a simple rule of thumb:
+Place the subject in front of the graph selection, then read it backward.
+
+```surql
+-- This query
+SELECT ->purchased->product<-purchased<-person->purchased->product FROM person:tobie
+
+-- Then becomes
+person:tobie->purchased->product<-purchased<-person->purchased->product SELECT
+```
+
+Reading this backwards then makes more sense: <br/>
+
+Select every product that was purchased by a person who purchased a product that was also purchased by person Tobie.
+
+Alternatively, you can break it down in steps
+
+```surql
+-- Starting with Tobie
+person:tobie
+
+-- and his purchased products
+->purchased->product
+
+-- that were also purchased by persons
+<-purchased<-person
+
+-- what are all of those persons' purchased products?
+->purchased->product
+```
+
+Putting it all together it would be:
+based on all the products Tobie purchased, which person also purchased those products and what did they purchase?
+
+## Using [`LET`](/docs/surrealdb/2.x/surrealql/statements/let) parameters in RELATE statements
+
+You can also use [parameters](/docs/surrealdb/2.x/surrealql/parameters) to specify the record IDs.
+
+```surql
+-- These two statements store the result of the subquery in a parameter
+-- The subquery returns an array of IDs
+LET $person = (SELECT VALUE id FROM person); 
+LET $article = (SELECT VALUE id FROM article);
+
+-- This statement creates a relationship record for every combination of Record IDs
+-- Such that if we have 10 records each in the person and article table
+-- We get 100 records in the wrote edge table (10*10 = 100)
+-- In this case it would mean that each article would have 10 authors
+RELATE $person->wrote->$article SET time.written = time::now();
+```
+
+## Using [`RETURN`](/docs/surrealdb/2.x/surrealql/statements/return) clause
+
+By default, the relate statement returns the record value once the changes have been made. To change the return value of each record, specify a RETURN clause, specifying either `NONE`, `BEFORE`, `AFTER`, `DIFF`, or a comma-separated list of specific fields to return.
+
+```surql
+-- Don't return any result
+RELATE person:l19zjikkw1p1h9o6ixrg->wrote->article:8nkk6uj4yprt49z7y3zm 
+    SET time.written = time::now() 
+    RETURN NONE;
+
+-- Return the changeset diff
+RELATE person:l19zjikkw1p1h9o6ixrg->wrote->article:8nkk6uj4yprt49z7y3zm 
+    SET time.written = time::now() 
+    RETURN DIFF;
+
+-- Return the record before changes were applied
+RELATE person:l19zjikkw1p1h9o6ixrg->wrote->article:8nkk6uj4yprt49z7y3zm 
+    SET time.written = time::now() 
+    RETURN BEFORE;
+
+-- Return the record after changes were applied (the default)
+RELATE person:l19zjikkw1p1h9o6ixrg->wrote->article:8nkk6uj4yprt49z7y3zm 
+    SET time.written = time::now() 
+    RETURN AFTER;
+
+-- Return a specific field only from the updated records
+RELATE person:l19zjikkw1p1h9o6ixrg->wrote->article:8nkk6uj4yprt49z7y3zm 
+    SET time.written = time::now() 
+    RETURN time;
+```
+## Using `TIMEOUT` clause
+
+When processing a large result set with many interconnected records, it is possible to use the `TIMEOUT` keyword to specify a timeout duration for the statement. If the statement continues beyond this duration, then the transaction will fail, and the statement will return an error.
+
+```surql
+-- Cancel this conditional filtering based on graph edge properties
+-- if it's not finished within 5 seconds
+SELECT * FROM person WHERE ->knows->person->(knows WHERE influencer = true) TIMEOUT 5s;
+```
+
+## Using `PARALLEL` clause
+
+When processing a large result set with many interconnected records, it is possible to use the `PARALLEL` keyword to signify that edges and remote records should be fetched and processed in parallel. This can be useful when you want to process a large result set in a short amount of time.
+
+```surql
+-- Fetch and process the person, purchased and product targets in parallel
+-- Select every product that was purchased by a person that purchased a product that person tobie also purchased
+SELECT ->purchased->product<-purchased<-person->purchased->product FROM person:tobie PARALLEL;
+```
+
+## Deleting graph edges
+You can also delete graph edges between two records in the database by using the [DELETE statement](/docs/surrealdb/2.x/surrealql/statements/delete).
+
+For example the graph edge below:
+
+```surql
+RELATE person:tobie->bought->product:iphone;
+```
+
+```bash title="Response"
+
+[
+	{
+		"id": "bought:ctwsll49k37a7rmqz9rr",
+		"in": "person:tobie",
+		"out": "product:iphone"
+	}
+]
+```
+
+Can be deleted by:
+
+```surql
+DELETE person:tobie->bought WHERE out=product:iphone;
+```
