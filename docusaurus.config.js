@@ -39,10 +39,15 @@ const config = {
         includeCurrentVersion: false,
         routeBasePath: '/surrealdb',
         lastVersion: '1.x',
+        onlyIncludeVersions: ['1.x'],
         versions: {
           "1.x": {
             label: '1.x',
             path: '',
+          },
+          "2.x": {
+            label: '2.x',
+            path: '2.x',
           },
         },
         editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
