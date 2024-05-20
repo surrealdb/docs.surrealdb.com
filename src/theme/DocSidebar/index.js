@@ -11,6 +11,11 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 import Link from '@docusaurus/Link';
 
 const mappedDocTitle = {
+    'doc-Sdks': {
+        title: "SDKs",
+        iconLight: "img/doc-surrealist.png",
+        iconDark: "img/doc-surrealist.png",
+    },
     'doc-surrealist': {
         title: "Surrealist",
         iconLight: "img/doc-surrealist.png",
