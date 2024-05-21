@@ -161,6 +161,24 @@ const config = {
         editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
       },
     ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'doc-nodejs',
+        sidebarCollapsed: true,
+        sidebarCollapsible: true,
+        includeCurrentVersion: false,
+        routeBasePath: '/sdk/nodejs',
+        lastVersion: '1.x',
+        versions: {
+          "1.x": {
+            label: '1.x',
+            path: '',
+          },
+        },
+        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+      },
+    ],
     'docusaurus-plugin-sass',
     ...(isProd ? [
       [
