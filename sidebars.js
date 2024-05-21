@@ -38,7 +38,7 @@ export default {
         {
           type: "link",
           label: "JavaScript",
-          href: "/docs/sdks/javascript"
+          href: "/docs/sdk/javascript/"
         },
         {
           type: "link",
