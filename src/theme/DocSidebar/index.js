@@ -11,15 +11,20 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 import Link from '@docusaurus/Link';
 
 const mappedDocTitle = {
+    'doc-python': {
+        title: "Python",
+        iconLight: "img/light/python.png",
+        iconDark: "img/python-icon.png",
+    },
     'doc-rust': {
         title: "Rust",
-        iconLight: "img/doc-surrealist.png",
-        iconDark: "img/doc-surrealist.png",
+        iconLight: "img/light/rust.png",
+        iconDark: "img/rust-icon.png",
     },
     'doc-javascript': {
         title: "JavaScript",
-        iconLight: "img/doc-surrealist.png",
-        iconDark: "img/doc-surrealist.png",
+        iconLight: "img/light/javascript.png",
+        iconDark: "img/javascript-icon.png",
     },
     'doc-Sdks': {
         title: "SDKs",
