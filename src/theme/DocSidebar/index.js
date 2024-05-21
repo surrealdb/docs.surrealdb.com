@@ -11,8 +11,13 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 import Link from '@docusaurus/Link';
 
 const mappedDocTitle = {
+    'doc-java': {
+        title: "Java",
+        iconLight: "img/light/java.png",
+        iconDark: "img/java-icon.png",
+    },
     'doc-golang': {
-        title: "GOlang",
+        title: "Golang",
         iconLight: "img/light/golang.png",
         iconDark: "img/golang-icon.png",
     },
