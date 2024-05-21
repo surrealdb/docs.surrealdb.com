@@ -33,7 +33,7 @@ export default {
         {
           type: "link",
           label: "Rust",
-          href: "/docs/sdks/rust"
+          href: "/docs/sdk/rust/"
         },
         {
           type: "link",
@@ -43,32 +43,32 @@ export default {
         {
           type: "link",
           label: "Python",
-          href: "/docs/sdks/python"
+          href: "/docs/sdk/python"
         },
         {
           type: "link",
           label: "Node.js",
-          href: "/docs/sdks/nodejs"
+          href: "/docs/sdk/nodejs"
         },
         {
           type: "link",
           label: "Deno",
-          href: "/docs/sdks/deno"
+          href: "/docs/sdk/deno"
         },
         {
           type: "link",
           label: ".NET",
-          href: "/docs/sdks/dotnet"
+          href: "/docs/sdk/dotnet"
         },
         {
           type: "link",
           label: "Golang",
-          href: "/docs/sdks/golang"
+          href: "/docs/sdk/golang"
         },
         {
           type: "link",
           label: "Java",
-          href: "/docs/sdks/java"
+          href: "/docs/sdk/java"
         },
       ]
     }
