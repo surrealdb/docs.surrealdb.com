@@ -48,7 +48,7 @@ export default {
         {
           type: "link",
           label: "Node.js",
-          href: "/docs/sdk/nodejs"
+          href: "/docs/surrealdb/integration/sdks/nodejs"
         },
         {
           type: "link",
