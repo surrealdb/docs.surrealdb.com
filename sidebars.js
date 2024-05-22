@@ -33,12 +33,12 @@ export default {
         {
           type: "link",
           label: "Rust",
-          href: "/docs/sdk/rust/"
+          href: "/docs/sdk/rust"
         },
         {
           type: "link",
           label: "JavaScript",
-          href: "/docs/sdk/javascript/"
+          href: "/docs/sdk/javascript"
         },
         {
           type: "link",
@@ -47,8 +47,13 @@ export default {
         },
         {
           type: "link",
+          label: "Node.js",
+          href: "/docs/sdk/javascript"
+        },
+        {
+          type: "link",
           label: "Deno",
-          href: "/docs/sdk/deno"
+          href: "/docs/sdk/javascript"
         },
         {
           type: "link",
