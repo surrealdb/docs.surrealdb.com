@@ -47,11 +47,6 @@ export default {
         },
         {
           type: "link",
-          label: "Node.js",
-          href: "/docs/surrealdb/integration/sdks/nodejs"
-        },
-        {
-          type: "link",
           label: "Deno",
           href: "/docs/sdk/deno"
         },
