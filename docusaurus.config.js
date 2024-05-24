@@ -39,10 +39,15 @@ const config = {
         includeCurrentVersion: false,
         routeBasePath: '/surrealdb',
         lastVersion: '1.x',
+        onlyIncludeVersions: ['1.x'],
         versions: {
           "1.x": {
             label: '1.x',
             path: '',
+          },
+          "2.x": {
+            label: '2.x',
+            path: '2.x',
           },
         },
         editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
@@ -56,6 +61,168 @@ const config = {
         sidebarCollapsible: true,
         includeCurrentVersion: false,
         routeBasePath: '/surrealml',
+        lastVersion: '1.x',
+        versions: {
+          "1.x": {
+            label: '1.x',
+            path: '',
+          },
+        },
+        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'doc-surrealist',
+        sidebarCollapsed: true,
+        sidebarCollapsible: true,
+        includeCurrentVersion: false,
+        routeBasePath: '/surrealist',
+        lastVersion: '2.x',
+        versions: {
+          "2.x": {
+            label: '2.x',
+            path: '',
+          },
+        },
+        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'doc-sdks',
+        sidebarCollapsed: true,
+        sidebarCollapsible: true,
+        includeCurrentVersion: false,
+        routeBasePath: '/sdks',
+        lastVersion: '1.x',
+        versions: {
+          "1.x": {
+            label: '1.x',
+            path: '',
+          },
+        },
+        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'doc-javascript',
+        sidebarCollapsed: true,
+        sidebarCollapsible: true,
+        includeCurrentVersion: false,
+        routeBasePath: '/sdk/javascript',
+        lastVersion: '1.x',
+        versions: {
+          "1.x": {
+            label: '1.x',
+            path: '',
+          },
+        },
+        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'doc-rust',
+        sidebarCollapsed: true,
+        sidebarCollapsible: true,
+        includeCurrentVersion: false,
+        routeBasePath: '/sdk/rust',
+        lastVersion: '1.x',
+        versions: {
+          "1.x": {
+            label: '1.x',
+            path: '',
+          },
+        },
+        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'doc-python',
+        sidebarCollapsed: true,
+        sidebarCollapsible: true,
+        includeCurrentVersion: false,
+        routeBasePath: '/sdk/python',
+        lastVersion: '1.x',
+        versions: {
+          "1.x": {
+            label: '1.x',
+            path: '',
+          },
+        },
+        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'doc-deno',
+        sidebarCollapsed: true,
+        sidebarCollapsible: true,
+        includeCurrentVersion: false,
+        routeBasePath: '/sdk/deno',
+        lastVersion: '1.x',
+        versions: {
+          "1.x": {
+            label: '1.x',
+            path: '',
+          },
+        },
+        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'doc-dotnet',
+        sidebarCollapsed: true,
+        sidebarCollapsible: true,
+        includeCurrentVersion: false,
+        routeBasePath: '/sdk/dotnet',
+        lastVersion: '1.x',
+        versions: {
+          "1.x": {
+            label: '1.x',
+            path: '',
+          },
+        },
+        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'doc-golang',
+        sidebarCollapsed: true,
+        sidebarCollapsible: true,
+        includeCurrentVersion: false,
+        routeBasePath: '/sdk/golang',
+        lastVersion: '1.x',
+        versions: {
+          "1.x": {
+            label: '1.x',
+            path: '',
+          },
+        },
+        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'doc-java',
+        sidebarCollapsed: true,
+        sidebarCollapsible: true,
+        includeCurrentVersion: false,
+        routeBasePath: '/sdk/java',
         lastVersion: '1.x',
         versions: {
           "1.x": {
