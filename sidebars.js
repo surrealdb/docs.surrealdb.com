@@ -33,42 +33,42 @@ export default {
         {
           type: "link",
           label: "Rust",
-          href: "/docs/surrealdb/integration/sdks/rust"
+          href: "/docs/sdk/rust"
         },
         {
           type: "link",
           label: "JavaScript",
-          href: "/docs/surrealdb/integration/sdks/javascript"
+          href: "/docs/sdk/javascript"
         },
         {
           type: "link",
           label: "Python",
-          href: "/docs/surrealdb/integration/sdks/python"
+          href: "/docs/sdk/python"
         },
         {
           type: "link",
           label: "Node.js",
-          href: "/docs/surrealdb/integration/sdks/nodejs"
+          href: "/docs/sdk/javascript"
         },
         {
           type: "link",
           label: "Deno",
-          href: "/docs/surrealdb/integration/sdks/deno"
+          href: "/docs/sdk/javascript"
         },
         {
           type: "link",
           label: ".NET",
-          href: "/docs/surrealdb/integration/sdks/dotnet"
+          href: "/docs/sdk/dotnet"
         },
         {
           type: "link",
           label: "Golang",
-          href: "/docs/surrealdb/integration/sdks/golang"
+          href: "/docs/sdk/golang"
         },
         {
           type: "link",
           label: "Java",
-          href: "/docs/surrealdb/integration/sdks/java"
+          href: "/docs/sdk/java"
         },
       ]
     }
