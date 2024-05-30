@@ -92,25 +92,7 @@ const config = {
     [
       '@docusaurus/plugin-content-docs',
       {
-        id: 'doc-sdks',
-        sidebarCollapsed: true,
-        sidebarCollapsible: true,
-        includeCurrentVersion: false,
-        routeBasePath: '/sdks',
-        lastVersion: '1.x',
-        versions: {
-          "1.x": {
-            label: '1.x',
-            path: '',
-          },
-        },
-        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
-      },
-    ],
-    [
-      '@docusaurus/plugin-content-docs',
-      {
-        id: 'doc-javascript',
+        id: 'doc-sdk-javascript',
         sidebarCollapsed: true,
         sidebarCollapsible: true,
         includeCurrentVersion: false,
@@ -128,7 +110,7 @@ const config = {
     [
       '@docusaurus/plugin-content-docs',
       {
-        id: 'doc-rust',
+        id: 'doc-sdk-rust',
         sidebarCollapsed: true,
         sidebarCollapsible: true,
         includeCurrentVersion: false,
@@ -146,7 +128,7 @@ const config = {
     [
       '@docusaurus/plugin-content-docs',
       {
-        id: 'doc-python',
+        id: 'doc-sdk-python',
         sidebarCollapsed: true,
         sidebarCollapsible: true,
         includeCurrentVersion: false,
@@ -164,25 +146,7 @@ const config = {
     [
       '@docusaurus/plugin-content-docs',
       {
-        id: 'doc-deno',
-        sidebarCollapsed: true,
-        sidebarCollapsible: true,
-        includeCurrentVersion: false,
-        routeBasePath: '/sdk/deno',
-        lastVersion: '1.x',
-        versions: {
-          "1.x": {
-            label: '1.x',
-            path: '',
-          },
-        },
-        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
-      },
-    ],
-    [
-      '@docusaurus/plugin-content-docs',
-      {
-        id: 'doc-dotnet',
+        id: 'doc-sdk-dotnet',
         sidebarCollapsed: true,
         sidebarCollapsible: true,
         includeCurrentVersion: false,
@@ -200,7 +164,7 @@ const config = {
     [
       '@docusaurus/plugin-content-docs',
       {
-        id: 'doc-golang',
+        id: 'doc-sdk-golang',
         sidebarCollapsed: true,
         sidebarCollapsible: true,
         includeCurrentVersion: false,
@@ -218,7 +182,7 @@ const config = {
     [
       '@docusaurus/plugin-content-docs',
       {
-        id: 'doc-java',
+        id: 'doc-sdk-java',
         sidebarCollapsed: true,
         sidebarCollapsible: true,
         includeCurrentVersion: false,

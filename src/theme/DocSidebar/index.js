@@ -11,18 +11,18 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 import Link from '@docusaurus/Link';
 
 const mappedDocTitle = {
-    'doc-java': {
+    'doc-sdk-java': {
         title: "Java",
         iconLight: "img/light/java.png",
         iconDark: "img/java-icon.png",
     },
-    'doc-golang': {
+    'doc-sdk-golang': {
         title: "Golang",
         iconLight: "img/light/golang.png",
         iconDark: "img/golang-icon.png",
     },
-    'doc-dotnet': {
-        title: "Dotnet",
+    'doc-sdk-dotnet': {
+        title: ".NET",
         iconLight: "img/light/dotnet.png",
         iconDark: "img/dotnet-icon.png",
     },
@@ -31,17 +31,17 @@ const mappedDocTitle = {
         iconLight: "img/light/deno.png",
         iconDark: "img/deno-icon.png",
     },
-    'doc-python': {
+    'doc-sdk-python': {
         title: "Python",
         iconLight: "img/light/python.png",
         iconDark: "img/python-icon.png",
     },
-    'doc-rust': {
+    'doc-sdk-rust': {
         title: "Rust",
         iconLight: "img/light/rust.png",
         iconDark: "img/rust-icon.png",
     },
-    'doc-javascript': {
+    'doc-sdk-javascript': {
         title: "JavaScript",
         iconLight: "img/light/javascript.png",
         iconDark: "img/javascript-icon.png",
