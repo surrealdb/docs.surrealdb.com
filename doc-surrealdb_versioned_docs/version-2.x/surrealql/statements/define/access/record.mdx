@@ -2,9 +2,109 @@
 sidebar_position: 10
 sidebar_label: RECORD
 title: DEFINE ACCESS ... TYPE RECORD statement | SurrealQL
-description: A record access method allows accessing SurrealDB as a record user. 
+description: A record access method allows accessing SurrealDB as a record user.
 ---
 
 # `DEFINE ACCESS ... TYPE RECORD`
 
-A record access method allows accessing SurrealDB as a record user. 
+A record access method allows accessing SurrealDB as a [record user](/docs/surrealdb/2.x/security/authentication#record-users).
+
+Record users allow SurrealDB to operate as a web database by offering mechanisms to define custom signin and signup logic as well as custom table and field permissions.
+
+## Requirements
+
+- You must be authenticated as a root, namespace or database user before you can define a record access method.
+- [You must select your namespace and database](/docs/surrealdb/2.x/surrealql/statements/use) before you can define a record access method.
+
+## Statement syntax
+
+```surql title="SurrealQL Syntax"
+DEFINE ACCESS [ IF NOT EXISTS ] @name
+  ON DATABASE TYPE RECORD
+    [ SIGNUP @expression ]
+    [ SIGNIN @expression ]
+    [ WITH JWT
+      [ ALGORITHM @algorithm KEY @key | URL @url ]
+      [ WITH ISSUER KEY @key ]
+    ]
+  [ DURATION
+    [ FOR TOKEN @duration ]
+    [ FOR SESSION @duration ]
+  ]
+```
+
+## Example usage
+
+Below shows how you can define record access using the `DEFINE ACCESS ... TYPE RECORD` statement.
+
+```surql
+DEFINE ACCESS account ON DATABASE TYPE RECORD
+	SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+	SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+	DURATION FOR TOKEN 15m, FOR SESSION 12h
+;
+```
+
+### With JSON Web Token
+
+Successful authentication with a record access method results in SurrealDB generating a JSON Web Token (JWT or, in the context of SurrealDB, just "token") that can be used until its expiration to authenticate as the record user without the need of providing any additional credentials. These tokens can also be issued by third parties and trusted by SurrealDB in order to allow for the authentication process to take place outside of SurrealDB, while the resulting access claims can be provided to SurrealDB inside of a token that it can trust. This feature is provided by the `WITH JWT` clause.
+
+Since the origin of the claims in the JWT is verified, those claims can be used within SurrealQL in order to provide table and field authorization through an external authenticator using OpenID Connect, OAuth or simply acting as a trusted issuer of a JWT. This can be done by leveraging table permissions to allow or disallow access depending on the values of the claims in the verified token. For example, these claims can be compared with the records in a table to only return those matching certain criteria.
+
+Bear in mind that table and field permissions only apply to [record users](/docs/surrealdb/2.x/security/authentication#record-users), which must use tokens that are verified by a `RECORD` access method. Access provided by namespace and database tokens defined in a `JWT` access method is equivalent to access from [system users](/docs/surrealdb/2.x/security/authentication#system-users), which is above fine-grained permissions. When application users will be the ones directly authenticating with JWT, defining a `RECORD` access method `WITH JWT` is most likely the right choice.
+
+The following example shows how record access with a tokens can be used to grant authorization by verifying that the “email” claim in the token matches the email used as the index of a user table:
+
+
+```surql
+-- Specify the namespace and database for the token
+USE NS abcum DB app_vitalsense;
+
+DEFINE ACCESS token_name ON DATABASE TYPE RECORD WITH JWT
+ALGORITHM RS256 VALUE "-----BEGIN PUBLIC KEY-----
+MUO52Me9HEB4ZyU+7xmDpnixzA/CUE7kyUuE0b7t38oCh+sQouREqIjLwgHhFdhh3cQAwr6GH07D
+ThioYrZL8xATJ3Youyj8C45QnZcGUif5PkpWXDi0HJSoMFekbW6Pr4xuqIqb2LGxGDVJcLZwJ2AS
+Gtu2UAfPXbBD3ffiad393M22g1iHM80YaNi+xgswG7qtXE4lR/Lt4s0MeKKX7stdWI1VIsoB+y3i
+r/OWUvJPjjDNbAsyy8tQmxydv+FUnLEP9TNT4AhN4DXcJ+XsDtW7OWt4EdSVDeKpGbIMvIrh1Pe+
+Nilj8UHNyNDHa2AjK3seMo6CMvaIQJKj5o4xGFblFGwvvPD03SbuQLs1FdRjsZCeWLdYeQ3JDHE9
+sFG7DCXlpMJcaYT1mf4XHJ0gPekNLQyewTY3Vxf7FgV3GCNjV20kcDFgJA2+iVW2wSrb+txD1ycE
+kbi8jh0pedWwE40VQWaTh/8eAvX7IHWya/AEro25mq+m6vktNZLbvLphhp586kJK3Tdt3YjpkPre
+M3nkFWOWurIyKbtIV9JemfwCgt89sNV45dTlnEDEZFFGnIgDnWgx3CUo4XmhICEQU8+tklw9jJYx
+iCTjhbIDEBHySSSc/pQ4ftHQmhToTlQeOdEy4LYiaEIgl1X+hzRH1hBYvWlNKe4EY1nMCKcjgt0=
+-----END PUBLIC KEY-----";
+
+DEFINE TABLE user SCHEMAFULL
+  -- Authorized users can select, update, delete and create user records
+  PERMISSIONS FOR select, update, delete, create
+  -- The access method must be "users"
+  WHERE $access = "users"
+  -- The email of the user being queried must match the email claim in the token
+  -- Only matching records will be changed or returned
+  AND email = $token.email
+;
+
+DEFINE INDEX email ON user FIELDS email UNIQUE;
+DEFINE FIELD email ON user TYPE string ASSERT string::is::email($value);
+DEFINE FIELD name ON user TYPE string;
+DEFINE FIELD nickname ON user TYPE string;
+DEFINE FIELD picture ON user TYPE string;
+```
+
+You may also use permissions clauses to perform additional verification on other JWT claims (e.g. verifying that the iss claim matches a specific principal using $token.iss) that may be required or recommended by a the provider of the token.
+
+The token payload should at least include the following claims when used to authenticate as a record user in SurrealDB.
+
+```json title="JWT Payload"
+{
+  "exp": 2147483647,
+  "ns": "abcum",
+  "db": "app_vitalsense",
+  "ac": "users"
+}
+```
+
+Additionally, when the `id` claim is present in the token, the fields of the record matching the identifier specified will be accessible through the `$auth` variable. For example, if the value of the `id` claim is `user:73q1bl039y6k8z80v55d`, and user records have fields such as “name” or “email”, then `$auth.name` and `$auth.email` can be used to access those values for the `user:73q1bl039y6k8z80v55d` record specifically, without them being present in the JWT.
+
+#### With Issuer
+
+TBD
