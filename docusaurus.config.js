@@ -46,7 +46,7 @@ const config = {
             path: '',
           },
           "2.x": {
-            label: '2.x (alpha)',
+            label: '2.x(alpha)',
             path: '2.x',
           },
         },
