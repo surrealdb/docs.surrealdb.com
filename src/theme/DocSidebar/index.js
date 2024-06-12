@@ -11,6 +11,46 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 import Link from '@docusaurus/Link';
 
 const mappedDocTitle = {
+    'doc-sdk-java': {
+        title: "Java",
+        iconLight: "img/light/java.png",
+        iconDark: "img/java-icon.png",
+    },
+    'doc-sdk-golang': {
+        title: "Golang",
+        iconLight: "img/light/golang.png",
+        iconDark: "img/golang-icon.png",
+    },
+    'doc-sdk-dotnet': {
+        title: ".NET",
+        iconLight: "img/light/dotnet.png",
+        iconDark: "img/dotnet-icon.png",
+    },
+    'doc-deno': {
+        title: "Deno",
+        iconLight: "img/light/deno.png",
+        iconDark: "img/deno-icon.png",
+    },
+    'doc-sdk-python': {
+        title: "Python",
+        iconLight: "img/light/python.png",
+        iconDark: "img/python-icon.png",
+    },
+    'doc-sdk-rust': {
+        title: "Rust",
+        iconLight: "img/light/rust.png",
+        iconDark: "img/rust-icon.png",
+    },
+    'doc-sdk-javascript': {
+        title: "JavaScript",
+        iconLight: "img/light/javascript.png",
+        iconDark: "img/javascript-icon.png",
+    },
+    'doc-Sdks': {
+        title: "SDKs",
+        iconLight: "img/doc-surrealist.png",
+        iconDark: "img/doc-surrealist.png",
+    },
     'doc-surrealist': {
         title: "Surrealist",
         iconLight: "img/doc-surrealist.png",
