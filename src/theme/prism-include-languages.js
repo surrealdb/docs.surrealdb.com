@@ -22,7 +22,7 @@ export default function prismIncludeLanguages(PrismObject) {
       lookbehind: true,
     },
     variable: /[$][\w.]+/,
-    function: /\b(?:fn|function|count|sleep|rand|(?:(array|crypto|duration|fn|geo|http|is|math|meta|ml|object|parse|rand|search|session|sleep|string|time|type|vector)::[\w-]+)(::[\w-]+)*)(?=\s*(<[^>]+>)?\s*\()/i,
+    function: /\b(?:fn|function|count|sleep|rand|(?:(array|crypto|duration|encoding|fn|geo|html|http|is|math|meta|ml|object|parse|rand|search|session|sleep|string|time|type|vector)::[\w-]+)(::[\w-]+)*)(?=\s*(<[^>]+>)?\s*\()/i,
     range: /\b[\w\d]+[:]([\w\d]+\b|⟨[^⟩]+⟩|`[^`]+`)\.\.([\w\d]+\b|⟨[^⟩]+⟩|`[^`]+`)/i,
     record: /\b[\w\d]+[:](([\w\d]+\b|⟨[^⟩]+⟩|`[^`]+`)|(?=\{|\[))?/i,
     cast: /[<](bool|int|float|string|number|decimal|datetime|duration|future)[>]/,
