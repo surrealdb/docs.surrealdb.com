@@ -103,7 +103,7 @@ The token payload should at least include the following claims when used to auth
 }
 ```
 
-Additionally, when the `id` claim is present in the token, the fields of the record matching the identifier specified will be accessible through the `$auth` variable. For example, if the value of the `id` claim is `user:73q1bl039y6k8z80v55d`, and user records have fields such as “name” or “email”, then `$auth.name` and `$auth.email` can be used to access those values for the `user:73q1bl039y6k8z80v55d` record specifically, without them being present in the JWT.
+Additionally, when the `id` claim is present in the token, the fields of the record matching the identifier specified will be accessible through the reserved `$auth` parameter. For example, if the value of the `id` claim is `user:73q1bl039y6k8z80v55d`, and user records have fields such as “name” or “email”, then `$auth.name` and `$auth.email` can be used to access those values for the `user:73q1bl039y6k8z80v55d` record specifically, without them being present in the JWT.
 
 #### With Issuer
 
@@ -169,16 +169,13 @@ ALGORITHM HS512 KEY "secret";
 
 ### With `AUTHENTICATE` clause
 
-The authenticate clause can be used to change or set the record id for a user, but can also be used to fail authentication for record users as it's consistently ran across signin, signup and token authentication. The clause always expects a record id to be returned, and will otherwise generally fail.
+The authenticate clause can be used to change the record identifier returned by the `SIGNIN` and `SIGNUP` clauses or replace the identifier provided in the token when authenticating `WITH JWT`. This clause can also be used to record or stop authentication attempts for record users, as it is always executed across signin, signup and token authentication. The clause always expects a record identifier to be returned and will otherwise fail.
 
-#### External auth provider
+#### Example: External authentication providers
 
-Rewriting or setting the record id for a session is especially useful in scenario's where the token used to authenticate the session does not contain one. This is a realistic situation when using an external authentication provider, which may only provider a user identifier from their platform, such as a UUID or an email address.
+Replacing the record identifier that will be used to establish the session is especially useful in scenarios where the token used to authenticate the session does not contain one. This is common when using an external authentication provider, which may only have knowledge of generic user identifiers such as an email address or UUID.
 
-In the below example, we:
-- First check if the session may already be tied to an existing user. `$auth` is a reserved variable, containing the record id of a user. If we can select the `id` field from `$auth`, it means that that record exists in the database.
-- If that is not the case, we can check if the token may contain a different identifiable property. In this case we check for an email address, after which we try to lookup the user from the user table by their email address.
-- Lastly, if everything fails, the clause won't return a record id, either by the `IF` statement not matching, or by the user lookup failing. In this scenario, the `AUTHENTICATE` clause will fail with a generic error. You can also opt to `THROW` a custom error if you so wish.
+In the below example, we check if the session may already be tied to an existing user by using the `$auth` reserved parameter, which contains the record identifier of the authenticated user. If we can select the `id` field from `$auth`, it means that the token already contained the `id` for a record that exists in the database. If that is not the case, we can check if the token contains a different claim that we can rely on to uniquely identifies users. In this case we check for an email address. If the `email` claim is present in the token, we try to retrieve the user from the `user` table by their email address. If none of the queries return a record, the `AUTHENTICATE` clause will fail with a generic error. You can also choose to `THROW` a custom error as shown in the next example.
 
 ```surql
 DEFINE ACCESS user ON DATABASE TYPE RECORD
@@ -189,19 +186,20 @@ DEFINE ACCESS user ON DATABASE TYPE RECORD
             RETURN SELECT * FROM user WHERE email = $token.email;
         };
     }
+    WITH JWT ALGORITHM HS512 KEY 'secret'
 ;
 ```
 
-#### Fail authentication
+#### Example: Failing authentication
 
-Because the `AUTHENTICATE` clause runs across signin, signup and token authentication, it's in a unique position to centralize logic _after_ a user's credentials are deemed valid, but _before_ the user is completely authenticated.
+Because the `AUTHENTICATE` clause is always executed across signin, signup and token authentication, it is in a unique position to centralize logic _after_ user credentials are deemed valid, but _before_ the user is completely authenticated.
 
-Below, we show a simple example, validating if a user is enabled. If this is not the case, we can simply `THROW` an error stating why the user cannot authenticate (or you can opt to not return anything which results in a generic error).
-
-If everything checks out, we can `RETURN` the record id which confirms that authentication is successful, and that that is the user which will operate the session.
+Below, we show an example of validating if a user is enabled. If this is not the case, we can `THROW` an error stating why the user cannot authenticate, stopping the authentication attempt with a custom message. You can also choose to not return anything, which results in a generic authentication error. If the user is enabled, we can `RETURN` the record identifier, which confirms that authentication is successful and specifies that the record user which will be authenticated in the session is the same that was already authenticated.
 
 ```surql
 DEFINE ACCESS user ON DATABASE TYPE RECORD
+    SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass), enabled = true )
+    SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
     AUTHENTICATE {
         IF !$auth.enabled {
             THROW "This user is not enabled";
@@ -209,5 +207,29 @@ DEFINE ACCESS user ON DATABASE TYPE RECORD
 
         RETURN $auth;
     }
+;
+```
+
+#### Example: Auditing and revoking tokens
+
+In addition to what is shown in the previous example, the `AUTHENTICATE` clause can also be used to create records and access the claims found in the token itself using the `$token` reserved parameter. These features can be combined to record authentication attempts and stop authentication from completing if some conditions are met.
+
+Below, we show a proof of concept example that leverages the fact that tokens issued by SurrealDB have the standard `jti` claim, which contains a randomly generated unique identifier for the token. This value can be used to uniquely identify each token that is issued by SurrealDB for the purposes of auditing and revocation.
+
+In this example, we create a new record in the `token` table for each token that SurrealDB issues after a successful `SIGNIN` and `SIGNUP`. This record is identified by the value in the `jti` claim. Every time that a token is used to authenticate, we check if the record in the `token` table with identifier matching the `jti` claim has been revoked and, if so, we fail authentication with a custom message. Otherwise, we log the time that the token was used to successfully authenticate in the `audit` table and continue authentication without changes.
+
+```surql
+DEFINE ACCESS user ON DATABASE TYPE RECORD
+    SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+    SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+    AUTHENTICATE {
+        IF type::thing("token", $token.jti).revoked = true {
+            THROW "This token has been revoked";
+        };
+        INSERT INTO token { id: $token.jti, exp: $token.exp, revoked: false };
+        CREATE audit CONTENT { token: $token.jti, time: time::now() };
+        RETURN $auth;
+    }
+    DURATION FOR TOKEN 30d, FOR SESSION 1h
 ;
 ```
