@@ -30,6 +30,12 @@
 <br>
 
 <p align="center">
+    <a href="https://codespaces.new/surrealdb/docs.surrealdb.com">
+        <img src="https://github.com/codespaces/badge.svg" alt="Open in GitHub Codespaces" />
+    </a>
+</p>
+
+<p align="center">
     <a href="https://surrealdb.com/discord"><img src="https://img.shields.io/discord/902568124350599239?label=discord&style=flat-square&color=5a66f6"></a>
     &nbsp;
     <a href="https://twitter.com/surrealdb"><img src="https://img.shields.io/badge/twitter-follow_us-1d9bf0.svg?style=flat-square"></a>
@@ -75,7 +81,7 @@ We have a list of [good first issues](https://github.com/surrealdb/docs.surreald
 
 ### Installation
 
-To get started with contributing to the SurrealDB documentation, first install the required packages using the following command.
+To get started with contributing to the SurrealDB documentation, you can either use [GitHub Codespaces](https://codespaces.new/surrealdb/docs.surrealdb.com), or install the required packages using the following command.
 
 ```
 $ pnpm install
