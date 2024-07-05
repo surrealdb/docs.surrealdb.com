@@ -8,7 +8,7 @@ After the setup is complete:
 
 - All the required dependencies will be installed.
 
-> ![NOTE]
+> [!NOTE]
 > The setup process will take a few minutes to complete, especially the `pnpm install` step.
 
 # Local Dev Containers
