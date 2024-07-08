@@ -1,0 +1,323 @@
+---
+sidebar_position: 4
+sidebar_label: Security Best Practices
+title: Security Best Practices | Reference guides
+description: This guide outlines some key security best practices for using SurrealDB 2.0. While SurrealDB offers powerful and flexible features to support you in meeting your desired security standards, the use that you make of those features will ultimately determine whether or not you meet them.
+---
+import ThemedImage from '@theme/ThemedImage';
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import { SurrealistMini } from "@site/src/components/SurrealistMini";
+
+# Security Best Practices
+
+This guide outlines some key security best practices for using SurrealDB 2.0. While SurrealDB offers powerful and flexible features to support you in meeting your desired security standards, the use that you make of those features will ultimately determine whether or not you meet them. The following is a non-exhaustive list of security best practices that you should take into account when building services and applications with SurrealDB to help you address common security challenges while preventing frequent pitfalls.
+
+## Capabilities
+
+When running a SurrealDB server, you are able to configure the [capabilities](https://surrealdb.com/docs/surrealdb/security/capabilities) that it will have. These capabilities are disabled by default to expose as little attack surface as possible to malicious actors. We strongly discourage running SurrealDB with all capabilities enabled without a good reason for it. Instead, we recommend enabling only the capabilities that are necessary to your service.
+
+Whenever you need to enable a specific capability, we recommend that you do it on a case by case basis instead of generally. For example, if you know that your queries need to be able to parse emails using functions, we recommend you run SurrealDB with the `--allow-funcs parse::email::*`  flag instead of allowing all functions with `--allow-funcs` without any arguments. This ensures that your SurrealDB instance will not be affected by vulnerabilities in the code of any other functions that a malicious actor could leverage to increase their privileges or execute unauthorized code.
+
+**Example**
+
+```bash
+# Allow SurrealDB to generate UUIDv4 and call any crypto function except MD5.
+surreal start --allow-funcs "crypto","rand::uuid::v4" --deny-funcs "crypto::md5"
+```
+
+Such a practice becomes specially important in the case of the network capability, which allows SurrealDB to perform network requests such as those required by the [`http::*` functions](https://surrealdb.com/docs/surrealdb/2.x/surrealql/functions/database/http). Allowing untrusted users to perform network requests from your SurrealDB instance can allow them access to its local network or services that specifically allow network access from that instance.
+
+**Example**
+
+```bash
+# Allow SurrealDB to perform HTTP GET requests over to a specific API over TLS.
+surreal start --allow-funcs "http::get" --allow-net "api.example.com:443"
+```
+
+## Passwords
+
+If you require storing passwords for your users, do not rely on table or field permissions to keep them private. In the event that your application or database is compromised, these passwords would become known by the attacker. Instead, use the [password hashing functions](https://surrealdb.com/docs/surrealdb/2.x/surrealql/functions/database/crypto) provided by SurreaDB such  as `crypto::argon2::*`, `crypto::bcrypt::*`, `crypto::pbkdf2::*` and  `crypto::scrypt::*` . These functions ensure that irreversible cryptographic hashes are stored instead of the original passwords, so that the passwords from your users remain safe even in the event of a compromise.
+
+Do not use other cryptographic hash functions (e.g. `crypto::md5`, `crypto::sha1` , `crypto::sha512`) for hashing passwords, even if you do use an additional salt. These functions are designed to be efficient in computing, which will benefit an attacker that sets out to crack any hashes that they may have obtained from the compromise of your application. Hash functions intended for password hashing already incorporate a salt as well as other mechanisms to prevent hash cracking by making the computation of such hashes less efficient. This mitigates password cracking at scale at the small cost of adding a few milliseconds delay while checking credentials for legitimate users.
+
+Even it you only store password hashes, it is a good practice to additionally use field permissions to prevent unauthorised access to the password hashes, which could allow an attacker to perform inefficient but potentially effective attacks such as testing candidate passwords against a specific hash. For even better security, you may store passwords in a separate table and use table permissions to disallow all access to that table. Due to their internal implementation, table permissions provide additional security compared to field permissions.
+
+**Example**
+
+```surql
+DEFINE TABLE user SCHEMAFULL
+  -- Only allow users to query their own record, including their password.
+	PERMISSIONS
+		FOR select, update, delete WHERE id = $auth.id;
+
+DEFINE FIELD name ON user TYPE string;
+DEFINE FIELD email ON user TYPE string ASSERT string::is::email($value);
+DEFINE FIELD password ON user TYPE string;
+
+DEFINE INDEX email ON user FIELDS email UNIQUE;
+
+DEFINE ACCESS user ON DATABASE TYPE RECORD
+	SIGNIN (
+		SELECT * FROM user WHERE email = $email AND
+		  crypto::argon2::compare(password, $password) -- Use Argon2 to compare the hashes.
+	)
+	SIGNUP (
+		CREATE user CONTENT {
+			name: $name,
+			email: $email,
+			password: crypto::argon2::generate($password) -- Use Argon2 to generate the hash.
+		}
+	);
+```
+
+## Expiration
+
+When defining [users](https://surrealdb.com/docs/surrealdb/2.x/surrealql/statements/define/user) and [access methods](https://surrealdb.com/docs/surrealdb/2.x/surrealql/statements/define/access/), ensure that you set a specific [session and token duration](https://surrealdb.com/docs/surrealdb/2.x/security/authentication#expiration) whenever possible using the `DURATION` clause.
+
+Default values provided by SurrealDB are intended to support cases where SurrealDB is used as a traditional backend database, which is why sessions do not expire by default. If you are building an application where your end users will directly connect with SurrealDB, we strongly encourage setting a session expiration that is as short as possible (typically a few hours) to provide a good experience to your users  without compromising security. Expiring user sessions ensures that a user will not be able to remain authenticated long after their access has been revoked. This cannot be done on demand, as users sessions are not persisted in the database. However, unlike tokens, user sessions are not typically susceptible to be stolen, as they exist only in the context of an established WebSocket connection.
+
+**Examples**
+
+```surql
+DEFINE USER username ON DATABASE PASSWORD 'CHANGE_THIS' DURATION FOR SESSION 5d;
+```
+
+```surql
+DEFINE ACCESS account ON DATABASE TYPE RECORD
+	SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+	SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+	DURATION FOR SESSION 12h
+;
+```
+
+Tokens, however, are usually stored in the client (e.g. a web browser) and may be stolen by client-side attacks such as a cross-site scripting vulnerability in your application. For this reason, we strongly recommend reducing token duration from the default one hour to the minimum amount of time that your use case can tolerate. Ideally, a token should only be valid for as log as the client needs in order to use the token to establish a session, which can be as little as a few seconds.
+
+**Examples**
+
+```surql
+DEFINE USER username ON DATABASE PASSWORD 'CHANGE_THIS' DURATION FOR TOKEN 15m;
+```
+
+```surql
+DEFINE ACCESS account ON DATABASE TYPE RECORD
+	SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+	SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+	DURATION FOR TOKEN 5s
+;
+```
+
+## Query Safety
+
+When using SurrealDB as a traditional backend database, your application will usually build SurrealQL queries that may need to contain some untrusted input, such as that provided by the users of your application. To do so, SurrealDB offers [`bind`](https://surrealdb.com/docs/sdk/rust/setup#query) as a method to `query` (implemented in other SDKs as [the `vars` argument to `query`](https://surrealdb.com/docs/sdk/javascript/setup#query)), which should always be used when including untrusted input into queries. Otherwise, SurrealDB will be unable to separate the actual query syntax from the user input, resulting in the well-known [SQL injection](https://en.wikipedia.org/wiki/SQL_injection) vulnerabilities. This practice is known as [prepared statements or parametrised queries](https://en.wikipedia.org/wiki/Prepared_statement). Binding parameters ensures that untrusted data is passed to SurrealDB as SurrealQL parameters, which are independent from the query syntax, preventing SQL injection attacks.
+
+**Examples**
+
+```rust
+// Rust SDK
+// Do this:
+let name = "tobie"; // User-controlled input.
+let mut result = db
+    .query("CREATE person CONTENT name = $name")
+    .bind(("name", name))
+    .await?;
+```
+
+```rust
+// Rust SDK
+// highlight-next-line
+// Do NOT do this:
+let name = "tobie"; // User-controlled input.
+let mut result = db
+    .query(format!("CREATE person CONTENT name = {name}"))
+    .await?;
+```
+
+```jsx
+// JavaScript SDK
+// Do this:
+const name = "tobie"; // User-controlled input.
+const result = await db.query(
+	'CREATE person CONTENT name = "$name";',
+	{ name: name }
+);
+```
+
+```jsx
+// JavaScript SDK
+// highlight-next-line
+// Do NOT do this:
+const name = "tobie"; // User-controlled input.
+const result = await db.query('CREATE person CONTENT name = "' + name + '";');
+```
+
+## Content Safety
+
+Content generated by users and other untrusted parties will often be stored in SurrealDB and later rendered in an HTML page to be displayed. Regardless of SurrealDB, rendering untrusted content is the source of some dangerous pitfalls which can lead to [cross-site scripting](https://en.wikipedia.org/wiki/Cross-site_scripting) attacks and other client-side code injection issues like [site defacement](https://en.wikipedia.org/wiki/Website_defacement) or [clickjacking](https://en.wikipedia.org/wiki/Clickjacking).
+
+When retrieving content that may be rendered in an HTML document, we strongly recommend that you use the [`string::html::encode`](https://surrealdb.com/docs/surrealdb/2.x/surrealql/functions/database/string#stringhtmlencode) function, which will encode any characters that have special meaning in HTML syntax (e.g. `<`, `>`, `&`...) into HTML entities (e.g. `&lt;`, `&gt;`, `&amp;`...) that will be rendered as the actual original character instead of interpreted as HTML syntax.
+
+**Example**
+
+```surql
+RETURN string::html::encode("<h1>Safe Title</h1><script>alert('XSS')</script><p>Safe paragraph. Not safe <span onload='logout()'>event</span>.</p>");
+
+['&lt;h1&gt;Safe&#32;Title&lt;&#47;h1&gt;&lt;script&gt;alert(&apos;XSS&apos;)&lt;&#47;script&gt;&lt;p&gt;Safe&#32;paragraph.&#32;Not&#32;safe&#32;&lt;span&#32;onload&#61;&apos;logout()&apos;&gt;event&lt;&#47;span&gt;.&lt;&#47;p&gt;']
+```
+
+If you absolutely require user-generated content to be rendered as HTML but still want to prevent users from injecting dangerous HTML into your page, you can use the [`string::html::sanitize`](https://surrealdb.com/docs/surrealdb/2.x/surrealql/functions/database/string#stringhtmlsanitize) function instead, which will keep all characters intact, so that the content can be interpreted as HTML syntax, while removing the specific syntax that is deemed dangerous. It is important to note that, although the set of accepted syntax is very conservative, sanitization is less safe that encoding and could potentially be bypassed due to a flaw in the function.
+
+**Example**
+
+```surql
+
+RETURN string::html::sanitize("<h1>Safe Title</h1><script>alert('XSS')</script><p>Safe paragraph. Not safe <span onload='logout()'>event</span>.</p>");
+
+['<h1>Safe Title</h1><p>Safe paragraph. Not safe <span>event</span>.</p>']
+```
+
+## JSON Web Tokens
+
+When configuring how [JSON Web Tokens](https://datatracker.ietf.org/doc/html/rfc7519) are verified before authenticating a [system](https://surrealdb.com/docs/surrealdb/2.x/security/authentication#system-users) or [record](https://surrealdb.com/docs/surrealdb/2.x/security/authentication#record-users) user with [`DEFINE ACCESS ... TYPE JWT`](https://surrealdb.com/docs/surrealdb/2.x/surrealql/statements/define/access/jwt) or [`DEFINE ACCESS ... TYPE RECORD ... WITH JWT`](https://surrealdb.com/docs/surrealdb/2.x/surrealql/statements/define/access/record#with-json-web-token), we recommend using an asymmetric algorithm (i.e. `PSXXX`,  `RSXXX` , `ECXXX`) when only a mechanism for token verification is being defined. This ensures that the only key stored by SurrealDB is a public key that does not represent a threat in the event of a compromise. On the other hand, symmetric algorithms (i.e. `HSXXX`) use the same key for signature and verification, which the attacker would be able to use to issue tokens that would be trusted by SurrealDB.
+
+**Example**
+
+```surql
+DEFINE ACCESS token ON DATABASE TYPE RECORD WITH JWT
+ALGORITHM RS256 KEY "-----BEGIN PUBLIC KEY-----
+MUO52Me9HEB4ZyU+7xmDpnixzA/CUE7kyUuE0b7t38oCh+sQouREqIjLwgHhFdhh3cQAwr6GH07D
+ThioYrZL8xATJ3Youyj8C45QnZcGUif5PkpWXDi0HJSoMFekbW6Pr4xuqIqb2LGxGDVJcLZwJ2AS
+Gtu2UAfPXbBD3ffiad393M22g1iHM80YaNi+xgswG7qtXE4lR/Lt4s0MeKKX7stdWI1VIsoB+y3i
+r/OWUvJPjjDNbAsyy8tQmxydv+FUnLEP9TNT4AhN4DXcJ+XsDtW7OWt4EdSVDeKpGbIMvIrh1Pe+
+Nilj8UHNyNDHa2AjK3seMo6CMvaIQJKj5o4xGFblFGwvvPD03SbuQLs1FdRjsZCeWLdYeQ3JDHE9
+sFG7DCXlpMJcaYT1mf4XHJ0gPekNLQyewTY3Vxf7FgV3GCNjV20kcDFgJA2+iVW2wSrb+txD1ycE
+kbi8jh0pedWwE40VQWaTh/8eAvX7IHWya/AEro25mq+m6vktNZLbvLphhp586kJK3Tdt3YjpkPre
+M3nkFWOWurIyKbtIV9JemfwCgt89sNV45dTlnEDEZFFGnIgDnWgx3CUo4XmhICEQU8+tklw9jJYx
+iCTjhbIDEBHySSSc/pQ4ftHQmhToTlQeOdEy4LYiaEIgl1X+hzRH1hBYvWlNKe4EY1nMCKcjgt0=
+-----END PUBLIC KEY-----";
+```
+
+Additionally, we recommend using [JSON Web Key Sets](https://datatracker.ietf.org/doc/html/rfc7517) to configure the verification algorithm and key from a remote authoritative source using the `URL` clause instead of providing them directly to SurrealDB using the `ALGORITHM` and `KEY` clauses. This ensures that the original token issuer will be able to rotate keys in the event of a compromise to prevent potentially compromised tokens to be used with your application without affecting the availability of your service.
+
+**Example**
+
+```surql
+DEFINE ACCESS token ON DATABASE TYPE RECORD WITH JWT
+URL "https://example.com/.well-known/jwks.json";
+```
+
+## Network Exposure
+
+When deploying SurrealDB, we recommend that you limit the attack surface as much as possible in order to minimise the risk of attacks or information gathering from unauthorised parties. If your database should only be available to other internal services, we suggest that you do this by exposing SurrealDB exclusively to the internal network instead of deploying the service with a publicly addressable network interface that is accessible from the internet, regardless of whether or not allowlisting has been applied at the networking or application level.
+
+If you must publish SurrealDB to the internet (e.g. in the case where your users directly connect to SurrealDB), you may want to monitor and prevent unwanted connections using tools such as a network [intrusion prevention system](https://en.wikipedia.org/wiki/Intrusion_detection_system#Intrusion_prevention) or a [web application firewall](https://en.wikipedia.org/wiki/Web_application_firewall). If you do so, ensure that these systems are appropriately tuned and do not interfere with the regular use of SurrealDB.
+
+In cases where SurrealDB is publicly exposed in environments where any sort of information leakage is unacceptable, the `--no-identification-headers` flag can be enabled, which will result in the SurrealDB server no longer responding to HTTP requests with headers that identify the product or its current version to prevent passive fingerprinting and metadata indexing. Note that this will not prevent active fingerprinting such as directly querying the `/version` endpoint if available or directly attempting to exploit a known security vulnerability without regard for compatibility. On the other hand, consider whether or not enabling this feature is compatible with your clients, which may rely on these headers in order to identify the version of SurrealDB running on the server.
+
+**Example**
+
+```bash
+# When launched without "--no-identification-headers":
+$ curl -vvv "127.0.0.1:8000"
+*   Trying 127.0.0.1:8000...
+* Connected to 127.0.0.1 (127.0.0.1) port 8000 (#0)
+> GET / HTTP/1.1
+> Host: 127.0.0.1:8000
+> User-Agent: curl/7.81.0
+> Accept: */*
+>
+* Mark bundle as not supporting multiuse
+< HTTP/1.1 307 Temporary Redirect
+< location: https://surrealdb.com/app
+< access-control-allow-origin: *
+< vary: origin
+< vary: access-control-request-method
+< vary: access-control-request-headers
+// highlight-start
+< surreal-version: surrealdb-2.0.0+20240612.2184e80f
+< server: SurrealDB
+// highlight-end
+< x-request-id: 157413ce-7cc4-41a1-a93b-0940bf87874c
+< content-length: 0
+< date: Mon, 17 Jun 2024 15:47:29 GMT
+<
+* Connection #0 to host 127.0.0.1 left intact
+
+# When launched with "--no-identification-headers":
+$ curl -vvv "127.0.0.1:8000"
+*   Trying 127.0.0.1:8000...
+* Connected to 127.0.0.1 (127.0.0.1) port 8000 (#0)
+> GET / HTTP/1.1
+> Host: 127.0.0.1:8000
+> User-Agent: curl/7.81.0
+> Accept: */*
+>
+* Mark bundle as not supporting multiuse
+< HTTP/1.1 307 Temporary Redirect
+< location: https://surrealdb.com/app
+< access-control-allow-origin: *
+< vary: origin
+< vary: access-control-request-method
+< vary: access-control-request-headers
+< x-request-id: deec3301-e930-4389-a0da-b2a336bd2631
+< content-length: 0
+< date: Mon, 17 Jun 2024 15:49:43 GMT
+<
+* Connection #0 to host 127.0.0.1 left intact
+```
+
+## Least Privilege
+
+When defining [system users](https://surrealdb.com/docs/surrealdb/2.x/security/authentication#system-users) in SurrealDB, you may assign them [roles](https://surrealdb.com/docs/surrealdb/2.x/surrealql/statements/define/user#roles) that will limit the actions they can perform inside the level where they are defined. Ensure that you employ the principle of least privilege and create users at the lowest level possible and with the minimum role in order to be able to perform their duties inside of SurrealDB. This will mitigate some of the risk in the case where credentials for that user are ever compromised.
+
+**Examples**
+
+A user who only needs to query the database:
+
+```surql
+DEFINE USER db_viewer ON DATABASE PASSWORD 'CHANGE_THIS' ROLES VIEWER;
+```
+
+A user who only needs to manage content in any databases on the same namespace:
+
+```surql
+DEFINE USER ns_editor ON NAMESPACE PASSWORD 'CHANGE_THIS' ROLES EDITOR;
+```
+
+## Encryption in Transit
+
+Encryption in transit is recommended specially when deploying SurrealDB on a server in a different network than its clients. This mitigates the impact of man-in-the-middle attacks and provides confidentially and integrity guarantees with regards to the data being exchanged. Encryption in transit can be achieved by using the SurrealDB server to serve its interfaces through HTTPS by providing the `--web-crt` and `--web-key` arguments when calling [the `start` subcommand in the CLI](https://surrealdb.com/docs/surrealdb/2.x/cli/start#command-help). For production deployments, we recommend that TLS termination is performed by a load balancer or reverse proxy that will often provide additional guarantees to the process.
+
+**Example**
+
+```bash
+# If you want to serve TLS directly with SurrealDB:
+surreal start --web-crt "cert.pem" --web-key "key.pem"
+```
+
+## Encryption at Rest
+
+Encryption at rest is recommended specially when storing sensitive data in a location where you cannot guarantee the security of the storage media. If encryption at rest is not used, physical access to the storage media may result in complete compromise to the data stored. It is important to note that most kinds of encryption at rest will not prevent logical attacks from resulting in compromise of the data, as such attacks will often access the data using the compromised system as a [confused deputy](https://en.wikipedia.org/wiki/Confused_deputy_problem) in order to leverage its ability to access data after it is already decrypted.
+
+Encryption at rest can be achieved by ensuring that the data is stored encrypted using a disk encryption solution such as [LUKS](https://en.wikipedia.org/wiki/Linux_Unified_Key_Setup) or [BitLocker](https://en.wikipedia.org/wiki/BitLocker) in Linux and Windows systems respectively and, in the case where you are hosting SurrealDB in a cloud provider, by leveraging their storage encryption solutions in the volume or disk that will store your data.
+
+You might consider additional encryption for your datastore in some specific scenarios. This can provide increased security when your database servers, storage media and their corresponding encryption keys are managed in different security contexts, where the storage media and its keys may be compromised without also compromising the datastore servers. Encryption at rest at the datastore level can be achieved by using a datastore backend that offers transparent encryption such as [TiKV (≥4.0)](https://docs.pingcap.com/tidb/stable/encryption-at-rest#tikv-encryption-at-rest) or [FoundationDB (≥7.2)](https://github.com/apple/foundationdb/blob/main/design/encryption-data-at-rest.md). This encryption is independent from SurrealDB.
+
+It is important to note that, even in this scenario, physical or logical access to the SurrealDB server will result in access to the data, as SurrealDB must receive decrypted data from the datastore in order to perform any sort of queries.
+
+## Untrusted Queries
+
+Due to the powerful SurrealQL language and the addition of functions, scripting and network capabilities, running untrusted queries in SurrealDB as a [system user](https://surrealdb.com/docs/surrealdb/2.x/security/authentication#system-users) should be treated similarly to running untrusted software in any system. When copying queries or importing datasets from sources that you do not trust, make sure to review their contents to ensure that they do not contain any malicious code intended to perform unauthorized changes, computations or network requests.
+
+## Session Isolation
+
+One of the interfaces to SurrealDB is [RPC through WebSockets](https://surrealdb.com/docs/surrealdb/integration/rpc). This interface is usually used by the official [SDKs](https://surrealdb.com/docs/surrealdb/integration/sdks) and offers performance benefits over the [HTTP REST API](https://surrealdb.com/docs/surrealdb/integration/http), which requires establishing a new connection for every operation. The RPC interface can either be directly exposed to end users or used internally from your backend to communicate with SurrealDB.
+
+In the later scenario, some developers may choose to still authenticate each user individually (e.g. using [`signin`](https://surrealdb.com/docs/surrealdb/2.x/integration/rpc#signin) or [`authenticate`](https://surrealdb.com/docs/surrealdb/2.x/integration/rpc#authenticate)) in the WebSockets [session](https://surrealdb.com/docs/surrealdb/security/authentication#sessions) as opposed to using a single service user for their backend. This could be done by calling [`invalidate`](https://surrealdb.com/docs/surrealdb/2.x/integration/rpc#invalidate) or just authenticating a new user in the same connection and may provide some performance benefits over establishing a new WebSocket connection for each user. However, we recommend using separate WebSocket sessions or connections for different users. Consider terminating the connection and establishing a new one for every individual user.
+
+WebSocket connections offer an additional degree of isolation between users that may become relevant in the event where some session information for previous users who were using the same connection was not properly cleared. Additionally, even if successfully isolated from the security perspective, some resources associated with users are freed by SurrealDB only when the connection is terminated. Sharing the same WebSockets connection between several users may cause these unused resources to grow indefinitely.
+
+## Vulnerabilities
+
+When SurrealDB is part of your service or application, vulnerabilities that affect SurrealDB may also impact your environment. Due to this fact, we highly recommend that you track [vulnerabilities published for SurrealDB](https://github.com/surrealdb/surrealdb/security/advisories) so that you become aware of any updates that address vulnerabilities that you may be affected by. This can be done most effectively by leveraging automation tools that will consume the [Github Advisory Database](https://github.com/advisories?query=surrealdb). These automations will usually also warn of vulnerabilities in dependencies used by SurrealDB, which may also have an impact in your environment. Keeping up to date with the latest releases of SurrealDB is, in general, a good practice.
+
+If you identify a vulnerability in SurrealDB that has not been published yet, we encourage you to [create a security advisory report](https://github.com/surrealdb/surrealdb/security/advisories/new) on Github so that the SurrealDB team can privately look into it in order to identify and work on a solution that can benefit you as well as the rest of the users.
