@@ -3,7 +3,6 @@ const config = {
   title: 'SurrealDB Docs',
   tagline: 'SurrealDB Docs',
   favicon: '/img/favicon.ico',
-  trailingSlash: false,
   url: 'https://surrealdb.com',
   baseUrl: '/docs/',
   onBrokenLinks: 'throw',
