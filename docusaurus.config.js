@@ -5,6 +5,7 @@ const config = {
   favicon: '/img/favicon.ico',
   url: 'https://surrealdb.com',
   baseUrl: '/docs/',
+  trailingSlash: false,
   onBrokenLinks: 'throw',
   onBrokenMarkdownLinks: 'throw',
   i18n: {
