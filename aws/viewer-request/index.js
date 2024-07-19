@@ -24,6 +24,11 @@ function handler(event) {
 		return redirect(`https://surrealdb.com${path}`);
 	}
 
+	// Docusaurus base path always has a trailing slash
+	if (path === '/docs') {
+		return redirect('https://surrealdb.com/docs/');
+	}
+
 	// Display the content for the documentation path
 	if (path === '/docs/') {
 		request.uri = request.uri.concat('index.html');
