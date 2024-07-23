@@ -33,7 +33,7 @@ const Since = ({ v }) => {
 
   return (
     <span>
-      <strong>Added in</strong>
+      <strong>Since</strong>
       <code>{v}</code>
       {featureStatus === 'new' && <span style={{ marginLeft: '10px', padding: '3px 6px', backgroundColor: '#28a745', color: '#fff', borderRadius: '3px' }}>New</span>}
       {featureStatus === 'beta' && <span style={{ marginLeft: '10px', padding: '3px 6px', backgroundColor: '#ffc107', color: '#000', borderRadius: '3px' }}>Beta</span>}
