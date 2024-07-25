@@ -35,14 +35,14 @@ function handler(event) {
 		return request;
 	}
 
-	// Don't process any files which have extensions
-	if (request.uri.lastIndexOf('.') > request.uri.lastIndexOf('/')) {
+	// Display any documentation assets and image files
+	if (path.startsWith('/docs/assets/') || path.startsWith('/docs/img/')) {
 		return request;
 	}
 
 	// Redirect any paths which have trailing slashes
 	if (request.uri.endsWith('/') === true) {
-		return redirect(`https://surrealdb.com/${path.slice(0, -1)}`);
+		return redirect(`https://surrealdb.com${path.slice(0, -1)}`);
 	}
 
 	// Redirect any capitalised paths to lowercase
