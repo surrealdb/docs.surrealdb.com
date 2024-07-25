@@ -106,13 +106,13 @@ export default function DocSidebarWrapper(props) {
                                 </h2>
                             )}
                         </div>
-                        <div className="custom-sidebarDocVersion">
+                        {/* <div className="custom-sidebarDocVersion">
                             <DocsVersionDropdownNavbarItem 
                                 docsPluginId={plugin.pluginId}
                                 dropdownItemsBefore={[]} 
                                 dropdownItemsAfter={[]} 
                             />
-                        </div>
+                        </div> */}
                     </div>
                     <hr class="custom-sidebarSeparator" />
                 </>
