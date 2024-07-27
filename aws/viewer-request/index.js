@@ -41,17 +41,13 @@ function handler(event) {
 	}
 
 	// Redirect any paths which have trailing slashes
-	if (request.uri.endsWith('/') === true) {
+	if (request.uri.endsWith('/')) {
 		return redirect(`https://surrealdb.com${path.slice(0, -1)}`);
 	}
 
 	// Redirect any capitalised paths to lowercase
 	if (path !== request.uri) {
 		return redirect(`https://surrealdb.com${path}`);
-	}
-
-	if (path.endsWith('/')) {
-		path = path.slice(0, -1);
 	}
 
 	switch (path) {
