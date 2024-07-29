@@ -17,7 +17,7 @@ function handler(event) {
 
 	const request = event.request;
 	const host = request.headers.host.value;
-	let path = request.uri.toLowerCase();
+	const path = request.uri.toLowerCase();
 
 	// Only use the base domain, not subdomains
 	if (host !== 'surrealdb.com') {
@@ -35,23 +35,19 @@ function handler(event) {
 		return request;
 	}
 
-	// Don't process any files which have extensions
-	if (request.uri.lastIndexOf('.') > request.uri.lastIndexOf('/')) {
+	// Display any documentation assets and image files
+	if (path.startsWith('/docs/assets/') || path.startsWith('/docs/img/')) {
 		return request;
 	}
 
 	// Redirect any paths which have trailing slashes
-	if (request.uri.endsWith('/') === true) {
-		return redirect(`https://surrealdb.com/${path.slice(0, -1)}`);
+	if (request.uri.endsWith('/')) {
+		return redirect(`https://surrealdb.com${path.slice(0, -1)}`);
 	}
 
 	// Redirect any capitalised paths to lowercase
 	if (path !== request.uri) {
 		return redirect(`https://surrealdb.com${path}`);
-	}
-
-	if (path.endsWith('/')) {
-		path = path.slice(0, -1);
 	}
 
 	switch (path) {
