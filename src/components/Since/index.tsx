@@ -1,4 +1,3 @@
-import React from 'react';
 
 type Version = `v${number}.${number}.${number}`;
 
@@ -7,10 +6,17 @@ interface SinceProps {
 }
 
 const Since: React.FC<SinceProps> = ({ v }) => {
+ // Regular expression to validate the version format
+    const versionRegex = /^v\d+\.\d+\.\d+$/;
 
-    const version = v.startsWith('v') ? v.slice(1) : v;
+ // Check if the passed version matches the expected format
+    if (!versionRegex.test(v)) {
+        return <div>Error: Version {v} is not recognized.</div>;
+ }
 
-    return <div className="version">Since {version}</div>;
+    return <p style={{
+        marginTop: '10px',
+    }}> <strong>Available since: </strong><code className="version">{v}</code> </p>;
 };
 
 export default Since;
