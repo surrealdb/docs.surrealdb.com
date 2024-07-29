@@ -39,11 +39,11 @@ const config = {
         sidebarCollapsible: true,
         includeCurrentVersion: false,
         routeBasePath: '/surrealdb',
-        lastVersion: '2.x',
-        onlyIncludeVersions: ['2.x'],
+        lastVersion: 'latest',
+        onlyIncludeVersions: ['latest'],
         versions: {
-          "2.x": {
-            label: 'Home',
+          "latest": {
+            label: '1.x',
             path: '',
           },
         },
