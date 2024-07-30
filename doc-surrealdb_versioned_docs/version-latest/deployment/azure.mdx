@@ -1,0 +1,370 @@
+---
+sidebar_position: 9
+sidebar_label: Deploy on Azure AKS
+title: Deploy on Azure AKS | Deployment
+description: This tutorial guides users through the process of deploying SurrealDB using Azure Kubernetes Service.
+---
+
+import ThemedImage from '@theme/ThemedImage';
+import useBaseUrl from '@docusaurus/useBaseUrl';
+
+<ThemedImage
+  alt="Azure"
+  width="50"
+  className="sdk-logo"
+  sources={{
+    light: useBaseUrl('img/light/azure.png'),
+    dark: useBaseUrl('img/azure-icon.png'),
+  }}
+/>
+
+# Deploy on Azure Kubernetes Service (AKS)
+
+<br />
+
+## What is AKS?
+
+[Azure Kubernetes Service](https://azure.microsoft.com/products/kubernetes-service) is a managed Kubernetes service offered by the Microsoft Azure platform.
+This article will guide you through setting up a highly available SurrealDB cluster backed by [TiKV](https://tikv.org/) on a Azure Kubernetes Service cluster.
+
+## What is TiKV?
+
+[TiKV](https://tikv.org/) is a cloud-native transactional key/value store built by PingCAP and that integrates well with Kubernetes thanks to their tidb-operator.
+
+## Prerequisites
+
+In order for you to complete this tutorial you'll need:
+
+- An account on [Microsoft Azure](https://azure.microsoft.com/)
+- The [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli)
+- [`kubectl`](https://kubernetes.io/docs/tasks/tools/install-kubectl/) to manage the Kubernetes cluster
+- [`helm`](https://helm.sh/docs/intro/install/) to install SurrealDB server and TiKV
+- [`Surreal CLI`](https://surrealdb.com/install) to interact with the SurrealDB server
+
+:::note
+<em> COST CONSIDERATIONS: </em>
+Provisioning the environment in your Azure account will create resources and there will be cost associated with them.
+The cleanup section provides a guide to remove them, preventing further charges.
+:::
+
+:::note
+<em> NOTE: </em>
+This guide was tested in <code>westeurope</code> region and it follows TiKV best practices for scalability and high availability.
+This tutorial is intended for production workloads using the <code>standard</code> tier. If you want to create a dev/test environment, you should root for the <code>free</code> tier and change the cluster and node pool configuration (no zone, fewer nodes).
+:::
+
+## Create an AKS Cluster
+
+1. Log in to Azure and get the current subscription if you have multiple subscriptions.
+
+```bash title="Log in to Azure and list Azure subscriptions"
+$ az login
+$ az account list
+```
+
+2. Create a new resource group
+
+```bash title="Create a new resource group"
+$ az group create --name rg-surrealdb-aks --location westeurope
+```
+
+3. Run the following command to create a cluster:
+
+```bash title="Create a new AKS cluster"
+$ az aks create \
+    --resource-group rg-surrealdb-aks \
+    --location westeurope \
+    --name surrealdb-aks-cluster \
+    --generate-ssh-keys \
+    --load-balancer-sku standard \
+    --node-count 3 \
+    --zones 1 2 3 \
+    --enable-addons monitoring \
+    --tier standard
+```
+
+4. After the creation finishes, get credentials to configure <code>kubectl</code> to connect to the new cluster:
+
+```bash title="Get AKS cluster credentials"
+$ az aks get-credentials --resource-group rg-surrealdb-aks --name surrealdb-aks-cluster
+```
+
+5. You can verify the connection to the cluster with the following command:
+
+```bash title="Display cluster nodes"
+$ kubectl get nodes
+
+NAME                                STATUS   ROLES   AGE     VERSION
+aks-nodepool1-33674805-vmss000000   Ready    agent   2m35s   v1.26.6
+aks-nodepool1-33674805-vmss000001   Ready    agent   2m36s   v1.26.6
+aks-nodepool1-33674805-vmss000002   Ready    agent   2m34s   v1.26.6
+```
+
+## Create cluster node pools
+
+:::note
+<em> NOTE: </em>
+In order to speed things up, the following commands can be executed in parallel.
+:::
+
+1. Create a TiDB Operator and monitor pool
+
+```bash title="Create a TiDB Operator and monitor pool"
+$ az aks nodepool add --name admin \
+    --resource-group rg-surrealdb-aks \
+    --cluster-name surrealdb-aks-cluster \
+    --zones 1 2 3 \
+    --node-count 1 \
+    --labels dedicated=admin
+```
+
+2. Create a PD node pool
+
+```bash title="Create a PD node pool"
+$ az aks nodepool add --name pd \
+    --resource-group rg-surrealdb-aks \
+    --cluster-name surrealdb-aks-cluster \
+    --node-vm-size Standard_F4s_v2 \
+    --zones 1 2 3 \
+    --node-count 3 \
+    --labels dedicated=pd \
+    --node-taints dedicated=pd:NoSchedule
+```
+
+3. Create a TiKV node pool
+
+```bash title="Create a TiKV node pool"
+$ az aks nodepool add --name tikv \
+    --resource-group rg-surrealdb-aks \
+    --cluster-name surrealdb-aks-cluster \
+    --node-vm-size Standard_E8s_v4 \
+    --zones 1 2 3 \
+    --node-count 3 \
+    --labels dedicated=tikv \
+    --node-taints dedicated=tikv:NoSchedule \
+    --enable-ultra-ssd
+```
+
+## Deploy TiDB operator
+
+Now that we have a Kubernetes cluster, we can deploy the [`TiDB` operator](https://github.com/pingcap/tidb-operator).
+TiDB operator is a Kubernetes operator that manages the lifecycle of TiDB clusters deployed to Kubernetes.
+You can deploy it following these steps:
+
+1. Install CRDS:
+
+```bash title="Install CRDS"
+$ kubectl create -f https://raw.githubusercontent.com/pingcap/tidb-operator/v1.5.0/manifests/crd.yaml
+```
+
+2. Install TiDB Operator Helm chart:
+
+```bash title="Install TiDB operator"
+$ helm repo add pingcap https://charts.pingcap.org
+$ helm repo update
+$ helm install \
+  -n tidb-operator \
+  --create-namespace \
+  tidb-operator \
+  pingcap/tidb-operator \
+  --version v1.5.0
+```
+
+3. Verify that the pods are running:
+
+```bash title="Verify TiDB operator"
+$ kubectl get pods --namespace tidb-operator -l app.kubernetes.io/instance=tidb-operator
+
+NAME                                       READY   STATUS    RESTARTS   AGE
+tidb-controller-manager-67d678dc64-qf6p2   1/1     Running   0          60s
+tidb-scheduler-68555ffd4-l2ssf             2/2     Running   0          60s
+```
+
+## Create TiDB cluster
+
+Now that we have the TiDB Operator running, it's time to define a TiDB Cluster and let the Operator do the rest.
+
+1. Create a local file named `tikv-cluster.yaml` with this content:
+
+```yaml title="TiDB cluster definition"
+apiVersion: pingcap.com/v1alpha1
+kind: TidbCluster
+metadata:
+  name: sdb-datastore
+spec:
+  version: v6.5.0
+  timezone: UTC
+  configUpdateStrategy: RollingUpdate
+  pvReclaimPolicy: Delete
+  enableDynamicConfiguration: true
+  schedulerName: default-scheduler
+  topologySpreadConstraints:
+  - topologyKey: topology.kubernetes.io/zone
+  helper:
+    image: alpine:3.16.0
+  pd:
+    baseImage: pingcap/pd
+    maxFailoverCount: 0
+    replicas: 3
+    storageClassName: managed-csi-premium
+    requests:
+      cpu: 500m
+      storage: 10Gi
+      memory: 1Gi
+    config: |
+      [dashboard]
+        internal-proxy = true
+      [replication]
+        location-labels = ["topology.kubernetes.io/zone", "kubernetes.io/hostname"]
+        max-replicas = 3
+    nodeSelector:
+      dedicated: pd
+    tolerations:
+    - effect: NoSchedule
+      key: dedicated
+      operator: Equal
+      value: pd
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/component
+              operator: In
+              values:
+              - pd
+          topologyKey: kubernetes.io/hostname
+  tikv:
+    baseImage: pingcap/tikv
+    maxFailoverCount: 0
+    replicas: 3
+    storageClassName: managed-csi-premium
+    requests:
+      cpu: 1
+      storage: 10Gi
+      memory: 2Gi
+    config: {}
+    nodeSelector:
+      dedicated: tikv
+    tolerations:
+    - effect: NoSchedule
+      key: dedicated
+      operator: Equal
+      value: tikv
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/component
+              operator: In
+              values:
+              - tikv
+          topologyKey: kubernetes.io/hostname
+  tidb:
+    replicas: 0
+```
+
+2. Create the TiDB cluster:
+
+```bash title="Create TiDB cluster"
+$ kubectl apply -f tikv-cluster.yaml
+```
+
+3. Check the cluster status and wait until it's ready:
+
+```bash title="Verify TiDB cluster"
+$ kubectl get tidbcluster
+
+$ kubectl get pods
+
+NAME                                       READY   STATUS    RESTARTS   AGE
+sdb-datastore-discovery-7d7d684d88-4v4ws   1/1     Running   0          4m2s
+sdb-datastore-pd-0                         1/1     Running   0          4m2s
+sdb-datastore-pd-1                         1/1     Running   0          4m2s
+sdb-datastore-pd-2                         1/1     Running   0          4m2s
+sdb-datastore-tikv-0                       1/1     Running   0          3m12s
+sdb-datastore-tikv-1                       1/1     Running   0          3m12s
+sdb-datastore-tikv-2                       1/1     Running   0          3m12s
+```
+
+## Deploy SurrealDB
+
+Now that we have a TiDB cluster running, we can deploy SurrealDB using the official Helm chart.
+The deploy will use the latest SurrealDB Docker image and make it accessible on internet.
+
+1. Get the TIKV PD service url:
+
+```bash title="Get TIKV PD service url"
+$ kubectl get service sdb-datastore-pd
+
+NAME               TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE
+sdb-datastore-pd   ClusterIP   10.0.161.101   <none>        2379/TCP   5m27s
+
+$ export TIKV_URL=tikv://sdb-datastore-pd:2379
+```
+
+2. Install the SurrealDB Helm chart with the TIKV_URL defined above and with auth disabled so we can create the initial credentials:
+
+```bash title="Install SurrealDB Helm chart"
+$ helm repo add surrealdb https://helm.surrealdb.com
+$ helm repo update
+$ helm install \
+    --set surrealdb.path=$TIKV_URL \
+    --set surrealdb.auth=false \
+    --set ingress.enabled=false \
+    --set service.type=LoadBalancer \
+    --set service.port=80 \
+    --set service.targetPort=8000 \
+    --set image.tag=latest \
+    surrealdb-tikv surrealdb/surrealdb
+```
+
+3. Wait until the Loadbalancer resource has an <code>EXTERNAL-IP</code> assigned:
+
+```bash title="Wait for Loadbalancer address"
+$ kubectl get service surrealdb-tikv
+
+NAME             TYPE           CLUSTER-IP    EXTERNAL-IP    PORT(S)          AGE
+surrealdb-tikv   LoadBalancer   10.0.38.191   20.13.45.154   80:30378/TCP   6m34s
+```
+
+4. Connect to the cluster and define the initial credentials:
+
+```bash title="Define initial credentials"
+$ export SURREALDB_URL=http://$(kubectl get service surrealdb-tikv -o json | jq -r .status.loadBalancer.ingress[0].ip)
+
+$ surreal sql -e $SURREALDB_URL
+> DEFINE USER root ON ROOT PASSWORD 'StrongSecretPassword!' ROLES OWNER;
+
+# Verify you can connect to the database with the new credentials:
+
+$ surreal sql -u root -p 'StrongSecretPassword!' -e $SURREALDB_URL
+> INFO FOR ROOT
+[{ namespaces: { }, users: { root: "DEFINE USER root ON ROOT PASSHASH '...' ROLES OWNER" } }]
+```
+
+5. Now that the initial credentials have been created, enable authentication:
+
+```bash title="Update SurrealDB Helm chart"
+$ helm upgrade \
+    --set surrealdb.path=$TIKV_URL \
+    --set surrealdb.auth=true \
+    --set ingress.enabled=false \
+    --set service.type=LoadBalancer \
+    --set service.port=80 \
+    --set service.targetPort=8000 \
+    --set image.tag=latest \
+    surrealdb-tikv surrealdb/surrealdb
+```
+
+## Cleanup
+
+Run the following commands to delete the Kubernetes resources and the AKS cluster:
+
+```bash title="Cleanup commands"
+$ helm uninstall surrealdb-tikv
+$ helm -n tidb-operator uninstall tidb-operator
+$ az aks delete --name surrealdb-aks-cluster --resource-group rg-surrealdb-aks
+$ az group delete --resource-group rg-surrealdb-aks
+```
