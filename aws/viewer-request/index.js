@@ -17,7 +17,7 @@ function handler(event) {
 
 	const request = event.request;
 	const host = request.headers.host.value;
-	let path = request.uri.toLowerCase();
+	const path = request.uri.toLowerCase();
 
 	// Only use the base domain, not subdomains
 	if (host !== 'surrealdb.com') {
@@ -41,7 +41,7 @@ function handler(event) {
 	}
 
 	// Redirect any paths which have trailing slashes
-	if (request.uri.endsWith('/') === true) {
+	if (request.uri.endsWith('/')) {
 		return redirect(`https://surrealdb.com${path.slice(0, -1)}`);
 	}
 
