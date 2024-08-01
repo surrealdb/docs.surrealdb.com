@@ -17,7 +17,7 @@ function handler(event) {
 
 	const request = event.request;
 	const host = request.headers.host.value;
-	const path = request.uri.toLowerCase();
+	let path = request.uri.toLowerCase();
 
 	// Only use the base domain, not subdomains
 	if (host !== 'surrealdb.com') {
@@ -41,13 +41,17 @@ function handler(event) {
 	}
 
 	// Redirect any paths which have trailing slashes
-	if (request.uri.endsWith('/')) {
+	if (request.uri.endsWith('/') === true) {
 		return redirect(`https://surrealdb.com${path.slice(0, -1)}`);
 	}
 
 	// Redirect any capitalised paths to lowercase
 	if (path !== request.uri) {
 		return redirect(`https://surrealdb.com${path}`);
+	}
+
+	if (path.endsWith('/')) {
+		path = path.slice(0, -1);
 	}
 
 	switch (path) {
@@ -146,6 +150,24 @@ function handler(event) {
 		case '/docs/surrealql/statements/remove/overview':
 		case '/docs/surrealdb/surrealql/statements/remove/overview':
 			return redirect('https://surrealdb.com/docs/surrealdb/surrealql/statements/remove');
+		case '/docs/1.0.x':
+		case '/docs/1.0.0':
+		case '/docs/1.1.x':
+		case '/docs/1.1.0':
+		case '/docs/1.2.x':
+		case '/docs/1.2.0':
+		case '/docs/1.3.x':
+		case '/docs/1.3.0':
+		case '/docs/surrealdb/2.x':
+		case '/docs/surrealdb/1.0.x':
+		case '/docs/surrealdb/1.0.0':
+		case '/docs/surrealdb/1.1.x':
+		case '/docs/surrealdb/1.1.0':
+		case '/docs/surrealdb/1.2.x':
+		case '/docs/surrealdb/1.2.0':
+		case '/docs/surrealdb/1.3.x':
+		case '/docs/surrealdb/1.3.0':
+		    return redirect('https://surrealdb.com/docs/surrealdb');
 	}
 
 	switch (true) {
@@ -166,6 +188,8 @@ function handler(event) {
 		case path.startsWith('/docs/1.3.0/'):
 			return redirect(`https://surrealdb.com/docs/surrealdb/${path.slice(12)}`);
 		// Redirect versioned pages to default
+		case path.startsWith('/docs/surrealdb/2.x/'):
+			return redirect(`https://surrealdb.com/docs/surrealdb/${path.slice(20)}`);
 		case path.startsWith('/docs/surrealdb/1.0.x/'):
 		case path.startsWith('/docs/surrealdb/1.0.0/'):
 		case path.startsWith('/docs/surrealdb/1.1.x/'):
