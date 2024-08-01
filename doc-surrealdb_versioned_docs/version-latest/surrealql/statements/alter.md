@@ -1,0 +1,101 @@
+---
+sidebar_position: 1
+sidebar_label: Overview
+title: ALTER statement | SurrealQL
+description: The ALTER statement can be used to change authentication access and behaviour, global parameters, table configurations, table events, schema definitions, and indexes.
+---
+
+# ALTER statement
+
+<Since v="v2.0.0" />
+
+The ALTER statement can be used on already defined items in the schema to change their authentication access and behaviour, global parameters, table configurations, table events, analyzers, and indexes.
+
+```surql title="SurrealQL Syntax"
+ALTER [
+	NAMESPACE [ IF NOT EXISTS ] @name
+	| DATABASE [ IF NOT EXISTS ] @name
+	| USER [ IF NOT EXISTS ] @name ON [ ROOT | NAMESPACE | DATABASE ] [ PASSWORD @pass | PASSHASH @hash ] ROLES @roles
+	| TABLE [ IF NOT EXISTS ] @name
+		[ DROP ]
+		[ SCHEMAFULL | SCHEMALESS ]
+		[ AS SELECT @projections
+			FROM @tables
+			[ WHERE @condition ]
+			[ GROUP [ BY ] @groups ]
+		]
+		[ PERMISSIONS [ NONE | FULL
+			| FOR select @expression
+			| FOR create @expression
+			| FOR update @expression
+			| FOR delete @expression
+		] ]
+	| EVENT [ IF NOT EXISTS ] @name ON [ TABLE ] @table WHEN @expression THEN @expression
+	| FIELD [ IF NOT EXISTS ] @name ON [ TABLE ] @table
+		[ [ FLEXIBLE ] TYPE @type ]
+		[ VALUE @expression ]
+		[ ASSERT @expression ]
+		[ PERMISSIONS [ NONE | FULL
+			| FOR select @expression
+			| FOR create @expression
+			| FOR update @expression
+			| FOR delete @expression
+		] ]
+	| PARAM [ IF NOT EXISTS ] $@name VALUE @value
+	| FUNCTION [ IF NOT EXISTS ] fn::@name ( [ ( @argument:@type ... ) ] ) { [@query] [RETURNS @returned] }
+	| ANALYZER [ IF NOT EXISTS ] @name
+		[ TOKENIZERS @tokenizers ]
+		[ FILTERS @filters ]
+	| INDEX [ IF NOT EXISTS ] @name ON [ TABLE ] @table [ FIELDS | COLUMNS ] @fields
+		[ UNIQUE | SEARCH ANALYZER @analyzer [ BM25 [(@k1, @b)] ] [ HIGHLIGHTS ] ]
+	| ACCESS [ IF NOT EXISTS ] @name ON [ NAMESPACE | DATABASE ]
+		TYPE [
+			JWT [ ALGORITHM @algorithm KEY @key | URL @url ]
+			| RECORD
+				[ SIGNUP @expression ]
+				[ SIGNIN @expression ]
+				[ WITH JWT [ ALGORITHM @algorithm KEY @key | URL @url ] [ WITH ISSUER KEY @key ] ]
+		]
+		[ DURATION [ FOR TOKEN @duration ] [ FOR SESSION @duration ] ]
+    [ COMMENT @string ]
+]
+```
+
+To see the already defined items that can be modified with `ALTER`, use the [INFO](/docs/surrealdb/surrealql/statements/info) statement (`INFO FOR ROOT`, `INFO FOR NAMESPACE`, or `INFO FOR DATABASE`).
+
+An example of `ALTER` to modify an existing table:
+
+```surql
+DEFINE TABLE user SCHEMALESS;
+DEFINE FIELD name ON TABLE user TYPE string;
+CREATE user SET name = "LordofSalty";
+-- Now make it schemafull to ensure that no other fields can be used
+ALTER TABLE user SCHEMAFULL;
+```
+
+`ALTER` was added to SurrealDB in version 2.0.0, before which a `DEFINE` statement could be used repeatedly to redefine an item. The query below worked in previous versions of SurrealDB, but now requires an `ALTER` statement instead of `DEFINE`.
+
+```surql
+DEFINE TABLE user SCHEMALESS;
+DEFINE FIELD name ON TABLE user TYPE string;
+CREATE user SET name = "LordofSalty";
+-- Will now generate an error; only ALTER can be used
+DEFINE TABLE user SCHEMAFULL;
+```
+
+An `ALTER` statement only needs to include the items to be altered, not the entire definition.
+
+```surql
+-- Will show up as DEFINE TABLE user TYPE ANY SCHEMAFULL PERMISSIONS NONE
+DEFINE TABLE user SCHEMAFULL;
+
+-- Now defined as DEFINE TABLE user TYPE ANY SCHEMAFULL PERMISSIONS FULL
+ALTER TABLE user PERMISSIONS ANY;
+```
+
+Note that SurrealDB's default behaviour is to create a table by default if it does not exist yet. As such, the `DEFINE` statement in the following query will not work because the `CREATE` statement implicitly creates a table as well. The behaviour to implicitly define a table upon record creation can be disabled by running SurrealDB with the option `--strict`.
+
+```surql
+CREATE user SET name = "LordofSalty";
+DEFINE TABLE user SCHEMAFULL;
+```
