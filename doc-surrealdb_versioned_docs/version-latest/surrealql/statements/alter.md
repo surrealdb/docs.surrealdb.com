@@ -4,6 +4,7 @@ sidebar_label: Overview
 title: ALTER statement | SurrealQL
 description: The ALTER statement can be used to change authentication access and behaviour, global parameters, table configurations, table events, schema definitions, and indexes.
 ---
+import Since from '@site/src/components/Since'
 
 # ALTER statement
 
