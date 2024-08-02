@@ -303,7 +303,9 @@ const config = {
           'java',
           'go',
           'jsx',
-          'csharp'
+          'csharp',
+            'php',
+            'markup-templating' // Required for PHP
         ]
       }
     }),
