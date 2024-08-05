@@ -23,6 +23,11 @@ export default {
           type: "link",
           label: "Surrealist",
           href: "/docs/surrealist"
+        },
+        {
+          type: "link",
+          label: "SurrealQL",
+          href: "/docs/surrealql"
         }
       ]
     },
