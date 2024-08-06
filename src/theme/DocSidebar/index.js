@@ -51,6 +51,11 @@ const mappedDocTitle = {
         iconLight: "img/doc-surrealist.png",
         iconDark: "img/doc-surrealist.png",
     },
+    'doc-surrealql': {
+        title: "SurrealQL",
+        iconLight: "img/light/ql.png",
+        iconDark: "img/ql-icon.png",
+    },
     'doc-surrealml': {
         title: "SurrealML",
         iconLight: "img/light/doc-surrealml.png",
