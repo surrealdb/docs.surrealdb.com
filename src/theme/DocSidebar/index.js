@@ -36,6 +36,11 @@ const mappedDocTitle = {
         iconLight: "img/light/rust.png",
         iconDark: "img/rust-icon.png",
     },
+    'doc-sdk-php': {
+        title: "PHP",
+        iconLight: "img/light/php.png",
+        iconDark: "img/php-icon.png"
+    },
     'doc-sdk-javascript': {
         title: "JavaScript",
         iconLight: "img/light/javascript.png",
