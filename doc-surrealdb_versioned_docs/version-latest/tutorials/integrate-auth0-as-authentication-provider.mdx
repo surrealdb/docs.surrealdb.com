@@ -4,14 +4,20 @@ sidebar_label: Integrate Auth0 as an Authentication Provider
 title: Integrate Auth0 as an Authentication Provider | Tutorials
 description: In this section, you will find step-by-step guides and tutorials on how to perform various tasks and achieve specific goals using SurrealDB.
 ---
+import Tabs from "@theme/Tabs";
+import TabItem from "@theme/TabItem";
 
 # Integrate Auth0 as an Authentication Provider
 
-This guide will cover using [Auth0](https://auth0.com/) as the authentication provider for single-page web applications using SurrealDB as the only backend. In this guide you will learn how to:
+This guide will cover using [Auth0](https://auth0.com/) as the authentication provider for single-page web applications using SurrealDB as the only backend. 
+
+Depending on the version of SurrealDB that you are on: `v1.x` or `v2.x`, you may have different options available with respect to using [Scope](/docs/surrealdb/surrealql/statements/define/scope) and [Token](/docs/surrealdb/surrealql/statements/define/token) or [DEFINE ACCESS](/docs/surrealdb/surrealql/statements/define/access) methods to you for integrating Auth0 as an authentication provider. 
+
+In this guide you will learn how to:
 
 - Configure Auth0 to issue tokens that can be used with SurrealDB.
 - Configure SurrealDB to accept tokens issued by Auth0.
-- Define user-level authorization using SurrealDB [record users](/docs/surrealdb/security/authentication#record-users).
+- Define user-level authorization using SurrealDB [record users](/docs/surrealdb/security/authentication#record-users) or [scopes](/docs/surrealdb/surrealql/statements/define/scope) if you are on `v1.x`.
 - Authenticate users with Auth0 in a single-page application.
 - Retrieve and update information from SurrealDB using the authenticated user.
 
@@ -66,6 +72,34 @@ To add custom claims, you must [create an Auth0 action](https://auth0.com/docs/c
 
 For this example, you can use the following code:
 
+<Tabs groupId="version">
+  <TabItem value="V1" label="Using Scope and Token" default>
+```js
+exports.onExecutePostLogin = async (event, api) => {
+  if (event.authorization) {
+    // The claims in this block are expected by SurrealDB.
+    // These values should match your SurrealDB installation.
+    api.accessToken.setCustomClaim(`https://surrealdb.com/ns`, "test");
+    api.accessToken.setCustomClaim(`https://surrealdb.com/db`, "test");
+    // These values correspond to the names of the SCOPE and TOKEN resources 
+    // which will be created in SurrealDB during the next section.
+    api.accessToken.setCustomClaim(`https://surrealdb.com/sc`, "user");
+    api.accessToken.setCustomClaim(`https://surrealdb.com/tk`, "auth0");
+
+    // In this block, we will add additional claims which are not required by SurrealDB.
+    // These claims can be used from SurrealQL to implement application logic.
+    // In this example, we will add the data that we will store for each user.
+    // We will also use some of this data to perform authorization.
+    api.accessToken.setCustomClaim(`https://surrealdb.com/email`, event.user.email);
+    api.accessToken.setCustomClaim(`https://surrealdb.com/email_verified`, event.user.email_verified);
+    api.accessToken.setCustomClaim(`https://surrealdb.com/name`, event.user.name);
+    api.accessToken.setCustomClaim(`https://surrealdb.com/nickname`, event.user.nickname);
+    api.accessToken.setCustomClaim(`https://surrealdb.com/picture`, event.user.picture);
+  }
+};
+```
+</TabItem>
+  <TabItem value="V2" label="Using DEFINE ACCESS">
 ```js
 exports.onExecutePostLogin = async (event, api) => {
   if (event.authorization) {
@@ -89,12 +123,88 @@ exports.onExecutePostLogin = async (event, api) => {
   }
 };
 ```
+</TabItem>
+</Tabs>
 
 This action should be saved and added to the “Login” flow in the “Actions > Flows” section.
 
 ## Configuring SurrealDB
 
-### Defining permissions and fields in SurrealDB
+<Tabs groupId="version">
+  <TabItem value="V1" label="Using Scope and Token" default>
+  #### Defining a token verification method in SurrealDB
+
+Next, we should configure SurrealDB so that it can verify tokens sent to it through the [HTTP REST API](/docs/surrealdb/integration/http) via the “Authorization” header or through any of the [SDKs](/docs/surrealdb/integration/sdks) via the “Authenticate” methods.
+
+To do that, we will leverage the JWKS support in SurrealDB in order to define a token verification mechanism pointing to a JWKS object served by Auth0. This JWKS object can be found in a [dedicated endpoint for your Auth0 domain](https://auth0.com/docs/secure/tokens/json-web-tokens/locate-json-web-key-sets).
+
+Pointing to a JWKS file ensures that token verification will work seamlessly even after [rotating the signing keys](https://auth0.com/docs/get-started/tenant-settings/signing-keys/rotate-signing-keys) and that tokens signed with revoked keys will no longer be accepted by SurrealDB.
+
+To understand how revocation is handled by SurrealDB, read the [JSON Web Key Set documentation](/docs/surrealdb/surrealql/statements/define/token#json-web-key-set-jwks) under `DEFINE TOKEN`.
+
+The following queries will create the required resources to authenticate a token for a scope:
+
+```surql
+-- Specify the namespace and database that will be used.
+-- These values should match the custom claims that we configured before.
+USE NS test DB test;
+
+-- Define the scope where the token will be used.
+-- The name of the scope should match the custom claim that we configured before.
+DEFINE SCOPE user;
+
+-- Define the public key to verify tokens issued by Auth0 for our application.
+-- The name of the token should match the custom claim that we configured before.
+DEFINE TOKEN auth0 ON SCOPE user TYPE JWKS VALUE "https://<YOUR_AUTH0_DOMAIN>/.well-known/jwks.json";
+```
+
+In the example above, replace the placeholder with the domain value defined for your Auth0 application.
+
+:::note
+<em> Note: </em> In order to allow SurrealDB to establish a connection with Auth0 to download the JWKS object, you will require running it with the network <a href="/docs/security/capabilities">capability</a>. For the strongest security, provide your specific Auth0 domain when starting SurrealDB with <code>--allow-net</code>. For example: <code>--allow-net example.eu.auth0.com</code>.
+:::
+
+#### Defining authorization criteria in SurrealDB
+For this simple example, we will create a single table named “user”, where any user that authenticates through Auth0 using your application with a verified email address will be able to register, view and update their data. For this to work as intended, we will need to verify some information in the token claims.
+
+```surql
+DEFINE TABLE user SCHEMAFULL
+  -- Authorized users can select, update, delete and create user records.
+  -- Records that do not match the permissions will not be modified nor returned.
+  PERMISSIONS FOR select, update, delete, create
+  WHERE
+    -- The token scope must match the scope that we defined.
+    -- The name of the scope should match the scope that we defined before.
+    $scope = "user"
+    -- The audience claim must contain the audience of you application.
+    -- This is the value that you defined when creating the API in Auth0.
+    AND $token.aud CONTAINS "<YOUR_AUTH0_AUDIENCE_VALUE>"
+    -- The audience claim must contain your Auth0 user information endpoint.
+    -- It contains the domain generated when when creating the application in Auth0.
+    AND $token.aud CONTAINS "https://<YOUR_AUTH0_DOMAIN>/userinfo"
+    -- The email claim must match the email of the user being queried.
+    AND email = $token['https://surrealdb.com/email']
+    -- The email must be verified as belonging to the user.
+    AND $token['https://surrealdb.com/email_verified'] = true
+;
+
+-- In this example, we will use the email as the primary identifier for a user.
+DEFINE INDEX email ON user FIELDS email UNIQUE;
+DEFINE FIELD email ON user TYPE string ASSERT string::is::email($value);
+-- We define some other information present in the token that we want to store.
+DEFINE FIELD name ON user TYPE string;
+DEFINE FIELD nickname ON user TYPE string;
+DEFINE FIELD picture ON user TYPE string;
+```
+It is important to know that [validating the audience of the token is a requirement of Auth0](https://auth0.com/docs/secure/tokens/access-tokens/validate-access-tokens), other providers may require validating additional claims (e.g. iss, sub) to ensure that the token is being used as intended. With Auth0, you can also make use of [OpenID Connect scopes](https://auth0.com/docs/get-started/apis/scopes/openid-connect-scopes), which can be accessed through the `scopes` claim via `$token.scopes` and contain the OIDC scopes requested by the application and granted by the user, which we will not do for this example.
+
+It is also important to note that the `$auth` variable accessible from SurrealQL will not contain any values in this case, as it requires the `id` claim to be added to the JWT, containing the value of the identifier of a SurrealDB record. For the current example, the `$auth` variable will not be necessary.
+
+
+  </TabItem>
+
+  <TabItem value="V2" label="Using DEFINE ACCESS">
+  #### Defining permissions and fields in SurrealDB
 
 For this simple example, we will create a single table named “user”, where any user that authenticates through Auth0 using your application will be granted complete permissions over their data. For this to work as intended, we will need to ensure that the email address is unique between users and that users are granted permissions to access their own record as long as they authenticated with the access method that we will define.
 
@@ -119,7 +229,7 @@ DEFINE FIELD nickname ON user TYPE string;
 DEFINE FIELD picture ON user TYPE string;
 ```
 
-### Defining a token verification method in SurrealDB
+#### Defining a token verification method in SurrealDB
 
 Next, we should configure SurrealDB so that it can verify tokens sent to it through the [HTTP REST API](/docs/surrealdb/integration/http) via the “Authorization” header or through any of the [SDKs](/docs/surrealdb/integration/sdks) via the “Authenticate” methods.
 
@@ -162,6 +272,10 @@ It is important to not that [validating the audience of the token is a requireme
 :::note
 <em> Note: </em> In order to allow SurrealDB to establish a connection with Auth0 to download the JWKS object, you will require running it with the network <a href="/docs/surrealdb/security/capabilities">capability</a>. For the strongest security, provide your specific Auth0 domain when starting SurrealDB with <code>--allow-net</code>. For example: <code>--allow-net example.eu.auth0.com</code>.
 :::
+  </TabItem>
+</Tabs>
+
+
 
 ## Configuring the Application
 
@@ -251,10 +365,21 @@ Auth0 can support scenarios like these through the option to [disable OIDC-confo
 
 If the choice of using HMAC is made, the rest of the guide can be followed as is, with the exception of specifying the proper HMAC algorithm and placing the secret as the value when defining a token. In Auth0, the secret used to sign using HMAC algorithm corresponds to the [Auth0 Client Secret](https://auth0.com/docs/secure/application-credentials#client-secret-authentication) string. The example below shows how a token using the HS256 algorithm can be defined:
 
-```surql
+<Tabs groupId="version">
+  <TabItem value="V1" label="Using Scope and Token" default>
+  ```surql
+-- Define the secret to verify tokens issued by Auth0 for our application.
+-- The name of the token should match the custom claim that we configured before.
+DEFINE TOKEN auth0 ON SCOPE user TYPE HS256 VALUE "<YOUR_AUTH0_CLIENT_SECRET_VALUE>";
+```
+  </TabItem>
+  <TabItem value="V2" label="Using DEFINE ACCESS">
+  ```surql
 -- Define the secret to verify tokens issued by Auth0 for our application.
 -- The name of the access method should match the custom claim that we configured before.
 DEFINE ACCESS auth0 ON DATABASE TYPE RECORD
   WITH JWT ALGORITHM HS256 KEY "<YOUR_AUTH0_CLIENT_SECRET_VALUE>"
 ;
 ```
+  </TabItem>
+</Tabs>
