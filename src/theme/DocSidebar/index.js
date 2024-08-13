@@ -26,11 +26,6 @@ const mappedDocTitle = {
         iconLight: "img/light/dotnet.png",
         iconDark: "img/dotnet-icon.png",
     },
-    'doc-deno': {
-        title: "Deno",
-        iconLight: "img/light/deno.png",
-        iconDark: "img/deno-icon.png",
-    },
     'doc-sdk-python': {
         title: "Python",
         iconLight: "img/light/python.png",

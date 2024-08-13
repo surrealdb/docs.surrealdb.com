@@ -50,11 +50,11 @@ export default {
           label: "Node.js",
           href: "/docs/sdk/javascript"
         },
-        {
-          type: "link",
-          label: "Deno",
-          href: "/docs/sdk/javascript"
-        },
+        // {
+        //   type: "link",
+        //   label: "Deno",
+        //   href: "/docs/sdk/javascript"
+        // },
         {
           type: "link",
           label: ".NET",
