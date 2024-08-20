@@ -197,33 +197,6 @@ const config = {
     'docusaurus-plugin-sass',
     ...(isProd ? [
       [
-        'docusaurus-plugin-sentry',
-        {
-          DSN: "7494265ecc6f4f0d2a2d26c9cbae3262",
-          sentry: {
-            init: {
-              ignoreErrors: [
-                'Non-Error promise rejection captured with value',
-              ],
-              // Enable session replay
-              // integrations: [
-              //   Sentry.replayIntegration({
-              //     maskAllText: false,
-              //     blockAllMedia: false,
-              //     workerUrl: "/assets/replay-worker.js",
-              //   }),
-              // ],
-              // Monitor performance for 100% of sessions
-              tracesSampleRate: 1.0,
-              // Enable session replays for 10% of all sessions
-              replaysSessionSampleRate: 0.1,
-              // Enable session replays for 100% of all sessions with errors
-              replaysOnErrorSampleRate: 1.0,
-            }
-          }
-        },
-      ],
-      [
         '@docusaurus/plugin-google-gtag',
         {
           trackingID: 'G-J1NWM32T1V',
