@@ -1,0 +1,154 @@
+---
+sidebar_position: 10
+sidebar_label: Literals
+title: Literals | SurrealQL
+description: A value that may have multiple representations or formats.
+
+---
+
+import Since from '@site/src/components/Since'
+
+# Literals
+
+<Since v="v2.0.0" />
+
+A literal is a value that may have multiple representations or formats, similar to an enum or a union type. A literal can be composed of strings, numbers, objects, arrays, or durations.
+
+## Examples
+
+A literal can be as simple as a declaration that a parameter must be a certain value.
+
+```surql
+LET $nine: 9 = 9;
+LET $nine: 9 = 10;
+```
+
+```bash title="Response"
+-------- Query --------
+
+NONE
+
+-------- Query --------
+
+'Found 10 for param $nine, but expected a 9'
+```
+
+Using `|` allows a literal to be a number of possible options.
+
+```surql
+LET $nine: 9 | "9" | "nine" = "Nein";
+```
+
+```bash title="Response"
+"Found 'Nein' for param $nine, but expected a 9 | '9' | 'nine'"
+```
+
+A literal can contain possible types in addition to possible values.
+
+```surql
+LET $flexible_param: datetime | uuid | "N/A" = "N/A";
+LET $flexible_param: datetime | uuid | "N/A" = <datetime>"2024-09-01";
+```
+
+Literals that include the option to be an array or an object can contain rich data.
+
+```surql
+LET $status: "Ok" | { err: string } = { err: "Forgot to plug it in" };
+```
+
+## Literals in database schema
+
+Literals can be defined inside a database schema by using a [DEFINE FIELD](/docs/surrealdb/surrealql/statements/define/field) statement.
+
+```surql
+DEFINE FIELD error_info ON TABLE info TYPE 
+    { error: "Continue" } | 
+    { error: "RetryWithId", id: string } |
+    { error: "Deprecated", message: string };
+
+CREATE info SET 
+	error_info = { error: "Deprecated", message: "You shouldn't use this anymore" };
+-- Doesn't conform to definition, will not work
+CREATE info SET 
+	error_info = "You shouldn't use this anymore";
+```
+
+```bash title="Response"
+-------- Query --------
+
+[
+	{
+		error_info: {
+			error: 'Deprecated',
+			message: "You shouldn't use this anymore"
+		},
+		id: info:pkckjrri8q1pg12unyuo
+	}
+]
+
+-------- Query --------
+
+"Found \"You shouldn't use this anymore\" for field `error_info`, with record `info:dq375w4lv02aj2dj7122`, but expected a { error: 'Continue' } | { error: 'RetryWithId', id: string } | { error: 'Deprecated', message: string }"
+```
+
+## Matching on literals
+
+While SurrealQL does not have a `match` or `switch` operator, `IF LET` statements can be used to match on a literal, particularly if each possible type is an object. The following shows a similar example to the above except that each object begins with a field containing the name of the type of error.
+
+```surql
+DEFINE FIELD error_info ON TABLE info TYPE
+	{ Continue:    { message: "" }} |
+	{ Retry: { error: "Retrying", after: duration }} |
+	{ Deprecated:  { message: string }};
+```
+
+Next, we will [define a function](/docs/surrealdb/surrealql/statements/define/function) to handle this field and return a certain type of message depending on the error. Note the following:
+
+* The `LET` statement in the first line is simply to shorten the path to the information contained inside `error_info`
+* `IF LET` statement works here because [IF](/docs/surrealdb/surrealql/statements/throw) involves a check for [truthiness](/docs/surrealdb/surrealql/datamodel/values#values-and-truthiness), returning `true` as long as it finds a value that is not none, empty, or zero.
+
+```surql
+DEFINE FUNCTION fn::handle_error($data: record<info>) -> string {
+	LET $err = $data.error_info;
+	RETURN IF $err.Continue {
+		"Continue"
+	}
+	ELSE IF $err.Retry {
+		sleep($err.Retry.after);
+		"Now retrying again"
+	}
+	ELSE IF $err.Deprecated {
+		$err.Deprecated.message
+	}
+};
+```
+
+With the function set up, the `info` records can be inserted and run one at a time through the function.
+
+```surql
+INSERT INTO info [
+	{ error_info: { Continue: { message: "" } }},
+	{ error_info: { Retry: { error: "Retrying", after: 1s } }},
+	{ error_info: { Deprecated: { message: "Thought I said you shouldn't use this anymore" } }}
+];
+
+LET $info = SELECT * FROM info;
+fn::handle_error($info[0].id);
+fn::handle_error($info[1].id);
+fn::handle_error($info[2].id);
+```
+
+```bash title="Output"
+-------- Query --------
+
+'Continue'
+
+-------- Query --------
+
+-- After waiting 1 second
+'Now retrying again'
+
+-------- Query --------
+
+"Thought I said you shouldn't use this anymore"
+```
