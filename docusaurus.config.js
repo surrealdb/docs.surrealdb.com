@@ -194,6 +194,24 @@ const config = {
         editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
       },
     ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'doc-sdk-php',
+        sidebarCollapsed: true,
+        sidebarCollapsible: true,
+        includeCurrentVersion: false,
+        routeBasePath: '/sdk/php',
+        lastVersion: '1.x',
+        versions: {
+          "1.x": {
+            label: '1.x',
+            path: '',
+          },
+        },
+        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+      }
+    ],
     'docusaurus-plugin-sass',
     ...(isProd ? [
       [
@@ -258,7 +276,9 @@ const config = {
           'java',
           'go',
           'jsx',
-          'csharp'
+          'csharp',
+            'php',
+            'markup-templating' // Required for PHP
         ]
       }
     }),
