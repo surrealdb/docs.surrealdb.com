@@ -75,6 +75,11 @@ export default {
           label: "Java",
           href: "/docs/sdk/java"
         },
+        {
+          type: "link",
+          label: "PHP",
+          href: "/docs/sdk/php"
+        }
       ]
     }
   ]
