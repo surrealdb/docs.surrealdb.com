@@ -43,7 +43,7 @@ const config = {
         onlyIncludeVersions: ['latest'],
         versions: {
           "latest": {
-            label: '',
+            label: ' ',
             path: '',
           },
         },
