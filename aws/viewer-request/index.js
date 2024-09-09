@@ -144,6 +144,8 @@ function handler(event) {
 		case '/docs/surrealql/statements/overview':
 		case '/docs/surrealdb/surrealql/statements/overview':
 			return redirect('https://surrealdb.com/docs/surrealdb/surrealql/statements');
+		case '/docs/surrealdb/surrealql':
+			return redirect('https://surrealdb.com/docs/surrealql');
 		case '/docs/surrealql/statements/define/overview':
 		case '/docs/surrealdb/surrealql/statements/define/overview':
 			return redirect('https://surrealdb.com/docs/surrealdb/surrealql/statements/define');
