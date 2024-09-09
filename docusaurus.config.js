@@ -98,7 +98,7 @@ const config = {
         onlyIncludeVersions: ['latest'],
         versions: {
           "latest": {
-            label: 'latest',
+            label: ' ',
             path: '',
           },
         },
