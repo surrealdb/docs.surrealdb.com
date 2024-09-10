@@ -144,6 +144,8 @@ function handler(event) {
 		case '/docs/surrealql/statements/overview':
 		case '/docs/surrealdb/surrealql/statements/overview':
 			return redirect('https://surrealdb.com/docs/surrealdb/surrealql/statements');
+		case '/docs/surrealdb/surrealql':
+			return redirect('https://surrealdb.com/docs/surrealql');
 		case '/docs/surrealql/statements/define/overview':
 		case '/docs/surrealdb/surrealql/statements/define/overview':
 			return redirect('https://surrealdb.com/docs/surrealdb/surrealql/statements/define');
@@ -209,6 +211,9 @@ function handler(event) {
 			return redirect(`https://surrealdb.com/docs/surrealdb/tutorials/${path.slice(13)}`);
 		case path.startsWith('/docs/surrealdb/how-to/'):
 			return redirect(`https://surrealdb.com/docs/surrealdb/tutorials/${path.slice(23)}`);
+		// Redirect SurrealQL subpaths to Querying
+		case path.startsWith('/docs/surrealdb/surrealql/'):
+			return redirect(`https://surrealdb.com/docs/surrealql/${path.slice(26)}`);
 		// Redirect all other docs pages
 		case path.startsWith('/docs/'): {
 			const splitted = path.split('/').slice(1);

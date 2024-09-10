@@ -89,6 +89,25 @@ const config = {
     [
       '@docusaurus/plugin-content-docs',
       {
+        id: 'doc-surrealql',
+        sidebarCollapsed: true,
+        sidebarCollapsible: true,
+        includeCurrentVersion: false,
+        routeBasePath: '/surrealql',
+        lastVersion: 'latest',
+        onlyIncludeVersions: ['latest'],
+        versions: {
+          "latest": {
+            label: ' ',
+            path: '',
+          },
+        },
+        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
         id: 'doc-sdk-javascript',
         sidebarCollapsed: true,
         sidebarCollapsible: true,
