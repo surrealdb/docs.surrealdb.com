@@ -222,6 +222,7 @@ function handler(event) {
 				case 'surrealml':
 				case 'surrealist':
 				case 'surrealism':
+				case 'surrealql':
 				case 'sdk':
 				case undefined:
 					break;
