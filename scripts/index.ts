@@ -5,6 +5,8 @@ const repositoryName = "surrealdb/surrealdb";
 const branch = "main";
 const fncSourceCodeFilePath = "core/src/fnc/mod.rs";
 
+const fncExclusions = [".chain"];
+
 const detectMissingFunctions = async () => {
   console.log("Detecting missing functions...");
   console.log("--------------------------------------------------");
@@ -68,6 +70,10 @@ const detectMissingFunctions = async () => {
     "../doc-surrealql_versioned_docs/version-latest/functions/database/*.mdx"
   );
   for await (const path of glob.scan(".")) {
+    if (path.endsWith("index.mdx")) {
+      continue;
+    }
+
     const data = await Bun.file(path).text();
     const $ = cheerio.load(data);
 
@@ -78,7 +84,8 @@ const detectMissingFunctions = async () => {
           .replace("()", "")
           .replace(/\u200B/g, "")
       )
-      .get();
+      .get()
+      .filter((functionName) => !fncExclusions.includes(functionName));
 
     allDocumentedFunctions.push(...functionNames);
   }
