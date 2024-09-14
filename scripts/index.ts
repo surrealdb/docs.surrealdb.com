@@ -108,6 +108,11 @@ const detectMissingFunctions = async () => {
       console.log(`* ${removedFunction}`);
     }
   }
+
+  // exit with error code if there are undocumented functions
+  if (undocumentedFunctions.length > 0) {
+    process.exit(1);
+  }
 };
 
 await detectMissingFunctions();
