@@ -43,7 +43,7 @@ const config = {
         onlyIncludeVersions: ['latest'],
         versions: {
           "latest": {
-            label: '1.x',
+            label: ' ',
             path: '',
           },
         },
@@ -80,6 +80,25 @@ const config = {
         versions: {
           "2.x": {
             label: '2.x',
+            path: '',
+          },
+        },
+        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+      },
+    ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'doc-surrealql',
+        sidebarCollapsed: true,
+        sidebarCollapsible: true,
+        includeCurrentVersion: false,
+        routeBasePath: '/surrealql',
+        lastVersion: 'latest',
+        onlyIncludeVersions: ['latest'],
+        versions: {
+          "latest": {
+            label: ' ',
             path: '',
           },
         },
@@ -194,6 +213,24 @@ const config = {
         editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
       },
     ],
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'doc-sdk-php',
+        sidebarCollapsed: true,
+        sidebarCollapsible: true,
+        includeCurrentVersion: false,
+        routeBasePath: '/sdk/php',
+        lastVersion: '1.x',
+        versions: {
+          "1.x": {
+            label: '1.x',
+            path: '',
+          },
+        },
+        editUrl: 'https://github.com/surrealdb/docs.surrealdb.com/edit/main/',
+      }
+    ],
     'docusaurus-plugin-sass',
     ...(isProd ? [
       [
@@ -241,7 +278,7 @@ const config = {
       },
       footer: {
         style: 'dark',
-        copyright: `&copy; <a href='https://surrealdb.com'>SurrealDB</a> &bull; <a href='https://github.com/surrealdb'>GitHub</a> &bull; <a href='https://discord.gg/surrealdb'>Discord</a> &bull; <a href='https://surrealdb.com/community'>Community</a> &bull; <a href='https://surrealdb.com/products'>Products</a> &bull; <a href='https://surrealdb.com/features'>Features</a> &bull; <a href='https://surrealdb.com/releases'>Releases</a> &bull; <a href='https://surrealdb.com/install'>Install</a>`,
+        copyright: `&copy; <a href='https://surrealdb.com'>SurrealDB</a> &bull; <a href='https://github.com/surrealdb'>GitHub</a> &bull; <a href='https://discord.gg/surrealdb'>Discord</a> &bull; <a href='https://surrealdb.com/community'>Community</a> &bull; <a href='https://surrealdb.com/cloud'>Cloud</a> &bull; <a href='https://surrealdb.com/features'>Features</a> &bull; <a href='https://surrealdb.com/releases'>Releases</a> &bull; <a href='https://surrealdb.com/install'>Install</a>`,
       },
       prism: {
         additionalLanguages: [
@@ -258,7 +295,9 @@ const config = {
           'java',
           'go',
           'jsx',
-          'csharp'
+          'csharp',
+            'php',
+            'markup-templating' // Required for PHP
         ]
       }
     }),
