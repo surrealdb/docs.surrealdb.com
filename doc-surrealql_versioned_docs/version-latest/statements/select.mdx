@@ -35,7 +35,7 @@ SELECT [ VALUE ] @fields [ AS @alias ]
 	[ FETCH @fields ... ]
 	[ TIMEOUT @duration ]
 	[ PARALLEL ]
-	[TEMPFILES]
+	[ TEMPFILES ]
 	[ EXPLAIN [ FULL ]]
 ;
 ```
@@ -46,6 +46,11 @@ SELECT [ VALUE ] @fields [ AS @alias ]
 By default, SurrealDB returns an array of JSON-like objects called records instead of a tabular structure of rows and columns.
 
 ```surql
+CREATE person:tobie SET
+	name.first = "Tobie",
+	address = "1 Bagshot Row",
+	email = "tobie@surrealdb.com";
+
 -- Select all fields from a table
 SELECT * FROM person;
 
@@ -58,13 +63,69 @@ SELECT * FROM person:tobie;
 -- Select specific fields from a specific record
 SELECT name, address, email FROM person:tobie;
 
--- Alias/rename fields
-SELECT name AS user_name, address FROM person;
-
 -- Select just a single record
--- Using the ONLY keyword, just an object for the record in question will be returned.
+-- Using the ONLY keyword, just an object
+-- for the record in question will be returned.
 -- This, instead of an array with a single object.
-SELECT * FROM ONLY person:john;
+SELECT * FROM ONLY person:tobie;
+```
+
+An alias can be used to rename fields or change the structure of an object.
+
+```surql
+SELECT * FROM person;
+
+-- Field `address` now shows up as "string::uppercase"
+-- name.first structure now flattened into a simple field
+SELECT 
+	name.first AS user_name, 
+	string::uppercase(address)
+FROM person;
+
+-- "Morgan Hitchcock" added to `name` field structure,
+-- `angry_address` for field name instead of automatically
+-- generated "string::uppercase(address) + '!!!'"
+SELECT 
+	name.first,
+	"Morgan Hitchcock" AS name.last,
+	string::uppercase(address) + "!!!" AS angry_address
+FROM person;
+```
+
+```bash title="Output"
+-------- Query --------
+
+[
+	{
+		address: '1 Bagshot Row',
+		email: 'tobie@surrealdb.com',
+		id: person:tobie,
+		name: {
+			first: 'Tobie'
+		}
+	}
+]
+
+-------- Query --------
+
+[
+	{
+		"string::uppercase": '1 BAGSHOT ROW',
+		user_name: 'Tobie'
+	}
+]
+
+-------- Query --------
+
+[
+	{
+		angry_address: '1 BAGSHOT ROW!!!',
+		name: {
+			first: 'Tobie',
+			last: 'Morgan Hitchcock'
+		}
+	}
+]
 ```
 
 SurrealDB can also return specific fields as an array of values instead of the default array of objects. This only works if you select a single un-nested field from a table or a record.
@@ -101,19 +162,24 @@ SELECT array::distinct(tags) FROM article;
 SELECT array::group(tags) AS tags FROM article GROUP ALL;
 
 -- Use mathematical calculations in a select expression
-SELECT (( celsius * 1.8 ) + 32) AS fahrenheit FROM temperature;
+SELECT 
+	(( celsius * 1.8 ) + 32) AS fahrenheit 
+	FROM temperature;
 
 -- Return boolean expressions with an alias
 SELECT rating >= 4 as positive FROM review;
 
 -- Select manually generated object structure
-SELECT { weekly: false, monthly: true } AS `marketing settings` FROM user;
+SELECT 
+	{ weekly: false, monthly: true } AS `marketing settings`
+FROM user;
 
 -- Select filtered nested array values
 SELECT address[WHERE active = true] FROM person;
 
 -- Select a person who has reacted to a post using a celebration
--- You can see the graph as: person->(reacted_to WHERE type='celebrate')->post
+-- Path can be conceptualized as:
+-- person->(reacted_to WHERE type='celebrate')->post
 SELECT * FROM person WHERE ->(reacted_to WHERE type='celebrate')->post;
 
 -- Select a remote field from connected out graph edges
@@ -122,14 +188,15 @@ SELECT ->likes->friend.name AS friends FROM person:tobie;
 -- Use the result of a subquery as a returned field
 SELECT *, (SELECT * FROM events WHERE type = 'activity' LIMIT 5) AS history FROM user;
 
--- Destructure objects in a select expression (since 2.0.0)
+-- Restructure objects in a select expression after `.` operator (since version 2.0.0)
 SELECT address.{city, country} FROM person;
 ```
 
 ## Using parameters
 
 Parameters can be used like variables to store a value which can then be used in a subsequent query.
-SurrealDB also uses a few [predefined variables](/docs/surrealql/parameters).
+
+More info on the `$parent` parameter in the second example can be seen on [the page for predefined variables](/docs/surrealql/parameters).
 
 ```surql
 -- Store the subquery result in a variable and query that result.
@@ -157,35 +224,64 @@ SELECT * FROM temperature:['London', '2022-08-29T08:03:39']..;
 SELECT * FROM temperature:['London', '2022-08-29T08:03:39']..['London', '2022-08-29T08:09:31'];
 ```
 
-## Skip certain fields using the `OMIT` clause
-
-Sometimes, especially with tables containing numerous columns, users might wish there was an easier way to select all columns except a few specific ones, with the `OMIT` clause you can omit certain fields from records as they are output.
+Using a record range is more performant than the `WHERE` clause, as it does not require a table scan.
 
 ```surql
--- Omit the password field and security field in the options object
-CREATE person:tobie SET name = 'Tobie', password = '123456', opts.security = 'secure', opts.enabled = true;
-CREATE person:jaime SET name = 'Jaime', password = 'asdfgh', opts.security = 'secure', opts.enabled = false;
+-- Create 5000 `person` records
+CREATE |person:1..5000| RETURN NONE;
+
+-- Set the starting time
+LET $now = time::now();
+-- Put the output somewhere so it won't clutter the screen
+LET $_ = SELECT * FROM person:1..5000;
+-- Get the elapsed time
+LET $time1 = time::now() - $now;
+
+LET $now = time::now();
+LET $_ = SELECT * FROM person WHERE id >= 1 and id <= 5000;
+LET $time2 = time::now() - $now;
+RETURN [$time1, $time2];
+```
+
+## Skip certain fields using the `OMIT` clause
+
+Sometimes, especially with tables containing numerous columns, it is desirable to select all columns except a few specific ones. The `OMIT` clause can be used in this case.
+
+```surql
+CREATE person:tobie SET 
+	name = 'Tobie', 
+	password = '123456', 
+	opts.security = 'secure', 
+	opts.enabled = true;
+CREATE person:jaime SET 
+	name = 'Jaime', 
+	password = 'asdfgh', 
+	opts.security = 'secure', 
+	opts.enabled = false;
 
 SELECT * FROM person;
+-- Omit the password field and security field in the options object
 SELECT * OMIT password, opts.security FROM person;
 
--- Using a destructuring syntax (since 2.0.0)
+-- Using destructuring syntax (since 2.0.0)
 SELECT * OMIT password, opts.{ security, enabled } FROM person;
 ```
 
-## Select multiple targets using the `FROM` clause
+## More on using the `FROM` clause
+
+The `FROM` clause can be used on targets beyond just a single table or record name.
 
 ```surql
--- This command selects all records from both 'user' and 'admin' tables.
+-- Selects all records from both 'user' and 'admin' tables.
 SELECT * FROM user, admin;
 
--- This command selects all records from the table named in the variable '$table',
+-- Selects all records from the table named in the variable '$table',
 -- but only if the 'admin' field of those records is true.
--- This query is equivalent to 'SELECT * FROM user WHERE admin = true'.
+-- Equivalent to 'SELECT * FROM user WHERE admin = true'.
 LET $table = "user";
 SELECT * FROM type::table($table) WHERE admin = true;
 
--- This command selects a single record from:
+-- Selects a single record from:
 -- * the table named in the variable '$table',
 -- * and the identifier named in the variable '$id'.
 -- This query is equivalent to 'SELECT * FROM user:admin'.
@@ -193,14 +289,15 @@ LET $table = "user";
 LET $id = "admin";
 SELECT * FROM type::thing($table, $id);
 
--- This command selects all records for specific users 'tobie' and 'jaime', as well as all records for the company 'surrealdb'.
+-- Selects all records for specific users 'tobie' and 'jaime',
+-- as well as all records for the company 'surrealdb'.
 SELECT * FROM user:tobie, user:jaime, company:surrealdb;
 
--- This command selects records from a list of identifiers. The identifiers can be numerical,
+-- Selects records from a list of identifiers. The identifiers can be numerical,
 -- string, or specific records such as 'person:lrym5gur8hzws72ux5fa'.
 SELECT * FROM [3648937, "test", person:lrym5gur8hzws72ux5fa, person:4luro9170uwcv1xrfvby];
 
--- This command selects data from an object that includes a 'person' key,
+-- Selects data from an object that includes a 'person' key,
 -- which is associated with a specific person record, and an 'embedded' key set to true.
 SELECT * FROM { person: person:lrym5gur8hzws72ux5fa, embedded: true };
 
@@ -212,7 +309,7 @@ SELECT * FROM (SELECT age >= 18 AS adult FROM user) WHERE adult = true;
 
 ## Filter queries using the `WHERE` clause
 
-As with traditional SQL queries, the SurrealDB SELECT queries support conditional filtering using a `WHERE` clause. If the expression in the `WHERE` clause evaluates to true, then the respective record will be returned.
+As with traditional SQL queries, a SurrealDB SELECT query supports conditional filtering using a `WHERE` clause. If the expression in the `WHERE` clause evaluates to true, then the respective record will be returned.
 
 ```surql
 -- Simple conditional filtering
@@ -236,9 +333,32 @@ SELECT address[WHERE active = true] FROM person;
 As SurrealDB supports arrays and nested fields within arrays, it is possible to split the result on a specific field name, returning each value in an array as a separate value, along with the record content itself. This is useful in data analysis contexts.
 
 ```surql
+CREATE user SET 
+    name = "Name",
+    emails = ["me@me.com", "longer_email@other_service.com"];
+
 -- Split the results by each value in an array
 SELECT * FROM user SPLIT emails;
+```
 
+```bash title="Output"
+[
+	{
+		emails: 'me@me.com',
+		id: user:tr5sxe8iygdco05faoh0,
+		name: 'Name'
+	},
+	{
+		emails: 'longer_email@other_service.com',
+		id: user:tr5sxe8iygdco05faoh0,
+		name: 'Name'
+	}
+]
+```
+
+Other examples using the `SPLIT` clause:
+
+```surql
 -- Split the results by each value in a nested array
 SELECT * FROM country SPLIT locations.cities;
 
@@ -260,14 +380,71 @@ SELECT settings.published FROM article GROUP BY settings.published;
 -- Group results by multiple fields
 SELECT gender, country, city FROM person GROUP BY gender, country, city;
 
--- Group results with aggregate functions
-SELECT count() AS total, math::mean(age) AS average_age, gender, country FROM person GROUP BY gender, country;
+-- Use an aggregate function to select unique values from a nested array across an entire table
+SELECT array::group(tags) AS tags FROM article GROUP ALL;
+```
+
+A longer example of grouping using aggregate functions:
+
+```surql
+INSERT INTO person [
+    { gender: "M", age: 20, country: "Japan" },
+    { gender: "M", age: 25, country: "Japan" },
+    { gender: "F", age: 23, country: "US" },
+    { gender: "F", age: 30, country: "US" },
+    { gender: "F", age: 25, country: "Korea" },
+    { gender: "F", age: 45, country: "UK" },
+];
+
+SELECT 
+	count() AS total, 
+	math::mean(age) AS average_age, 
+	gender, 
+	country 
+FROM person 
+GROUP BY gender, country;
 
 -- Get the total number of records in a table
 SELECT count() AS number_of_records FROM person GROUP ALL;
+```
 
--- Select unique values from a nested array across an entire table
-SELECT array::group(tags) AS tags FROM article GROUP ALL;
+```bash title="Output"
+-------- Query --------
+
+[
+	{
+		average_age: 25,
+		country: 'Korea',
+		gender: 'F',
+		total: 1
+	},
+	{
+		average_age: 45,
+		country: 'UK',
+		gender: 'F',
+		total: 1
+	},
+	{
+		average_age: 26,
+		country: 'US',
+		gender: 'F',
+		total: 2
+	},
+	{
+		average_age: 22,
+		country: 'Japan',
+		gender: 'M',
+		total: 2
+	}
+]
+
+-------- Query --------
+
+[
+	{
+		number_of_records: 6
+	}
+]
 ```
 
 ## Sort records using the `ORDER BY` clause
@@ -276,7 +453,7 @@ To sort records, SurrealDB allows ordering on multiple fields and nested fields.
 
 ```surql
 -- Order records randomly
-SELECT * FROM user ORDER BY RAND();
+SELECT * FROM user ORDER BY rand();
 
 -- Order records descending by a single field
 SELECT * FROM song ORDER BY rating DESC;
@@ -305,6 +482,19 @@ When using the `LIMIT` clause, it is possible to paginate results by using the `
 ```surql
 -- Start at record 50 and select the following 50 records
 SELECT * FROM user LIMIT 50 START 50;
+```
+
+The `LIMIT` clause followed by 1 is often used along with the `ONLY` clause to satisfy the requirement that only up to a single record can be returned.
+
+```surql
+-- Record IDs are unique so guaranteed to be no more than 1
+SELECT * FROM ONLY person:jamie;
+
+-- Error because no guarantee that this will return a single record
+SELECT * FROM ONLY person WHERE name = "Jaime";
+
+-- Add `LIMIT 1` to ensure that only up to one record will be returned
+SELECT * FROM ONLY person WHERE name = "Jaime" LIMIT 1;
 ```
 
 ## Connect targets using the FETCH clause
@@ -350,61 +540,137 @@ SELECT ->purchased->product<-purchased<-person->purchased->product FROM person:t
 <Since v="v2.0.0" />
 
 When processing a large result set with many records, it is possible to use the `TEMPFILES` clause to specify that the statement should be processed in temporary files rather than memory.
-This significantly reduces memory usage, though it will also result in slower performance.
+
+This significantly reduces memory usage in exchange for slower performance.
 
 ```surql
 -- Select every person and order them by name using temporary files rather than memory.
 SELECT * FROM person ORDER BY name TEMPFILES;
 ```
 
-This requires the temporary directory to be set in the server configuration.
+This requires the temporary directory to be set in the server configuration or when using the [`surreal start`](/docs/surrealdb/cli/start) command.
 
 ## The `EXPLAIN` clause
 
-When `EXPLAIN` is used, the `SELECT` statement returns an explanation, essentially revealing the execution plan to provide transparency and understanding of the query performance.
+When `EXPLAIN` is used, the `SELECT` statement returns an explanation, essentially revealing the execution plan to provide transparency and understanding of the query performance. `EXPLAIN` can be followed by `FULL` to see the number of executed rows.
 
-```surql
--- Returns the execution plan
-SELECT * FROM person WHERE email='tobie@surrealdb.com' EXPLAIN;
-```
 Here is the result when the field 'email' is not indexed. We can see that the execution plan will iterate over the whole table.
 
 ```surql
-[
-		{
-				detail: {
-						table: 'person'
-				},
-				operation: 'Iterate Table'
-		}
-]
-```
-```surql
--- Returns the execution plan with the number of fetched rows
+CREATE person:tobie SET
+	name = "Tobie",
+	address = "1 Bagshot Row",
+	email = "tobie@surrealdb.com";
+
+SELECT * FROM person WHERE email='tobie@surrealdb.com' EXPLAIN;
 SELECT * FROM person WHERE email='tobie@surrealdb.com' EXPLAIN FULL;
+```
+
+```bash title="Output"
+-------- Query --------
+
+[
+	{
+		detail: {
+			table: 'person'
+		},
+		operation: 'Iterate Table'
+	},
+	{
+		detail: {
+			type: 'Memory'
+		},
+		operation: 'Collector'
+	}
+]
+
+-------- Query --------
+
+[
+	{
+		detail: {
+			table: 'person'
+		},
+		operation: 'Iterate Table'
+	},
+	{
+		detail: {
+			type: 'Memory'
+		},
+		operation: 'Collector'
+	},
+	{
+		detail: {
+			count: 1
+		},
+		operation: 'Fetch'
+	}
+]
 ```
 
 Here is the result when the 'email' field is indexed. We can see that the execution plan will proceed by utilizing the index.
 
 ```surql
+DEFINE INDEX fast_email ON TABLE person FIELDS email;
+
+CREATE person:tobie SET
+	name = "Tobie",
+	address = "1 Bagshot Row",
+	email = "tobie@surrealdb.com";
+
+SELECT * FROM person WHERE email='tobie@surrealdb.com' EXPLAIN;
+SELECT * FROM person WHERE email='tobie@surrealdb.com' EXPLAIN FULL;
+```
+
+```bash title="Output"
+-------- Query --------
+
 [
-		{
-				detail: {
-						plan: {
-								index: 'email',
-								operator: '=',
-								value: 'tobie@surrealdb.com'
-						},
-						table: 'person'
-				},
-				operation: 'Iterate Index'
+	{
+		detail: {
+			plan: {
+				index: 'fast_email',
+				operator: '=',
+				value: 'tobie@surrealdb.com'
+			},
+			table: 'person'
 		},
-		{
-				detail: {
-						count: 1
-				},
-				operation: 'Fetch'
-		}
+		operation: 'Iterate Index'
+	},
+	{
+		detail: {
+			type: 'Memory'
+		},
+		operation: 'Collector'
+	}
+]
+
+-------- Query --------
+
+[
+	{
+		detail: {
+			plan: {
+				index: 'fast_email',
+				operator: '=',
+				value: 'tobie@surrealdb.com'
+			},
+			table: 'person'
+		},
+		operation: 'Iterate Index'
+	},
+	{
+		detail: {
+			type: 'Memory'
+		},
+		operation: 'Collector'
+	},
+	{
+		detail: {
+			count: 1
+		},
+		operation: 'Fetch'
+	}
 ]
 ```
 
@@ -419,7 +685,11 @@ For instance, the cardinality of an index can be high, potentially even equal to
 
 ```surql
 -- forces the query planner to use the specified index(es):
-SELECT * FROM person WITH INDEX ft_email WHERE email = 'tobie@surrealdb.com' AND company = 'SurrealDB';
+SELECT * FROM person 
+WITH INDEX ft_email
+WHERE 
+	email = 'tobie@surrealdb.com' AND
+	company = 'SurrealDB';
 
 -- forces the usage of the table iterator
 SELECT name FROM person WITH NOINDEX WHERE job = 'engineer' AND gender = 'm';
