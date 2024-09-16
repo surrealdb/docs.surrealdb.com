@@ -5,7 +5,12 @@ const repositoryName = "surrealdb/surrealdb";
 const branch = "main";
 const fncSourceCodeFilePath = "core/src/fnc/mod.rs";
 
-const fncExclusions = [".chain"];
+const fncExclusions = Bun.env.EXCLUDED_FUNCS
+  ? Bun.env.EXCLUDED_FUNCS.split("\n")
+  : [];
+const fncNotImplemented = Bun.env.NOT_IMPLEMENTED_FUNCS
+  ? Bun.env.NOT_IMPLEMENTED_FUNCS.split("\n")
+  : [];
 
 const detectMissingFunctions = async () => {
   console.log("Detecting missing functions...");
@@ -59,7 +64,10 @@ const detectMissingFunctions = async () => {
     ) {
       const regexResult = /"(.+)" =>/gi.exec(line);
       if (regexResult) {
-        allExistingFunctions.push(regexResult[1]);
+        const functionName = regexResult[1];
+        if (!fncNotImplemented.includes(functionName)) {
+          allExistingFunctions.push(regexResult[1]);
+        }
       }
     }
   }
