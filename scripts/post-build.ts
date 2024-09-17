@@ -5,7 +5,7 @@ import { parse as parseHTML } from 'node-html-parser';
 import glob from 'tiny-glob';
 
 const __root = path.dirname(__dirname);
-const __dist = path.join(__root, 'dist');
+const __dist = path.join(__root, 'dist/docs');
 const __astro = path.join(__dist, '_astro');
 
 const scripts = [
@@ -27,7 +27,7 @@ async function fetchRemoteResources() {
         const name = `_extr-${hash}.js`;
         fs.writeFileSync(path.join(__astro, name), await minifyJS(content));
         // Scan the JS files in the dist folder
-        console.log('[EXTRACT] Scanning JS files in dist/ folder');
+        console.log('[EXTRACT] Scanning JS files in dist/docs/ folder');
         const files = await glob('**/*.js', {
             cwd: __dist,
             dot: true,
@@ -47,7 +47,7 @@ async function fetchRemoteResources() {
 
 async function extractInlineResources() {
     // Scan the HTML files in the dist folder
-    console.log('[EXTRACT] Scanning HTML files in dist/ folder');
+    console.log('[EXTRACT] Scanning HTML files in dist/docs/ folder');
     const files = await glob('**/*.html', {
         cwd: __dist,
         dot: true,
