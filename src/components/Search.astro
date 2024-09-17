@@ -1,0 +1,277 @@
+---
+import { Icon } from "astro-icon/components";
+---
+
+<style>
+    search-dialog :global(.docs-search-result) {
+        @apply block px-6 py-4 hover:bg-bwr/10;
+
+        & :global(h3) {
+            @apply text-2xl;
+        }
+
+        & :global(span) {
+            @apply text-surreal-pink text-xs pb-1 block;
+        }
+
+        & :global(p) {
+            @apply text-text/80 font-thin text-sm;
+
+            & :global(span) {
+                @apply text-text/100;
+            }
+        }
+    }
+
+    search-dialog :global(.docs-search-message) {
+        @apply w-full h-full flex items-center justify-center text-lg text-text/50;
+    }
+</style>
+
+<search-dialog>
+    <button class="search-trigger flex items-center justify-between gap-6 bg-code rounded-lg border border-border min-w-40 text-sm text-text/80 font-light py-2 px-3">
+        <div class="flex items-center gap-2">
+            <Icon name="fa6-solid:magnifying-glass" class="w-4 h-4" />
+            Search
+        </div>
+        <span class="bg-background/30 py-0.5 px-2 text-[0.6rem] font-mono rounded text-text">
+            CMD + K
+        </span>
+    </button>
+    <dialog class="fixed top-0 right-0 bottom-0 left-0 m-auto w-[900px] h-[700px] bg-background-secondary rounded-xl text-bwr outline-none backdrop:bg-background/50 backdrop:backdrop-blur-md transition-all">
+        <div class="dialog-content h-full w-full flex flex-col">
+            <input class="bg-background/30 w-full border-none py-5 px-6 outline-none text-xl" placeholder="Search..." />
+            <div class="search-results relative flex-grow overflow-y-auto">
+                <p class="docs-search-message">
+                    Enter a search query
+                </p>
+            </div>
+        </div>
+    </dialog>
+</search-dialog>
+
+<script>
+    class Search extends HTMLElement {
+        connectedCallback() {
+            const trigger = this.querySelector('.search-trigger');
+            const input = this.querySelector('input');
+            const dialog = this.querySelector('dialog');
+            const dialogContent = this.querySelector('dialog .dialog-content');
+            const searchResults = this.querySelector('dialog .search-results');
+            if (!trigger || !dialog || !dialogContent || !searchResults || !input) throw new Error("Search element is broken")
+
+            trigger.addEventListener('click', () => {
+                dialog.showModal()
+            });
+
+            dialog.addEventListener('click', () => {
+                dialog.close()
+            });
+
+            dialogContent.addEventListener('click', (e) => {
+                e.stopPropagation();
+            });
+
+            function setMessage(message: string) {
+                const el = document.createElement("p");
+                el.classList.add("docs-search-message");
+                el.innerText = message;
+                searchResults!.innerHTML = "";
+                searchResults!.appendChild(el);
+            }
+
+            let timeout: unknown;
+            input.addEventListener('input', () => {
+                if (timeout) clearTimeout(timeout as number);
+                timeout = setTimeout(async () => {
+                    if (input.value.length === 0) {
+                        setMessage("Enter a search query");
+                    } else {
+                        const results = await search(input.value);
+                        searchResults.innerHTML = "";
+                        if (results.length > 0) {
+                            for (const result of results) {
+                                const rendered = createResult(result);
+                                searchResults.appendChild(rendered);
+                            }
+                        } else {
+                            setMessage("No results found");
+                        }
+                    }
+                }, 300);
+            });
+        }
+    }
+
+    customElements.define('search-dialog', Search);
+
+    interface Offset {
+    	e: number;
+    	s: number;
+    }
+
+    interface Chunks {
+    	bold: boolean;
+    	value: string;
+    }
+
+    export interface Doc {
+    	url: string;
+    	title: string;
+    	content: string[];
+    	offsets: Record<number, Offset[]>;
+    	score: number;
+    	hostname: string;
+    	chunks?: Chunks[];
+    }
+
+    export async function search(keywords: string): Promise<Doc[]> {
+        const sql = templatedQuery(keywords);
+        const docs = await query(sql);
+    	const hostname = getHostname();
+        const processed = docs
+            .filter((match) => {
+			return match.offsets
+			&& match.hostname == hostname
+			// && validateUrl(match.url, version)
+		})
+            .map(processResult);
+      	return processed as Doc[];
+    }
+
+    function getHostname() {
+    	const mapped: Record<string, string> = {
+    		'surrealdb.com': 'main--surrealdb-docs.netlify.app',
+    		'www.surrealdb.com': 'main--surrealdb-docs.netlify.app',
+    		'docs.surrealdb.com': 'main--surrealdb-docs.netlify.app',
+    		'surrealdb-docs.netlify.app': 'main--surrealdb-docs.netlify.app',
+    		'localhost': 'main--surrealdb-docs.netlify.app',
+    	};
+
+    	return mapped[location.hostname] || location.hostname;
+    }
+
+    const templatedQuery = (keywords: string) => {
+    	const escaped = JSON.stringify(keywords);
+    	const hostname = JSON.stringify(getHostname());
+    	return /* surrealql */ `
+    		LET $escaped = ${escaped};
+    		SELECT
+    			path as url,
+    			hostname,
+    			title,
+    			content,
+    			search::offsets(7) AS offsets,
+    			(
+    				  (search::score(0) * 10)
+    				+ (search::score(1) * 9)
+    				+ (search::score(2) * 7)
+    				+ (search::score(3) * 6)
+    				+ (search::score(4) * 5)
+    				+ (search::score(5) * 4)
+    				+ (search::score(6) * 2)
+    				+ search::score(7)
+    			) AS score
+    		FROM page
+    			WHERE
+    				hostname = ${hostname}
+    				AND (
+    					title @0@ $escaped
+    					OR path @1@ $escaped
+    					OR h1 @2@ $escaped
+    					OR h2 @3@ $escaped
+    					OR h3 @4@ $escaped
+    					OR h4 @5@ $escaped
+    					OR code @6@ $escaped
+    					OR content @7@ $escaped
+    				)
+    		ORDER BY score DESC LIMIT 10;
+    	`;
+        };
+
+        async function query(sql: string) {
+    	const raw = await fetch('https://blog-db.surrealdb.com/sql', {
+    		method: 'POST',
+    		headers: {
+    			Accept: 'application/json',
+    		},
+    		body: `USE NS docs DB search; ${sql}`,
+    	});
+    	const json = (await raw.json()).slice(1);
+    	const result: Doc[] = json[1].result ?? []
+    	return result;
+    }
+
+    function processResult(doc: Doc) {
+    	// Will:
+    	// - group offsets per line (see groupOffsets() function)
+    	// - Sort descending based on the length of the offsets
+    	// - pick the biggest offset
+    	let maxOffsetSize = -1;
+    	let linenumber = null;
+    	let offsets = null;
+
+    	for (const [line, off] of Object.entries(doc.offsets)) {
+            const currentOffsetSize = findBiggestOffsets(off);
+    		if (currentOffsetSize > maxOffsetSize) {
+    			maxOffsetSize = currentOffsetSize;
+    			linenumber = line;
+    			offsets = off;
+    		}
+    	}
+
+    	// - Grab the actual content of the line.
+    	// - Split up in chunks of what to highlight and what not.
+    	const line = doc.content[Number(linenumber)];
+    	const chunks = (offsets ?? [])
+    		.flatMap(({ s, e }, i, arr) => {
+    			const next = arr[i + 1];
+    			return [
+    				i == 0 && { bold: false, value: line.slice(0, s) },
+    				{ bold: true, value: line.slice(s, e) },
+    				{ bold: false, value: line.slice(e, next?.s) },
+    			];
+    		})
+    		.filter((a) => a);
+
+    	return {
+    		...doc,
+    		chunks,
+    	};
+    }
+
+    function findBiggestOffsets(offsets: Offset[]) {
+        return offsets.reduce((sum, { s, e }) => sum + (e - s), 0);
+    }
+
+    function createResult(
+        doc: Doc
+    ): HTMLElement {
+        const result = document.createElement("a");
+        result.href = doc.url;
+        result.classList.add("docs-search-result");
+
+        const title = document.createElement("h3");
+        title.innerText = doc.title;
+        result.appendChild(title);
+
+        const link = document.createElement("span");
+        link.innerText = doc.url;
+        result.appendChild(link);
+
+        const match = document.createElement("p");
+        for (const chunk of doc.chunks ?? []) {
+            if (chunk.bold) {
+                const node = document.createElement("b");
+                node.innerText = chunk.value;
+                match.appendChild(node);
+            } else {
+                const node = document.createTextNode(chunk.value);
+                match.appendChild(node);
+            }
+        }
+        result.appendChild(match);
+
+        return result;
+    }
+</script>
