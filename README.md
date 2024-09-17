@@ -1,54 +1,98 @@
-# Astro Starter Kit: Basics
+<br>
 
-```sh
-npm create astro@latest -- --template basics
+<p align="center">
+    <a href="https://surrealdb.com#gh-dark-mode-only" target="_blank">
+        <img width="300" src="/img/white/logo.svg" alt="SurrealDB Logo">
+    </a>
+    <a href="https://surrealdb.com#gh-light-mode-only" target="_blank">
+        <img width="300" src="/img/black/logo.svg" alt="SurrealDB Logo">
+    </a>
+</p>
+
+<h3 align="center">
+    <a href="https://surrealdb.com#gh-dark-mode-only" target="_blank">
+        <img src="/img/white/text.svg" height="15" alt="SurrealDB">
+    </a>
+    <a href="https://surrealdb.com#gh-light-mode-only" target="_blank">
+        <img src="/img/black/text.svg" height="15" alt="SurrealDB">
+    </a>
+    is the ultimate cloud <br> database for tomorrow's applications
+</h3>
+
+<h3 align="center">Develop easier. &nbsp; Build faster. &nbsp; Scale quicker.</h3>
+
+<br>
+
+<p align="center">The documentation for <a href="https://github.com/surrealdb/surrealdb" target="_blank">SurrealDB</a>, built using <a href="https://docusaurus.io/" target="_blank">Docusaurus</a>.</p>
+
+<p align="center">If you want to contribute, then please read the <a href="https://github.com/surrealdb/awesome-surreal/blob/main/CONTRIBUTING.md" target="_blank">contributing guidelines</a>.</p>
+
+<br>
+
+<p align="center">
+    <a href="https://surrealdb.com/discord"><img src="https://img.shields.io/discord/902568124350599239?label=discord&style=flat-square&color=5a66f6"></a>
+    &nbsp;
+    <a href="https://twitter.com/surrealdb"><img src="https://img.shields.io/badge/twitter-follow_us-1d9bf0.svg?style=flat-square"></a>
+    &nbsp;
+    <a href="https://dev.to/surrealdb"><img src="https://img.shields.io/badge/dev-join_us-86f7b7.svg?style=flat-square"></a>
+    &nbsp;
+    <a href="https://www.linkedin.com/company/surrealdb/"><img src="https://img.shields.io/badge/linkedin-connect_with_us-0a66c2.svg?style=flat-square"></a>
+    &nbsp;
+    <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><img src="https://img.shields.io/badge/youtube-subscribe-ff0000.svg?style=flat-square"></a>
+</p>
+
+<p align="center">
+    <a href="https://surrealdb.com/blog"><img height="25" src="/img/social/blog.svg" alt="Blog"></a>
+    &nbsp;
+    <a href="https://github.com/surrealdb/surrealdb"><img height="25" src="/img/social/github.svg" alt="Github	"></a>
+    &nbsp;
+    <a href="https://www.linkedin.com/company/surrealdb/"><img height="25" src="/img/social/linkedin.svg" alt="LinkedIn"></a>
+    &nbsp;
+    <a href="https://twitter.com/surrealdb"><img height="25" src="/img/social/twitter.svg" alt="Twitter"></a>
+    &nbsp;
+    <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><img height="25" src="/img/social/youtube.svg" alt="Youtube"></a>
+    &nbsp;
+    <a href="https://dev.to/surrealdb"><img height="25" src="/img/social/dev.svg" alt="Dev"></a>
+    &nbsp;
+    <a href="https://surrealdb.com/discord"><img height="25" src="/img/social/discord.svg" alt="Discord"></a>
+    &nbsp;
+    <a href="https://stackoverflow.com/questions/tagged/surrealdb"><img height="25" src="/img/social/stack-overflow.svg" alt="StackOverflow"></a>
+</p>
+
+<br>
+
+## Getting started with SurrealDB
+
+Visit [surrealdb.com/docs](https://surrealdb.com/docs/surrealdb/) to get started with SurrealDB. 
+
+## Contributing to the documentation
+
+Please see our [contributing guidelines](/CONTRIBUTING.md).
+
+### Good First Issues
+
+We have a list of [good first issues](https://github.com/surrealdb/docs.surrealdb.com/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22) that contain bugs that have a relatively limited scope. This is a great place to get started, gain experience, and get familiar with our contribution process.
+
+### Installation
+
+To get started with contributing to the SurrealDB documentation, first install the required packages using the following command.
+
+```
+$ pnpm install
 ```
 
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/withastro/astro/tree/latest/examples/basics)
-[![Open with CodeSandbox](https://assets.codesandbox.io/github/button-edit-lime.svg)](https://codesandbox.io/p/sandbox/github/withastro/astro/tree/latest/examples/basics)
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/withastro/astro?devcontainer_path=.devcontainer/basics/devcontainer.json)
+### Development
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+The following command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
 
-![just-the-basics](https://github.com/withastro/astro/assets/2244813/a0a5533c-a856-4198-8470-2d67b1d7c554)
-
-## 🚀 Project Structure
-
-Inside of your Astro project, you'll see the following folders and files:
-
-```text
-/
-├── public/
-│   └── favicon.svg
-├── src/
-│   ├── components/
-│   │   └── Card.astro
-│   ├── layouts/
-│   │   └── Layout.astro
-│   └── pages/
-│       └── index.astro
-└── package.json
+```
+$ pnpm start
 ```
 
-Astro looks for `.astro` or `.md` files in the `src/pages/` directory. Each page is exposed as a route based on its file name.
+### Building
 
-There's nothing special about `src/components/`, but that's where we like to put any Astro/React/Vue/Svelte/Preact components.
+The following command builds and generates static content into the `build` directory, and can then be served using any static contents hosting service.
 
-Any static assets, like images, can be placed in the `public/` directory.
-
-## 🧞 Commands
-
-All commands are run from the root of the project, from a terminal:
-
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
-
-## 👀 Want to learn more?
-
-Feel free to check [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).
+```
+$ pnpm build
+```
