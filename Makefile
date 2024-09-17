@@ -75,18 +75,9 @@ apply-quality-unsafe:
 .PHONY: deploy
 deploy:
 	@echo "Deploy..."
-	aws s3 sync --region eu-west-2 --cache-control "public, max-age=31536000, immutable" --exclude '.DS_Store' --exclude '*' --include '*.webp' --content-type 'image/webp' ./dist/_astro s3://www.surrealdb.com/_astro/
-	aws s3 sync --region eu-west-2 --cache-control "public, max-age=31536000, immutable" --exclude '.DS_Store' --exclude '*.webp' ./dist/_astro s3://www.surrealdb.com/_astro/
-	aws s3 sync --region eu-west-2 --cache-control "public, max-age=31536000, immutable" --exclude '.DS_Store' ./dist/static s3://www.surrealdb.com/static/
-	aws s3 sync --region eu-west-2 --cache-control "public, max-age=86400" --exclude '.DS_Store' ./dist/~partytown s3://www.surrealdb.com/~partytown/
-	aws s3 sync --region eu-west-2 --cache-control "public, max-age=300" --delete --exclude '.DS_Store' ./dist/.well-known/ s3://www.surrealdb.com/.well-known/
-	aws s3 sync --region eu-west-2 --cache-control "public, max-age=30" --delete --exclude '*' --include '*.rss' ./dist/feed s3://www.surrealdb.com/feed/
-	aws s3 cp --region eu-west-2 --cache-control "public, max-age=86400" ./dist/favicon.ico s3://www.surrealdb.com/
-	aws s3 cp --region eu-west-2 --cache-control "public, max-age=86400" ./dist/robots.txt s3://www.surrealdb.com/
-	aws s3 sync --region eu-west-2 --cache-control "public, max-age=30" --delete --exclude '*' --include '*.html' --exclude 'docs/*.html' ./dist/ s3://www.surrealdb.com/
-
-.PHONY: sitemap
-sitemap:
-	@echo "Generating sitemap..."
-	bunx --yes sitemap-generator-cli --priority-map "1.0,0.9,0.8,0.7" https://surrealdb.com
-	aws s3 cp --region eu-west-2 --cache-control "public, max-age=30" ./sitemap.xml s3://www.surrealdb.com/
+	aws s3 sync --region eu-west-2 --cache-control "public, max-age=31536000, immutable" --exclude '.DS_Store' --exclude '*' --include '*.webp' --content-type 'image/webp' ./dist/docs/_astro s3://www.surrealdb.com/docs/_astro/
+	aws s3 sync --region eu-west-2 --cache-control "public, max-age=31536000, immutable" --exclude '.DS_Store' --exclude '*.webp' ./dist/_astro s3://www.surrealdb.com/docs/docs/_astro/
+	aws s3 sync --region eu-west-2 --cache-control "public, max-age=31536000, immutable" --exclude '.DS_Store' ./dist/docs/static s3://www.surrealdb.com/docs/static/
+	aws s3 sync --region eu-west-2 --cache-control "public, max-age=86400" --exclude '.DS_Store' ./dist/docs/~partytown s3://www.surrealdb.com/docs/~partytown/
+	aws s3 cp --region eu-west-2 --cache-control "public, max-age=86400" ./dist/docs/favicon.ico s3://www.surrealdb.com/docs/
+	aws s3 sync --region eu-west-2 --cache-control "public, max-age=30" --delete --exclude '*' --include '*.html' --exclude 'docs/*.html' ./dist/docs/ s3://www.surrealdb.com/docs/
