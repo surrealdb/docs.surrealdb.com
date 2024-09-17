@@ -39,7 +39,7 @@ async function fetchRemoteResources() {
         for (const file of files) {
             console.log(`[EXTRACT] Processing file: ${file}`);
             const raw = fs.readFileSync(file, { encoding: 'utf-8' });
-            const src = raw.replaceAll(script, `/_astro/${name}`);
+            const src = raw.replaceAll(script, `/docs/_astro/${name}`);
             fs.writeFileSync(file, src);
         }
     }
@@ -78,7 +78,7 @@ async function extractInlineResources() {
                     path.join(__astro, name),
                     await minifyJS(content)
                 );
-                script.setAttribute('src', `/_astro/${name}`);
+                script.setAttribute('src', `/docs/_astro/${name}`);
                 script.setAttribute('defer', '');
                 script.innerHTML = '';
             }
