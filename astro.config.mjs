@@ -17,6 +17,7 @@ const site = `https://${deployDomain}`;
 export default defineConfig({
     site,
     base: '/docs',
+    outDir: './dist/docs',
     trailingSlash: 'never',
     integrations: [
         mdx({ remarkPlugins: [remarkCustomHeadingId] }),
