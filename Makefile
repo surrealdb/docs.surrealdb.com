@@ -76,7 +76,7 @@ apply-quality-unsafe:
 deploy:
 	@echo "Deploy..."
 	aws s3 sync --region eu-west-2 --cache-control "public, max-age=31536000, immutable" --exclude '.DS_Store' --exclude '*' --include '*.webp' --content-type 'image/webp' ./dist/docs/_astro s3://www.surrealdb.com/docs/_astro/
-	aws s3 sync --region eu-west-2 --cache-control "public, max-age=31536000, immutable" --exclude '.DS_Store' --exclude '*.webp' ./dist/docs/_astro s3://www.surrealdb.com/docs/docs/_astro/
+	aws s3 sync --region eu-west-2 --cache-control "public, max-age=31536000, immutable" --exclude '.DS_Store' --exclude '*.webp' ./dist/docs/_astro s3://www.surrealdb.com/docs/_astro/
 	aws s3 sync --region eu-west-2 --cache-control "public, max-age=86400" --exclude '.DS_Store' ./dist/docs/~partytown s3://www.surrealdb.com/docs/~partytown/
 	aws s3 sync --region eu-west-2 --cache-control "public, max-age=30" --delete --exclude '*' --include '*.html' ./dist/docs/ s3://www.surrealdb.com/docs/
 
@@ -84,6 +84,6 @@ deploy:
 stage:
 	@echo "Stage..."
 	aws s3 sync --region eu-west-2 --cache-control "public, max-age=31536000, immutable" --exclude '.DS_Store' --exclude '*' --include '*.webp' --content-type 'image/webp' ./dist/docs/_astro s3://www.surrealdb.dev/docs/_astro/
-	aws s3 sync --region eu-west-2 --cache-control "public, max-age=31536000, immutable" --exclude '.DS_Store' --exclude '*.webp' ./dist/docs/_astro s3://www.surrealdb.dev/docs/docs/_astro/
+	aws s3 sync --region eu-west-2 --cache-control "public, max-age=31536000, immutable" --exclude '.DS_Store' --exclude '*.webp' ./dist/docs/_astro s3://www.surrealdb.dev/docs/_astro/
 	aws s3 sync --region eu-west-2 --cache-control "public, max-age=86400" --exclude '.DS_Store' ./dist/docs/~partytown s3://www.surrealdb.dev/docs/~partytown/
 	aws s3 sync --region eu-west-2 --cache-control "public, max-age=30" --delete --exclude '*' --include '*.html' ./dist/docs/ s3://www.surrealdb.dev/docs/
