@@ -17,7 +17,7 @@ function handler(event) {
 
 	const request = event.request;
 	const host = request.headers.host.value;
-	const path = request.uri.toLowerCase();
+	let path = request.uri.toLowerCase();
 
 	// Only use the base domain, not subdomains
 	if (host !== 'surrealdb.com') {
@@ -36,7 +36,7 @@ function handler(event) {
 	}
 
 	// Display any documentation assets and image files
-	if (path.startsWith('/docs/assets/') || path.startsWith('/docs/img/')) {
+	if (path.startsWith('/docs/_astro/') || path.startsWith('/docs/~partytown/')) {
 		return request;
 	}
 
