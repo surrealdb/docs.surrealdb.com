@@ -232,7 +232,7 @@ function handler(event) {
 		}
 	}
 
-	request.uri = request.uri.concat('.html');
+	request.uri = request.uri.concat('/index.html');
 
 	return request;
 
