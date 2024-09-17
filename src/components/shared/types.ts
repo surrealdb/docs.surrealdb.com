@@ -6,3 +6,8 @@ export type StatusString =
     | 'complete'
     | 'available'
     | `planned ${string}`;
+
+export type LabelType =
+    | `required${string}`
+    | `optional${string}`
+    | `${string}only`;

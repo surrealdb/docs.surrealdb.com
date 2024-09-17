@@ -41,7 +41,7 @@ const focusableElementSelectors = [
 let count = 0;
 const getIDs = () => {
     const id = count++;
-    return { panelId: 'tab-panel-' + id, tabId: 'tab-' + id };
+    return { panelId: `tab-panel-${id}`, tabId: `tab-${id}` };
 };
 
 /**
@@ -67,12 +67,12 @@ const tabsProcessor = rehype()
                     label: String(dataLabel),
                 };
                 if (dataIcon)
-                    panel.icon = String(dataIcon) as keyof typeof Icons;
+                    panel.icon = String(dataIcon) as `${string}:${string}`;
                 file.data.panels?.push(panel);
 
                 // Remove `<TabItem>` props
-                delete node.properties.dataLabel;
-                delete node.properties.dataIcon;
+                node.properties.dataLabel = undefined;
+                node.properties.dataIcon = undefined;
                 // Turn into `<section>` with required attributes
                 node.tagName = 'section';
                 node.properties.id = ids.panelId;
