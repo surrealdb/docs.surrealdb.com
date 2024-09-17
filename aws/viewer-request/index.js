@@ -17,7 +17,7 @@ function handler(event) {
 
 	const request = event.request;
 	const host = request.headers.host.value;
-	const path = request.uri.toLowerCase();
+	let path = request.uri.toLowerCase();
 
 	// Only use the base domain, not subdomains
 	if (host !== 'surrealdb.com') {
