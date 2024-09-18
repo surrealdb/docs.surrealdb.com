@@ -87,5 +87,5 @@ bun dev
 The following command builds and generates static content into the `build` directory, and can then be served using any static contents hosting service.
 
 ```
-$ bun run build
+bun  build
 ```
