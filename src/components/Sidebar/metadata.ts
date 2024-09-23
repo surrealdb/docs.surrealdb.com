@@ -101,8 +101,8 @@ export const metadata = {
             dark: DarkPython,
         },
         repo: {
-            title: 'surrealdb/surrealdb.python',
-            href: 'https://github.com/surrealdb/surrealdb.python',
+            title: 'surrealdb/surrealdb.py',
+            href: 'https://github.com/surrealdb/surrealdb.py',
         },
     },
     'doc-sdk-rust': {

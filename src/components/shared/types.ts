@@ -9,5 +9,6 @@ export type StatusString =
 
 export type LabelType =
     | `required${string}`
+    | `${string}required`
     | `optional${string}`
     | `${string}only`;
