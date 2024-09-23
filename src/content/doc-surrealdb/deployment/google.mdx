@@ -1,0 +1,264 @@
+---
+sidebar_position: 7
+sidebar_label: Deploy on Google GKE
+title: Deploy on Google GKE | Deployment
+description: This tutorial guides users through the process of deploying SurrealDB using Google Kubernetes Engine.
+---
+
+import Image from "@components/Image.astro";
+import LightLogo from "@img/light/google.png";
+import DarkLogo from "@img/google-icon.png";
+
+<Image
+    alt="Google Kubernetes Engine"
+    width={100}
+    className="flag-image-title"
+    src={{
+        light: LightLogo,
+        dark: DarkLogo,
+    }}
+/>
+
+# Deploy on Google Kubernetes Engine (GKE)
+
+This article will guide you through the process of setting up a highly available SurrealDB clutter backed by TIKV on a GKE Autopilot cluster.
+
+## What is GKE?
+
+[Google Kubernetes Engine](https://cloud.google.com/kubernetes-engine) is a managed Kubernetes service offered by Google Cloud Platform. In this guide we will create a [GKE Autopilot](https://cloud.google.com/kubernetes-engine/docs/concepts/autopilot-overview) cluster, which removes the need to manage the underlaying compute nodes.
+
+## What is TiKV?
+[TiKV](https://tikv.org/) is a cloud-native transactional key/value store built by PingCAP and that integrates well with Kubernetes thanks to their tidb-operator.
+
+## Prerequisites
+In order for you to complete this tutorial you'll need:
+
+- An account on [Google Cloud Platform](https://cloud.google.com/)
+- The [gcloud CLI](https://cloud.google.com/sdk/gcloud) installed and configured
+- `kubectl` with gcloud integration for accessing the GKE cluster. Installation [here](https://cloud.google.com/kubernetes-engine/docs/tutorials/cluster-access-for-kubectl)
+- `helm` : To install SurrealDB server and TiKV
+- [`Surreal CLI`](https://surrealdb.com/install) : To interact with the SurrealDB server
+
+## Create GKE Cluster
+
+1. Choose the target project and region. List them with these commands:
+
+```bash title="List projects and regions"
+gcloud projects list
+
+gcloud compute regions list --project PROJECT_ID
+```
+
+2. Run the following command to create a cluster replacing the REGION and PROJECT_ID for your desired values:
+
+```bash title="Create new GKE autopilot Cluster"
+gcloud container clusters create-auto surrealdb-guide --region REGION --project PROJECT_ID
+```
+
+3. After the creation finishes, configure kubectl to connect to the new cluster:
+
+```bash title="Configure kubectl"
+gcloud container clusters get-credentials surrealdb-guide --region REGION --project PROJECT_ID
+```
+
+## Deploy TiDB operator
+
+Now that we have a Kubernetes cluster, we can deploy the [TiDB operator](https://github.com/pingcap/tidb-operator). TiDB operator is a Kubernetes operator that manages the lifecycle of TiDB clusters deployed to Kubernetes.
+
+You can deploy it following these steps:
+
+1. Install CRDS:
+
+```bash title="Install CRDS"
+kubectl create -f https://raw.githubusercontent.com/pingcap/tidb-operator/v1.5.0/manifests/crd.yaml
+```
+
+2. Install TiDB operator Helm chart:
+
+
+```bash title="Install TiDB operator"
+
+$ helm repo add pingcap https://charts.pingcap.org
+$ helm repo update
+$ helm install \
+	-n tidb-operator \
+    --create-namespace \
+	tidb-operator \
+	pingcap/tidb-operator \
+	--version v1.5.0
+```
+3. Verify that the Pods are running:
+
+```bash title="Verify Pods"
+kubectl get pods --namespace tidb-operator -l app.kubernetes.io/instance=tidb-operator
+NAME                                       READY   STATUS    RESTARTS   AGE
+tidb-controller-manager-56f49794d7-hnfz7   1/1     Running   0          20s
+tidb-scheduler-8655bcbc86-66h2d            2/2     Running   0          20s
+```
+
+## Create TiDB cluster
+Now that we have the TiDB Operator running, it’s time to define a TiDB Cluster and let the Operator do the rest.
+
+1. Create a local file named `tikv-cluster.yaml` with this content:
+
+```yaml title="tikv-cluster.yaml"
+apiVersion: pingcap.com/v1alpha1
+kind: TidbCluster
+metadata:
+  name: sdb-datastore
+spec:
+  version: v6.5.0
+  timezone: UTC
+  configUpdateStrategy: RollingUpdate
+  pvReclaimPolicy: Delete
+  enableDynamicConfiguration: true
+  schedulerName: default-scheduler
+  topologySpreadConstraints:
+  - topologyKey: topology.kubernetes.io/zone
+  helper:
+    image: alpine:3.16.0
+  pd:
+    baseImage: pingcap/pd
+    maxFailoverCount: 0
+    replicas: 3
+    storageClassName: premium-rwo
+    requests:
+      cpu: 500m
+      storage: 10Gi
+      memory: 1Gi
+    config: |
+      [dashboard]
+        internal-proxy = true
+      [replication]
+        location-labels = ["topology.kubernetes.io/zone", "kubernetes.io/hostname"]
+        max-replicas = 3
+    nodeSelector:
+      dedicated: pd
+    tolerations:
+    - effect: NoSchedule
+      key: dedicated
+      operator: Equal
+      value: pd
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/component
+              operator: In
+              values:
+              - pd
+          topologyKey: kubernetes.io/hostname
+  tikv:
+    baseImage: pingcap/tikv
+    maxFailoverCount: 0
+    replicas: 3
+    storageClassName: premium-rwo
+    requests:
+      cpu: 1
+      storage: 10Gi
+      memory: 2Gi
+    config: {}
+    nodeSelector:
+      dedicated: tikv
+    tolerations:
+    - effect: NoSchedule
+      key: dedicated
+      operator: Equal
+      value: tikv
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/component
+              operator: In
+              values:
+              - tikv
+          topologyKey: kubernetes.io/hostname
+  tidb:
+    replicas: 0
+```
+
+2. Create the TiDB cluster:
+
+```bash title="Create TiDB cluster"
+kubectl apply -f tikv-cluster.yaml
+```
+
+3. Check the cluster status and wait until it’s ready:
+
+```bash title="Check cluster status"
+kubectl get tidbcluster
+NAME             READY   PD                  STORAGE   READY   DESIRE   TIKV                  STORAGE   READY   DESIRE   TIDB                  READY   DESIRE   AGE
+sdb-datastore   True    pingcap/pd:v6.5.0   10Gi      3       3        pingcap/tikv:v6.5.0   10Gi      3       3        pingcap/tidb:v6.5.0           0        5m
+```
+
+## Deploy SurrealDB
+Now that we have a TiDB cluster running, we can deploy SurrealDB using the official Helm chart
+
+The deploy will use the latest SurrealDB Docker image and make it accessible on internet
+
+1. Get the TIKV PD service url:
+
+```bash title="Get TIKV PD service url"
+kubectl get svc/sdb-datastore-pd
+NAME       TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE
+sdb-datastore-pd   ClusterIP   10.96.208.25   <none>        2379/TCP   10h
+
+export TIKV_URL=tikv://sdb-datastore-pd:2379
+```
+2. Install the SurrealDB Helm chart with the TIKV_URL defined above and with auth disabled so we can create the initial credentials:
+
+```bash title="Install SurrealDB Helm chart"
+helm repo add surrealdb https://helm.surrealdb.com
+$ helm repo update
+$ helm install \
+    --set surrealdb.path=$TIKV_URL \
+    --set surrealdb.auth=false \
+    --set ingress.enabled=true \
+    --set image.tag=latest \
+    surrealdb-tikv surrealdb/surrealdb
+```
+
+3. Wait until the Ingress resource has an `ADDRESS` assigned:
+
+```bash title="Wait for Ingress ADDRESS"
+kubectl get ingress surrealdb-tikv
+NAME             CLASS    HOSTS   ADDRESS         PORTS   AGE
+surrealdb-tikv   <none>   *       34.160.82.177   80      5m
+```
+
+4. Connect to the cluster and define the initial credentials:
+
+```bash title="Define initial credentials"
+$ export SURREALDB_URL=http://$(kubectl get ingress surrealdb-tikv -o json | jq -r .status.loadBalancer.ingress[0].ip)
+$ surreal sql -e $SURREALDB_URL
+> DEFINE USER root ON ROOT PASSWORD 'StrongSecretPassword!' ROLES OWNER;
+
+Verify you can connect to the database with the new credentials:
+$ surreal sql -u root -p 'StrongSecretPassword!' -e $SURREALDB_URL
+> INFO FOR ROOT
+[{ namespaces: { }, users: { root: "DEFINE USER root ON ROOT PASSHASH '...' ROLES OWNER" } }]
+```
+
+5. Now that the initial credentials have been created, enable authentication:
+
+```bash title="Update SurrealDB Helm chart"
+helm upgrade \
+    --set surrealdb.path=$TIKV_URL \
+    --set surrealdb.auth=true \
+    --set ingress.enabled=true \
+    --set image.tag=latest \
+    surrealdb-tikv surrealdb/surrealdb
+```
+
+## Cleanup
+Run the following commands to delete the Kubernetes resources and the GKE cluster:
+
+```bash title="Cleanup command"
+kubectl delete tidbcluster sdb-datastore
+helm uninstall surrealdb-tikv
+helm -n tidb-operator uninstall tidb-operator
+gcloud container clusters delete surrealdb-guide --region REGION --project PROJECT_ID
+```
