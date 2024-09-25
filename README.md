@@ -68,7 +68,9 @@ We have a list of [good first issues](https://github.com/surrealdb/docs.surreald
 
 ### Installation
 
-To get started with contributing to the SurrealDB documentation, first install the required packages using the following command.
+To get started with contributing to the SurrealDB documentation, first install the required packages using the following command. 
+
+> This project uses [Bun](https://bun.sh/) as our package manager. If you haven't installed Bun yet, then please see the [installation guide](https://bun.sh/docs/installation) for your operating system. It also requires Node.js v20.0.0 or higher.
 
 ```bash
 bun i 
@@ -89,3 +91,36 @@ The following command builds and generates static content into the `build` direc
 ```
 bun run build
 ```
+
+### File structure
+
+To contribute to the documentation, most of your changes will be made to the `src/content` directory. Each section of the documentation has its own subdirectory, and each page is an MDX file. 
+
+```md
+src/
+    assets/
+    components/
+    content/
+        doc-surrealdb/
+        doc-surrealql/
+        doc-surrealist/
+        ...
+    layouts/
+    pages/
+    styles/
+    util/ 
+```
+
+### Linting
+
+To ensure the documentation is consistent and follows our style guide, we use `make qc` to check for linting errors. You can also use `make qa` to automatically fix most of the errors. 
+
+Here are the commands for some of the common commands you may need to use.
+
+- `make install` - Install dependencies, first time or when they change
+- `make dev` - Run a development server
+- `make build` - Build the website
+- `make preview` - Preview a build you made
+- `make qc` - Check code quality (fmt + lint)
+- `make qa` - Apply safe code quality suggestions
+- `make qau` - Apply (un)safe code quality suggestions
