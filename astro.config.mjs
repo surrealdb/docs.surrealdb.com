@@ -9,6 +9,9 @@ import { defineConfig } from 'astro/config';
 import remarkCustomHeadingId from 'remark-custom-heading-id';
 import { rehypeCodemirrorPlugin } from './src/util/rehypeCodemirrorPlugin.mjs';
 import { rehypeNotesPlugin } from './src/util/rehypeNotesPlugin.mjs';
+import rehypeAutolinkHeadings from 'rehype-autolink-headings';
+import { autolinkConfig } from './src/util/rehypeHeadingsConfig';
+import rehypeSlug from 'rehype-slug';
 
 const deployDomain = process.env.DEPLOY_DOMAIN ?? 'surrealdb.com';
 const site = `https://${deployDomain}`;
@@ -20,7 +23,13 @@ export default defineConfig({
     outDir: './dist/docs',
     trailingSlash: 'never',
     integrations: [
-        mdx({ remarkPlugins: [remarkCustomHeadingId] }),
+        mdx({
+            remarkPlugins: [remarkCustomHeadingId],
+            rehypePlugins: [
+                rehypeSlug,
+                [rehypeAutolinkHeadings, autolinkConfig],
+            ],
+        }),
         solidJs({ devtools: true }),
         icon(),
         tailwind({
@@ -32,7 +41,13 @@ export default defineConfig({
         }),
     ],
     markdown: {
-        rehypePlugins: [rehypeCodemirrorPlugin, rehypeNotesPlugin],
+        remarkPlugins: [remarkCustomHeadingId],
+        rehypePlugins: [
+            rehypeCodemirrorPlugin,
+            rehypeNotesPlugin,
+            rehypeSlug,
+            [rehypeAutolinkHeadings, autolinkConfig],
+        ],
         syntaxHighlight: false,
     },
 });
