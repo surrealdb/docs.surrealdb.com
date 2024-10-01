@@ -1,5 +1,3 @@
-// biome-ignore lint/suspicious/noShadowRestrictedNames: no issue here
-import { toString } from 'hast-util-to-string';
 import { h } from 'hastscript';
 import type { Options } from 'rehype-autolink-headings';
 
