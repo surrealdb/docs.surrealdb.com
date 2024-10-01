@@ -6,12 +6,12 @@ import compress from 'astro-compress';
 import icon from 'astro-icon';
 // @ts-check
 import { defineConfig } from 'astro/config';
+import rehypeAutolinkHeadings from 'rehype-autolink-headings';
+import rehypeSlug from 'rehype-slug';
 import remarkCustomHeadingId from 'remark-custom-heading-id';
 import { rehypeCodemirrorPlugin } from './src/util/rehypeCodemirrorPlugin.mjs';
-import { rehypeNotesPlugin } from './src/util/rehypeNotesPlugin.mjs';
-import rehypeAutolinkHeadings from 'rehype-autolink-headings';
 import { autolinkConfig } from './src/util/rehypeHeadingsConfig';
-import rehypeSlug from 'rehype-slug';
+import { rehypeNotesPlugin } from './src/util/rehypeNotesPlugin.mjs';
 
 const deployDomain = process.env.DEPLOY_DOMAIN ?? 'surrealdb.com';
 const site = `https://${deployDomain}`;
