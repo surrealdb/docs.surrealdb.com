@@ -23,13 +23,7 @@ export default defineConfig({
     outDir: './dist/docs',
     trailingSlash: 'never',
     integrations: [
-        mdx({
-            remarkPlugins: [remarkCustomHeadingId],
-            rehypePlugins: [
-                rehypeSlug,
-                [rehypeAutolinkHeadings, autolinkConfig],
-            ],
-        }),
+        mdx(),
         solidJs({ devtools: true }),
         icon(),
         tailwind({

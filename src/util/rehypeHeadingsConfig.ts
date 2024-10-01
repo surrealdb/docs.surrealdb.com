@@ -23,14 +23,8 @@ const AnchorLinkIcon = h(
     )
 );
 
-const createSROnlyLabel = (text: string) =>
-    h('span', { 'is:raw': true, class: 'sr-only' }, text);
-
 export const autolinkConfig: Options = {
     properties: { class: 'anchor-link' },
     behavior: 'append',
-    content: (heading) => [
-        AnchorLinkIcon,
-        createSROnlyLabel(toString(heading)),
-    ],
+    content: (heading) => [AnchorLinkIcon],
 };
