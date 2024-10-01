@@ -24,17 +24,129 @@ import Label from "@components/shared/Label.astro";
 
 ### Install the SDK
 
-First, create a new project using cargo new and add the SurrealDB SDK to your dependencies:
+First, create a new project using `cargo new` and add the following dependencies:
+
+* `surrealdb`
+* `tokio`, in order to to use the database inside `fn main()`, likely with the `macros` and `rt-multi-thread` enabled so that the `#[tokio::main]` attribute can be used on top of `fn main()`.
+* `serde` with the `derive` feature enabled in order to use the `Serialize` and `Deserialize` attribute macros on top of your Rust data types to match those sent to and returned from the database.
+
+All together, that leads to the following commands to get started.
 
 ```sh
+cargo new my_project
+cd my_project
 cargo add surrealdb
+cargo add tokio --features macros,rt-multi-thread
+cargo add serde --features derive
 ```
 
-<br />
+### Start SurrealDB
+
+Before using `cargo run` to try out your code, make sure that the SurrealDB server is running with a command such as the following that will start an in-memory server with a single root user at the default address `127.0.0.1:8000`.
+
+```bash
+surreal start --user root --pass root
+```
+
+If you have Surrealist installed locally, you can also use the [`Start serving`](/docs/surrealist/concepts/local-database-serving) button to do the same.
 
 ### Connect to SurrealDB
 
-Open src/main.rs and replace everything in there with the following code to try out some basic operations using the SurrealDB SDK.
+Open `src/main.rs` and replace everything in there with the following code to try out some basic operations using the SurrealDB SDK.
+
+```rust
+use surrealdb::engine::remote::ws::Ws;
+use surrealdb::opt::auth::Root;
+use surrealdb::Surreal;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+
+    // Connect to the server
+    let db = Surreal::new::<Ws>("127.0.0.1:8000").await?;
+
+    // Signin as a namespace, database, or root user
+    db.signin(Root {
+        username: "root",
+        password: "root",
+    })
+    .await?;
+
+    // Select a specific namespace / database
+    db.use_ns("test").use_db("test").await?;
+
+    let some_queries = db.query("
+        RETURN 9; 
+        RETURN 10; 
+        SELECT * FROM { is: 'Nice database' };
+    ").await?;
+    dbg!(some_queries);
+    Ok(())
+}
+```
+
+Note that the `.query()` method is able to hold more than one statement, in this case three. The `results` field from the `Response` struct returned contains a field called `results` which holds the results of each statement. Note that each result has its own index. This will become useful when using the `.take()` method in the example to follow.
+
+```bash
+    results: {
+        0: (
+            Stats {
+                execution_time: Some(
+                    64.125µs,
+                ),
+            },
+            Ok(
+                Number(
+                    Int(
+                        9,
+                    ),
+                ),
+            ),
+        ),
+        1: (
+            Stats {
+                execution_time: Some(
+                    19.791µs,
+                ),
+            },
+            Ok(
+                Number(
+                    Int(
+                        10,
+                    ),
+                ),
+            ),
+        ),
+        2: (
+            Stats {
+                execution_time: Some(
+                    97.75µs,
+                ),
+            },
+            Ok(
+                Array(
+                    Array(
+                        [
+                            Object(
+                                Object(
+                                    {
+                                        "is": Strand(
+                                            Strand(
+                                                "Nice database",
+                                            ),
+                                        ),
+                                    },
+                                ),
+                            ),
+                        ],
+                    ),
+                ),
+            ),
+        ),
+    }
+```
+
+Now that we have the basics down, it is time to try out some other methods like [CREATE](/docs/surrealql/statements/create) and [UPDATE](/docs/surrealql/statements/update). The most ergonomic way to do this is to use a struct that implements `Serialize` for anything we want to pass in, and `Deserialize` for anything we have received from the database and want to turn back into a Rust type.
 
 ```rust
 use serde::{Deserialize, Serialize};
@@ -63,23 +175,19 @@ struct Responsibility {
 
 #[derive(Debug, Deserialize)]
 struct Record {
-    #[allow(dead_code)]
     id: Thing,
 }
 
 #[tokio::main]
 async fn main() -> surrealdb::Result<()> {
-    // Connect to the server
     let db = Surreal::new::<Ws>("127.0.0.1:8000").await?;
 
-    // Signin as a namespace, database, or root user
     db.signin(Root {
         username: "root",
         password: "root",
     })
     .await?;
 
-    // Select a specific namespace / database
     db.use_ns("test").use_db("test").await?;
 
     // Create a new person with a random id
@@ -97,40 +205,49 @@ async fn main() -> surrealdb::Result<()> {
     dbg!(created);
 
     // Update a person record with a specific id
-    let updated: Option<Record> = db
+    let _: Option<Record> = db
         .update(("person", "jaime"))
         .merge(Responsibility { marketing: true })
         .await?;
-    dbg!(updated);
 
     // Select all people records
     let people: Vec<Record> = db.select("person").await?;
     dbg!(people);
 
     // Perform a custom advanced query
-    let groups = db
+    let mut groups = db
         .query("SELECT marketing, count() FROM type::table($table) GROUP BY marketing")
         .bind(("table", "person"))
         .await?;
-    dbg!(groups);
+    // Use .take() to transform the first query result into
+    // anything that can be deserialized, in this case
+    // a Value
+    dbg!(groups.take::<Value>(0).unwrap());
 
     Ok(())
 }
 ```
 
-To run the example above, you will need to add the following additional dependencies:
-```sh
-cargo add serde --features derive
-cargo add tokio --features macros,rt-multi-thread
+### Other ways to see the results
+
+Besides printing out the results inside the Rust code above, you can sign in to the database using the CLI or Surrealist to view them.
+
+```bash
+surreal sql --user root --pass root --namespace test --database test --pretty
 ```
 
-Then make sure your SurrealDB server is running on 127.0.0.1:8000 and run your app from the command line with:
+Inside Surrealist, do the following:
 
-```sh
-cargo run
+* Hover over the current connection and click on "Change connection"
+* Hover over "New connection" and click the pencil icon
+* Change the "Method" to "root". Enter "root" for both username and password.
+* You will now be connected as the root user, and can define and then select the namespace and databases called "test".
+
+Here is the last query in the example above to get started:
+
+```surql
+SELECT marketing, count() FROM person GROUP BY marketing;
 ```
-
-<br />
 
 ### SDK methods
 
@@ -219,7 +336,7 @@ The Rust SDK comes with a number of built-in functions.
 
 ## `.init()` {#init}
 
-The DB static singleton ensures that a single database instance is available across very large or complicated applications. With the singleton, only one connection to the database is instantiated, and the database connection does not have to be shared across components or controllers.
+The DB static singleton in the examples below ensures that a single database instance is available across very large or complicated applications. With the singleton, only one connection to the database is instantiated, and the database connection does not have to be shared across components or controllers.
 
 ```rust title="Method Syntax"
 Surreal::init()
@@ -277,10 +394,20 @@ db.connect(endpoint)
 
 ### Example usage
 ```rust
-// Connect to a local endpoint
-DB.connect::<Ws>("127.0.0.1:8000").await?;
-// Connect to a remote endpoint
-DB.connect::<Wss>("cloud.surrealdb.com").await?;
+static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
+
+use std::sync::LazyLock;
+use surrealdb::engine::remote::ws::{Client, Ws, Wss};
+use surrealdb::Surreal;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    // Connect to a local endpoint
+    DB.connect::<Ws>("127.0.0.1:8000").await?;
+    // Connect to a remote endpoint
+    DB.connect::<Wss>("cloud.surrealdb.com").await?;
+    Ok(())
+}
 ```
 
 <br />
@@ -315,8 +442,16 @@ Surreal::new::<T>(endpoint)
 </table>
 
 ### Example usage
+
 ```rust
-let db = Surreal::new::<Ws>("127.0.0.1:8000").await?;
+use surrealdb::engine::remote::ws::Ws;
+use surrealdb::Surreal;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = Surreal::new::<Ws>("127.0.0.1:8000").await?;
+    Ok(())
+}
 ```
 
 <br />
@@ -361,14 +496,22 @@ db.use_ns(ns).use_db(db)
 
 ### Example usage
 ```rust
-db.use_ns("test").use_db("test").await?;
+use surrealdb::engine::remote::ws::Ws;
+use surrealdb::Surreal;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = Surreal::new::<Ws>("127.0.0.1:8000").await?;
+    db.use_ns("ns").use_db("db").await?;
+    Ok(())
+}
 ```
 
 <br />
 
 ## `.signup()` {#signup}
 
-Signs up to a specific authentication scope.
+Signs up as a record user (formerly known as a scope user) to a specific access method.
 
 ```rust title="Method Syntax"
 db.signup(credentials)
@@ -396,9 +539,20 @@ db.signup(credentials)
 </table>
 
 ### Example usage
+
 ```rust
+// Use the following statement to set up the access
+// 
+//  DEFINE ACCESS account ON DATABASE TYPE RECORD
+// 	SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+// 	SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+// 	DURATION FOR TOKEN 15m, FOR SESSION 12h
+// ;
+
 use serde::Serialize;
-use surrealdb::opt::auth::Scope;
+use surrealdb::engine::remote::ws::Ws;
+use surrealdb::opt::auth::Record;
+use surrealdb::Surreal;
 
 #[derive(Serialize)]
 struct Credentials<'a> {
@@ -406,18 +560,26 @@ struct Credentials<'a> {
     pass: &'a str,
 }
 
-let jwt = db.signup(Scope {
-    namespace: "test",
-    database: "test",
-    scope: "user",
-    params: Credentials {
-        email: "info@surrealdb.com",
-        pass: "123456",
-    },
-}).await?;
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = Surreal::new::<Ws>("127.0.0.1:8000").await?;
+    let jwt = db
+        .signup(Record {
+            namespace: "test",
+            database: "test",
+            access: "account",
+            params: Credentials {
+                email: "info@surrealdb.com",
+                pass: "123456",
+            },
+        })
+        .await?;
 
-// ⚠️: It is important to note that the token should be handled securely and protected from unauthorized access.
-let token = jwt.as_insecure_token();
+    // ⚠️: It is important to note that the token should be handled securely and protected from unauthorized access.
+    let token = jwt.as_insecure_token();
+    dbg!(token);
+    Ok(())
+}
 ```
 
 <br />
@@ -452,9 +614,20 @@ db.signin(credentials)
 </table>
 
 ### Example usage
+
 ```rust
+// Use the following statement to set up the access
+//
+// DEFINE ACCESS account ON DATABASE TYPE RECORD
+// 	SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+// 	SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+// 	DURATION FOR TOKEN 15m, FOR SESSION 12h
+// ;
+
 use serde::Serialize;
-use surrealdb::opt::auth::Scope;
+use surrealdb::engine::remote::ws::Ws;
+use surrealdb::opt::auth::Record;
+use surrealdb::Surreal;
 
 #[derive(Serialize)]
 struct Credentials<'a> {
@@ -462,18 +635,26 @@ struct Credentials<'a> {
     pass: &'a str,
 }
 
-let jwt = db.signin(Scope {
-    namespace: "test",
-    database: "test",
-    scope: "user",
-    params: Credentials {
-        email: "info@surrealdb.com",
-        pass: "123456",
-    },
-}).await?;
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = Surreal::new::<Ws>("127.0.0.1:8000").await?;
+    let jwt = db
+        .signin(Record {
+            namespace: "test",
+            database: "test",
+            access: "account",
+            params: Credentials {
+                email: "info@surrealdb.com",
+                pass: "123456",
+            },
+        })
+        .await?;
 
-// ⚠️: It is important to note that the token should be handled securely and protected from unauthorized access.
-let token = jwt.as_insecure_token();
+    // ⚠️: It is important to note that the token should be handled securely and protected from unauthorized access.
+    let token = jwt.as_insecure_token();
+    dbg!(token);
+    Ok(())
+}
 ```
 
 <br />
@@ -483,7 +664,7 @@ let token = jwt.as_insecure_token();
 Invalidates the authentication for the current connection.
 
 ```rust title="Method Syntax"
-db.invalidate(credentials)
+db.invalidate()
 ```
 
 ### Example usage
@@ -584,7 +765,7 @@ db.query("SELECT * FROM person WHERE name.first = $name.first").await?;
 
 ## `.query()` {#query}
 
-Runs a set of SurrealQL statements against the database.
+Runs one or more SurrealQL statements against the database.
 
 ```rust title="Method Syntax"
 db.query(sql).bind(vars)
