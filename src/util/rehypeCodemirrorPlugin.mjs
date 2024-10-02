@@ -6,6 +6,8 @@ import { parser as javascriptParser } from '@lezer/javascript';
 import { parser as jsonParser } from '@lezer/json';
 import { parser as pythonParser } from '@lezer/python';
 import { parser as rustParser } from '@lezer/rust';
+import { parser as yamlParser } from '@lezer/yaml';
+import { parser as bashParser } from '@fig/lezer-bash';
 import { parser as _surrealqlParser } from '@surrealdb/lezer';
 import { toText } from 'hast-util-to-text';
 import { parser as tomlParser } from 'lezer-toml';
@@ -20,6 +22,7 @@ const surrealqlParser = _surrealqlParser.configure({
 });
 
 const parser = {
+    bash: bashParser,
     rs: rustParser,
     rust: rustParser,
     js: javascriptParser,
@@ -36,7 +39,10 @@ const parser = {
     py: pythonParser,
     python: pythonParser,
     toml: tomlParser,
+    sh: bashParser,
     syntax: _surrealqlParser.configure({ top: 'Syntax' }),
+    yaml: yamlParser,
+    yml: yamlParser,
 };
 
 const classHighlighter = tagHighlighter([
