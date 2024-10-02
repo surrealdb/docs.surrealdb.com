@@ -18,7 +18,7 @@
 
 <p align="center">The documentation for <a href="https://github.com/surrealdb/surrealdb" target="_blank">SurrealDB</a>, built using <a href="https://astro.build/" target="_blank">Astro</a>.</p>
 
-<p align="center">If you want to contribute, then please read the <a href="https://github.com/surrealdb/awesome-surreal/blob/main/CONTRIBUTING.md" target="_blank">contributing guidelines</a>.</p>
+<p align="center">If you want to contribute, then please read the <a href="https://github.com/surrealdb/docs.surrealdb.com/blob/main/CONTRIBUTING.md" target="_blank">contributing guidelines</a>.</p>
 
 <br>
 
