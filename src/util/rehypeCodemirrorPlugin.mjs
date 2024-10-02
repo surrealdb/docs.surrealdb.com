@@ -192,7 +192,7 @@ class Processor {
             this.main.push({
                 type: 'element',
                 tagName: 'div',
-                properties: { className: ['highlight'] },
+                properties: { className: ['code-highlight'] },
                 children: this.line,
             });
         } else if (this.mode === 'highlight-start') {
@@ -212,7 +212,7 @@ class Processor {
             this.main.push({
                 type: 'element',
                 tagName: 'div',
-                properties: { className: ['highlight'] },
+                properties: { className: ['code-highlight'] },
                 children: this.block,
             });
         }
