@@ -5,6 +5,7 @@ import { parser as goParser } from '@lezer/go';
 import { highlightCode, tagHighlighter, tags } from '@lezer/highlight';
 import { parser as javascriptParser } from '@lezer/javascript';
 import { parser as jsonParser } from '@lezer/json';
+import { parser as phpParser } from '@lezer/php';
 import { parser as pythonParser } from '@lezer/python';
 import { parser as rustParser } from '@lezer/rust';
 import { parser as yamlParser } from '@lezer/yaml';
@@ -36,6 +37,7 @@ const parser = {
     json: jsonParser,
     sql: StandardSQL.parser,
     go: goParser,
+    php: phpParser,
     py: pythonParser,
     python: pythonParser,
     toml: tomlParser,
