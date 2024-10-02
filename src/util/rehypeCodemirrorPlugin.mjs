@@ -130,6 +130,7 @@ export function rehypeCodemirrorPlugin() {
 }
 
 class Processor {
+    lines = 0;
     main = [];
     block = [];
     line = [];
@@ -174,6 +175,7 @@ class Processor {
     }
 
     emit_break() {
+        this.lines++;
         this.line.push({
             type: 'text',
             value: '\n',
@@ -224,13 +226,15 @@ class Processor {
         this.commit_line();
         this.commit_block();
 
-        return [
-            {
-                type: 'element',
-                tagName: 'div',
-                children: this.main,
-            },
-        ];
+        return this.lines > 1
+            ? [
+                  {
+                      type: 'element',
+                      tagName: 'div',
+                      children: this.main,
+                  },
+              ]
+            : this.main;
     }
 }
 
