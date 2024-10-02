@@ -1,4 +1,5 @@
 import { StandardSQL } from '@codemirror/lang-sql';
+import { parser as bashParser } from '@fig/lezer-bash';
 import { parseMixed } from '@lezer/common';
 import { parser as goParser } from '@lezer/go';
 import { highlightCode, tagHighlighter, tags } from '@lezer/highlight';
@@ -7,7 +8,6 @@ import { parser as jsonParser } from '@lezer/json';
 import { parser as pythonParser } from '@lezer/python';
 import { parser as rustParser } from '@lezer/rust';
 import { parser as yamlParser } from '@lezer/yaml';
-import { parser as bashParser } from '@fig/lezer-bash';
 import { parser as _surrealqlParser } from '@surrealdb/lezer';
 import { toText } from 'hast-util-to-text';
 import { parser as tomlParser } from 'lezer-toml';
