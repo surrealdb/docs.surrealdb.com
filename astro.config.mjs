@@ -10,9 +10,9 @@ import rehypeAutolinkHeadings from 'rehype-autolink-headings';
 import rehypeSlug from 'rehype-slug';
 import remarkCustomHeadingId from 'remark-custom-heading-id';
 import { rehypeCodemirrorPlugin } from './src/util/rehypeCodemirrorPlugin.mjs';
+import { rehypeCopyCodePlugin } from './src/util/rehypeCopyCodePlugin.mjs';
 import { autolinkConfig } from './src/util/rehypeHeadingsConfig';
 import { rehypeNotesPlugin } from './src/util/rehypeNotesPlugin.mjs';
-import { rehypeCopyCodePlugin } from './src/util/rehypeCopyCodePlugin.mjs';
 
 const deployDomain = process.env.DEPLOY_DOMAIN ?? 'surrealdb.com';
 const site = `https://${deployDomain}`;
