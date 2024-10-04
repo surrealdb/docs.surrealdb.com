@@ -32,33 +32,130 @@ db.query(query)
                 Specifies the SurrealQL statements.
             </td>
         </tr>
-        <tr>
-            <td colspan="2" scope="row" data-label="Argument">
-                <code>vars</code>
-            </td>
-            <td colspan="2" scope="row" data-label="Type">
-                <code>query</code>
-            </td>
-            <td colspan="2" scope="row" data-label="Description">
-                Assigns variables which can be used in the query.
-            </td>
-        </tr>
     </tbody>
 </table>
 
 ### Example usage
+
+The `.query()` method serves as a default way to pass queries into the Rust SDK. The simplest usage of this method is by passing in a `&str` and returning a [`Response`](https://docs.rs/surrealdb/latest/surrealdb/struct.Response.html).
+
 ```rust
-// Run some queries
+use surrealdb::engine::any::connect;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("ws://localhost:8000").await?;
+
+    db.use_ns("ns").use_db("db").await?;
+
+    let query = r#"
+    LET $data = ["J. Jonah Jameson", "James Earl Jones"];
+    RETURN $data.map(|$name| {
+    LET $names = $name.split(' ');
+    {
+       first_name:  $names[0],
+       middle_name: $names[1],
+       last_name:   $names[2]
+    }
+    });"#;
+
+    let result = db.query(query).await?;
+    println!("Number of statements: {}", result.num_statements());
+    dbg!(result);
+    Ok(())
+}
+```
+
+The `.take()` method can be used to pull out one of the responses into a deserialized format. Note that in the next example the `LET` statement is the first statement received by the database, and thus `.take(1)` is used to grab the output of the second statement to deserialize into a `Person` struct.
+
+```rust
+use serde::Deserialize;
+use surrealdb::engine::any::connect;
+
+#[derive(Debug, Deserialize)]
+struct Person {
+    first_name: String,
+    middle_name: String,
+    last_name: String,
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("ws://localhost:8000").await?;
+
+    db.use_ns("ns").use_db("db").await?;
+
+    let query = r#"
+    LET $data = ["J. Jonah Jameson", "James Earl Jones"];
+    RETURN $data.map(|$name| {
+    LET $names = $name.split(' ');
+    {
+       first_name:  $names[0],
+       middle_name: $names[1],
+       last_name:   $names[2]
+    }
+    });"#;
+
+    let mut result = db.query(query).await?;
+    let people: Vec<Person> = result.take(1)?;
+    dbg!(people);
+    Ok(())
+}
+```
+
+### Security when using the .query() method
+
+As the `.query()` method can be used to pass any SurrealQL query on to the database, it is an easy go-to when using complex queries. However, be sure to keep [the following best practices in mind](/docs/surrealdb/reference-guide/security-best-practices#query-safety) when doing so.
+
+<blockquote>
+When using SurrealDB as a traditional backend database, your application will usually build SurrealQL queries that may need to contain some untrusted input, such as that provided by the users of your application. To do so, SurrealDB offers bind as a method to query, which should always be used when including untrusted input into queries. Otherwise, SurrealDB will be unable to separate the actual query syntax from the user input, resulting in the well-known SQL injection vulnerabilities. This practice is known as prepared statements or parameterised queries.
+</blockquote>
+
+Thus, instead of using user input to directly construct a string:
+
+```rust
+let bad_sql = format!("
+CREATE {user_input};
+SELECT * FROM {user_input};");
+```
+
+You can insert a parameter using SurrealQL's `$` parameter syntax,
+
+```rust
 let sql = "
     CREATE person;
     SELECT * FROM type::table($table);
 ";
-let mut result = db
-    .query(sql)
-    .bind(("table", "person"))
-    .await?;
-// Get the first result from the first query
-let created: Option<Person> = result.take(0)?;
-// Get all of the results from the second query
-let people: Vec<Person> = result.take(1)?;
+```
+
+And then apply the `.bind()` method to pass the parameter in.
+
+```rust
+use serde::Deserialize;
+use surrealdb::{engine::any::connect, sql::Thing};
+
+#[derive(Debug, Deserialize)]
+struct Person {
+    id: Thing
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("ws://localhost:8000").await?;
+
+    db.use_ns("ns").use_db("db").await?;
+
+    let sql = "
+    CREATE person;
+    SELECT * FROM type::table($table);
+";
+    let mut result = db.query(sql).bind(("table", "person")).await?;
+    // Get the first result from the first query
+    let created: Option<Person> = result.take(0)?;
+    dbg!(created);
+    // Get all of the results from the second query
+    let people: Vec<Person> = result.take(1)?;
+    dbg!(people);
+    Ok(())
+}
 ```
