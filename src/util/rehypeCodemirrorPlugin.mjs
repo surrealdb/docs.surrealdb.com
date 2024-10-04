@@ -1,11 +1,14 @@
 import { StandardSQL } from '@codemirror/lang-sql';
+import { parser as bashParser } from '@fig/lezer-bash';
 import { parseMixed } from '@lezer/common';
 import { parser as goParser } from '@lezer/go';
 import { highlightCode, tagHighlighter, tags } from '@lezer/highlight';
 import { parser as javascriptParser } from '@lezer/javascript';
 import { parser as jsonParser } from '@lezer/json';
+import { parser as phpParser } from '@lezer/php';
 import { parser as pythonParser } from '@lezer/python';
 import { parser as rustParser } from '@lezer/rust';
+import { parser as yamlParser } from '@lezer/yaml';
 import { parser as _surrealqlParser } from '@surrealdb/lezer';
 import { toText } from 'hast-util-to-text';
 import { parser as tomlParser } from 'lezer-toml';
@@ -20,6 +23,7 @@ const surrealqlParser = _surrealqlParser.configure({
 });
 
 const parser = {
+    bash: bashParser,
     rs: rustParser,
     rust: rustParser,
     js: javascriptParser,
@@ -33,10 +37,14 @@ const parser = {
     json: jsonParser,
     sql: StandardSQL.parser,
     go: goParser,
+    php: phpParser,
     py: pythonParser,
     python: pythonParser,
     toml: tomlParser,
+    sh: bashParser,
     syntax: _surrealqlParser.configure({ top: 'Syntax' }),
+    yaml: yamlParser,
+    yml: yamlParser,
 };
 
 const classHighlighter = tagHighlighter([
@@ -121,50 +129,134 @@ export function rehypeCodemirrorPlugin() {
     };
 }
 
-function createHighlightedCode(code, lang) {
-    const children = [];
+class Processor {
+    lines = 0;
+    main = [];
+    block = [];
+    line = [];
 
-    function emit(text, classes) {
+    // undefined | 'highlight-next-line' | 'highlight-line' | 'highlight-start' | 'highlight-block' | 'highlight-end'
+    mode = undefined;
+
+    process_instruction(text) {
+        if (this.line.length === 0) {
+            switch (text.trim()) {
+                case '// highlight-next-line':
+                    this.mode = 'highlight-next-line';
+                    break;
+                case '// highlight-start':
+                    this.mode = 'highlight-start';
+                    break;
+                case '// highlight-end':
+                    this.mode = 'highlight-end';
+                    break;
+            }
+        }
+    }
+
+    emit_node(text, classes) {
+        this.process_instruction(text);
+
         const node = {
             type: 'text',
             value: text,
         };
 
         if (classes) {
-            children.push({
+            this.line.push({
                 type: 'element',
                 tagName: 'span',
                 properties: { className: classes },
                 children: [node],
             });
         } else {
-            children.push(node);
+            this.line.push(node);
         }
     }
 
-    function emitBreak() {
-        children.push({
+    emit_break() {
+        this.lines++;
+        this.line.push({
             type: 'text',
             value: '\n',
         });
+
+        this.commit_line();
     }
 
+    commit_line() {
+        if (!this.mode) {
+            this.main.push(...this.line);
+        } else if (this.mode === 'highlight-next-line') {
+            this.mode = 'highlight-line';
+        } else if (this.mode === 'highlight-line') {
+            this.mode = undefined;
+            this.main.push({
+                type: 'element',
+                tagName: 'div',
+                properties: { className: ['code-highlight'] },
+                children: this.line,
+            });
+        } else if (this.mode === 'highlight-start') {
+            this.mode = 'highlight-block';
+        } else if (this.mode === 'highlight-block') {
+            this.block.push(...this.line);
+        } else if (this.mode === 'highlight-end') {
+            this.commit_block();
+        }
+
+        this.line = [];
+    }
+
+    commit_block() {
+        if (this.mode === 'highlight-end') {
+            this.mode = undefined;
+            this.main.push({
+                type: 'element',
+                tagName: 'div',
+                properties: { className: ['code-highlight'] },
+                children: this.block,
+            });
+        }
+
+        this.block = [];
+    }
+
+    finalize() {
+        this.commit_line();
+        this.commit_block();
+
+        return this.lines > 1
+            ? [
+                  {
+                      type: 'element',
+                      tagName: 'div',
+                      children: this.main,
+                  },
+              ]
+            : this.main;
+    }
+}
+
+function createHighlightedCode(code, lang) {
+    const pro = new Processor();
+
     if (!parser[lang]) {
-        children.push({
-            type: 'text',
-            value: code,
-        });
+        for (const line of code.split('\n')) {
+            pro.emit_node(line);
+            pro.emit_break();
+        }
     } else {
         highlightCode(
             code,
             parser[lang].parse(code),
             classHighlighter,
-            emit,
-            emitBreak
+            (text, classes) => pro.emit_node(text, classes),
+            () => pro.emit_break()
         );
     }
 
-    return children;
+    return pro.finalize();
 }
 
 function language(node) {
