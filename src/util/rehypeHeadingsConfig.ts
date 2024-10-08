@@ -24,5 +24,5 @@ const AnchorLinkIcon = h(
 export const autolinkConfig: Options = {
     properties: { class: 'anchor-link' },
     behavior: 'append',
-    content: (heading) => [AnchorLinkIcon],
+    content: () => [AnchorLinkIcon],
 };
