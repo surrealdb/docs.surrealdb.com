@@ -166,5 +166,9 @@ export const metadata = {
             light: LightSurrealDB,
             dark: DarkSurrealDB,
         },
+        repo: {
+            title: 'surrealdb/examples',
+            href: 'https://github.com/surrealdb/examples',
+        },
     },
 } satisfies Metadata;
