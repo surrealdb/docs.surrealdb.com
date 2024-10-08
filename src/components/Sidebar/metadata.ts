@@ -18,8 +18,8 @@ import DarkPython from '@img/python-icon.png';
 import DarkRust from '@img/rust-icon.png';
 
 import LightSurrealML from '@img/light/doc-surrealml.png';
-import LightSurrealDB from '@img/light/surreal.png';
 import LightSurrealQL from '@img/light/ql.png';
+import LightSurrealDB from '@img/light/surreal.png';
 import LightSurrealist from '@img/light/surreal.png';
 
 import DarkSurrealDB from '@img/doc-surrealdb.png';
@@ -170,5 +170,5 @@ export const metadata = {
             title: 'surrealdb/surrealdb',
             href: 'https://github.com/surrealdb/surrealdb',
         },
-    }
+    },
 } satisfies Metadata;
