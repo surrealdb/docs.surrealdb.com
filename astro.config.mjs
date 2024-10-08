@@ -14,6 +14,8 @@ import { rehypeCopyCodePlugin } from './src/util/rehypeCopyCodePlugin.mjs';
 import { autolinkConfig } from './src/util/rehypeHeadingsConfig';
 import { rehypeNotesPlugin } from './src/util/rehypeNotesPlugin.mjs';
 
+import sitemap from '@astrojs/sitemap';
+
 const deployDomain = process.env.DEPLOY_DOMAIN ?? 'surrealdb.com';
 const site = `https://${deployDomain}`;
 
@@ -23,18 +25,11 @@ export default defineConfig({
     base: '/docs',
     outDir: './dist/docs',
     trailingSlash: 'never',
-    integrations: [
-        mdx(),
-        solidJs({ devtools: true }),
-        icon(),
-        tailwind({
-            nesting: true,
-        }),
-        partytown(),
-        compress({
-            Image: false,
-        }),
-    ],
+    integrations: [mdx(), solidJs({ devtools: true }), icon(), tailwind({
+        nesting: true,
+    }), partytown(), compress({
+        Image: false,
+    }), sitemap()],
     markdown: {
         remarkPlugins: [remarkCustomHeadingId],
         rehypePlugins: [
