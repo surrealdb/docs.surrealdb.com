@@ -25,11 +25,19 @@ export default defineConfig({
     base: '/docs',
     outDir: './dist/docs',
     trailingSlash: 'never',
-    integrations: [mdx(), solidJs({ devtools: true }), icon(), tailwind({
-        nesting: true,
-    }), partytown(), compress({
-        Image: false,
-    }), sitemap()],
+    integrations: [
+        mdx(),
+        solidJs({ devtools: true }),
+        icon(),
+        tailwind({
+            nesting: true,
+        }),
+        partytown(),
+        compress({
+            Image: false,
+        }),
+        sitemap(),
+    ],
     markdown: {
         remarkPlugins: [remarkCustomHeadingId],
         rehypePlugins: [

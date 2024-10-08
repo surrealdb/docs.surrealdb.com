@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseStringPromise } from 'xml2js';
+import { cwd } from 'node:process';
 import { parse as parseHTML } from 'node-html-parser';
 import Surreal, { RecordId, surql } from 'surrealdb';
-import { cwd } from 'node:process';
+import { parseStringPromise } from 'xml2js';
 
 export async function onSuccess() {
     // const isLocalBuild = process.env.DEPLOY_URL == 'https://0--surrealdb-docs.netlify.app';
