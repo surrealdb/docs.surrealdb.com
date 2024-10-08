@@ -134,15 +134,11 @@ export async function onSuccess() {
     if (applyIndexes) {
         console.log('[CW] Removing stale pages');
         await db.query(
-            /* surql */ `
+            surql`
                 DELETE page WHERE
-                    hostname = $hostname AND
-                    (date IS NONE OR date < $jobDate)
-            `,
-            {
-                jobDate,
-                hostname: hostname,
-            }
+                    hostname = ${hostname} AND
+                    (date IS NONE OR date < ${jobDate})
+            `
         );
     } else {
         console.log('[CW] Skipping stale page removal, not on prod');
