@@ -6,10 +6,8 @@ import Surreal, { RecordId, surql } from 'surrealdb';
 import { parseStringPromise } from 'xml2js';
 
 export async function onSuccess() {
-    // const isLocalBuild = process.env.DEPLOY_URL == 'https://0--surrealdb-docs.netlify.app';
     const applyIndexes =
-        process.env.DEPLOY_PRIME_URL ===
-        'https://main--surrealdb-docs.netlify.app';
+        process.env.DEPLOY_URL !== 'https://0--surrealdb-docs.netlify.app';
     const jobDate = new Date();
     const db = new Surreal();
 
