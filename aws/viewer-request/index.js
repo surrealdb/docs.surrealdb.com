@@ -118,7 +118,6 @@ function handler(event) {
 		case '/docs/surrealdb/tutorials/overview':
 			return redirect('https://surrealdb.com/docs/tutorials');
 		case '/docs/surrealdb/tutorials':
-		case '/docs/surrealdb/tutorials/':
 			return redirect('https://surrealdb.com/docs/tutorials');
 		case '/docs/installation/overview':
 		case '/docs/surrealdb/installation/overview':
