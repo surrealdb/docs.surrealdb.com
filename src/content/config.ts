@@ -18,6 +18,7 @@ export const docs = [
     'surrealist',
     'surrealml',
     'surrealql',
+    'tutorials',
 ] as const;
 export const sdks = [
     'dotnet',
