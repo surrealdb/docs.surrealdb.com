@@ -212,8 +212,9 @@ function handler(event) {
 		case path.startsWith('/docs/how-to/'):
 			return redirect(`https://surrealdb.com/docs/tutorials/${path.slice(13)}`);
 		case path.startsWith('/docs/surrealdb/how-to/'):
-		case path.startsWith('/docs/surrealdb/tutorials/'):
 			return redirect(`https://surrealdb.com/docs/tutorials/${path.slice(23)}`);
+		case path.startsWith('/docs/surrealdb/tutorials/'):
+			return redirect(`https://surrealdb.com/docs/tutorials/${path.slice(26)}`);
 		// Redirect SurrealQL subpaths to Querying
 		case path.startsWith('/docs/surrealdb/surrealql/'):
 			return redirect(`https://surrealdb.com/docs/surrealql/${path.slice(26)}`);
