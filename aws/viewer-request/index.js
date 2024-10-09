@@ -113,10 +113,13 @@ function handler(event) {
 			return redirect('https://surrealdb.com/docs/surrealdb/faqs');
 		case '/docs/how-to/overview':
 		case '/docs/surrealdb/how-to/overview':
-			return redirect('https://surrealdb.com/docs/surrealdb/tutorials');
+			return redirect('https://surrealdb.com/docs/tutorials');
 		case '/docs/tutorials/overview':
 		case '/docs/surrealdb/tutorials/overview':
-			return redirect('https://surrealdb.com/docs/surrealdb/tutorials');
+			return redirect('https://surrealdb.com/docs/tutorials');
+		case '/docs/surrealdb/tutorials':
+		case '/docs/surrealdb/tutorials/':
+			return redirect('https://surrealdb.com/docs/tutorials');
 		case '/docs/installation/overview':
 		case '/docs/surrealdb/installation/overview':
 			return redirect('https://surrealdb.com/docs/surrealdb/installation');
@@ -208,9 +211,10 @@ function handler(event) {
 			return redirect(`https://surrealdb.com/docs/sdk/${path.slice(33)}`);
 		// Redirect how-to pages to tutorials
 		case path.startsWith('/docs/how-to/'):
-			return redirect(`https://surrealdb.com/docs/surrealdb/tutorials/${path.slice(13)}`);
+			return redirect(`https://surrealdb.com/docs/tutorials/${path.slice(13)}`);
 		case path.startsWith('/docs/surrealdb/how-to/'):
-			return redirect(`https://surrealdb.com/docs/surrealdb/tutorials/${path.slice(23)}`);
+		case path.startsWith('/docs/surrealdb/tutorials/'):
+			return redirect(`https://surrealdb.com/docs/tutorials/${path.slice(23)}`);
 		// Redirect SurrealQL subpaths to Querying
 		case path.startsWith('/docs/surrealdb/surrealql/'):
 			return redirect(`https://surrealdb.com/docs/surrealql/${path.slice(26)}`);
