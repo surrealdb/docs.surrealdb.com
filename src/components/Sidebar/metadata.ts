@@ -18,14 +18,14 @@ import DarkPython from '@img/python-icon.png';
 import DarkRust from '@img/rust-icon.png';
 
 import LightSurrealML from '@img/light/doc-surrealml.png';
+import LightSurrealQL from '@img/light/ql.png';
 import LightSurrealDB from '@img/light/surreal.png';
-import LightSurrealQL from '@img/light/surreal.png';
 import LightSurrealist from '@img/light/surreal.png';
 
 import DarkSurrealDB from '@img/doc-surrealdb.png';
 import DarkSurrealist from '@img/doc-surrealist.png';
 import DarkSurrealML from '@img/doc-surrealml.png';
-import DarkSurrealQL from '@img/surreal-icon.png';
+import DarkSurrealQL from '@img/ql-icon.png';
 
 type Metadata = {
     [K in CollectionKey]?: {
@@ -158,6 +158,17 @@ export const metadata = {
         repo: {
             title: 'surrealdb/surrealdb',
             href: 'https://github.com/surrealdb/surrealdb',
+        },
+    },
+    'doc-tutorials': {
+        title: 'Tutorials',
+        icon: {
+            light: LightSurrealDB,
+            dark: DarkSurrealDB,
+        },
+        repo: {
+            title: 'surrealdb/examples',
+            href: 'https://github.com/surrealdb/examples',
         },
     },
 } satisfies Metadata;
