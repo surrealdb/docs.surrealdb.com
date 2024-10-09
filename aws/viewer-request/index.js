@@ -228,6 +228,7 @@ function handler(event) {
 				case 'surrealism':
 				case 'surrealql':
 				case 'sdk':
+				case 'tutorials':
 				case undefined:
 					break;
 				default:
