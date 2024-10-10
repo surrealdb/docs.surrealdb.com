@@ -17,7 +17,7 @@ function handler(event) {
 
 	const request = event.request;
 	const host = request.headers.host.value;
-	const path = request.uri.toLowerCase();
+	let path = request.uri.toLowerCase();
 
 	// Only use the base domain, not subdomains
 	if (host !== 'surrealdb.com') {
@@ -36,7 +36,7 @@ function handler(event) {
 	}
 
 	// Display any documentation assets and image files
-	if (path.startsWith('/docs/assets/') || path.startsWith('/docs/img/')) {
+	if (path.startsWith('/docs/_astro/') || path.startsWith('/docs/~partytown/')) {
 		return request;
 	}
 
@@ -113,10 +113,12 @@ function handler(event) {
 			return redirect('https://surrealdb.com/docs/surrealdb/faqs');
 		case '/docs/how-to/overview':
 		case '/docs/surrealdb/how-to/overview':
-			return redirect('https://surrealdb.com/docs/surrealdb/tutorials');
+			return redirect('https://surrealdb.com/docs/tutorials');
 		case '/docs/tutorials/overview':
 		case '/docs/surrealdb/tutorials/overview':
-			return redirect('https://surrealdb.com/docs/surrealdb/tutorials');
+			return redirect('https://surrealdb.com/docs/tutorials');
+		case '/docs/surrealdb/tutorials':
+			return redirect('https://surrealdb.com/docs/tutorials');
 		case '/docs/installation/overview':
 		case '/docs/surrealdb/installation/overview':
 			return redirect('https://surrealdb.com/docs/surrealdb/installation');
@@ -144,6 +146,8 @@ function handler(event) {
 		case '/docs/surrealql/statements/overview':
 		case '/docs/surrealdb/surrealql/statements/overview':
 			return redirect('https://surrealdb.com/docs/surrealdb/surrealql/statements');
+		case '/docs/surrealdb/surrealql':
+			return redirect('https://surrealdb.com/docs/surrealql');
 		case '/docs/surrealql/statements/define/overview':
 		case '/docs/surrealdb/surrealql/statements/define/overview':
 			return redirect('https://surrealdb.com/docs/surrealdb/surrealql/statements/define');
@@ -206,9 +210,14 @@ function handler(event) {
 			return redirect(`https://surrealdb.com/docs/sdk/${path.slice(33)}`);
 		// Redirect how-to pages to tutorials
 		case path.startsWith('/docs/how-to/'):
-			return redirect(`https://surrealdb.com/docs/surrealdb/tutorials/${path.slice(13)}`);
+			return redirect(`https://surrealdb.com/docs/tutorials/${path.slice(13)}`);
 		case path.startsWith('/docs/surrealdb/how-to/'):
-			return redirect(`https://surrealdb.com/docs/surrealdb/tutorials/${path.slice(23)}`);
+			return redirect(`https://surrealdb.com/docs/tutorials/${path.slice(23)}`);
+		case path.startsWith('/docs/surrealdb/tutorials/'):
+			return redirect(`https://surrealdb.com/docs/tutorials/${path.slice(26)}`);
+		// Redirect SurrealQL subpaths to Querying
+		case path.startsWith('/docs/surrealdb/surrealql/'):
+			return redirect(`https://surrealdb.com/docs/surrealql/${path.slice(26)}`);
 		// Redirect all other docs pages
 		case path.startsWith('/docs/'): {
 			const splitted = path.split('/').slice(1);
@@ -217,7 +226,9 @@ function handler(event) {
 				case 'surrealml':
 				case 'surrealist':
 				case 'surrealism':
+				case 'surrealql':
 				case 'sdk':
+				case 'tutorials':
 				case undefined:
 					break;
 				default:
@@ -226,7 +237,7 @@ function handler(event) {
 		}
 	}
 
-	request.uri = request.uri.concat('.html');
+	request.uri = request.uri.concat('/index.html');
 
 	return request;
 
