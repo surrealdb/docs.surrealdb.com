@@ -58,6 +58,14 @@
 
 Visit [surrealdb.com/docs](https://surrealdb.com/docs/surrealdb/) to get started with SurrealDB. 
 
+
+## Learn SurrealDB
+
+- SurrealDB University: https://surrealdb.com/learn/fundamentals
+- Aeon's Surreal Renaissance (Interative book): https://surrealdb.com/learn/book
+- Documentation: https://surrealdb.com/docs/surrealdb
+
+
 ## Contributing to the documentation
 
 Please see our [contributing guidelines](/CONTRIBUTING.md).
@@ -66,7 +74,7 @@ Please see our [contributing guidelines](/CONTRIBUTING.md).
 
 We have a list of [good first issues](https://github.com/surrealdb/docs.surrealdb.com/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22) that contain bugs that have a relatively limited scope. This is a great place to get started, gain experience, and get familiar with our contribution process.
 
-### Installation
+## Installation
 
 To get started with contributing to the SurrealDB documentation, first install the required packages using the following command. 
 
@@ -76,7 +84,7 @@ To get started with contributing to the SurrealDB documentation, first install t
 bun i 
 ```
 
-### Development
+## Development
 
 The following command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
 
@@ -84,7 +92,7 @@ The following command starts a local development server and opens up a browser w
 bun dev
 ```
 
-### Building
+## Building
 
 The following command builds and generates static content into the `build` directory, and can then be served using any static contents hosting service.
 
@@ -92,7 +100,7 @@ The following command builds and generates static content into the `build` direc
 bun run build
 ```
 
-### File structure
+## File structure
 
 To contribute to the documentation, most of your changes will be made to the `src/content` directory. Each section of the documentation has its own subdirectory, and each page is an MDX file. 
 
@@ -111,7 +119,7 @@ src/
     util/ 
 ```
 
-### Linting
+## Linting
 
 To ensure the documentation is consistent and follows our style guide, we use `make qc` to check for linting errors. You can also use `make qa` to automatically fix most of the errors. 
 
