@@ -63,7 +63,7 @@ Visit [surrealdb.com/docs](https://surrealdb.com/docs/surrealdb/) to get started
 
 - SurrealDB University: https://surrealdb.com/learn/fundamentals
 - Aeon's Surreal Renaissance (Interative book): https://surrealdb.com/learn/book
-- Documentation: https://surrealdb.com/docs/surrealdb
+- Documentation: https://surrealdb.com/docs
 
 
 ## Contributing to the documentation
