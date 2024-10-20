@@ -190,23 +190,3 @@ export function getTitle(
 ): string {
     return meta.sidebar_label ?? meta.title ?? titleFromSlug(slug);
 }
-
-export function isActiveLink(
-    url: string,
-    href: string
-) {
-    const urlParts = url.split('/').filter((a) => a !== '');
-    const hrefParts = href.split('/').filter((a) => a !== '');
-
-    if (urlParts.length !== hrefParts.length) {
-        return false;
-    }
-
-    for(let i = 0; i < urlParts.length; i++) {
-        if (urlParts[i] !== hrefParts[i]) {
-            return false;
-        }
-    }
-
-    return true;
-}
