@@ -37,7 +37,7 @@ const parser = {
     json: jsonParser,
     sql: StandardSQL.parser,
     go: goParser,
-    php: phpParser.configure({ top: "Program" }),
+    php: phpParser.configure({ top: 'Program' }),
     py: pythonParser,
     python: pythonParser,
     toml: tomlParser,
