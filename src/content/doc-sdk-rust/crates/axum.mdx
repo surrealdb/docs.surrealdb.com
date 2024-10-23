@@ -7,11 +7,11 @@ description: The SurrealDB SDK for Rust enables simple and advanced querying of 
 
 # SurrealDB with Axum
 
-The following tutorial will set up a server with Axum that has a few endpoints:
+The following tutorial will set up a server with SurrealDB and [Axum](https://docs.rs/axum/latest/axum/) that has a few endpoints:
 
-* Some endpoints to demonstrate how the HTTP endpoints work to create, select, modify etc. the tables in a database
-* Other endpoints to display 
-* Two endpoints to allow signing up and in as a record user.
+* Some endpoints to demonstrate how the HTTP endpoints work to create, select, modify etc. the tables in a database,
+* Other endpoints to display some helpful info for the user,
+* Two endpoints to allow signing up and in as a [record user](/docs/surrealql/statements/define/access/record).
 
 ## Getting started
 
@@ -23,22 +23,24 @@ surreal start --user root --pass root
 
 You can also use the [Start serving](/docs/surrealist/concepts/local-database-serving) button on [Surrealist](/docs/surrealist) to do the same if you have it installed locally.
 
-You can then connect to the database either by creating a connection [inside Surrealist](https://surrealist.app/), or by using the following command.
+The database initiated by the [surreal start](/docs/surrealdb/cli/start) command stores data in memory by default, which then disappears every time the database is shut down. As such, you can simply use Ctrl+C every time you want to start the database anew with no existing definitions or data.
+
+With this database running, you can connect to it either by [creating a connection](/docs/surrealist/getting-started#creating-a-connection) inside Surrealist, or by using the following command.
 
 ```bash
 surreal sql --user root --pass root --ns test --db test --pretty
 ```
 
-Next, create a new Rust project with the command `cargo new project_name`, go into the newly created directory and use `cargo add` to add the following dependencies:
+Next, create a new Rust project with the command `cargo new project_name`, go into the newly created directory and use `cargo add` to add each of the following dependencies:
 
+* `surrealdb` (of course),
 * `axum`,
 * `serde`, for serializing and deserializing Rust structs passed to and from the database and Axum,
-* `surrealdb` (of course),
 * `tokio`, for the async runtime used by both Axum and SurrealDB,
 * `thiserror`, to make it easy to convert between SurrealDB's error type, other errors and Axum's response types,
 * `rand` and `faker_rand`, to create random user names that can be used to sign in to the database as a record user.
 
-The `serde` and `tokio` crates will also need a few features. Your `cargo.toml` dependencies should look like this:
+The `serde` and `tokio` crates will also need a few feature flags. Your `cargo.toml` dependencies should look like this:
 
 ```
 axum = "0.7.7"
@@ -50,7 +52,7 @@ thiserror = "1.0.64"
 tokio = { version = "1.40.0", features = ["rt-multi-thread", "macros"] }
 ```
 
-The first thing to do is a bit of groundwork to convert database errors into an error type of our own, which will then implement Axum's `IntoResponse` trait so that it can be used as output for the server. This can be done manually, but the `thiserror` crate saves a certain amount of typing.
+The first thing to do is a bit of groundwork to convert database errors into an error type of our own. Implementing `From<surrealdb::Error>` for this type will let it be used with the `?` operator when handling results. Finally, it will also need to implement Axum's `IntoResponse` trait so that it can be used as output for the server. All of this can be done manually if you prefer, but the `thiserror` crate saves a certain amount of typing.
 
 ```rust
 mod error {
@@ -81,7 +83,7 @@ mod error {
 }
 ```
 
-Next, we'll put the database client together. Axum provides a [`.with_state()`](https://docs.rs/axum/latest/axum/routing/struct.Router.html#method.with_state) method when starting its router that would give us access to the database inside its functions. However, for simplicity we can wrap the client inside a `LazyLock` to make it into a global static.
+Next, we will put the database client together. Axum provides a [`.with_state()`](https://docs.rs/axum/latest/axum/routing/struct.Router.html#method.with_state) method when starting a router that would give us access to the database inside its functions. However, for simplicity we can wrap the client inside a `LazyLock` to make it into a global static.
 
 ```rust
 use std::sync::LazyLock;
@@ -90,9 +92,9 @@ static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 
 Inside `main()`, we will do the following:
 
-* Run the database at localhost:8000
-* Sign in as the root user created through the `surreal start` command
-* Use the namespace "test" and database "test"
+* Connect to the database running at localhost:8000
+* Sign in as the root user that was created through the `surreal start` command
+* Use (move to) the namespace "test" and database "test"
 * Use the `.query()` method to pass in a few definitions for the database.
 
 ```rust
@@ -127,9 +129,9 @@ DURATION FOR TOKEN 15m, FOR SESSION 12h
 
 Let's go over each of the definitions to see what they do.
 
-The first three define a `person` table. This table is schemaless, but has one required field `name`, which must be present and must be a string. This table has defined permissions by which a [record user](https://surrealdb.com/docs/surrealql/statements/define/access/record) is able to use `CREATE`, `SELECT`, and `UPDATE` on the `person` table, but can only `DELETE` records that it has created.
+The first three define a `person` table. This table is schemaless, but has one required field `name`, which must be present and must be a string. This table has defined permissions by which a record user is able to use `CREATE`, `SELECT`, and `UPDATE` on the `person` table, but can only `DELETE` records that it has created. The root user, however, is not subject to these rules.
 
-The way this is done is by using the `$auth` parameter. This parameter is set whenever a record user is set as the authorized used for the database. The `WHERE $auth` clause simply means "whenever a value exists for the parameter `$auth`". But for `DELETE` queries, it is not enough for `$auth` to just be present, the `created_by` field of a `person` record must also match the ID of the currently authenticated user.
+The way these permissions are set is by using the `$auth` parameter. This parameter is set whenever a record user is set as the authorized used for the database. The `WHERE $auth` clause simply means "where a value exists for the parameter `$auth`". But for `UPDATE` and `DELETE` queries, it is not enough for `$auth` to just be present, the `created_by` field of a `person` record must also match the ID of the currently authenticated user.
 
 The final `DEFINE FIELD` statement sets an automatically generated `created_by` field which is set to the value of `$auth`, and is `READONLY` and thus cannot be changed. When logged in as a system user (like a root user), its value will be `NONE`. But when logged in as a record user, its value will be something like `user:qx2apv5oc8mh03wtah0q`.
 
@@ -142,7 +144,9 @@ DEFINE FIELD IF NOT EXISTS name ON TABLE person TYPE string;
 DEFINE FIELD IF NOT EXISTS created_by ON TABLE person VALUE $auth READONLY;
 ```
 
-So where does an ID like `user:qx2apv5oc8mh03wtah0q` come from? This is thanks to the following definitions that set the signup and signin behaviour of the record users. A typical [`DEFINE ACCESS`](https://surrealdb.com/docs/surrealql/statements/define/access/record) statement will create some sort of record on signup (in this case, a `user`) record, and will compare it against a password during signin. Note that the access has its own name (`account`). A `DEFINE INDEX` statement is also used to ensure that user names must be unique.
+So where does an ID like `user:qx2apv5oc8mh03wtah0q` come from? This is thanks to the following definitions that set the signup and signin behaviour of the record users. A typical [`DEFINE ACCESS`](/docs/surrealql/statements/define/access/record) statement will create some sort of record on signup (in this case, a `user`) record, and will compare it against a password during signin. Note that the access has a name that we gave it (`account`), so that it can be referenced elsewhere.
+
+In addition, a `DEFINE INDEX` statement with a `UNIQUE` clause is used to ensure that no two users can have the same name.
 
 ```surql
     DEFINE INDEX IF NOT EXISTS unique_name ON TABLE user FIELDS name UNIQUE;
@@ -152,13 +156,25 @@ So where does an ID like `user:qx2apv5oc8mh03wtah0q` come from? This is thanks t
 	DURATION FOR TOKEN 15m, FOR SESSION 12h
 ```
 
-For an actual user in production, you would probably want to require an email and some other fields for a user. Functions like [`string::is::email`](https://surrealdb.com/docs/surrealql/functions/database/string#stringisemail) can be used to ensure that the value passed in is valid.
+For an actual user in production, you would probably want to require an email and some other fields for a user. Functions like [`string::is::email`](/docs/surrealql/functions/database/string#stringisemail) can be used to ensure that the value passed in is valid.
 
 ```surql
 DEFINE FIELD email ON TABLE user TYPE string ASSERT $value.is_email();
 ```
 
-However, for this simple example, each user will simply have a unique username.
+However, for this simple example, each user will simply have a unique name and a password. The password will be stored in hashed and salted form on the database, making it unreadable and unique every time it is generated. The only way to check if it is correct is by using a [compare function](/docs/surrealql/functions/database/crypto#cryptoargon2compare) of the output with a password. Here is a short SurrealQL sample to show how the process works.
+
+```surql
+LET $hash1 = crypto::argon2::generate("myPaSSWord");
+LET $hash2 = crypto::argon2::generate("myPaSSWord");
+
+RETURN [$hash1, $hash2];
+-- First returns true, second returns false
+RETURN [
+    crypto::argon2::compare($hash1, "myPaSSWord")
+    crypto::argon2::compare($hash1, "Wrongpassword")
+];
+```
 
 The last step is where the majority of the work takes place: setting up the paths for Axum to handle, and writing the functions that handle the endpoints and (usually) access the database to handle the request. To start, we'll create a function for the root path to display a helpful message to any users wanting to give the server a try via the browser or an app like curl or Postman. These paths and curl examples can all be seen on [the page for SurrealDB's HTTP endpoints](/docs/surrealdb/integration/http).
 
@@ -266,7 +282,7 @@ Two most interesting function is the one used to create a new record user. To ma
 
 * The access name is `"account"`, which is the name we chose in the `DEFINE ACCESS` statement above.
 * The `params` field takes anything that implements `Serialize`, in this case a struct we put together called `Params`.
-* The `.signup()` method returns a redacted `Jwt` by default. To make the token visible, you can use the `.into_insecure_token()` method as we have done here. As a small guide to getting started, this example is not concerned about security. However, if you are looking to create something more production-worthy, do take a look at the [security](https://surrealdb.com/docs/surrealdb/security) section of the documentation and the [security best practices](https://surrealdb.com/docs/surrealdb/reference-guide/security-best-practices) page.
+* The `.signup()` method returns a redacted `Jwt` by default. To make the token visible, you can use the `.into_insecure_token()` method as we have done here. As a small guide to getting started, this example is not concerned about security. However, if you are looking to create something more production-worthy, do take a look at the [security](/docs/surrealdb/security) section of the documentation and the [security best practices](/docs/surrealdb/reference-guide/security-best-practices) page.
 
 The function will then end with an output showing the username, password, token, and instructions for how to log in using the CLI. This can be copied and pasted to begin making queries immediately.
 
@@ -559,8 +575,20 @@ test/test> UPDATE person SET name = "Yogurt";
 ]
 ```
 
+Also note that the root user is able to see the `user` tables and their information. A record user cannot, as a record user by default has no permissions except what it is given by the `PERMISSIONS` clause. If you create a record user using the `/new_user` endpoint, the root user will be able to view it. However, the password has been obscured by the `crypto::argon2::generate` function so that nobody else can use it.
+
+```surql
+[
+	{
+		id: user:qx2apv5oc8mh03wtah0q,
+		name: 'Gerard',
+		pass: '$argon2id$v=19$m=19456,t=2,p=1$j0ktTqUxRjOWYnwS5LoMFQ$2NcGkf5+IuLml6NorPy/Le6T8RppYXTXakwY5cDiZPY'
+	}
+]
+```
+
 ## Further steps
 
 Now that you have a running database using Axum, here are some other ideas that you might want to explore.
 
-* Using the [`AUTHENTICATE`](https://surrealdb.com/docs/surrealql/statements/define/access/record#example-failing-authentication) clause inside the DEFINE ACCESS statement. This will result in increased performance 
+* Using the [`AUTHENTICATE`](/docs/surrealql/statements/define/access/record#example-failing-authentication) clause inside the DEFINE ACCESS statement. This will result in increased performance 
