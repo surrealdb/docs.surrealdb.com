@@ -6,3 +6,236 @@ description: The SurrealDB SDK for Rust enables simple and advanced querying of 
 ---
 
 # SurrealDB with Egui
+
+```rust
+use std::ops::Deref;
+use std::sync::mpsc::channel;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
+
+use surrealdb::engine::remote::ws::Client;
+use surrealdb::engine::remote::ws::Ws;
+use surrealdb::opt::auth::Root;
+use surrealdb::Error;
+use surrealdb::Surreal;
+
+use faker_rand::en_us::names::FirstName;
+use surrealdb::opt::auth::Record;
+
+use serde::{Deserialize, Serialize};
+use surrealdb::RecordId;
+const PERSON: &str = "person";
+
+#[derive(Serialize, Deserialize)]
+struct Params<'a> {
+    name: &'a str,
+    pass: &'a str,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct PersonData {
+    name: String,
+    id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Person {
+    name: String,
+    id: RecordId,
+}
+
+#[derive(Debug, Clone)]
+enum Command {
+    CreatePerson(String),
+    DeletePerson(String),
+    ListPeople,
+    SignUp,
+    SignIn(String),
+    ReadPerson(String),
+    Session,
+    UpdatePerson(String),
+}
+
+struct Database {
+    client: Surreal<Client>,
+    command_receiver: Receiver<Command>,
+    response_sender: Sender<String>
+}
+
+impl Deref for Database {
+    type Target = Surreal<Client>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
+}
+
+impl Database {
+
+    async fn handle_command(&self, command: Command) -> Result<String, Error> {
+        match command {
+            Command::CreatePerson(c) => {
+                let person: Option<Person> = self.create(PERSON).content(c).await?;
+                Ok(format!("{person:?}"))
+            }
+            Command::DeletePerson(id) => {
+                let person: Option<Person> = self.delete((PERSON, &id)).await?;
+                Ok(format!("{person:?}"))
+            }
+            Command::ListPeople => {
+                let person: Vec<Person> = self.select(PERSON).await?;
+                Ok(format!("{person:?}"))
+            },
+            Command::SignUp => {
+                let name = rand::random::<FirstName>().to_string();
+                let pass = rand::random::<FirstName>().to_string();
+                let jwt = self
+                    .signup(Record {
+                        access: "account",
+                        namespace: "namespace",
+                        database: "database",
+                        params: Params {
+                            name: &name,
+                            pass: &pass,
+                        },
+                    })
+                    .await?;
+                Ok(format!("New user created!\n\nName: {name}\nPassword: {pass}\n"))
+            },
+            Command::SignIn(s) => {
+                let Ok(Params { name, pass }) = serde_json::from_str::<Params>(&s) else {
+                    return Ok("Params don't work!".to_string())
+                };
+                let jwt = self.signin(Record {
+                    access: "account",
+                    namespace: "namespace",
+                    database: "database",
+                    params: Params {
+                        name: &name,
+                        pass: &pass,
+                    },
+                }).await?;
+                Ok(format!("Signed in! {jwt:?}"))
+            },
+            Command::ReadPerson(s) => {
+                let person: Vec<Person> = self.select(s).await?;
+                Ok(format!("{person:?}"))
+            },
+            Command::Session => {
+                println!("Session data!");
+                let res: Option<String> = self.query("RETURN <string>$session").await?.take(0)?;
+                Ok(res.unwrap_or("No session data found!".into()))
+            }
+            Command::UpdatePerson(s) => {
+                let person: Vec<Person> = self.update(PERSON).content(s).await?;
+                Ok(format!("{person:?}"))
+            }
+        }
+    }
+}
+
+struct SurrealDbApp {
+    input: String,
+    results: String,
+    command_sender: Sender<Command>,
+    response_receiver: Receiver<String>,
+}
+
+impl SurrealDbApp {}
+
+impl eframe::App for SurrealDbApp {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let _ = ui.button("Input:");
+            ui.text_edit_singleline(&mut self.input);
+            if ui.button("Create person").clicked() {
+                self.command_sender.send(Command::CreatePerson(self.input.clone())).unwrap();
+            };
+            if ui.button("Session data").clicked() {
+                println!("Session data!!!");
+                let res = self.command_sender.send(Command::Session);
+                println!("{res:?}");
+            }
+
+            if let Ok(response) = self.response_receiver.try_recv() {
+                self.results = response;
+            }
+            ui.text_edit_multiline(&mut self.results);
+        });
+    }
+}
+
+fn main() -> Result<(), Error> {
+
+    let (command_sender, command_receiver) = channel();
+    let (response_sender, response_receiver) = channel();
+
+    std::thread::spawn(|| {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        println!("Here");
+
+        rt.block_on(async {
+
+            let client = Surreal::new::<Ws>("localhost:8000").await.unwrap();
+      
+            let db = Database {
+                client,
+                command_receiver,
+                response_sender
+            };
+            
+
+            println!("BL");
+
+            db.signin(Root {
+                username: "root",
+                password: "root",
+            })
+            .await.unwrap();
+
+            db.use_ns("namespace").use_db("database").await.unwrap();
+
+            db.query(
+                "    DEFINE TABLE person SCHEMALESS
+                PERMISSIONS FOR
+                    CREATE, SELECT WHERE $auth,
+                    FOR UPDATE, DELETE WHERE created_by = $auth;
+            DEFINE FIELD name ON TABLE person TYPE string;
+            DEFINE FIELD created_by ON TABLE person VALUE $auth READONLY;
+
+            DEFINE INDEX unique_name ON TABLE user FIELDS name UNIQUE;
+            DEFINE ACCESS account ON DATABASE TYPE RECORD
+            SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
+            SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+            DURATION FOR TOKEN 15m, FOR SESSION 12h
+        ;",
+            )
+            .await.unwrap();
+
+        loop {
+            if let Ok(command) = db.command_receiver.try_recv() {
+                println!("Got a {command:?}!");
+                let response = db.handle_command(command).await;
+                db.response_sender.send(format!("{response:?}")).unwrap();
+            }
+        }
+        })
+    });
+
+    let app = SurrealDbApp {
+        input: String::new(),
+        results: String::new(),
+        command_sender,
+        response_receiver,
+    };
+
+
+    let native_options = eframe::NativeOptions::default();
+    eframe::run_native(
+        "SurrealDB App",
+        native_options,
+        Box::new(|_cc| Ok(Box::new(app))),
+    );
+    Ok(())
+}
+```
