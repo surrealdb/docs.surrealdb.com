@@ -7,12 +7,102 @@ description: The SurrealDB SDK for Rust enables simple and advanced querying of 
 
 # SurrealDB with Egui
 
+The following tutorial will set up a small app with Egui that uses SurrealDB as its database.
+
+## Getting started
+
+First, open up a terminal window and use the following command to start an empty database.
+
+```bash
+surreal start --user root --pass root
+```
+
+You can also use the [Start serving](/docs/surrealist/concepts/local-database-serving) button on [Surrealist](/docs/surrealist) to do the same if you have it installed locally.
+
+The database initiated by the [surreal start](/docs/surrealdb/cli/start) command stores data in memory by default, which then disappears every time the database is shut down. As such, you can simply use Ctrl+C every time you want to start the database anew with no existing definitions or data. To save data to disk which will persist after shutting down, add a [positional argument](/docs/surrealdb/cli/start#positional-argument) for one of the storage backends such as `rocksdb://mydatabase` or `surrealkv://mydatabase`.
+
+With the database running, it's time to start setting up the Rust code.
+
+## Starting the Rust code
+
+First create a new Rust project with the command `cargo new your_project_name`, go into the newly created directory, and use `cargo add` to add each of the following dependencies:
+
+* `anyhow`, to allow us to not worry about how to handle different error types,
+* `egui` and its framework `eframe`,
+* `rand` and `faker_rand`, to create random user names that can be used to sign in to the database as a record user,
+* `serde` and `serde_json`, for serializing and deserializing Rust structs passed to and from the database and Egui,
+* `tokio`, for the async runtime that SurrealDB uses.
+
+The `serde` crate will need the `derive` flag enabled, and `tokio` will need the `rt` flag enabled as well. Your `cargo.toml` dependencies should look like this:
+
+```
+anyhow = "1.0.91"
+eframe = "0.29.1"
+egui = "0.29.1"
+faker_rand = "0.1.1"
+rand = "0.8.5"
+serde = { version = "1.0.209", features = ["derive"] }
+serde_json = "1.0.132"
+surrealdb = "2.0.4"
+tokio = { version = "1.41.0", features = ["rt"] }
+```
+
+Before we get around to the Egui frontend, let's set up the database.
+
+While usually you will see an `async fn main()` with a `#[tokio::main]` attribute on top, Egui does not use async and so we will create the tokio runtime manually and call `.block_on()` to isolate the database in its own space.
+
+Inside `main()`, we will do the following:
+
+* Connect to the database running at `localhost:8000`
+* Sign in as the root user that was created through the `surreal start` command
+* Use (move to) the namespace "test" and database "test"
+* Use the `.query()` method to pass in a few definitions for the database.
+
+```rust
+fn main() -> Result<(), Error> {
+    let rt = tokio::runtime::Runtime::new()?;
+
+    let _: Result<(), Error> = rt.block_on(async {
+
+            let db = Surreal::new::<Ws>("localhost:8000").await?;
+
+            db.signin(Root {
+                username: "root",
+                password: "root",
+            })
+            .await?;
+
+            db.use_ns("test").use_db("test").await?;
+
+            db.query(
+                "    DEFINE TABLE person SCHEMALESS
+                PERMISSIONS FOR
+                    CREATE, SELECT WHERE $auth,
+                    FOR UPDATE, DELETE WHERE created_by = $auth;
+            DEFINE FIELD name ON TABLE person TYPE string;
+            DEFINE FIELD created_by ON TABLE person VALUE $auth READONLY;
+
+            DEFINE INDEX unique_name ON TABLE user FIELDS name UNIQUE;
+            DEFINE ACCESS account ON DATABASE TYPE RECORD
+            SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
+            SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+            DURATION FOR TOKEN 15m, FOR SESSION 12h
+        ;",
+            )
+            .await?;
+        Ok(())
+        });
+    Ok(())
+}
+```
+
 ```rust
 use std::{
     ops::Deref,
     sync::mpsc::{channel, Receiver, Sender},
 };
 
+use egui::RichText;
 use surrealdb::{
     engine::remote::ws::{Client, Ws},
     opt::auth::{Record, Root},
@@ -52,7 +142,7 @@ enum Command {
     RawQuery(String),
     SignUp,
     SignIn(String),
-    SignInRoot(String),
+    SignInRoot,
     Session,
 }
 
@@ -70,13 +160,28 @@ impl Deref for Database {
     }
 }
 
+trait StringIt {
+    fn string(self) -> Result<String, Error>;
+}
+
+impl StringIt for Option<Person> {
+    fn string(self) -> Result<String, Error> {
+        match self {
+            Some(t) => Ok(format!("{t:?}")),
+            None => Ok("[]".into()),
+        }
+    }
+}
+
 impl Database {
     async fn handle_command(&self, command: Command) -> Result<String, Error> {
         match command {
             Command::CreatePerson(s) => {
                 let person_data: PersonData = serde_json::from_str(&s)?;
-                let person: Option<Person> = self.create(PERSON).content(person_data).await?;
-                Ok(format!("{person:?}"))
+                self.create::<Option<Person>>(PERSON)
+                    .content(person_data)
+                    .await?
+                    .string()
             }
             Command::DeletePerson(s) => {
                 if s.is_empty() {
@@ -84,8 +189,7 @@ impl Database {
                     Ok(format!("{res:?}"))
                 } else {
                     let key = RecordIdKey::from(s);
-                    let person: Option<Person> = self.delete((PERSON, key)).await?;
-                    Ok(format!("{person:?}"))
+                    self.delete::<Option<Person>>((PERSON, key)).await?.string()
                 }
             }
             Command::ListPeople => {
@@ -95,17 +199,16 @@ impl Database {
             Command::SignUp => {
                 let name = rand::random::<FirstName>().to_string();
                 let pass = rand::random::<FirstName>().to_string();
-                self
-                    .signup(Record {
-                        access: "account",
-                        namespace: "test",
-                        database: "test",
-                        params: Params {
-                            name: &name,
-                            pass: &pass,
-                        },
-                    })
-                    .await?;
+                self.signup(Record {
+                    access: "account",
+                    namespace: "test",
+                    database: "test",
+                    params: Params {
+                        name: &name,
+                        pass: &pass,
+                    },
+                })
+                .await?;
                 Ok(format!(
                     "New user created!\n\n{{ \"name\": \"{name}\", \n \"pass\": \"{pass}\" }}"
                 ))
@@ -118,35 +221,28 @@ impl Database {
                 let Ok(Params { name, pass }) = serde_json::from_str::<Params>(&s) else {
                     return Ok("Params don't work!".to_string());
                 };
-                let jwt = self
-                    .signin(Record {
-                        access: "account",
-                        namespace: "test",
-                        database: "test",
-                        params: Params {
-                            name,
-                            pass,
-                        },
-                    })
-                    .await?;
-                Ok(format!("Signed in! {jwt:?}"))
+                self.signin(Record {
+                    access: "account",
+                    namespace: "test",
+                    database: "test",
+                    params: Params { name, pass },
+                })
+                .await?;
+                Ok(format!("Signed in as {name}!"))
             }
-            Command::SignInRoot(s) => {
-                let Ok(Params { name, pass }) = serde_json::from_str::<Params>(&s) else {
-                    return Ok("Params don't work!".to_string());
-                };
-                let res = self
-                    .signin(Root {
-                        username: name,
-                        password: pass,
-                    })
-                    .await?;
-                Ok(format!("Back to root! {res:?}"))
+            Command::SignInRoot => {
+                self.signin(Root {
+                    username: "root",
+                    password: "root",
+                })
+                .await?;
+                Ok(format!("Back to root!"))
             }
-            Command::Session => {
-                let res: Option<String> = self.query("RETURN <string>$session").await?.take(0)?;
-                Ok(res.unwrap_or("No session data found!".into()))
-            }
+            Command::Session => Ok(self
+                .query("RETURN <string>$session")
+                .await?
+                .take::<Option<String>>(0)?
+                .unwrap_or("No session data found!".into())),
         }
     }
 }
@@ -168,12 +264,12 @@ impl SurrealDbApp {
 
 impl eframe::App for SurrealDbApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::SidePanel::left("").show(ctx, |ui| {
+        egui::SidePanel::left("left").show(ctx, |ui| {
             if ui.button("Create person").clicked() {
                 self.send(Command::CreatePerson(self.input.clone()))
             };
             if ui.button("Session data").clicked() {
-                self.send(Command::Session);
+                self.send(Command::Session)
             }
             if ui.button("Delete person").clicked() {
                 self.send(Command::DeletePerson(self.input.clone()))
@@ -188,7 +284,7 @@ impl eframe::App for SurrealDbApp {
                 self.send(Command::SignIn(self.input.clone()));
             }
             if ui.button("Sign in as root").clicked() {
-                self.send(Command::SignInRoot(self.input.clone()))
+                self.send(Command::SignInRoot)
             }
             if ui.button("Raw query").clicked() {
                 self.send(Command::RawQuery(self.input.clone()))
@@ -198,13 +294,12 @@ impl eframe::App for SurrealDbApp {
             }
         });
         egui::CentralPanel::default().show(ctx, |ui| {
-            let _ = ui.button("Input:");
+            ui.label(RichText::new("Input:").heading());
             ui.text_edit_multiline(&mut self.input);
         });
-        egui::SidePanel::right("oeoe").show(ctx, |ui| {
-
+        egui::SidePanel::right("right").show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                let _ = ui.button("Results:");
+                ui.label(RichText::new("Results:").heading());
                 ui.text_edit_multiline(&mut self.results);
             });
         });
