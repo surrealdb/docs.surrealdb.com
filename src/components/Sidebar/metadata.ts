@@ -40,7 +40,7 @@ type Metadata = {
 
 export const metadata = {
     'doc-sdk-dotnet': {
-        title: 'Dotnet SDK',
+        title: '.NET SDK',
         icon: {
             light: LightDotnet,
             dark: DarkDotnet,
