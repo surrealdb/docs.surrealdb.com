@@ -8,22 +8,21 @@ description: The SurrealDB SDK for Rust enables simple and advanced querying of 
 # SurrealDB with Egui
 
 ```rust
-use std::ops::Deref;
-use std::sync::mpsc::channel;
-use std::sync::mpsc::Receiver;
-use std::sync::mpsc::Sender;
+use std::{
+    ops::Deref,
+    sync::mpsc::{channel, Receiver, Sender},
+};
 
-use surrealdb::engine::remote::ws::Client;
-use surrealdb::engine::remote::ws::Ws;
-use surrealdb::opt::auth::Root;
-use surrealdb::Error;
-use surrealdb::Surreal;
+use surrealdb::{
+    engine::remote::ws::{Client, Ws},
+    opt::auth::{Record, Root},
+    RecordId, RecordIdKey, Surreal,
+};
 
+use anyhow::Error;
 use faker_rand::en_us::names::FirstName;
-use surrealdb::opt::auth::Record;
-
 use serde::{Deserialize, Serialize};
-use surrealdb::RecordId;
+
 const PERSON: &str = "person";
 
 #[derive(Serialize, Deserialize)]
@@ -35,13 +34,14 @@ struct Params<'a> {
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct PersonData {
     name: String,
-    id: String,
+    id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Person {
     name: String,
     id: RecordId,
+    created_by: Option<RecordId>,
 }
 
 #[derive(Debug, Clone)]
@@ -49,17 +49,17 @@ enum Command {
     CreatePerson(String),
     DeletePerson(String),
     ListPeople,
+    RawQuery(String),
     SignUp,
     SignIn(String),
-    ReadPerson(String),
+    SignInRoot(String),
     Session,
-    UpdatePerson(String),
 }
 
 struct Database {
     client: Surreal<Client>,
     command_receiver: Receiver<Command>,
-    response_sender: Sender<String>
+    response_sender: Sender<String>,
 }
 
 impl Deref for Database {
@@ -71,64 +71,81 @@ impl Deref for Database {
 }
 
 impl Database {
-
     async fn handle_command(&self, command: Command) -> Result<String, Error> {
         match command {
-            Command::CreatePerson(c) => {
-                let person: Option<Person> = self.create(PERSON).content(c).await?;
+            Command::CreatePerson(s) => {
+                let person_data: PersonData = serde_json::from_str(&s)?;
+                let person: Option<Person> = self.create(PERSON).content(person_data).await?;
                 Ok(format!("{person:?}"))
             }
-            Command::DeletePerson(id) => {
-                let person: Option<Person> = self.delete((PERSON, &id)).await?;
-                Ok(format!("{person:?}"))
+            Command::DeletePerson(s) => {
+                if s.is_empty() {
+                    let res: Vec<Person> = self.delete(PERSON).await?;
+                    Ok(format!("{res:?}"))
+                } else {
+                    let key = RecordIdKey::from(s);
+                    let person: Option<Person> = self.delete((PERSON, key)).await?;
+                    Ok(format!("{person:?}"))
+                }
             }
             Command::ListPeople => {
                 let person: Vec<Person> = self.select(PERSON).await?;
                 Ok(format!("{person:?}"))
-            },
+            }
             Command::SignUp => {
                 let name = rand::random::<FirstName>().to_string();
                 let pass = rand::random::<FirstName>().to_string();
-                let jwt = self
+                self
                     .signup(Record {
                         access: "account",
-                        namespace: "namespace",
-                        database: "database",
+                        namespace: "test",
+                        database: "test",
                         params: Params {
                             name: &name,
                             pass: &pass,
                         },
                     })
                     .await?;
-                Ok(format!("New user created!\n\nName: {name}\nPassword: {pass}\n"))
+                Ok(format!(
+                    "New user created!\n\n{{ \"name\": \"{name}\", \n \"pass\": \"{pass}\" }}"
+                ))
+            }
+            Command::RawQuery(q) => match self.query(q).await {
+                Ok(ok) => Ok(format!("{ok:?}")),
+                Err(e) => Ok(e.to_string()),
             },
             Command::SignIn(s) => {
                 let Ok(Params { name, pass }) = serde_json::from_str::<Params>(&s) else {
-                    return Ok("Params don't work!".to_string())
+                    return Ok("Params don't work!".to_string());
                 };
-                let jwt = self.signin(Record {
-                    access: "account",
-                    namespace: "namespace",
-                    database: "database",
-                    params: Params {
-                        name: &name,
-                        pass: &pass,
-                    },
-                }).await?;
+                let jwt = self
+                    .signin(Record {
+                        access: "account",
+                        namespace: "test",
+                        database: "test",
+                        params: Params {
+                            name,
+                            pass,
+                        },
+                    })
+                    .await?;
                 Ok(format!("Signed in! {jwt:?}"))
-            },
-            Command::ReadPerson(s) => {
-                let person: Vec<Person> = self.select(s).await?;
-                Ok(format!("{person:?}"))
-            },
+            }
+            Command::SignInRoot(s) => {
+                let Ok(Params { name, pass }) = serde_json::from_str::<Params>(&s) else {
+                    return Ok("Params don't work!".to_string());
+                };
+                let res = self
+                    .signin(Root {
+                        username: name,
+                        password: pass,
+                    })
+                    .await?;
+                Ok(format!("Back to root! {res:?}"))
+            }
             Command::Session => {
-                println!("Session data!");
                 let res: Option<String> = self.query("RETURN <string>$session").await?.take(0)?;
                 Ok(res.unwrap_or("No session data found!".into()))
-            }
-            Command::UpdatePerson(s) => {
-                let person: Vec<Person> = self.update(PERSON).content(s).await?;
-                Ok(format!("{person:?}"))
             }
         }
     }
@@ -141,59 +158,83 @@ struct SurrealDbApp {
     response_receiver: Receiver<String>,
 }
 
-impl SurrealDbApp {}
+impl SurrealDbApp {
+    fn send(&mut self, command: Command) {
+        if let Err(e) = self.command_sender.send(command) {
+            self.results = e.to_string()
+        }
+    }
+}
 
 impl eframe::App for SurrealDbApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            let _ = ui.button("Input:");
-            ui.text_edit_singleline(&mut self.input);
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::SidePanel::left("").show(ctx, |ui| {
             if ui.button("Create person").clicked() {
-                self.command_sender.send(Command::CreatePerson(self.input.clone())).unwrap();
+                self.send(Command::CreatePerson(self.input.clone()))
             };
             if ui.button("Session data").clicked() {
-                println!("Session data!!!");
-                let res = self.command_sender.send(Command::Session);
-                println!("{res:?}");
+                self.send(Command::Session);
             }
-
+            if ui.button("Delete person").clicked() {
+                self.send(Command::DeletePerson(self.input.clone()))
+            }
+            if ui.button("List people").clicked() {
+                self.send(Command::ListPeople)
+            }
+            if ui.button("New user").clicked() {
+                self.send(Command::SignUp)
+            }
+            if ui.button("Sign in as record user").clicked() {
+                self.send(Command::SignIn(self.input.clone()));
+            }
+            if ui.button("Sign in as root").clicked() {
+                self.send(Command::SignInRoot(self.input.clone()))
+            }
+            if ui.button("Raw query").clicked() {
+                self.send(Command::RawQuery(self.input.clone()))
+            }
             if let Ok(response) = self.response_receiver.try_recv() {
                 self.results = response;
             }
-            ui.text_edit_multiline(&mut self.results);
+        });
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let _ = ui.button("Input:");
+            ui.text_edit_multiline(&mut self.input);
+        });
+        egui::SidePanel::right("oeoe").show(ctx, |ui| {
+
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let _ = ui.button("Results:");
+                ui.text_edit_multiline(&mut self.results);
+            });
         });
     }
 }
 
 fn main() -> Result<(), Error> {
-
     let (command_sender, command_receiver) = channel();
     let (response_sender, response_receiver) = channel();
 
-    std::thread::spawn(|| {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        println!("Here");
+    std::thread::spawn(|| -> Result<(), Error> {
+        let rt = tokio::runtime::Runtime::new()?;
 
         rt.block_on(async {
 
-            let client = Surreal::new::<Ws>("localhost:8000").await.unwrap();
+            let client = Surreal::new::<Ws>("localhost:8000").await?;
       
             let db = Database {
                 client,
                 command_receiver,
                 response_sender
             };
-            
-
-            println!("BL");
 
             db.signin(Root {
                 username: "root",
                 password: "root",
             })
-            .await.unwrap();
+            .await?;
 
-            db.use_ns("namespace").use_db("database").await.unwrap();
+            db.use_ns("test").use_db("test").await?;
 
             db.query(
                 "    DEFINE TABLE person SCHEMALESS
@@ -210,13 +251,15 @@ fn main() -> Result<(), Error> {
             DURATION FOR TOKEN 15m, FOR SESSION 12h
         ;",
             )
-            .await.unwrap();
+            .await?;
 
         loop {
             if let Ok(command) = db.command_receiver.try_recv() {
-                println!("Got a {command:?}!");
                 let response = db.handle_command(command).await;
-                db.response_sender.send(format!("{response:?}")).unwrap();
+                match response {
+                    Ok(s) => db.response_sender.send(s)?,
+                    Err(e) => db.response_sender.send(e.to_string())?
+                }
             }
         }
         })
@@ -229,9 +272,8 @@ fn main() -> Result<(), Error> {
         response_receiver,
     };
 
-
     let native_options = eframe::NativeOptions::default();
-    eframe::run_native(
+    let _ = eframe::run_native(
         "SurrealDB App",
         native_options,
         Box::new(|_cc| Ok(Box::new(app))),
