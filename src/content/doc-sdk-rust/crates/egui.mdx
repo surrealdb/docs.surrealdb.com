@@ -96,6 +96,86 @@ fn main() -> Result<(), Error> {
 }
 ```
 
+## What the database definitions do
+
+The first item that stands out with the definitions above is that they all contain a `IF NOT EXISTS` clause. As the `DEFINE` statements will be executed every time the app starts, it is possible that they might be executed on a database that already has the definitions in place. Since version 2.0, SurrealDB simply returns an error if a definition already exists, requiring the `OVERWRITE` clause if a definition needs to be redone. Without `IF NOT EXISTS`, the message "The table 'person' already exists" will be returned.
+
+Note that this would not affect our app, as this would still be a successful usage of the `.query()` method. Instead, its output would contain a number of error results that could be handled individually:
+
+```
+Response { client: Surreal { router: OnceLock(Router { sender: Sender { .. }, last_id: 4, features: {LiveQueries} }), engine: PhantomData<surrealdb::api::engine::any::Any> }, results: {0: (Stats { execution_time: Some(252.625µs) }, Err(Api(Query("The table 'person' already exists")))), 1: (Stats { execution_time: Some(79.167µs) }, Err(Api(Query("The field 'name' already exists")))), 2: (Stats { execution_time: Some(69.5µs) }, Err(Api(Query("The field 'created_by' already exists")))), 3: (Stats { execution_time: Some(73.625µs) }, Err(Api(Query("The index 'unique_name' already exists")))), 4: (Stats { execution_time: Some(73.583µs) }, Err(Api(Query("The access method 'account' already exists in the database 'test'"))))}, live_queries: {} }
+```
+
+However, adding `IF NOT EXISTS` is a nice way to change the results from errors into successful results, and to avoid the rare case in which they end up applied to some other version 1.x database that would rewrite its definitions if `IF NOT EXISTS` is present. So while not necessary in our case, it is a good practice to follow and makes for cleaner output.
+
+Now let's go over each of the definitions to see what they do.
+
+The first three statements define a `person` table. This table is schemaless, but has one required field `name`, which must be present and must be a string. This table has defined permissions by which a record user is able to use `CREATE` and `SELECT` on the `person` table, but can only `UPDATE` and `DELETE` records that it has created. The root user, however, is not subject to permissions rules.
+
+The way these permissions are set is by using the `$auth` parameter. This parameter has a value whenever a record user is set as the authorized used for the database. The `WHERE $auth` clause simply means "where a value exists for the parameter `$auth`" (`WHERE $auth IS NOT NONE` would also work in this case). But for `UPDATE` and `DELETE` queries, it is not enough for `$auth` to just be present, the `created_by` field of a `person` record must also match the ID of the currently authenticated user.
+
+This `created_by` field is automatically generated from its definition in the `DEFINE FIELD` statement. It is given the value of `$auth`, and is `READONLY` and thus cannot be changed. When logged in as a system user (like a root user), its value will be `NONE`. But when logged in as a record user, its value will be something like `user:qx2apv5oc8mh03wtah0q`.
+
+```surql
+DEFINE TABLE IF NOT EXISTS person SCHEMALESS
+    PERMISSIONS FOR 
+        CREATE, SELECT WHERE $auth,
+        FOR UPDATE, DELETE WHERE created_by = $auth;
+DEFINE FIELD IF NOT EXISTS name ON TABLE person TYPE string;
+DEFINE FIELD IF NOT EXISTS created_by ON TABLE person VALUE $auth READONLY;
+```
+
+So where does an ID like `user:qx2apv5oc8mh03wtah0q` come from? This is thanks to the following definitions that set the signup and signin behaviour of the record users. A typical [`DEFINE ACCESS`](/docs/surrealql/statements/define/access/record) statement will create some sort of record on signup (in this case, a `user`) record, and will compare it against a password during signin. Note that the access has a name that we gave it (`account`), so that it can be referenced elsewhere.
+
+In addition, a `DEFINE INDEX` statement with a `UNIQUE` clause is used to ensure that no two users can have the same name.
+
+```surql
+    DEFINE INDEX IF NOT EXISTS unique_name ON TABLE user FIELDS name UNIQUE;
+    DEFINE ACCESS IF NOT EXISTS account ON DATABASE TYPE RECORD
+	SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
+	SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+	DURATION FOR TOKEN 15m, FOR SESSION 12h
+```
+
+For an actual user in production, you would probably want to require an email and some other fields. Functions like [`string::is::email`](/docs/surrealql/functions/database/string#stringisemail) can be used to ensure that the value passed in is valid.
+
+```surql
+DEFINE FIELD email ON TABLE user TYPE string ASSERT $value.is_email();
+```
+
+However, for this simple example, each user will simply have a unique name and a password. The password will be stored in hashed and salted form on the database, making it unique and unreadable every time it is generated. The only way to check if it is correct is by using a [compare function](/docs/surrealql/functions/database/crypto#cryptoargon2compare) of the output with an attempted password. Here is a short SurrealQL sample to show how the process works.
+
+```surql
+LET $hash1 = crypto::argon2::generate("myPaSSWord");
+LET $hash2 = crypto::argon2::generate("myPaSSWord");
+
+RETURN [$hash1, $hash2];
+-- First returns true, second returns false
+RETURN [
+    crypto::argon2::compare($hash1, "myPaSSWord")
+    crypto::argon2::compare($hash1, "Wrongpassword")
+];
+```
+
+## The Egui code
+
+The last step is where the majority of the work takes place: creating the actual app and a way for it to interact with the database.
+
+To keep the code to a minimum, our app will be as simple as possible. It will have a few buttons, a panel to take user input, and a second panel to display results. The buttons will be as follows:
+
+* `Create person`: Instructs the database to try to create a `person` record based on the input provided by the user.
+* `Delete person`: Deletes all the `person` records if the user input is left blank, otherwise will take a single id.
+* `List people`: Shows all the `person` records in the database.
+* `Session data`: Shows the current session data.
+* `Raw query`: Allows the user to execute a raw query.
+* `New user`: Creates a new record user with a random name and password, displayed as an object.
+* `Sign in as record user`: Signs in using an object with a name and a password. The `New user` output can be pasted in to sign in here.
+* `Sign in as root`: Signs back in as the database root user.
+
+## Experimenting with the app
+
+The final code looks like this:
+
 ```rust
 use std::{
     ops::Deref,
@@ -376,3 +456,5 @@ fn main() -> Result<(), Error> {
     Ok(())
 }
 ```
+
+## Further steps
