@@ -49,7 +49,7 @@ tokio = { version = "1.41.0", features = ["rt"] }
 
 Before we get around to the Egui frontend, let's set up the database.
 
-While usually you will see an `async fn main()` with a `#[tokio::main]` attribute on top, Egui does not use async and so we will create the tokio runtime manually and call `.block_on()` to isolate the database in its own space.
+While usually you will see an `async fn main()` with a `#[tokio::main]` attribute on top, Egui does not use async. To isolate one from the other, we can create the tokio runtime manually and call `.block_on()` to isolate the database in its own space. Later one, we will create two [channels](https://doc.rust-lang.org/std/sync/mpsc/fn.channel.html) to communicate between the database and the Egui app.
 
 Inside `main()`, we will do the following:
 
@@ -171,6 +171,246 @@ To keep the code to a minimum, our app will be as simple as possible. It will ha
 * `New user`: Creates a new record user with a random name and password, displayed as an object.
 * `Sign in as record user`: Signs in using an object with a name and a password. The `New user` output can be pasted in to sign in here.
 * `Sign in as root`: Signs back in as the database root user.
+
+The behaviour of an Egui app takes place inside a single [.update()](https://docs.rs/eframe/latest/eframe/trait.App.html#tymethod.update), which takes a mutable reference to the app (usually a single struct).
+
+Because this function can be called up to several times per second, waiting for even short database queries might have noticeable effects on the repainting of the app. To ensure that this won't happen, we will create two channels between the Egui app and the database. The first channel will send commands from the app to the database, while the second channel will send each response back as a simple `String`. The database will loop continuously as it checks for commands, while the app will check for responses during every iteration of the `.update()` function.
+
+Here are the two apps and the types used to communicate with each other.
+
+```rust
+struct SurrealDbApp {
+    input: String,
+    results: String,
+    command_sender: Sender<Command>,
+    response_receiver: Receiver<String>,
+}
+
+struct Database {
+    client: Surreal<Client>,
+    command_receiver: Receiver<Command>,
+    response_sender: Sender<String>,
+}
+
+#[derive(Debug, Clone)]
+enum Command {
+    CreatePerson(String),
+    DeletePerson(String),
+    ListPeople,
+    RawQuery(String),
+    SignUp,
+    SignIn(String),
+    SignInRoot,
+    Session,
+}
+```
+
+Egui has some sample code [here](https://docs.rs/eframe/latest/eframe/#usage-native) on how to start running an app that we can copy and paste, only changing the name. Here is what the `main()` portion of the final code will look like.
+
+```rust
+fn main() -> Result<(), Error> {
+    let (command_sender, command_receiver) = channel();
+    let (response_sender, response_receiver) = channel();
+
+    std::thread::spawn(|| -> Result<(), Error> {
+        let rt = tokio::runtime::Runtime::new()?;
+
+        rt.block_on(async {
+
+            let client = Surreal::new::<Ws>("localhost:8000").await?;
+
+            let db = Database {
+                client,
+                command_receiver,
+                response_sender
+            };
+
+            db.signin(Root {
+                username: "root",
+                password: "root",
+            })
+            .await?;
+
+            db.use_ns("test").use_db("test").await?;
+
+            db.query(
+                "    DEFINE TABLE person SCHEMALESS
+                PERMISSIONS FOR
+                    CREATE, SELECT WHERE $auth,
+                    FOR UPDATE, DELETE WHERE created_by = $auth;
+            DEFINE FIELD name ON TABLE person TYPE string;
+            DEFINE FIELD created_by ON TABLE person VALUE $auth READONLY;
+
+            DEFINE INDEX unique_name ON TABLE user FIELDS name UNIQUE;
+            DEFINE ACCESS account ON DATABASE TYPE RECORD
+            SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
+            SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+            DURATION FOR TOKEN 15m, FOR SESSION 12h
+        ;",
+            )
+            .await?;
+
+        loop {
+            if let Ok(command) = db.command_receiver.try_recv() {
+                let response = db.handle_command(command).await;
+                match response {
+                    Ok(s) => db.response_sender.send(s)?,
+                    Err(e) => db.response_sender.send(e.to_string())?
+                }
+            }
+        }
+        })
+    });
+
+    let app = SurrealDbApp {
+        input: String::new(),
+        results: String::new(),
+        command_sender,
+        response_receiver,
+    };
+
+    let native_options = eframe::NativeOptions::default();
+    let _ = eframe::run_native(
+        "SurrealDB App",
+        native_options,
+        Box::new(|_cc| Ok(Box::new(app))),
+    );
+    Ok(())
+}
+```
+
+The database calls a function called `.handle_command()` every time it receives a command, so let's take a look at that one. It uses a simple `match` statement and executes database queries depending on what it is asked to do.
+
+Here are some notable parts of the `.handle_command()` function and related code.
+
+First we have two pieces of code added for convenience. One implements `Deref` so that the `Database` struct can call methods like `.create()` instead of `.client.create()`. The other is a helper trait so that we can call `.string()` after each method that returns an `Option<Person>` instead of having to use a `match` statement every time. There is also a `const` declared with `const PERSON: &str = "person"` that removes the possibility of typos inside the various query methods.
+
+```rust
+impl Deref for Database {
+    type Target = Surreal<Client>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
+}
+
+trait StringIt {
+    fn string(self) -> Result<String, Error>;
+}
+
+impl StringIt for Option<Person> {
+    fn string(self) -> Result<String, Error> {
+        match self {
+            Some(t) => Ok(format!("{t:?}")),
+            None => Ok("[]".into()),
+        }
+    }
+}
+
+const PERSON: &str = "person";
+```
+
+When the `.handle_command()` method comes across a `Command::CreatePerson`, which contains a `String`, it will attempt to turn it into this `PersonData` struct.
+
+```rust
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct PersonData {
+    name: String,
+    id: Option<String>,
+}
+```
+
+This can be done using the `serde_json::from_str()` function. If the input is properly formatted, such as `{ "name": "Billy" }`, it will deserialize into a `PersonData` that can then be passed into the `.create()` function. The helper function `.string()` will then pass it back as an `Ok` with the `String` data inside if successful.
+
+```rust
+Command::CreatePerson(s) => {
+    let person_data: PersonData = serde_json::from_str(&s)?;
+    self.create::<Option<Person>>(PERSON)
+        .content(person_data)
+        .await?
+        .string()
+}
+```
+
+For the `Command::DeletePerson` variant, a check is made to see whether the user input is empty, in which case it will delete every `person` record. Otherwise, it will assume that the input is the key of a record ID (like the `one` in `person:one`) and delete that record if it exists.
+
+```rust
+Command::DeletePerson(s) => {
+    if s.is_empty() {
+        let res: Vec<Person> = self.delete(PERSON).await?;
+        Ok(format!("{res:?}"))
+    } else {
+        let key = RecordIdKey::from(s);
+        self.delete::<Option<Person>>((PERSON, key)).await?.string()
+    }
+}
+```
+
+The other three query methods are pretty simple. `Command::ListPeople` returns all `person` records, `Command::RawQuery` takes a direct SurrealQL input and returns the result, and `Command::Session` just accesses the `$session` parameter cast into a string.
+
+```rust
+Command::ListPeople => {
+    let person: Vec<Person> = self.select(PERSON).await?;
+    Ok(format!("{person:?}"))
+}
+Command::RawQuery(q) => match self.query(q).await {
+    Ok(ok) => Ok(format!("{ok:?}")),
+    Err(e) => Ok(e.to_string()),
+},
+Command::Session => Ok(self
+    .query("RETURN <string>$session")
+    .await?
+    .take::<Option<String>>(0)?
+    .unwrap_or("No session data found!".into()))
+```
+
+The `Command::SignUp` and `Command::SignIn` variants are a bit more interesting.
+
+A user is allowed to choose a name and a password when signing up as a record user, but to make the process as quick as possible we will use the `faker_rand` crate to generate two names: one for the username and one for the password.
+
+The [`.signup()`](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.signup) method actually returns a token (a [`JWT`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Jwt.html) struct), but these tokens are mostly useful when signing in via the [surreal sql](https://surrealdb.com/docs/surrealdb/cli/sql) command or through Surrealist. In our case, we can simply use the `.signin()` method along with a name and password and so we don't need to display the token.
+
+The `Params` struct is our own struct, which holds a `name` and a `pass` field because those are the two fields that we specified in the `DEFINE ACCESS` statement which creates a new `user` record every time a record user is signed up. Similarly, the `access` field inside `.signup()` takes the input "account" because that is the name that we have to the `DEFINE ACCESS` statement.
+
+```rust
+// DEFINE ACCESS account ON DATABASE TYPE RECORD
+// SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
+// SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+// DURATION FOR TOKEN 15m, FOR SESSION 12h
+
+#[derive(Serialize, Deserialize)]
+struct Params<'a> {
+    name: &'a str,
+    pass: &'a str,
+}
+
+Command::SignUp => {
+    let name = rand::random::<FirstName>().to_string();
+    let pass = rand::random::<FirstName>().to_string();
+    self.signup(Record {
+        access: "account",
+        namespace: "test",
+        database: "test",
+        params: Params {
+            name: &name,
+            pass: &pass,
+        },
+    })
+    .await?;
+    Ok(format!(
+        "New user created!\n\n{{ \"name\": \"{name}\", \n \"pass\": \"{pass}\" }}"
+    ))
+}
+```
+
+The output when the button is clicked to sign up a new user is in `JSON` format so that the user can copy and paste it to sign in.
+
+```
+New user created!
+
+{ "name": "Rebecca", 
+ "pass": "Neha" }
+```
 
 ## Experimenting with the app
 
