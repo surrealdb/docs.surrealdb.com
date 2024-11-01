@@ -159,6 +159,8 @@ RETURN [
 
 ## The Egui code
 
+### The Database struct
+
 The last step is where the majority of the work takes place: creating the actual app and a way for it to interact with the database.
 
 To keep the code to a minimum, our app will be as simple as possible. It will have a few buttons, a panel to take user input, and a second panel to display results. The buttons will be as follows:
@@ -252,8 +254,7 @@ fn main() -> Result<(), Error> {
 
         loop {
             if let Ok(command) = db.command_receiver.try_recv() {
-                let response = db.handle_command(command).await;
-                match response {
+                match db.handle_command(command).await {
                     Ok(s) => db.response_sender.send(s)?,
                     Err(e) => db.response_sender.send(e.to_string())?
                 }
@@ -322,7 +323,16 @@ pub struct PersonData {
 
 This can be done using the `serde_json::from_str()` function. If the input is properly formatted, such as `{ "name": "Billy" }`, it will deserialize into a `PersonData` that can then be passed into the `.create()` function. The helper function `.string()` will then pass it back as an `Ok` with the `String` data inside if successful.
 
+For simplicity, data passed in will only ever deserialize into a `Person` app with three fields: a name, a record Id, and a possible `created_by` field which will have a value if the `person` record is created by a record user.
+
 ```rust
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Person {
+    name: String,
+    id: RecordId,
+    created_by: Option<RecordId>,
+}
+
 Command::CreatePerson(s) => {
     let person_data: PersonData = serde_json::from_str(&s)?;
     self.create::<Option<Person>>(PERSON)
@@ -411,6 +421,121 @@ New user created!
 { "name": "Rebecca", 
  "pass": "Neha" }
 ```
+
+Signing in is pretty similar, except that it begins by trying to deserialize the user input into a `Params` struct. The `.signin()` method also returns a `Jwt` that we don't need, so the output will just let the user know that it has signed in under a certain name.
+
+```rust
+Command::SignIn(s) => {
+    let Ok(Params { name, pass }) = serde_json::from_str::<Params>(&s) else {
+        return Ok("Params don't work!".to_string());
+    };
+    self.signin(Record {
+        access: "account",
+        namespace: "test",
+        database: "test",
+        params: Params { name, pass },
+    })
+    .await?;
+    Ok(format!("Signed in as {name}!"))
+}
+```
+
+The last command will allow the user to sign back in as the root user. To make it easy to experiment with the database as a record user vs. a root user, we won't make the user type in the root user's name and password each time.
+
+```rust
+Command::SignInRoot => {
+    self.signin(Root {
+        username: "root",
+        password: "root",
+    })
+    .await?;
+    Ok(format!("Back to root!"))
+}
+```
+
+### The Egui app struct
+
+The struct for the Egui app is quite simple, with only four fields. Two of them hold the user input and database results, while the other two are for the sending and receiving end of the two channels.
+
+```rust
+struct SurrealDbApp {
+    input: String,
+    results: String,
+    command_sender: Sender<Command>,
+    response_receiver: Receiver<String>,
+}
+```
+
+Since the [`.send()`](https://doc.rust-lang.org/std/sync/mpsc/struct.Sender.html#method.send) function for channels in Rust returns a `Result` but Egui's `.update()` function doesn't, we'll save ourselves a lot of typing by putting together a quick method for this struct called `.send()` that does the error handling. All it will do is turn any errors into a `String` which it will then give to the `results` field.
+
+```rust
+impl SurrealDbApp {
+    fn send(&mut self, command: Command) {
+        if let Err(e) = self.command_sender.send(command) {
+            self.results = e.to_string()
+        }
+    }
+}
+```
+
+After that, the final task left to us is to create the layout and buttons for the Egui app inside the `update()` function that all Egui app structs are required to implement. The first line will be the one where the app checks to see if the database has sent it a message. All of these messages are simple Strings, so it will just set the `results` field with them so the user can see what was sent. Note that the `Ok` here just means that `.try_recv()` has successfully received a message, not that the database has succeeded at what it was instructed to do. The `String` might contain successful data, or an error message.
+
+```rust
+if let Ok(response) = self.response_receiver.try_recv() {
+    self.results = response;
+}
+```
+
+After this come the buttons. The [`SidePanel::left()`](https://docs.rs/egui/latest/egui/containers/panel/struct.SidePanel.html) will create a panel on the left side of the screen inside which we can add the buttons. If the button is clicked, the app will send off a command that may or might not include the data from the `input` field.
+
+```rust
+egui::SidePanel::left("left").show(ctx, |ui| {
+    if let Ok(response) = self.response_receiver.try_recv() {
+        self.results = response;
+    }
+    if ui.button("Create person").clicked() {
+        self.send(Command::CreatePerson(self.input.clone()))
+    };
+    if ui.button("Delete person").clicked() {
+        self.send(Command::DeletePerson(self.input.clone()))
+    }
+    if ui.button("List people").clicked() {
+        self.send(Command::ListPeople)
+    }
+    if ui.button("Session data").clicked() {
+        self.send(Command::Session)
+    }
+    if ui.button("New user").clicked() {
+        self.send(Command::SignUp)
+    }
+    if ui.button("Sign in as record user").clicked() {
+        self.send(Command::SignIn(self.input.clone()));
+    }
+    if ui.button("Sign in as root").clicked() {
+        self.send(Command::SignInRoot)
+    }
+    if ui.button("Raw query").clicked() {
+        self.send(Command::RawQuery(self.input.clone()))
+    }
+});
+```
+
+The final bit of code just involves creating two more panels, one in the centre and one on the right. The one on the right will add a [`ScrollArea`](https://docs.rs/egui/latest/egui/containers/scroll_area/struct.ScrollArea.html) so that the user can scroll through any results that are larger than the space in the right panel.
+
+```rust
+egui::CentralPanel::default().show(ctx, |ui| {
+    ui.label(RichText::new("Input:").heading());
+    ui.text_edit_multiline(&mut self.input);
+});
+egui::SidePanel::right("right").show(ctx, |ui| {
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        ui.label(RichText::new("Results:").heading());
+        ui.text_edit_multiline(&mut self.results);
+    });
+});
+```
+
+And that's all the code!
 
 ## Experimenting with the app
 
@@ -585,17 +710,20 @@ impl SurrealDbApp {
 impl eframe::App for SurrealDbApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::SidePanel::left("left").show(ctx, |ui| {
+            if let Ok(response) = self.response_receiver.try_recv() {
+                self.results = response;
+            }
             if ui.button("Create person").clicked() {
                 self.send(Command::CreatePerson(self.input.clone()))
             };
-            if ui.button("Session data").clicked() {
-                self.send(Command::Session)
-            }
             if ui.button("Delete person").clicked() {
                 self.send(Command::DeletePerson(self.input.clone()))
             }
             if ui.button("List people").clicked() {
                 self.send(Command::ListPeople)
+            }
+            if ui.button("Session data").clicked() {
+                self.send(Command::Session)
             }
             if ui.button("New user").clicked() {
                 self.send(Command::SignUp)
@@ -608,9 +736,6 @@ impl eframe::App for SurrealDbApp {
             }
             if ui.button("Raw query").clicked() {
                 self.send(Command::RawQuery(self.input.clone()))
-            }
-            if let Ok(response) = self.response_receiver.try_recv() {
-                self.results = response;
             }
         });
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -670,8 +795,7 @@ fn main() -> Result<(), Error> {
 
         loop {
             if let Ok(command) = db.command_receiver.try_recv() {
-                let response = db.handle_command(command).await;
-                match response {
+                match db.handle_command(command).await {
                     Ok(s) => db.response_sender.send(s)?,
                     Err(e) => db.response_sender.send(e.to_string())?
                 }
@@ -697,4 +821,29 @@ fn main() -> Result<(), Error> {
 }
 ```
 
+Here are some experiments you can do now that the app is up and running.
+
+* `Create person` button: pass in `{ "name": "Billy", "id": "billy" }` and see the return value `Person { name: "Billy", id: Thing { tb: "person", id: String("billy") }, created_by: None }`.
+* `Delete person` button: pass in `billy` to delete `person:billy`, or leave it blank to delete all the `person` records. As `.delete()` in the Rust SDK returns the records that are deleted, you will see `Person { name: "Billy", id: Thing { tb: "person", id: String("billy") }, created_by: None }` here as well.
+* `List people`, `Session data`, and `Sign in as root` buttons, which only require a single click.
+* `New user` button: will return an output like `New user created! { "name": "Estrella", "pass": "Jeromy" }`.
+* `Sign in as record user` button: if you paste in the output from the `New user` button, you will see an output like `Signed in as Lonnie!`. Note that this query will take a fraction of a second to compute. This is because the algorithms behind cryptographic functions like [`crypto::argon2::compare()`](https://surrealdb.com/docs/surrealql/functions/database/crypto#cryptoargon2compare) are [meant to be computationally expensive](/docs/surrealdb/reference-guide/security-best-practices#passwords) so that comparing real passwords to hashed and salted passwords takes as long as possible - but just quick enough that a single comparison is barely noticed by a legitimate user.
+* `Raw query` button: runs [a raw query](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.query) and returns a [Response](https://docs.rs/surrealdb/latest/surrealdb/struct.Response.html). The output is not particularly pretty, but being able to run any query is convenient in a pinch.
+
+Since the app lets you sign in as both a record user and a root user, let's use this to compare the permissions between the two.
+
+First, paste in `{ "name": "Billy", "id": "billy" }` as a root user and click `Create person`, then again with `{ "name": "Billina", "id": "billina" }`.
+
+Next, click on `New user`, copy the `JSON` output, paste it into the input in the central panel, and click on `Sign in as record user`.
+
+Now try creating a `person` by entering `{ "name": "recorduserperson" }` into the input box and clicking on `Create person`. You should see a different output this time, as now the `created_by` field has been filled in because the `$auth` parameter currently holds the record user's ID. It should look something like this. `Person { name: "recorduserperson", id: Thing { tb: "person", id: String("70fpp3dd72hriekgclfb") }, created_by: Some(Thing { tb: "user", id: String("141datbkzq5tum9h5xvk") }) }`
+
+We'll now imagine that the record user wants to delete all of the `person` records in the database. Delete everything in the Input box and click on `Delete person`. You should see the same output as before: just the `person` record that the record user created.
+
+Finally, click on `List people`. The results will show that the Billy and Billina `person` records are safe and sound, because record users can only delete `person` records that they have created.
+
 ## Further steps
+
+Now that you have a running Egui app with SurrealDB as the backend, here are some other ideas that you might want to explore.
+
+* Compiling to WASM (and even deploying to a website). Egui can be compiled to WASM, and SurrealDB can use IndexedDB as [one of its backends](https://surrealdb.com/docs/surrealdb/cli/start#positional-argument).
