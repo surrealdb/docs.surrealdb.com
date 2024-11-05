@@ -7,7 +7,7 @@ import { highlightCode, tagHighlighter, tags } from '@lezer/highlight';
 import { parser as javascriptParser } from '@lezer/javascript';
 import { parser as jsonParser } from '@lezer/json';
 import { parser as phpParser } from '@lezer/php';
-import { csharp, java } from "@codemirror/legacy-modes/mode/clike";
+import { csharp} from "@codemirror/legacy-modes/mode/clike";
 import { parser as pythonParser } from '@lezer/python';
 import { parser as rustParser } from '@lezer/rust';
 import { parser as yamlParser } from '@lezer/yaml';
