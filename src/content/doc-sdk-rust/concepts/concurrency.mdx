@@ -7,6 +7,8 @@ description: SurrealDB supports a number of methods for authenticating users and
 
 # Concurrency
 
+The following example 
+
 ## Getting started
 
 Start a running database using the following command:
@@ -30,42 +32,93 @@ tokio = "1.41.0"
 ```
 
 ```rust
-use std::sync::LazyLock;
-use surrealdb::engine::remote::ws::Client;
-use surrealdb::engine::remote::ws::Ws;
-use surrealdb::Surreal;
-use tokio::sync::mpsc;
+use std::sync::Arc;
+use std::time::Instant;
+use surrealdb::engine::remote::ws::{Client, Ws};
+use surrealdb::opt::auth::Root;
+use surrealdb::{Error, Surreal};
 
-static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
+const MAX: usize = 50_000;
 
-const NUM: usize = 100_000;
+enum DbType {
+    Standard,
+    With1,
+    With1000,
+}
+
+impl DbType {
+    async fn generate(self) -> Result<Surreal<Client>, Error> {
+        let db = match self {
+            DbType::Standard => Surreal::new::<Ws>("localhost:8000").await,
+            DbType::With1 => Surreal::new::<Ws>("localhost:8000").with_capacity(1).await,
+            DbType::With1000 => {
+                Surreal::new::<Ws>("localhost:8000")
+                    .with_capacity(1000)
+                    .await
+            }
+        }?;
+        db.use_ns("namespace").use_db("database").await?;
+        db.signin(Root {
+            username: "root",
+            password: "root",
+        })
+        .await?;
+        Ok(db)
+    }
+}
+
+async fn select_index(db: &Surreal<Client>, idx: usize) {
+    let mut result = db
+        .query("SELECT * FROM $idx")
+        .bind(("idx", idx))
+        .await
+        .unwrap();
+
+    let db_idx: Option<usize> = result.take(0).unwrap();
+    if let Some(db_idx) = db_idx {
+        println!("{idx}: {db_idx}");
+    }
+}
+
+async fn async_test(db: Arc<Surreal<Client>>) -> std::time::Duration {
+    let start = std::time::Instant::now();
+    let mut handles = vec![];
+    for idx in 0..=MAX {
+        let db = db.clone();
+        handles.push(tokio::spawn(async move {
+            select_index(&db, idx).await;
+        }));
+    }
+    for h in handles {
+        h.await.unwrap();
+    }
+    Instant::now() - start
+}
 
 #[tokio::main]
-async fn main() -> surrealdb::Result<()> {
-	DB.connect::<Ws>("localhost:8000").with_capacity(NUM).await?;
+async fn main() -> Result<(), Error> {
+    let db_standard = Arc::new(DbType::Standard.generate().await?);
+    let db_with_1 = Arc::new(DbType::With1.generate().await?);
+    let db_with_1000 = Arc::new(DbType::With1000.generate().await?);
 
-	DB.use_ns("namespace").use_db("database").await?;
+    let start = std::time::Instant::now();
+    for idx in 0..=MAX {
+        select_index(&db_standard, idx).await;
+    }
 
-	let (tx, mut rx) = mpsc::channel::<()>(1);
+    let res_1 = format!("Regular DB: {:?}", Instant::now() - start);
+    let res_2 = format!("Async with capacity 1: {:?}", async_test(db_with_1).await);
+    let res_3 = format!(
+        "Async with capacity 1000: {:?}",
+        async_test(db_with_1000).await
+    );
+    let res_4 = format!(
+        "Async with unbounded capacity: {:?}",
+        async_test(db_standard).await
+    );
 
-	for idx in 0..NUM {
-		let sender = tx.clone();
-		tokio::spawn(async move {
-			let mut result = DB.query("SELECT * FROM $idx").bind(("idx", idx)).await.unwrap();
+    println!("{res_1}\n{res_2}\n{res_3}\n{res_4}");
 
-			let db_idx: Option<usize> = result.take(0).unwrap();
-			if let Some(db_idx) = db_idx {
-				println!("{idx}: {db_idx}");
-			}
-
-			drop(sender);
-		});
-	}
-
-	drop(tx);
-
-	rx.recv().await;
-
-	Ok(())
+    Ok(())
 }
 ```
