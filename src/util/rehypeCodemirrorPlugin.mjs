@@ -1,5 +1,6 @@
 import { StandardSQL } from '@codemirror/lang-sql';
-import {StreamLanguage} from "@codemirror/language"
+import { StreamLanguage } from '@codemirror/language';
+import { csharp } from '@codemirror/legacy-modes/mode/clike';
 import { parser as bashParser } from '@fig/lezer-bash';
 import { parseMixed } from '@lezer/common';
 import { parser as goParser } from '@lezer/go';
@@ -7,7 +8,6 @@ import { highlightCode, tagHighlighter, tags } from '@lezer/highlight';
 import { parser as javascriptParser } from '@lezer/javascript';
 import { parser as jsonParser } from '@lezer/json';
 import { parser as phpParser } from '@lezer/php';
-import { csharp} from "@codemirror/legacy-modes/mode/clike";
 import { parser as pythonParser } from '@lezer/python';
 import { parser as rustParser } from '@lezer/rust';
 import { parser as yamlParser } from '@lezer/yaml';
@@ -24,9 +24,12 @@ const surrealqlParser = _surrealqlParser.configure({
     }),
 });
 
+const csharpParser = StreamLanguage.define(csharp).parser;
+
 const parser = {
     bash: bashParser,
-    dotnet:StreamLanguage.define(csharp),
+    cs: csharpParser,
+    csharp: csharpParser,
     rs: rustParser,
     rust: rustParser,
     js: javascriptParser,
