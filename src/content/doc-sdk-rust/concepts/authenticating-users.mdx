@@ -5,6 +5,135 @@ title: Rust | SDKs | Integration
 description: SurrealDB supports a number of methods for authenticating users and securing the database.
 ---
 
+# Authenticating users
+
+The [`.signup()`](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.signup) and [`.signin()`](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.signin) methods are used for both system users (users created with a [DEFINE USER](/docs/surrealql/statements/define/user) statement) and record users (users created with a [DEFINE ACCESS](/docs/surrealql/statements/define/access) statement). These two methods take any type that implements the [`Credentials`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/trait.Credentials.html) trait, namely the structs [`Root`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Root.html), [`Namespace`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Namespace.html), [`Database`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Database.html), and [`Record`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Record.html).
+
+```rust
+pub struct Root<'a> {
+    pub username: &'a str,
+    pub password: &'a str,
+}
+
+pub struct Namespace<'a> {
+    pub namespace: &'a str,
+    pub username: &'a str,
+    pub password: &'a str,
+}
+
+pub struct Database<'a> {
+    pub namespace: &'a str,
+    pub database: &'a str,
+    pub username: &'a str,
+    pub password: &'a str,
+}
+
+// P: any type that implements Serialize
+pub struct Record<'a, P> {
+    pub namespace: &'a str,
+    pub database: &'a str,
+    pub access: &'a str,
+    pub params: P,
+}
+```
+
+The `access` and `params` fields of the `Record` struct are the only one of the four that requires extra explanation.
+
+The `access` field comes from the name of the [access method](https://surrealdb.com/docs/surrealql/statements/define/access/record) used to create a record user. In our case, we will use an access method called 'account'. An access method will generally create a record on signup, and select a record on signin, which is the case with our access method as well.
+
+```surql
+DEFINE ACCESS account ON DATABASE TYPE RECORD
+	SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
+	SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+	DURATION FOR TOKEN 15m, FOR SESSION 12h;
+```
+
+Since the `params` of a `Record` struct used to sign up and sign can be any type that implements `Serialize`, we can put our own struct together and pass them into these methods. On signup, the database will CREATE a `user` record that holds the name and password, and on signin it will SELECT the user that has a matching name and password.
+
+
+
+```rust
+#[derive(Serialize, Deserialize)]
+struct Params<'a> {
+    name: &'a str,
+    pass: &'a str,
+}
+
+db.signup(Record {
+    access: "account",
+    namespace: "namespace",
+    database: "database",
+    params: Params {
+        name: "username",
+        pass: "Str0ngpAASSword!",
+    },
+})
+```
+
+All of the definitions for this example are as follows.
+
+```surql
+DEFINE TABLE person SCHEMALESS
+    PERMISSIONS FOR 
+        CREATE, SELECT WHERE $auth,
+        FOR UPDATE, DELETE WHERE created_by = $auth;
+DEFINE FIELD name ON TABLE person TYPE string;
+DEFINE FIELD created_by ON TABLE person VALUE $auth READONLY;
+
+DEFINE INDEX unique_name ON TABLE user FIELDS name UNIQUE;
+DEFINE ACCESS account ON DATABASE TYPE RECORD
+SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
+SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+DURATION FOR TOKEN 15m, FOR SESSION 12h
+```
+
+Whenever a record user is signed into the database, the `$auth` parameter will be populated with its record ID. The `DEFINE TABLE` statement then uses this to give the record user permissions to `CREATE` and `SELECT` any `person` record, but to `UPDATE` and `DELETE` only when the `created_by` field matches the ID in `$auth`. This `created_by` field is automatically set and is `READONLY`. It will show up as `None` when a system user is signed in.
+
+The `.signup()` and `.signin()` methods return a [`Jwt`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Jwt.html), which can be printed out if needed using the `.into_insecure_token()` or `.as_insecure_token()` methods. As the method names imply, great care should be taken care with them. The `Jwt` struct redacts the token so printing out a `Jwt` on its own will not display it.
+
+The code uses a crate called [`faker_rand`](https://docs.rs/faker_rand/latest/faker_rand/index.html) to generate a random name and password to make it easy to rerun the code and experiment with the behaviour.
+
+```rust
+async fn make_new_user(db: &Surreal<Client>) -> Result<RecordUser, Error> {
+    let name = rand::random::<FirstName>().to_string();
+    let pass = rand::random::<FirstName>().to_string();
+    println!("Signing in as user {name} and password {pass}");
+    let jwt = db
+        .signup(Record {
+            access: "account",
+            namespace: "namespace",
+            database: "database",
+            params: Params {
+                name: &name,
+                pass: &pass,
+            },
+        })
+        .await?
+        .into_insecure_token();
+    println!("New user created!\n\nName: {name}\nPassword: {pass}\nToken: {jwt}\n\nTo log in, use this command:\n\nsurreal sql --namespace namespace --database database --pretty --token \"{jwt}\"\n");
+    Ok(RecordUser { name, pass })
+}
+
+async fn get_new_token(db: &Surreal<Client>, user: &RecordUser) -> Result<(), Error> {
+    let jwt = db
+        .signin(Record {
+            access: "account",
+            namespace: "namespace",
+            database: "database",
+            params: Params {
+                name: &user.name,
+                pass: &user.pass,
+            },
+        })
+        .await?
+        .into_insecure_token();
+    println!("New token! Sign in with surreal sql --namespace namespace --database database --pretty --token \"{jwt}\"\n");
+    Ok(())
+}
+```
+
+The entire code is as follows. Inside `main()`, the client first logs in as a root user to define the schema and create a `person` record. It then signs up as a new record user, and then signs in again to demonstrate that a new token is returned each time this method is called (as long as the name and password match). The record user then creates a `person` record - which it is permitted to do - and then tries to delete all of the `person` records in the database. However, the `person` record created by the root user will remain untouched.
+
 ```rust
 use surrealdb::engine::remote::ws::Client;
 use surrealdb::engine::remote::ws::Ws;
@@ -126,4 +255,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+```
+
+Example output:
+
+```
+Signing in as user Emmett and password Izaiah
+New user created!
+
+Name: Emmett
+Password: Izaiah
+Token: eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpYXQiOjE3MzA4NjQ2NDAsIm5iZiI6MTczMDg2NDY0MCwiZXhwIjoxNzMwODY1NTQwLCJpc3MiOiJTdXJyZWFsREIiLCJqdGkiOiIwNmYwOGFhZi0zYzIyLTQ5N2UtYWRmNC0zNDMxMzA5YWYxOGEiLCJOUyI6Im5hbWVzcGFjZSIsIkRCIjoiZGF0YWJhc2UiLCJBQyI6ImFjY291bnQiLCJJRCI6InVzZXI6YW92bHN0dzBvN2R1Y2J4ZWpqZWsifQ.tHCVlubg3G2j05-LsEaE6jRHMwrBtccJcR6uC9Z6Lo-egrYlBybEEfOZh020OxWxKvUt8eA92-6TjwBvSpN5KA
+
+To log in, use this command:
+
+surreal sql --namespace namespace --database database --pretty --token "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpYXQiOjE3MzA4NjQ2NDAsIm5iZiI6MTczMDg2NDY0MCwiZXhwIjoxNzMwODY1NTQwLCJpc3MiOiJTdXJyZWFsREIiLCJqdGkiOiIwNmYwOGFhZi0zYzIyLTQ5N2UtYWRmNC0zNDMxMzA5YWYxOGEiLCJOUyI6Im5hbWVzcGFjZSIsIkRCIjoiZGF0YWJhc2UiLCJBQyI6ImFjY291bnQiLCJJRCI6InVzZXI6YW92bHN0dzBvN2R1Y2J4ZWpqZWsifQ.tHCVlubg3G2j05-LsEaE6jRHMwrBtccJcR6uC9Z6Lo-egrYlBybEEfOZh020OxWxKvUt8eA92-6TjwBvSpN5KA"
+
+New token! Sign in with surreal sql --namespace namespace --database database --pretty --token "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpYXQiOjE3MzA4NjQ2NDAsIm5iZiI6MTczMDg2NDY0MCwiZXhwIjoxNzMwODY1NTQwLCJpc3MiOiJTdXJyZWFsREIiLCJqdGkiOiIyZjExZTQzZi04ODg1LTRmNzAtOGI2Zi0zNGZmZGZlZWY4MDUiLCJOUyI6Im5hbWVzcGFjZSIsIkRCIjoiZGF0YWJhc2UiLCJBQyI6ImFjY291bnQiLCJJRCI6InVzZXI6YW92bHN0dzBvN2R1Y2J4ZWpqZWsifQ.0GWwMiAjn5kKUoNAw2TxAdVLhWIHeJsVWvlAzw1QZ91qdIhkazygdG5uFl5DHVmmoYC-cLo-ko27jiRCid5xDg"
+
+Two `person` records: [Person { name: "Created by record user", id: Thing { tb: "person", id: String("i2sv6bqk0mso0udgzmdx") }, created_by: Some(Thing { tb: "user", id: String("aovlstw0o7ducbxejjek") }) }, Person { name: "Created by root", id: Thing { tb: "person", id: String("u6mry7agmsmtbwl94yui") }, created_by: None }]
+
+`person` created by root is still there: [Person { name: "Created by root", id: Thing { tb: "person", id: String("u6mry7agmsmtbwl94yui") }, created_by: None }]
 ```
