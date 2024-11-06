@@ -24,9 +24,12 @@ const surrealqlParser = _surrealqlParser.configure({
     }),
 });
 
+const csharpParser = StreamLanguage.define(csharp).parser;
+
 const parser = {
     bash: bashParser,
-    dotnet: StreamLanguage.define(csharp),
+    cs: csharpParser,
+    csharp: csharpParser,
     rs: rustParser,
     rust: rustParser,
     js: javascriptParser,
