@@ -31,6 +31,8 @@ surrealdb = "2.0.4"
 tokio = "1.41.0"
 ```
 
+## The code
+
 The SurrealDB client by nature has no maximum capacity for the number of channels that can be made to perform queries. To change this setting, the [`.with_capacity()`](https://docs.rs/surrealdb/latest/surrealdb/struct.Connect.html#method.with_capacity) method can be used. As the documentation notes, this method is useful if your client is running so many queries concurrently that the machine used to execute them is running out of memory.
 
 ```
@@ -227,4 +229,45 @@ Regular DB: 5.244320833s
 Async with capacity 1: 1.523926416s
 Async with capacity 1000: 1.441300833s
 Async with unbounded capacity: 1.183820584s
+```
+
+## Using a channel instead of a JoinHandle
+
+Besides the classic method of using a `JoinHandle` for each thread or task to wait until all have completed their operation, a [channel](https://docs.rs/tokio/latest/tokio/sync/mpsc/fn.channel.html) can also be used. A channel can be used in the following way:
+
+* Create a channel with a buffer of 1 (the minimum size), as the channel will not be used to actually send data,
+* Clone the sender and send it into each iteration of the `for` loop,
+* Drop the cloned sender once the database query is done,
+* Drop the original sender after the `for` loop,
+* Call [`.recv()`](https://docs.rs/tokio/latest/tokio/sync/mpsc/struct.Receiver.html#method.recv) on the receiver at the very end.
+
+As tokio's documentation shows, the `.recv()` method will cause the receiver to sleep as it waits for each task to complete, and at the end it will close once the last sender has been dropped.
+
+```
+This method returns None if the channel has been closed and there are no remaining messages in the channel’s buffer. This indicates that no further values can ever be received from this Receiver. The channel is closed when all senders have been dropped, or when close is called.
+
+If there are no messages in the channel’s buffer, but the channel has not yet been closed, this method will sleep until a message is sent or the channel is closed.
+```
+
+Here is what the `async_test()` function looks like using this method.
+
+```rust
+async fn async_test(db: Arc<Surreal<Client>>, test_num: &'static str) -> std::time::Duration {
+    let (tx, mut rx) = mpsc::channel::<()>(1);
+    let start = std::time::Instant::now();
+
+    for idx in 0..=MAX {
+        let sender = tx.clone();
+        let db = db.clone();
+        tokio::spawn(async move {
+            select_index(&db, idx, test_num).await;
+            drop(sender);
+        });
+    }
+    drop(tx);
+
+	rx.recv().await;
+
+    Instant::now() - start
+}
 ```
