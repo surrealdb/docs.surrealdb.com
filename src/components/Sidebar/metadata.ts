@@ -17,10 +17,10 @@ import DarkPhp from '@img/icon/dark/php.png';
 import DarkPython from '@img/icon/dark/python.png';
 import DarkRust from '@img/icon/dark/rust.png';
 
-import LightSurrealML from '@img/icon/light/surrealml.png';
-import LightSurrealQL from '@img/icon/light/surrealql.png';
 import LightSurrealDB from '@img/icon/light/surrealdb.png';
 import LightSurrealist from '@img/icon/light/surrealdb.png';
+import LightSurrealML from '@img/icon/light/surrealml.png';
+import LightSurrealQL from '@img/icon/light/surrealql.png';
 
 import DarkSurrealDB from '@img/icon/dark/surrealdb.png';
 import DarkSurrealist from '@img/icon/dark/surrealist.png';
