@@ -74,6 +74,19 @@ function handler(event) {
 		case '/docs/integration/libraries/deno':
 		case '/docs/surrealdb/integration/sdks/deno':
 			return redirect('https://surrealdb.com/docs/sdk/javascript');
+		// Redirect broken JS SDK doc urls
+		case '/docs/sdk/javascript/core/initialization':
+			return redirect('/docs/sdk/javascript/core/create-a-new-connection');
+		case '/docs/sdk/javascript/core/authentication':
+			return redirect('/docs/sdk/javascript/core/handling-authentication');
+		case '/docs/sdk/javascript/core/data-querying':
+			return redirect('/docs/sdk/javascript/core/data-maniplulation');
+		case '/docs/sdk/javascript/core/methods/authenticate':
+			return redirect('/docs/sdk/javascript/methods/authenticate');
+		case '/docs/sdk/javascript/core/methods/invalidate':
+			return redirect('/docs/sdk/javascript/methods/invalidate');
+		case '/docs/sdk/javascript/setup':
+			return redirect('/docs/sdk/javascript/core');
 		// Redirect old SurrealQL functions pages
 		case '/docs/surrealdb/surrealql/functions/array':
 		case '/docs/surrealdb/surrealql/functions/count':
@@ -154,6 +167,8 @@ function handler(event) {
 		case '/docs/surrealql/statements/remove/overview':
 		case '/docs/surrealdb/surrealql/statements/remove/overview':
 			return redirect('https://surrealdb.com/docs/surrealdb/surrealql/statements/remove');
+		case '/docs/surrealdb/installation/upgrading/beta':
+			return redirect('/docs/surrealdb/installation/upgrading/migrating-data-to-2x');
 		case '/docs/1.0.x':
 		case '/docs/1.0.0':
 		case '/docs/1.1.x':
