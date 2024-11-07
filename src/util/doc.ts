@@ -108,7 +108,7 @@ export async function generateBreadcrumb(
             const title = getTitle(meta, slug);
             const href = `${import.meta.env.BASE_URL}/${
                 urlForCollection[name]
-            }${meta.fileIsIndex ? "" : `/${slug}`}`;
+            }${meta.fileIsIndex ? '' : `/${slug}`}`;
             return meta.isPage ? { title, href } : { title };
         })
     );
@@ -148,9 +148,12 @@ export async function getMeta<CK extends CollectionKey>(
     name: CK,
     slug: string,
     isGroup = false
-): Promise<CollectionEntry<CK>['data'] & { isPage: boolean, fileIsIndex: boolean }> {
+): Promise<
+    CollectionEntry<CK>['data'] & { isPage: boolean; fileIsIndex: boolean }
+> {
     const item = await getEntry(name, slug);
-    const fileIsIndex = item && item.slug === 'index' && item.id.startsWith('index');
+    const fileIsIndex =
+        item && item.slug === 'index' && item.id.startsWith('index');
     if (!isGroup) {
         if (item)
             return {
