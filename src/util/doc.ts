@@ -45,7 +45,7 @@ export async function generateSidebar(
                 const meta = await getMeta(name, slug, isGroup);
 
                 let urlSlug: string = slug;
-                if (!base && slug === 'index') {
+                if (meta.fileIsIndex) {
                     urlSlug = '';
                 }
 
@@ -99,7 +99,7 @@ export async function generateSidebar(
 export async function generateBreadcrumb(
     name: CollectionKey,
     slug: string
-): Promise<{ items: { title: string; href: string }[] }> {
+): Promise<{ items: { title: string; href?: string }[] }> {
     const parts = slug.split('/').filter((a) => a !== '');
     const slugs = parts.map((_, i) => parts.slice(0, i + 1).join('/'));
     const items = await Promise.all(
@@ -108,8 +108,8 @@ export async function generateBreadcrumb(
             const title = getTitle(meta, slug);
             const href = `${import.meta.env.BASE_URL}/${
                 urlForCollection[name]
-            }/${slug}`;
-            return { title, href };
+            }${meta.fileIsIndex ? '' : `/${slug}`}`;
+            return meta.isPage ? { title, href } : { title };
         })
     );
 
@@ -148,13 +148,18 @@ export async function getMeta<CK extends CollectionKey>(
     name: CK,
     slug: string,
     isGroup = false
-): Promise<CollectionEntry<CK>['data'] & { isPage: boolean }> {
+): Promise<
+    CollectionEntry<CK>['data'] & { isPage: boolean; fileIsIndex: boolean }
+> {
     const item = await getEntry(name, slug);
+    const fileIsIndex =
+        item && item.slug === 'index' && item.id.startsWith('index');
     if (!isGroup) {
         if (item)
             return {
                 ...item.data,
                 isPage: true,
+                fileIsIndex,
             };
     }
 
@@ -176,10 +181,12 @@ export async function getMeta<CK extends CollectionKey>(
         return {
             ...(schema?.parse(JSON.parse(raw)) ?? JSON.parse(raw)),
             isPage: !!item,
+            fileIsIndex,
         };
     } catch {
         return {
             isPage: !!item,
+            fileIsIndex,
         };
     }
 }

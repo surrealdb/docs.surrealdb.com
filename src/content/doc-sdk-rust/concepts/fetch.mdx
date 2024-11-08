@@ -1,0 +1,210 @@
+---
+sidebar_position: 2
+sidebar_label: Fetching linked records
+title: Rust | SDKs | Integration
+description: All the fields of a SurrealDB linked record can be fetched and deserialized into a Rust type
+---
+
+# Fetching records
+
+Start a running database using the following command:
+
+```
+surreal start --user root --pass root 
+```
+
+To follow along interactively, connect [using Surrealist](/docs/surrealist/getting-started#creating-a-connection) or the following command to open up the CLI:
+
+```
+surrealdb % surreal sql --user root --pass root --ns namespace --db database --pretty
+```
+
+Then use the `cargo add` command to add three crates: `surrealdb` and `tokio`, and with `serde` with the "serde_derive" feature (`cargo add serde --features serde_derive`). The dependencies inside `Cargo.toml` should look something like this:
+
+cargo add serde --features serde_derive
+
+```toml
+[dependencies]
+serde = { version = "1.0.214", features = ["serde_derive"] }
+surrealdb = "2.0.4"
+tokio = "1.41.0"
+```
+
+## When to use FETCH
+
+The following example shows a classroom joined to a few students by [record links](/docs/surrealql/datamodel/records).
+
+```surql
+CREATE teacher:one SET name = id.id();
+CREATE student:one, student:two, student:three SET name = id.id();
+
+CREATE classroom SET
+    location = (-16.7, 64.4),
+    school_name = "Jöklaskóli",
+    teacher = teacher:one,
+    students = [student:one, student:two, student:three];
+```
+
+A query using `SELECT * FROM classroom:one` will show the teacher and all of the students, but only their record IDs.
+
+```surql title="Query and response"
+SELECT * FROM classroom:one;
+
+[
+	{
+		id: classroom:one,
+		location: (-16.7, 64.4),
+		school_name: 'Jöklaskóli',
+		students: [
+			student:one,
+			student:two,
+			student:three
+		],
+		teacher: teacher:one
+	}
+]
+```
+
+[The `.*` operator](/docs/surrealql/datamodel/idioms#all-elements) for the `teacher` and `student` fields can be used in this case, but note that the `.*` must be used twice in the case of the students: once to access each member of the array, and once more to access all of its fields.
+
+```surql
+SELECT *, teacher.*, students.*.* FROM classroom;
+```
+
+Using `FETCH` may be a nicer option in this case. The syntax is a bit more readable, and there is no need to think about which fields are single records and which ones are arrays.
+
+```surql
+SELECT * FROM classroom FETCH teacher, students;
+```
+
+Here is the result:
+
+```surql title="Output"
+[
+	{
+		id: classroom:one,
+		location: (-16.7, 64.4),
+		school_name: 'Jöklaskóli',
+		students: [
+			{
+				id: student:one,
+				name: 'one'
+			},
+			{
+				id: student:two,
+				name: 'two'
+			},
+			{
+				id: student:three,
+				name: 'three'
+			}
+		],
+		teacher: {
+			id: teacher:one,
+			name: 'one'
+		}
+	}
+]
+```
+
+## The Rust code
+
+The code below that shows an example of `FETCH` is another example related to classes and students. Note that in one part it passes a [`Resource`](https://docs.rs/surrealdb/latest/surrealdb/opt/enum.Resource.html) into the [`create`](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.create) method in order to return a [`Value`](https://docs.rs/surrealdb/latest/surrealdb/struct.Value.html) and thus not have to specify a return type to deserialize into. For more information on this technique, see [the page on flexible typing](/docs/sdk/rust/concepts/flexible_typing).
+
+```rust
+use serde::{Deserialize, Serialize};
+use surrealdb::{
+    engine::remote::ws::Ws,
+    opt::{auth::Root, Resource},
+    sql::Datetime,
+    RecordId, Surreal,
+};
+
+// Dance classes table name
+const DANCE: &str = "dance";
+// Students table name
+const STUDENT: &str = "student";
+
+// Dance class table schema
+#[derive(Debug, Serialize, Deserialize)]
+struct DanceClass {
+    id: RecordId,
+    name: String,
+    created_at: Datetime,
+}
+
+// Student table schema
+#[derive(Debug, Serialize)]
+struct Student {
+    id: RecordId,
+    name: String,
+    classes: Vec<RecordId>,
+    created_at: Datetime,
+}
+
+// Student model with full class details
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct StudentClasses {
+    id: RecordId,
+    name: String,
+    classes: Vec<DanceClass>,
+    created_at: Datetime,
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    // Connect to the database server
+    let db = Surreal::new::<Ws>("localhost:8000").await?;
+
+    // Sign in into the server
+    db.signin(Root {
+        username: "root",
+        password: "root",
+    })
+    .await?;
+
+    // Select the namespace and database to use
+    db.use_ns("namespace").use_db("database").await?;
+
+    // Create a dance class and store the result
+    let classes: Option<DanceClass> = db
+        .create(DANCE)
+        .content(DanceClass {
+            id: RecordId::from((DANCE, "dc101")),
+            name: "Introduction to Dancing".to_owned(),
+            created_at: Datetime::default(),
+        })
+        .await?;
+
+    // Create a student and assign her to the previous dance class
+    // We don't care about the result here so we don't need to
+    // type-hint and store it. We use `Resource::from` to return
+    // a `sql::Value` instead and ignore it.
+    db.create(Resource::from(STUDENT))
+        .content(Student {
+            id: RecordId::from((STUDENT, "jane")),
+            name: "Jane Doe".to_owned(),
+            classes: classes.into_iter().map(|class| class.id).collect(),
+            created_at: Datetime::default(),
+        })
+        .await?;
+
+    // Run a query to retrieve students and full class info
+    let mut results = db.query(format!("SELECT * FROM {STUDENT} FETCH classes")).await?;
+
+    // Extract the first query statement result and deserialise it as a vector of students
+    let students: Vec<StudentClasses> = results.take(0)?;
+
+    // Use the result as you see fit. In this case we are simply pretty printing it.
+    println!("Students = {:?}", students);
+
+    Ok(())
+}
+```
+
+Here is the final output:
+
+```
+Students = [StudentClasses { id: Thing { tb: "student", id: String("jane") }, name: "Jane Doe", classes: [DanceClass { id: Thing { tb: "dance", id: String("dc101") }, name: "Introduction to Dancing", created_at: Datetime(2024-11-06T02:15:05.116807Z) }], created_at: Datetime(2024-11-06T02:15:05.117644Z) }]
+```
