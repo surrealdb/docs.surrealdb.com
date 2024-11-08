@@ -1,0 +1,849 @@
+---
+sidebar_position: 4
+sidebar_label: Egui
+title: Rust | SDKs | Integration
+description: The SDK for Rust allows SurrealDB to be used as the storage backend for an Egui visual app
+---
+
+# SurrealDB with Egui
+
+The following tutorial will set up a small app with Egui that uses SurrealDB as its database.
+
+## Getting started
+
+First, open up a terminal window and use the following command to start an empty database.
+
+```bash
+surreal start --user root --pass root
+```
+
+You can also use the [Start serving](/docs/surrealist/concepts/local-database-serving) button on [Surrealist](/docs/surrealist) to do the same if you have it installed locally.
+
+The database initiated by the [surreal start](/docs/surrealdb/cli/start) command stores data in memory by default, which then disappears every time the database is shut down. As such, you can simply use Ctrl+C every time you want to start the database anew with no existing definitions or data. To save data to disk which will persist after shutting down, add a [positional argument](/docs/surrealdb/cli/start#positional-argument) for one of the storage backends such as `rocksdb://mydatabase` or `surrealkv://mydatabase`.
+
+With the database running, it's time to start setting up the Rust code.
+
+## Starting the Rust code
+
+First create a new Rust project with the command `cargo new your_project_name`, go into the newly created directory, and use `cargo add` to add each of the following dependencies:
+
+* `anyhow`, to allow us to not worry about how to handle different error types,
+* `egui` and its framework `eframe`,
+* `rand` and `faker_rand`, to create random user names that can be used to sign in to the database as a record user,
+* `serde` and `serde_json`, for serializing and deserializing Rust structs passed to and from the database and Egui,
+* `tokio`, for the async runtime that SurrealDB uses.
+
+The `serde` crate will need the `derive` flag enabled, and `tokio` will need the `rt` flag enabled as well. Your `cargo.toml` dependencies should look like this:
+
+```
+anyhow = "1.0.91"
+eframe = "0.29.1"
+egui = "0.29.1"
+faker_rand = "0.1.1"
+rand = "0.8.5"
+serde = { version = "1.0.209", features = ["derive"] }
+serde_json = "1.0.132"
+surrealdb = "2.0.4"
+tokio = { version = "1.41.0", features = ["rt"] }
+```
+
+Before we get around to the Egui frontend, let's set up the database.
+
+SurrealDB's Rust crate uses async code, and while usually you will see an `async fn main()` with a `#[tokio::main]` attribute on top in SurrealDB examples, Egui does not use async. To isolate one from the other, we can create the tokio runtime manually and call `.block_on()` to isolate the database in its own space. Later one, we will create two [channels](https://doc.rust-lang.org/std/sync/mpsc/fn.channel.html) to communicate between the database and the Egui app.
+
+Inside `main()`, we will do the following:
+
+* Connect to the database running at `localhost:8000`
+* Sign in as the root user that was created through the `surreal start` command
+* Use (move to) the namespace "test" and database "test"
+* Use the `.query()` method to pass in a few definitions for the database.
+
+```rust
+fn main() -> Result<(), Error> {
+    let rt = tokio::runtime::Runtime::new()?;
+
+    let _: Result<(), Error> = rt.block_on(async {
+
+            let db = Surreal::new::<Ws>("localhost:8000").await?;
+
+            db.signin(Root {
+                username: "root",
+                password: "root",
+            })
+            .await?;
+
+            db.use_ns("test").use_db("test").await?;
+
+            db.query(
+                "    DEFINE TABLE person SCHEMALESS
+                PERMISSIONS FOR
+                    CREATE, SELECT WHERE $auth,
+                    FOR UPDATE, DELETE WHERE created_by = $auth;
+            DEFINE FIELD name ON TABLE person TYPE string;
+            DEFINE FIELD created_by ON TABLE person VALUE $auth READONLY;
+
+            DEFINE INDEX unique_name ON TABLE user FIELDS name UNIQUE;
+            DEFINE ACCESS account ON DATABASE TYPE RECORD
+            SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
+            SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+            DURATION FOR TOKEN 15m, FOR SESSION 12h
+        ;",
+            )
+            .await?;
+        Ok(())
+        });
+    Ok(())
+}
+```
+
+## What the database definitions do
+
+The first item that stands out with the definitions above is that they all contain a `IF NOT EXISTS` clause. As the `DEFINE` statements will be executed every time the app starts, it is possible that they might be executed on a database that already has the definitions in place. Since version 2.0, SurrealDB simply returns an error if a definition already exists, requiring the `OVERWRITE` clause if a definition needs to be redone. Without `IF NOT EXISTS`, the message "The table 'person' already exists" will be returned.
+
+Note that this would not affect our app, as this would still be a successful usage of the `.query()` method. Instead, its output would contain a number of error results that could be handled individually:
+
+```
+Response { client: Surreal { router: OnceLock(Router { sender: Sender { .. }, last_id: 4, features: {LiveQueries} }), engine: PhantomData<surrealdb::api::engine::any::Any> }, results: {0: (Stats { execution_time: Some(252.625µs) }, Err(Api(Query("The table 'person' already exists")))), 1: (Stats { execution_time: Some(79.167µs) }, Err(Api(Query("The field 'name' already exists")))), 2: (Stats { execution_time: Some(69.5µs) }, Err(Api(Query("The field 'created_by' already exists")))), 3: (Stats { execution_time: Some(73.625µs) }, Err(Api(Query("The index 'unique_name' already exists")))), 4: (Stats { execution_time: Some(73.583µs) }, Err(Api(Query("The access method 'account' already exists in the database 'test'"))))}, live_queries: {} }
+```
+
+However, adding `IF NOT EXISTS` is a nice way to change the results from errors into successful results, and to avoid the rare case in which they end up applied to some other version 1.x database that would rewrite its definitions if `IF NOT EXISTS` is present. So while not necessary in our case, it is a good practice to follow and makes for cleaner output.
+
+Now let's go over each of the definitions to see what they do.
+
+The first three statements define a `person` table. This table is schemaless, but has one required field `name`, which must be present and must be a string. This table has defined permissions by which a record user is able to use `CREATE` and `SELECT` on the `person` table, but can only `UPDATE` and `DELETE` records that it has created. The root user, however, is not subject to permissions rules.
+
+The way these permissions are set is by using the `$auth` parameter. This parameter has a value whenever a record user is set as the authorized used for the database. The `WHERE $auth` clause simply means "where a value exists for the parameter `$auth`" (`WHERE $auth IS NOT NONE` would also work in this case). But for `UPDATE` and `DELETE` queries, it is not enough for `$auth` to just be present, the `created_by` field of a `person` record must also match the ID of the currently authenticated user.
+
+This `created_by` field is automatically generated from its definition in the `DEFINE FIELD` statement. It is given the value of `$auth`, and is `READONLY` and thus cannot be changed. When logged in as a system user (like a root user), its value will be `NONE`. But when logged in as a record user, its value will be something like `user:qx2apv5oc8mh03wtah0q`.
+
+```surql
+DEFINE TABLE IF NOT EXISTS person SCHEMALESS
+    PERMISSIONS FOR 
+        CREATE, SELECT WHERE $auth,
+        FOR UPDATE, DELETE WHERE created_by = $auth;
+DEFINE FIELD IF NOT EXISTS name ON TABLE person TYPE string;
+DEFINE FIELD IF NOT EXISTS created_by ON TABLE person VALUE $auth READONLY;
+```
+
+So where does an ID like `user:qx2apv5oc8mh03wtah0q` come from? This is thanks to the following definitions that set the signup and signin behaviour of the record users. A typical [`DEFINE ACCESS`](/docs/surrealql/statements/define/access/record) statement will create some sort of record on signup (in this case, a `user`) record, and will compare it against a password during signin. Note that the access has a name that we gave it (`account`), so that it can be referenced elsewhere.
+
+In addition, a `DEFINE INDEX` statement with a `UNIQUE` clause is used to ensure that no two users can have the same name.
+
+```surql
+    DEFINE INDEX IF NOT EXISTS unique_name ON TABLE user FIELDS name UNIQUE;
+    DEFINE ACCESS IF NOT EXISTS account ON DATABASE TYPE RECORD
+	SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
+	SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+	DURATION FOR TOKEN 15m, FOR SESSION 12h
+```
+
+For an actual user in production, you would probably want to require an email and some other fields. Functions like [`string::is::email`](/docs/surrealql/functions/database/string#stringisemail) can be used to ensure that the value passed in is valid.
+
+```surql
+DEFINE FIELD email ON TABLE user TYPE string ASSERT $value.is_email();
+```
+
+However, for this simple example, each user will simply have a unique name and a password. The password will be stored in hashed and salted form on the database, making it unique and unreadable every time it is generated. The only way to check if it is correct is by using a [compare function](/docs/surrealql/functions/database/crypto#cryptoargon2compare) of the output with an attempted password. Here is a short SurrealQL sample to show how the process works.
+
+```surql
+LET $hash1 = crypto::argon2::generate("myPaSSWord");
+LET $hash2 = crypto::argon2::generate("myPaSSWord");
+
+RETURN [$hash1, $hash2];
+-- First returns true, second returns false
+RETURN [
+    crypto::argon2::compare($hash1, "myPaSSWord")
+    crypto::argon2::compare($hash1, "Wrongpassword")
+];
+```
+
+## The Egui code
+
+### The Database struct
+
+We are now at the point where the majority of the work takes place: creating the actual app and a way for it to interact with the database.
+
+To keep the code to a minimum, our app will be as simple as possible. It will have a few buttons, a panel to take user input, and a second panel to display results. The buttons will be as follows:
+
+* `Create person`: Instructs the database to try to create a `person` record based on the input provided by the user.
+* `Delete person`: Deletes all the `person` records if the user input is left blank, otherwise will take a single id.
+* `List people`: Shows all the `person` records in the database.
+* `Session data`: Shows the current session data.
+* `Raw query`: Allows the user to execute a raw query.
+* `New user`: Creates a new record user with a random name and password, displayed as an object.
+* `Sign in as record user`: Signs in using an object with a name and a password. The `New user` output can be pasted in to sign in here.
+* `Sign in as root`: Signs back in as the database root user.
+
+The behaviour of an Egui app takes place inside a single [.update()](https://docs.rs/eframe/latest/eframe/trait.App.html#tymethod.update), which takes a mutable reference to the app (usually a struct).
+
+Because this function can be called up to several times per second, waiting for even short database queries might have noticeable effects on the repainting of the app. To ensure that this won't happen, we will create two channels between the Egui app and the database. The first channel will send commands from the app to the database, while the second channel will send each response back as a simple `String`. The database will loop continuously as it checks for commands, while the app will check for responses during every iteration of the `.update()` function.
+
+Here are the two apps and the types used to communicate with each other.
+
+```rust
+struct SurrealDbApp {
+    input: String,
+    results: String,
+    command_sender: Sender<Command>,
+    response_receiver: Receiver<String>,
+}
+
+struct Database {
+    client: Surreal<Client>,
+    command_receiver: Receiver<Command>,
+    response_sender: Sender<String>,
+}
+
+#[derive(Debug, Clone)]
+enum Command {
+    CreatePerson(String),
+    DeletePerson(String),
+    ListPeople,
+    RawQuery(String),
+    SignUp,
+    SignIn(String),
+    SignInRoot,
+    Session,
+}
+```
+
+Egui has some sample code [here](https://docs.rs/eframe/latest/eframe/#usage-native) on how to start running an app that we can copy and paste, only changing the name. Here is what the `main()` portion of the final code will look like.
+
+```rust
+fn main() -> Result<(), Error> {
+    let (command_sender, command_receiver) = channel();
+    let (response_sender, response_receiver) = channel();
+
+    std::thread::spawn(|| -> Result<(), Error> {
+        let rt = tokio::runtime::Runtime::new()?;
+
+        rt.block_on(async {
+
+            let client = Surreal::new::<Ws>("localhost:8000").await?;
+
+            let db = Database {
+                client,
+                command_receiver,
+                response_sender
+            };
+
+            db.signin(Root {
+                username: "root",
+                password: "root",
+            })
+            .await?;
+
+            db.use_ns("test").use_db("test").await?;
+
+            db.query(
+                "    DEFINE TABLE person SCHEMALESS
+                PERMISSIONS FOR
+                    CREATE, SELECT WHERE $auth,
+                    FOR UPDATE, DELETE WHERE created_by = $auth;
+            DEFINE FIELD name ON TABLE person TYPE string;
+            DEFINE FIELD created_by ON TABLE person VALUE $auth READONLY;
+
+            DEFINE INDEX unique_name ON TABLE user FIELDS name UNIQUE;
+            DEFINE ACCESS account ON DATABASE TYPE RECORD
+            SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
+            SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+            DURATION FOR TOKEN 15m, FOR SESSION 12h
+        ;",
+            )
+            .await?;
+
+        loop {
+            if let Ok(command) = db.command_receiver.try_recv() {
+                match db.handle_command(command).await {
+                    Ok(s) => db.response_sender.send(s)?,
+                    Err(e) => db.response_sender.send(e.to_string())?
+                }
+            }
+        }
+        })
+    });
+
+    let app = SurrealDbApp {
+        input: String::new(),
+        results: String::new(),
+        command_sender,
+        response_receiver,
+    };
+
+    let native_options = eframe::NativeOptions::default();
+    let _ = eframe::run_native(
+        "SurrealDB App",
+        native_options,
+        Box::new(|_cc| Ok(Box::new(app))),
+    );
+    Ok(())
+}
+```
+
+The database calls a function called `.handle_command()` every time it receives a command, so let's take a look at that one. It uses a simple `match` statement and executes database queries depending on what it is asked to do.
+
+We'll start with some notable parts of the `.handle_command()` function and related code.
+
+First we have two pieces of code added for convenience. One implements `Deref` so that the `Database` struct can call methods like `.create()` instead of `.client.create()`. The other is a helper trait so that we can call `.string()` after each method that returns an `Option<Person>` instead of having to use a `match` statement every time. There is also a `const` declared with `const PERSON: &str = "person"` that removes the possibility of typos inside the various query methods.
+
+```rust
+impl Deref for Database {
+    type Target = Surreal<Client>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
+}
+
+trait StringIt {
+    fn string(self) -> Result<String, Error>;
+}
+
+impl StringIt for Option<Person> {
+    fn string(self) -> Result<String, Error> {
+        match self {
+            Some(t) => Ok(format!("{t:?}")),
+            None => Ok("[]".into()),
+        }
+    }
+}
+
+const PERSON: &str = "person";
+```
+
+When the `.handle_command()` method comes across a `Command::CreatePerson`, which contains a `String`, it will attempt to turn it into this `PersonData` struct.
+
+```rust
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct PersonData {
+    name: String,
+    id: Option<String>,
+}
+```
+
+This can be done using the `serde_json::from_str()` function. If the input is properly formatted, such as `{ "name": "Billy" }`, it will deserialize into a `PersonData` that can then be passed into the `.create()` function. The helper function `.string()` will then pass it back as an `Ok` with the `String` data inside if successful.
+
+For simplicity, data passed in will only ever deserialize into a `Person` app with three fields: a name, a record Id, and a possible `created_by` field which will have a value if the `person` record is created by a record user.
+
+```rust
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Person {
+    name: String,
+    id: RecordId,
+    created_by: Option<RecordId>,
+}
+
+Command::CreatePerson(s) => {
+    let person_data: PersonData = serde_json::from_str(&s)?;
+    self.create::<Option<Person>>(PERSON)
+        .content(person_data)
+        .await?
+        .string()
+}
+```
+
+For the `Command::DeletePerson` variant, a check is made to see whether the user input is empty, in which case it will delete every `person` record. Otherwise, it will assume that the input is the key of a record ID (like the `one` in `person:one`) and delete that record if it exists.
+
+```rust
+Command::DeletePerson(s) => {
+    if s.is_empty() {
+        let res: Vec<Person> = self.delete(PERSON).await?;
+        Ok(format!("{res:?}"))
+    } else {
+        let key = RecordIdKey::from(s);
+        self.delete::<Option<Person>>((PERSON, key)).await?.string()
+    }
+}
+```
+
+The other three query methods are pretty simple. `Command::ListPeople` returns all `person` records, `Command::RawQuery` takes a direct SurrealQL input and returns the result, and `Command::Session` just accesses the `$session` parameter cast into a string.
+
+```rust
+Command::ListPeople => {
+    let person: Vec<Person> = self.select(PERSON).await?;
+    Ok(format!("{person:?}"))
+}
+Command::RawQuery(q) => match self.query(q).await {
+    Ok(ok) => Ok(format!("{ok:?}")),
+    Err(e) => Ok(e.to_string()),
+},
+Command::Session => Ok(self
+    .query("RETURN <string>$session")
+    .await?
+    .take::<Option<String>>(0)?
+    .unwrap_or("No session data found!".into()))
+```
+
+The `Command::SignUp` and `Command::SignIn` variants are a bit more interesting.
+
+A user is allowed to choose a name and a password when signing up as a record user, but to make the process as quick as possible we will use the `faker_rand` crate to generate two names: one for the username and one for the password.
+
+The [`.signup()`](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.signup) method actually returns a token (a [`JWT`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Jwt.html) struct) that can [display the actual token](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Jwt.html#method.as_insecure_token) if preferred, but these tokens are mostly useful when signing in via the [surreal sql](https://surrealdb.com/docs/surrealdb/cli/sql) command or through Surrealist. In our case, we can simply use the `.signin()` method along with a name and password and so we don't need to display the token.
+
+The `Params` struct is our own struct, which holds a `name` and a `pass` field because those are the two fields that we specified in the `DEFINE ACCESS` statement which creates a new `user` record every time a record user is signed up. Similarly, the `access` field inside `.signup()` takes the input "account" because that is the name that we have to the `DEFINE ACCESS` statement.
+
+```rust
+// DEFINE ACCESS account ON DATABASE TYPE RECORD
+// SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
+// SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+// DURATION FOR TOKEN 15m, FOR SESSION 12h
+
+#[derive(Serialize, Deserialize)]
+struct Params<'a> {
+    name: &'a str,
+    pass: &'a str,
+}
+
+Command::SignUp => {
+    let name = rand::random::<FirstName>().to_string();
+    let pass = rand::random::<FirstName>().to_string();
+    self.signup(Record {
+        access: "account",
+        namespace: "test",
+        database: "test",
+        params: Params {
+            name: &name,
+            pass: &pass,
+        },
+    })
+    .await?;
+    Ok(format!(
+        "New user created!\n\n{{ \"name\": \"{name}\", \n \"pass\": \"{pass}\" }}"
+    ))
+}
+```
+
+The output when the button is clicked to sign up a new user is in `JSON` format so that the user can copy and paste it to sign in.
+
+```
+New user created!
+
+{ "name": "Rebecca", 
+ "pass": "Neha" }
+```
+
+Signing in is pretty similar, except that it begins by trying to deserialize the user input into a `Params` struct. The `.signin()` method also returns a `Jwt` that we don't need, so the output will just let the user know that it has signed in under a certain name.
+
+```rust
+Command::SignIn(s) => {
+    let Ok(Params { name, pass }) = serde_json::from_str::<Params>(&s) else {
+        return Ok("Params don't work!".to_string());
+    };
+    self.signin(Record {
+        access: "account",
+        namespace: "test",
+        database: "test",
+        params: Params { name, pass },
+    })
+    .await?;
+    Ok(format!("Signed in as {name}!"))
+}
+```
+
+The last command will allow the user to sign back in as the root user. To make it easy to experiment with the database as a record user vs. a root user, we won't make the user type in the root user's name and password each time.
+
+```rust
+Command::SignInRoot => {
+    self.signin(Root {
+        username: "root",
+        password: "root",
+    })
+    .await?;
+    Ok(format!("Back to root!"))
+}
+```
+
+### The Egui app struct
+
+The struct for the Egui app is quite simple, with only four fields. Two of them hold the user input and database results, which will be displayed on the screen at all times. The other two fields are for the sending and receiving end of the two channels.
+
+```rust
+struct SurrealDbApp {
+    input: String,
+    results: String,
+    command_sender: Sender<Command>,
+    response_receiver: Receiver<String>,
+}
+```
+
+Since the [`.send()`](https://doc.rust-lang.org/std/sync/mpsc/struct.Sender.html#method.send) function for channels in Rust returns a `Result` but Egui's `.update()` function doesn't, we'll save ourselves a lot of typing by putting together a quick method for this struct called `.send()` that does the error handling. All it will do is turn any errors into a `String` which it will then give to the `results` field.
+
+```rust
+impl SurrealDbApp {
+    fn send(&mut self, command: Command) {
+        if let Err(e) = self.command_sender.send(command) {
+            self.results = e.to_string()
+        }
+    }
+}
+```
+
+After that, the final task left to us is to create the layout and buttons for the Egui app inside the `update()` function that all Egui app structs are required to implement. The first line will be the one where the app checks to see if the database has sent it a message. All of these messages are simple Strings, so it will just set the `results` field with them so the user can see what was sent. Note that the `Ok` here just means that `.try_recv()` has successfully received a message, not that the database has succeeded at what it was instructed to do. The `String` might contain successful data, or an error message.
+
+```rust
+if let Ok(response) = self.response_receiver.try_recv() {
+    self.results = response;
+}
+```
+
+After this come the buttons. The [`SidePanel::left()`](https://docs.rs/egui/latest/egui/containers/panel/struct.SidePanel.html) will create a panel on the left side of the screen inside which we can add the buttons. If the button is clicked, the app will send off a command that may or might not include the data from the `input` field.
+
+```rust
+egui::SidePanel::left("left").show(ctx, |ui| {
+    if let Ok(response) = self.response_receiver.try_recv() {
+        self.results = response;
+    }
+    if ui.button("Create person").clicked() {
+        self.send(Command::CreatePerson(self.input.clone()))
+    };
+    if ui.button("Delete person").clicked() {
+        self.send(Command::DeletePerson(self.input.clone()))
+    }
+    if ui.button("List people").clicked() {
+        self.send(Command::ListPeople)
+    }
+    if ui.button("Session data").clicked() {
+        self.send(Command::Session)
+    }
+    if ui.button("New user").clicked() {
+        self.send(Command::SignUp)
+    }
+    if ui.button("Sign in as record user").clicked() {
+        self.send(Command::SignIn(self.input.clone()));
+    }
+    if ui.button("Sign in as root").clicked() {
+        self.send(Command::SignInRoot)
+    }
+    if ui.button("Raw query").clicked() {
+        self.send(Command::RawQuery(self.input.clone()))
+    }
+});
+```
+
+The final bit of code just involves creating two more panels, one in the centre and one on the right. The one on the right will add a [`ScrollArea`](https://docs.rs/egui/latest/egui/containers/scroll_area/struct.ScrollArea.html) so that the user can scroll through any results that are larger than the space in the right panel.
+
+```rust
+egui::CentralPanel::default().show(ctx, |ui| {
+    ui.label(RichText::new("Input:").heading());
+    ui.text_edit_multiline(&mut self.input);
+});
+egui::SidePanel::right("right").show(ctx, |ui| {
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        ui.label(RichText::new("Results:").heading());
+        ui.text_edit_multiline(&mut self.results);
+    });
+});
+```
+
+And that's all the code!
+
+## Experimenting with the app
+
+The final code looks like this:
+
+```rust
+use std::{
+    ops::Deref,
+    sync::mpsc::{channel, Receiver, Sender},
+};
+
+use egui::RichText;
+use surrealdb::{
+    engine::remote::ws::{Client, Ws},
+    opt::auth::{Record, Root},
+    RecordId, RecordIdKey, Surreal,
+};
+
+use anyhow::Error;
+use faker_rand::en_us::names::FirstName;
+use serde::{Deserialize, Serialize};
+
+const PERSON: &str = "person";
+
+#[derive(Serialize, Deserialize)]
+struct Params<'a> {
+    name: &'a str,
+    pass: &'a str,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct PersonData {
+    name: String,
+    id: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Person {
+    name: String,
+    id: RecordId,
+    created_by: Option<RecordId>,
+}
+
+#[derive(Debug, Clone)]
+enum Command {
+    CreatePerson(String),
+    DeletePerson(String),
+    ListPeople,
+    RawQuery(String),
+    SignUp,
+    SignIn(String),
+    SignInRoot,
+    Session,
+}
+
+struct Database {
+    client: Surreal<Client>,
+    command_receiver: Receiver<Command>,
+    response_sender: Sender<String>,
+}
+
+impl Deref for Database {
+    type Target = Surreal<Client>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
+}
+
+trait StringIt {
+    fn string(self) -> Result<String, Error>;
+}
+
+impl StringIt for Option<Person> {
+    fn string(self) -> Result<String, Error> {
+        match self {
+            Some(t) => Ok(format!("{t:?}")),
+            None => Ok("[]".into()),
+        }
+    }
+}
+
+impl Database {
+    async fn handle_command(&self, command: Command) -> Result<String, Error> {
+        match command {
+            Command::CreatePerson(s) => {
+                let person_data: PersonData = serde_json::from_str(&s)?;
+                self.create::<Option<Person>>(PERSON)
+                    .content(person_data)
+                    .await?
+                    .string()
+            }
+            Command::DeletePerson(s) => {
+                if s.is_empty() {
+                    let res: Vec<Person> = self.delete(PERSON).await?;
+                    Ok(format!("{res:?}"))
+                } else {
+                    let key = RecordIdKey::from(s);
+                    self.delete::<Option<Person>>((PERSON, key)).await?.string()
+                }
+            }
+            Command::ListPeople => {
+                let person: Vec<Person> = self.select(PERSON).await?;
+                Ok(format!("{person:?}"))
+            }
+            Command::SignUp => {
+                let name = rand::random::<FirstName>().to_string();
+                let pass = rand::random::<FirstName>().to_string();
+                self.signup(Record {
+                    access: "account",
+                    namespace: "test",
+                    database: "test",
+                    params: Params {
+                        name: &name,
+                        pass: &pass,
+                    },
+                })
+                .await?;
+                Ok(format!(
+                    "New user created!\n\n{{ \"name\": \"{name}\", \n \"pass\": \"{pass}\" }}"
+                ))
+            }
+            Command::RawQuery(q) => match self.query(q).await {
+                Ok(ok) => Ok(format!("{ok:?}")),
+                Err(e) => Ok(e.to_string()),
+            },
+            Command::SignIn(s) => {
+                let Ok(Params { name, pass }) = serde_json::from_str::<Params>(&s) else {
+                    return Ok("Params don't work!".to_string());
+                };
+                self.signin(Record {
+                    access: "account",
+                    namespace: "test",
+                    database: "test",
+                    params: Params { name, pass },
+                })
+                .await?;
+                Ok(format!("Signed in as {name}!"))
+            }
+            Command::SignInRoot => {
+                self.signin(Root {
+                    username: "root",
+                    password: "root",
+                })
+                .await?;
+                Ok(format!("Back to root!"))
+            }
+            Command::Session => Ok(self
+                .query("RETURN <string>$session")
+                .await?
+                .take::<Option<String>>(0)?
+                .unwrap_or("No session data found!".into())),
+        }
+    }
+}
+
+struct SurrealDbApp {
+    input: String,
+    results: String,
+    command_sender: Sender<Command>,
+    response_receiver: Receiver<String>,
+}
+
+impl SurrealDbApp {
+    fn send(&mut self, command: Command) {
+        if let Err(e) = self.command_sender.send(command) {
+            self.results = e.to_string()
+        }
+    }
+}
+
+impl eframe::App for SurrealDbApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::SidePanel::left("left").show(ctx, |ui| {
+            if let Ok(response) = self.response_receiver.try_recv() {
+                self.results = response;
+            }
+            if ui.button("Create person").clicked() {
+                self.send(Command::CreatePerson(self.input.clone()))
+            };
+            if ui.button("Delete person").clicked() {
+                self.send(Command::DeletePerson(self.input.clone()))
+            }
+            if ui.button("List people").clicked() {
+                self.send(Command::ListPeople)
+            }
+            if ui.button("Session data").clicked() {
+                self.send(Command::Session)
+            }
+            if ui.button("New user").clicked() {
+                self.send(Command::SignUp)
+            }
+            if ui.button("Sign in as record user").clicked() {
+                self.send(Command::SignIn(self.input.clone()));
+            }
+            if ui.button("Sign in as root").clicked() {
+                self.send(Command::SignInRoot)
+            }
+            if ui.button("Raw query").clicked() {
+                self.send(Command::RawQuery(self.input.clone()))
+            }
+        });
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.label(RichText::new("Input:").heading());
+            ui.text_edit_multiline(&mut self.input);
+        });
+        egui::SidePanel::right("right").show(ctx, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.label(RichText::new("Results:").heading());
+                ui.text_edit_multiline(&mut self.results);
+            });
+        });
+    }
+}
+
+fn main() -> Result<(), Error> {
+    let (command_sender, command_receiver) = channel();
+    let (response_sender, response_receiver) = channel();
+
+    std::thread::spawn(|| -> Result<(), Error> {
+        let rt = tokio::runtime::Runtime::new()?;
+
+        rt.block_on(async {
+
+            let client = Surreal::new::<Ws>("localhost:8000").await?;
+      
+            let db = Database {
+                client,
+                command_receiver,
+                response_sender
+            };
+
+            db.signin(Root {
+                username: "root",
+                password: "root",
+            })
+            .await?;
+
+            db.use_ns("test").use_db("test").await?;
+
+            db.query(
+                "    DEFINE TABLE person SCHEMALESS
+                PERMISSIONS FOR
+                    CREATE, SELECT WHERE $auth,
+                    FOR UPDATE, DELETE WHERE created_by = $auth;
+            DEFINE FIELD name ON TABLE person TYPE string;
+            DEFINE FIELD created_by ON TABLE person VALUE $auth READONLY;
+
+            DEFINE INDEX unique_name ON TABLE user FIELDS name UNIQUE;
+            DEFINE ACCESS account ON DATABASE TYPE RECORD
+            SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
+            SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+            DURATION FOR TOKEN 15m, FOR SESSION 12h
+        ;",
+            )
+            .await?;
+
+        loop {
+            if let Ok(command) = db.command_receiver.try_recv() {
+                match db.handle_command(command).await {
+                    Ok(s) => db.response_sender.send(s)?,
+                    Err(e) => db.response_sender.send(e.to_string())?
+                }
+            }
+        }
+        })
+    });
+
+    let app = SurrealDbApp {
+        input: String::new(),
+        results: String::new(),
+        command_sender,
+        response_receiver,
+    };
+
+    let native_options = eframe::NativeOptions::default();
+    let _ = eframe::run_native(
+        "SurrealDB App",
+        native_options,
+        Box::new(|_cc| Ok(Box::new(app))),
+    );
+    Ok(())
+}
+```
+
+Here are some experiments you can do now that the app is up and running.
+
+* `Create person` button: pass in `{ "name": "Billy", "id": "billy" }` and see the return value `Person { name: "Billy", id: Thing { tb: "person", id: String("billy") }, created_by: None }`.
+* `Delete person` button: pass in `billy` to delete `person:billy`, or leave it blank to delete all the `person` records. As `.delete()` in the Rust SDK returns the records that are deleted, you will see `Person { name: "Billy", id: Thing { tb: "person", id: String("billy") }, created_by: None }` here as well.
+* `List people`, `Session data`, and `Sign in as root` buttons, which only require a single click.
+* `New user` button: will return an output like `New user created! { "name": "Estrella", "pass": "Jeromy" }`.
+* `Sign in as record user` button: if you paste in the output from the `New user` button, you will see an output like `Signed in as Lonnie!`. Note that this query will take a fraction of a second to compute. This is because the algorithms behind cryptographic functions like [`crypto::argon2::compare()`](https://surrealdb.com/docs/surrealql/functions/database/crypto#cryptoargon2compare) are [meant to be computationally expensive](/docs/surrealdb/reference-guide/security-best-practices#passwords) so that comparing real passwords to hashed and salted passwords takes as long as possible - but just quick enough that a single comparison is barely noticed by a legitimate user.
+* `Raw query` button: runs [a raw query](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.query) and returns a [Response](https://docs.rs/surrealdb/latest/surrealdb/struct.Response.html). The output is not particularly pretty, but being able to run any query is convenient in a pinch.
+
+Since the app lets you sign in as both a record user and a root user, let's use this to compare the permissions between the two.
+
+First, paste in `{ "name": "Billy", "id": "billy" }` as a root user and click `Create person`, then again with `{ "name": "Billina", "id": "billina" }`.
+
+Next, click on `New user`, copy the `JSON` output, paste it into the input in the central panel, and click on `Sign in as record user`.
+
+Now try creating a `person` by entering `{ "name": "recorduserperson" }` into the input box and clicking on `Create person`. You should see a different output this time, as now the `created_by` field has been filled in because the `$auth` parameter currently holds the record user's ID. It should look something like this. `Person { name: "recorduserperson", id: Thing { tb: "person", id: String("70fpp3dd72hriekgclfb") }, created_by: Some(Thing { tb: "user", id: String("141datbkzq5tum9h5xvk") }) }`
+
+We'll now imagine that the record user wants to delete all of the `person` records in the database. Delete everything in the Input box and click on `Delete person`. You should see the same output as before: just the `person` record that the record user created.
+
+Finally, click on `List people`. The results will show that the Billy and Billina `person` records are safe and sound, because record users can only delete `person` records that they have created.
+
+## Further steps
+
+Now that you have a running Egui app with SurrealDB as the backend, here are some other ideas that you might want to explore.
+
+* Compiling to WASM (and even deploying to a website). Egui can be compiled to WASM, and SurrealDB can use IndexedDB as [one of its backends](https://surrealdb.com/docs/surrealdb/cli/start#positional-argument).
