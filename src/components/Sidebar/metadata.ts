@@ -1,31 +1,31 @@
 import type { CollectionKey } from 'astro:content';
 import type { Props as ImageProps } from '@components/Image.astro';
 
-import LightDotnet from '@img/light/dotnet.png';
-import LightGolang from '@img/light/golang.png';
-import LightJava from '@img/light/java.png';
-import LightJavascript from '@img/light/javascript.png';
-import LightPhp from '@img/light/php.png';
-import LightPython from '@img/light/python.png';
-import LightRust from '@img/light/rust.png';
+import LightDotnet from '@img/icon/light/dotnet.png';
+import LightGolang from '@img/icon/light/golang.png';
+import LightJava from '@img/icon/light/java.png';
+import LightJavascript from '@img/icon/light/javascript.png';
+import LightPhp from '@img/icon/light/php.png';
+import LightPython from '@img/icon/light/python.png';
+import LightRust from '@img/icon/light/rust.png';
 
-import DarkDotnet from '@img/dotnet-icon.png';
-import DarkGolang from '@img/golang-icon.png';
-import DarkJava from '@img/java-icon.png';
-import DarkJavascript from '@img/javascript-icon.png';
-import DarkPhp from '@img/php-icon.png';
-import DarkPython from '@img/python-icon.png';
-import DarkRust from '@img/rust-icon.png';
+import DarkDotnet from '@img/icon/dark/dotnet.png';
+import DarkGolang from '@img/icon/dark/golang.png';
+import DarkJava from '@img/icon/dark/java.png';
+import DarkJavascript from '@img/icon/dark/javascript.png';
+import DarkPhp from '@img/icon/dark/php.png';
+import DarkPython from '@img/icon/dark/python.png';
+import DarkRust from '@img/icon/dark/rust.png';
 
-import LightSurrealML from '@img/light/doc-surrealml.png';
-import LightSurrealQL from '@img/light/ql.png';
-import LightSurrealDB from '@img/light/surreal.png';
-import LightSurrealist from '@img/light/surreal.png';
+import LightSurrealDB from '@img/icon/light/surrealdb.png';
+import LightSurrealist from '@img/icon/light/surrealdb.png';
+import LightSurrealML from '@img/icon/light/surrealml.png';
+import LightSurrealQL from '@img/icon/light/surrealql.png';
 
-import DarkSurrealDB from '@img/doc-surrealdb.png';
-import DarkSurrealist from '@img/doc-surrealist.png';
-import DarkSurrealML from '@img/doc-surrealml.png';
-import DarkSurrealQL from '@img/ql-icon.png';
+import DarkSurrealDB from '@img/icon/dark/surrealdb.png';
+import DarkSurrealist from '@img/icon/dark/surrealist.png';
+import DarkSurrealML from '@img/icon/dark/surrealml.png';
+import DarkSurrealQL from '@img/icon/dark/surrealql.png';
 
 type Metadata = {
     [K in CollectionKey]?: {
