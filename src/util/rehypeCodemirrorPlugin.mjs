@@ -41,7 +41,7 @@ const parser = {
     typescript: javascriptParser,
     surql: surrealqlParser,
     surrealql: surrealqlParser,
-	java: javaParser,
+    java: javaParser,
     json: jsonParser,
     sql: StandardSQL.parser,
     go: goParser,
