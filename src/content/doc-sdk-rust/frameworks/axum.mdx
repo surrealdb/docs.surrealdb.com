@@ -1,13 +1,13 @@
 ---
-sidebar_position: 5
-sidebar_label: Rocket
+sidebar_position: 3
+sidebar_label: Axum
 title: Rust | SDKs | Integration
-description: The SDK for Rust allows SurrealDB to be used as the storage backend for a Rocket web server
+description: The SDK for Rust allows SurrealDB to be used as the storage backend for an Axum web server
 ---
 
-# SurrealDB with Rocket
+# SurrealDB with Axum
 
-The following tutorial will set up a server with SurrealDB and [Rocket](https://rocket.rs/) that has a few endpoints:
+The following tutorial will set up a server with SurrealDB and [Axum](https://docs.rs/axum/latest/axum/) that has a few endpoints:
 
 * Some endpoints to demonstrate how the HTTP endpoints work to create, select, modify etc. a `person` table in a database,
 * Other endpoints to display some helpful info for the user,
@@ -34,31 +34,34 @@ surreal sql --user root --pass root --ns test --db test --pretty
 Next, create a new Rust project with the command `cargo new your_project_name`, go into the newly created directory, and use `cargo add` to add each of the following dependencies:
 
 * `surrealdb` (of course),
-* `rocket`,
-* `serde`, for serializing and deserializing Rust structs passed to and from the database and Rocket,
-* `thiserror`, to make it easy to convert between SurrealDB's error type, other errors and Rocket's response types,
+* `axum`,
+* `serde`, for serializing and deserializing Rust structs passed to and from the database and Axum,
+* `tokio`, for the async runtime used by both Axum and SurrealDB,
+* `thiserror`, to make it easy to convert between SurrealDB's error type, other errors and Axum's response types,
 * `rand` and `faker_rand`, to create random user names that can be used to sign in to the database as a record user.
 
-The `serde` crate will need the `derive` flag, and `rocket` will need the `json` flag enabled. Your `cargo.toml` dependencies should look like this:
+The `serde` crate will also need a feature flag for its `Serialize` and `Deserialize` macros. Your `cargo.toml` dependencies should look like this:
 
 ```
+axum = "0.7.7"
 faker_rand = "0.1.1"
 rand = "0.8.5"
-rocket = { version = "0.5.1", features = ["json"] }
 serde = { version = "1.0.209", features = ["derive"] }
 surrealdb = "2.0.4"
 thiserror = "1.0.64"
+tokio = "1.40.0"
 ```
 
 ## Starting the Rust code
 
-The first thing to do is a bit of groundwork to convert database errors into an error type of our own. Implementing `From<surrealdb::Error>` for this type will let it be used with the `?` operator when handling results. Finally, it will also need to implement Rocket's `Responder` trait so that it can be used as output for the server. All of this can be done manually if you prefer, but the `thiserror` crate saves a certain amount of typing.
+The first thing to do is a bit of groundwork to convert database errors into an error type of our own. Implementing `From<surrealdb::Error>` for this type will let it be used with the `?` operator when handling results. Finally, it will also need to implement Axum's `IntoResponse` trait so that it can be used as output for the server. All of this can be done manually if you prefer, but the `thiserror` crate saves a certain amount of typing.
 
 ```rust
 mod error {
-    use rocket::http::Status;
-    use rocket::response::{self, Responder, Response};
-    use rocket::Request;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::response::Response;
+    use axum::Json;
     use thiserror::Error;
 
     #[derive(Error, Debug)]
@@ -67,14 +70,9 @@ mod error {
         Db,
     }
 
-    impl<'r> Responder<'r, 'static> for Error {
-        fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static> {
-            let error_message = format!(r#"{{ "error": "{self}" }}"#);
-            Response::build()
-                .status(Status::InternalServerError)
-                .header(rocket::http::ContentType::JSON)
-                .sized_body(error_message.len(), std::io::Cursor::new(error_message))
-                .ok()
+    impl IntoResponse for Error {
+        fn into_response(self) -> Response {
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(self.to_string())).into_response()
         }
     }
 
@@ -87,14 +85,14 @@ mod error {
 }
 ```
 
-Next, we will put the database client together. Rocket provides a [`.manage()`](https://rocket.rs/guide/v0.5/state/) method when starting a router that would give us access to the database inside its functions. However, for simplicity we can instead wrap the client inside a `LazyLock` to make it into a global static.
+Next, we will put the database client together. Axum provides a [`.with_state()`](https://docs.rs/axum/latest/axum/routing/struct.Router.html#method.with_state) method when starting a router that would give us access to the database inside its functions. However, for simplicity we can instead wrap the client inside a `LazyLock` to make it into a global static.
 
 ```rust
 use std::sync::LazyLock;
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 ```
 
-Inside a method called `init()` to initiate the database, we will do the following:
+Inside `main()`, we will do the following:
 
 * Connect to the database running at `localhost:8000`
 * Sign in as the root user that was created through the `surreal start` command
@@ -102,35 +100,33 @@ Inside a method called `init()` to initiate the database, we will do the followi
 * Use the `.query()` method to pass in a few definitions for the database.
 
 ```rust
-async fn init() -> Result<(), surrealdb::Error> {
-    DB.connect::<Ws>("localhost:8000").await?;
+DB.connect::<Ws>("localhost:8000").await?;
 
-    DB.signin(Root {
-        username: "root",
-        password: "root",
-    })
-    .await?;
+DB.signin(Root {
+    username: "root",
+    password: "root",
+})
+.await?;
 
-    DB.use_ns("namespace").use_db("database").await?;
+DB.use_ns("test").use_db("test").await?;
 
-    DB.query(
-        "    DEFINE TABLE person SCHEMALESS
-        PERMISSIONS FOR 
-            CREATE, SELECT WHERE $auth,
-            FOR UPDATE, DELETE WHERE created_by = $auth;
-    DEFINE FIELD name ON TABLE person TYPE string;
-    DEFINE FIELD created_by ON TABLE person VALUE $auth READONLY;
+DB.query(
+    "
+DEFINE TABLE IF NOT EXISTS person SCHEMALESS
+    PERMISSIONS FOR 
+        CREATE, SELECT WHERE $auth,
+        FOR UPDATE, DELETE WHERE created_by = $auth;
+DEFINE FIELD IF NOT EXISTS name ON TABLE person TYPE string;
+DEFINE FIELD IF NOT EXISTS created_by ON TABLE person VALUE $auth READONLY;
 
-    DEFINE INDEX unique_name ON TABLE user FIELDS name UNIQUE;
-    DEFINE ACCESS account ON DATABASE TYPE RECORD
-	SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
-	SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
-	DURATION FOR TOKEN 15m, FOR SESSION 12h
+DEFINE INDEX IF NOT EXISTS unique_name ON TABLE user FIELDS name UNIQUE;
+DEFINE ACCESS IF NOT EXISTS account ON DATABASE TYPE RECORD
+SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
+SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
+DURATION FOR TOKEN 15m, FOR SESSION 12h
 ;",
-    )
-    .await?;
-    Ok(())
-}
+)
+.await?;
 ```
 
 ## What the database definitions do
@@ -196,53 +192,44 @@ RETURN [
 
 ## The rest of the code
 
-The last step is where the majority of the work takes place: setting up the paths for Rocket to handle, and writing the functions that handle the endpoints and (usually) access the database to handle the request. To start, we'll create a function for the `"/"` root path to display a helpful message to anybody giving the server a try via the browser or an app like curl or Postman. These paths and curl examples can all be seen on [the page for SurrealDB's HTTP endpoints](/docs/surrealdb/integration/http).
+The last step is where the majority of the work takes place: setting up the paths for Axum to handle, and writing the functions that handle the endpoints and (usually) access the database to handle the request. To start, we'll create a function for the `"/"` root path to display a helpful message to anybody giving the server a try via the browser or an app like curl or Postman. These paths and curl examples can all be seen on [the page for SurrealDB's HTTP endpoints](/docs/surrealdb/integration/http).
 
 ```rust
-    #[get("/")]
     pub async fn paths() -> &'static str {
         r#"
-
 -----------------------------------------------------------------------------------------------------------------------------------------
         PATH                |           SAMPLE COMMAND                                                                                  
 -----------------------------------------------------------------------------------------------------------------------------------------
-/session: See session data  |  curl -X GET    -H "Content-Type: application/json"                          http://localhost:8080/session
+/session: See session data  |  curl -X GET    -H "Content-Type: application/json"                      http://localhost:8080/session
                             |
 /person/{id}:               |
-  Create a person           |  curl -X POST   -H "Content-Type: application/json" -d '{"name":"John Doe"}' http://localhost:8080/person/one
-  Get a person              |  curl -X GET    -H "Content-Type: application/json"                          http://localhost:8080/person/one
-  Update a person           |  curl -X PUT    -H "Content-Type: application/json" -d '{"name":"Jane Doe"}' http://localhost:8080/person/one
-  Delete a person           |  curl -X DELETE -H "Content-Type: application/json"                          http://localhost:8080/person/one
+  Create a person           |  curl -X POST   -H "Content-Type: application/json" -d '{"name":"John"}' http://localhost:8080/person/one
+  Update a person           |  curl -X PUT    -H "Content-Type: application/json" -d '{"name":"Jane"}' http://localhost:8080/person/one
+  Get a person              |  curl -X GET    -H "Content-Type: application/json"                      http://localhost:8080/person/one
+  Delete a person           |  curl -X DELETE -H "Content-Type: application/json"                      http://localhost:8080/person/one
                             |
-/people: List all people    |  curl -X GET    -H "Content-Type: application/json"                          http://localhost:8080/people
+/people: List all people    |  curl -X GET    -H "Content-Type: application/json"                      http://localhost:8080/people
 
 /new_user:  Create a new record user
 /new_token: Get instructions for a new token if yours has expired"#
     }
 ```
 
-Each of these functions will be put into a mod called `routes`, leading to the following code inside Rocket's `rocket()` function (its equivalent of `main()`).
+Each of these functions will be put into a mod called `routes`, leading to the following code inside `main()`.
 
 ```rust
-#[launch]
-pub async fn rocket() -> _ {
-    std::env::set_var("ROCKET_PORT", "8080");
-    init().await.expect("Something went wrong, shutting down");
-    rocket::build().mount(
-        "/",
-        routes![
-            routes::create_person,
-            routes::read_person,
-            routes::update_person,
-            routes::delete_person,
-            routes::list_people,
-            routes::paths,
-            routes::make_new_user,
-            routes::get_new_token,
-            routes::session
-        ],
-    )
-}
+let listener = TcpListener::bind("localhost:8080").await?;
+let router = Router::new()
+    .route("/", get(routes::paths))
+    .route("/person/:id", post(routes::create_person))
+    .route("/person/:id", get(routes::read_person))
+    .route("/person/:id", put(routes::update_person))
+    .route("/person/:id", delete(routes::delete_person))
+    .route("/people", get(routes::list_people))
+    .route("/session", get(routes::session))
+    .route("/new_user", get(routes::make_new_user))
+    .route("/new_token", get(routes::get_new_token));
+axum::serve(listener, router).await?;
 ```
 
 Many functions require some JSON data from the user, which will be deserialized into a `PersonData` struct. The database can then use it in methods like `.create().content()`. The output returned will now have a `name` and an `id`, which the `Person` struct holds.
@@ -263,55 +250,43 @@ pub struct Person {
 Each of these functions are pretty straightforward: obtain some user input, initiate a query, feed the user input into it, and return it as JSON.
 
 ```rust
-const PERSON: &str = "person";
+    const PERSON: &str = "person";
 
-#[post("/person/<id>", data = "<person>")]
-pub async fn create_person(
-    id: String,
-    person: Json<PersonData>,
-) -> Result<Json<Option<Person>>, Error> {
-    let person = DB
-        .create((PERSON, &*id))
-        .content(person.into_inner())
-        .await?;
-    Ok(Json(person))
-}
+    pub async fn create_person(
+        id: Path<String>,
+        Json(person): Json<PersonData>,
+    ) -> Result<Json<Option<Person>>, Error> {
+        let person = DB.create((PERSON, &*id)).content(person).await?;
+        Ok(Json(person))
+    }
 
-#[get("/person/<id>")]
-pub async fn read_person(id: String) -> Result<Json<Option<Person>>, Error> {
-    let person = DB.select((PERSON, &*id)).await?;
-    Ok(Json(person))
-}
+    pub async fn read_person(id: Json<String>) -> Result<Json<Option<Person>>, Error> {
+        let person = DB.select((PERSON, &*id)).await?;
+        Ok(Json(person))
+    }
 
-#[put("/person/<id>", data = "<person>")]
-pub async fn update_person(
-    id: String,
-    person: Json<PersonData>,
-) -> Result<Json<Option<Person>>, Error> {
-    let person = DB
-        .update((PERSON, &*id))
-        .content(person.into_inner())
-        .await?;
-    Ok(Json(person))
-}
+    pub async fn update_person(
+        id: Path<String>,
+        Json(person): Json<PersonData>,
+    ) -> Result<Json<Option<Person>>, Error> {
+        let person = DB.update((PERSON, &*id)).content(person).await?;
+        Ok(Json(person))
+    }
 
-#[delete("/person/<id>")]
-pub async fn delete_person(id: String) -> Result<Json<Option<Person>>, Error> {
-    let person = DB.delete((PERSON, &*id)).await?;
-    Ok(Json(person))
-}
+    pub async fn delete_person(id: String) -> Result<Json<Option<Person>>, Error> {
+        let person = DB.delete((PERSON, &*id)).await?;
+        Ok(Json(person))
+    }
 
-#[get("/people")]
-pub async fn list_people() -> Result<Json<Vec<Person>>, Error> {
-    let people = DB.select(PERSON).await?;
-    Ok(Json(people))
-}
+    pub async fn list_people() -> Result<Json<Vec<Person>>, Error> {
+        let people = DB.select(PERSON).await?;
+        Ok(Json(people))
+    }
 ```
 
 The `session()` function is also quite small, and is just a convenience for a user curious about the current session data. As the `.query()` method can take more than one statement, it returns each of these responses in order with an index for each (starting at 0). The `.take()` method can then be used to access the response at that index, and turn it into anything that can be deserialized back into a Rust type. In our case, a `String` is all we need here as the output will only be used to show the user the current session info.
 
 ```rust
-#[get("/session")]
 pub async fn session() -> Result<Json<String>, Error> {
     let res: Option<String> = DB.query("RETURN <string>$session").await?.take(0)?;
 
@@ -334,15 +309,14 @@ struct Params<'a> {
     pass: &'a str,
 }
 
-#[get("/new_user")]
 pub async fn make_new_user() -> Result<String, Error> {
     let name = rand::random::<FirstName>().to_string();
     let pass = rand::random::<FirstName>().to_string();
     let jwt = DB
         .signup(Record {
             access: "account",
-            namespace: "namespace",
-            database: "database",
+            namespace: "test",
+            database: "test",
             params: Params {
                 name: &name,
                 pass: &pass,
@@ -350,18 +324,17 @@ pub async fn make_new_user() -> Result<String, Error> {
         })
         .await?
         .into_insecure_token();
-    Ok(format!("New user created!\n\nName: {name}\nPassword: {pass}\nToken: {jwt}\n\nTo log in, use this command:\n\nsurreal sql --namespace namespace --database database --pretty --token \"{jwt}\""))
+    Ok(format!("New user created!\n\nName: {name}\nPassword: {pass}\nToken: {jwt}\n\nTo log in, use this command:\n\nsurreal sql --ns test --db test --pretty --token \"{jwt}\""))
 }
 ```
 
 A record user with an expired token can use the `/signin` endpoint to get a new token. Since this requires passing in a username and password, we'll just have this function return a `String` that contains a curl example to get a new token.
 
 ```rust
-#[get("/new_token")]
-pub async fn get_new_token() -> String {
-    let command = r#"curl -X POST -H "Accept: application/json" -d '{"ns":"namespace","db":"database","ac":"account","user":"your_username","pass":"your_password"}' http://localhost:8000/signin"#;
-    format!("Need a new token? Use this command:\n\n{command}\n\nThen log in with surreal sql --namespace namespace --database database --pretty --token YOUR_TOKEN_HERE")
-}
+    pub async fn get_new_token() -> String {
+        let command = r#"curl -X POST -H "Accept: application/json" -d '{"ns":"test","db":"test","ac":"account","user":"your_username","pass":"your_password"}' http://localhost:8000/signin"#;
+        format!("Need a new token? Use this command:\n\n{command}\n\nThen log in with surreal sql --ns test --db test --pretty --token YOUR_TOKEN_HERE")
+    }
 ```
 
 ## Experimenting with the app
@@ -369,21 +342,18 @@ pub async fn get_new_token() -> String {
 The final code looks like this:
 
 ```rust
-#[macro_use]
-extern crate rocket;
-
 use std::sync::LazyLock;
-use surrealdb::engine::remote::ws::Client;
-use surrealdb::engine::remote::ws::Ws;
-use surrealdb::opt::auth::Root;
-use surrealdb::Surreal;
+use axum::{Router, routing::{delete, get, post, put}};
+use surrealdb::{Surreal, engine::remote::ws::{Client, Ws}, opt::auth::Root};
+use tokio::net::TcpListener;
 
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 
 mod error {
-    use rocket::http::Status;
-    use rocket::response::{self, Responder, Response};
-    use rocket::Request;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::response::Response;
+    use axum::Json;
     use thiserror::Error;
 
     #[derive(Error, Debug)]
@@ -392,14 +362,9 @@ mod error {
         Db,
     }
 
-    impl<'r> Responder<'r, 'static> for Error {
-        fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static> {
-            let error_message = format!(r#"{{ "error": "{self}" }}"#);
-            Response::build()
-                .status(Status::InternalServerError)
-                .header(rocket::http::ContentType::JSON)
-                .sized_body(error_message.len(), std::io::Cursor::new(error_message))
-                .ok()
+    impl IntoResponse for Error {
+        fn into_response(self) -> Response {
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(self.to_string())).into_response()
         }
     }
 
@@ -412,23 +377,15 @@ mod error {
 }
 
 mod routes {
-
-    use faker_rand::en_us::names::FirstName;
-    use surrealdb::opt::auth::Record;
-
     use crate::error::Error;
     use crate::DB;
-    use rocket::serde::json::Json;
-    use rocket::{delete, get, post, put};
-    use serde::{Deserialize, Serialize};
-    use surrealdb::RecordId;
-    const PERSON: &str = "person";
 
-    #[derive(Serialize, Deserialize)]
-    struct Params<'a> {
-        name: &'a str,
-        pass: &'a str,
-    }
+    use axum::{extract::Path, Json};
+    use faker_rand::en_us::names::FirstName;
+    use surrealdb::{RecordId, opt::auth::Record};
+    use serde::{Deserialize, Serialize};
+
+    const PERSON: &str = "person";
 
     #[derive(Serialize, Deserialize, Clone)]
     pub struct PersonData {
@@ -441,85 +398,76 @@ mod routes {
         id: RecordId,
     }
 
-    #[get("/")]
     pub async fn paths() -> &'static str {
         r#"
-
 -----------------------------------------------------------------------------------------------------------------------------------------
         PATH                |           SAMPLE COMMAND                                                                                  
 -----------------------------------------------------------------------------------------------------------------------------------------
-/session: See session data  |  curl -X GET    -H "Content-Type: application/json"                          http://localhost:8080/session
+/session: See session data  |  curl -X GET    -H "Content-Type: application/json"                      http://localhost:8080/session
                             |
 /person/{id}:               |
-  Create a person           |  curl -X POST   -H "Content-Type: application/json" -d '{"name":"John Doe"}' http://localhost:8080/person/one
-  Get a person              |  curl -X GET    -H "Content-Type: application/json"                          http://localhost:8080/person/one
-  Update a person           |  curl -X PUT    -H "Content-Type: application/json" -d '{"name":"Jane Doe"}' http://localhost:8080/person/one
-  Delete a person           |  curl -X DELETE -H "Content-Type: application/json"                          http://localhost:8080/person/one
+  Create a person           |  curl -X POST   -H "Content-Type: application/json" -d '{"name":"John"}' http://localhost:8080/person/one
+  Update a person           |  curl -X PUT    -H "Content-Type: application/json" -d '{"name":"Jane"}' http://localhost:8080/person/one
+  Get a person              |  curl -X GET    -H "Content-Type: application/json"                      http://localhost:8080/person/one
+  Delete a person           |  curl -X DELETE -H "Content-Type: application/json"                      http://localhost:8080/person/one
                             |
-/people: List all people    |  curl -X GET    -H "Content-Type: application/json"                          http://localhost:8080/people
+/people: List all people    |  curl -X GET    -H "Content-Type: application/json"                      http://localhost:8080/people
 
 /new_user:  Create a new record user
 /new_token: Get instructions for a new token if yours has expired"#
     }
 
-    #[get("/session")]
     pub async fn session() -> Result<Json<String>, Error> {
         let res: Option<String> = DB.query("RETURN <string>$session").await?.take(0)?;
 
         Ok(Json(res.unwrap_or("No session data found!".into())))
     }
 
-    #[post("/person/<id>", data = "<person>")]
     pub async fn create_person(
-        id: String,
-        person: Json<PersonData>,
+        id: Path<String>,
+        Json(person): Json<PersonData>,
     ) -> Result<Json<Option<Person>>, Error> {
-        let person = DB
-            .create((PERSON, &*id))
-            .content(person.into_inner())
-            .await?;
+        let person = DB.create((PERSON, &*id)).content(person).await?;
         Ok(Json(person))
     }
 
-    #[get("/person/<id>")]
-    pub async fn read_person(id: String) -> Result<Json<Option<Person>>, Error> {
+    pub async fn read_person(id: Path<String>) -> Result<Json<Option<Person>>, Error> {
         let person = DB.select((PERSON, &*id)).await?;
         Ok(Json(person))
     }
 
-    #[put("/person/<id>", data = "<person>")]
     pub async fn update_person(
-        id: String,
-        person: Json<PersonData>,
+        id: Path<String>,
+        Json(person): Json<PersonData>,
     ) -> Result<Json<Option<Person>>, Error> {
-        let person = DB
-            .update((PERSON, &*id))
-            .content(person.into_inner())
-            .await?;
+        let person = DB.update((PERSON, &*id)).content(person).await?;
         Ok(Json(person))
     }
 
-    #[delete("/person/<id>")]
-    pub async fn delete_person(id: String) -> Result<Json<Option<Person>>, Error> {
+    pub async fn delete_person(id: Path<String>) -> Result<Json<Option<Person>>, Error> {
         let person = DB.delete((PERSON, &*id)).await?;
         Ok(Json(person))
     }
 
-    #[get("/people")]
     pub async fn list_people() -> Result<Json<Vec<Person>>, Error> {
         let people = DB.select(PERSON).await?;
         Ok(Json(people))
     }
 
-    #[get("/new_user")]
+    #[derive(Serialize, Deserialize)]
+    struct Params<'a> {
+        name: &'a str,
+        pass: &'a str,
+    }
+
     pub async fn make_new_user() -> Result<String, Error> {
         let name = rand::random::<FirstName>().to_string();
         let pass = rand::random::<FirstName>().to_string();
         let jwt = DB
             .signup(Record {
                 access: "account",
-                namespace: "namespace",
-                database: "database",
+                namespace: "test",
+                database: "test",
                 params: Params {
                     name: &name,
                     pass: &pass,
@@ -527,17 +475,17 @@ mod routes {
             })
             .await?
             .into_insecure_token();
-        Ok(format!("New user created!\n\nName: {name}\nPassword: {pass}\nToken: {jwt}\n\nTo log in, use this command:\n\nsurreal sql --namespace namespace --database database --pretty --token \"{jwt}\""))
+        Ok(format!("New user created!\n\nName: {name}\nPassword: {pass}\nToken: {jwt}\n\nTo log in, use this command:\n\nsurreal sql --ns test --db test --pretty --token \"{jwt}\""))
     }
 
-    #[get("/new_token")]
     pub async fn get_new_token() -> String {
-        let command = r#"curl -X POST -H "Accept: application/json" -d '{"ns":"namespace","db":"database","ac":"account","user":"your_username","pass":"your_password"}' http://localhost:8000/signin"#;
-        format!("Need a new token? Use this command:\n\n{command}\n\nThen log in with surreal sql --namespace namespace --database database --pretty --token YOUR_TOKEN_HERE")
+        let command = r#"curl -X POST -H "Accept: application/json" -d '{"ns":"test","db":"test","ac":"account","user":"your_username","pass":"your_password"}' http://localhost:8000/signin"#;
+        format!("Need a new token? Use this command:\n\n{command}\n\nThen log in with surreal sql --ns test --db test --pretty --token YOUR_TOKEN_HERE")
     }
 }
 
-async fn init() -> Result<(), surrealdb::Error> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     DB.connect::<Ws>("localhost:8000").await?;
 
     DB.signin(Root {
@@ -546,45 +494,39 @@ async fn init() -> Result<(), surrealdb::Error> {
     })
     .await?;
 
-    DB.use_ns("namespace").use_db("database").await?;
+    DB.use_ns("test").use_db("test").await?;
 
     DB.query(
-        "    DEFINE TABLE person SCHEMALESS
+        "
+    DEFINE TABLE IF NOT EXISTS person SCHEMALESS
         PERMISSIONS FOR 
             CREATE, SELECT WHERE $auth,
             FOR UPDATE, DELETE WHERE created_by = $auth;
-    DEFINE FIELD name ON TABLE person TYPE string;
-    DEFINE FIELD created_by ON TABLE person VALUE $auth READONLY;
+    DEFINE FIELD IF NOT EXISTS name ON TABLE person TYPE string;
+    DEFINE FIELD IF NOT EXISTS created_by ON TABLE person VALUE $auth READONLY;
 
-    DEFINE INDEX unique_name ON TABLE user FIELDS name UNIQUE;
-    DEFINE ACCESS account ON DATABASE TYPE RECORD
+    DEFINE INDEX IF NOT EXISTS unique_name ON TABLE user FIELDS name UNIQUE;
+    DEFINE ACCESS IF NOT EXISTS account ON DATABASE TYPE RECORD
 	SIGNUP ( CREATE user SET name = $name, pass = crypto::argon2::generate($pass) )
 	SIGNIN ( SELECT * FROM user WHERE name = $name AND crypto::argon2::compare(pass, $pass) )
 	DURATION FOR TOKEN 15m, FOR SESSION 12h
 ;",
     )
     .await?;
-    Ok(())
-}
 
-#[launch]
-pub async fn rocket() -> _ {
-    std::env::set_var("ROCKET_PORT", "8080");
-    init().await.expect("Something went wrong, shutting down");
-    rocket::build().mount(
-        "/",
-        routes![
-            routes::create_person,
-            routes::read_person,
-            routes::update_person,
-            routes::delete_person,
-            routes::list_people,
-            routes::paths,
-            routes::make_new_user,
-            routes::get_new_token,
-            routes::session
-        ],
-    )
+    let listener = TcpListener::bind("localhost:8080").await?;
+    let router = Router::new()
+        .route("/", get(routes::paths))
+        .route("/person/:id", post(routes::create_person))
+        .route("/person/:id", get(routes::read_person))
+        .route("/person/:id", put(routes::update_person))
+        .route("/person/:id", delete(routes::delete_person))
+        .route("/people", get(routes::list_people))
+        .route("/session", get(routes::session))
+        .route("/new_user", get(routes::make_new_user))
+        .route("/new_token", get(routes::get_new_token));
+    axum::serve(listener, router).await?;
+    Ok(())
 }
 ```
 
@@ -660,7 +602,7 @@ Also note that the root user is able to see the `user` tables and their informat
 
 ## Further steps
 
-Now that you have a running Rocket server with SurrealDB as the backend, here are some other ideas that you might want to explore.
+Now that you have a running Axum server with SurrealDB as the backend, here are some other ideas that you might want to explore.
 
 * Using the [`AUTHENTICATE`](/docs/surrealql/statements/define/access/record#example-failing-authentication) clause inside the `DEFINE ACCESS` statement. This will result in increased performance thanks to only being executed once, compared to permissions checks which are executed for each query.
-* Adding some interesting behaviour to the database such as [changefeeds](https://surrealdb.com/docs/surrealql/statements/define/table#example-usage) or [events](https://surrealdb.com/docs/surrealql/statements/define/event).
+* Adding some interesting behaviour to the database such as [changefeeds](/docs/surrealql/statements/define/table#example-usage) or [events](/docs/surrealql/statements/define/event).
