@@ -26,6 +26,7 @@ An idiom is made up of one or more **parts**, each of which can be one of severa
 - [**Graph**](#graph-navigation): Navigate through graph relationships.
 - [**Destructure**](#destructuring): Destructure nested objects.
 - [**Optional**](#optional-parts): Indicate that the following part is optional.
+- [**Recurse**](#recursive-paths): Recursively traverse paths such as graph and record links.
 
 In this section, we'll explore each part in detail with examples to help you understand how to use idioms in SurrealQL.
 
@@ -497,13 +498,22 @@ This idiom will return `NONE` for `spouse_name` if the `spouse` field is not pre
 
 <Since v="v2.1.0" />
 
-#### Overview
-
 A recursive path allows record link or graph traversal down to a specified depth, as opposed to manually putting together a query to navigate down each level.
 
 Using recursive graph traversal can be thought of as the equivalent of "show me all the third-generation descendants of Mr. Brown" as opposed to "show me the children and children's children and children's children's children of Mr. Brown".
 
-Take the following statements that create one planet, two countries, two states/provinces in each of these countries, and two cities in each of those states/provinces. The `CREATE` statements are followed by `UPDATE` statements to set record links between them, and `RELATE` to create bidirectional graph relations between them.
+The following shows a recursive query that returns the names of people known by records that the record `person:tobie` knows.
+
+```surql
+-- Get all names of people second to Tobie
+person:tobie.{2}(->friends_with->person).name;
+```
+
+As the syntax of recursive queries tends to be complex to the untrained eye, this section will explain them in order of difficulty, beginning with what queries were necessary before recursive paths were added in SurrealDB version 2.1.
+
+#### Overview
+
+Take the following example that creates one planet, two countries, two states/provinces in each of these countries, and two cities in each of those states/provinces. The `CREATE` statements are followed by `UPDATE` statements to set record links between them, and `RELATE` to create bidirectional graph relations between them.
 
 ```surql
 CREATE
@@ -518,7 +528,7 @@ CREATE
 	city:los_angeles, city:san_francisco,
 	city:houston,     city:dallas,
 	city:vancouver,   city:victoria,
-	city:toronto,     city:ottawa,
+	city:toronto,     city:ottawa
 	// Give them each names like 'earth', 'us', 'bc', etc.
 	SET name = id.id();
 
@@ -542,8 +552,6 @@ RELATE state:texas      ->has->    [city:houston, city:dallas];
 RELATE province:bc      ->has->    [city:vancouver, city:victoria];
 RELATE province:ontario ->has->    [city:toronto, city:ottawa];
 ```
-
-#### Before recursive paths
 
 Before version `2.1.0`, traversing each of these paths could only be done manually, requiring a good deal of typing and knowing the exact depth to traverse.
 
@@ -701,7 +709,7 @@ Parentheses can be added to a recursive query. To explain their use, consider th
 planet:earth.{1..3}->has->(?).name;
 ```
 
-Unfortunately, the output shows that the query stopped at a depth of one. This is because the path `->has->(?).name` only leads to a string: a dead end.
+Unfortunately, the output shows that the query stopped at a depth of one. This is because the query is instructing the database to recurse the entire `->has->(?).name` path between 1 and 3 times, but after the first recursion it has reached a string. And a string on its own is of no use in a `->has->(?)` graph query which expects a record ID.
 
 ```surql title="Output"
 [
@@ -710,7 +718,13 @@ Unfortunately, the output shows that the query stopped at a depth of one. This i
 ]
 ```
 
-Enclosing `->has->(?)` in parentheses is an instruction to compute the graph traversal first as many times as needed, and only then move on to the `name` field.
+In fact, the above query is equivalent to the following statement which encloses `->has->(?).name` in parentheses.
+
+```surql
+planet:earth.{1..3}(->has->(?).name);
+```
+
+To make the query work, we can shrink the area enclosed in the parentheses to `->has->(?)`, isolating the part to recurse before moving on to `.name`. It will repeat as many times as instructed and only then move on to the `name` field.
 
 ```surql
 planet:earth.{1..3}(->has->(?)).name;
@@ -738,7 +752,7 @@ planet:earth
 	.{1..3}
 -- instructions for current document
 	(->has->(?))
--- final path
+-- leftover idiom path
 	.{name, id};
 ```
 
@@ -806,6 +820,43 @@ planet:earth
 ```
 
 Using `.@` in this way will return the fields for a depth of up to three levels.
+
+Here are some more simple examples of recursive queries and notes on the output they generate.
+
+```surql
+-- Any depth
+person:tobie.{..}(->knows->person).name;
+
+-- Minimum 2, maximum 6 iterations of recursion (or either)
+person:tobie.{2..6}(->knows->person).name;
+person:tobie.{2..}(->knows->person).name;
+person:tobie.{..6}(->knows->person).name;
+
+-- Generate complex recursive tree structures:
+-- Fetches connections up to 3 levels deep, 
+-- collecting their name, id, and connections along the way
+-- 3 levels, because the first iteration is used to collect
+-- the details for person:tobie
+person:tobie.{..4}.{ id, name, connections: ->knows->person.@ };
+
+-- @ is a shortcut to the current document, and acts as a shorthand to start an idiom path.
+-- The "." can optionally be omitted
+SELECT @{1..4}(->knows->person).name AS names_2nds FROM person
+
+-- Recursive idioms work with any idiom parts, not limited to graphs
+-- Here, we recursively fetch friends and then collect their names
+person:tobie.{1..5}(.friend).name
+```
+
+#### Behaviour of recursive queries
+
+Recursive queries follow a few rules to determine how far to traverse and what to return. They are:
+
+* NONE, NULL, and arrays which are empty or contain only NONE/NULL are considered a dead end.
+* An iteration with the same value as the previous one is also considered a dead end.
+* If a query does not reach the minimum depth, it returns NONE.
+* If it does reach the minimum depth, it returns the last valid value.
+* During each iteration, all dead end values and paths are automatically filtered out whenever an array is encountered.
 
 ## Combining Idiom Parts
 
