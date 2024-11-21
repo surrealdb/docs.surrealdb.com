@@ -170,6 +170,176 @@ search::analyze("example_edgengram", "apple banana");
 ]
 ```
 
+{/* Add Since here once next version out */}
+
+### `mapper(path)`
+
+The mapping filter is designed to enable lemmatization within SurrealDB.
+
+Lemmatization is the process of reducing words to their base or dictionary form. The mapper mechanism allows users to specify a custom dictionary file that maps terms to their base forms. This dictionary file is then used by SurrealDB’s analyzer to standardize terms as they are indexed, improving search consistency.
+
+This is particularly useful for handling irregular verbs and other terms that the default "snowball" filter cannot handle. Lemmatization files are easy to put together and to find online, making it possible to customize full-text search for smaller languages.
+
+How does the mapper work?
+
+Configuration: In the SQL statement below, the mapper parameter is specified within the analyzer definition.
+This parameter points to the file that contains the term mappings for lemmatization.
+
+```surql
+DEFINE ANALYZER lemme_english TOKENIZERS blank,class FILTERS lowercase,mapper('../tests/data/lemmatization-en.txt');
+
+RETURN [
+    search::analyze("lemme_english", "He drove and swam"),
+];
+```
+
+```surql title="Output"
+[
+	[
+		'he',
+		'drive',
+		'and',
+		'swim'
+	]
+]
+```
+
+Dictionary File Structure: The file specified in the mapper parameter must follow this format:
+
+- Each line contains a pair of terms separated by a tab.
+- The first term represents the canonical (base form) of the word.
+- The second term is the form to be mapped to this base form.
+
+Example file format:
+
+```
+drive	driven
+drive	drives
+drive	driving
+drive	drove
+swim	swam
+swim	swimming
+swim	swims
+swim	swum
+```
+
+Usage: When this analyzer is applied to a text, any word that matches the mapped term in the dictionary file will be replaced by its base form before indexing. This helps ensure consistency in search results by consolidating different forms of a word to a single, standardized entry.
+
+By using this custom dictionary-based mapper, you can control how irregular forms and other variations of terms are indexed,
+making search behavior more predictable and comprehensive.
+
+The following example shows how lemmatization can be used to generate a list of words and their respective frequencies. Other notable functionalities in the example are the [`string::is::alpha()`](/docs/surrealql/functions/database/string#stringisalpha) function inside [`array::filter()`](/docs/surrealql/functions/database/array#arrayfilter) to remove all non-alphabetic strings, the [`type::thing()`](/docs/surrealql/functions/database/type#typething) function to construct a record ID from two strings, and an [`UPSERT`](/docs/surrealql/statements/upsert) statement to create a record if one does not exist, or update it otherwise.
+
+```surql
+DEFINE ANALYZER lemme_english TOKENIZERS blank,class FILTERS lowercase,mapper('../tests/data/lemmatization-en.txt');
+
+LET $text = "The Wheel of Time turns, and Ages come and pass, leaving memories that become legend. Legend fades to myth, and even myth is long forgotten when the Age that gave it birth comes again. In one Age, called the Third Age by some, an Age yet to come, an Age long past, a wind rose in the Mountains of Mist. The wind was not the beginning. There are neither beginnings nor endings to the turning of the Wheel of Time. But it was a beginning.";
+
+LET $words = search::analyze("lemme_english", $text)
+    .filter(|$c| $c.is_alpha());
+FOR $word IN $words {
+    UPSERT type::thing("word", $word) SET frequency += 1;
+};
+
+SELECT * FROM word WHERE frequency >=3 ORDER BY frequency DESC;
+```
+
+```surql title="Output"
+[
+	{
+		frequency: 8,
+		id: word:the
+	},
+	{
+		frequency: 6,
+		id: word:age
+	},
+	{
+		frequency: 4,
+		id: word:a
+	},
+	{
+		frequency: 4,
+		id: word:be
+	},
+	{
+		frequency: 4,
+		id: word:of
+	},
+	{
+		frequency: 3,
+		id: word:and
+	},
+	{
+		frequency: 3,
+		id: word:come
+	},
+	{
+		frequency: 3,
+		id: word:to
+	}
+]
+```
+
+A mapper can also be used for ad-hoc filtering, as long as the file referenced contains two single words separated by a tab. Take the following file for example:
+
+```title="error_filter.txt"
+NOT_FOUND	File_not_found
+NOT_FOUND	Datei_nicht_gefunden
+NOT_FOUND	Fichier_non_trouvé
+TIMEOUT	Timed_out
+TIMEOUT	Délai_expiré
+TIMEOUT	Zeitüberschreitung
+```
+
+An analyzer that uses a single mapper filter can then use this lemmatizer to unify multilingual error messages into a single output.
+
+```surql
+DEFINE ANALYZER error_filter FILTERS mapper('error_filter.txt');
+
+LET $messages = 
+	["File not found", "Datei nicht gefunden", "Zeitüberschreitung"]
+	.map(|$word| $word.replace(' ', '_'))
+	.join(' ');
+search::analyze("error_filter", $messages);
+```
+
+```surql title="Output"
+[
+	'NOT_FOUND',
+	'NOT_FOUND',
+	'TIMEOUT'
+]
+```
+
+Example using the same mapper to search for errors in multiple languages:
+
+```surql
+DEFINE ANALYZER error_filter FILTERS mapper('error_filter.txt');
+DEFINE INDEX OVERWRITE errors ON TABLE error FIELDS message SEARCH ANALYZER error_filter;
+
+FOR $message IN ["File not found", "Datei nicht gefunden", "Zeitüberschreitung"] {
+	CREATE error SET message = $message.replace(' ', '_'), at = time::now();
+};
+
+SELECT * FROM error WHERE message @@ "NOT_FOUND";
+```
+
+```surql title="Output"
+[
+	{
+		at: d'2024-11-13T03:56:12.039252Z',
+		id: error:acbc044syhnx54wzs3n9,
+		message: 'File_not_found'
+	},
+	{
+		at: d'2024-11-13T03:56:12.043643Z',
+		id: error:5ifxic9s750x24ts4zof,
+		message: 'Datei_nicht_gefunden'
+	}
+]
+```
+
 ### `ngram(min,max)`
 
 The ngram filter is used to create a sequence of 'n' tokens from a given sample of text or speech. These items can be syllables, letters, words or base pairs according to the application. It accepts two parameters `min` and `max` which indicates that you want to create n-grams starting from min to size of max.
