@@ -1,6 +1,6 @@
 import { StandardSQL } from '@codemirror/lang-sql';
 import { StreamLanguage } from '@codemirror/language';
-import { csharp } from '@codemirror/legacy-modes/mode/clike';
+import { csharp, java } from '@codemirror/legacy-modes/mode/clike';
 import { parser as bashParser } from '@fig/lezer-bash';
 import { parseMixed } from '@lezer/common';
 import { parser as goParser } from '@lezer/go';
@@ -25,6 +25,7 @@ const surrealqlParser = _surrealqlParser.configure({
 });
 
 const csharpParser = StreamLanguage.define(csharp).parser;
+const javaParser = StreamLanguage.define(java).parser;
 
 const parser = {
     bash: bashParser,
@@ -40,6 +41,7 @@ const parser = {
     typescript: javascriptParser,
     surql: surrealqlParser,
     surrealql: surrealqlParser,
+    java: javaParser,
     json: jsonParser,
     sql: StandardSQL.parser,
     go: goParser,
