@@ -810,9 +810,10 @@ As the query that uses aliases does not maintain the original graph structure, a
 
 Being able to set fields on graph tables opens up a large variety of custom query methods, one of which is explored here.
 
-Imagine a database that holds detailed information on the relations between NPCs in a game that are made to be as realistic as possible. Two of the characters have a rocky past but finally a happy conclusion in which they end up married. During this period, we might have tracked their relationship by adding and removing graph edges between the two of them as they move from a stage of being friends, to dating, to hating each other, to finally ending up married.
+Imagine a database that holds detailed information on the relations between NPCs in a game that are made to be as realistic as possible. Two of the characters have a rocky past but finally end up married. During this period, we might have tracked their relationship by adding and removing graph edges between the two of them as they move from a stage of being friends, to dating, to hating each other, to finally ending up married.
 
 ```surql
+CREATE person:one, person:two;
 -- These three relations would end up deleted
 RELATE person:one->friends_with->person:two;
 RELATE person:one->dating->person:two;
@@ -824,6 +825,7 @@ RELATE person:one->married->person:two;
 This works well to track the current state of the relationship, but creating a more general table such as `knows` along with a number of fields can be a better method to track the changing relationship over time. The following shows the relationship between the two `person` records, along with a third record called `person:three` who went to the same school and once dated `person:one`.
 
 ```surql
+CREATE person:one, person:two, person:three;
 RELATE person:one->knows->person:two SET
     has_been_friends = true,
     has_dated = true,
@@ -838,9 +840,29 @@ RELATE person:one->knows->person:three SET
 With these fields in place, it is possible to use a `WHERE` clause to do refined searches on relationships of a certain type.
 
 ```surql
-SELECT id, ->knows->person FROM person:one;
-SELECT id, ->knows[WHERE has_dated]->person FROM person:one;
-SELECT id, ->knows[WHERE same_high_school AND has_dated]->person FROM person:one;
+SELECT 
+	->knows->person AS knows,
+	->knows[WHERE has_dated]->person AS has_dated,
+	->knows[WHERE same_high_school AND has_dated]->person AS dated_and_same_school
+ FROM person:one;
+```
+
+```surql title="Response"
+[
+	{
+		dated_and_same_school: [
+			person:three
+		],
+		has_dated: [
+			person:two,
+			person:three
+		],
+		knows: [
+			person:two,
+			person:three
+		]
+	}
+]
 ```
 
 Because the `WHERE` clause simply checks for [truthiness](/docs/surrealql/datamodel/values#values-and-truthiness) (whether a value is present and not empty), these fields do not necessarily need to be booleans and can even be complex objects.
@@ -876,3 +898,164 @@ SELECT id, ->knows[WHERE same_high_school AND has_dated.to > d'2020-12-25']->per
 ```
 
 ### Recursive graph queries
+
+<Since v="v2.1.0" />
+
+Graph edges can also be queried recursively. For a full explanation of this syntax, see the page on [recursive paths](/docs/surrealql/datamodel/idioms#recursive-paths).
+
+Take the following example which creates five cities, each of which is connected to the next by some type of road of random length.
+
+```surql
+CREATE |city:1..5| SET name = <string>id.id() + 'ville';
+FOR $pair IN (<array>(1..=5)).windows(2) {
+  	LET $city1 = type::thing("city", $pair[0]);
+    LET $city2 = type::thing("city", $pair[1]);
+    RELATE $city1->to->$city2 SET 
+        type = rand::enum(["train", "road", "bike path"]),
+        distance = <int>(rand::float() * 100).ceil()
+};
+```
+
+While it is possible to manually move three levels down this road network, it involves a good deal of manual typing.
+
+```surql
+SELECT ->to->city->to->city->to->city AS fourth_city FROM city:1;
+```
+
+```surql title="Response"
+[
+	{
+		fourth_city: [
+			city:4
+		]
+	}
+]
+```
+
+This can be replaced by a `@` to refer to the current record, followed by `.{3}` to represent three levels down the 
+
+```surql
+SELECT @.{3}->to->city AS fourth_city FROM city:1;
+```
+
+A traditional query to show the final road info from `city:1` to the city three stops away would look like this.
+
+```surql
+SELECT ->to->city->to->city->to.* AS third_journey FROM city:1;
+```
+
+```surql title="Response"
+[
+	{
+		fourth_city: [
+			[
+				{
+					distance: 80,
+					id: to:sw2pery99jomfhibzfrh,
+					in: city:3,
+					out: city:4,
+					type: 'train'
+				}
+			]
+		]
+	}
+]
+```
+
+To use the same query recursively, wrap the part that must be repeated (`->to->city`) inside parentheses. This will ensure that the `.{2}` part of the query only repeats `->to->city` twice, and not the final `->to.*` portion.
+
+```surql
+SELECT @.{2}(->to->city)->to.* AS third_journey FROM city:1;
+```
+
+A range can be added inside the `{}` braces. The following query that uses a range of 1 to 20 will follow the `->to->city` path up to 20 times, but will stop at the 5th and final depth because the next level returns an empty array.
+
+```surql
+city:1.{1..20}->to->city;
+```
+
+```surql title="Response"
+[
+	city:5
+]
+```
+
+Ranges can be followed with the destructuring operator to collect fields on each depth, returning them in a single response. The following query goes five depths down the `to` graph table, returning each city and road along the way.
+
+```surql
+SELECT @.{1..5}.{ 
+    id, 
+    next_roads: ->to.*,
+    next_cities: ->to->city
+} FROM city;
+```
+
+```surql title="Response"
+[
+	{
+		id: city:1,
+		next_cities: [
+			city:2
+		],
+		next_roads: [
+			{
+				distance: 33,
+				id: to:bl6i9djau0pg24pqrwd9,
+				in: city:1,
+				out: city:2,
+				type: 'road'
+			}
+		]
+	},
+	{
+		id: city:2,
+		next_cities: [
+			city:3
+		],
+		next_roads: [
+			{
+				distance: 45,
+				id: to:ybugfnlzv6kcrkaj49ig,
+				in: city:2,
+				out: city:3,
+				type: 'road'
+			}
+		]
+	},
+	{
+		id: city:3,
+		next_cities: [
+			city:4
+		],
+		next_roads: [
+			{
+				distance: 80,
+				id: to:sw2pery99jomfhibzfrh,
+				in: city:3,
+				out: city:4,
+				type: 'train'
+			}
+		]
+	},
+	{
+		id: city:4,
+		next_cities: [
+			city:5
+		],
+		next_roads: [
+			{
+				distance: 29,
+				id: to:42hlspf4z5lpqceyv68p,
+				in: city:4,
+				out: city:5,
+				type: 'train'
+			}
+		]
+	},
+	{
+		id: city:5,
+		next_cities: [],
+		next_roads: []
+	}
+]
+```
