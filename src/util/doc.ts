@@ -197,3 +197,32 @@ export function getTitle(
 ): string {
     return meta.sidebar_label ?? meta.title ?? titleFromSlug(slug);
 }
+
+export function findPreviousPage(
+    items: Item[],
+    index: number
+): Item | undefined {
+    if (index === -1) {
+        return undefined;
+    }
+
+    for (let i = index - 1; i >= 0; i--) {
+        const item = items[i];
+        if ('isPage' in item ? item.isPage : true) {
+            return item;
+        }
+    }
+}
+
+export function findNextPage(items: Item[], index: number): Item | undefined {
+    if (index === -1) {
+        return undefined;
+    }
+
+    for (let i = index + 1; i < items.length; i++) {
+        const item = items[i];
+        if ('isPage' in item ? item.isPage : true) {
+            return item;
+        }
+    }
+}
