@@ -74,6 +74,7 @@ async function checkBrokenLinks() {
 
             if (href.startsWith('/')) {
                 href = href.split('#')[0];
+                href = href.split('?')[0];
 
                 let exists = false;
 
