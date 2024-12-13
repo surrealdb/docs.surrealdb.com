@@ -90,7 +90,10 @@ async function checkBrokenLinks() {
                     default: {
                         if (!websiteCache.has(href)) {
                             const res = await fetch(
-                                `https://surrealdb.com${href}`
+                                `https://surrealdb.com${href}`,
+                                {
+                                    redirect: 'manual',
+                                }
                             );
                             websiteCache.set(href, res.ok);
                         }
