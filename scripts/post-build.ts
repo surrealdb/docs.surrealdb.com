@@ -59,7 +59,7 @@ async function checkBrokenLinks() {
                     console.error(`\n[ERROR] In file: ${file}`);
                     loggedFile = true;
                 }
-                
+
                 hasIssue = true;
                 console.error(`[ERROR] ${issue}`);
             }
@@ -73,7 +73,6 @@ async function checkBrokenLinks() {
             }
 
             if (href.startsWith('/')) {
-
                 href = href.split('#')[0];
 
                 let exists = false;
@@ -126,9 +125,11 @@ async function checkBrokenLinks() {
 
     if (broken.length > 0) {
         console.error('\n=============================================');
-        console.error("\n[ERROR] Broken links found.");
-        console.error("[ERROR] Possible issues include dead links, redirected links, or external links that should be local.");
-        console.error("[ERROR] Check the above logs for more in-depth details");
+        console.error('\n[ERROR] Broken links found.');
+        console.error(
+            '[ERROR] Possible issues include dead links, redirected links, or external links that should be local.'
+        );
+        console.error('[ERROR] Check the above logs for more in-depth details');
         console.error("[ERROR] Here's the list: \n");
         for (const link of broken) {
             console.error(`[ERROR] Broken link: ${link}`);
