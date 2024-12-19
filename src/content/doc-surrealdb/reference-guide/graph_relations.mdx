@@ -1,7 +1,7 @@
 ---
 sidebar_position: 3
 sidebar_label: Graph relations
-title: Full-Text search | Reference guides
+title: Graph relations | Reference guides
 description: In SurrealDB, Full-Text Search supports advanced features like basic and advanced text matching, proximity searches, result ranking, and keyword highlighting⁠.
 ---
 
@@ -13,7 +13,9 @@ The first item to take into account when using graph relations is whether they a
 
 SurrealDB has two main ways to create relations between one record and another: record links, and graph relations.
 
-A record link is a link between one record to another, created any time a record holds the record ID of another record. The link is unidirectional, and no metadata exists about the relation between the two records. If this matches your use case, then a record link is the easiest solution.
+A record link is a simple pointer from one record to another, a link that exists any time a record holds the record ID of another record. Record links are efficient because record IDs are direct pointers to the data of a record, and do not require a scan of the whole table.
+
+Take the following example that creates one `user` who has written two `comment`s.
 
 ```surql
 LET $new_user = CREATE ONLY user SET name = "User McUserson";
@@ -28,7 +30,7 @@ UPDATE $new_user SET comments += (CREATE ONLY comment SET
     .id;
 ```
 
-The advantages to this approach are that the linked comments are simply a field on a `user` record and accessing them is as simple as any other field.
+Querying a record link is easy as the link is unidirectional with nothing in between. In this case, the linked comments are simply a field on a `user` record and accessing them is as simple as any other field on a `user` record.
 
 ```surql
 SELECT 
@@ -55,7 +57,7 @@ FROM user;
 ]
 ```
 
-Record links have two main limitations. One is that the link is unidirectional, so the only way to know about any linking records is by using a subquery. With some knowledge of SurrealQL this is certainly doable, but a case like this is an indication that a graph link may be the better solution.
+The unidirectionality of a record link is also a limitation, because the only way to query in the other direction is by using a subquery. With some knowledge of SurrealQL this is certainly doable, but a case like this is an indication that a graph link may be the better solution.
 
 ```surql
 SELECT 
@@ -103,7 +105,7 @@ The other limitation is that there is no metadata about the context in which the
 }
 ```
 
-This information isn't information about the user as a whole, nor the comment itself. It's information about the moment in time in which the `user` and `comment` were linked, and thus is best stored in a separate table. If this sort of metadata is necessary, then a graph table is the ideal solution.
+This metadata isn't information about the user as a whole, nor the comment itself. It's information about the moment in time in which the `user` and `comment` were linked, and thus is best stored in a separate table. If this sort of metadata is necessary, then a graph table is the ideal solution.
 
 ## Creating a graph relation
 
@@ -121,7 +123,26 @@ RELATE $new_user->wrote->$new_comment SET
 	mood = "happy";
 ```
 
-At the end of a graph query, use .* to see all of a record's fields or the destructuring operator to see a few of them.
+Now that a graph edge has been established, the arrow operator can be used to traverse this path. The versatility of this operator is one of the key advantages of using graph edges, as they can be traversed forward, backward, recursively, and more.
+
+```surql
+-- Go through each user and find comment(s) it wrote
+SELECT ->wrote->comment FROM user;
+-- Go through each comment and find the user(s) that wrote it
+SELECT <-wrote<-user FROM comment;
+-- Go through each comment, find the user(s) that wrote it,
+-- and then find all of their comments
+SELECT <-wrote<-user->wrote->comment FROM comment;
+```
+
+## More on querying graph relations
+
+As this page is devoted to an overview of when and how best to use graph relations, it does not go into the details of queries themselves. Many reference pages already exist in the SurrealDB documentation to learn this, including:
+
+* The [`RELATE` statement](/docs/surrealql/statements/relate#querying-graphs)
+* The [page on idioms](https://surrealdb.com/docs/surrealql/datamodel/idioms)
+* The [SurrealDB Fundamentals course](https://surrealdb.com/learn/fundamentals)
+* [Aeon's Surreal Renaissance](https://surrealdb.com/learn/book), chapters 5 to 8 in particular
 
 ## Tips and best practices with graph relations
 
@@ -180,14 +201,94 @@ RELATE person:one->likes->blog_post:one;
 
 ![alt text](schema3.png)
 
-### Graph paths in schemas
+### Create a unique index if the graph relationship is between equals
+
+While most examples involve a clear subject and object relationship, sometimes a graph edge represents a relationship such as friendship, a partnership, sister cities, etc. in which this is not clear.
 
 ```surql
-DEFINE FIELD is_employed ON TABLE person VALUE !!$this<-employs<-company;
+CREATE person:one, person:two;
+
+-- Relate them like this?
+RELATE person:one->friends_with->person:two;
+-- Or like this?
+RELATE person:two->friends_with->person:one;
+```
+
+To ensure that this relationship cannot be established more than once, define a field made of the sorted `in` and `out` fields of the graph table, and define an index on it with a unique constraint.
+
+```surql
+DEFINE FIELD key ON TABLE friends_with VALUE array::sort([in, out]);
+DEFINE INDEX only_one_friendship ON TABLE friends_with FIELDS key UNIQUE;
+```
+
+With this constraint in place, no second `friends_with` can be initiated from the other side.
+
+```surql
+CREATE person:one, person:two;
+RELATE person:one->friends_with->person:two;
+RELATE person:two->friends_with->person:one;
+```
+
+```surql title="Output"
+'Database index `only_one_friendship` already contains person:one, with record `friends_with:hdt5hoamvs8l65cw7a3t`'
+```
+
+The `<->` operator can be used in this case to traverse both the `in` and `out` fields of the `friends_with` table, along with the [`array::complement()`](https://surrealdb.com/docs/surrealql/functions/database/array#arraycomplement) function to exclude the record in question from showing up as its own friend.
+
+```surql
+SELECT *, array::complement(<->friends_with<->person, [id]) AS friends FROM person;
+```
+
+For further details on this pattern, see [this section](https://surrealdb.com/docs/surrealql/statements/relate#bidirectional-relation-querying) in the page on the `RELATE` statement.
+
+
+### Traverse directly from a record instead of using SELECT
+
+
+
+### Graph paths in schemas
+
+While most examples in the documentation show how to traverse graph paths inside a `SELECT` statement, they can just as easily be defined as a field on a table.
+
+```surql
+DEFINE FIELD is_employed ON TABLE person VALUE !!(SELECT VALUE <-employs<-company FROM ONLY $this);
 
 CREATE person:1, person:2, company:1;
 RELATE company:1->employs->person:1;
 person:1.*;
+```
+
+However, note that the output of the query above shows `false` for the `is_employed` field, as it was calculated at the point that `person:1` was created. The `VALUE` clause will only recalculate if a record is updated.
+
+```surql
+UPDATE person:1;
+```
+
+```surql title="Output"
+[
+	{
+		id: person:1,
+		is_employed: true
+	}
+]
+```
+
+A `future` makes more sense in this case, as a future is calculated each time a record is queried, not just whenever it is created or updated.
+
+```surql
+DEFINE FIELD is_employed ON TABLE person VALUE <future> { RETURN !!(SELECT VALUE <-employs<-company FROM ONLY $this) };
+
+CREATE person:1, person:2, company:1;
+RELATE company:1->employs->person:1;
+
+person:1.*;
+```
+
+```surql title="Output"
+{
+	id: person:1,
+	is_employed: true
+}
 ```
 
 ### RELATE can be used before records to relate exist
@@ -311,3 +412,32 @@ While developed for graph relations in particular, this path can be used in any 
 For more details on SurrealDB's recursive syntax, see the following pages:
 
 * [Idioms: recursive paths](/docs/surrealql/datamodel/idioms#recursive-paths)
+
+### Don't use them if you can use a record link instead
+
+To sum up the post with the point made at the beginning, graph edges are just one of two ways to join records and are not always the ideal solution. If graph edges are not strictly necessary and performance is key, then record links are the way to go.
+
+The following example that links one `person` to 10000 `cat` records in both ways shows at the end how much more performant record links are.
+
+```surql
+LET $cats = CREATE |cat:1..10000|;
+CREATE person:1 SET cats = $cats;
+FOR $cat IN $cats {
+  RELATE person:1->owner_of->$cat;  
+};
+
+-- Record links, very performant
+LET $_ = SELECT cats FROM person:1;
+-- Graph traversal, more complex query
+LET $_ = person:1->owner_of->cat;
+```
+
+This can be seen visually by adding the `owner_of` table and `cats` field to the schema inside Surrealist. As the Designer view shows, the `cats` field is simply a direct link to a `cat` record, while to reach `cat` via graph traversal will always involve the `owner_of` table located in between the two.
+
+```surql
+DEFINE TABLE OVERWRITE owner_of TYPE RELATION IN person OUT cat;
+DEFINE FIELD cats ON TABLE person TYPE array<record<cat>>;
+```
+
+![alt text](schema4.png)
+
