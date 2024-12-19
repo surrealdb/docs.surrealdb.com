@@ -137,7 +137,7 @@ export const metadata = {
         },
         repo: {
             title: 'Forum',
-            href: 'https://surrealdb.com/community/forums',
+            href: '/community',
         },
     },
     'doc-surrealist': {
