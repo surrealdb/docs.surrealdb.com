@@ -21,6 +21,8 @@ import LightSurrealDB from '@img/icon/light/surrealdb.png';
 import LightSurrealist from '@img/icon/light/surrealdb.png';
 import LightSurrealML from '@img/icon/light/surrealml.png';
 import LightSurrealQL from '@img/icon/light/surrealql.png';
+import LightCloud from '@img/image/cloud/surrealcloud.png';
+import DarkCloud from '@img/image/cloud/surrealcloud.png';
 
 import DarkSurrealDB from '@img/icon/dark/surrealdb.png';
 import DarkSurrealist from '@img/icon/dark/surrealist.png';
@@ -125,6 +127,17 @@ export const metadata = {
         repo: {
             title: 'surrealdb/surrealdb',
             href: 'https://github.com/surrealdb/surrealdb',
+        },
+    },
+    'doc-cloud': {
+        title: 'Surreal Cloud (Beta)',
+        icon: {
+            light: LightCloud,
+            dark: DarkCloud,
+        },
+        repo: {
+            title: 'Forum',
+            href: '/community',
         },
     },
     'doc-surrealist': {

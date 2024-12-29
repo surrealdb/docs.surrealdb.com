@@ -15,6 +15,7 @@ const abstractDoc = defineCollection({
 
 export const docs = [
     'surrealdb',
+    'cloud',
     'surrealist',
     'surrealml',
     'surrealql',

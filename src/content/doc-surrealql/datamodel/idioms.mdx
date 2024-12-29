@@ -133,8 +133,8 @@ SELECT results[0].score FROM student;
 ```surql title="Response"
 [
   {
-    "results": [
-      { "score": 76 }
+    results: [
+      { score: 76 }
     ]
   }
 ]
@@ -144,10 +144,10 @@ Here, `results[0].score` accesses the score of the first student in the `results
 
 ### All Elements
 
-To access all elements in an array or all fields in an object, use `[*]` or `.*`. This is useful when you want to access all the elements in an array or all the fields in an object. 
+To access all elements in an array or all fields in an object, use `.*`. This is useful when you want to access all the elements in an array or all the fields in an object. 
 
-```surql
-SELECT results[*].score FROM student;
+```surql 
+SELECT results.* FROM student;
 ```
 
 ```surql title="Response"
@@ -166,6 +166,28 @@ SELECT results[*].score FROM student;
 ```
 
 This idiom selects all elements in the `score` array.
+
+The operator `[*]` can also be used as an alias of `.*`, and is often seen in definitions and error messages.
+
+```surql
+DEFINE FIELD friends ON TABLE person TYPE array<record<person>>;
+INFO FOR TABLE person;
+```
+
+The output for `INFO FOR TABLE person` includes an automatically generated definition for `friends[*]`, namely every item inside the `friends` field.
+
+```surql
+{
+	events: {},
+	fields: {
+		friends: 'DEFINE FIELD friends ON person TYPE array<record<person>> PERMISSIONS FULL',
+		"friends[*]": 'DEFINE FIELD friends[*] ON person TYPE record<person> PERMISSIONS FULL'
+	},
+	indexes: {},
+	lives: {},
+	tables: {}
+}
+```
 
 #### Using `.*` to return values
 
@@ -429,8 +451,8 @@ Explanation:
 
 - `*`: Selects all fields of `explorer:drake`.
 - `->? AS actions`: Retrieves all outgoing relationships from Drake and aliases them as actions.
-- `<-? AS interactions`: Retrieves all incoming relationships to Drake and aliases them as interactions.
-- `<->? AS connections`: Retrieves all relationships connected to Drake, regardless of direction, and aliases them as connections.
+- `<-? AS was`: Retrieves all incoming relationships to Drake and aliases them as was.
+- `<->? AS involved_in`: Retrieves all relationships connected to Drake, regardless of direction, and aliases them as involved_in.
 
 
 ### Destructuring
@@ -963,9 +985,9 @@ SELECT @.{1..3}(->has->(?)) AS cities FROM planet;
 SELECT name.len()           AS length FROM planet;
 ```
 
-#### Using `@` and `{}` to combine results
+#### Using `{}` and `.@` to combine results
 
-The `@` symbol can also be used to refer to the current record when setting the structure of a recursive graph query. This allows not just the fields on the final depth of the query to be returned, but each one along the way as well.
+Inside the structure of a recursive graph query, the `@` symbol is used in the form of `.@` at the end of a path to inform the database that this is the path to be repeated during the recursion. This allows not just the fields on the final depth of the query to be returned, but each one along the way as well.
 
 ```surql
 planet:earth
@@ -1003,11 +1025,68 @@ planet:earth
 }
 ```
 
-Using `.@` in this way will return the fields for a depth of up to three levels.
+The following two rules of thumb are a good way to understand how the syntax inside the structure of the query.
+
+* The individual fields inside a recursive query are simply populated at each point,
+* The field with `.@` is used as the gateway to the next depth.
+
+To see this visually, here is the unfolded output of the query above. The `name` and `id` fields appear at each point, while `contains` is used to move on to the next depth.
+
+```surql
+-- Original query
+planet:earth.{1..2}.{ name, id, contains: ->has->(?).@ };
+
+-- Unfolds to:
+planet:earth
+	.{
+		name, 
+		id,
+		contains: ->has->(?).{
+		  name, 
+		  id,
+		  contains: ->has->(?)
+	    }
+	};
+```
+
+Similarly, only one `.@` can be present inside such a query, as this is the path that is used to follow the recursive query until the end.
+
+```surql
+planet:earth
+	.{1..2}
+	.{
+		name, 
+		id,
+-- Query with ->has->(?) on the current record
+		contains: ->has->(?).@,
+        contains2: ->has->(?).@
+	};
+```
+
+```surql
+'Tried to use a `@` repeat recurse symbol in a position where it is not supported'
+```
 
 Here are some more simple examples of recursive queries and notes on the output they generate.
 
 ```surql
+INSERT INTO person [
+	{ id: person:tobie, name: 'Tobie', friends: [person:jaime, person:micha] },
+	{ id: person:jaime, name: 'Jaime', friends: [person:mary] },
+	{ id: person:micha, name: 'Micha', friends: [person:john] },
+	{ id: person:john, name: 'John' },
+	{ id: person:mary, name: 'Mary' },
+	{ id: person:tim, name: 'Tim' },
+];
+
+INSERT RELATION INTO knows [
+	{ id: knows:1, in: person:tobie, out: person:jaime },
+	{ id: knows:2, in: person:tobie, out: person:micha },
+	{ id: knows:3, in: person:micha, out: person:john },
+	{ id: knows:4, in: person:jaime, out: person:mary },
+	{ id: knows:5, in: person:mary, out: person:tim },
+];
+
 -- Any depth
 person:tobie.{..}(->knows->person).name;
 
@@ -1041,6 +1120,51 @@ Recursive queries follow a few rules to determine how far to traverse and what t
 * If an iteration with a dead end does not reach the minimum depth, it returns `NONE`.
 * If it has already passed the minimum depth, it returns the last valid value.
 * During each iteration, if it encounters an array value, all dead end values are automatically filtered out, ensuring no empty paths are included.
+
+#### Filtering recursive fields
+
+Recursive syntax is not just useful in creating recursive queries, but parsing them as well. Take the following example that creates some `person` records, gives each of them two friends, and then traverses the `friends_with` graph for the first `person` records to find its friends, friends of friends, and friends of friends of friends. Since every level except the last contains another `connections` field, adding a `.{some_number}.connections` to a `RETURN` statement is all that is needed to drill down to a certain depth.
+
+```surql
+CREATE |person:1..20| SET name = id.id() RETURN NONE;
+FOR $person IN SELECT * FROM person {
+    LET $friends = (SELECT * FROM person WHERE id != $person.id ORDER BY rand() LIMIT 2);
+    RELATE $person->friends_with->$friends;
+};
+
+LET $third_degree = person:1.{..3}.{ id, connections: ->friends_with->person.@ };
+// Object containing array of arrays of arrays of 'person'
+RETURN $third_degree;
+// All connections: an array of arrays of arrays of 'person'
+RETURN $third_degree.connections;
+// Secondary connections: an array of arrays of 'person'
+RETURN $third_degree.{2}.connections;
+// Tertiary connections: an array of 'person'
+RETURN $third_degree.{3}.connections;
+// Tertiary connections with aliased fields and original 'person' info
+RETURN $third_degree.{
+		original_person: id, 
+		third_degree_friends: connections.{2}.connections
+};
+```
+
+Possible output of the final query:
+
+```surql title="Output for third_degree_friends query"
+{
+	original_person: person:1,
+	third_degree_friends: [
+		person:13,
+		person:3,
+		person:14,
+		person:10,
+		person:8,
+		person:3,
+		person:3,
+		person:14
+	]
+}
+```
 
 ## Combining Idiom Parts
 
