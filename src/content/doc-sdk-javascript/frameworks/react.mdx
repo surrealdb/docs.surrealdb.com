@@ -2,9 +2,378 @@
 sidebar_position: 1
 sidebar_label: React
 title: React | JavaScript | SDK | Frameworks 
-description: The SurrealDB SDK for JavaScript can run in memory using the Node.js engine or in a browser using the WebAssembly engine.
+description: The SurrealDB SDK for JavaScript can also be used in your React applications to interact with your SurrealDB instance.
 ---
 
+import Image from "@components/Image.astro";
+import Tabs from "@components/Tabs/Tabs.astro";
+import TabItem from "@components/Tabs/TabItem.astro";
+
 # React
+
+[React](https://react.dev/) is a popular JavaScript library for building user interfaces. The SurrealDB SDK for JavaScript can also be used in your React applications to interact with your SurrealDB instance.
+
+In this guide, we will walk you through setting up and querying your first project with the SurrealDB SDK for React.
+
+## Prerequisites
+
+This guide assumes the following:
+- You have a basic understanding of React.
+- You have a SurrealDB instance running.
+
+## Setup
+
+### Install the SDK
+
+The SurrealDB SDK is available.
+
+First, install the [SurrealDB SDK](https://npmjs.com/package/surrealdb) using your favorite package manager:
+
+<Tabs groupId="node-package-manager">
+  <TabItem value="Bun" label="Bun">
+    ```bash
+    bun install surrealdb
+    ```
+  </TabItem>
+  <TabItem value="NPM" label="NPM" default>
+    ```bash
+    npm install --save surrealdb
+    ```
+  </TabItem>
+  <TabItem value="Yarn" label="Yarn">
+    ```bash
+    yarn add surrealdb
+    ```
+  </TabItem>
+  <TabItem value="Pnpm" label="Pnpm">
+    ```bash
+    pnpm install surrealdb
+    ```
+  </TabItem>
+</Tabs>
+
+> [!IMPORTANT]
+> The SurrealDB SDK for JavaScript is also available in the JSR registry as [`@surrealdb/surrealdb`](https://jsr.io/@surrealdb/surrealdb).
+
+### Initialize the SDK
+
+After installing the SDK, import it into your project. We recommend initializing the SDK in a utility file or a shared file so it can be reused across your application.
+
+<Tabs groupId="node-package-manager">
+<TabItem value="es6" label="ES6" default>
+
+```ts
+import Surreal from 'surrealdb';
+```
+
+</TabItem>
+<TabItem value="bun" label="CommonJS">
+
+```ts
+const { Surreal } = require('surrealdb');
+```
+
+</TabItem>
+<TabItem value="deno" label="Deno">
+
+```ts
+// Importing from Deno
+import Surreal from "https://deno.land/x/surrealdb/mod.ts";
+
+// Import with version 
+import Surreal from "https://deno.land/x/surrealdb@1.0.0/mod.ts";
+```
+
+</TabItem>
+<TabItem value="CDN" label="CDN">
+
+```ts
+import Surreal from "https://unpkg.com/surrealdb";
+// or
+import Surreal from "https://cdn.jsdelivr.net/npm/surrealdb";
+```
+
+</TabItem>
+</Tabs>
+
+### Using a utility file
+
+In the root of your project, or in a shared utility file, create a `utils` folder and a `surreal.ts` (or `surreal.tsx`) file. This file will contain the SDK initialization logic which manages the connection to your SurrealDB instance.
+
+```ts
+import Surreal from "surrealdb";
+
+// Define the database configuration interface
+interface DbConfig {
+  url: string;
+  namespace: string;
+  database: string;
+}
+
+// Define the default database configuration
+const DEFAULT_CONFIG: DbConfig = {
+  url: "http://127.0.0.1:8000/rpc",
+  namespace: "test",
+  database: "test",
+};
+
+// Define the function to get the database instance
+export async function getDb(config: DbConfig = DEFAULT_CONFIG): Promise<Surreal> {
+  const db = new Surreal();
+
+  try {
+    await db.connect(config.url);
+    await db.use({ namespace: config.namespace, database: config.database });
+    return db;
+  } catch (err) {
+    console.error(
+      "Failed to connect to SurrealDB:",
+      err instanceof Error ? err.message : String(err)
+    );
+    await db.close();
+    throw err;
+  }
+}
+```
+
+Then, anywhere in your application:
+
+```ts
+import { getDb } from "../utils/surreal"; // or wherever you have it
+
+const db = await getDb();
+```
+
+### Using a SurrealDB Provider in React
+
+Rather than manually setting up the Surreal client in multiple places (like a `utils/surreal.ts` file), you can wrap your React application with a [Context Provider](https://react.dev/reference/react/useContext) that initializes Surreal for you. This makes the client accessible anywhere in your component tree, simplifies cleanup, and provides built-in state management for connection success or failure.
+
+#### 1. Install Required Packages
+In addition to `surrealdb`, you’ll need [@tanstack/react-query](https://tanstack.com/query/latest) for managing the connection state:
+
+```bash
+npm install surrealdb @tanstack/react-query
+```
+
+#### 2. Create a `SurrealDbProvider.tsx` File
+
+```tsx
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useCallback,
+  useState,
+} from "react";
+import { useMutation } from "@tanstack/react-query";
+import { Surreal } from "surrealdb";
+
+export type ConnectFnProps = {
+  client: Surreal;
+  endpoint: string;
+  params?: Parameters<Surreal["connect"]>[1];
+};
+
+export type ConnectFn = (props: ConnectFnProps) => Promise<void>;
+
+type SurrealDbProviderProps = {
+  children: React.ReactNode;
+  client?: Surreal; // optionally pass in an existing Surreal client
+  endpoint: string; // endpoint URL
+  params?: Parameters<Surreal["connect"]>[1]; // optional connection params
+  autoconnect?: boolean; // auto-connect on mount?
+  connectFn?: ConnectFn; // optional custom connect function
+};
+
+type SurrealDbProviderState = {
+  client: Surreal | undefined;
+  isLoading: boolean;
+  isSuccess: boolean;
+  isError: boolean;
+  error: unknown;
+  connect: () => Promise<void>;
+};
+
+const SurrealDbContext = createContext<SurrealDbProviderState | undefined>(undefined);
+
+export function SurrealDbProvider({
+  children,
+  client,
+  endpoint,
+  params,
+  autoconnect = true,
+  connectFn,
+}: SurrealDbProviderProps) {
+  // Surreal instance remains stable across re-renders
+  const [surrealInstance] = useState(() => client ?? new Surreal());
+
+  // React Query mutation for connecting to Surreal
+  const {
+    mutateAsync: connectMutation,
+    isPending,
+    isSuccess,
+    isError,
+    error,
+    reset,
+  } = useMutation(async () => {
+    if (connectFn) {
+      await connectFn({ client: surrealInstance, endpoint, params });
+    } else {
+      await surrealInstance.connect(`${endpoint}/rpc`, params);
+    }
+  });
+
+  // Wrap mutateAsync in a stable callback
+  const connect = useCallback(() => connectMutation(), [connectMutation]);
+
+  // Auto-connect on mount (if enabled) and cleanup on unmount
+  useEffect(() => {
+    if (autoconnect) {
+      connect();
+    }
+    return () => {
+      reset();
+      surrealInstance.close();
+    };
+  }, [autoconnect, connect, reset, surrealInstance]);
+
+  // Memoize the context value
+  const value: SurrealDbProviderState = useMemo(
+    () => ({
+      client: surrealInstance,
+      isLoading: isPending,
+      isSuccess,
+      isError,
+      error,
+      connect,
+    }),
+    [surrealInstance, isPending, isSuccess, isError, error, connect]
+  );
+
+  return <SurrealDbContext.Provider value={value}>{children}</SurrealDbContext.Provider>;
+}
+
+// Hook to consume the entire SurrealDB context state
+export function useSurrealDb() {
+  const context = useContext(SurrealDbContext);
+  if (!context) {
+    throw new Error("useSurrealDb must be used within a SurrealDbProvider");
+  }
+  return context;
+}
+
+// Hook to quickly grab just the Surreal client
+export function useSurrealDbClient() {
+  const { client } = useSurrealDb();
+  return client!;
+}
+```
+
+#### 3. Wrap Your Application with the Provider
+
+In your main file (e.g., `App.tsx` or `index.tsx`), wrap your root component with `SurrealDbProvider`:
+
+```tsx
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import { SurrealDbProvider } from "./SurrealDbProvider";
+
+const root = ReactDOM.createRoot(document.getElementById("root")!);
+root.render(
+  <React.StrictMode>
+    <SurrealDbProvider endpoint="http://127.0.0.1:8000" autoconnect={true}>
+      <App />
+    </SurrealDbProvider>
+  </React.StrictMode>
+);
+```
+
+#### 4. Use the Hooks in Your Components
+
+Anywhere inside the provider, you can access the Surreal client or check the connection status:
+
+```tsx
+import React from "react";
+import { useSurrealDb, useSurrealDbClient } from "./SurrealDbProvider";
+
+export function ExampleComponent() {
+  const { isLoading, isError, error, connect } = useSurrealDb();
+  const client = useSurrealDbClient();
+
+  React.useEffect(() => {
+    if (!isLoading && !isError) {
+      // Example: run a query once the connection is successful
+      client.query("SELECT * FROM users").then(console.log).catch(console.error);
+    }
+  }, [isLoading, isError, client]);
+
+  if (isLoading) return <p>Loading SurrealDB connection...</p>;
+  if (isError) return <p>Failed to connect: {String(error)}</p>;
+
+  return (
+    <div>
+      <h1>Users</h1>
+      {/* Example button to manually reconnect */}
+      <button onClick={() => connect()}>Reconnect</button>
+    </div>
+  );
+}
+```
+
+#### 5. Customizing the Connection Logic
+
+If you need custom logic (e.g., calling `db.use(...)`, providing authentication tokens, etc.), you can:
+
+1. Pass a **custom connect** function via the `connectFn` prop:
+
+   ```tsx
+   <SurrealDbProvider
+     endpoint="http://127.0.0.1:8000"
+     connectFn={async ({ client }) => {
+       await client.connect("http://127.0.0.1:8000/rpc", { NS: "myNs", DB: "myDb" });
+       // or manually call client.use({ namespace: "...", database: "..." });
+     }}
+   >
+     <App />
+   </SurrealDbProvider>
+   ```
+
+2. Use the `params` prop:
+
+   ```tsx
+   <SurrealDbProvider
+     endpoint="http://127.0.0.1:8000"
+     params={{ NS: "myNs", DB: "myDb" }}
+   >
+     <App />
+   </SurrealDbProvider>
+   ```
+
+3. Supply your own **preconfigured Surreal instance**:
+
+   ```tsx
+   import Surreal from "surrealdb";
+
+   const preconfiguredClient = new Surreal();
+   await preconfiguredClient.connect("http://127.0.0.1:8000/rpc");
+   await preconfiguredClient.use({ namespace: "myNs", database: "myDb" });
+
+   <SurrealDbProvider client={preconfiguredClient} endpoint="http://127.0.0.1:8000">
+     <App />
+   </SurrealDbProvider>
+   ```
+
+#### Why Use a Provider?
+
+- **Shared Connection**: A single Surreal client instance is accessible to all your components.
+- **Managed Lifecycle**: Auto-connect on mount, reset on unmount, and handle errors gracefully.
+- **Connection State**: React Query simplifies loading, success, and error handling.
+
+
+## Using the SDK methods
+
+Depending on how you set up your SurrealDB client, you can use it in your React components in a few different ways. We recommend using the Context Provider to manage the client and connection state also using Tanstack Query for handling interactions with the database.
 
 
