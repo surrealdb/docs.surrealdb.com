@@ -31,7 +31,7 @@ RELATE [ ONLY ] @from_record -> @table -> @to_record
 	[ CONTENT @value
 	  | SET @field = @value ...
 	]
-	[ RETURN NONE | RETURN BEFORE | RETURN AFTER | RETURN DIFF | RETURN @statement_param, ... ]
+	[ RETURN NONE | RETURN BEFORE | RETURN AFTER | RETURN DIFF | RETURN @statement_param, ... | RETURN VALUE @statement_param ]
 	[ TIMEOUT @duration ]
 	[ PARALLEL ]
 ;
@@ -377,6 +377,11 @@ RELATE person:l19zjikkw1p1h9o6ixrg->wrote->article:8nkk6uj4yprt49z7y3zm
 RELATE person:l19zjikkw1p1h9o6ixrg->wrote->article:8nkk6uj4yprt49z7y3zm
     SET time.written = time::now()
     RETURN time;
+
+-- Return only the value of a specific field without the field name
+RELATE person:l19zjikkw1p1h9o6ixrg->wrote->article:8nkk6uj4yprt49z7y3zm
+    SET time.written = time::now()
+    RETURN VALUE time;
 ```
 
 ### Using the `TIMEOUT` clause
@@ -452,6 +457,69 @@ SELECT * FROM likes;
 		id: likes:55szjin5yfqwl4sbmy1f,
 		in: person:three,
 		out: person:one
+	}
+]
+```
+
+
+### Using RELATE on non-existent records
+
+As mentioned at the top of the page, `RELATE` can be used for records that do not yet exist. While this behaviour can be overridden by using the `ENFORCED` keyword, it can be useful in certain situations.
+
+For example, the `VALUE` clause inside a [`DEFINE FIELD`](/docs/surrealql/statements/define/field) statement is calculated every time a record is altered (that is, every time it is created or updated). If this value depends on a graph edge, creating the record first will cause `VALUE` to calculate it based on a nonexistent path.
+
+In the following example, a `house` table has a field called `has_road_access` that depends on whether any `->has_road` paths return an output that is not empty. Meanwhile, the city has a new road under construction but no houses are present and their details have not been set yet.
+
+```surql
+-- Returns true if $this->has_road path is not empty
+DEFINE FIELD has_road_access ON TABLE house VALUE !!$this->has_road->road;
+CREATE road SET name = "Dalhurst Way", length = 10.5;
+```
+
+As the addresses of the upcoming houses have been decided, the `->has_road` path can be set ahead of time by giving the `house` records an ID based on their exact address.
+
+```surql
+LET $road = SELECT * FROM ONLY road WHERE name = "Dalhurst Way" LIMIT 1;
+RELATE [
+    house:[218, "Dalhurst Way"],
+    house:[222, "Dalhurst Way"],
+    house:[226, "Dalhurst Way"],
+]->has_road->$road;
+```
+
+Later on, two new houses are completed in the city and registered in the database. As the path to `house:[218, "Dalhurst Way"]` has already been set up, the `has_road_access` field will evaluate to `true`, while the other house in the middle of nowhere will evaluate to `false`.
+
+```surql
+CREATE house:[218, "Dalhurst Way"] SET floors = 2, bedrooms = 5;
+CREATE house:[0, "Middle of nowhere"] SET floors = 4, bedrooms = 12;
+```
+
+```surql
+-------- Query --------
+
+[
+	{
+		bedrooms: 5,
+		floors: 2,
+		has_road_access: true,
+		id: house:[
+			218,
+			'Dalhurst Way'
+		]
+	}
+]
+
+-------- Query --------
+
+[
+	{
+		bedrooms: 12,
+		floors: 4,
+		has_road_access: false,
+		id: house:[
+			0,
+			'Middle of nowhere'
+		]
 	}
 ]
 ```
@@ -581,6 +649,130 @@ SELECT
 	<-purchased<-person
 	->purchased->(?)
 FROM person:tobie;
+```
+
+The `?` operator on its own can thus be used to see all of the relations that a record has.
+
+```surql
+CREATE person:hermann_hesse, person:abigail, city:calw, book:demian;
+RELATE person:hermann_hesse->wrote->book:demian SET written_in = d'1919-01-01';
+RELATE person:hermann_hesse->born_in->city:calw;
+RELATE person:abigail->likes->person:hermann_hesse;
+
+SELECT 
+	-- all tables in which the record is at `in`
+    ->(?).* AS what_hesse_did,
+	-- all tables in which the record is at `out`
+    <-(?).* AS what_others_did_to_hesse
+FROM person:hermann_hesse;
+```
+
+```surql title="Output"
+[
+	{
+		what_hesse_did: [
+			{
+				id: born_in:k3adylof24a2r5kio8l5,
+				in: person:hermann_hesse,
+				out: city:calw
+			},
+			{
+				id: wrote:ncbo9w0d8t3xd7lvl4dx,
+				in: person:hermann_hesse,
+				out: book:demian,
+				written_in: d'1919-01-01T00:00:00Z'
+			}
+		],
+		what_others_did_to_hesse: [
+			{
+				id: likes:6gubmldm14gzasoyypay,
+				in: person:abigail,
+				out: person:hermann_hesse
+			}
+		]
+	}
+]
+```
+
+Parentheses can be used at each point of a graph query. The example below includes `person` records (authors) connected to `book` records by the `wrote` table. As both the `person` and `book` tables have fields that can be useful when filtering, they can be isolated with parentheses at this point of the graph query in order to filter using the `WHERE` clause.
+
+```surql
+CREATE person:j_r_r_tolkien SET
+	name = "J.R.R. Tolkien",
+	born = d'1891-01-03';
+-- Very approximate date of birth
+CREATE person:plato SET 
+	name = "Plato", 
+	born = "-0428-06-01";
+
+CREATE book:fotr SET 
+	name = "The Fellowship of the Ring";
+CREATE book:republic SET 
+	name = "The Republic",
+	original_name = "Πολιτεία";
+
+RELATE person:j_r_r_tolkien->wrote->book:fotr SET written_at = "North Oxford";
+RELATE person:plato->wrote->book:republic SET written_at = "Athens";
+
+SELECT 
+	name,
+	-- Isolate 'wrote' to use WHERE
+	->(wrote WHERE written_at = "Athens")->book.* AS books_written_in_athens
+FROM person;
+
+SELECT 
+	name, 
+	-- Isolate 'book' to use WHERE
+	->wrote->(book WHERE "Ring" IN name).* AS books_about_rings
+FROM person;
+```
+
+```surql title="Output"
+-------- Query --------
+
+[
+	{
+		books_written_in_athens: [],
+		name: 'J.R.R. Tolkien'
+	},
+	{
+		books_written_in_athens: [
+			{
+				id: book:republic,
+				name: 'The Republic',
+				original_name: 'Πολιτεία'
+			}
+		],
+		name: 'Plato'
+	}
+]
+
+-------- Query --------
+
+[
+	{
+		books_about_rings: [
+			{
+				id: book:fotr,
+				name: 'The Fellowship of the Ring'
+			}
+		],
+		name: 'J.R.R. Tolkien'
+	},
+	{
+		books_about_rings: [],
+		name: 'Plato'
+	}
+]
+```
+
+As of SurrealDB 2.0, [destructuring](/docs/surrealql/datamodel/idioms#destructuring) can also be used to pick and choose which fields to access inside a graph query. The following query will return the same output as above, except that `original_name: 'Πολιτεία'` will no longer show up.
+
+```surql
+SELECT 
+	name, 
+	->(wrote WHERE written_at = "Athens")->book.{ name, id } AS books_written_in_athens
+FROM person;
 ```
 
 ### Bidirectional relation querying

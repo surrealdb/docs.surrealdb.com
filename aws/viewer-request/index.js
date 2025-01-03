@@ -244,6 +244,7 @@ function handler(event) {
 				case 'surrealql':
 				case 'sdk':
 				case 'tutorials':
+				case 'cloud': 
 				case undefined:
 					break;
 				default:
