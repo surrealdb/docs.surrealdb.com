@@ -130,7 +130,7 @@ export const metadata = {
         },
     },
     'doc-cloud': {
-        title: 'Surreal Cloud (Beta)',
+        title: 'Surreal Cloud',
         icon: {
             light: LightCloud,
             dark: DarkCloud,
