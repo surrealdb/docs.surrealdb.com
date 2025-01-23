@@ -1,0 +1,1 @@
+A simple lambda translating user search requests to a request to the surrealdb instance responsible for search
