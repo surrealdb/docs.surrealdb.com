@@ -30,6 +30,7 @@ DEFINE FUNCTION OVERWRITE fn::search($hostname: string, $query: string) {
             + search::score(7)
         ) AS score
     FROM page
+        WITH INDEX page_hostname
         WHERE
             hostname = $hostname
             AND (
