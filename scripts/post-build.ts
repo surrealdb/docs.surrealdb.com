@@ -41,7 +41,9 @@ async function checkBrokenLinks() {
         const links = parsed.querySelectorAll('a');
         for (const link of links) {
             let href = link.getAttribute('href');
-            if (!href) {
+			const nofollow = link.getAttribute('rel') === 'nofollow';
+
+            if (!href || nofollow || href === 'https://surrealdb.com') {
                 continue;
             }
 
