@@ -18,16 +18,16 @@ import DarkPython from '@img/icon/dark/python.png';
 import DarkRust from '@img/icon/dark/rust.png';
 
 import LightSurrealDB from '@img/icon/light/surrealdb.png';
-import LightSurrealist from '@img/icon/light/surrealdb.png';
+import LightSurrealist from '@img/icon/light/surrealist.png';
 import LightSurrealML from '@img/icon/light/surrealml.png';
 import LightSurrealQL from '@img/icon/light/surrealql.png';
 import LightCloud from '@img/image/cloud/surrealcloud.png';
-import DarkCloud from '@img/image/cloud/surrealcloud.png';
 
 import DarkSurrealDB from '@img/icon/dark/surrealdb.png';
 import DarkSurrealist from '@img/icon/dark/surrealist.png';
 import DarkSurrealML from '@img/icon/dark/surrealml.png';
 import DarkSurrealQL from '@img/icon/dark/surrealql.png';
+import DarkCloud from '@img/image/cloud/surrealcloud.png';
 
 type Metadata = {
     [K in CollectionKey]?: {
