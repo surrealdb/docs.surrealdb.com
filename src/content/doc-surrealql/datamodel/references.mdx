@@ -1,0 +1,488 @@
+---
+sidebar_position: 17
+sidebar_label: Record references
+title: Record references | SurrealQL
+description: Record references allow you to link records together, enabling you to traverse from one record to another.
+
+---
+
+import Since from '@components/shared/Since.astro'
+
+# Record references
+
+<Since v="v2.2.0" />
+
+> [!Caution]
+> Record references are an experimental feature and not recommended for production use so they are disabled by default. To use record references,  follow the instructions below to enable the experimental capability.
+
+## Before you begin 
+
+To use record references, set the experimental capability to allow `record_references`. When starting the database, as shown below:
+
+```bash
+surreal start --allow-experimental record_references
+```
+
+or, via an environment variable:
+
+```bash
+SURREAL_CAPS_ALLOW_EXPERIMENTAL = "record_references"
+```
+
+
+## Basic concepts
+
+Reference tracking begins by adding a `REFERENCE` clause to any `DEFINE FIELD` statement, as long as the field is a `record` or array of records.
+
+```surql
+DEFINE FIELD comics ON person TYPE option<array<record<comic_book>>> REFERENCE;
+```
+
+Any referencing record can then be picked up on the referenced record by creating a field of type `references`.
+
+```surql
+DEFINE FIELD owners ON comic_book TYPE references;
+```
+
+```surql
+CREATE person:one, person:two SET comics = [comic_book:one];
+CREATE comic_book:one SET title = "Loki, God of Stories";
+SELECT * FROM comic_book;
+```
+
+In the example above, the referencing records will now be picked up automatically from the `comic_book` side.
+
+```surql title="Output"
+[
+	{
+		id: comic_book:one,
+		owners: [
+			person:one,
+			person:two
+		],
+		title: 'Loki, God of Stories'
+	}
+]
+```
+
+## Specifying linking tables
+
+The following is similar to the previous example, except that the `comic_book` is now being linked to from two sources, one of which is a `publisher` which publishes both books and comic books.
+
+```surql
+DEFINE FIELD comics ON person TYPE option<array<record<comic_book>>> REFERENCE;
+DEFINE FIELD products ON publisher TYPE option<array<record<comic_book|book>>> REFERENCE;
+DEFINE FIELD owners ON comic_book TYPE references;
+
+CREATE person:one, person:two SET comics = [comic_book:one];
+CREATE publisher:one SET products = [comic_book:one, book:one];
+CREATE comic_book:one SET title = "Loki, God of Stories";
+SELECT * FROM comic_book;
+```
+
+As the `owners` field on `comic_book` only includes a general `references` clause, it will show any and all references to a `comic_book` record. It will thus show the publisher as one of the `owners`, which is not ideal.
+
+```surql title="Output"
+[
+	{
+		id: comic_book:one,
+		owners: [
+			person:one,
+			person:two,
+			publisher:one
+		],
+		title: 'Loki, God of Stories'
+	}
+]
+```
+
+This can be fixed by changing the single field of type `references` to two fields, one of which is a `references<person>`, and the other a `references<publisher>`.
+
+```surql
+DEFINE FIELD comics ON person TYPE option<array<record<comic_book>>> REFERENCE;
+DEFINE FIELD products ON publisher TYPE option<array<record<comic_book|book>>> REFERENCE;
+DEFINE FIELD owners ON comic_book TYPE references<person>;
+DEFINE FIELD publishers ON comic_book TYPE references<publisher>;
+
+CREATE person:one, person:two SET comics = [comic_book:one];
+CREATE publisher:one SET products = [comic_book:one, book:one];
+CREATE comic_book:one SET title = "Loki, God of Stories";
+SELECT * FROM comic_book;
+```
+
+```surql title="Output"
+[
+	{
+		id: comic_book:one,
+		owners: [
+			person:one,
+			person:two
+		],
+		publishers: [
+			publisher:one
+		],
+		title: 'Loki, God of Stories'
+	}
+]
+```
+
+## Specifying linking tables and field names
+
+A field of type `references` can be further narrowed down to specify not just the table name, but also the field name of the referencing record.
+
+In the comic book example, this can be used to keep track of which people own comic books (via a `comics` field on the `person` table), versus those who borrow those (via a separate `borrowed_comics`) field. Any `comic_book` can keep track of these separately by defining one field with the type `references<person, comics>`, and another field with the type `references<person, borrowed_comics>`.
+
+```surql
+DEFINE FIELD comics ON person TYPE option<array<record<comic_book>>> REFERENCE;
+DEFINE FIELD borrowed_comics ON person TYPE option<array<record<comic_book>>> REFERENCE;
+DEFINE FIELD owned_by ON comic_book TYPE references<person, comics>;
+DEFINE FIELD borrowed_by ON comic_book TYPE references<person, borrowed_comics>;
+
+CREATE person:one SET comics = [comic_book:one];
+CREATE person:two SET borrowed_comics = [comic_book:one];
+CREATE comic_book:one SET title = "Loki, God of Stories";
+SELECT * FROM comic_book;
+```
+
+```surql title="Output"
+[
+	{
+		borrowed_by: [
+			person:two
+		],
+		id: comic_book:one,
+		owned_by: [
+			person:one
+		],
+		title: 'Loki, God of Stories'
+	}
+]
+```
+
+## Using the `.refs()` method
+
+To dynamically find references to a record instead of using a `DEFINE FIELD` statement, the `.refs()` method can be used. Similar to defining a field of type `references`, this function can also narrow down the references to a record by only returning references from a certain table, or a certain table and field name. However, a `DEFINE FIELD` which includes a `REFERENCE` clause is still necessary in order to set up the reference tracking in the first place.
+
+```surql
+DEFINE FIELD comics ON person TYPE option<array<record<comic_book>>> REFERENCE;
+DEFINE FIELD borrowed_comics ON person TYPE option<array<record<comic_book>>> REFERENCE;
+
+CREATE person:one SET comics = [comic_book:one];
+CREATE person:two SET borrowed_comics = [comic_book:one];
+CREATE comic_book:one SET title = "Loki, God of Stories";
+
+-- All references
+comic_book:one.refs();
+-- All references from 'person' records
+comic_book:one.refs('person');
+-- All references from 'person' records via a field 'comics'
+comic_book:one.refs('person', 'comics');
+```
+
+```surql title="Output"
+-------- Query --------
+
+[
+	person:two,
+	person:one
+]
+
+-------- Query --------
+
+[
+	person:two,
+	person:one
+]
+
+-------- Query --------
+
+[
+	person:one
+]
+```
+
+## Specifying deletion behaviour
+
+When working with record links, it is very likely that you will want some behaviour to happen when a referencing link is deleted. Take the following example of a `person` who owns a `comic_book`, which is later deleted. Despite the deletion, a follow-up `SELECT * FROM person` still shows the comic book.
+
+```surql
+DEFINE FIELD comics ON person TYPE option<array<record<comic_book>>> REFERENCE;
+DEFINE FIELD owned_by ON comic_book TYPE references<person, comics>;
+
+CREATE comic_book:one SET title = "Loki, God of Stories";
+CREATE person:one SET comics = [comic_book:one];
+DELETE comic_book:one;
+SELECT * FROM person;
+```
+
+```surql title="Output"
+[
+	{
+		comics: [
+			comic_book:one
+		],
+		id: person:one
+	}
+]
+```
+
+A query using `INFO FOR TABLE person` shows that the actual statement created using `REFERENCE` does not finish at this point, but includes the clause `ON DELETE IGNORE`. This is the default behaviour for references.
+
+```surql
+{
+	events: {},
+	fields: {
+		comics: 'DEFINE FIELD comics ON person TYPE option<array<record<comic_book>>> REFERENCE ON DELETE IGNORE PERMISSIONS FULL',
+		"comics[*]": 'DEFINE FIELD comics[*] ON person TYPE record<comic_book> REFERENCE ON DELETE IGNORE PERMISSIONS FULL'
+	},
+	indexes: {},
+	lives: {},
+	tables: {}
+}
+```
+
+This `ON DELETE` clause can be modified to have some other behaviour when a reference is deleted.
+
+### ON DELETE IGNORE
+
+As shown in the previous section, `ON DELETE IGNORE` is the default behaviour for references and this clause will be added automatically if not specified. It can be added manually to a statement to hint to others reading the code that this behaviour is desired.
+
+```surql
+-- Default, behaviour, so identical to:
+-- DEFINE FIELD friends ON person TYPE option<array<record<person>>> REFERENCE;
+DEFINE FIELD friends ON person TYPE option<array<record<person>>> REFERENCE ON DELETE IGNORE;
+DEFINE FIELD friended_by ON person TYPE references<person, friends>;
+
+CREATE person:one SET friends = [person:two];
+CREATE person:two;
+DELETE person:one;
+person:two.*;
+```
+
+As the deletion of `person:one` is ignored when calculating the `friended_by` field, it will still show `person:one` even though the record itself has been deleted.
+
+```surql
+{
+	friended_by: [
+		person:one
+	],
+	id: person:two
+}
+```
+
+### ON DELETE UNSET
+
+`ON DELETE UNSET` will unset (remove) any linked records that are deleted. This can be thought of as the opposite of `ON DELETE IGNORE`.
+
+```surql
+DEFINE FIELD comments ON person TYPE option<array<record<comment>>> REFERENCE ON DELETE UNSET;
+DEFINE FIELD author ON comment TYPE references;
+
+CREATE person:one;
+UPDATE person:one SET comments += (CREATE ONLY comment SET text = "Estonia is bigger than I expected!").id;
+-- Give this one a parameter name so it can be deleted later
+LET $comment = CREATE ONLY comment SET text = "I don't get the joke here?";
+UPDATE person:one SET comments += $comment.id;
+-- Now delete it
+DELETE $comment;
+-- Only one comment shows up for person:one now
+person:one.comments.*.*;
+```
+
+```surql title="Output of person:one queries"
+-------- Query --------
+
+[
+	{
+		author: [
+			person:one
+		],
+		id: comment:idxhzumaggzb7g3ym6bl,
+		text: 'Estonia is bigger than I expected!'
+	},
+	{
+		author: [
+			person:one
+		],
+		id: comment:58uasmx4s0vdjjehfyjz,
+		text: "I don't get the joke here?"
+	}
+]
+
+-------- Query --------
+
+[
+	{
+		author: [
+			person:one
+		],
+		id: comment:uma97u2j2q4tlamzc9yv,
+		text: 'Estonia is bigger than I expected!'
+	}
+]
+```
+
+### ON DELETE CASCADE
+
+The `ON DELETE CASCADE` will cause a record to be deleted if any record it references is deleted. This is useful for records that should not exist if a record that links to them no longer exists.
+
+```surql
+DEFINE FIELD author ON comment TYPE record<person> REFERENCE ON DELETE CASCADE;
+DEFINE FIELD comments ON person TYPE references;
+
+CREATE person:one;
+CREATE comment SET author = person:one, text = "5/10 for this blog post. The problems I have with it are...";
+CREATE comment SET author = person:one, text = "WOW! I never knew you could cut a rope with an arrow.";
+
+-- Show all the details of comments for 'person:one'
+person:one.comments.*.*;
+DELETE person:one;
+-- Comments no longer exist
+SELECT * FROM comment;
+```
+
+```surql title="Output"
+-------- Query --------
+
+[
+	{
+		author: person:one,
+		id: comment:8msvp0egg8cdlyu4vvn9,
+		text: 'WOW! I never knew you could cut a rope with an arrow.'
+	},
+	{
+		author: person:one,
+		id: comment:i72qfjy59vbn81hk6lrm,
+		text: '5/10 for this blog post. The problems I have with it are...'
+	}
+]
+
+-------- Query --------
+
+[]
+
+-------- Query --------
+
+[]
+```
+
+### ON DELETE REJECT
+
+`ON DELETE REJECT` will outright make it impossible to delete a record that is referenced from somewhere else. For example, consider the case in which a house should not be demolished (deleted) until it has been disconnected from utilities such as gas, water, electricity, and so on. This can be simulated in a schema by adding a `REFERENCE ON DELETE REJECT` to the `utility` table, making it impossible for any `house` to be deleted if they link to it.
+
+```surql
+DEFINE FIELD connected_to ON utility TYPE option<array<record<house>>> REFERENCE ON DELETE REJECT;
+DEFINE FIELD using ON house TYPE references<utility>;
+
+CREATE house:one;
+CREATE utility:gas, utility:water SET connected_to = [house:one];
+```
+
+At this point, the `using` field on `house:one` automatically picks up the two references. Due to these references, the `house` record cannot be deleted.
+
+```surql
+house:one.*;
+DELETE house:one;
+```
+
+```surql title="Output"
+-------- Query --------
+
+{
+	id: house:one,
+	using: [
+		utility:gas,
+		utility:water
+	]
+}
+
+-------- Query --------
+
+'Cannot delete `house:one` as it is referenced by `utility:gas` with an ON DELETE REJECT clause'
+```
+
+To delete the `house`, the `connected_to` references will first have to be removed.
+
+```surql
+UPDATE utility:gas   SET connected_to -= house:one;
+UPDATE utility:water SET connected_to -= house:one;
+
+DELETE house:one;
+```
+
+Note that an `ON DELETE UNSET` for a required field is effectively the same as an `ON DELETE REJECT`. In both of the following two cases, a `person` that has any referencing `comment` records will not be able to be deleted.
+
+```surql
+-- Non-optional field that attempts an UNSET when referencing 'person' is deleted
+DEFINE FIELD author ON comment TYPE record<person> REFERENCE ON DELETE UNSET;
+LET $person = CREATE ONLY person;
+CREATE comment SET text = "Cats are so much better at climbing UP a tree than down! Lol", author = $person.id;
+DELETE person;
+
+-- Optional field which rejects the deletion of a referencing 'person'
+DEFINE FIELD author ON comment TYPE option<record<person>> REFERENCE ON DELETE REJECT;
+LET $person = CREATE ONLY person;
+CREATE comment SET text = "Cats are so much better at climbing UP a tree than down! Lol", author = $person.id;
+DELETE person;
+```
+
+The error message in these two cases will differ, but the behaviour is the same.
+
+```surql
+-------- Query --------
+
+'An error occured while updating references for `person:jn7ux92gna61hxhc7fta`: Found NONE for field `author`, with record `comment:xrfbrrx2nw16l83io2cs`, but expected a record<person>'
+
+-------- Query --------
+
+'Cannot delete `person:3fm76xztvfab99eq780l` as it is referenced by `comment:ig0ogusbm64cier5ovv9` with an ON DELETE REJECT clause'
+```
+
+### ON DELETE THEN
+
+The `ON DELETE THEN` clause allows for custom logic when a reference is deleted. This clause includes a parameters called `$this` to refer to the record in question, and `$reference` for the reference.
+
+In the following example, a `person` record's `comments` field will remove any comments when they are deleted, but also add the same comment to a different field called `deleted_comments`.
+
+```surql
+DEFINE FIELD comments ON person TYPE option<array<record<comment>>> REFERENCE ON DELETE THEN {
+    UPDATE $this SET
+        deleted_comments += $reference,
+        comments -= $reference;
+};
+DEFINE FIELD author ON comment TYPE references;
+
+CREATE person:one SET comments += (CREATE ONLY comment SET text = "Estonia is bigger than I expected!").id;
+LET $comment = CREATE ONLY comment SET text = "I don't get the joke here?";
+UPDATE person:one SET comments += $comment.id;
+DELETE $comment;
+SELECT * FROM person:one;
+```
+
+```surql title="person:one before and after comment is deleted"
+-------- Query --------
+
+[
+	{
+		comments: [
+			comment:lbeyh2icushpwo0ak5ux,
+			comment:90tdnyoa14cge2ocmep7
+		],
+		id: person:one
+	}
+]
+
+-------- Query --------
+
+[
+	{
+		comments: [
+			comment:lbeyh2icushpwo0ak5ux
+		],
+		deleted_comments: [
+			comment:90tdnyoa14cge2ocmep7
+		],
+		id: person:one
+	}
+]
+```
