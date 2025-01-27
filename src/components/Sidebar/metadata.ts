@@ -18,7 +18,7 @@ import DarkPython from '@img/icon/dark/python.png';
 import DarkRust from '@img/icon/dark/rust.png';
 
 import LightSurrealDB from '@img/icon/light/surrealdb.png';
-import LightSurrealist from '@img/icon/light/surrealdb.png';
+import LightSurrealist from '@img/icon/light/surrealist.png';
 import LightSurrealML from '@img/icon/light/surrealml.png';
 import LightSurrealQL from '@img/icon/light/surrealql.png';
 import LightCloud from '@img/image/cloud/surrealcloud.png';
