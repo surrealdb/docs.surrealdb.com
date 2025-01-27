@@ -20,6 +20,13 @@ await fetchRemoteResources();
 await extractInlineResources();
 
 async function checkBrokenLinks() {
+    if (process.env.SKIP_BROKEN_LINKS === 'true') {
+        console.log(
+            '[SKIP] Skipping broken link check do to `SKIP_BROKEN_LINKS = true`'
+        );
+        return;
+    }
+
     const broken: string[] = [];
     const files = await glob('**/*.html', {
         cwd: __dist,
