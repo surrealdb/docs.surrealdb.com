@@ -1431,3 +1431,152 @@ When experimenting with recursive queries, especially open-ended ranges, it is t
 ```surql
 SELECT @.{..}.{ id, likes: ->likes->person.@ } FROM person TIMEOUT 1s;
 ```
+
+### Graph clauses
+
+<Since v="v2.2.0" />
+
+The same clauses available to a `SELECT` statement can be used inside a graph query. Take the following relations for example:
+
+```surql
+CREATE person:one, person:two, person:three;
+RELATE person:one->knows->person:two SET
+	friends = true,
+    dated = true,
+    married_to = true;
+
+RELATE person:one->knows->person:three SET
+    dated = true;
+
+RELATE person:two->knows->person:three SET
+	friends = true;
+```
+
+At the `knows` path, parentheses can be used to insert clauses or an entirely new SELECT statement based on the records turned up at this point. In the following example, the `FROM knows` portion applies to all the records that a `person` knows, not the `knows` table as a whole.
+
+```surql
+SELECT 
+	id, 
+	->(SELECT out.id AS counterpart, !!dated AS dated FROM knows) AS acquaintances
+FROM person;
+```
+
+```surql title="Output"
+[
+	{
+		acquaintances: [
+			{
+				counterpart: person:three,
+				dated: true
+			},
+			{
+				counterpart: person:two,
+				dated: true
+			}
+		],
+		id: person:one
+	},
+	{
+		acquaintances: [],
+		id: person:three
+	},
+	{
+		acquaintances: [
+			{
+				counterpart: person:three,
+				dated: false
+			}
+		],
+		id: person:two
+	}
+]
+```
+
+In some cases, the dot or destructuring operator can produce the same output. The following queries are equivalent.
+
+```surql
+SELECT ->(SELECT * FROM knows) FROM person:one;
+SELECT ->knows.* FROM person:one;
+```
+
+```surql title="Output"
+[
+	{
+		"->knows": [
+			{
+				dated: true,
+				id: knows:2tsz3aomelegp060ii7d,
+				in: person:one,
+				out: person:three
+			},
+			{
+				dated: true,
+				friends: true,
+				id: knows:g54z9zapdkssxb4p4pjc,
+				in: person:one,
+				married_to: true,
+				out: person:two
+			}
+		]
+	}
+]
+```
+
+However, clauses available in [`SELECT` statements](/docs/surrealql/statements/select) such as `WHERE`, `LIMIT`, `GROUP BY`, aliases and so on can be used, making a graph clause a most flexible option.
+
+```surql
+SELECT ->(SELECT *, time::now() AS queried_at FROM knows LIMIT 1) FROM person:one;
+```
+
+```surql title="Output"
+[
+	{
+		"->knows": [
+			{
+				dated: true,
+				id: knows:2tsz3aomelegp060ii7d,
+				in: person:one,
+				out: person:three,
+				queried_at: d'2025-01-24T02:16:31.811Z'
+			}
+		]
+	}
+]
+```
+
+Some other examples of possible graph clauses:
+
+```surql
+CREATE |person:1..3|;
+
+RELATE person:1->likes->person:2 SET like_strength = 20, know_in_person = true;
+RELATE person:1->likes->person:3 SET like_strength = 5,  know_in_person = false;
+RELATE person:2->likes->person:1 SET like_strength = 10, know_in_person = true;
+RELATE person:2->likes->person:3 SET like_strength = 12, know_in_person = false;
+RELATE person:3->likes->person:1 SET like_strength = 2,  know_in_person = false;
+RELATE person:3->likes->person:2 SET like_strength = 9,  know_in_person = false;
+
+SELECT ->likes AS likes FROM person;
+SELECT ->(SELECT like_strength FROM likes) AS likes FROM person;
+SELECT ->(SELECT like_strength FROM likes WHERE like_strength > 10) AS likes FROM person;
+SELECT ->(likes WHERE like_strength > 10) AS likes FROM person;
+SELECT ->(SELECT like_strength, know_in_person FROM likes ORDER BY like_strength DESC) AS likes FROM person;
+SELECT ->(SELECT count() as count, know_in_person FROM likes GROUP BY know_in_person) AS likes FROM person;
+SELECT ->(likes LIMIT 1) AS likes FROM person;
+SELECT ->(likes START 1) AS likes FROM person;
+```
+
+Multiple graph tables can be selected by separating each table with a comma, in the same way as in any other `SELECT` statement. In addition, all tables can be selected by using `?` as a wildcard operator.
+
+```surql
+CREATE person:one SET name = "Þor";
+CREATE dog:one SET name = "Fenrir";
+CREATE cat:one SET name = "Jólakötturinn";
+RELATE person:one->feeds->cat:one SET at = time::now();
+RELATE dog:one->plays_with->cat:one SET at = time::now();
+
+-- Select from both 'feeds' and 'plays_with'
+SELECT <-(SELECT * FROM feeds, plays_with ORDER BY at) FROM cat:one;
+-- Or any graph table
+SELECT <-(SELECT * FROM ? ORDER BY at) FROM cat:one;
+```
