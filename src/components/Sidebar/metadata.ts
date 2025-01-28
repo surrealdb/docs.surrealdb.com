@@ -19,6 +19,7 @@ import DarkRust from '@img/icon/dark/rust.png';
 
 import LightCloud from '@img/icon/light/cloud-light.png';
 import LightSurrealML from '@img/icon/light/ml-light.png';
+import LightSurrealKV from '@img/icon/light/kv.png';
 import LightSurrealQL from '@img/icon/light/ql-light.png';
 import LightSurrealDB from '@img/icon/light/surrealdb.png';
 import LightSurrealist from '@img/icon/light/surrealist-light.png';
@@ -26,6 +27,7 @@ import LightSurrealist from '@img/icon/light/surrealist-light.png';
 import DarkSurrealDB from '@img/icon/dark/surrealdb.png';
 import DarkSurrealist from '@img/icon/dark/surrealist.png';
 import DarkSurrealML from '@img/icon/dark/surrealml.png';
+import DarkSurrealKV from '@img/icon/dark/kv.png';
 import DarkSurrealQL from '@img/icon/dark/surrealql.png';
 import DarkCloud from '@img/image/cloud/surrealcloud.png';
 
@@ -160,6 +162,17 @@ export const metadata = {
         repo: {
             title: 'surrealdb/surrealml',
             href: 'https://github.com/surrealdb/surrealml',
+        },
+    },
+    'doc-surrealkv': {
+        title: 'SurrealKV',
+        icon: {
+            light: LightSurrealKV,
+            dark: DarkSurrealKV,
+        },
+        repo: {
+            title: 'surrealdb/surrealkv',
+            href: 'https://github.com/surrealdb/surrealkv',
         },
     },
     'doc-surrealql': {
