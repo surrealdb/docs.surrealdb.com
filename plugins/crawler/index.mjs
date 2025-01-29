@@ -90,6 +90,9 @@ export async function onSuccess() {
                         .filter((a) => a);
 
                 const title = document.querySelector('title').textContent;
+                const description = document
+                    .querySelector('meta[name=description]')
+                    .getAttribute('content');
                 const h1 = scrapByQuerySelector('.flag-page-content h1');
                 const h2 = scrapByQuerySelector('.flag-page-content h2');
                 const h3 = scrapByQuerySelector('.flag-page-content h3');
@@ -121,6 +124,7 @@ export async function onSuccess() {
                     console.log(`[IX] Indexing "${subject}"`);
                     await db.upsert(subject, {
                         title,
+                        description,
                         path: pathname,
                         hostname,
                         h1,
