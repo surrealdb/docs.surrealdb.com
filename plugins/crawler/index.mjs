@@ -90,7 +90,9 @@ export async function onSuccess() {
                         .filter((a) => a);
 
                 const title = document.querySelector('title').textContent;
-                const description = document.querySelector('meta[name=description]').getAttribute("content");
+                const description = document
+                    .querySelector('meta[name=description]')
+                    .getAttribute('content');
                 const h1 = scrapByQuerySelector('.flag-page-content h1');
                 const h2 = scrapByQuerySelector('.flag-page-content h2');
                 const h3 = scrapByQuerySelector('.flag-page-content h3');
