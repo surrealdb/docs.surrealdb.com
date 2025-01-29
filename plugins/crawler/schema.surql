@@ -4,6 +4,7 @@ DEFINE INDEX OVERWRITE page_hostname ON page FIELDS hostname CONCURRENTLY;
 DEFINE INDEX OVERWRITE page_date_indexed ON page FIELDS date CONCURRENTLY;
 DEFINE INDEX OVERWRITE unique_page ON page FIELDS hostname, path UNIQUE CONCURRENTLY;
 DEFINE INDEX OVERWRITE page_title ON page FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) CONCURRENTLY;
+DEFINE INDEX OVERWRITE page_description ON page FIELDS description SEARCH ANALYZER simple BM25(1.2,0.75) CONCURRENTLY;
 DEFINE INDEX OVERWRITE page_path ON page FIELDS path SEARCH ANALYZER simple BM25(1.2,0.75) CONCURRENTLY;
 DEFINE INDEX OVERWRITE page_h1 ON page FIELDS h1 SEARCH ANALYZER simple BM25(1.2,0.75) CONCURRENTLY;
 DEFINE INDEX OVERWRITE page_h2 ON page FIELDS h2 SEARCH ANALYZER simple BM25(1.2,0.75) CONCURRENTLY;
@@ -17,17 +18,19 @@ DEFINE FUNCTION OVERWRITE fn::search($hostname: string, $query: string) {
         path as url,
         hostname,
         title,
+        description,
         content,
         search::offsets(7) AS offsets,
         (
-                (search::score(0) * 10)
-            + (search::score(1) * 9)
-            + (search::score(2) * 7)
-            + (search::score(3) * 6)
-            + (search::score(4) * 5)
-            + (search::score(5) * 4)
-            + (search::score(6) * 2)
-            + search::score(7)
+                (search::score(0) * 11)
+            + (search::score(1) * 10)
+            + (search::score(2) * 9)
+            + (search::score(3) * 7)
+            + (search::score(4) * 6)
+            + (search::score(5) * 5)
+            + (search::score(6) * 4)
+            + (search::score(7) * 2)
+            + search::score(8)
         ) AS score
     FROM page
         WITH INDEX page_hostname
@@ -36,12 +39,13 @@ DEFINE FUNCTION OVERWRITE fn::search($hostname: string, $query: string) {
             AND (
                 title @0@ $query
                 OR path @1@ $query
-                OR h1 @2@ $query
-                OR h2 @3@ $query
-                OR h3 @4@ $query
-                OR h4 @5@ $query
-                OR code @6@ $query
-                OR content @7@ $query
+                OR description @2@ $query
+                OR h1 @3@ $query
+                OR h2 @4@ $query
+                OR h3 @5@ $query
+                OR h4 @6@ $query
+                OR code @7@ $query
+                OR content @8@ $query
             )
     ORDER BY score DESC LIMIT 10;
 }
