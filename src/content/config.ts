@@ -18,9 +18,11 @@ export const docs = [
     'cloud',
     'surrealist',
     'surrealml',
+    'surrealkv',
     'surrealql',
     'tutorials',
 ] as const;
+
 export const sdks = [
     'dotnet',
     'golang',
