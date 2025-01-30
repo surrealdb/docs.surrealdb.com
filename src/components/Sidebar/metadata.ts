@@ -31,15 +31,15 @@ import DarkSurrealML from '@img/icon/dark/surrealml.png';
 import DarkSurrealQL from '@img/icon/dark/surrealql.png';
 import DarkCloud from '@img/image/cloud/surrealcloud.png';
 
-import ThumbnailCloud from "@assets/img/thumbnails/cloud.jpg";
-import ThumbnailSurrealDB from "@assets/img/thumbnails/surrealdb.jpg";
-import ThumbnailSurrealist from "@assets/img/thumbnails/surrealist.jpg";
+import ThumbnailCloud from '@assets/img/thumbnails/cloud.jpg';
+import ThumbnailSurrealDB from '@assets/img/thumbnails/surrealdb.jpg';
+import ThumbnailSurrealist from '@assets/img/thumbnails/surrealist.jpg';
 
 type Metadata = {
     [K in CollectionKey]?: {
         title: string;
         icon: ImageProps['src'];
-		thumbnail?: ImageProps['src'];
+        thumbnail?: ImageProps['src'];
         repo?: {
             title: string;
             href: string;
@@ -135,7 +135,7 @@ export const metadata = {
             title: 'surrealdb/surrealdb',
             href: 'https://github.com/surrealdb/surrealdb',
         },
-		thumbnail: ThumbnailSurrealDB
+        thumbnail: ThumbnailSurrealDB,
     },
     'doc-cloud': {
         title: 'Surreal Cloud',
@@ -147,7 +147,7 @@ export const metadata = {
             title: 'Forum',
             href: '/community',
         },
-		thumbnail: ThumbnailCloud,
+        thumbnail: ThumbnailCloud,
     },
     'doc-surrealist': {
         title: 'Surrealist',
@@ -159,7 +159,7 @@ export const metadata = {
             title: 'surrealdb/surrealist',
             href: 'https://github.com/surrealdb/surrealist',
         },
-		thumbnail: ThumbnailSurrealist,
+        thumbnail: ThumbnailSurrealist,
     },
     'doc-surrealml': {
         title: 'SurrealML',
