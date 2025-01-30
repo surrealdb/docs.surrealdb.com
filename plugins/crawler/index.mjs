@@ -90,15 +90,30 @@ export async function onSuccess() {
                         .filter((a) => a);
 
                 const title = document.querySelector('title').textContent;
-                const h1 = scrapByQuerySelector('h1');
-                const h2 = scrapByQuerySelector('h2');
-                const h3 = scrapByQuerySelector('h3');
-                const h4 = scrapByQuerySelector('h4');
-                const code = scrapByQuerySelector('code', (el) =>
-                    [...el.childNodes].map((el) => el.textContent).join('\n')
+                const description = document
+                    .querySelector('meta[name=description]')
+                    .getAttribute('content');
+                const h1 = scrapByQuerySelector('.flag-page-content h1');
+                const h2 = scrapByQuerySelector('.flag-page-content h2');
+                const h3 = scrapByQuerySelector('.flag-page-content h3');
+                const h4 = scrapByQuerySelector('.flag-page-content h4');
+                const code = scrapByQuerySelector(
+                    '.flag-page-content code',
+                    (el) =>
+                        [...el.childNodes]
+                            .map((el) => el.textContent)
+                            .join('\n')
                 );
                 const content = [
-                    ...scrapByQuerySelector('p,h1,h2,h3,h4,h5,h6,tr,th,td'),
+                    ...scrapByQuerySelector(
+                        ['p', 'h5', 'h6', 'tr', 'th', 'td']
+                            .map((tag) => `.flag-page-content ${tag}`)
+                            .join(', ')
+                    ),
+                    ...h1,
+                    ...h2,
+                    ...h3,
+                    ...h4,
                     ...code,
                 ];
 
@@ -109,6 +124,7 @@ export async function onSuccess() {
                     console.log(`[IX] Indexing "${subject}"`);
                     await db.upsert(subject, {
                         title,
+                        description,
                         path: pathname,
                         hostname,
                         h1,
