@@ -23,12 +23,14 @@ import LightSurrealML from '@img/icon/light/ml-light.png';
 import LightSurrealQL from '@img/icon/light/ql-light.png';
 import LightSurrealDB from '@img/icon/light/surrealdb.png';
 import LightSurrealist from '@img/icon/light/surrealist-light.png';
+import LightTutorials from '@img/icon/light/tutorials-light.png';
 
 import DarkSurrealKV from '@img/icon/dark/kv.png';
 import DarkSurrealDB from '@img/icon/dark/surrealdb.png';
 import DarkSurrealist from '@img/icon/dark/surrealist.png';
 import DarkSurrealML from '@img/icon/dark/surrealml.png';
 import DarkSurrealQL from '@img/icon/dark/surrealql.png';
+import DarkTutorials from '@img/icon/dark/tutorials.png';
 import DarkCloud from '@img/image/cloud/surrealcloud.png';
 
 import ThumbnailCloud from '@assets/img/thumbnails/cloud.jpg';
@@ -197,8 +199,8 @@ export const metadata = {
     'doc-tutorials': {
         title: 'Tutorials',
         icon: {
-            light: LightSurrealDB,
-            dark: DarkSurrealDB,
+            light: LightTutorials,
+            dark: DarkTutorials,
         },
         repo: {
             title: 'surrealdb/examples',
