@@ -214,7 +214,7 @@ CREATE temperature:{ city: 'London', date: time::now() } SET
 ]
 ```
 
-### Parameters and function calls
+### IDs made with parameters and function calls
 
 Parameters and function calls can be used inside array- and object-based record IDs in the same way as on standalone arrays and objects.
 
@@ -247,9 +247,37 @@ CREATE type::thing("weather", $now) SET city = 'London';
 ]
 ```
 
-### Record ranges
+## Defining record IDs in a schema
 
-SurrealDB supports the ability to query a range of records, using the record ID. The record ID ranges, retrieve records using the natural sorting order of the record IDs. These range queries can be used to query a range of records in a timeseries context.
+The type name of a record ID is `record`, which by default allows any sort of record. This type can be set inside a [`DEFINE FIELD`](/docs/surrealql/statements/define/field) statement.
+
+```surql
+DEFINE FIELD possessions ON TABLE person TYPE option<array<record>>;
+DEFINE FIELD friends ON TABLE person TYPE option<array<record<person>>>;
+
+CREATE person SET
+    possessions = [ book:one, house:one],
+    friends = [ person:one, person:two ];
+```
+
+Be sure to use just `record` instead of `record<any>`, as `<any>` here would imply actual records of a table called `any`.
+
+```surql
+DEFINE FIELD possessions ON TABLE person TYPE option<array<record<any>>>;
+
+-- Won't work, 'book' and 'house' are not of table 'any'
+CREATE person SET
+    possessions = [ book:one, house:one ];
+
+-- Actually expects this, which is probably
+-- not what the DEFINE FIELD intended
+CREATE person SET
+    possessions = [ any:one, any:two ];
+```
+
+## Record ranges
+
+SurrealDB supports the ability to query a range of records, using the record ID. Record ID range queries retrieve records using the natural sorting order of the record IDs, making a table scan unnecessary. These range queries can be used to query a range of records in a timeseries context.
 
 ```surql
 -- Select all person records with IDs between the given range
@@ -268,7 +296,26 @@ SELECT * FROM temperature:['London', '2022-08-29T08:03:39']..;
 SELECT * FROM temperature:['London', '2022-08-29T08:03:39']..['London', '2022-08-29T08:09:31'];
 ```
 
-## Best practices when choosing a record ID format
+The following example shows the difference in performance between a regular query that uses a `WHERE` clause and a record range scan.
+
+```surql
+FOR $num IN 0..=100000 {
+  CREATE person SET id = $num, num = $num  
+};
+
+-- Assign the output to an unused parameter
+-- to avoid excessive output
+LET $_ = SELECT * FROM person WHERE num IN 0..=1000;
+LET $_ = SELECT * FROM person:0..=1000;
+```
+
+## Record IDs are links
+
+As a record ID 
+
+/docs/surrealql/datamodel/records
+
+## Tips and best practices for record IDs
 
 ### Why choose the right record ID format
 
@@ -341,7 +388,7 @@ FOR $user IN $users {
 };
 ```
 
-Finding out the current relational state can be done with a query like the following which shows all of the graph tables in which a record is located at the `in` or `out` point.
+Finding out the current relational state can be done with a query like the following which shows all of the graph tables in which a record is located at the `in` or `out` point. The `?` is a wildcard operator, returning any and all tables found at this point of the graph query.
 
 ```surql
 SELECT
@@ -384,7 +431,7 @@ With this in mind, here are some of the items to keep in mind when deciding what
 
 ### Meaningful sortable IDs are faster to query
 
-Records are returned in ascending record ID order by default. As the following query shows, a `SELECT` statement on a large number of `user` records with random IDs will show those with record identifiers starting with a large number of zeroes.
+Records are returned in ascending record ID order by default. As the following query shows, a `SELECT` statement on a large number of `user` records with random IDs will show those with record identifiers starting with a large number of zeroes. While the IDs are sortable, the IDs themselves are completely random.
 
 ```surql
 CREATE |user:200000| RETURN NONE;
@@ -510,29 +557,6 @@ Not only is the `START 50 LIMIT 2` query more performant, but the entire `num` f
 ]
 ```
 
-## Limitations
-
-At present, definitions for a record ID's value inside a [`DEFINE FIELD`](/docs/surrealql/statements/define/field) statement are ignored.
-
-```surql
-DEFINE FIELD id ON user VALUE rand::int(1, 1000000000) READONLY;
-CREATE user;
-```
-
-```surql title="Output"
-[
-	{
-		id: user:9ixn3oei6o532c2qyixa
-	}
-]
-```
-
-However, the `id` field can be set inside the statement to create the record.
-
-```surql
-CREATE user SET id = rand::int(1, 1000000000);
-```
-
 ### Auto-incrementing IDs
 
 While SurrealDB does not use auto-incrementing IDs by default, this behaviour can be achieved in a number of ways. One is to use the [`record::id()`](/docs/surrealql/functions/database/record#recordid) function on the latest record, which returns the latter part of a record ID (the '1' in the record ID `person:1`). This can then be followed up with the [`type::thing()`](/docs/surrealql/functions/database/type#typething) function to create a new record ID.
@@ -573,32 +597,75 @@ COMMIT TRANSACTION;
 RETURN person_id:counter.num;
 ```
 
-## Defining record IDs in a schema
+### Record IDs are record links
 
-The type name of a record ID is `record`, which by default allows any sort of record. This type can be set inside a [`DEFINE FIELD`](/docs/surrealql/statements/define/field) statement.
+As a record ID is a pointer to all of the data of a record, a single record ID is enough to access all of a record's fields. This behaviour is the key to the convenience of [record links](/docs/surrealql/datamodel/records) in SurrealDB, as holding a record ID is all that is needed for one record to have a link to another.
+
+When using a standalone record ID as a record pointer, be sure to use the record ID itself.
 
 ```surql
-DEFINE FIELD possessions ON TABLE person TYPE option<array<record>>;
-DEFINE FIELD friends ON TABLE person TYPE option<array<record<person>>>;
+CREATE person:1 SET data = {
+    some: "demo",
+    data: "for",
+    demonstration: "purposes"
+};
 
-CREATE person SET
-    possessions = [ book:one, house:one],
-    friends = [ person:one, person:two ];
+LET $record = SELECT id FROM person:1;
+SELECT * FROM $record;
 ```
 
-Be sure to use just `record` instead of `record<any>`, as `<any>` here would imply actual records of a table called `any`.
+The output of the above query is just the `id` field on its own, as the `$record` parameter is an object with an `id` field, not the `id` field (the pointer) itself.
+
+```surql title="Output"
+[
+	{
+		id: person:1
+	}
+]
+```
+
+To rectify this, `id.*` can be used to follow the pointer to the entire data for the record.
 
 ```surql
-DEFINE FIELD possessions ON TABLE person TYPE option<array<record<any>>>;
+SELECT id.* FROM $record;
+```
 
--- Won't work, 'book' and 'house' are not of table 'any'
-CREATE person SET
-    possessions = [ book:one, house:one ];
+```surql title="Output"
+[
+	{
+		id: {
+			data: {
+				data: 'for',
+				demonstration: 'purposes',
+				some: 'demo'
+			},
+			id: person:1
+		}
+	}
+]
+```
 
--- Actually expects this, which is probably
--- not what the DEFINE FIELD intended
-CREATE person SET
-    possessions = [ any:one, any:two ];
+## Limitations
+
+At present, definitions for a record ID's value inside a [`DEFINE FIELD`](/docs/surrealql/statements/define/field) statement are ignored.
+
+```surql
+DEFINE FIELD id ON user VALUE rand::int(1, 1000000000) READONLY;
+CREATE user;
+```
+
+```surql title="Output"
+[
+	{
+		id: user:9ixn3oei6o532c2qyixa
+	}
+]
+```
+
+To achieve the same behaviour, the `id` field can be set inside the statement to create the record.
+
+```surql
+CREATE user SET id = rand::int(1, 1000000000);
 ```
 
 ## Learn more
