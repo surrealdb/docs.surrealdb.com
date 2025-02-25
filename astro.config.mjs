@@ -51,7 +51,7 @@ export default defineConfig({
     vite: {
         plugins: [
             llms({
-                llmsDir: 'llms', // optional, defaults to 'llms'
+                llmsDir: 'llms',
             }),
         ],
     },
