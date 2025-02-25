@@ -14,7 +14,7 @@ import { autolinkConfig } from './src/util/rehypeHeadingsConfig';
 import { rehypeNotesPlugin } from './src/util/rehypeNotesPlugin.mjs';
 
 import sitemap from '@astrojs/sitemap';
-import llms from 'vite-plugin-llms'
+import llms from 'vite-plugin-llms';
 
 const deployDomain = process.env.DEPLOY_DOMAIN ?? 'surrealdb.com';
 const site = `https://${deployDomain}`;
@@ -51,8 +51,8 @@ export default defineConfig({
     vite: {
         plugins: [
             llms({
-              llmsDir: 'llms' // optional, defaults to 'llms'
-            })
-          ]
-      }
+                llmsDir: 'llms', // optional, defaults to 'llms'
+            }),
+        ],
+    },
 });
