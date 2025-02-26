@@ -36,7 +36,7 @@ function handler(event) {
 	}
 
 	// Display any documentation assets and image files
-	if (path.startsWith('/docs/_astro/') || path.startsWith('/docs/~partytown/')) {
+	if (path.startsWith('/docs/_astro/') || path.startsWith('/docs/~partytown/') || path === '/docs/llms.txt') {
 		return request;
 	}
 
