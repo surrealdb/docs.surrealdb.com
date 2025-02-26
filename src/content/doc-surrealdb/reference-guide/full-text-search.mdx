@@ -1,26 +1,290 @@
 ---
 sidebar_position: 2
-sidebar_label: Full-text Search
-title: Full-Text search | Reference guides
-description: In SurrealDB, Full-Text Search supports advanced features like basic and advanced text matching, proximity searches, result ranking, and keyword highlighting⁠.
+sidebar_label: Working with text
+title: Working with text | Reference guides
+description: In SurrealDB, Full-Text Search supports advanced features like basic and advanced text matching, proximity searches, result ranking, and keyword highlighting.
 ---
 
-# Full-Text Search
-In SurrealDB, Full-Text Search supports text matching, proximity searches, result ranking, and keyword highlighting⁠.
-It is also [ACID-compliant](https://en.wikipedia.org/wiki/ACID), which ensures data integrity and reliability.⁠
+# Working with text in SurrealDB
 
-## Define tables and fields
-To implement Full-Text Search it is important that your data is first defined using SurrealDB [`DEFINE TABLE`](/docs/surrealql/statements/define/table) and [`DEFINE FIELD`](/docs/surrealql/statements/define/field). 
+SurrealDB offers a large variety of ways to work with text, from simple operators to fuzzy searching, customized ordering, full-text search and more.
 
-## Analyzers
+## Comparing and sorting text
+
+### In `SELECT` queries
+
+Take the following data for example.
+
+```surql
+CREATE data SET val = 'Zoo';
+CREATE data SET val = 'Ábaco';
+CREATE data SET val = '1';
+CREATE data SET val = '2';
+CREATE data SET val = '11';
+CREATE data SET val = 'kitty';
+```
+
+Inside a `SELECT` query, an `ORDER BY` clause can be used to order the output by one or more field names. For the above data, an ordered `SELECT` query looks like this.
+
+```surql
+SELECT VALUE val FROM data ORDER BY val;
+```
+
+However, in the case of strings, sorting is done by Unicode rank which often leads to output that seems out of order to the human eye. The output of the above query shows the following:
+
+```surql title="Output"
+[
+	'1',
+	'11',
+	'2',
+	'Zoo',
+	'kitty',
+	'Ábaco'
+]
+```
+
+This is because:
+
+* '11' is ordered before '2', because the first character in the string '2' is greater than the first character in the string '1'.
+* 'Zoo' is ordered before 'kitty', because the first character in the string 'Zoo' is 'Z', number 0059 in the [list of Unicode characters](https://en.wikipedia.org/wiki/List_of_Unicode_characters#Basic_Latin). A lowercase 'k' is 0076 on the list and thus "greater", while the 'Á', registered as the "Latin Capital letter A with acute", is 0129 on the list.
+
+To sort strings in a more natural manner to the human eye, the keywords `NUMERIC` and `COLLATE` (or both) can be used. `NUMERIC` will instruct strings that parse into numbers to be treated as such.
+
+```surql
+SELECT VALUE val FROM data ORDER BY val NUMERIC;
+```
+
+```surql title="Numberic strings now sorted as numbers"
+[
+	'1',
+	'2',
+	'11',
+	'Zoo',
+	'kitty',
+	'Ábaco'
+]
+```
+
+`COLLATE` instructs unicode strings to sort by alphabetic order, rather than Unicode order.
+
+```surql
+SELECT VALUE val FROM data ORDER BY val COLLATE;
+```
+
+```surql title="Output"
+[
+	'1',
+	'11',
+	'2',
+	'Ábaco',
+	'kitty',
+	'Zoo'
+]
+```
+
+And for the data in this example, `COLLATE NUMERIC` is likely what will be desired.
+
+```surql
+SELECT VALUE val FROM data ORDER BY val COLLATE NUMERIC;
+```
+
+```surql title="Output"
+[
+	'1',
+	'2',
+	'11',
+	'Ábaco',
+	'kitty',
+	'Zoo'
+]
+```
+
+As of SurrealDB 2.2.2, the functions `array::sort_natural`, `array::sort_lexical`, and `array::sort_lexical_natural` can be used on ad-hoc data to return the same output as the `COLLATE` and `NUMERIC` clauses in a `SELECT` statement.
+
+## Contains
+
+```surql
+-- false
+"Umple" IN "Rumplestiltskin";
+"Rumplestiltskin".contains("Umple");
+string::contains("Rumplestiltskin", "Umple");
+
+-- true
+"umple" IN "Rumplestiltskin";
+"Rumplestiltskin".contains("umple");
+string::contains("Rumplestiltskin", "umple");
+```
+
+SurrealDB has a number of operators to determine if all or some of the values of one array are contained in another, such as `CONTAINSALL` and `CONTAINSANY`, or `ALLINSIDE` and `ANYINSIDE`. The `CONTAINS` and `INSIDE` operators perform the same behaviour, just in the opposite order.
+
+```surql
+-- If 1,2,3 contains each item in 1,2
+[1,2,3] CONTAINSALL [1,2];
+-- then each item in 1,2 is inside 1,2,3
+[1,2] ALLINSIDE [1,2,3];
+```
+
+Because strings are essentially arrays of characters, these operators work with strings as well. (Note: this capability was added in SurrealDB version 2.2.2)
+
+Both of these queries will return `true`.
+
+```surql
+"Rumplestiltskin" CONTAINSALL ["umple", "kin"];
+"kin" ALLINSIDE "Rumplestiltskin";
+```
+
+## Equality and fuzzy equality
+
+While strings can be compared for strict equality in the same way as with other values, fuzzy searching can also be used to return `true` if two strings are approximately equal.
+
+* `~` to check if two strings have fuzzy equality
+* `!~` to check if two strings do not have fuzzy equality: 
+* `?~` to check if any strings have fuzzy equality: 
+* `*~` to check if all strings have fuzzy equality
+
+All of the following will return true.
+
+```surql
+"big" ~ "Big";
+"big" !~ "small";
+["Big", "small"] ?~ "big";
+["Big", "big"] *~ "big";
+```
+
+Fuzzy matching is based on [an algorithm](https://en.wikipedia.org/wiki/Smith%E2%80%93Waterman_algorithm) that requires some time to understand. It is a convenient option due to the `~` operator, but can sometimes produce surprising results.
+
+```surql
+ -- true
+"United Kingdom" ~ "United kingdom";
+-- true (second string entirely contained in first)
+"United Kingdom" ~ "ited";
+-- Also true!
+"United Kingdom" ~ "i";
+-- false
+"United Kingdom" ~ "United Kingdóm";
+```
+
+The `string::similarity::fuzzy` function can be useful in this case, as it returns a number showing the similarity between strings, not just whether they count as a fuzzy match. In the following example, while the strings "ited" and "i" do have a similarity score above 0, they are ranked much lower than the better matches "United kingdom" and "United Kingdom".
+
+```surql
+LET $similarities = ["United Kingdom", "United kingdom", "ited", "United Kingdóm", "i"].map(|$string| {
+    {
+        word: $string,
+        similarity: string::similarity::fuzzy("United Kingdom", $string)
+    }
+});
+SELECT * FROM $similarities ORDER BY similarity DESC;
+```
+
+```surql title="Output"
+[
+	{
+		similarity: 295,
+		word: 'United Kingdom'
+	},
+	{
+		similarity: 293,
+		word: 'United kingdom'
+	},
+	{
+		similarity: 75,
+		word: 'ited'
+	},
+	{
+		similarity: 15,
+		word: 'i'
+	},
+	{
+		similarity: 0,
+		word: 'United Kingdóm'
+	}
+]
+```
+
+Also note that similarity and distance scores are not a measure of absolute equality and ordered similarity scores should only be used in comparisons against the same string. Take the following two queries for example:
+
+```surql
+string::similarity::fuzzy("United Kingdom", "United");
+string::similarity::fuzzy("United", "United");
+```
+
+While "United" is clearly more similar to "United" than to "United Kingdom", the output of each one is 131. This number is generated from the point of view of the second "United" string, which finds an exact match for itself inside the first string.
+
+## Other fuzzy match algorithms
+
+SurrealDB offers quite a few other algorithms inside the [string functions module](/docs/surrealql/functions/database/string) for distance or similarity comparison. They are:
+
+* string::distance::damerau_levenshtein
+* string::distance::normalized_damerau_levenshtein
+* string::distance::hamming
+* string::distance::levenshtein
+* string::distance::normalized_levenshtein
+* string::distance::osa_distance
+
+* string::similarity::jaro
+* string::similarity::jaro_winkler
+
+These resemble fuzzy searching to a certain extent, but have a different output and may have different requirements. For example, the Hamming distance algorithm was made for strings of equal length, so a query comparing "United Kingdom" to "United" will not work.
+
+```surql
+-- Error: different length
+string::distance::hamming("United Kingdom", "United");
+-- Returns 0
+string::distance::hamming("United", "United");
+-- Returns 1
+string::distance::hamming("United", "Unitéd");
+-- Returns 6
+string::distance::hamming("United", "uNITED");
+```
+
+For more customized text searching, full-text search can be used.
+
+## Full-text search
+
+Full-Text search supports text matching, proximity searches, result ranking, and keyword highlighting, making it a much more comprehensive solution when precise text searching is required.
+
+It is also [ACID-compliant](https://en.wikipedia.org/wiki/ACID), which ensures data integrity and reliability.
+
+### Analyzers
+
+The first step to using full-text search is to [define an analyzer](/docs/surrealql/statements/define/analyzer) using a `DEFINE ANALYZER` statement. An analyzer is not defined on a table, but a set of tokenizers (to break up text) and filters (to modify text).
+
+The `DEFINE ANALYZER` page contains a detailed explanation of each type of tokenizer and analyzer to choose from. To define the analyzer that most suits your needs, it is recommended to use the [`search::analyze`](/docs/surrealql/functions/database/search#searchanalyze) function which returns the output of an analyzer for an input string.
+
+Take the following analyzer for example, which uses `blank` to split a string by whitespace, and `edgengram(3, 10)` to output all of the instances of the first three to ten letters of a word.
+
+```surql
+DEFINE ANALYZER blank_edgengram TOKENIZERS blank FILTERS edgengram(3, 10);
+search::analyze("blank_edgengram", "The Wheel of Time turns, and Ages come and pass, leaving memories that become legend.");
+```
+
+The output includes strings like 'turns,' and 'legend.', which include punctuation marks.
+
+```surql title="Output"
+['The', 'Whe', 'Whee', 'Wheel', 'Tim', 'Time', 'tur', 'turn', 'turns', 'turns,', 'and', 'Age', 'Ages', 'com', 'come', 'and', 'pas', 'pass', 'pass,', 'lea', 'leav', 'leavi', 'leavin', 'leaving', 'mem', 'memo', 'memor', 'memori', 'memorie', 'memories', 'tha', 'that', 'bec', 'beco', 'becom', 'become', 'leg', 'lege', 'legen', 'legend', 'legend.']
+```
+
+If this is not desired, some looking through the `DEFINE ANALYZER` page will turn up another tokenizer called `punct` that can be included, now creating an analyzer that splits on whitespace as well as punctuation. Since punctuation on its own will not 
+
+```surql
+DEFINE ANALYZER blank_edgengram TOKENIZERS blank, punct FILTERS edgengram(3, 10);
+search::analyze("blank_edgengram", "The Wheel of Time turns, and Ages come and pass, leaving memories that become legend.");
+```
+
+```surql title="Output"
+['The', 'Whe', 'Whee', 'Wheel', 'Tim', 'Time', 'tur', 'turn', 'turns', 'and', 'Age', 'Ages', 'com', 'come', 'and', 'pas', 'pass', 'lea', 'leav', 'leavi', 'leavin', 'leaving', 'mem', 'memo', 'memor', 'memori', 'memorie', 'memories', 'tha', 'that', 'bec', 'beco', 'becom', 'become', 'leg', 'lege', 'legen', 'legend']
+```
+
 Once the data is in your tables, you can use customized [analyzers](/docs/surrealql/statements/define/analyzer) to define rules for how your textual data should be searched.
-An analyzer includes [tokenizers](/docs/surrealql/statements/define/analyzer#tokenizers) and [filters](/docs/surrealql/statements/define/analyzer#filters) which help break down text into manageable tokens and refine the search.
+
+An analyzer includes [tokenizers](/docs/surrealql/statements/define/analyzer#tokenizers) and [filters](/docs/surrealql/statements/define/analyzer#filters) which help break down text into manageable tokens and refine the search.
 
 ```surql
 -- Combining tokenizers and filters into a custom analyzer
 DEFINE ANALYZER custom_analyzer TOKENIZERS blank FILTERS lowercase, snowball(english);
 ```
-## Define a Full-Text Index
+
+### Define a Full-Text Index
 To make a text field searchable, you need to set up a [full-text index](/docs/surrealql/statements/define/indexes#full-text-search-index) on it by using the 'search' keyword.
 
 Depending on the use case, each field or column can be associated with a different analyzers
@@ -31,17 +295,19 @@ To enable text highlight on searches, use the `HIGHLIGHTS` keyword when defining
 DEFINE INDEX book_title ON book FIELDS title SEARCH ANALYZER custom_analyzer BM25;
 DEFINE INDEX book_content ON book FIELDS content SEARCH ANALYZER custom_analyzer BM25 HIGHLIGHTS;
 ```
-## The MATCHES Operator
+
+### The MATCHES Operator
 To find documents that contain the given keywords based on the full-text indexes, the [matches](/docs/surrealql/operators#matches) operator (@@) is used in queries. 
 
 ```surql
 -- Using the MATCHES (@@) operator in a query
 SELECT * FROM book WHERE content @@ 'tools';
 ```
-## Search Functions
+
+### Search Functions
 If you want to do more with your search results, SurrealDB offers 3 search functions that accompany the matches operator.
-- [`search::highlight`](/docs/surrealql/functions/database/search#searchhighlight): Highlights the matching keywords for the predicate reference number.
-- [`search::offsets`](/docs/surrealql/functions/database/search#searchoffsets): Returns the position of the matching keywords for the predicate reference number.
+- [`search::highlight`](/docs/surrealql/functions/database/search#searchhighlight): Highlights the matching keywords for the predicate reference number.
+- [`search::offsets`](/docs/surrealql/functions/database/search#searchoffsets): Returns the position of the matching keywords for the predicate reference number.
 - [`search::score`](/docs/surrealql/functions/database/search#searchscore): Helps with scoring and ranking the search results based on their relevance to the search terms.
 
 
