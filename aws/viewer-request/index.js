@@ -248,6 +248,10 @@ function handler(event) {
 				case undefined:
 					break;
 				default:
+					// Skip redirection for llms.txt which is already handled above
+					if (path === '/docs/llms.txt') {
+						break;
+					}
 					return redirect(`https://surrealdb.com/docs/surrealdb/${path.slice(6)}`);
 			}
 		}
@@ -256,5 +260,4 @@ function handler(event) {
 	request.uri = request.uri.concat('/index.html');
 
 	return request;
-
 }
