@@ -21,6 +21,7 @@ export const docs = [
     'surrealkv',
     'surrealql',
     'tutorials',
+    'examples',
 ] as const;
 
 export const sdks = [

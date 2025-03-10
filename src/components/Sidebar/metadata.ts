@@ -207,4 +207,15 @@ export const metadata = {
             href: 'https://github.com/surrealdb/examples',
         },
     },
+    'doc-examples': {
+        title: 'Examples',
+        icon: {
+            light: LightTutorials,
+            dark: DarkTutorials,
+        },
+        repo: {
+            title: 'surrealdb/awesome-surreal',
+            href: 'https://github.com/surrealdb/awesome-surreal',
+        },
+    },
 } satisfies Metadata;
