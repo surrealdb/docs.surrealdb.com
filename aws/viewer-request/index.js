@@ -1,3 +1,6 @@
+// These are all the various docs that we have. Previously there was just "surrealdb documentation" without a segment for that in the URL.
+// Any segment in `/docs/{segment}/...` not in this list should be redirected to `/docs/surrealdb/{segment}/...`
+// Therefor we keep this list of exceptions
 const validSections = [
 	'surrealdb',
 	'surrealml',
@@ -9,6 +12,8 @@ const validSections = [
 	'cloud',
 ];
 
+// We previously had versioned docs. Turns out this was terrible for SEO due to duplicate content, so we reverted that after a few months. 
+// This does mean that we need to extract versions from the URL, which is what this list is.
 const versions = [
 	'nightly',
 	'1.0.x', '1.0.0',
@@ -23,6 +28,7 @@ const prefixes = {
 	'/docs/surrealdb/integration/sdks/': '/docs/sdk/',
 }
 
+// List of static redirects from A to B
 const redirects = {
 	// Redirect old sdk libraries page
 	'/docs/integration/libraries': '/docs/surrealdb/integration/sdks',
