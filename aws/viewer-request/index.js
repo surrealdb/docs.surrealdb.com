@@ -119,7 +119,7 @@ function compute(input) {
 
 	// Basic URLs
 	if (path === '/docs') return { path: '/docs/' };
-	if (path === '/docs/') return { path };
+	if (path === '/docs/') return { path: '/docs/index.html', raw: true };
 	if (path === '/docs/llms.txt') return { path, raw: true };
 	if (path.startsWith('/docs/_astro/')) return { path: input, raw: true };
 
