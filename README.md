@@ -100,7 +100,7 @@ The following command builds and generates static content into the `build` direc
 bun run build
 ```
 
-# Adding a new doc
+## Adding a new doc
 
 **READ VERY CAREFULLY**
 
