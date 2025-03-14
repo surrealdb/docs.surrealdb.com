@@ -112,20 +112,6 @@ const redirects = {
 	'/docs/surrealdb/installation/upgrading/beta': '/docs/installation/upgrading/migrating-data-to-2x',
 };
 
-function redirect(input) {
-	// Redirect paths which have trailing slashes
-	const path = input !== '/docs/' && input.endsWith('/') ? input.slice(0, -1) : input;
-	// Redirect the user's browser permanently
-	return {
-		statusCode: 301,
-		statusDescription: 'Moved Permanently',
-		headers: {
-			'cache-control': { value: 'public, max-age=86400' },
-			location: { value: `https://surrealdb.com${path}` }
-		}
-	};
-}
-
 function compute(input) {
 	let path = input;
 
@@ -172,7 +158,14 @@ function handler(event) {
 		host !== 'surrealdb.com' ||
 		(!computed.raw && computed.path !== request.uri)
 	) {
-		return redirect(computed.path);
+		return {
+			statusCode: 301,
+			statusDescription: 'Moved Permanently',
+			headers: {
+				'cache-control': { value: 'public, max-age=86400' },
+				location: { value: `https://surrealdb.com${computed.path}` }
+			}
+		}
 	}
 
 	// Update the request URI
