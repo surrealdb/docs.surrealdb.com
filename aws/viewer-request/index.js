@@ -1,17 +1,12 @@
 const validSections = ['surrealdb', 'surrealml', 'surrealist', 'surrealism', 'surrealql', 'sdk', 'tutorials', 'cloud'];
 
-const versionPrefixes = [
-	'/docs/nightly/',
-	'/docs/surrealdb/nightly/',
-	'/docs/1.0.x/', '/docs/1.0.0/',
-	'/docs/1.1.x/', '/docs/1.1.0/',
-	'/docs/1.2.x/', '/docs/1.2.0/',
-	'/docs/1.3.x/', '/docs/1.3.0/',
-	'/docs/surrealdb/2.x/',
-	'/docs/surrealdb/1.0.x/', '/docs/surrealdb/1.0.0/',
-	'/docs/surrealdb/1.1.x/', '/docs/surrealdb/1.1.0/',
-	'/docs/surrealdb/1.2.x/', '/docs/surrealdb/1.2.0/',
-	'/docs/surrealdb/1.3.x/', '/docs/surrealdb/1.3.0/'
+const versions = [
+	'nightly',
+	'1.0.x', '1.0.0',
+	'1.1.x', '1.1.0',
+	'1.2.x', '1.2.0',
+	'1.3.x', '1.3.0',
+	'2.x'
 ];
 
 const prefixedRedirects = {
@@ -76,7 +71,9 @@ const redirects = {
 	'/docs/surrealdb/installation/upgrading/beta': '/docs/surrealdb/installation/upgrading/migrating-data-to-2x'
 };
 
-function redirect(path) {
+function redirect(input) {
+	const path = input !== '/docs/' && input.endsWith('/') ? input.slice(0, -1) : input;
+	
 	return {
 		statusCode: 301,
 		statusDescription: 'Moved Permanently',
@@ -99,23 +96,27 @@ function handler(event) {
 		return request;
 	}
 
-	if (/^\/docs\/(_astro\/|~partytown\/)|\/docs\/llms\.txt$/.test(path)) return request;
-	if (request.uri.endsWith('/')) return redirect(path.slice(0, -1));
-	if (path !== request.uri) return redirect(path);
+	if (/^\/docs\/((_astro\/|~partytown\/)|llms\.txt$)/.test(path)) return request;
 
 	if (redirects[path]) return redirect(redirects[path]);
 
-	for (const prefix of versionPrefixes) {
-		if (path.startsWith(prefix)) {
-			return redirect(`/docs/surrealdb/${path.slice(prefix.length)}`);
-		}
+	const versionMatch = path.match(/^\/docs\/(?:surrealdb\/)?([^\/]+)(\/.*)?$/);
+	if (versions.includes(versionMatch[1])) {
+		return redirect(`/docs/surrealdb${versionMatch[2] || ""}`);
 	}
 
-	for (const [prefix, target] of Object.entries(prefixedRedirects)) {
+	const entries = Object.keys(prefixedRedirects);
+	for (let i = 0; i < entries.length; i++) {
+		const prefix = entries[i];
+		const target = prefixedRedirects[prefix];
+		
 		if (path.startsWith(prefix)) {
 			return redirect(`${target}${path.slice(prefix.length)}`);
 		}
 	}
+	
+	if (request.uri.endsWith('/')) return redirect(path.slice(0, -1));
+	if (path !== request.uri) return redirect(path);
 
 	if (path.startsWith('/docs/')) {
 		const section = path.split('/')[2];
