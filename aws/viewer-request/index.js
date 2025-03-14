@@ -5,6 +5,7 @@ const validDocs = [
 	'surrealdb',
 	'surrealml',
 	'surrealist',
+	'surrealkv',
 	'surrealism',
 	'surrealql',
 	'sdk',
