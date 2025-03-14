@@ -106,7 +106,10 @@ const redirects = {
 	'/docs/surrealdb/installation/upgrading/beta': '/docs/installation/upgrading/migrating-data-to-2x',
 };
 
-function redirect(path) {	
+function redirect(input) {
+	// Redirect paths which have trailing slashes
+	const path = input !== '/docs/' && input.endsWith('/') ? input.slice(0, -1) : input;
+	// Redirect the user's browser permanently
 	return {
 		statusCode: 301,
 		statusDescription: 'Moved Permanently',
@@ -140,9 +143,6 @@ function handler(event) {
 
 	// Display documentation assets without redirecting
 	if (path.startsWith('/docs/_astro/')) return request;
-
-	// Redirect any paths which have trailing slashes
-	if (path.endsWith('/')) return redirect(path.slice(0, -1));
 
 	// Ensure request is normalized and lowercase
 	if (path !== request.uri) return redirect(path);
