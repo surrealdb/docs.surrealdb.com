@@ -143,9 +143,6 @@ function handler(event) {
 
 	// Display documentation assets without redirecting
 	if (path.startsWith('/docs/_astro/')) return request;
-
-	// Ensure request is normalized and lowercase
-	if (path !== request.uri) return redirect(path);
 	
 	// Redirect simple paths which don't need matching
 	if (redirects[path]) return redirect(redirects[path]);
@@ -174,6 +171,9 @@ function handler(event) {
 			return redirect(`/docs/surrealdb/${path.slice(6)}`);
 		}
 	}
+
+	// Ensure request is normalized and lowercase
+	if (path !== request.uri) return redirect(path);
 
 	request.uri += '/index.html';
 
