@@ -122,12 +122,9 @@ function compute(path) {
 
 	// Version removal
 	const match = path.match(/^\/docs\/(?:surrealdb\/)?([^\/]+)(\/.*)?$/);
-	if (match) {
-		const [,, section, rest] = match;
-		if (versions.includes(section)) {
-			// biome-ignore lint/style/noParameterAssign:
-			path = `/docs/surrealdb${rest || ''}`;
-		}
+	if (match && versions.includes(match[1])) {
+		// biome-ignore lint/style/noParameterAssign:
+		path = `/docs/surrealdb${match[2] || ''}`;
 	}
 
 	// Prefixed redirects
@@ -169,7 +166,7 @@ function handler(event) {
 	// Do we redirect to fix the URL first?
 	if (
 		host !== 'surrealdb.com' ||
-		(!computed.raw && computed.path !== request.uri)
+		(!computed.raw && (computed.path !== request.uri))
 	) {
 		return {
 			statusCode: 301,
