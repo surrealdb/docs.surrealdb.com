@@ -1,7 +1,7 @@
-// These are all the various docs that we have. Previously there was just "surrealdb documentation" without a segment for that in the URL.
+// // These are all the various docs that we have. Previously there was just "surrealdb documentation" without a segment for that in the URL.
 // Any segment in `/docs/{segment}/...` not in this list should be redirected to `/docs/surrealdb/{segment}/...`
 // Therefor we keep this list of exceptions
-const validSections = [
+const validDocs = [
 	'surrealdb',
 	'surrealml',
 	'surrealist',
@@ -112,9 +112,7 @@ const redirects = {
 	'/docs/surrealdb/installation/upgrading/beta': '/docs/installation/upgrading/migrating-data-to-2x',
 };
 
-function compute(input) {
-	let path = input;
-
+function compute(path) {
 	// Basic URLs
 	if (path === '/docs') return { path: '/docs/' };
 	if (path === '/docs/') return { path };
@@ -126,6 +124,7 @@ function compute(input) {
 	if (match) {
 		const [,, section, rest] = match;
 		if (versions.includes(section)) {
+			// biome-ignore lint/style/noParameterAssign:
 			path = `/docs/surrealdb${rest || ''}`;
 		}
 	}
@@ -133,16 +132,29 @@ function compute(input) {
 	// Prefixed redirects
 	for (const prefix in prefixes) {
 		if (path.startsWith(prefix)) {
+			// biome-ignore lint/style/noParameterAssign:
 			path = `${prefixes[prefix]}${path.slice(prefix.length)}`;
 			break;
 		}
 	}
 
 	// Slash removal
+	// biome-ignore lint/style/noParameterAssign:
 	if (path.endsWith('/')) path = path.slice(0, -1);
 
 	// Fixed redirects
+	// biome-ignore lint/style/noParameterAssign:
 	if (redirects[path]) path = redirects[path];
+
+	// Check that the URL points to a valid document
+	// See top of file for more information
+	if (path.startsWith('/docs/')) {
+		const doc = path.split('/')[2];
+		if (!validDocs.includes(doc)) {
+			// biome-ignore lint/style/noParameterAssign:
+			path = `/docs/surrealdb/${path.slice(6)}`;
+		}
+	}
 
 	// Return the computed path
 	return { path };
