@@ -126,63 +126,60 @@ function redirect(input) {
 	};
 }
 
-function handler(event) {
+function compute(input) {
+	let path = input;
 
+	// Basic URLs
+	if (path === '/docs') return { path: '/docs/' };
+	if (path === '/docs/') return { path };
+	if (path === '/docs/llms.txt') return { path, raw: true };
+	if (path.startsWith('/docs/_astro/')) return { path, raw: true };
+
+	// Version removal
+	const match = path.match(/^\/docs\/(?:surrealdb\/)?([^\/]+)(\/.*)?$/);
+	if (match) {
+		const [,, section, rest] = match;
+		if (versions.includes(section)) {
+			path = `/docs/surrealdb${rest || ''}`;
+		}
+	}
+
+	// Prefixed redirects
+	for (const prefix in prefixes) {
+		if (path.startsWith(prefix)) {
+			path = `${prefixes[prefix]}${path.slice(prefix.length)}`;
+			break;
+		}
+	}
+
+	// Slash removal
+	if (path.endsWith('/')) path = path.slice(0, -1);
+
+	// Fixed redirects
+	if (redirects[path]) path = redirects[path];
+
+	// Return the computed path
+	return { path };
+}
+
+function handler(event) {
 	const request = event.request;
 	const host = request.headers.host.value;
-	const path = request.uri.toLowerCase();
+	const computed = compute(request.uri.toLowerCase());
 
-	// Only use the base domain, not subdomains
-	if (host !== 'surrealdb.com') return redirect(path);
-
-	// Base path always needs to have a trailing slash
-	if (path === '/docs') return redirect('/docs/');
-
-	// Display the content for the documentation path
-	if (path === '/docs/') {
-		request.uri += 'index.html';
-		return request;
+	// Do we redirect to fix the URL first?
+	if (
+		host !== 'surrealdb.com' ||
+		(!computed.raw && computed.path !== request.uri)
+	) {
+		return redirect(computed.path);
 	}
 
-	// Display the LLM text document without redirecting
-	if (path === '/docs/llms.txt') return request;
+	// Update the request URI
+	request.uri = computed.raw
+		? computed.path 
+		: `${computed.path}/index.html`;
 
-	// Display documentation assets without redirecting
-	if (path.startsWith('/docs/_astro/')) return request;
-	
-	// Redirect simple paths which don't need matching
-	if (redirects[path]) return redirect(redirects[path]);
-
-	// Redirect old versioned documentation paths
-	const versionMatch = path.match(/^\/docs\/(?:surrealdb\/)?([^\/]+)(\/.*)?$/);
-	if (versions.includes(versionMatch[1])) {
-		return redirect(`/docs/surrealdb${versionMatch[2] || ""}`);
-	}
-
-	// Redirect prefixed paths to new locations
-	for (const prefix in prefixes) {
-		const target = prefixes[prefix];
-		if (path.startsWith(prefix)) {
-			return redirect(`${target}${path.slice(prefix.length)}`);
-		}
-	}
-
-	// Redirect any paths which have trailing slashes
-	if (path.endsWith('/')) return redirect(path.slice(0, -1));
-
-	// Ensure all docs sections are valid
-	if (path.startsWith('/docs/')) {
-		const section = path.split('/')[2];
-		if (!validSections.includes(section)) {
-			return redirect(`/docs/surrealdb/${path.slice(6)}`);
-		}
-	}
-
-	// Ensure request is normalized and lowercase
-	if (path !== request.uri) return redirect(path);
-
-	request.uri += '/index.html';
-
+	// Return the updated request
 	return request;
-
 }
