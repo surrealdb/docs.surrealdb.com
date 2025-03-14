@@ -164,6 +164,9 @@ function handler(event) {
 		}
 	}
 
+	// Redirect any paths which have trailing slashes
+	if (path.endsWith('/')) return redirect(path.slice(0, -1));
+
 	// Ensure all docs sections are valid
 	if (path.startsWith('/docs/')) {
 		const section = path.split('/')[2];
