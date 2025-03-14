@@ -113,35 +113,34 @@ const redirects = {
 	'/docs/surrealdb/installation/upgrading/beta': '/docs/installation/upgrading/migrating-data-to-2x',
 };
 
-function compute(path) {
+function compute(input) {
+	// Path should be lowercase
+	let path = input.toLowerCase();
+
 	// Basic URLs
 	if (path === '/docs') return { path: '/docs/' };
 	if (path === '/docs/') return { path };
 	if (path === '/docs/llms.txt') return { path, raw: true };
-	if (path.startsWith('/docs/_astro/')) return { path, raw: true };
+	if (path.startsWith('/docs/_astro/')) return { path: input, raw: true };
 
 	// Version removal
 	const match = path.match(/^\/docs\/(?:surrealdb\/)?([^\/]+)(\/.*)?$/);
 	if (match && versions.includes(match[1])) {
-		// biome-ignore lint/style/noParameterAssign:
 		path = `/docs/surrealdb${match[2] || ''}`;
 	}
 
 	// Prefixed redirects
 	for (const prefix in prefixes) {
 		if (path.startsWith(prefix)) {
-			// biome-ignore lint/style/noParameterAssign:
 			path = `${prefixes[prefix]}${path.slice(prefix.length)}`;
 			break;
 		}
 	}
 
 	// Slash removal
-	// biome-ignore lint/style/noParameterAssign:
 	if (path.endsWith('/')) path = path.slice(0, -1);
 
 	// Fixed redirects
-	// biome-ignore lint/style/noParameterAssign:
 	if (redirects[path]) path = redirects[path];
 
 	// Check that the URL points to a valid document
@@ -149,7 +148,6 @@ function compute(path) {
 	if (path.startsWith('/docs/')) {
 		const doc = path.split('/')[2];
 		if (!validDocs.includes(doc)) {
-			// biome-ignore lint/style/noParameterAssign:
 			path = `/docs/surrealdb/${path.slice(6)}`;
 		}
 	}
@@ -161,7 +159,7 @@ function compute(path) {
 function handler(event) {
 	const request = event.request;
 	const host = request.headers.host.value;
-	const computed = compute(request.uri.toLowerCase());
+	const computed = compute(request.uri);
 
 	// Do we redirect to fix the URL first?
 	if (
