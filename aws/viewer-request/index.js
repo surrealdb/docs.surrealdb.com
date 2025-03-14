@@ -1,4 +1,13 @@
-const validSections = ['surrealdb', 'surrealml', 'surrealist', 'surrealism', 'surrealql', 'sdk', 'tutorials', 'cloud'];
+const validSections = [
+	'surrealdb',
+	'surrealml',
+	'surrealist',
+	'surrealism',
+	'surrealql',
+	'sdk',
+	'tutorials',
+	'cloud',
+];
 
 const versions = [
 	'nightly',
@@ -9,27 +18,53 @@ const versions = [
 	'2.x'
 ];
 
-const prefixedRedirects = {
+const prefixes = {
 	'/docs/integration/libraries/': '/docs/sdk/',
 	'/docs/surrealdb/integration/sdks/': '/docs/sdk/',
 }
 
 const redirects = {
+	// Redirect old sdk libraries page
 	'/docs/integration/libraries': '/docs/surrealdb/integration/sdks',
+	// Redirect old websocket protocol page
 	'/docs/integration/websocket/text': '/docs/surrealdb/integration/rpc',
 	'/docs/integration/websocket/binary': '/docs/surrealdb/integration/rpc',
 	'/docs/surrealdb/integration/websocket': '/docs/surrealdb/integration/rpc',
 	'/docs/surrealql/statements/define/login': '/docs/surrealdb/surrealql/statements/define/user',
+	// Redirect Node.js docs to JavaScript docs
 	'/docs/integration/libraries/nodejs': '/docs/sdk/javascript',
 	'/docs/surrealdb/integration/sdks/nodejs': '/docs/sdk/javascript',
+	// Redirect Deno docs to JavaScript docs
 	'/docs/integration/libraries/deno': '/docs/sdk/javascript',
 	'/docs/surrealdb/integration/sdks/deno': '/docs/sdk/javascript',
+	// Redirect old JavaScript SDK paths
+	'/docs/sdk/javascript/setup': '/docs/sdk/javascript/core',
 	'/docs/sdk/javascript/core/initialization': '/docs/sdk/javascript/core/create-a-new-connection',
 	'/docs/sdk/javascript/core/authentication': '/docs/sdk/javascript/core/handling-authentication',
 	'/docs/sdk/javascript/core/data-querying': '/docs/sdk/javascript/core/data-maniplulation',
 	'/docs/sdk/javascript/core/methods/authenticate': '/docs/sdk/javascript/methods/authenticate',
 	'/docs/sdk/javascript/core/methods/invalidate': '/docs/sdk/javascript/methods/invalidate',
-	'/docs/sdk/javascript/setup': '/docs/sdk/javascript/core',
+	// Redirect old database function paths
+	'/docs/surrealdb/surrealql/functions/array': '/docs/surrealdb/surrealql/functions/database/array',
+	'/docs/surrealdb/surrealql/functions/count': '/docs/surrealdb/surrealql/functions/database/count',
+	'/docs/surrealdb/surrealql/functions/crypto': '/docs/surrealdb/surrealql/functions/database/crypto',
+	'/docs/surrealdb/surrealql/functions/duration': '/docs/surrealdb/surrealql/functions/database/duration',
+	'/docs/surrealdb/surrealql/functions/encoding': '/docs/surrealdb/surrealql/functions/database/encoding',
+	'/docs/surrealdb/surrealql/functions/geo': '/docs/surrealdb/surrealql/functions/database/geo',
+	'/docs/surrealdb/surrealql/functions/http': '/docs/surrealdb/surrealql/functions/database/http',
+	'/docs/surrealdb/surrealql/functions/math': '/docs/surrealdb/surrealql/functions/database/math',
+	'/docs/surrealdb/surrealql/functions/meta': '/docs/surrealdb/surrealql/functions/database/meta',
+	'/docs/surrealdb/surrealql/functions/object': '/docs/surrealdb/surrealql/functions/database/object',
+	'/docs/surrealdb/surrealql/functions/parse': '/docs/surrealdb/surrealql/functions/database/parse',
+	'/docs/surrealdb/surrealql/functions/rand': '/docs/surrealdb/surrealql/functions/database/rand',
+	'/docs/surrealdb/surrealql/functions/search': '/docs/surrealdb/surrealql/functions/database/search',
+	'/docs/surrealdb/surrealql/functions/session': '/docs/surrealdb/surrealql/functions/database/session',
+	'/docs/surrealdb/surrealql/functions/sleep': '/docs/surrealdb/surrealql/functions/database/sleep',
+	'/docs/surrealdb/surrealql/functions/string': '/docs/surrealdb/surrealql/functions/database/string',
+	'/docs/surrealdb/surrealql/functions/time': '/docs/surrealdb/surrealql/functions/database/time',
+	'/docs/surrealdb/surrealql/functions/type': '/docs/surrealdb/surrealql/functions/database/type',
+	'/docs/surrealdb/surrealql/functions/vector': '/docs/surrealdb/surrealql/functions/database/vector',
+	// Redirect old directory structure
 	'/docs/intro': '/docs/surrealdb',
 	'/docs/surrealdb/intro': '/docs/surrealdb',
 	'/docs/cli/overview': '/docs/surrealdb/cli',
@@ -68,12 +103,10 @@ const redirects = {
 	'/docs/surrealdb/surrealql/statements/define/overview': '/docs/surrealql/statements/define',
 	'/docs/surrealql/statements/remove/overview': '/docs/surrealql/statements/remove',
 	'/docs/surrealdb/surrealql/statements/remove/overview': '/docs/surrealql/statements/remove',
-	'/docs/surrealdb/installation/upgrading/beta': '/docs/installation/upgrading/migrating-data-to-2x'
+	'/docs/surrealdb/installation/upgrading/beta': '/docs/installation/upgrading/migrating-data-to-2x',
 };
 
-function redirect(input) {
-	const path = input !== '/docs/' && input.endsWith('/') ? input.slice(0, -1) : input;
-	
+function redirect(path) {	
 	return {
 		statusCode: 301,
 		statusDescription: 'Moved Permanently',
@@ -85,46 +118,62 @@ function redirect(input) {
 }
 
 function handler(event) {
+
 	const request = event.request;
 	const host = request.headers.host.value;
 	const path = request.uri.toLowerCase();
 
+	// Only use the base domain, not subdomains
 	if (host !== 'surrealdb.com') return redirect(path);
+
+	// Base path always needs to have a trailing slash
 	if (path === '/docs') return redirect('/docs/');
+
+	// Display the content for the documentation path
 	if (path === '/docs/') {
 		request.uri += 'index.html';
 		return request;
 	}
 
-	if (/^\/docs\/((_astro\/|~partytown\/)|llms\.txt$)/.test(path)) return request;
+	// Display the LLM text document without redirecting
+	if (path === '/docs/llms.txt') return request;
 
+	// Display documentation assets without redirecting
+	if (path.startsWith('/docs/_astro/')) return request;
+
+	// Redirect any paths which have trailing slashes
+	if (path.endsWith('/')) return redirect(path.slice(0, -1));
+
+	// Ensure request is normalized and lowercase
+	if (path !== request.uri) return redirect(path);
+	
+	// Redirect simple paths which don't need matching
 	if (redirects[path]) return redirect(redirects[path]);
 
+	// Redirect old versioned documentation paths
 	const versionMatch = path.match(/^\/docs\/(?:surrealdb\/)?([^\/]+)(\/.*)?$/);
 	if (versions.includes(versionMatch[1])) {
 		return redirect(`/docs/surrealdb${versionMatch[2] || ""}`);
 	}
 
-	const entries = Object.keys(prefixedRedirects);
-	for (let i = 0; i < entries.length; i++) {
-		const prefix = entries[i];
-		const target = prefixedRedirects[prefix];
-		
+	// Redirect prefixed paths to new locations
+	for (const prefix in prefixes) {
+		const target = prefixes[prefix];
 		if (path.startsWith(prefix)) {
 			return redirect(`${target}${path.slice(prefix.length)}`);
 		}
 	}
-	
-	if (request.uri.endsWith('/')) return redirect(path.slice(0, -1));
-	if (path !== request.uri) return redirect(path);
 
+	// Ensure all docs sections are valid
 	if (path.startsWith('/docs/')) {
 		const section = path.split('/')[2];
-		if (!validSections.includes(section) && path !== '/docs/llms.txt') {
+		if (!validSections.includes(section)) {
 			return redirect(`/docs/surrealdb/${path.slice(6)}`);
 		}
 	}
 
 	request.uri += '/index.html';
+
 	return request;
+
 }
