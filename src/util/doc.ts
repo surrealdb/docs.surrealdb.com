@@ -35,6 +35,7 @@ export async function generateSidebar(
 
     async function getItems(
         base: string,
+        isTop: boolean,
         // biome-ignore lint/suspicious/noExplicitAny: alternative is a cirular type definition which is not allowed
         urls: Record<string, any>
     ): Promise<SidebarItem[]> {
@@ -62,9 +63,10 @@ export async function generateSidebar(
                     {
                         title: getTitle(meta, slug),
                         isPage: meta.isPage,
+                        top: isTop,
                         href,
                         items: isGroup
-                            ? await getItems(slug, nested)
+                            ? await getItems(slug, false, nested)
                             : undefined,
                         slug,
                     } satisfies SidebarItem,
@@ -87,7 +89,7 @@ export async function generateSidebar(
         });
     }
 
-    const items = await getItems('', urls);
+    const items = await getItems('', true, urls);
     const flat = flatten(items);
 
     return {
@@ -196,4 +198,33 @@ export function getTitle(
     slug: string
 ): string {
     return meta.sidebar_label ?? meta.title ?? titleFromSlug(slug);
+}
+
+export function findPreviousPage(
+    items: Item[],
+    index: number
+): Item | undefined {
+    if (index === -1) {
+        return undefined;
+    }
+
+    for (let i = index - 1; i >= 0; i--) {
+        const item = items[i];
+        if ('isPage' in item ? item.isPage : true) {
+            return item;
+        }
+    }
+}
+
+export function findNextPage(items: Item[], index: number): Item | undefined {
+    if (index === -1) {
+        return undefined;
+    }
+
+    for (let i = index + 1; i < items.length; i++) {
+        const item = items[i];
+        if ('isPage' in item ? item.isPage : true) {
+            return item;
+        }
+    }
 }

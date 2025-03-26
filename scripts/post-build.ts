@@ -10,13 +10,143 @@ const __astro = path.join(__dist, '_astro');
 
 const scripts = [
     'https://snap.licdn.com/li.lms-analytics/insight.min.js',
-    'https://www.clarity.ms/tag/idmjleqtib',
-    'https://www.googletagmanager.com/gtag/js?id=G-J1NWM32T1V',
     'https://static.ads-twitter.com/uwt.js',
+    'https://surrealdb.com/data/script.js',
 ];
 
-await extractInlineResources();
+await checkBrokenLinks();
 await fetchRemoteResources();
+await extractInlineResources();
+
+async function checkBrokenLinks() {
+    if (process.env.SKIP_BROKEN_LINKS === 'true') {
+        console.log(
+            '[SKIP] Skipping broken link check do to `SKIP_BROKEN_LINKS = true`'
+        );
+        return;
+    }
+
+    const broken: string[] = [];
+    const files = await glob('**/*.html', {
+        cwd: __dist,
+        dot: true,
+        absolute: true,
+        filesOnly: true,
+    });
+
+    const websiteCache = new Map<string, boolean>();
+    const self = ['https://surrealdb.com', 'https://www.surrealdb.com'];
+
+    for (const file of files) {
+        let loggedFile = false;
+        const raw = fs.readFileSync(file, { encoding: 'utf-8' });
+        const parsed = parseHTML(raw, {
+            comment: true,
+        });
+
+        const links = parsed.querySelectorAll('a');
+        for (const link of links) {
+            let href = link.getAttribute('href');
+            if (!href) {
+                continue;
+            }
+
+            let hasIssue = false;
+            function issue(issue: string) {
+                if (!href) {
+                    return;
+                }
+
+                if (!broken.includes(href)) {
+                    broken.push(href);
+                }
+
+                if (!hasIssue && !loggedFile) {
+                    console.error(`\n[ERROR] In file: ${file}`);
+                    loggedFile = true;
+                }
+
+                hasIssue = true;
+                console.error(`[ERROR] ${issue}`);
+            }
+
+            for (const domain of self) {
+                if (href.startsWith(domain)) {
+                    issue(`External link should be local: ${href}`);
+                    href = href.slice(domain.length);
+                    break;
+                }
+            }
+
+            if (href.startsWith('/')) {
+                href = href.split('#')[0];
+                href = href.split('?')[0];
+
+                let exists = false;
+
+                switch (true) {
+                    case href === '/docs':
+                    case href.startsWith('/docs/'): {
+                        exists = fs.existsSync(
+                            path.join(__root, 'dist', href, 'index.html')
+                        );
+                        break;
+                    }
+
+                    default: {
+                        if (!websiteCache.has(href)) {
+                            const res = await fetch(
+                                `https://surrealdb.com${href}`,
+                                {
+                                    redirect: 'manual',
+                                }
+                            );
+                            websiteCache.set(href, res.ok);
+                        }
+
+                        const res = websiteCache.get(href);
+                        if (res === undefined) {
+                            throw new Error(`Cache miss for ${href}`);
+                        }
+
+                        exists = res;
+                        break;
+                    }
+                }
+
+                if (!exists) {
+                    issue(`Broken link: ${href}`);
+                }
+            }
+
+            if (hasIssue) {
+                let elemStr = link.toString();
+                if (elemStr.length > 100) {
+                    elemStr = `${elemStr.slice(0, 97)}...`;
+                }
+
+                console.error(`[ERROR] For element: ${elemStr}`);
+            }
+        }
+    }
+
+    if (broken.length > 0) {
+        console.error('\n=============================================');
+        console.error('\n[ERROR] Broken links found.');
+        console.error(
+            '[ERROR] Possible issues include dead links, redirected links, or external links that should be local.'
+        );
+        console.error('[ERROR] Check the above logs for more in-depth details');
+        console.error("[ERROR] Here's the list: \n");
+        for (const link of broken) {
+            console.error(`[ERROR] Broken link: ${link}`);
+        }
+
+        console.error('\n');
+
+        throw new Error('Broken links found');
+    }
+}
 
 async function fetchRemoteResources() {
     // Fetch the remote scripts
@@ -28,12 +158,20 @@ async function fetchRemoteResources() {
         fs.writeFileSync(path.join(__astro, name), await minifyJS(content));
         // Scan the JS files in the dist folder
         console.log('[EXTRACT] Scanning JS files in dist/docs/ folder');
-        const files = await glob('**/*.js', {
-            cwd: __dist,
-            dot: true,
-            absolute: true,
-            filesOnly: true,
-        });
+        const files = [
+            ...(await glob('**/*.js', {
+                cwd: __dist,
+                dot: true,
+                absolute: true,
+                filesOnly: true,
+            })),
+            ...(await glob('**/*.html', {
+                cwd: __dist,
+                dot: true,
+                absolute: true,
+                filesOnly: true,
+            })),
+        ];
         // Loop over each file and process the content
         console.log(`[EXTRACT] Found ${files.length} JS files`);
         for (const file of files) {

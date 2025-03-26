@@ -1,0 +1,433 @@
+---
+sidebar_position: 7
+sidebar_label: Performance Best Practices
+title: Performance Best Practices | Reference guides
+description: This guide outlines some key performance best practices for using SurrealDB 2.0. While SurrealDB offers powerful and flexible features to support you in meeting your desired performance standards, the use that you make of those features will ultimately determine whether or not you meet them.
+---
+
+# Performance Best Practices
+
+This guide outlines some key performance best practices for using SurrealDB `v2.x.x`. While SurrealDB offers powerful and flexible features to help you meet your desired performance standards, your use of those features will ultimately determine whether or not you meet them.
+
+To achieve the best performance from SurrealDB, there are a number of configuration options and runtime design choices to be considered which can improve and affect the performance of the database.
+
+The following is a non-exhaustive list of performance best practices you should consider when building services and applications with SurrealDB to help you address common performance challenges while preventing frequent pitfalls.
+
+
+## SurrealDB architecture
+
+While SurrealDB is a [multi-model database](/blog/what-are-multi-model-databases), at its core, SurrealDB stores data in documents on transactional key-value stores.
+
+This means that SurrealDB is a general-purpose databases optimised for a combination of various workloads such as operational, AI and real-time workloads.
+
+While SurrealDB can perform well with real-time and advanced analytical workloads, its architecture is not columnar based. Therefore its not optimised for large ad-hoc analytical queries in the same way as specialised columnar data warehouses.
+
+SurrealDB is built using a layered approach, with compute separated from the storage. This allows us, if necessary, to scale up the compute layer, and the storage layer independently from each other.
+
+Read more about the [architecture of SurrealDB and the supported storage engines.](/docs/surrealdb/introduction/architecture)
+
+## Running SurrealDB
+
+### Using Surreal Cloud
+
+The easiest way to run SurrealDB is using Surreal Cloud, which allows you to focus on building great products while we take care of running and maintaining it in the most performant and scalable way.
+
+Read more about running SurrealDB [using Surreal Cloud](/cloud).
+
+### Running SurrealDB as a server
+
+When starting the SurrealDB server, it is important to run the server using the correct configuration options and
+settings. For production environments or for performance benchmarking, the `--log` command-line argument or the
+`SURREAL_LOG` environment variable should be set to `error`, `warn`, or `info` (the default option when not specified).
+
+> [!NOTE]
+>Other log verbosity levels (such as `debug`, `trace`, or `full`) are only for use in debugging, testing, or development scenarios. The verbosity of the log level impacts the performance by increasing the amount of information being logged for each single operation.
+
+When starting up the SurrealDB binary ensure that the `--log` argument is omitted, or specifically set to the correct
+log verbosity level. Additionally, ensure that the `rocksdb` storage engine is used to store data.
+
+```sh
+surreal start --log info rocksdb://path/to/mydatabase
+```
+
+When starting up the SurrealDB Docker container ensure that the `--log` argument is omitted, or specifically set to the
+correct log verbosity level.
+
+```sh
+docker run --rm --pull always -p 8000:8000 surrealdb/surrealdb:latest start --log info rocksdb://path/to/mydatabase
+```
+
+Read more about running SurrealDB as a [single-node server](/docs/surrealdb/installation/running/file) or [multi-node cluster](/docs/surrealdb/installation/running/tikv).
+
+### Running SurrealDB embedded in Rust
+
+When running SurrealDB as an embedded database within Rust, using the correct release profile and memory allocator can
+greatly improve the performance of the database core engine. In addition using an optimised asynchronous runtime
+configuration can help speed up concurrent queries and increase database throughput.
+
+In your project's `Cargo.toml` file, ensure that the release profile uses the following configuration:
+
+```toml
+[profile.release]
+lto = true
+strip = true
+opt-level = 3
+panic = 'abort'
+codegen-units = 1
+```
+
+In your project's `Cargo.toml` file, ensure that the `allocator` feature is enabled on the `surrealdb` dependency:
+
+```toml
+surrealdb = { version = "2", features = ["allocator", "storage-mem", "storage-surrealkv", "storage-rocksdb", "protocol-http", "protocol-ws", "rustls"] }
+```
+
+When running SurrealDB within your Rust code, ensure that the asynchronous runtime is configured correctly, making use
+of multiple threads, an increased stack size, and an optimised number of threads:
+
+```toml
+tokio = { version = "1.41.1", features = ["sync", "rt-multi-thread"] }
+```
+
+```rs
+fn main() {
+	tokio::runtime::Builder::new_multi_thread()
+    .enable_all()
+    .thread_stack_size(10 * 1024 * 1024) // 10MiB
+    .build()
+    .unwrap()
+    .block_on(async {
+      // Your application code
+    })
+}
+```
+
+Read more about [running SurrealDB embedded in Rust.](/docs/surrealdb/embedding/rust)
+
+### Running SurrealDB embedded in Tauri
+
+When running SurrealDB as an embedded database within Rust, default options of Tauri can make SurrealDB run slower, as
+it processes and outputs the database information logs. Configuring Tauri correctly, can result in much improved
+performance with the core database engine and any queries which are run on SurrealDB.
+
+When building a desktop application with Tauri, ensure that the Tauri plugin log is disabled by configuring the
+`tauri.conf.json` file:
+
+```json
+{
+	"plugins": {
+		"logger": {
+			"enabled": false
+			}
+	}
+}
+```
+
+Alternatively you can disable logs at compile time when building your Tauri app:
+
+```bash
+TAURI_LOG_LEVEL=off cargo tauri build
+```
+
+## Performing queries
+
+### Selecting single records
+
+Certain queries in SurrealDB can be more efficiently written in certain ways which ensure that full table scans or
+indexes are not necessary when executing the query.
+
+In traditional SQL, the following query can be used to query for a particular row from a table:
+
+```surql
+SELECT *
+FROM user
+WHERE id = 19374837491;
+```
+
+However, currently in SurrealDB this query will perform a scan to find the record, although this is not necessary and you don't need to index the id field when using SurrealDB. Instead the following query can be used to select the specific record without needing to perform any scan:
+
+```surql
+SELECT *
+FROM user:19374837491;
+```
+
+### Selecting multiple records
+
+In traditional SQL, the following queries can be used to query for getting particular rows from a table:
+
+```surql
+-- Selecting individual IDs
+SELECT *
+FROM user
+WHERE id = 19374837491
+   OR id = 12647931632;
+```
+
+```surql
+-- Selecting a range of IDs
+SELECT *
+FROM user
+WHERE id >= 12647931632
+   AND id <= 19374837491;
+```
+
+However, currently in SurrealDB this query will perform a scan to find the record, although this is not necessary and you don't need to index the id field when using SurrealDB. Instead the following query can be used to select the specific record without needing to perform any scan:
+
+```surql
+-- Selecing indiviudal IDs
+SELECT *
+FROM user:19374837491, user:12647931632;
+```
+
+```surql
+-- Selecting a range of IDs
+SELECT *
+FROM user:12647931632..=19374837491;
+```
+
+## Using indexes
+
+SurrealDB has native built-in support for a number of different index types, without leveraging external libraries or
+implementations.
+
+With native support for indexes in the core database engine, SurrealDB leverages indexes where possible within the SurrealQL query language, without pushing queries down to a separate indexing engine. 
+
+In addition, data is indexed in the same way for embedded systems, single-node database servers, and multi-node highly-available clusters, ensuring that the same indexing functionality is available regardless of the SurrealDB deployment model. 
+
+Indexing support in SurrealDB is in active development, with work focusing on increased support for additional operators, compound indexes, additional index types, and overall improved index performance.
+
+> [!NOTE]
+> Currently no indexes are used when performing `UPDATE` or `DELETE` queries on large table, even where indexes are defined.
+> We'll be adding support for indexes within `UPDATE`, `UPSERT`, and `DELETE` statements in SurrealDB release `v2.3.0`.
+
+In the meantime, you can improve the performance of `UPDATE` and `DELETE` statements by combining these with a `SELECT` statement.
+
+To improve the performance of an `UPDATE` statement, use a `SELECT` statement within a subquery, selecting only the `id`
+field. This will use any defined indexes:
+
+```surql
+UPDATE (SELECT id FROM user WHERE age < 18)
+SET adult = false;
+```
+
+To improve the performance of an `DELETE` statement, use a `SELECT` statement within a subquery, selecting only the `id`
+field. This will use any defined indexes:
+
+```surql
+DELETE (SELECT id FROM user WHERE age < 18);
+```
+
+### Index strategies explained
+
+When using `SELECT`, SurrealDB uses a query planner whose role is to identify if it can use the index to speed the
+execution of the query.
+
+Without indexes, SurrealDB will operate a `SELECT` query on a table by using the table iterator. It mainly scans every
+record of a given table. If there is a condition (`WHERE ...`), an ordering (`ORDER BY ...`), or an aggregation (`GROUP
+BY ...`), it will load the value in memory and execute the operation. This process is commonly called a "table full
+scan".
+
+```surql
+SELECT *
+FROM user
+WHERE age < 18
+EXPLAIN;
+```
+
+```surql title="Output"
+[
+	{
+		detail: {
+			table: 'user'
+		},
+		operation: 'Iterate Table'
+	},
+	{
+		detail: {
+			type: 'Memory'
+		},
+		operation: 'Collector'
+	}
+]
+```
+
+Under certain conditions, if an index exists, and the condition or ordering involves exclusively fields that are
+indexed, the query planner will suggest an execution plan that involves one or multiple indexes to achieve these
+potential optimisations:
+
+- Only collect records that match the condition(s), as opposed to performing a table full scan.
+- As the index already stores the records in order, the scanning collects the records pre-ordered, sparing an additional ordering phase.
+
+```surql
+DEFINE INDEX idx_user_age ON user FIELDS age;
+
+SELECT age
+FROM user
+WHERE age > 18
+EXPLAIN;
+```
+
+```surql title="Output"
+[
+	{
+		detail: {
+			plan: {
+				from: {
+					inclusive: false,
+					value: 18
+				},
+				index: 'idx_user_age',
+				to: {
+					inclusive: false,
+					value: NONE
+				}
+			},
+			table: 'user'
+		},
+		operation: 'Iterate Index'
+	},
+	{
+		detail: {
+			type: 'Memory'
+		},
+		operation: 'Collector'
+	}
+]
+```
+
+If there are several clauses separated with `OR` operators, the query planner may do several index-based iterations:
+
+```surql
+SELECT age
+FROM user
+WHERE age < 7
+   OR age > 77
+EXPLAIN;
+```
+
+```surql title="Output"
+[
+	{
+		detail: {
+			plan: {
+				from: {
+					inclusive: false,
+					value: NONE
+				},
+				index: 'idx_user_age',
+				to: {
+					inclusive: false,
+					value: 7
+				}
+			},
+			table: 'user'
+		},
+		operation: 'Iterate Index'
+	},
+	{
+		detail: {
+			plan: {
+				from: {
+					inclusive: false,
+					value: 77
+				},
+				index: 'idx_user_age',
+				to: {
+					inclusive: false,
+					value: NONE
+				}
+			},
+			table: 'user'
+		},
+		operation: 'Iterate Index'
+	},
+	{
+		detail: {
+			type: 'Memory'
+		},
+		operation: 'Collector'
+	}
+]
+```
+
+### Index lookup on remote fields
+
+SurrealDB document record IDs store both the table name and the record identifier. This design provides a
+straightforward and consistent way to reference records across the database. One particularly powerful feature is the
+ability to filter a table based on conditions that relate to a referenced table.
+
+Here is a concrete example, where the statement `SELECT * FROM access WHERE user.role = 'admin'` will retrieve records
+from the `access` table for which the referenced record in the `user` table has the `name` field set to 'admin'.
+
+Consider the following example:
+
+```surql
+DEFINE FIELD user ON TABLE access TYPE record<user>;
+
+CREATE user:1 SET name = 'foo', role = 'admin';
+CREATE user:2 SET name = 'bar', role = 'admin';
+
+CREATE access:A SET user = user:1;
+CREATE access:B SET user = user:2;
+
+SELECT *
+FROM access
+WHERE user.role = 'admin'
+```
+
+The query retrieves records from the `access` table whose associated record in the `user` table has the role `field` set
+to 'admin'.
+
+```surql title="Output"
+[
+	{
+		id: access:A,
+		user: user:1
+	},
+	{
+		id: access:B,
+		user: user:2
+	}
+]
+```
+
+To optimize this query, you can create indexes on both the `user.role` field and the `access.user` field.
+With these indexes, the query planner can leverage an index-based join strategy:
+
+```surql
+DEFINE INDEX idx_user_role ON TABLE user COLUMNS role;
+DEFINE INDEX idx_access_user ON TABLE access COLUMNS user;
+
+SELECT *
+FROM access
+WHERE user.role = 'admin' 
+EXPLAIN;
+```
+
+```surql title="Output"
+[
+	{
+		detail: {
+			plan: {
+				index: 'idx_access_user',
+				joins: [
+					{
+						index: 'idx_user_role',
+						operator: '=',
+						value: 'admin'
+					}
+				],
+				operator: 'join'
+			},
+			table: 'access'
+		},
+		operation: 'Iterate Index'
+	},
+	{
+		detail: {
+			type: 'Memory'
+		},
+		operation: 'Collector'
+	}
+]
+```

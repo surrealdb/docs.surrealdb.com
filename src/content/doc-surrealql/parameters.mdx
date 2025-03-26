@@ -5,6 +5,8 @@ title: Parameters | SurrealQL
 description: Parameters can be used like variables to store a value which can then be used in a subsequent query.
 ---
 
+import Since from '@components/shared/Since.astro'
+
 # Parameters
 
 Parameters can be used like variables to store a value which can then be used in subsequent queries. To define a parameter in SurrealQL, use the [`LET`](../surrealql/statements/let) statement. The name of the parameter should begin with a `$` character.
@@ -51,7 +53,82 @@ RETURN $founders.name;
 ]
 ```
 
+Parameters persist across the current connection, and thus can be reused between different namespaces and databases. In the example below, a created `person` record assigned to a parameter is reused in a query in a completely different namespace and database.
+
+```surql
+LET $billy = CREATE ONLY person:billy SET name = "Billy";
+-- Fails as `person:billy` already exists
+CREATE person CONTENT $billy;
+
+USE NAMESPACE other_namespace;
+USE DATABASE other_database;
+-- Succeeds as `person:billy` does not yet exist in this namespace and database
+CREATE person CONTENT $billy;
+```
+
 Parameters can be defined using SurrealQL as shown above, or can be passed in using the client libraries as request variables.
+
+## Redefining and shadowing parameters
+
+The value of a parameter can be redefined by using the `=` operator, which is syntactic sugar for a `LET` statement.
+
+```surql
+LET $my_name = "Alucard";
+$my_name = "Sypha";
+RETURN $my_name;
+```
+
+```surql title="Output"
+'Sypha'
+```
+
+If the parameter is redefined inside another scope, the original value will be shadowed. Shadowing refers to when a value is temporarily obstructed by a new value of the same name until the new scope has completed.
+
+```surql
+LET $nums = [
+    [1,2],
+    [3,4]
+];
+
+{
+    LET $nums = $nums.flatten();
+    -- Flattened into a single array,
+    -- so $nums is shadowed as [1,2,3,4]
+    RETURN $nums;
+};
+
+-- Returns original unflattened $nums:
+-- [[1,2], [3,4]]
+RETURN $nums;
+```
+
+Even a parameter defined using a [`DEFINE PARAM`](/docs/surrealql/statements/define/param) statement can be shadowed.
+
+```surql
+DEFINE PARAM $USERNAME VALUE "user@user.com";
+
+$USERNAME = "some other email";
+```
+
+However, the parameter `$USERNAME` in this case is still defined as its original value, as can be seen via an [`INFO FOR DB`](/docs/surrealql/statements/info) statement.
+
+```surql
+{
+	accesses: {},
+	analyzers: {},
+	apis: {},
+	configs: {},
+	functions: {},
+	models: {},
+	params: {
+		USERNAME: "DEFINE PARAM $USERNAME VALUE 'user@user.com' PERMISSIONS FULL"
+	},
+	tables: {},
+	users: {}
+}
+```
+
+As the shadowed `$USERNAME` parameter will persist over the length of the connection, the parameter `$USERNAME` will once again show up as its original defined value if the connection is discontinued and restarted.
 
 ## Defining parameters within client libraries
 SurrealDB's client libraries allow parameters to be passed in as JSON values, which are then converted to SurrealDB data types when the query is run. The following example show a variable being used within a SurrealQL query from the JavaScript library.
@@ -64,7 +141,34 @@ let people = await surreal.query("SELECT * FROM article WHERE status INSIDE $sta
 
 ## Reserved variable names
 
-SurrealDB automatically predefines certain variables depending on the type of operation being performed. For example, `$this` and `$parent` are automatically predefined for subqueries so that the fields of one can be compared to another if necessary. Other predefined variables like `$session` give access to parts of the current database configuration. You should not declare new parameters of your own using the same names as the predefined variables below.
+SurrealDB automatically predefines certain variables depending on the type of operation being performed. For example, `$this` and `$parent` are automatically predefined for subqueries so that the fields of one can be compared to another if necessary. In addition, the predefined variables `$access`, `$auth`, `$token`, and `$session` are protected variables used to give access to parts of the current database configuration and can never be overwritten.
+
+```surql
+LET $access = true;
+LET $auth = 10;
+LET $token = "Mytoken";
+LET $session = rand::int(0, 100);
+```
+
+```surql title="Output"
+-------- Query 1 --------
+
+"'access' is a protected variable and cannot be set"
+
+-------- Query 2 --------
+
+"'auth' is a protected variable and cannot be set"
+
+-------- Query 3 --------
+
+"'token' is a protected variable and cannot be set"
+
+-------- Query 4 --------
+
+"'session' is a protected variable and cannot be set"
+```
+
+Other predefined variables listed below are not specifically protected, but should not be used in order to avoid unexpected behaviour.
 
 ### $before, $after
 
@@ -109,7 +213,7 @@ DEFINE TABLE user SCHEMAFULL
 
 ### $event
 
-Represents the type of table event triggered on an event.
+Represents the type of table event triggered on an event. This parameter will be one of either `"CREATE"`, `"UPDATE"`, or `"DELETE"`.
 
 ```surql
 DEFINE EVENT user_created ON TABLE user WHEN $event = "CREATE" THEN (
@@ -284,3 +388,28 @@ DEFINE EVENT email ON TABLE user WHEN $before.email != $after.email THEN (
         action = 'email_changed'
 );
 ```
+
+
+### $request
+
+<Since v="v2.0.0" />
+
+This parameter represents the value of a request to a custom API defined using the [`DEFINE API`](/docs/surrealql/statements/define/api) statement.
+
+```surql
+DEFINE API OVERWRITE "/test"
+    FOR get, post 
+        MIDDLEWARE
+            api::req::raw_body(false)
+        THEN {
+            RETURN {
+                status: 404,
+                body: $request.body,
+                headers: {
+                    'bla': '123'
+                }
+            };
+        };
+```
+
+The `$request` parameter may contain values at the following fields: `body`, `headers`, `method`, `query`, and `params`.

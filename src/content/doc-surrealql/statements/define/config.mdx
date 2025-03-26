@@ -1,56 +1,162 @@
 ---
-sidebar_position: 3
+sidebar_position: 4
 sidebar_label: DEFINE CONFIG
 title: DEFINE CONFIG statement | SurrealQL
-description: This statement allows you to configure how your database's tables and functions are exposed via the GraphQL API. This configuration is essential for enabling GraphQL functionality in your database, specifying which tables and functions should be included or excluded from the GraphQL schema.
+description: This statement allows you to set external configurations on the database, either for API middleware and permissions, or for how the database's tables and functions are exposed via the GraphQL API.
 ---
 import Since from '@components/shared/Since.astro'
 
 
-# `DEFINE CONFIG GRAPHQL` statement
+# `DEFINE CONFIG` statement
 
-The `DEFINE CONFIG GRAPHQL` statement allows you to configure how your database's tables and functions are exposed via the GraphQL API. This configuration is essential for enabling GraphQL functionality in your database, specifying which tables and functions should be included or excluded from the GraphQL schema.
-
-The GraphQL configuration defined using this statement dictates how clients interact with your database through GraphQL queries and mutations.
-
->[!IMPORTANT]
->The `DEFINE CONFIG GRAPHQL` statement is currently still experimental and is subject to change.
-
+The `DEFINE CONFIG` statement allows you to set external configurations on your database. It can be used to configure API middleware and permissions, or to configure how the database's tables and functions are exposed via the GraphQL API.
 
 > [!WARNING]
-> By running SurrealDB with the GraphQL module enabled, you are opting into an experimental feature. While the GraphQL module is fully functional, it is still considered experimental and may not be as stable as the core SurrealQL module which means we cannot guarantee that it will provide the same security guarantees. It is not recommended for production use. We welcome your feedback and contributions to help improve the feature and make it more robust.
+> By running SurrealDB with configurations for the database API or the GraphQL module, you are opting into an experimental feature. While these features are fully functional, they are still considered experimental and may not be as stable as the core SurrealQL module which means we cannot guarantee that it will provide the same security guarantees. They are not recommended for production use. We welcome your feedback and contributions to help improve the feature and make it more robust.
 
 ## Requirements
 
 - You **must** be authenticated as a **root**, **namespace**, or **database** user before you can use the `DEFINE CONFIG GRAPHQL` statement.
 - You **must** select your **namespace** and **database** before you can use the `DEFINE CONFIG GRAPHQL` statement.
 - You **must** define at least one table in your database for the GraphQL API to function.
-- You **must** have started the SurrealDB instance with the `SURREAL_EXPERIMENTAL_GRAPHQL` environment variable set to `true`.
+- You **must** have started the SurrealDB instance with the `SURREAL_CAPS_ALLOW_EXPERIMENTAL` environment variable set to `"graphql"`.
 
 ## Statement syntax
 
 ```surql title="SurrealQL Syntax"
 
-DEFINE CONFIG [OVERWRITE | IF NOT EXISTS] GRAPHQL [ AUTO | NONE]
-  [ TABLES (AUTO | NONE | INCLUDE table1, table2, ...) ]
-  [ FUNCTIONS (AUTO | NONE | INCLUDE [function1, function2, ...] | EXCLUDE [function1, function2, ...]) ]
+DEFINE CONFIG [ OVERWRITE | IF NOT EXISTS ] 
+
+  [ API [ MIDDLEWARE @expression, .. ] [ PERMISSIONS [ NONE | FULL | @expression ] ]
+
+  [ GRAPHQL 
+    [ AUTO | NONE ]
+    [ TABLES (AUTO | NONE | INCLUDE table1, table2, ...) ]
+    [ FUNCTIONS (AUTO | NONE | INCLUDE [function1, function2, ...] | EXCLUDE [function1, function2, ...]) ] ]
+
 ```
 
+## DEFINE CONFIG API
 
-## Important Notes
+The `DEFINE CONFIG API` statement can be used to set middleware and permissions in order to alter the behaviour of the database for guest and [record users](/docs/surrealql/statements/define/access/record). This middleware can be used in cases such as rate limiting on the query language and setting how many resources a client can read or alter at a time.
+
+`DEFINE CONFIG API` is often used in conjunction with a [flag](/docs/surrealdb/security/capabilities) or [environment variable](/docs/surrealdb/cli/env) to disable arbitrary queries, thereby forcing record and anonymous users to interact with the database via API endpoints alone.
+
+The following is an example of a `DEFINE CONFIG` statement that includes a timeout and a single header in the responses of all API endpoints.
+
+```surql
+DEFINE CONFIG API
+    MIDDLEWARE 
+        api::timeout(10s),
+        api::res::headers({
+            'Access-Control-Allow-Origin': '*'
+        });
+```
+
+To set the actual API endpoints and their middleware, a [`DEFINE API`](/docs/surrealql/statements/define/api) statement is used for each endpoint.
+
+The behaviour of API endpoints can be tested using the `api::invoke` method, or through a regular HTTP call to the endpoint that [includes the namespace and database name](/docs/surrealdb/integration/http#custom-endpoint-at-apinsdbendpoint).
+
+This next example uses `DEFINE CONFIG` to set a single response header, followed by two endpoints that return different output.
+
+```surql
+DEFINE CONFIG API
+    MIDDLEWARE 
+        api::res::headers({
+            'Access-Control-Allow-Origin': '*'
+        });
+
+DEFINE API "/test" FOR get THEN {};
+DEFINE API "/test2" FOR get THEN {
+    RETURN {
+        body: {
+            some: "data"
+        }
+    }
+};
+
+api::invoke("/test");
+api::invoke("/test2");
+```
+
+The query shows that the endpoints return a combination of the `DEFINE CONFIG` middleware and the response object set in the `DEFINE API` statements.
+
+```surql
+-------- Query --------
+
+{
+	headers: {
+		"access-control-allow-origin": '*'
+	},
+	raw: false,
+	status: 200
+}
+
+-------- Query --------
+
+{
+	body: {
+		some: 'data'
+	},
+	headers: {
+		"access-control-allow-origin": '*'
+	},
+	raw: false,
+	status: 200
+}
+```
+
+Note that the middleware and permissions inside individual `DEFINE API` statements will override the middleware in a `DEFINE CONFIG API` statement. In the following example, the default `10s` timeout is set to a single microsecond for the `"/test"` endpoint, giving the intended query no time to complete.
+
+```surql
+DEFINE CONFIG API
+    MIDDLEWARE 
+        api::timeout(10s),
+        api::res::headers({
+            'Access-Control-Allow-Origin': '*'
+        });
+
+DEFINE API OVERWRITE "/test"
+    FOR get 
+        MIDDLEWARE
+            api::timeout(1µs)
+        THEN {
+            RETURN {
+                status: 200,
+                body: { 
+                    data: (SELECT * FROM person),
+                    however: "This will probably never return because the timeout is 1 microsecond"
+                }
+            };
+        };
+
+api::invoke("/test");
+```
+
+```surql title="Output"
+'The query was not executed because it exceeded the timeout'
+```
+
+## DEFINE CONFIG GRAPHQL
+
+The configuration set using the `DEFINE CONFIG GRAPHQL` is essential for enabling GraphQL functionality in your database, specifying which tables and functions should be included or excluded from the GraphQL schema.
+
+The GraphQL configuration defined using this statement dictates how clients interact with your database through GraphQL queries and mutations.
+
+### Important Notes
 
 - The `DEFINE CONFIG GRAPHQL` statement **must** be executed before any GraphQL queries can be made.
 - If you attempt to use the GraphQL API without defining the configuration, you will receive a `NotConfigured` error.
 - If no tables are defined in the database, you will receive an error stating "No tables found in database" when attempting to use the GraphQL API.
 
-## Example usage
+### Example usage
 
 ```surql
 -- Define GraphQL configuration
 DEFINE CONFIG GRAPHQL  AUTO;
 ```
 
-## Tables Configuration
+### Tables Configuration
 
 The `TABLES` clause in the `DEFINE CONFIG GRAPHQL` statement specifies how tables are exposed via GraphQL. There are four options for the `TABLES` configuration:
 
@@ -59,7 +165,7 @@ The `TABLES` clause in the `DEFINE CONFIG GRAPHQL` statement specifies how table
 - `INCLUDE`: Specify a list of tables to include in the GraphQL schema.
 - `EXCLUDE`: Specify a list of tables to exclude from the GraphQL schema.
 
-### `AUTO`
+#### `AUTO`
 
 When you specify `TABLES AUTO`, all tables in the database are automatically included in the GraphQL schema.
 
@@ -67,7 +173,7 @@ When you specify `TABLES AUTO`, all tables in the database are automatically inc
 DEFINE CONFIG GRAPHQL TABLES AUTO;
 ```
 
-### `NONE`
+#### `NONE`
 
 When you specify `TABLES NONE`, no tables are included in the GraphQL schema.
 
@@ -75,7 +181,7 @@ When you specify `TABLES NONE`, no tables are included in the GraphQL schema.
 DEFINE CONFIG GRAPHQL TABLES NONE;
 ```
 
-### `INCLUDE`
+#### `INCLUDE`
 
 You can specify a list of tables to include in the GraphQL schema using the `INCLUDE` clause. The list of tables is specified as a comma-separated list without brackets.
 
@@ -86,7 +192,7 @@ DEFINE CONFIG GRAPHQL TABLES INCLUDE user, post, comment;
 > [!NOTE]
 > The `EXCLUDE` option for `TABLES` is currently not implemented.
 
-## Functions Configuration
+### Functions Configuration
 
 The `FUNCTIONS` clause in the `DEFINE CONFIG GRAPHQL` statement specifies how functions are exposed via GraphQL. There are four options for the `FUNCTIONS` configuration:
 
@@ -95,7 +201,7 @@ The `FUNCTIONS` clause in the `DEFINE CONFIG GRAPHQL` statement specifies how fu
 - `INCLUDE`: Specify a list of functions to include in the GraphQL schema.
 - `EXCLUDE`: Specify a list of functions to exclude from the GraphQL schema.
 
-### `AUTO`
+#### `AUTO`
 
 When you specify `FUNCTIONS AUTO`, all functions in the database are automatically included in the GraphQL schema.
 
@@ -103,7 +209,7 @@ When you specify `FUNCTIONS AUTO`, all functions in the database are automatical
 DEFINE CONFIG GRAPHQL FUNCTIONS AUTO;
 ```
 
-### `NONE`
+#### `NONE`
 
 When you specify `FUNCTIONS NONE`, no functions are included in the GraphQL schema.
 
@@ -111,7 +217,7 @@ When you specify `FUNCTIONS NONE`, no functions are included in the GraphQL sche
 DEFINE CONFIG GRAPHQL FUNCTIONS NONE;
 ```
 
-### `INCLUDE`
+#### `INCLUDE`
 
 You can specify a list of functions to include in the GraphQL schema using the `INCLUDE` clause. The list of functions is specified as a comma-separated list enclosed in square brackets `[]`.
 
@@ -119,7 +225,7 @@ You can specify a list of functions to include in the GraphQL schema using the `
 DEFINE CONFIG GRAPHQL FUNCTIONS INCLUDE [getUser, listPosts, searchComments];
 ```
 
-### `EXCLUDE`
+#### `EXCLUDE`
 
 You can specify a list of functions to exclude from the GraphQL schema using the `EXCLUDE` clause. The list of functions is specified as a comma-separated list enclosed in square brackets `[]`.
 
@@ -127,7 +233,7 @@ You can specify a list of functions to exclude from the GraphQL schema using the
 DEFINE CONFIG GRAPHQL FUNCTIONS EXCLUDE [debugFunction, testFunction];
 ```
 
-## Using `IF NOT EXISTS` clause
+### Using `IF NOT EXISTS` clause
 
 The `IF NOT EXISTS` clause can be used to define the GraphQL configuration only if it does not already exist. This is useful when you want to ensure that the configuration is only created if it does not already exist, preventing errors due to duplicate definitions.
 
@@ -136,7 +242,7 @@ The `IF NOT EXISTS` clause can be used to define the GraphQL configuration only 
 DEFINE CONFIG GRAPHQL IF NOT EXISTS TABLES AUTO FUNCTIONS AUTO;
 ```
 
-## Using `OVERWRITE` clause
+### Using `OVERWRITE` clause
 
 The `OVERWRITE` clause can be used to redefine the GraphQL configuration, overwriting any existing configuration. This is useful when you want to update or modify the existing GraphQL configuration.
 
@@ -145,9 +251,9 @@ The `OVERWRITE` clause can be used to redefine the GraphQL configuration, overwr
 DEFINE CONFIG OVERWRITE GRAPHQL TABLES INCLUDE user, post FUNCTIONS NONE;
 ```
 
-## Examples
+### Examples
 
-### Example 1: Include specific tables and functions
+#### Example 1: Include specific tables and functions
 
 This example defines a GraphQL configuration that includes specific tables and functions.
 
@@ -155,7 +261,7 @@ This example defines a GraphQL configuration that includes specific tables and f
 DEFINE CONFIG GRAPHQL TABLES INCLUDE user, post FUNCTIONS INCLUDE [getUser, listPosts];
 ```
 
-### Example 2: Automatically include all tables and functions
+#### Example 2: Automatically include all tables and functions
 
 This example defines a GraphQL configuration that automatically includes all tables and functions.
 
@@ -163,7 +269,7 @@ This example defines a GraphQL configuration that automatically includes all tab
 DEFINE CONFIG GRAPHQL TABLES AUTO FUNCTIONS AUTO;
 ```
 
-### Example 3: Exclude specific functions
+#### Example 3: Exclude specific functions
 
 This example defines a GraphQL configuration that includes all functions except specific ones.
 
@@ -172,9 +278,9 @@ DEFINE CONFIG GRAPHQL FUNCTIONS EXCLUDE [debugFunction, testFunction];
 ```
 
 
-## Error Handling
+### Error Handling
 
-### NotConfigured Error
+#### NotConfigured Error
 
 If you attempt to access the GraphQL endpoint without defining the GraphQL configuration, you will receive a `NotConfigured` error.
 
@@ -191,7 +297,7 @@ Execute the `DEFINE CONFIG GRAPHQL` statement to define the GraphQL configuratio
 DEFINE CONFIG GRAPHQL TABLES AUTO FUNCTIONS AUTO;
 ```
 
-### No Tables Found Error
+#### No Tables Found Error
 
 If you have defined the GraphQL configuration but no tables are defined in the database, you will receive an error stating "No tables found in database" when attempting to use the GraphQL API. You can fix this by defining at least one table in your database using the [`DEFINE TABLE`](/docs/surrealql/statements/define/table) statement.
 
@@ -209,13 +315,13 @@ DEFINE FIELD val ON foo TYPE int;
 CREATE foo:1 SET val = 42;
 ```
 
-## Authentication Errors When Accessing Data via GraphQL
+### Authentication Errors When Accessing Data via GraphQL
 
 **Cause**: Insufficient permissions or incorrect authentication credentials.
 
 **Solution**: Ensure you are authenticated as a user with the necessary permissions and that the permissions on tables and fields are correctly configured.
 
-### Authentication and Permissions
+#### Authentication and Permissions
 
 - The GraphQL API respects SurrealDB's authentication and permission model.
 - You must authenticate using the appropriate credentials to access data via GraphQL.
@@ -224,7 +330,7 @@ CREATE foo:1 SET val = 42;
 
 
 
-### Example: Basic Authentication
+#### Example: Basic Authentication
 
 ```surql
 -- Define a user with access permissions
@@ -246,9 +352,9 @@ CREATE foo:2 SET val = 43, email = "other@example.com";
 
 When querying the GraphQL API as `user@example.com`, only the records where `email = "user@example.com"` will be accessible due to the permissions set.
 
-## Examples
+### Examples
 
-### Example 1: Defining GraphQL Configuration and Fetching Data
+#### Example 1: Defining GraphQL Configuration and Fetching Data
 
 ```surql
 -- Define GraphQL configuration to include all tables automatically
@@ -291,7 +397,7 @@ query {
 }
 ```
 
-### Example 2: Including Specific Tables
+#### Example 2: Including Specific Tables
 
 ```surql
 -- Define GraphQL configuration to include only specific tables
@@ -300,11 +406,11 @@ DEFINE CONFIG OVERWRITE GRAPHQL TABLES INCLUDE foo;
 
 When querying the GraphQL schema, only the included tables will be available.
 
-### Example 3: Using Limit, Start, Order, and Filter in GraphQL Queries
+#### Example 3: Using Limit, Start, Order, and Filter in GraphQL Queries
 
 You can use `limit`, `start`, `order`, and `filter` in your GraphQL queries to control the data returned.
 
-#### Limit
+##### Limit
 
 ```graphql
 query {
@@ -315,7 +421,7 @@ query {
 }
 ```
 
-#### Start
+##### Start
 
 ```graphql
 query {
@@ -326,7 +432,7 @@ query {
 }
 ```
 
-#### Order
+##### Order
 
 ```graphql
 query {
@@ -337,7 +443,7 @@ query {
 }
 ```
 
-#### Filter
+##### Filter
 
 ```graphql
 query {
@@ -348,7 +454,7 @@ query {
 }
 ```
 
-## More Information
+### More Information
 
 The `DEFINE CONFIG GRAPHQL` statement is essential for enabling and configuring the GraphQL API in SurrealDB. By specifying which tables and functions are included or excluded, you can fine-tune the GraphQL schema to match your application's needs.
 

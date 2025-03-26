@@ -44,6 +44,7 @@ export default {
             },
             screens: {
                 xs: '390px',
+                '3xl': '1800px',
             },
             maxWidth: {
                 container: '1200px',

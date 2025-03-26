@@ -1,0 +1,98 @@
+---
+sidebar_position: 5
+sidebar_label: Troubleshooting
+title: Troubleshooting | Security
+description: This page provides some troubleshooting advice to support users in addressing issues either caused by or involved in the usage of specific security features provided by SurrealDB.
+---
+
+# Troubleshooting
+
+This page provides some troubleshooting advice to support users in addressing issues either caused by or involved in the usage of specific security features provided by SurrealDB.
+
+## Authentication
+
+### Invalid Authentication Error
+
+The most common error that users may receive when authenticating to SurrealDB is `InvalidAuth`, which results in a generic message such as `There was a problem with authentication`. The reason that this message is so vague and yet so common is that it is a placeholder for other more specific internal errors related to authentication. These errors are not returned to the client due to their potential to leak internal information about the database (e.g. whether or not a user or access method exists, whether a token failed to verify because of its signature or a specific claim...) to unauthenticated users.
+
+Although the internal cause for these errors is not revealed to clients, it can be identified by the SurrealDB administrator through its server logs. These logs will usually be prefixed by `surrealdb::core::iam`. Most helpful messages will be displayed when [starting SurrealDB with `--log debug`](/docs/surrealdb/cli/start#command-help). If those logs are not enough to diagnose the problem, starting the server with `--log trace` will provide additional messages describing the authentication process.
+
+In situations where debugging must be performed on the client, starting the SurrealDB server with the environment variable `SURREAL_INSECURE_FORWARD_ACCESS_ERRORS` set to `true` will forward errors resulting from [`SIGNIN`, `SIGNUP`](/docs/surrealql/statements/define/access/record#example-usage) and [`AUTHENTICATE`](/docs/surrealql/statements/define/access/record#with-authenticate-clause) clauses directly to clients. Since these errors may expose the internal logic of such clauses, this variable should only be used for debugging in controlled environments with trusted clients.
+
+#### Common Causes
+
+The following are the most common causes for a generic authentication error in SurrealDB.
+
+##### Incorrect user credentials
+
+The simplest reason why authentication may fail. Ensure that the credentials that you are using to authenticate (e.g. username and password) match the ones that you have defined.
+
+For system users, ensure that any special characters (e.g. quotes) have been interpreted correctly as part of the username or password rather than as SurrealQL syntax. Use the `INFO` statements to display the defined users and ensure that their password hash matches the hash of the password that you are providing. You can use the included [compare hash functions in SurrealQL](/docs/surrealql/functions/database/crypto#cryptoargon2compare) to perform this verification.
+
+For record users, ensure that the `SIGNIN` and `SIGNUP` queries will return a user. You can do that by running those queries by themselves in the SurrealQL interpreter (`surreal sql`) or in Surrealist. You will just need to replace any parameters from those queries by the parameters that you are providing during authentication. Ensure that you are in fact providing all the expected parameters during authentication in your actual code.
+
+##### The referenced user or access method does not exist
+
+Ensure that the user and access method that you are authenticating with exists on the level that you are trying to authenticate. Check that you are authenticating against the namespace or database where the resource is defined and that you have correctly spelled the resource everywhere.
+
+When authenticating with the SurrealDB CLI or with the HTTP REST API, ensure that you specify the namespace and database that your user exists in (i.e. `--auth-level ns` and `--auth-level db` or `surreal-auth-ns` and `surreal-auth-db`), in addition to the namespace and database that you want to use for the connection (i.e. `--namespace` and `--database` or `surreal-ns` and `surreal-db`). Otherwise, SurrealDB will default to authenticating at the root level.
+
+##### The token could not be cryptographically verified
+
+When using a token to authenticate, SurrealDB will reject tokens that fail the verification of its cryptographic signature. If the token has been issued by SurrealDB, this is most likely not the cause for your issue. If the token has not been issued by SurrealDB, this usually means that the provided token is signed using a different algorithm than defined or that the key used to sign the token is incorrect.
+
+For tokens that are [verified from a URL hosting a JWKS object](/docs/surrealql/statements/define/access/jwt#json-web-key-set-jwks), failure to verify the token may be caused by the URL being incorrect, unreachable by the SurrealDB server or outbound connections to the address not being allowed by the [network capability](/docs/surrealdb/security/capabilities#network). Relevant logs will be displayed on the SurrealDB server when running it with `--log debug` or `--log trace`.
+
+##### The token is missing a required claim
+
+Tokens that are missing any of the claims required by SurrealDB will be rejected with a generic error. Ensure that tokens issued outside of SurrealDB contain all the required claims. Depending on whether the token is for a system user, a record access method or a JWT access method, different claims will be expected. In all cases, the `exp` claim is required. Consult the [Using Tokens](/docs/surrealql/statements/define/access/jwt#using-tokens) section of the `DEFINE ACCESS ... TYPE JWT` documentation for more information about the required claims for system and record users.
+
+### Other Authentication Errors
+
+The following is a non-comprehensive list of authentication errors which may sometimes be challenging to understand.
+
+#### Unexpected Authentication Error
+
+Like `InvalidAuth`, `UnexpectedAuth` is an error that acts as a placeholder for a different group of errors. This error results in a generic message such as `There was an unexpected error while performing authentication`. Unlike errors specific to authentication, this error is returned when the original error is not directly related with authentication, but rather with a failure in some of the components necessary for authentication.
+
+This distinction is made because, unlike `InvalidAuth` errors, `UnexpectedAuth` errors may be retried by clients, as it is possible that the internal failure that resulted in the error is ephemeral. Clients may want to handle these two errors differently; for example, by returning `InvalidAuth` errors to user but internally attempting to retry on `UnexpectedAuth` errors, only returning an internal error to the user if the error persists.
+
+A specific example for this error is the `AUTHENTICATE`, `SIGNIN` or `SIGNUP` clauses failing due to a transaction error, such as those which can arise from a write conflict during the transaction. These conflicts may appear for some datastores in any query when two transactions simultaneously access the same document.
+
+#### Token Expired Error
+
+This error is returned when the token that is being used to authenticate a session has [expired](/docs/surrealdb/security/authentication#expiration). If this token was issued by SurrealDB, this expiration defaults to an hour and can be changed using the `DURATION FOR TOKEN` clause in [`DEFINE ACCESS`](/docs/surrealql/statements/define/access/record) and [`DEFINE USER`](/docs/surrealql/statements/define/user). If the token was not issued by SurrealDB, this expiration will be set by the `exp` claim. 
+
+Note that this error will only appear when trying to authenticate the [session](/docs/surrealdb/security/authentication#sessions). After authentication, the session will not expire when the token does, but rather after the independent session duration that has been defined in the `DURATION FOR SESSION` clause. By default, sessions will not expire. When using the HTTP REST API, a persistent session is not established as each request will be individually authenticated, as a consequence, requests made using an expired token will be rejected with this error.
+
+Although tokens accepted by SurrealDB must have some expiration, you can configure any amount of time that fits your security and usability requirements with the `DURATION FOR TOKEN` clause or by configuring the `exp` claim if you are using an external token issuer.
+
+To address token expiration errors you will either have to ask your end user to authenticate again with credentials to obtain a new token, rely on a persistent authenticated WebSocket session, rely on an external identity provider like [Auth0](/docs/tutorials/integrate-auth0-as-authentication-provider) or [AWS Cognito](/docs/tutorials/integrate-aws-cognito-as-authentication-provider) or, for development purposes, test the [expimental refresh token feature](/docs/surrealql/statements/define/access/record#with-refresh-token).
+
+### Other Authentication Issues
+
+#### Slow / Expensive Authentication
+
+In SurrealDB, clients can authenticate using different methods, such as credentials (e.g. username and password), a token (i.e. JWT) and other experimental access methods like bearer keys. These access methods provide different benefits and have different performance implications. Different options are provided precisely to allow flexibility for different use cases.
+
+If you observe that authentication requests are slow or computationally (e.g. CPU, memory...) expensive, consider switching from authentication with credentials to token authentication. By default, SurrealDB verifies passwords for system users with [Argon2id](https://en.wikipedia.org/wiki/Argon2), which is a password hashing algorithm that ensures that the password verification process is slow and expensive to prevent password cracking. If you are using the [HTTP REST API](/docs/surrealdb/integration/http) to authenticate using credentials (i.e. with `Authorization: Basic ...` rather than `Authorization: Bearer ...`), this password verification process will be performed for every request. Instead, consider [authenticating once with credentials](/docs/surrealdb/integration/http#signin) to obtain a token and performing subsequent requests using that token in the `Authorization` header prefixed by `Bearer`. Token verification is a different cryptographic process that is designed to be orders of magnitude faster and cheaper.
+
+When using credentials to authenticate record users, you are able to choose the password hashing algorithm that you use in your `SIGNIN` query. If you must repeatedly authenticate using credentials and the performance impact of using Argon2id is unacceptable to your use case, you may consider using different password hashing algorithms (e.g. [Bcrypt](/docs/surrealql/functions/database/crypto#cryptobcryptcompare), [Scrypt](/docs/surrealql/functions/database/crypto#cryptoscryptcompare) or [PBKDF2](/docs/surrealql/functions/database/crypto#cryptopbkdf2compare)) that may be more efficient at the cost of diminished security against certain types of password cracking.
+
+Authentication logic that is implemented by users via the `SIGNIN`, `SIGNUP` and `AUTHENTICATION` clauses may also be costly depending on the logic implemented therein. If you are using any custom authentication logic, verify that it is not the cause for the performance cost by manually executing the query in the SurrealQL interpreter (`surreal sql`) or in Surrealist and ensuring that the time that it takes to execute is acceptable.
+
+### Requesting Authentication Support
+
+If you are not able to diagnose a specific authentication issue with the information provided on this page, you may consider asking support from the SurrealDB community. If you do so, this section describes some information that you should provide in order to help others help you with your issue. Please, only ask support directly from the developers of SurrealDB if you believe your issue may be related to a bug in SurrealDB.
+
+Before sharing any information with other SurrealDB users or the SurrealDB team, please ensure that it does not contain any sensitive data, including secrets which may be used to access sensitive data. We recommend setting up a separate SurrealDB environment with dummy data for the purposes of debugging.
+
+When requesting support with authentication, we recommend that you provide the following information:
+
+- The version of SurrealDB that you are using, which you can obtain with the `surreal version` command.
+- The command line arguments that you are using to start the SurrealDB server with the `surreal start` command.
+- The error message that your client receives when attempting to authenticate against SurrealDB.
+- The logs that are displayed on the server, running with `--log debug`, when authentication fails.
+- A description of the resources you are using to authenticate. These resources will most likely be included in the output of `INFO FOR ROOT`, `INFO FOR NAMESPACE` and `INFO FOR DATABASE`. If your authentication logic relies on data from specific records through `SIGNIN`, `SIGNUP` or `AUTHENTICATE` clauses, include the contents of those records as well.
+- A simplified proof of concept that reproduces your issue. Please, do not share the complete code that you are using to authenticate with SurrealDB. Instead, provide a minimal example that only contains the relevant elements and that does not require a specific SDK to reproduce. If possible, provide a simple request that uses the [HTTP REST API](/docs/surrealdb/integration/http#signin) (e.g. with `curl` or similar) to reproduce the error that you are encountering.
+- If you are using a token to authenticate, provide an example of a token that triggers the issue. In the case of a JWT, please include the full encoded contents of the token, not just the values of its claims.

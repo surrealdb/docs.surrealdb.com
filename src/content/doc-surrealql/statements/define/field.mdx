@@ -1,5 +1,5 @@
 ---
-sidebar_position: 5
+sidebar_position: 6
 sidebar_label: DEFINE FIELD
 title: DEFINE FIELD statement | SurrealQL
 description: The DEFINE FIELD statement allows you to instantiate a named field on a table, enabling you to set the field's achema and configuration.
@@ -21,7 +21,14 @@ The `DEFINE FIELD` statement allows you to instantiate a named field on a table,
 ```syntax title="SurrealQL Syntax"
 DEFINE FIELD [ OVERWRITE | IF NOT EXISTS ] @name ON [ TABLE ] @table
 	[ [ FLEXIBLE ] TYPE @type ]
-	[ DEFAULT @expression ]
+	[ REFERENCE 
+		[   ON DELETE REJECT | 
+			ON DELETE CASCADE | 
+			ON DELETE IGNORE |
+			ON DELETE UNSET | 
+			ON DELETE THEN @expression ]
+	]
+	[ DEFAULT [ALWAYS] @expression ]
   [ READONLY ]
 	[ VALUE @expression ]
 	[ ASSERT @expression ]
@@ -42,9 +49,37 @@ The following expression shows the simplest way to use the `DEFINE FIELD` statem
 DEFINE FIELD email ON TABLE user;
 ```
 
+The fields of an object and the items in an array can be defined individually using the `.` operator for objects, or the indexing operator for arrays.
+
+```surql
+-- Define nested object property types
+DEFINE FIELD emails.address ON TABLE user TYPE string;
+DEFINE FIELD emails.primary ON TABLE user TYPE bool;
+
+-- Define individual fields on an array
+DEFINE FIELD metadata[0] ON person TYPE datetime;
+DEFINE FIELD metadata[1] ON person TYPE int;
+```
+
 ## Defining data types
 
 The `DEFINE FIELD` statement allows you to set the data type of a field. For a full list of supported data types, see [Data types](/docs/surrealql/datamodel).
+
+From version `v2.2.0`, when defining nested fields, where both the parent and the nested fields have types defined, it is no longer possible to have mismatching types, to prevent any impossible type issues once the schema is defined.
+
+For example, the following will fail:
+
+```surql
+DEFINE FIELD OVERWRITE fd ON c TYPE { a: string, b: number };
+DEFINE FIELD OVERWRITE fd.* ON c TYPE number;
+```
+
+The above will fail with the following error:
+
+```
+Cannot set field `fd[*]` with type `number` as it mismatched with field `fd` with type `{ a: string, b: number } | { a: string, b: bool }` 
+```
+
 
 ### Simple data types
 ```surql
@@ -70,7 +105,7 @@ DEFINE FIELD user_id ON TABLE user TYPE uuid|int;
 
 ### Array type
 
-You can also set a field to have the array data type. The array data type can be used to store a list of values. You can also set the data type of the array's contents.
+You can also set a field to have the array data type. The array data type can be used to store a list of values. You can also set the data type of the array's contents, as well as the maximum number of items that it can hold.
 
 ```surql
 -- Set a field to have the array data type
@@ -81,6 +116,10 @@ DEFINE FIELD posts ON TABLE user TYPE array;
 
 -- Set a field to have the array object data type
 DEFINE FIELD emails ON TABLE user TYPE array<object>;
+
+-- Field for a block in a game showing the possible directions a character can move next.
+-- The array can contain no more than four directions
+DEFINE FIELD next_paths ON TABLE block TYPE array<"north" | "east" | "south" | "west", 4>;
 ```
 
 ### Making a field optional
@@ -101,60 +140,77 @@ DEFINE FIELD user ON TABLE POST TYPE option<record<user>>;
 
 ### Flexible data types
 
-Flexible types allow you to have `SCHEMALESS` functionality on a `SCHEMAFULL` table. This is necessary for working with nested `object` types, which by nature do not have defined fields.
+Flexible types allow you to have `SCHEMALESS` functionality on a `SCHEMAFULL` table. This is necessary for working with nested `object` types that need to be able to accept fields that have not yet been defined.
 
 ```surql
 DEFINE TABLE user SCHEMAFULL;
 DEFINE FIELD name ON TABLE user TYPE string;
 DEFINE FIELD metadata ON TABLE user FLEXIBLE TYPE object;
+DEFINE FIELD metadata.user_id ON TABLE TYPE int;
 ```
 
 Taking the following `CREATE` statement:
 
 ```surql
-CREATE user SET
+CREATE ONLY user SET
     name = "User1",
     metadata = {
+        user_id: 8876687,
         country_code: "ee",
         time_zone: "EEST",
         age: 25
 };
 ```
 
-Without `FLEXIBLE`, the database will recognize that an object has been inserted, but has no way of knowing whether the fields inside conform to the strict schema. As a result, `metadata` will show up as an empty object. Note the difference between this and the `name` field. The `CREATE` statement will simply err if a string for `name` is not provided, while `metadata` will not err because _some_ object has been passed in.
+Without `FLEXIBLE`, the `metadata` field will effectively be a `SCHEMAFULL` object with only a single defined field and thus unable to hold any of the other values that the user attempted to pass in.
 
 ```surql
-[
-    {
-        "id": "user:6nv0vymyutpvajzrfjuw",
-        "metadata": {},
-        "name": "User1"
-    }
-]
+{
+	id: user:ke8w4u38gbm3ofp2u8fb,
+	metadata: {
+		user_id: 8876687
+	},
+	name: 'User1'
+}
 ```
 
-With `FLEXIBLE`, the output will be as expected as the schema now flexibly allows any sort of object to be a field on the `user` table.
+With `FLEXIBLE`, the output will be as expected as the schema now allows any sort of object to be a field on the `user` table — as long as values for `name` and `metadata.user_id` are present.
 
 ```surql title="Response"
-[
-    {
-        "id": "user:4a9amtnwzrvbya6p9l8x",
-        "metadata": {
-            "age": 25,
-            "country_code": "ee",
-            "time_zone": "EEST"
-        },
-        "name": "User1"
-    }
-]
+{
+	id: user:lsdk473e279oik1k484b,
+	metadata: {
+		age: 25,
+		country_code: 'ee',
+		time_zone: 'EEST',
+		user_id: 8876687
+	},
+	name: 'User1'
+}
 ```
 
-The fields of an object can be defined individually using the `.` operator.
+The same `user` record without any defined fields or the `FLEXIBLE` clause would not fail, but none of the data besides the ID for the `user` record would be recognized.
 
 ```surql
--- Define nested object property types
-DEFINE FIELD emails.address ON TABLE user TYPE string;
-DEFINE FIELD emails.primary ON TABLE user TYPE bool;
+DEFINE TABLE user SCHEMAFULL;
+DEFINE FIELD metadata ON TABLE user TYPE object;
+
+CREATE ONLY user SET
+    name = "User1",
+    metadata = {
+        user_id: 8876687,
+        country_code: "ee",
+        time_zone: "EEST",
+        age: 25
+};
+```
+
+```surql title="Response"
+
+{
+	id: user:6qjj67lh6z4y1cvpsalx,
+	metadata: {}
+}
 ```
 
 ### Using the `DEFAULT` clause to set a default value
@@ -166,6 +222,64 @@ You can set a default value for a field using the `DEFAULT` clause. The default 
 DEFINE FIELD locked ON TABLE user TYPE bool
 -- Set a default value if empty
 DEFAULT false;
+```
+
+### Using the `DEFAULT` and `ALWAYS` clause
+
+<Since v="v2.2.0" />
+
+In addition to the `DEFAULT` clause, you can use the `DEFAULT ALWAYS` clause to set a default value for a field. The `ALWAYS` keyword indicates that the `DEFAULT` clause is used not only on `CREATE`, but also on `UPDATE` if the value is empty (NONE).
+
+
+```surql
+DEFINE TABLE product SCHEMAFULL;
+-- Set a default value of 123.456 for the primary field
+DEFINE FIELD primary ON product TYPE number DEFAULT ALWAYS 123.456;
+```
+
+With the above definition, the `primary` field will be set to `123.456` when a new `product` is created without a value for the `primary` field or with a value of `NONE`, and when an existing `product` is updated if the value is specified the result will be the new value. 
+
+In the case of `NULL` or a mismatching type, an error will be returned.
+
+```surql
+-- This will return an error
+CREATE product:test SET primary = NULL;
+
+-- result 
+Found NULL for field `primary`, with record `product:test`, but expected a number
+```
+
+On the other hand, if a valid number is provided during creation or update, that number will be used instead of the default value. In this case, `123.456`.
+
+```surql
+-- This will set the value of the `primary` field to `123.456`
+CREATE product:test;
+
+-- This will set the value of the `primary` field to `463.456`
+UPSERT product:test SET primary = 463.456;
+
+-- This will set the value of the `primary` field to `123.456`
+UPSERT product:test SET primary = NONE;
+
+```
+
+```surql title="Query"
+DEFINE TABLE post SCHEMAFULL;
+DEFINE FIELD tags ON post TYPE array<object> DEFAULT ALWAYS [];
+DEFINE FIELD tags.*.color ON post TYPE string DEFAULT ALWAYS 'red';
+DEFINE FIELD tags.*.name ON post TYPE string;
+--
+CREATE post:test;
+UPSERT post:test SET tags += { name: 'test' };
+UPSERT post:test SET tags += { name: 'test', color: 'blue' };
+```
+
+```surql title="Response"
+[{ id: post:test, tags: [] }]
+
+[{ id: post:test, tags: [{ color: 'red', name: 'test' }] }]
+
+[{ id: post:test, tags: [{ color: 'red', name: 'test' }, { color: 'blue', name: 'test' }] }]
 ```
 
 ### Using the `VALUE` clause to set a field's value
@@ -234,13 +348,30 @@ DEFINE FIELD email ON TABLE user TYPE string
 
 You can take your field definitions even further by using asserts. Assert can be used to ensure that your data remains consistent. For example you can use asserts to ensure that a field is always a valid email address, or that a number is always positive.
 
-### Email is required
-
 ```surql
 -- Give the user table an email field. Store it in a string
 DEFINE FIELD email ON TABLE user TYPE string
   -- Check if the value is a properly formatted email address
   ASSERT string::is::email($value);
+```
+
+As the `ASSERT` clause expects an expression that returns a boolean, an assertion with a custom message can be manually created by returning `true` in one case and using a [`THROW`](/docs/surrealql/statements/throw) clause otherwise.
+
+```surql
+DEFINE FIELD num ON data TYPE int ASSERT {
+    IF $input % 2 = 0 {
+        RETURN true
+    } ELSE {
+        THROW "Tried to make a " + <string>$this + " but `num` field requires an even number"
+    }
+};
+
+CREATE data SET num = 11;
+```
+
+```surql title="Error output"
+'An error occurred: Tried to make a { id: data:syoz25pra8hc0af980tu, num: 11 }
+but `num` field requires an even number'
 ```
 
 ### Making a field `READONLY`
@@ -372,18 +503,82 @@ DEFINE FIELD countrycode ON user TYPE string
 
 ## Interacting with other fields of the same record
 
-While a `DEFINE TABLE` statement represents a template for any subsequent records to be created, a `DEFINE FIELD` statement pertains to concrete field data of a record. As such, access to both the field itself and its parent record are granted inside `DEFINE FIELD` through the [`$value`](/docs/surrealql/parameters#value) and [`$this`](/docs/surrealql/parameters#parent-this) parameters, respectively.
+While a `DEFINE TABLE` statement represents a template for any subsequent records to be created, a `DEFINE FIELD` statement pertains to concrete field data of a record. As such, a `DEFINE FIELD` statement gives access to the record's other fields through their names, as well as the current field through the [`$value`](/docs/surrealql/parameters#value) parameter.
 
 ```surql
 DEFINE TABLE person SCHEMAFULL;
 
 DEFINE FIELD first_name ON TABLE person TYPE string VALUE string::lowercase($value);
 DEFINE FIELD last_name  ON TABLE person TYPE string VALUE string::lowercase($value);
-DEFINE FIELD name       ON TABLE person             VALUE $this.first_name + ' ' + $this.last_name;
+DEFINE FIELD name       ON TABLE person             VALUE first_name + ' ' + last_name;
 
 // Creates a `person` with the name "bob bobson"
 CREATE person SET first_name = "BOB", last_name = "BOBSON";
 ```
+
+The `$this` parameter gives access to the entire record on which a field is defined.
+
+```surql
+DEFINE FIELD extra_self ON TABLE person VALUE $this;
+CREATE person:one SET name = "Little person", age = 6;
+```
+
+```surql title="Output"
+[
+	{
+		age: 6,
+		extra_self: {
+			age: 6,
+			id: person:one,
+			name: 'Person'
+		},
+		id: person:one,
+		name: 'Person'
+	}
+]
+```
+
+In practice, using `$this` to access the full record is useful when a field is defined as an expression, especially a [future](/docs/surrealql/datamodel/futures) which is computed every time the field is accessed.
+
+```surql
+DEFINE FIELD followers
+	ON TABLE person
+	VALUE <future> { (SELECT VALUE <-follows<-person.id FROM ONLY $this) };
+
+CREATE person:one, person:two, person:three;
+
+RELATE person:one->follows->person:three;
+SELECT * FROM person:three;
+
+RELATE person:two->follows->person:three;
+SELECT * FROM person:three;
+```
+
+```surql title="Output of SELECT statements"
+-------- Query --------
+
+[
+	{
+		followers: [
+			person:one
+		],
+		id: person:three
+	}
+]
+
+-------- Query --------
+[
+	{
+		followers: [
+			person:one,
+			person:two
+		],
+		id: person:three
+	}
+]
+```
+
+## Order of operations when setting a field's value
 
 As `DEFINE FIELD` statements are computed in alphabetical order, be sure to keep this in mind when using fields that rely on the values of others.
 
@@ -394,7 +589,7 @@ DEFINE TABLE person SCHEMAFULL;
 
 DEFINE FIELD first_name ON TABLE person TYPE string VALUE string::lowercase($value);
 DEFINE FIELD last_name  ON TABLE person TYPE string VALUE string::lowercase($value);
-DEFINE FIELD full_name  ON TABLE person             VALUE $this.first_name + ' ' + $this.last_name;
+DEFINE FIELD full_name  ON TABLE person             VALUE first_name + ' ' + last_name;
 
 // Creates a `person` with `full_name` of "bob BOBSON", not "bob bobson"
 CREATE person SET first_name = "Bob", last_name = "Bobson";
@@ -431,7 +626,7 @@ CREATE order SET coffee = "small";
 "Found 'small' for field `coffee`, with record `order:juq3twfic1s6gxw9ljgj`, but expected a 'regular' | 'large' | { special_order: string }"
 ```
 
-One more example of a literal containing settings for a [full text search](/docs/surrealdb/reference-guide/full-text-search) filter:
+One more example of a literal containing settings for a [full text search](/docs/surrealdb/models/full-text-search) filter:
 
 ```surql
 DEFINE FIELD filter ON TABLE search_settings TYPE
@@ -443,3 +638,50 @@ DEFINE FIELD filter ON TABLE search_settings TYPE
     | { type: "Snowball", language: string }
     | { type: "Uppercase" };
 ```
+
+
+## Defining a `TYPE` for the `id` field
+
+The `DEFINE FIELD` statement can be defined for the `id` field to specify the acceptable types of IDs, including complex record IDs.
+
+```surql
+DEFINE FIELD id ON TABLE something TYPE string;
+DEFINE FIELD id ON TABLE something TYPE int;
+DEFINE FIELD id ON TABLE something TYPE uuid;
+
+-- using multiple data types for a Complex Record ID
+DEFINE FIELD id ON TABLE log TYPE [record, "info" | "warn" | "error", datetime];
+
+-- Incorrect ID format, generates an error
+CREATE log SET level = "info", time = time::now(), message = "Database started";
+
+-- Acceptable ID format
+CREATE log:[user:one, "info", time::now()] SET message = "Database started";
+```
+
+```surql title="Output"
+-------- Query --------
+
+"Found 'c6zdrbyuo1xmgm30stl0' for field `id`, with record `log:c6zdrbyuo1xmgm30stl0`, but expected a [record, 'info' | 'warn' | 'error', datetime]"
+
+-------- Query --------
+
+[
+	{
+		id: log:[
+			user:one,
+			'info',
+			d'2025-03-25T03:36:16.323Z'
+		],
+		message: 'Database started'
+	}
+]
+```
+
+## Defining a reference
+
+<Since v="v2.2.0" />
+
+A field that is a record link (type `record`, `option<record>`, `array<record<person>>`, and so on) can be defined as a `REFERENCE`. If this clause is used, any linked to record will be able to define a field of its own of type `references` which will be aware of the incoming links.
+
+For more information, see [the page in the datamodel section on references](/docs/surrealql/datamodel/references).

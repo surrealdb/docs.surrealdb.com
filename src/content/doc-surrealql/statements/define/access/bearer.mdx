@@ -1,0 +1,216 @@
+---
+sidebar_position: 10
+sidebar_label: BEARER 
+title: DEFINE ACCESS ... TYPE BEARER statement | SurrealQL
+description: A bearer access method allows accessing SurrealDB using a bearer key.
+---
+
+import Since from '@components/shared/Since.astro'
+
+# `DEFINE ACCESS ... TYPE BEARER`
+
+
+> [!CAUTION]
+> Currently, the `BEARER` access method is an experimental feature intended to be used for validating its suitability and security. As such, it may be subject to breaking changes and may present unidentified security issues. Do not rely on this feature in production applications. To enable this and other experimental features related to bearer access, set the `SURREAL_CAPS_ALLOW_EXPERIMENTAL` [environment variable](/docs/surrealdb/cli/env) to `"bearer_access"`.
+
+A bearer access method allows generating bearer grants with an associated key that can be used to access SurrealDB as a specific [system user](/docs/surrealdb/security/authentication#system-users) or [record user](/docs/surrealdb/security/authentication#record-users). Bearer grants allow other systems and software to authenticate with SurrealDB using a secure and unique credential that can be [audited](/docs/surrealql/statements/access#show) and [revoked](/docs/surrealql/statements/access#revoke) at any time.
+
+Allowing access to SurrealDB using a bearer access method requires creating grants associated with that access method. This can be done using the [`GRANT`](/docs/surrealql/statements/access#grant) clause of the [`ACCESS`](/docs/surrealql/statements/access) statement.
+
+After creating a grant for a subject (i.e. a [system user](/docs/surrealdb/security/authentication#system-users) or a [record user](/docs/surrealdb/security/authentication#record-users)) with a bearer access method, a bearer key will be returned. This bearer key can be used to sign in as the subject of the grant without using its password or any other credentials. As with other credentials in SurrealDB, signing in with a bearer key will return a JWT, which can be used to perform authenticated operations or establish a persistent [authenticated session](/docs/surrealdb/security/authentication). This makes bearer keys most suitable for automations and other service-to-service authentication use cases that require interacting with SurrealDB in an authenticated context by providing stronger security guarantees than passwords and removing the complexity of having to work with JWT directly.
+
+## Requirements
+
+- You must be authenticated as a [root, namespace or database user](/docs/surrealql/statements/define/user) before you can define a bearer access method.
+
+## Statement syntax
+
+```syntax title="SurrealQL Syntax"
+DEFINE ACCESS [ OVERWRITE | IF NOT EXISTS ] @name
+  ON [ NAMESPACE | DATABASE ]
+  TYPE BEARER FOR [ USER | RECORD ]
+  [ AUTHENTICATE @expression ]
+  [ DURATION
+    [ FOR GRANT @duration ]
+    [ FOR TOKEN @duration ]
+    [ FOR SESSION @duration ]
+  ]
+```
+
+## `FOR USER`
+
+Defining a bearer access method `FOR USER` will ensure that grants can only be created with a [system user](/docs/surrealdb/security/authentication#system-users) as its subject. This application is useful for integrations that require administering SurrealDB at the `ROOT`, `NAMESPACE` or `DATABASE` level with the roles with which the user has been defined with [`DEFINE USER`](/docs/surrealql/statements/define/user). 
+
+### Example
+
+```surql
+DEFINE ACCESS api ON DATABASE TYPE USER DURATION FOR GRANT 30d, FOR TOKEN 15m, FOR SESSION 12h;
+```
+
+In this example, grants created with this bearer access method will be valid for 30 days. After signing in with any of those grants, SurrealDB will return a token that will be valid for 15 minutes. This token can be used to establish an authenticated SurrealDB session valid for 12 hours. Grants created with this access method will only allow a system user as its subject.
+
+```surql
+-- Define system user that access will be granted to
+DEFINE USER automation ON DATABASE PASSWORD 'secret' ROLES VIEWER;
+-- Define bearer access method to generate API keys for system users
+DEFINE ACCESS api ON DATABASE TYPE BEARER FOR USER DURATION FOR GRANT 10d;
+-- Generate bearer grant to be used by a specific automation
+ACCESS api GRANT FOR USER automation;
+```
+
+```surql title="Response"
+-- Query 1
+NONE
+-- Query 2
+NONE
+-- Query 3
+{
+        ac: 'api',
+        creation: d'2024-12-16T16:15:51.517384293Z',
+        expiration: d'2024-12-26T16:15:51.517386053Z',
+        grant: {
+                id: 'BNb2pS0GmaJz',
+                key: 'surreal-bearer-BNb2pS0GmaJz-5eTfQ5uEu8jbRb3oblqVMAt8'
+        },
+        id: 'BNb2pS0GmaJz',
+        revocation: NONE,
+        subject: {
+                user: 'automation'
+        },
+        type: 'bearer'
+}
+```
+
+The key value returned in the grant object is the bearer key, which can be used to sign in as the `automation` user without using its password.
+
+Here are some examples on how to do that using the [JavaScript SDK](/docs/sdk/javascript) or a raw [HTTP request](/docs/surrealdb/integration/http).
+
+#### JavaScript SDK
+
+```js
+const db = new Surreal();
+db.connect('ws://localhost:8000/rpc', {
+	namespace: 'test',
+	database: 'test',
+});
+
+db.signin({
+	namespace: 'test',
+	database: 'test',
+
+	// Provide the name of the access method
+	access: 'api',
+
+	// Provide the bearer key in the "key" variable
+	variables: {
+    		key: 'surreal-bearer-BNb2pS0GmaJz-5eTfQ5uEu8jbRb3oblqVMAt8',
+	}
+});
+```
+
+#### HTTP Request
+
+```bash
+curl -X POST \
+	-H "Accept: application/json" \
+	-d '{"NS":"test", "DB":"test", "AC":"api", "key":"surreal-bearer-BNb2pS0GmaJz-5eTfQ5uEu8jbRb3oblqVMAt8"}' \
+	http://localhost:8000/signin
+```
+
+## `FOR RECORD`
+
+Defining a bearer access method `FOR RECORD` will ensure that grants can only be created with a [record user](/docs/surrealdb/security/authentication#record-users) as its subject. This application is useful for integrations that require accessing only some data in a specific SurrealDB database and in accordance with existing `PERMISSIONS` clauses. Bearer access can only be defined `FOR RECORD` if a database is selected and using `ON DATABASE`.
+
+```surql
+-- Create record representing a user
+CREATE user:1 CONTENT { name: "tobie" };
+-- Define bearer access method to generate API keys for record users
+DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD DURATION FOR GRANT 10d;
+-- Generate bearer grant to be used by a specific automation belonging to the user
+ACCESS api GRANT FOR RECORD user:1;
+```
+
+```surql title="Response"
+-- Query 1
+[
+        {
+                id: user:1,
+                name: 'tobie'
+        }
+]
+-- Query 2
+NONE
+-- Query 3
+{
+        ac: 'api',
+        creation: d'2024-12-17T10:36:09.215762475Z',
+        expiration: d'2024-12-27T10:36:09.216227523Z',
+        grant: {
+                id: 'NJ2I2d7OXxN9',
+                key: 'surreal-bearer-NJ2I2d7OXxN9-Oa5LqF36IzfURpo6Bhxy9WMF'
+        },
+        id: 'NJ2I2d7OXxN9',
+        revocation: NONE,
+        subject: {
+                record: user:1
+        },
+        type: 'bearer'
+}
+```
+
+The key value returned in the grant object is the bearer key, which can be used to sign in as the `user:1` record in SurrealDB.
+
+Here are some examples on how to do that using the JavaScript SDK or a raw HTTP request.
+
+#### JavaScript SDK
+
+```js
+const db = new Surreal();
+db.connect('ws://localhost:8000/rpc', {
+	namespace: 'test',
+	database: 'test',
+});
+
+db.signin({
+	namespace: 'test',
+	database: 'test',
+
+	// Provide the name of the access method
+	access: 'api',
+
+	// Provide the bearer key in the "key" variable
+	variables: {
+    		key: 'surreal-bearer-NJ2I2d7OXxN9-Oa5LqF36IzfURpo6Bhxy9WMF',
+	}
+});
+```
+
+#### HTTP Request
+
+```bash
+curl -X POST \
+	-H "Accept: application/json" \
+	-d '{"NS":"test", "DB":"test", "AC":"api", "key":"surreal-bearer-NJ2I2d7OXxN9-Oa5LqF36IzfURpo6Bhxy9WMF"}' \
+	http://localhost:8000/signin
+```
+
+
+## Using `IF NOT EXISTS` clause
+
+The `IF NOT EXISTS` clause can be used to define an access method of type BEARER only if it does not already exist. You should use the `IF NOT EXISTS` clause when defining an access method in SurrealDB if you want to ensure that the access method is only created if it does not already exist. If the access method already exists, the `DEFINE ACCESS` statement will return an error.
+
+It's particularly useful when you want to safely attempt to define an access method without manually checking its existence first.
+
+```surql
+-- Create a BEARER access method for the example database if it does not already exist
+DEFINE ACCESS IF NOT EXISTS example ON DATABASE TYPE BEARER;
+```
+
+## Using `OVERWRITE` clause
+
+The `OVERWRITE` clause can be used to define an access method of type BEARER and overwrite an existing one if it already exists. You should use the `OVERWRITE` clause when you want to modify an existing access method definition. If the access method already exists, the `DEFINE ACCESS` statement will overwrite the existing access method definition with the new one.
+
+```surql
+-- Create a BEARER access method for the example database and overwrite if it already exists
+DEFINE ACCESS OVERWRITE example ON DATABASE TYPE BEARER;
+```

@@ -1,5 +1,4 @@
 import mdx from '@astrojs/mdx';
-import partytown from '@astrojs/partytown';
 import solidJs from '@astrojs/solid-js';
 import tailwind from '@astrojs/tailwind';
 import compress from 'astro-compress';
@@ -32,7 +31,6 @@ export default defineConfig({
         tailwind({
             nesting: true,
         }),
-        partytown(),
         compress({
             Image: false,
         }),

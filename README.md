@@ -100,6 +100,14 @@ The following command builds and generates static content into the `build` direc
 bun run build
 ```
 
+## Adding a new doc
+
+**READ VERY CAREFULLY**
+
+When adding a new doc, you MUST update redirect logic <br />
+If this does not happen, you'll get endless redirects :D <br />
+In: project://aws/viewer-request/index.js#4
+
 ## File structure
 
 To contribute to the documentation, most of your changes will be made to the `src/content` directory. Each section of the documentation has its own subdirectory, and each page is an MDX file. 
