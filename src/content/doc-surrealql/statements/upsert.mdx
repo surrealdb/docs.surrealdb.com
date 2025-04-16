@@ -194,10 +194,10 @@ UPSERT person:test SET name = 'Billy' WHERE name = 'Jaime';
 [Unique indexes](/docs/surrealql/statements/define/indexes#unique-index) can be used to ensure that no field or combination of fields is ever present more than once. For example, a game might have a rule that duplicate names can exist, but not within the same class.
 
 ```surql
-DEFINE INDEX unique_key ON TABLE user FIELDS name, member_of UNIQUE;
-DEFINE FIELD official_name ON TABLE user VALUE name + " the " + the;
-CREATE user SET name = "Billy", the = "wizard", metadata = { likes: ["strawberries"] };
-CREATE user SET name = "Billy", the = "wizard", metadata = { likes: ["strawberries", "fields"] };
+DEFINE INDEX unique_key ON TABLE user FIELDS name, class UNIQUE;
+DEFINE FIELD official_name ON TABLE user VALUE name + " the " + class;
+CREATE user SET name = "Billy", class = "wizard", metadata = { likes: ["strawberries"] };
+CREATE user SET name = "Billy", class = "wizard", metadata = { likes: ["strawberries", "fields"] };
 ```
 
 As the output shows, the unique index prevents the creation of a second user with the name and class as the first.
@@ -206,7 +206,7 @@ As the output shows, the unique index prevents the creation of a second user wit
 -------- Query --------
 [
 	{
-		id: user:88helr5y62nudjsst9e1,
+		id: user:j2ecdb2tf4ou29mr0yp5,
 		metadata: {
 			likes: [
 				'strawberries'
@@ -214,27 +214,64 @@ As the output shows, the unique index prevents the creation of a second user wit
 		},
 		name: 'Billy',
 		official_name: 'Billy the wizard',
-		the: 'wizard'
+		class: 'wizard'
 	}
 ]
 
 -------- Query --------
-"Database index `unique_key` already contains ['Billy', NONE], with record `user:88helr5y62nudjsst9e1`"
+"Database index `unique_key` already contains ['Billy', 'wizard'],
+with record `user:j2ecdb2tf4ou29mr0yp5`"
 ```
 
-To actually update the record using `UPDATE`, a `WHERE` clause would need to be added. This performs a scan on the `user` table to check for all records that match the `WHERE` clause.
+To change an existing record's `metadata` field to the value `{ likes: ["strawberries", "fields"] }`, an `UPDATE` with a `WHERE` can be used. This performs a scan on the `user` table to check for all records that match the `WHERE` clause.
 
 ```surql
-UPDATE user SET metadata = { likes: ["strawberries", "fields"] } WHERE name = "Billy" AND the = "wizard";
+UPDATE user SET
+	metadata = { likes: ["strawberries", "fields"] }
+WHERE
+	name = "Billy" AND
+	class = "wizard";
 ```
 
-However, this method is inefficient if you only need to update one record and have a unique index that can be used instead. Instead, an `UPSERT` statement can be used. The database will recognize that the user with `name = "Billy"` and `the = "Wizard"` corresponds to the record `user:j2ecdb2tf4ou29mr0yp5` and update it without needing to scan the entire `user` table.
+However, a much more efficient method is available if you only need to update one record and have a unique index that can be used instead. This optimization is available when using `UPSERT` and a unique index, because the statement will always access the index in any case to first see if the record is a duplicate.
 
 ```surql
-DEFINE INDEX unique_key ON TABLE user FIELDS name, member_of UNIQUE;
-DEFINE FIELD official_name ON TABLE user VALUE name + " the " + the;
-UPSERT user SET name = "Billy", the = "wizard", metadata = { likes: ["strawberries"] };
-UPSERT user SET name = "Billy", the = "wizard", metadata = { likes: ["strawberries", "fields"] };
+-- Checks the index for ["Mandy", "wizard"], no existing
+-- record found so no problem
+UPSERT user SET name = "Mandy", class = "wizard";
+
+-- Fails because statement tries to upsert a new user:mandy
+-- on top of the previous randomly generated one
+UPSERT user:mandy SET 
+	name = "Mandy",
+	class = "wizard",
+	metadata = { likes: ["strawberries" ]};
+```
+
+```surql title="Output"
+-------- Query --------
+
+[
+	{
+		class: 'wizard',
+		id: user:kdvh401gofckvvy6nbiw,
+		name: 'Mandy',
+		official_name: 'Mandy the wizard'
+	}
+]
+
+-------- Query --------
+
+"Database index `unique_key` already contains ['Mandy', 'wizard'], with record `user:kdvh401gofckvvy6nbiw`"
+```
+
+Since an `UPSERT` statement already checks unique indexes by default, it uses this to recognize that the user with `name = "Billy"` and `the = "Wizard"` corresponds to the record `user:j2ecdb2tf4ou29mr0yp5` and update it without needing to scan the entire `user` table.
+
+```surql
+UPSERT user SET
+	name = "Billy",
+	class = "wizard",
+	metadata = { likes: ["strawberries", "fields"] };
 ```
 
 ```surql title="Output"
@@ -249,45 +286,36 @@ UPSERT user SET name = "Billy", the = "wizard", metadata = { likes: ["strawberri
 		},
 		name: 'Billy',
 		official_name: 'Billy the wizard',
-		the: 'wizard'
-	}
-]
--------- Query --------
-[
-	{
-		id: user:j2ecdb2tf4ou29mr0yp5,
-		metadata: {
-			likes: [
-				'strawberries',
-				'fields'
-			]
-		},
-		name: 'Billy',
-		official_name: 'Billy the wizard',
-		the: 'wizard'
+		class: 'wizard'
 	}
 ]
 ```
 
-Unsurprisingly, an error will occur in case of an `UPSERT` on a table with a unique index if it tries to create a specific record that would violate the index.
+To compare the performance difference between using a `WHERE` clause and a unique index yourself, here is an example that creates a crowded field of 50000 `user` records, followed by one more `user` named "Billy". An `UPDATE` using `WHERE name = "Billy" AND class = "wizard"` requires a full table scan, while an `UPSERT` using the two fields used to build the index is much faster.
 
 ```surql
-UPSERT user:billy SET name = "Billy", the = "wizard", metadata = { likes: ["strawberries", "fields"] };
-```
+DEFINE INDEX unique_key ON TABLE user FIELDS name, class UNIQUE;
+DEFINE FIELD official_name ON TABLE user VALUE name + " the " + class;
 
-```surql title="Output"
-"Database index `unique_key` already contains ['Billy', NONE], with record `user:j2ecdb2tf4ou29mr0yp5`"
-```
+-- Add 50000 users to fill up the database
+FOR $i IN <array>0..50000 { CREATE user SET name = <string>$i, class = <string>$i; };
 
-To compare the performance difference between using a `WHERE` clause and a unique index yourself, here is an example that creates a crowded field of 50000 `user` records, followed by one more `user` named "Billy". An `UPDATE` using `WHERE name = "Billy" AND the = "wizard"` requires a full table scan, while an `UPSERT` using the two fields used to build the index is much faster.
+-- Create Billy, one of 50,001 records
+CREATE user SET name = "Billy", class = "wizard";
 
-```surql
-DEFINE INDEX unique_key ON TABLE user FIELDS name, member_of UNIQUE;
-DEFINE FIELD official_name ON TABLE user VALUE name + " the " + the;
-FOR $i IN <array>0..50000 { CREATE user SET name = <string>$i, the = <string>$i; };
-CREATE user SET name = "Billy", the = "wizard";
-UPDATE user SET interests = ["music"] WHERE name = "Billy" AND the = "wizard";
-UPSERT user CONTENT { name: "Billy", the: "wizard", interests: ["music", "travel"] };
+-- Updating Billy requires a table scan
+UPDATE user SET
+	interests += "music"
+WHERE
+	name = "Billy" AND
+	class = "wizard";
+
+-- But UPSERT uses 'name' and 'class' to check the index anyway,
+-- and thus can use it to access the record without a scan
+UPSERT user SET
+	name = "Billy",
+	class = "wizard",
+	interests += "travel";
 ```
 
 ## Using the ONLY clause
