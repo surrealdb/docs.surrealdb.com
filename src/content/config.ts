@@ -13,6 +13,14 @@ const abstractDoc = defineCollection({
         }),
 });
 
+///////////////////////////////////////////////////////////
+//                                                       //
+//           !!!!!  READ VERY CAREFULLY  !!!!!           //
+// When adding a new doc, you MUST update redirect logic //
+// In: project://aws/viewer-request/index.js#4           //
+//                                                       //
+///////////////////////////////////////////////////////////
+
 export const docs = [
     'surrealdb',
     'cloud',
