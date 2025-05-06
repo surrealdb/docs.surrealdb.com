@@ -10,9 +10,8 @@ const __astro = path.join(__dist, '_astro');
 
 const scripts = [
     'https://snap.licdn.com/li.lms-analytics/insight.min.js',
-    'https://www.clarity.ms/tag/idmjleqtib',
-    'https://www.googletagmanager.com/gtag/js?id=G-J1NWM32T1V',
     'https://static.ads-twitter.com/uwt.js',
+    'https://surrealdb.com/data/script.js',
 ];
 
 await checkBrokenLinks();
