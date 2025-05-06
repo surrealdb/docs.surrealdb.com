@@ -143,6 +143,14 @@ function compute(input) {
 	// Fixed redirects
 	if (redirects[path]) path = redirects[path];
 
+	// Convert underscores to hyphens in any path
+	if (path.includes('_')) {
+		const newPath = path.replace(/_/g, '-');
+		if (newPath !== path) {
+			path = newPath;
+		}
+	}
+
 	// Check that the URL points to a valid document
 	// See top of file for more information
 	if (path.startsWith('/docs/')) {
