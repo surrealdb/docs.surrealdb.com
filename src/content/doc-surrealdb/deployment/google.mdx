@@ -268,3 +268,242 @@ helm uninstall surrealdb-tikv
 helm -n tidb-operator uninstall tidb-operator
 gcloud container clusters delete surrealdb-guide --region REGION --project PROJECT_ID
 ```
+
+
+# Deploy SurrealDB + TiKV on **any** Kubernetes (with GKE Autopilot as the default)
+
+This article will guide you through the process of setting up a highly available SurrealDB cluster backed by TiKV on a GKE Autopilot cluster. It is a parameter‑driven guide, so you only edit a handful of variables to deploy the cluster.
+
+
+
+<table>
+  <thead>
+    <tr>
+      <th>Variable</th>
+      <th>Default</th>
+      <th>Purpose</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>PROJECT_ID</code></td>
+      <td>—</td>
+      <td>Your GCP project (required for GKE)</td>
+    </tr>
+    <tr>
+      <td><code>REGION</code></td>
+      <td><code>europe‑west2</code></td>
+      <td>GKE cluster region</td>
+    </tr>
+    <tr>
+      <td><code>CLUSTER_NAME</code></td>
+      <td><code>surrealdb-guide</code></td>
+      <td>Cluster name</td>
+    </tr>
+    <tr>
+      <td><code>TIDB_VERSION</code></td>
+      <td><code>v1.5.0</code></td>
+      <td>TiDB Operator & CRD version</td>
+    </tr>
+    <tr>
+      <td><code>SURDB_TAG</code></td>
+      <td><code>1.5.2</code></td>
+      <td>SurrealDB Docker tag</td>
+    </tr>
+    <tr>
+      <td><code>STORAGE_CLASS</code></td>
+      <td><code>premium-rwo</code></td>
+      <td>StorageClass used by TiKV</td>
+    </tr>
+  </tbody>
+</table>
+
+```bash
+# Set variables ONCE
+export PROJECT_ID=<your‑gcp‑project>
+export REGION=europe-west2
+export CLUSTER_NAME=surrealdb-guide
+export TIDB_VERSION=v1.5.0
+export SURDB_TAG=1.5.2
+export STORAGE_CLASS=premium-rwo
+````
+
+##  Create / attach to the Kubernetes cluster
+
+GKE Autopilot (recommended)
+
+```bash
+# Authenticate & project
+gcloud config set project "$PROJECT_ID"
+
+# Create the Autopilot cluster (no node sizing needed)
+gcloud container clusters create-auto "$CLUSTER_NAME" \
+  --region "$REGION"
+
+# Kube‑config
+gcloud container clusters get-credentials "$CLUSTER_NAME" \
+  --region "$REGION"
+```
+
+
+Bring‑your‑own cluster
+
+> Skip this step if you already have a Kubernetes ≥ 1.27 cluster with:
+>
+> * LoadBalancer service type
+> * A default `StorageClass` (or set `STORAGE_CLASS` above)
+
+
+## Install TiDB Operator (manages TiKV)
+
+```bash
+# CRDs
+kubectl apply -f \
+  "https://raw.githubusercontent.com/pingcap/tidb-operator/${TIDB_VERSION}/manifests/crd.yaml"
+
+# Helm chart
+helm repo add pingcap https://charts.pingcap.org
+helm repo update
+helm upgrade --install tidb-operator pingcap/tidb-operator \
+  --namespace tidb-operator --create-namespace \
+  --version "$TIDB_VERSION"
+```
+
+
+## Deploy the TiKV cluster
+
+Save **`tikv-cluster.yaml.tpl`**:
+
+```yaml
+apiVersion: pingcap.com/v1alpha1
+kind: TidbCluster
+metadata:
+  name: sdb-datastore
+spec:
+  version: v6.5.0
+  timezone: UTC
+  pvReclaimPolicy: Delete
+  enableDynamicConfiguration: true
+  schedulerName: default-scheduler
+
+  pd:
+    baseImage: pingcap/pd
+    replicas: 3
+    storageClassName: ${STORAGE_CLASS}
+    requests:
+      cpu: 500m
+      memory: 1Gi
+      storage: 10Gi
+
+  tikv:
+    baseImage: pingcap/tikv
+    replicas: 3
+    storageClassName: ${STORAGE_CLASS}
+    requests:
+      cpu: 1
+      memory: 2Gi
+      storage: 10Gi
+
+  tidb:
+    replicas: 0
+```
+
+Then apply it with your env vars:
+
+```bash
+envsubst < tikv-cluster.yaml.tpl | kubectl apply -f -
+kubectl wait --for=condition=Ready tidbcluster/sdb-datastore --timeout=15m
+```
+
+
+## Install SurrealDB (Helm values file)
+
+Create `surreal-values.yaml`:
+
+```yaml
+surrealdb:
+  path: "tikv://sdb-datastore-pd:2379"
+  auth: false                 # toggled in step 5
+image:
+  tag: "${SURDB_TAG}"
+ingress:
+  enabled: true
+```
+
+Install:
+
+```bash
+helm repo add surrealdb https://helm.surrealdb.com
+helm repo update
+helm upgrade --install surrealdb-tikv surrealdb/surrealdb \
+  -f surreal-values.yaml
+```
+
+Wait for the ingress to receive an external IP:
+
+```bash
+kubectl get ingress surrealdb-tikv -w
+export SURDB_URL="http://$(kubectl get ingress surrealdb-tikv \
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+```
+
+
+## Bootstrap SurrealDB credentials
+
+```bash
+# Connect unauthenticated (one‑time)
+surreal sql -e "$SURDB_URL"
+
+# Create a root user
+> DEFINE USER root ON ROOT PASSWORD 'StrongSecretPassword!' ROLES OWNER;
+```
+
+Now re‑enable auth:
+
+```bash
+helm upgrade surrealdb-tikv surrealdb/surrealdb \
+  -f surreal-values.yaml \
+  --set surrealdb.auth=true
+```
+
+Verify:
+
+```bash
+surreal sql -u root -p 'StrongSecretPassword!' -e "$SURDB_URL"
+```
+
+
+## Cleanup
+
+```bash
+kubectl delete tidbcluster sdb-datastore
+helm uninstall surrealdb-tikv
+helm -n tidb-operator uninstall tidb-operator
+
+# If you created a GKE cluster:
+gcloud container clusters delete "$CLUSTER_NAME" \
+  --region "$REGION" --quiet
+```
+
+---
+
+### Automation scripts (optional)
+
+Add these to `/scripts` if you prefer one‑liners:
+
+| Script         | What it does |
+| -------------- | ------------ |
+| `provision.sh` | steps 0–4    |
+| `bootstrap.sh` | step 5       |
+| `cleanup.sh`   | step 6       |
+
+Each script simply reproduces the sections above with `bash -euo pipefail` for safety.
+
+---
+
+## Done 🎉
+
+Because **all versions & paths live in variables or YAML files**, maintaining the guide now means bumping a couple of numbers instead of editing dozens of snippets.
+
+```
+```
