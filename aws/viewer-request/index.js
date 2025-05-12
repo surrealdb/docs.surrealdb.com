@@ -111,6 +111,11 @@ const redirects = {
 	'/docs/surrealql/statements/remove/overview': '/docs/surrealql/statements/remove',
 	'/docs/surrealdb/surrealql/statements/remove/overview': '/docs/surrealql/statements/remove',
 	'/docs/surrealdb/installation/upgrading/beta': '/docs/installation/upgrading/migrating-data-to-2x',
+	// Redirect removed deployment guides to main deployment page
+	'/docs/surrealdb/deployment/heroku': '/docs/surrealdb/deployment',
+	'/docs/surrealdb/deployment/railway': '/docs/surrealdb/deployment',
+	'/docs/surrealdb/deployment/digitalocean': '/docs/surrealdb/deployment',
+	'/docs/surrealdb/deployment/fly': '/docs/surrealdb/deployment',
 };
 
 function compute(input) {
@@ -142,6 +147,14 @@ function compute(input) {
 
 	// Fixed redirects
 	if (redirects[path]) path = redirects[path];
+
+	// Convert underscores to hyphens in any path
+	if (path.includes('_')) {
+		const newPath = path.replace(/_/g, '-');
+		if (newPath !== path) {
+			path = newPath;
+		}
+	}
 
 	// Check that the URL points to a valid document
 	// See top of file for more information
