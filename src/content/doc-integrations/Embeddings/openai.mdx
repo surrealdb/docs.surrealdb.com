@@ -7,7 +7,146 @@ description: This section contains information about the OpenAI embeddings featu
 
 # OpenAI
 
-SurrealDB provides a number of different embeddings features that can be used to manage your data.
+SurrealDB provides a number of different embeddings features that can be used to manage your data. This walkthrough shows how to embed your text with OpenAI, store the vectors in SurrealDB, and run fast k‑nearest‑neighbour (KNN) searches—all from Python.It follows the same flow you might have seen for Qdrant, but swaps in SurrealDB’s native vector‑search features so you can keep documents, graphs, and embeddings in one place.
+
+## Install the two clients
+
+OpenAI calls the API that turns text into a 1 536‑dimensional vector, while SurrealDB lets your Python code connect over WebSocket or HTTP to any SurrealDB server.
+
+If you do not have SurrealDB running already you can spin up an in‑memory node in one line:
+
+```bash
+pip install openai surrealdb   
+```
+
+SurrealDB must be running somewhere.
+For local testing you can spin it up quickly:
+
+```bash
+docker run -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass root memory
+```
+
+## Set up the OpenAI & SurrealDB clients
+
+```python
+import asyncio
+import openai
+from surrealdb import Surreal
+
+openai_client = openai.Client(api_key="YOUR_OPENAI_KEY")
+
+TEXTS = [
+    "SurrealDB is a multi-model database you can embed anywhere!",
+    "Loved by devs who need graphs, documents **and** vector search in one box.",
+]
+
+async def init_db() -> Surreal:
+    db = Surreal("ws://localhost:8000/rpc")          # change URL if remote
+    await db.signin({"username": "root", "password": "root"})
+    await db.use("demo_ns", "demo_db")
+    return db
+```
+
+## Create the embeddings with OpenAI
+
+`text‑embedding‑3‑small` is compact, cheap, and surprisingly accurate for semantic search. If you need more nuance (or plan to quantise heavily) you can upgrade to `text‑embedding‑3‑large` (3 072 dimensions) at roughly twice the cost.
+
+```python
+EMBED_MODEL = "text-embedding-3-small"
+
+emb_resp = openai_client.embeddings.create(
+    input=TEXTS,
+    model=EMBED_MODEL
+)
+emb_vectors = [row.embedding for row in emb_resp.data]   # list[list[float]]
+```
+
+## Insert the documents into SurrealDB
+
+SurrealDB is schemaless by default, so you can drop JSON directly into a table named article:
+
+*(table `article` with a vector field called `embedding`)*
+
+```python
+async def load_documents(db: Surreal):
+    docs = [
+        {"text": txt, "embedding": vec}
+        for txt, vec in zip(TEXTS, emb_vectors)
+    ]
+    await db.create("article", docs)
+
+asyncio.run(load_documents(asyncio.run(init_db())))
+```
+
+## Add a vector index (HNSW)
+
+The Hierarchical Navigable Small World (HNSW) index trades a tiny bit of accuracy for dramatic speed‑ups compared with brute‑force scanning—ideal once your table grows beyond a few thousand rows.Because HNSW lives in RAM today, index creation is instant but counts against your memory budget. 
+
+SurrealQL lets you add the index once; after that inserts are indexed automatically.
+
+```python
+async def add_index(db: Surreal):
+    await db.query("""
+        DEFINE INDEX article_embedding_hnsw 
+        ON article
+        FIELDS embedding
+        HNSW DIMENSION 1536;
+    """)
+
+asyncio.run(add_index(asyncio.run(init_db())))
+```
+
+The `DIMENSION` must match the length of the OpenAI vectors (1536 in this model). ([SurrealDB][1])
 
 
+## Search for the most relevant documents
 
+```python
+async def semantic_search(question: str, k: int = 3):
+    query_vec = openai_client.embeddings.create(
+        input=[question],
+        model=EMBED_MODEL
+    ).data[0].embedding
+
+    db = await init_db()
+
+    # KNN search: <|k, ef|> – ef is “search breadth”. 100 is a decent default.
+    result = await db.query(f"""
+        LET $q := {query_vec};
+
+        SELECT id, text,
+               vector::distance::knn() AS distance
+        FROM article
+        WHERE embedding <|{k},100|> $q
+        ORDER BY distance;
+    """)
+    return result[0]['result']
+
+hits = asyncio.run(semantic_search("What’s the best database for unified search?"))
+for hit in hits:
+    print(hit["distance"], hit["text"])
+```
+
+The `vector::distance::knn()` helper returns the exact distance that the KNN operator just computed, so SurrealDB can immediately sort or filter without recalculating.
+
+Two knobs to remember:
+
+- `k` – the number of neighbours you want back.
+- `ef` (the second number) – search breadth. Higher values spend more CPU for slightly better accuracy; 100–200 is a safe default.
+
+## (Optional) Binary-quantise the vectors
+
+SurrealDB stores vectors as arrays of floats (`F32` by default) and doesn’t yet expose built-in binary quantisation the way Qdrant does.
+If you need ultra-compact storage you can:
+
+1. **Quantise offline** (e.g. convert to `int8` with `numpy`).
+2. Store the compressed list in a separate field (`embedding_q8`) and build an index on that instead:
+
+```sql
+DEFINE INDEX article_embedding_q8_mt
+ON article
+FIELDS embedding_q8
+MTREE TYPE I8 DIMENSION 1536;
+```
+
+This keeps the SurrealDB side simple while you experiment with different quantisers. For more information about vector search in SurrealDB, see the [Vector Search Reference guides](/docs/surrealdb/reference-guide/vector-search).
