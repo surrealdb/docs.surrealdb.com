@@ -8,6 +8,8 @@ import LightJavascript from '@img/icon/light/javascript.png';
 import LightPhp from '@img/icon/light/php.png';
 import LightPython from '@img/icon/light/python.png';
 import LightRust from '@img/icon/light/rust.png';
+import LightIntegrations from '@img/icon/dark/integrations.png';
+import DarkIntegrations from '@img/icon/dark/integrations.png';
 
 import DarkDotnet from '@img/icon/dark/dotnet.png';
 import DarkGolang from '@img/icon/dark/golang.png';
@@ -190,6 +192,17 @@ export const metadata = {
         icon: {
             light: LightSurrealQL,
             dark: DarkSurrealQL,
+        },
+        repo: {
+            title: 'surrealdb/surrealdb',
+            href: 'https://github.com/surrealdb/surrealdb',
+        },
+    },
+    'doc-integrations': {
+        title: 'Integrations',
+        icon: {
+            light: LightIntegrations,
+            dark: DarkIntegrations,
         },
         repo: {
             title: 'surrealdb/surrealdb',
