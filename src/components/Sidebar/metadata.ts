@@ -1,6 +1,8 @@
 import type { CollectionKey } from 'astro:content';
 import type { Props as ImageProps } from '@components/Image.astro';
 
+import LightIntegrations from '@img/icon/dark/integrations.png';
+import DarkIntegrations from '@img/icon/dark/integrations.png';
 import LightDotnet from '@img/icon/light/dotnet.png';
 import LightGolang from '@img/icon/light/golang.png';
 import LightJava from '@img/icon/light/java.png';
@@ -8,8 +10,6 @@ import LightJavascript from '@img/icon/light/javascript.png';
 import LightPhp from '@img/icon/light/php.png';
 import LightPython from '@img/icon/light/python.png';
 import LightRust from '@img/icon/light/rust.png';
-import LightIntegrations from '@img/icon/dark/integrations.png';
-import DarkIntegrations from '@img/icon/dark/integrations.png';
 
 import DarkDotnet from '@img/icon/dark/dotnet.png';
 import DarkGolang from '@img/icon/dark/golang.png';
