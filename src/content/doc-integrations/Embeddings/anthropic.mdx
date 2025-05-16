@@ -1,0 +1,153 @@
+---
+sidebar_position: 1
+sidebar_label: Anthropic
+title: SurrealDB × Anthropic (Claude) RAG Starter
+description: Use Voyage AI embeddings with SurrealDB’s native HNSW index and Anthropic Claude for generation.
+---
+
+
+# SurrealDB × Anthropic (Claude) RAG Starter
+
+Although Anthropic doesn’t ship an embedding model of its own (it recommends Voyage AI instead), the recipe below uses Voyage AI to embed text, stores the vectors in SurrealDB, and calls Anthropic Claude for generation.
+
+
+## Install the SDKs
+
+```bash
+pip install surrealdb voyageai anthropic
+````
+
+## Connect to SurrealDB
+
+```python
+from surrealdb import Surreal
+import voyageai, anthropic, asyncio, os
+
+DB_URI     = "http://localhost:8000/rpc"
+DB_USER    = "root"
+DB_PASS    = "root"
+NAMESPACE  = "demo"
+DATABASE   = "demo"
+TABLE_NAME = "rag_docs"
+
+VOYAGE_API_KEY   = os.environ["VOYAGE_API_KEY"]
+ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
+
+db  = Surreal(DB_URI)
+vo  = voyageai.Client(api_key=VOYAGE_API_KEY)
+claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+async def init():
+    await db.signin({"user": DB_USER, "pass": DB_PASS})
+    await db.use(NAMESPACE, DATABASE)
+
+asyncio.run(init())
+```
+
+
+
+## Define table + vector index (raw query with variable binding)
+
+```python
+schema = """
+DEFINE TABLE $tb SCHEMALESS PERMISSIONS NONE;
+DEFINE FIELD embedding      ON $tb TYPE array;
+DEFINE FIELD original_text  ON $tb TYPE string;
+
+-- HNSW ANN index (SurrealDB ≥ v1.5):contentReference[oaicite:1]{index=1}
+DEFINE INDEX idx_hnsw ON $tb
+  FIELDS embedding
+  HNSW DIMENSION 1024
+  DIST   COSINE;
+"""
+
+asyncio.run(db.query(schema, { "tb": TABLE_NAME }))   # <- variable binding pattern:contentReference[oaicite:2]{index=2}
+```
+
+
+
+## Embed and ingest documents
+
+```python
+docs = [
+    "SurrealDB is a multi-model database that now has an in-memory HNSW index.",
+    "Anthropic’s Claude 3 model family (Haiku, Sonnet, Opus) excels at reasoning tasks."
+]
+
+doc_vecs = vo.embed(
+    docs,
+    model="voyage-3",
+    input_type="document"
+).embeddings          # vectors are 1024-D by default:contentReference[oaicite:3]{index=3}
+
+async def ingest():
+    for i, (text, vec) in enumerate(zip(docs, doc_vecs), start=1):
+        await db.create(f"{TABLE_NAME}:{i}", {
+            "original_text": text,
+            "embedding":     vec,
+        })
+
+asyncio.run(ingest())
+```
+
+
+
+## Search SurrealDB with a query
+
+```python
+query = "Does SurrealDB support HNSW for fast ANN search?"
+q_vec  = vo.embed([query], model="voyage-3", input_type="query").embeddings[0]
+
+surql = """
+LET $q := $vec;
+SELECT id, original_text, vector::distance::knn() AS dist
+FROM $tb
+WHERE embedding <|3,64|> $q          -- top-3, efSearch = 64
+ORDER BY dist;
+"""
+
+hits = asyncio.run(db.query(surql, { "vec": q_vec, "tb": TABLE_NAME }))[0].result
+```
+
+`<|K,EF|>` is SurrealQL’s **K-NN operator**; `vector::distance::knn()` returns the pre-computed cosine distance.
+
+
+
+## Ask Claude with retrieved context
+
+```python
+context = "\n\n".join([h["original_text"] for h in hits])
+
+prompt = [
+    { "role": "user",
+      "content": f"""Answer the question using ONLY the context.
+
+Context:
+{context}
+
+Question: {query}
+"""}
+]
+
+response = claude.messages.create(
+    model="claude-3-7-sonnet-20250219",
+    max_tokens=256,
+    messages=prompt,
+)
+
+print(response.content[0].text)
+```
+
+
+
+Done! You now have a lightweight RAG stack:
+
+1. **Voyage AI** → high-quality embeddings.
+2. **SurrealDB** → blazing-fast HNSW vector search.
+3. **Claude** (Anthropic) → answer generation over the retrieved snippets.
+
+
+
+
+
+

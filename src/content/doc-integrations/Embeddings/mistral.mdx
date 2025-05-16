@@ -1,0 +1,313 @@
+---
+sidebar_position: 1
+sidebar_label: Mistral
+title: Mistral Embeddings × SurrealDB (Improved)
+description: End-to-end guide for building a fast semantic-search stack with Mistral-Embed vectors stored in SurrealDB’s native HNSW index.
+---
+
+## Mistral Embeddings × SurrealDB
+
+Modern open-source RAG pipelines need two things:
+
+1. **High-quality embeddings** – *Mistral-Embed* (`mistral-embed`) returns 1 024-dimensional float vectors that rival OpenAI + Cohere.  
+2. **Blazing-fast vector storage** – **SurrealDB** (≥ v1.5) ships an in-memory HNSW index, queried with the `<|K,EF|>` operator in SurrealQL.
+
+Below you’ll wire them together, from install → ingestion → search → production-ready script.
+
+## Prerequisites
+
+```bash
+pip install mistralai surrealdb
+````
+
+Set two environment variables (or hard-code them if you must):
+
+```bash
+export SDB_URL="http://localhost:8000/rpc"   # ← SurrealDB RPC endpoint
+export MISTRAL_API_KEY="sk-…"                # ← your Mistral key
+```
+
+## Connect and create the schema
+
+```python
+from mistralai.client import MistralClient
+from surrealdb import Surreal
+import os, asyncio
+
+# ----- 1.1 · Config -----------------------------------------------------------------
+SDB_URL  = os.getenv("SDB_URL", "http://localhost:8000/rpc")
+SDB_USER = os.getenv("SDB_USER", "root")
+SDB_PASS = os.getenv("SDB_PASS", "root")
+NS, DB   = "demo", "demo"
+TABLE    = "mistral_docs"
+MODEL    = "mistral-embed"
+
+# ----- 1.2 · Clients ----------------------------------------------------------------
+sdb   = Surreal(SDB_URL)
+mistr = MistralClient(api_key=os.environ["MISTRAL_API_KEY"])
+
+async def init_db():
+    await sdb.signin({"user": SDB_USER, "pass": SDB_PASS})
+    await sdb.use(NS, DB)
+
+    # one quick embedding → get true vector dimension
+    dim = len(mistr.embeddings(model=MODEL, input=["ping"]).data[0].embedding)
+
+    schema = """
+    DEFINE TABLE $tb SCHEMALESS PERMISSIONS NONE;
+    DEFINE FIELD text      ON $tb TYPE string;
+    DEFINE FIELD embedding ON $tb TYPE array;
+
+    DEFINE INDEX hnsw_idx ON $tb
+      FIELDS embedding
+      HNSW DIMENSION {dim}
+      DIST   COSINE;
+    """
+    await sdb.query(schema, {"tb": TABLE})
+
+asyncio.run(init_db())
+```
+
+### Why detect the dimension dynamically?
+
+*Future-proofing:* if Mistral introduces a **small** or **large** Embed model with a different dimension, the code auto-adapts.
+
+## Embed and bulk-insert documents
+
+```python
+DOCS = [
+    "SurrealDB offers an in-memory HNSW vector index for low-latency search.",
+    "Mistral-Embed produces 1 024-dimensional embeddings.",
+    "You can build a completely open-source RAG stack with these two tools.",
+]
+
+async def insert_docs(docs, batch=64):
+    rows = []
+    for i in range(0, len(docs), batch):
+        chunk = docs[i : i + batch]
+        vecs  = mistr.embeddings(model=MODEL, input=chunk).data
+        rows += [
+            {
+                "id":        f"{TABLE}:{i+j}",
+                "text":      chunk[j],
+                "embedding": vec.embedding,
+            }
+            for j, vec in enumerate(vecs)
+        ]
+    await sdb.query(f"INSERT INTO {TABLE} $data", {"data": rows})
+
+asyncio.run(insert_docs(DOCS))
+```
+
+*Why bulk-insert?* One SurrealQL call → one network round-trip — **much faster** than inserting row-by-row.
+
+## Search with a natural-language query
+
+```python
+async def search(query: str, k: int = 3, ef: int = 64):
+    q_vec = mistr.embeddings(model=MODEL, input=[query]).data[0].embedding
+    surql = """
+    LET $q := $vec;
+    SELECT id, text, vector::distance::knn() AS score
+    FROM $tb
+    WHERE embedding <|{k},{ef}|> $q
+    ORDER BY score;
+    """
+    res = await sdb.query(surql, {"vec": q_vec, "tb": TABLE})
+    return res[0].result
+
+hits = asyncio.run(search("Which database supports native vector search?"))
+for h in hits:
+    print(f"⭐ {h['text']}  (score={h['score']:.4f})")
+```
+
+`<|K,EF|>` activates the HNSW **K-nearest-neighbour** operator (`K=3`, `efSearch=64`).
+`vector::distance::knn()` exposes the cosine distance already computed inside the index—no post-processing needed.
+
+## Full script (ready to run)
+
+```python
+# mistral_surreal_demo.py
+from __future__ import annotations
+import os, asyncio
+from mistralai.client import MistralClient
+from surrealdb import Surreal
+
+SDB_URL  = os.getenv("SDB_URL", "http://localhost:8000/rpc")
+SDB_USER = os.getenv("SDB_USER", "root")
+SDB_PASS = os.getenv("SDB_PASS", "root")
+NS, DB, TABLE = "demo", "demo", "mistral_docs"
+MODEL   = "mistral-embed"
+KEY     = os.environ["MISTRAL_API_KEY"]  # export first!
+
+sdb, mistr = Surreal(SDB_URL), MistralClient(api_key=KEY)
+
+DOCS = [
+    "SurrealDB's vector index is built on HNSW.",
+    "Mistral-Embed vectors offer strong semantic quality.",
+    "Together they form a fast, open-source search stack.",
+]
+
+async def main():
+    await sdb.signin({"user": SDB_USER, "pass": SDB_PASS})
+    await sdb.use(NS, DB)
+
+    dim = len(mistr.embeddings(model=MODEL, input=["x"]).data[0].embedding)
+    await sdb.query("""
+        DEFINE TABLE $tb SCHEMALESS PERMISSIONS NONE;
+        DEFINE FIELD text ON $tb TYPE string;
+        DEFINE FIELD embedding ON $tb TYPE array;
+        DEFINE INDEX hnsw_idx ON $tb FIELDS embedding
+               HNSW DIMENSION {dim} DIST COSINE;
+    """, {"tb": TABLE})
+
+    # ingest if empty
+    if (await sdb.query(f"SELECT count() FROM {TABLE};"))[0].result[0]["count"] == 0:
+        rows = []
+        vecs = mistr.embeddings(model=MODEL, input=DOCS).data
+        rows = [
+            {"id": f"{TABLE}:{i}", "text": DOCS[i], "embedding": v.embedding}
+            for i, v in enumerate(vecs)
+        ]
+        await sdb.query(f"INSERT INTO {TABLE} $data", {"data": rows})
+
+    # search
+    q_vec = mistr.embeddings(model=MODEL,
+                             input=["open-source vector database"] ).data[0].embedding
+    res = await sdb.query("""
+        LET $q := $vec;
+        SELECT text, vector::distance::knn() AS score
+        FROM {TABLE}
+        WHERE embedding <|3,64|> $q
+        ORDER BY score;
+    """, {"vec": q_vec})
+    print(res[0].result)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## About quantisation
+
+SurrealDB currently stores vectors as `float32` / `float64` arrays and does **not** ship built-in binary or int8 quantisation.
+If memory is critical you can:
+
+1. Quantise offline to int8 (e.g. with *faiss* or *sentence-transformers*).
+2. Store the int8 arrays in **another field** (SurrealQL’s array type is agnostic).
+3. Execute a **two-stage search**: coarse K-NN on the int8 field, then rescore on the full-precision field.
+
+---
+
+### You’re done 🚀
+
+You now have a clean, fully-async SurrealDB setup that stores **Mistral-Embed** vectors, supports **fast HNSW search**, and can be dropped into any RAG or semantic-search workflow.
+
+```
+```
+
+
+
+
+
+---- 
+```python
+# ───────────────────────── 0 · Imports & config ──────────────────────────
+from __future__ import annotations
+
+import os, asyncio, math, typing as T
+from mistralai.client import MistralClient
+from surrealdb import Surreal
+
+SDB_URL    = os.getenv("SDB_URL", "http://localhost:8000/rpc")
+SDB_USER   = os.getenv("SDB_USER", "root")
+SDB_PASS   = os.getenv("SDB_PASS", "root")
+NS         = "demo"
+DB         = "demo"
+TABLE      = "mistral_docs"
+
+MISTRAL_KEY = os.getenv("MISTRAL_API_KEY")   # ▸ export MISTRAL_API_KEY=...
+assert MISTRAL_KEY, "No Mistral key found!"
+
+# ───────────────────────── 1 · Clients ───────────────────────────────────
+sdb   = Surreal(SDB_URL)
+mistr = MistralClient(api_key=MISTRAL_KEY)
+
+# ───────────────────────── 2 · Example documents ─────────────────────────
+DOCS = [
+    "SurrealDB ships an in-memory HNSW index for high-speed ANN search.",
+    "Mistral-Embed produces 1024-dimensional float vectors.",
+    "You can pair them for a full open-source semantic-search stack.",
+]
+
+# ───────────────────────── 3 · Helper funcs ──────────────────────────────
+async def	init_db() -> None:
+    """Connect and (re)create the schema if needed."""
+    await sdb.signin({"user": SDB_USER, "pass": SDB_PASS})
+    await sdb.use(NS, DB)
+
+    # embed *one* doc to get the true dimension
+    dim = len(
+        mistr.embeddings(model="mistral-embed", input=["ping"]).data[0].embedding
+    )
+
+    schema = f"""
+    DEFINE TABLE $tb SCHEMALESS PERMISSIONS NONE;
+    DEFINE FIELD text      ON $tb TYPE string;
+    DEFINE FIELD embedding ON $tb TYPE array;
+
+    DEFINE INDEX hnsw_idx ON $tb
+      FIELDS embedding
+      HNSW DIMENSION {dim}
+      DIST   COSINE;
+    """
+    await sdb.query(schema, {"tb": TABLE})
+
+
+async def	insert_docs(docs: list[str]) -> None:
+    """Batch-embed & insert documents via one SurrealQL call."""
+    batch_size = 64
+    rows: list[dict[str, T.Any]] = []
+
+    for i in range(0, len(docs), batch_size):
+        chunk  = docs[i : i + batch_size]
+        vecs   = mistr.embeddings(model="mistral-embed", input=chunk).data
+        rows  += [
+            {
+                "id":        f"{TABLE}:{i + j}",
+                "text":      chunk[j],
+                "embedding": vec.embedding,
+            }
+            for j, vec in enumerate(vecs)
+        ]
+
+    await sdb.query(f"INSERT INTO {TABLE} $data", {"data": rows})
+
+
+async def	search(query: str, k: int = 3, ef: int = 64):
+    """Return the top-k docs for a query."""
+    q_vec = mistr.embeddings(model="mistral-embed", input=[query]).data[0].embedding
+    surql = f"""
+    LET $q := $vec;
+    SELECT id, text, vector::distance::knn() AS score
+    FROM $tb
+    WHERE embedding <|{k},{ef}|> $q
+    ORDER BY score;
+    """
+    res = await sdb.query(surql, {"vec": q_vec, "tb": TABLE})
+    return res[0].result
+
+
+# ───────────────────────── 4 · Main entry - async all-in-one ─────────────
+async def main():
+    await init_db()
+
+    # ingest only if empty
+    count = (await sdb.query(f"SELECT count() FROM {TABLE};"))[0].result[0]["count"]
+    if count == 0:
+        await insert_docs(DOCS)
+
+    hits = await search("Which DB offers native vector search?")
+    for h in hits:
+        print(f"⭐ {h['text']}  (score={h['score']:.4f})")
+
+asyncio.run(main())
