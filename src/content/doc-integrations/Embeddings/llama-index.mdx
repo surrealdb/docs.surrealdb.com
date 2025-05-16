@@ -1,0 +1,172 @@
+---
+sidebar_position: 1
+sidebar_label: Llama Index
+title: Llama Index × SurrealDB
+description: Use SurrealDB’s native HNSW vector index as the backing store for a Llama Index `VectorStoreIndex`.
+---
+
+> [!NOTE]  
+> Llama Index doesn’t (yet!) ship an off-the-shelf SurrealDB adapter,  
+> so in this guide we’ll implement a **20-line `SurrealVectorStore`** that satisfies Llama Index’s minimal vector-store interface.  
+> You can drop it into any RAG pipeline just like you would with Pinecone, Qdrant, Chroma, etc.
+
+### TL;DR
+
+1. **Install** `surrealdb` + `llama-index`.
+2. **Create** a table with an `HNSW` index.
+3. **Drop-in** the 20-line `SurrealVectorStore`.
+4. Use `VectorStoreIndex.from_documents()` and you’re done.
+
+## Install the libraries
+
+```bash
+pip install surrealdb llama-index numpy
+```
+
+## Connect to SurrealDB
+
+```python
+from surrealdb import Surreal
+import asyncio, os
+
+# — connection details —
+DB_URL   = os.getenv("SDB_URL", "http://localhost:8000/rpc")
+DB_USER  = os.getenv("SDB_USER", "root")
+DB_PASS  = os.getenv("SDB_PASS", "root")
+NS, DB   = "demo", "demo"
+TABLE    = "llama_chunks"
+
+sdb = Surreal(DB_URL)
+
+async def init():
+    await sdb.signin({"user": DB_USER, "pass": DB_PASS})
+    await sdb.use(NS, DB)
+
+asyncio.run(init())
+```
+
+## Create the table and HNSW index
+
+```python
+# SurrealDB ≥ v1.5 exposes an in-memory HNSW ANN index
+schema = """
+DEFINE TABLE $tb SCHEMALESS PERMISSIONS NONE;
+DEFINE FIELD text      ON $tb TYPE string;
+DEFINE FIELD embedding ON $tb TYPE array;
+
+DEFINE INDEX idx_hnsw ON $tb
+  FIELDS embedding
+  HNSW DIMENSION 768
+  DIST   COSINE;
+"""
+asyncio.run(sdb.query(schema, {"tb": TABLE}))
+```
+
+SurrealQL’s `DEFINE INDEX … HNSW` activates a high-speed, cosine-distance ANN index.
+
+## A tiny SurrealDB adapter for Llama Index
+
+```python
+import numpy as np
+from typing import Any, List, Sequence
+from llama_index.core.vector_stores.types import (
+    BasePydanticVectorStore,
+    VectorStoreQuery,
+    VectorStoreQueryResult,
+)
+from llama_index.core.schema import NodeWithEmbedding
+
+class SurrealVectorStore(BasePydanticVectorStore):
+    """Minimal Llama Index adapter using SurrealDB’s <|K,EF|> operator."""
+
+    def __init__(self, table: str, conn: Surreal):
+        self.table, self.conn = table, conn
+
+    # ---- required APIs ----------------------------------------------------
+    def add(self, nodes: Sequence[NodeWithEmbedding], **_) -> List[str]:
+        rows = [
+            {
+                "id": f"{self.table}:{i}",
+                "text": n.get_content(metadata_mode="all"),
+                "embedding": n.embedding,
+            }
+            for i, n in enumerate(nodes)
+        ]
+        asyncio.run(self.conn.query(f"INSERT INTO {self.table} $data", {"data": rows}))
+        return [r["id"] for r in rows]
+
+    def delete(self, doc_id: str, **_) -> None:  # optional but easy
+        asyncio.run(self.conn.delete(doc_id))
+
+    def query(
+        self, query: VectorStoreQuery, **_
+    ) -> VectorStoreQueryResult:  # semantic search
+        q_vec = query.query_embedding
+        surql = """
+        LET $q := $vec;
+        SELECT id, text, vector::distance::knn() AS score
+        FROM {self.table}
+        WHERE embedding <|{query.similarity_top_k},64|> $q
+        ORDER BY score;
+        """
+        res = asyncio.run(self.conn.query(surql, {"vec": q_vec}))[0].result
+        return VectorStoreQueryResult(
+            nodes=[],  # Llama Index will fetch raw docs separately
+            ids=[r["id"] for r in res],
+            similarities=[r["score"] for r in res],
+        )
+```
+
+The `SurrealVectorStore` class is a minimal adapter cribbed from the official [build a vector store from scratch](https://docs.llamaindex.ai/en/stable/examples/low_level/vector_store/) example.
+
+## Index documents with Llama Index
+
+```python
+from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
+
+# 5-1  load + chunk a handful of docs (replace with your own)
+docs = SimpleDirectoryReader("./my_pdfs").load_data()
+
+# 5-2  build the index – Llama Index will call SurrealVectorStore.add()
+surreal_store = SurrealVectorStore(table=TABLE, conn=sdb)
+index = VectorStoreIndex.from_documents(
+    docs,
+    vector_store=surreal_store,
+    show_progress=True,
+)
+```
+
+## Query
+
+```python
+qe   = index.as_query_engine(similarity_top_k=4)
+resp = qe.query("Which document talks about vector search in SurrealDB?")
+print(resp)
+```
+
+The query flow is:
+
+```
+User → Llama Index → SurrealVectorStore.query()
+          ↘︎ top-K doc IDs & scores
+                  ↘︎ fetch full text → synthesize answer
+```
+
+## What about metadata filters, deletes, hybrid search?
+
+SurrealDB supports **metadata-rich JSON payloads**, additional **filter clauses**, and full-text search; extend `SurrealVectorStore.query()` to:
+
+* add `WHERE` predicates before the `<|K,EF|>` operator,
+* combine with `vector::distance::knn()` for re-ranking,
+* or fall back to `vector::distance::cosine()` for exact search.
+
+All other Llama Index abstractions (retrievers, query engines, agents) work unchanged, because they talk to the vector store through the same tiny interface you just implemented.
+
+
+Enjoy Llama Index + SurrealDB!
+
+## References
+
+- [DEFINE INDEX statement](https://surrealdb.com/docs/surrealql/statements/define/indexes)
+- [Building a RAG with Astro, FastAPI, SurrealDB and Llama 3.1](https://fireworks.ai/blog/rag-with-astro-fastapi-surrealdb-tailwind)
+- [Building a (Very Simple) Vector Store from Scratch - LlamaIndex](https://docs.llamaindex.ai/en/stable/examples/low_level/vector_store/)
