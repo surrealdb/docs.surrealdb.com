@@ -1,0 +1,227 @@
+---
+sidebar_position: 1
+sidebar_label: Bedrock
+title: AWS Bedrock
+description: Using Bedrock with SurrealDB
+---
+
+# Bedrock Embeddings
+
+## Using Titan Embeddings G1 with SurrealDB
+
+[AWS Bedrock’s **Titan Embeddings G1 – Text** model](https://docs.aws.amazon.com/bedrock/latest/userguide/titan-embedding-models.html) returns 1 536-dimensional sentence vectors. SurrealDB already ships with high-performance k-nearest-neighbour search (HNSW, brute-force or M-Tree), so you can build a full retrieval-augmented-generation (RAG) pipeline without running Qdrant or any other external vector store.
+
+## Prerequisites & Installation
+
+```bash
+# SurrealDB async Python SDK + AWS SDK (boto3)
+pip install surrealdb boto3
+```
+
+Run a local SurrealDB server (or connect to your cluster):
+
+```bash
+surreal start --log trace --auth root root
+```
+
+Make sure your AWS credentials (region, access key, secret) allow invocation of Bedrock models.
+
+
+## Set up AWS Bedrock
+
+```python
+# python3
+import os, json, boto3
+
+bedrock = boto3.client(
+    "bedrock-runtime",
+    region_name      = os.environ["AWS_REGION"],
+    aws_access_key_id     = os.environ["AWS_ACCESS_KEY_ID"],
+    aws_secret_access_key = os.environ["AWS_SECRET_ACCESS_KEY"],
+)
+
+MODEL_ID = "amazon.titan-embed-text-v1"
+```
+
+## Texts to embed
+
+```python
+sentences = [
+    "Bedrock unifies access to leading foundation models through a single API.",
+    "Titan Embeddings convert sentences into 1536-dimension vectors ideal for semantic search.",
+    "SurrealDB adds HNSW indexing to combine relational and vector workloads.",
+]
+```
+
+## Generate sentence embeddings
+
+```python
+payload = json.dumps({"inputText": sentences})
+resp    = bedrock.invoke_model(
+    body        = payload,
+    modelId     = MODEL_ID,
+    contentType = "application/json",
+    accept      = "application/json",
+)
+
+vectors = json.loads(resp["body"].read())["embedding"]
+# `vectors` is a list with the three 1 536-dim float arrays
+```
+
+## Store vectors in SurrealDB
+
+```python
+import asyncio
+from surrealdb import Surreal
+
+TABLE = "TechDocs"                      # table name
+
+async def ingest():
+    db = Surreal("ws://localhost:8000/rpc")
+    await db.connect()
+    await db.signin({"user":"root","pass":"root"})
+    await db.use("test","test")         # <namespace>, <database>
+
+    # ----- schema & HNSW index (idempotent) -----
+    await db.query(`
+        DEFINE TABLE IF NOT EXISTS {TABLE};
+        DEFINE FIELD  text       ON {TABLE} TYPE string;
+        DEFINE FIELD  embedding  ON {TABLE} TYPE array;
+        DEFINE INDEX  hnsw_embed ON {TABLE}
+                     FIELDS embedding HNSW DIMENSION 1536;
+    `)
+
+    # ----- insert rows --------------------------
+    await db.create(TABLE, [
+        {"id": f"doc:{i}", "text": t, "embedding": v}
+        for i, (t, v) in enumerate(zip(sentences, vectors))
+    ])
+
+asyncio.run(ingest())
+```
+
+## Similarity search
+
+```python
+async def search(query: str, k: int = 3):
+    # ---- embed the query with Titan ----------
+    q_vec = json.loads(
+        bedrock.invoke_model(
+            body        = json.dumps({"inputText": query}),
+            modelId     = MODEL_ID,
+            contentType = "application/json",
+            accept      = "application/json",
+        )["body"].read()
+    )["embedding"]
+
+    # ---- SurrealDB KNN query -----------------
+    db = Surreal("ws://localhost:8000/rpc")
+    await db.connect()
+    await db.signin({"user":"root","pass":"root"})
+    await db.use("test","test")
+
+    result = await db.query(`
+        LET $q = $vec;
+        SELECT text,
+               vector::distance::cosine(embedding, $q) AS score
+        FROM {TABLE}
+        WHERE embedding <|{k}|> $q          -- top-k nearest neighbours
+        ORDER BY score;
+    `, {"vec": q_vec})
+
+    return result[0]                       # list of matches
+
+matches = asyncio.run(search("How do I add vector search to my database?"))
+for m in matches:
+    print(f"{m['score']:.4f}  {m['text']}")
+```
+
+Typical console output:
+
+```
+0.1582  SurrealDB adds HNSW indexing to combine relational and vector workloads.
+0.3976  Bedrock unifies access to leading foundation models through a single API.
+0.5534  Titan Embeddings convert sentences into 1536-dimension vectors ideal for semantic search.
+```
+
+## TypeScript / Node quick-start (optional)
+
+```ts
+// npm i surrealdb.js @aws-sdk/client-bedrock-runtime
+import Surreal from 'surrealdb.js';
+import {
+  BedrockRuntimeClient,
+  InvokeModelCommand,
+} from '@aws-sdk/client-bedrock-runtime';
+
+const bedrock = new BedrockRuntimeClient({
+  region: process.env.AWS_REGION!,
+  credentials: {
+    accessKeyId:     process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  },
+});
+
+const sentences = [
+  'Bedrock unifies access to leading foundation models through a single API.',
+  'Titan Embeddings convert sentences into 1536-dimension vectors ideal for semantic search.',
+];
+
+const resp = await bedrock.send(new InvokeModelCommand({
+  modelId: 'amazon.titan-embed-text-v1',
+  body: JSON.stringify({ inputText: sentences }),
+  contentType: 'application/json',
+  accept: 'application/json',
+}));
+const vectors = JSON.parse(Buffer.from(resp.body).toString()).embedding;
+
+// SurrealDB
+const db = new Surreal('ws://localhost:8000/rpc');
+await db.connect();
+await db.signin({ user: 'root', pass: 'root' });
+await db.use('test', 'test');
+
+await db.query(`
+  DEFINE TABLE IF NOT EXISTS TechDocs;
+  DEFINE FIELD  text       ON TechDocs TYPE string;
+  DEFINE FIELD  embedding  ON TechDocs TYPE array;
+  DEFINE INDEX  hnsw_embed ON TechDocs
+               FIELDS embedding HNSW DIMENSION 1536;
+`);
+
+await db.create('TechDocs', sentences.map((t, i) => ({
+  id: `doc:${i}`, text: t, embedding: vectors[i],
+})));
+```
+
+### Quick Reference
+
+<table>
+  <tr>
+    <th>Feature</th>
+    <th>SurrealQL syntax</th>
+    <th>Notes</th>
+  </tr>
+  <tr>
+    <td><strong>Vector field</strong></td>
+    <td><code>embedding array</code></td>
+    <td>Any float array works.</td>
+  </tr>
+  <tr>
+    <td><strong>HNSW index</strong></td>
+    <td><code>DEFINE INDEX … HNSW DIMENSION 1536</code></td>
+    <td>Re-index with <code>REBUILD INDEX …</code> after big bulk loads.</td>
+  </tr>
+  <tr>
+    <td><strong>KNN search</strong></td>
+    <td><code>WHERE embedding &lt;|k|&gt; $vec</code></td>
+    <td>Optional metric: <code>&lt;|k,COSINE|&gt;</code></td>
+  </tr>
+  <tr>
+    <td><strong>Distance funcs</strong></td>
+    <td><code>vector::distance::cosine(a,b)</code></td>
+    <td>Also <code>euclidean</code>, <code>manhattan</code>, etc.</td>
+  </tr>
+</table>
+
+SurrealDB lets you combine relational data, documents, graphs and vectors in a single, lightweight engine—simplifying your stack while giving you production-grade semantic search.

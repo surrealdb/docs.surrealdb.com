@@ -1,0 +1,110 @@
+---
+sidebar_position: 1
+sidebar_label: Ollama
+title: Ollama
+description: Using Ollama with SurrealDB
+---
+
+# Using Ollama with **SurrealDB**
+
+[Ollama](https://ollama.com) provides specialized embeddings for niche applications, and SurrealDB has first-class [vector-search support](/docs/surrealdb/reference-guide/vector-search) (k-nearest-neighbour via brute-force, HNSW or M-Tree). Together they make it easy to build retrieval-augmented-generation (RAG) pipelines completely in Python.
+
+## Installation
+
+```bash
+pip install ollama surrealdb           # SurrealDB Python SDK ≥ 1.0.0
+```
+
+The SDK talks to a running SurrealDB server (e.g. `surreal start --log trace --auth root root`). ([PyPI][2])
+
+
+## Integration Example
+
+The snippet below assumes:
+
+* **SurrealDB** is listening on its WebSocket RPC endpoint `ws://localhost:8000/rpc`
+* **Ollama** is on its default port `11434`
+* We’ll store vectors in a table called `NicheApplications` and index them with **HNSW** for fast similarity search.
+
+```python
+import asyncio
+from surrealdb import Surreal            # async-capable Python client
+import ollama
+
+TABLE = "NicheApplications"
+
+async def main():
+    # ----- connect to SurrealDB ------------------------------------------------
+    db = Surreal("ws://localhost:8000/rpc")
+    await db.connect()
+    await db.signin({"user": "root", "pass": "root"})
+    await db.use("test", "test")          # <namespace>, <database>
+
+    # ----- generate an embedding with Ollama -----------------------------------
+    oclient  = ollama.Client(host="localhost")
+    text     = "Ollama excels in niche applications with specific embeddings"
+    emb      = oclient.embeddings(model="llama3.2", prompt=text)["embedding"]
+
+    # ----- (idempotent) schema & index setup -----------------------------------
+    await db.query(`
+        DEFINE TABLE IF NOT EXISTS {TABLE};
+        DEFINE FIELD   embedding       ON {TABLE} TYPE array;
+        DEFINE FIELD   text            ON {TABLE} TYPE string;
+        -- HNSW index for DIMENSION = vector length
+        DEFINE INDEX   hnsw_embedding  ON {TABLE}
+                       FIELDS embedding HNSW DIMENSION {len(emb)};
+    `)
+
+    # ----- store the record -----------------------------------------------------
+    await db.create(TABLE, {"text": text, "embedding": emb})
+
+    # ----- similarity search (top-3 neighbours) --------------------------------
+    results = await db.query(`
+        LET $q = $embedding;
+        SELECT *, vector::distance::cosine(embedding, $q) AS score
+        FROM NicheApplications
+        WHERE embedding <|3|> $q           -- KNN operator
+        ORDER BY score;                    -- lower = more similar
+    `, {"embedding": emb})
+
+    print(results[0])   # array of matching rows with cosine distance
+
+asyncio.run(main())
+```
+
+### What the query does
+
+* `embedding <|3|> $q` is SurrealQL’s **KNN operator**: *return the 3 vectors nearest to `$q`*.
+  You can optionally pass a distance metric (`<|3,COSINE|>`), but when you also compute `vector::distance::cosine(...)` in the projection you usually just need the count. ([SurrealDB][3])
+* `vector::distance::cosine(embedding, $q)` adds an explicit similarity score so you can `ORDER BY` it or filter further.
+
+## Tips & Next Steps
+
+<table>
+  <tr>
+    <th>Topic</th>
+    <th>How-to</th>
+  </tr>
+  <tr>
+    <td><strong>Batch inserts</strong></td>
+    <td>Wrap multiple <code>CREATE</code> statements in a single <code>db.query("""…""")</code> block for better throughput.</td>
+  </tr>
+  <tr>
+    <td><strong>Filtering</strong></td>
+    <td>Combine the KNN operator with ordinary <code>WHERE</code> clauses (<code>flag = true</code>, ranges, etc.).</td>
+  </tr>
+  <tr>
+    <td><strong>Index rebuilds</strong></td>
+    <td>If you bulk-import data, run <code>REBUILD INDEX hnsw_embedding ON NicheApplications</code> once at the end.</td>
+  </tr>
+  <tr>
+    <td><strong>Other metrics</strong></td>
+    <td>Use <code>vector::distance::euclidean</code>, <code>manhattan</code>, etc., or specify the metric directly in <code>&lt;k,METRIC&gt;</code>.</td>
+  </tr>
+</table>
+
+SurrealDB’s multi-model nature means you can keep metadata, graphs and time-series data right alongside your vectors, simplifying your stack even further.
+
+- [Vector Search | Reference guides](/docs/integration/vector-search)
+- [surrealdb · PyPI](https://pypi.org/project/surrealdb/)
+- [Operators | SurrealQL](/docs/surrealql/operators)

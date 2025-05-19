@@ -1,0 +1,193 @@
+---
+sidebar_position: 1
+sidebar_label: Voyage AI
+title: Voyage AI
+description: Store and search **Voyage AI** embeddings inside SurrealDB’s native HNSW / M-Tree vector indexes.
+---
+
+# Voyage AI
+Voyage AI ships state-of-the-art sentence-embedding models (e.g. **`voyage-large-2`**, 1 536-d).  
+SurrealDB (≥ v1.5) adds first-class vector indexes and functions, so you can run RAG pipelines with nothing but open-source tools.
+
+## Install the SDKs
+
+```bash
+pip install voyageai surrealdb                 # Python
+npm add @surrealdb/client                      # TypeScript / Node
+```
+
+
+## Python quick-start
+
+###  Connect
+
+```python
+from surrealdb import Surreal
+import voyageai, asyncio, os
+
+SDB_URL   = os.getenv("SDB_URL", "http://localhost:8000/rpc")
+SDB_USER  = "root"
+SDB_PASS  = "root"
+NS, DB    = "demo", "demo"
+TABLE     = "voyage_docs"
+API_KEY   = os.environ["VOYAGE_API_KEY"]
+
+db   = Surreal(SDB_URL)
+vcli = voyageai.Client(api_key=API_KEY)
+
+async def bootstrap():
+    await db.signin({"user": SDB_USER, "pass": SDB_PASS})
+    await db.use(NS, DB)
+
+asyncio.run(bootstrap())
+```
+
+### Define table + HNSW index
+
+```python
+schema = """
+DEFINE TABLE $tb SCHEMALESS PERMISSIONS NONE;
+DEFINE FIELD text      ON $tb TYPE string;
+DEFINE FIELD embedding ON $tb TYPE array;
+
+DEFINE INDEX hnsw_idx ON $tb
+  FIELDS embedding
+  HNSW DIMENSION 1536
+  DIST   COSINE;
+"""
+asyncio.run(db.query(schema, {"tb": TABLE}))
+```
+
+> [!NOTE]
+> Use `MTREE` instead of `HNSW` if you need exact (non-approximate) search.
+
+### Embed & insert documents
+
+```python
+texts = [
+    "SurrealDB is a multi-model database with an in-memory HNSW index.",
+    "Voyage AI embeddings are great for low-latency semantic search.",
+]
+
+vecs = vcli.embed(texts, model="voyage-large-2", input_type="document").embeddings
+
+async def ingest():
+    for i, (t, e) in enumerate(zip(texts, vecs), start=1):
+        await db.create(f"{TABLE}:{i}", {"text": t, "embedding": e})
+
+asyncio.run(ingest())
+```
+
+### Query
+
+```python
+q_vec = vcli.embed(
+    ["Which DB has native vector search?"],
+    model="voyage-large-2",
+    input_type="query",
+).embeddings[0]
+
+surql = """
+LET $q := $vec;
+SELECT id, text, vector::distance::knn() AS score
+FROM $tb
+WHERE embedding <|3,64|> $q     -- top-3, efSearch=64
+ORDER BY score;
+"""
+hits = asyncio.run(db.query(surql, {"vec": q_vec, "tb": TABLE}))[0].result
+print(hits)
+```
+
+`<|K,EF|>` triggers SurrealDB’s **K-NN** operator; `vector::distance::knn()` exposes the pre-computed cosine distance.
+
+
+## TypeScript quick-start
+
+```ts
+import { Surreal } from '@surrealdb/client';
+import fetch from 'node-fetch';
+
+const db      = new Surreal();
+await db.connect('ws://localhost:8000/rpc');
+await db.signin({ user: 'root', pass: 'root' });
+await db.use({ ns: 'demo', db: 'demo' });
+
+const TABLE = 'voyage_docs';
+
+// 3-1 ensure schema
+await db.query(`
+DEFINE TABLE $tb SCHEMALESS PERMISSIONS NONE;
+DEFINE FIELD text      ON $tb TYPE string;
+DEFINE FIELD embedding ON $tb TYPE array;
+DEFINE INDEX hnsw_idx ON $tb FIELDS embedding
+  HNSW DIMENSION 1536 DIST COSINE;`,
+{ tb: TABLE });
+
+// 3-2 embed via Voyage REST
+const VOYAGE_API_KEY = process.env.VOYAGE_API_KEY!;
+const txts = [
+  'SurrealDB vector search is blazing fast.',
+  'Voyage AI embeddings are 1 536-D floats.'
+];
+
+const resp = await fetch('https://api.voyageai.com/v1/embeddings', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${VOYAGE_API_KEY}`,
+    'Content-Type':  'application/json',
+  },
+  body: JSON.stringify({
+    input: txts,
+    model: 'voyage-large-2',
+    input_type: 'document',
+  }),
+}).then(r => r.json());
+
+for (let i = 0; i < txts.length; i++) {
+  await db.create(`${TABLE}:${i}`, {
+    text: txts[i],
+    embedding: resp.data[i].embedding,
+  });
+}
+
+// 3-3 search
+const qRes = await fetch('https://api.voyageai.com/v1/embeddings', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${VOYAGE_API_KEY}`,
+    'Content-Type':  'application/json',
+  },
+  body: JSON.stringify({
+    input: ['open-source vector database'],
+    model: 'voyage-large-2',
+    input_type: 'query',
+  }),
+}).then(r => r.json());
+
+const results = await db.query(`
+LET $q := $vec;
+SELECT text, vector::distance::knn() AS score
+FROM ${TABLE}
+WHERE embedding <|3,64|> $q
+ORDER BY score;
+`, { vec: qRes.data[0].embedding });
+
+console.log(results[0].result);
+```
+
+## Notes on performance & quantisation
+
+SurrealDB stores vectors as `float32`/`float64` arrays.
+If you need lower memory --
+
+1. Quantise Voyage vectors offline (`faiss`, `gptq`, etc.).
+2. Put int8 / binary blobs in a second field.
+3. Run a coarse ANN pass on the small field and rescore on the full-precision one.
+
+You now have a fully open-source stack:
+
+* **Voyage AI** → high-quality embeddings.
+* **SurrealDB** → lightning-fast similarity search with HNSW or exact search with M-Tree.
+
+Drop the snippets into your RAG or search service and go build cool stuff.
+

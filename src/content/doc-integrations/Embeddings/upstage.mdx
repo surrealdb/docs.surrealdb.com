@@ -1,0 +1,197 @@
+---
+sidebar_position: 1
+sidebar_label: Upstage
+title: Upstage
+description: Store and search **4096-D Solar embeddings** from Upstage inside SurrealDB’s native HNSW / M-Tree vector indexes.
+---
+
+# Upstage
+Upstage’s [Solar API](https://console.upstage.ai/docs/capabilities/embeddings) ships two dual-encoders:
+
+| Model                              | Purpose                 | Dim |
+|------------------------------------|-------------------------|-----|
+| `solar-embedding-1-large-passage`  | Index / document vecs   | 4096 |
+| `solar-embedding-1-large-query`    | Query vecs (same space) | 4096 |
+
+SurrealDB (≥ v1.5) provides two built-in vector indexes:
+
+| Index   | Kind          | When to pick it |
+|---------|---------------|-----------------|
+| **HNSW**| Approx. ANN   | Low-latency RAG, large corpora |
+| **M-Tree** | Exact metric tree | Small datasets, recall = 100 % |
+
+> [!NOTE]
+> We’ll default to **HNSW** below; swap a single keyword for **M-Tree** if you need exact search.
+
+
+
+## Install the clients
+
+```bash
+pip install surrealdb requests           # Python
+npm add @surrealdb/client node-fetch@3   # TypeScript / ESM
+```
+
+## Python end-to-end
+
+### Connect to SurrealDB
+
+```python
+from surrealdb import Surreal
+import requests, asyncio, os
+
+SDB_URL     = os.getenv("SDB_URL", "http://localhost:8000/rpc")
+SDB_USER    = "root"
+SDB_PASS    = "root"
+NS, DB      = "demo", "demo"
+TABLE       = "solar_docs"
+UP_API_KEY  = os.environ["UPSTAGE_API_KEY"]        # export first!
+SOLAR_URL   = "https://api.upstage.ai/v1/solar/embeddings"
+
+db = Surreal(SDB_URL)
+session = requests.Session()
+headers  = {"Authorization": f"Bearer {UP_API_KEY}", "Accept": "application/json"}
+
+async def init():
+    await db.signin({"user": SDB_USER, "pass": SDB_PASS})
+    await db.use(NS, DB)
+
+asyncio.run(init())
+```
+
+###  Schema + HNSW index
+
+```python
+schema = `
+DEFINE TABLE $tb SCHEMALESS PERMISSIONS NONE;
+DEFINE FIELD text      ON $tb TYPE string;
+DEFINE FIELD embedding ON $tb TYPE array;
+
+DEFINE INDEX hnsw_idx ON $tb
+  FIELDS embedding
+  HNSW DIMENSION 4096
+  DIST   COSINE;
+`
+asyncio.run(db.query(schema, {"tb": TABLE}))
+```
+
+*(Switch `HNSW` → `MTREE` if you prefer exact search.)*
+
+### Embed & insert documents
+
+```python
+texts = [
+    "SurrealDB ships an in-memory HNSW index for vector search.",
+    "Upstage Solar embeddings are 4096-D floats.",
+]
+
+body = {"input": texts, "model": "solar-embedding-1-large-passage"}
+vecs = session.post(SOLAR_URL, headers=headers, json=body).json()["data"]
+
+async def ingest():
+    for i, (t, d) in enumerate(zip(texts, vecs), start=1):
+        await db.create(f"{TABLE}:{i}", {"text": t, "embedding": d["embedding"]})
+
+asyncio.run(ingest())
+```
+
+### Similarity search
+
+```python
+q_body = {
+    "input": "Which database offers native vector search?",
+    "model": "solar-embedding-1-large-query",
+}
+q_vec = session.post(SOLAR_URL, headers=headers, json=q_body).json()["data"][0]["embedding"]
+
+surql = `
+LET $q := $vec;
+SELECT id, text, vector::distance::knn() AS score
+FROM $tb
+WHERE embedding <|3,64|> $q        -- top-3, efSearch = 64
+ORDER BY score;
+`
+
+hits = asyncio.run(db.query(surql, {"vec": q_vec, "tb": TABLE}))[0].result
+print(hits)
+```
+
+`<|K,EF|>` invokes SurrealDB’s **K-NN operator**; `vector::distance::knn()` retrieves the already-computed cosine distance.
+
+## TypeScript (Node / Deno / Bun)
+
+```ts
+import { Surreal } from '@surrealdb/client';
+import fetch from 'node-fetch';
+
+const DB = new Surreal();
+await DB.connect('ws://localhost:8000/rpc');
+await DB.signin({ user: 'root', pass: 'root' });
+await DB.use({ ns: 'demo', db: 'demo' });
+
+const TABLE = 'solar_docs';
+
+await DB.query(`
+DEFINE TABLE $tb SCHEMALESS PERMISSIONS NONE;
+DEFINE FIELD text ON $tb TYPE string;
+DEFINE FIELD embedding ON $tb TYPE array;
+DEFINE INDEX hnsw_idx ON $tb FIELDS embedding
+  HNSW DIMENSION 4096 DIST COSINE;`,
+{ tb: TABLE });
+
+const texts = [
+  'SurrealDB vector search is blazing fast.',
+  'Solar embeddings live in a 4-K-dimensional space.',
+];
+
+const SOLAR = 'https://api.upstage.ai/v1/solar/embeddings';
+const KEY   = process.env.UPSTAGE_API_KEY!;
+const hdr   = { 'Authorization': `Bearer ${KEY}`, 'Accept': 'application/json', 'Content-Type': 'application/json' };
+
+const docResp = await fetch(SOLAR, {
+  method: 'POST',
+  headers: hdr,
+  body: JSON.stringify({ input: texts, model: 'solar-embedding-1-large-passage' })
+}).then(r => r.json());
+
+for (let i = 0; i < texts.length; i++) {
+  await DB.create(`${TABLE}:${i}`, {
+    text: texts[i],
+    embedding: docResp.data[i].embedding,
+  });
+}
+
+const qResp = await fetch(SOLAR, {
+  method: 'POST',
+  headers: hdr,
+  body: JSON.stringify({ input: 'open-source vector database', model: 'solar-embedding-1-large-query' })
+}).then(r => r.json());
+
+const results = await DB.query(`
+LET $q := $vec;
+SELECT text, vector::distance::knn() AS score
+FROM ${TABLE}
+WHERE embedding <|3,64|> $q
+ORDER BY score;`,
+{ vec: qResp.data[0].embedding });
+
+console.log(results[0].result);
+```
+
+## Memory-saving tip
+
+SurrealDB stores vectors as `float32` / `float64`.
+If 4096 × 4 B feels heavy:
+
+1. Quantise Solar embeddings to int8 offline.
+2. Save int8 arrays in a separate field.
+3. Run a coarse ANN on the int8 field, then rescore with full-precision vectors.
+
+### Done! 🚀
+
+You now have an open-source stack:
+
+* **Upstage Solar** → dual-encoder, 4 K-dim vectors.
+* **SurrealDB** → HNSW / M-Tree search in a single database engine.
+
+Plug it into your RAG pipeline, chatbot, or recommendation service and ship!
