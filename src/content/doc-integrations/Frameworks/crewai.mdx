@@ -37,7 +37,7 @@ SurrealDB V2 has native vector search with HNSW / M-Tree indexes, so you get an 
 ```python title="src/mycrew/surreal_storage.py"
 from typing import Any, Dict, List, Optional
 from crewai.memory.storage.rag_storage import RAGStorage
-from surrealdb import Surreal            # Python SDK ≥ 1.0
+from surrealdb import AsyncSurreal
 import json, os, hashlib
 import openai                            # or any local embedding model
 
@@ -56,109 +56,144 @@ def embed(text: str) -> List[float]:
 
 class SurrealStorage(RAGStorage):
     """
-    CrewAI → SurrealDB adapter that implements the small RAGStorage API:
+    CrewAI → SurrealDB adapter that implements the small RAGStorage API:
     save(), search(), reset().
-    One Surreal table per memory type (“short-term”, “entity”, …).
+    One Surreal table per memory type ("short-term", "entity", …).
     """
 
-    def __init__(self, typ: str, allow_reset=True, embedder_config=None, crew=None):
-        super().__init__(typ, allow_reset, embedder_config, crew)
-        self._init_db()
-
-    # ---------- RAGStorage API ------------------------------------------
-
-    def save(self, value: Any, metadata: Dict[str, Any]) -> None:
-        rec = {
-            "id": hashlib.sha1(value.encode()).hexdigest(),  # stable PK
-            "text": value,
-            "metadata": metadata or {},
-            "embedding": embed(value),
-        }
-        self.db.create(self.table, rec)                     # UPSERT semantics
-
-    def search(
+    def __init__(
         self,
-        query: str,
-        limit: int = 3,
-        filter: Optional[dict] = None,
-        score_threshold: float = 0,
-    ) -> List[Any]:
-        vec = embed(query)
-        # very simple metadata AND-filter implementation
-        where = ""
-        if filter:
-            conds = [
-                f"metadata.{k} == {json.dumps(v)}"
-                for k, v in filter.items()
-            ]
-            where = " AND " + " AND ".join(conds)
-
-        sql = (
-            `SELECT *,
-            vector::distance::cosine(embedding, {json.dumps(vec)}) AS score
-            FROM {self.table}
-            WHERE embedding <|{limit}|> {json.dumps(vec)}{where}
-            ORDER BY score ASC`
-        )
-        rows = self.db.query(sql)[0]["result"]
-        return [
-            {
-                "id": r["id"],
-                "metadata": r["metadata"],
-                "context": r["text"],
-                "score": r["score"],
-            }
-            for r in rows
-            if r["score"] <= score_threshold or score_threshold == 0
-        ]
-
-    def reset(self) -> None:
-        self.db.query(`REMOVE TABLE {self.table}`)
-        self._ensure_table_and_index()
-
-    # ---------- internals -----------------------------------------------
-
-    def _init_db(
-        self,
+        typ: str,
+        allow_reset: bool = True,
+        embedder_config: Optional[Dict[str, Any]] = None,
+        crew: Optional[Any] = None,
         url: str = "ws://localhost:8000/rpc",
         namespace: str = "crew",
         database: str = "memories",
         user: str = "root",
         password: str = "root",
     ):
-        self.table = f"mem_{self.type.replace('-', '_')}"
-        self.db = Surreal(url)
-        self.db.connect()
-        self.db.signin({"username": user, "password": password})
-        self.db.use(namespace, database)
-        self._ensure_table_and_index()
+        super().__init__(typ, allow_reset, embedder_config, crew)
+        self.url = url
+        self.namespace = namespace
+        self.database = database
+        self.user = user
+        self.password = password
+        self.table = f"mem_{typ.replace('-', '_')}"
 
-    def _ensure_table_and_index(self):
-        # idempotent table + HNSW index creation
-        self.db.query(
-            `DEFINE TABLE {self.table} SCHEMALESS;
-            DEFINE FIELD id        ON {self.table} TYPE string;
-            DEFINE FIELD text      ON {self.table} TYPE string;
-            DEFINE FIELD metadata  ON {self.table} TYPE object;
-            DEFINE FIELD embedding ON {self.table} TYPE array;
-            DEFINE INDEX {self.table}_vec_idx
-                ON {self.table} FIELDS embedding
-                HNSW DIMENSION {_EMBED_DIM} DIST COSINE IF NOT EXISTS;`
-        )
+    # ---------- RAGStorage API ------------------------------------------
+
+    async def save(self, value: Any, metadata: Dict[str, Any]) -> None:
+        await self._ensure_table_and_index()
+        async with AsyncSurreal(self.url) as db:
+            await db.signin({"username": self.user, "password": self.password})
+            await db.use(self.namespace, self.database)
+            rec = {
+                "id": hashlib.sha1(str(value).encode()).hexdigest(),  # stable PK
+                "text": value,
+                "metadata": metadata or {},
+                "embedding": embed(str(value)),
+            }
+            await db.create(self.table, rec)  # UPSERT semantics
+
+    async def search(
+        self,
+        query: str,
+        limit: int = 3,
+        filter: Optional[dict] = None,
+        score_threshold: float = 0,
+    ) -> List[Dict[str, Any]]:
+        await self._ensure_table_and_index()
+        vec = embed(query)
+        
+        # Build filter conditions
+        filter_params = {}
+        where_clause = ""
+        if filter:
+            conditions = []
+            for i, (k, v) in enumerate(filter.items()):
+                param_name = f"filter_{i}"
+                conditions.append(f"metadata.{k} == ${param_name}")
+                filter_params[param_name] = v
+            where_clause = " AND " + " AND ".join(conditions)
+
+        async with AsyncSurreal(self.url) as db:
+            await db.signin({"username": self.user, "password": self.password})
+            await db.use(self.namespace, self.database)
+            result = await db.query(
+                f"""
+                SELECT *,
+                       vector::distance::cosine(embedding, $vec) AS score
+                FROM {self.table}
+                WHERE embedding <|$limit|> $vec{where_clause}
+                ORDER BY score ASC
+                """,
+                {
+                    "vec": vec,
+                    "limit": limit,
+                    **filter_params
+                }
+            )
+            
+            rows = result[0]["result"]
+            return [
+                {
+                    "id": r["id"],
+                    "metadata": r["metadata"],
+                    "context": r["text"],
+                    "score": r["score"],
+                }
+                for r in rows
+                if r["score"] <= score_threshold or score_threshold == 0
+            ]
+
+    async def reset(self) -> None:
+        async with AsyncSurreal(self.url) as db:
+            await db.signin({"username": self.user, "password": self.password})
+            await db.use(self.namespace, self.database)
+            await db.query(
+                "REMOVE TABLE $table;",
+                {"table": self.table}
+            )
+            await self._ensure_table_and_index()
+
+    # ---------- internals -----------------------------------------------
+
+    async def _ensure_table_and_index(self):
+        async with AsyncSurreal(self.url) as db:
+            await db.signin({"username": self.user, "password": self.password})
+            await db.use(self.namespace, self.database)
+            await db.query(
+                """
+                DEFINE TABLE $table SCHEMALESS;
+                DEFINE FIELD id        ON $table TYPE string;
+                DEFINE FIELD text      ON $table TYPE string;
+                DEFINE FIELD metadata  ON $table TYPE object;
+                DEFINE FIELD embedding ON $table TYPE array;
+                DEFINE INDEX ${table}_vec_idx
+                    ON $table FIELDS embedding
+                    HNSW DIMENSION $dim DIST COSINE IF NOT EXISTS;
+                """,
+                {
+                    "table": self.table,
+                    "dim": _EMBED_DIM
+                }
+            )
 ```
 
 *Highlights*
 
-* Uses SurrealDB’s WebSocket SDK (HTTP also works).([SurrealDB][3])
+* Uses SurrealDB's WebSocket SDK (HTTP also works).([SurrealDB][3])
 * Vector index created with one `DEFINE INDEX … HNSW` command.([SurrealDB][4])
 * Minimal `save / search / reset` surface so the rest of CrewAI is untouched.
 
 ## Wire it into a crew
 
-Below is a **tiny “Travel Concierge” crew**: two agents plan a weekend city break.
+Below is a **tiny "Travel Concierge" crew**: two agents plan a weekend city break.
 Their short-term memory persists the conversation; the entity memory stores facts about *destinations* they discover.
 
 ```python title="src/mycrew/crew.py"
+import asyncio
 from crewai import Agent, Task, Crew
 from crewai.memory.entity.entity_memory import EntityMemory
 from crewai.memory.short_term.short_term_memory import ShortTermMemory
@@ -180,7 +215,7 @@ planner = Agent(
 
 # --- Memory back-end ---------------------------------------------------
 entity_mem = EntityMemory(storage=SurrealStorage("entity"))
-short_mem  = ShortTermMemory(storage=SurrealStorage("short-term"))
+short_mem = ShortTermMemory(storage=SurrealStorage("short-term"))
 
 # --- Tasks -------------------------------------------------------------
 t1 = Task(
@@ -206,9 +241,12 @@ crew = Crew(
 crew.add_agents(researcher, planner)
 crew.add_tasks(t1, t2)
 
-if __name__ == "__main__":
-    result = crew.run()
+async def main():
+    result = await crew.run()
     print(result)
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 Run with:
@@ -221,7 +259,7 @@ python -m mycrew.crew
 
   * `Researcher ➜ SurrealStorage.save()` writes the three festival candidates into **entity memory** (table `mem_entity`).
   * Each message between agents is added to **short-term memory** (table `mem_short_term`) so the planner can reference them mid-run.
-  * On subsequent executions, `SurrealStorage.search()` lets either agent recall past entity details (“When did we last look at Barcelona’s Sónar?”) using a vector (k-NN) query plus metadata filters – all inside SurrealDB.
+  * On subsequent executions, `SurrealStorage.search()` lets either agent recall past entity details (“When did we last look at Barcelona's Sónar?”) using a vector (k-NN) query plus metadata filters – all inside SurrealDB.
 
 ## Where to customise further
 
