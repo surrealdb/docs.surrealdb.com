@@ -1,0 +1,158 @@
+---
+sidebar_position: 2
+sidebar_label: Unstructured
+title: Unstructured | Data Management
+description: This section contains information about the Unstructured data management feature of SurrealDB.
+---
+
+# Unstructured
+
+Unstructured cleans raw files (PDF, HTML, Office docs …) and, if you wish, embeds each chunk. SurrealDB then keeps those embeddings together with any metadata or graph relations—so your whole retrieval pipeline lives in one database.
+
+
+## Setup
+
+```bash
+pip install unstructured surrealdb              # ingestion + SurrealDB SDK
+surreal start --log trace --auth root root      # local server (or connect to your cluster)
+```
+
+## One-shot CLI workflow
+
+Below we extract **embedded chunks from a PDF annual report**, save them as JSONL, then bulk-insert the file into SurrealDB.
+
+```bash
+# Choose any embedding backend supported by Unstructured
+EMBED_PROVIDER="openai"
+
+unstructured-ingest \
+  local \
+  --input-path example-docs/annual-report-2024.pdf \
+  --output-dir ./chunks_jsonl                      \
+  --strategy hi_res                                \
+  --chunk-elements                                 \
+  --embedding-provider "$EMBED_PROVIDER"           \
+  --verbose                                        \
+  filesystem                                       # write JSONL locally
+```
+
+A tiny script can read each line of `chunks_jsonl/annual-report-2024.jsonl` and push it into SurrealDB (see “Importer” below).
+
+
+## Fully programmatic pipeline
+
+### Create a tiny SurrealDB writer
+
+```python
+# surreal_writer.py  (NEW – replaces the earlier Qdrant writer)
+from typing import List, Dict, Any
+from surrealdb import Surreal
+from unstructured.ingest.runner.writers.base_writer import Writer
+from unstructured.ingest.interfaces import BaseDoc
+
+class SDBConfig:
+    def __init__(self, url: str, table: str, dim: int):
+        self.url, self.table, self.dim = url, table, dim
+
+class SDBWriter(Writer):
+    def __init__(self, cfg: SDBConfig, batch_size: int = 100):
+        self.cfg, self.batch_size, self.db = cfg, batch_size, None
+
+    async def _connect(self):
+        if self.db is None:
+            self.db = Surreal(self.cfg.url)
+            await self.db.connect()
+            await self.db.signin({"user": "root", "pass": "root"})
+            await self.db.use("reports", "corp")          # namespace / database
+            await self.db.query(f"""
+                DEFINE TABLE IF NOT EXISTS {self.cfg.table};
+                DEFINE FIELD  text       ON {self.cfg.table} TYPE string;
+                DEFINE FIELD  page       ON {self.cfg.table} TYPE int;
+                DEFINE FIELD  embedding  ON {self.cfg.table} TYPE array;
+                DEFINE INDEX  hnsw_idx   ON {self.cfg.table}
+                             FIELDS embedding HNSW DIMENSION {self.cfg.dim};
+            """)
+
+    async def write(self, batch: List[BaseDoc], **_):
+        await self._connect()
+        rows: List[Dict[str, Any]] = []
+        for doc in batch:
+            rows.append({
+                "id":        f"chunk:{doc.id}",
+                "text":      doc.text,
+                "page":      doc.metadata.get("page_number", -1),
+                "embedding": doc.embedding,
+            })
+        await self.db.create(self.cfg.table, rows)
+```
+
+### Run the ingest runner
+
+```python
+# ingest_to_surreal.py (NEW example)
+from unstructured.ingest.connector.local import SimpleLocalConfig
+from unstructured.ingest.interfaces import (
+    ChunkingConfig, EmbeddingConfig, PartitionConfig,
+    ProcessorConfig, ReadConfig,
+)
+from unstructured.ingest.runner import LocalRunner
+from surreal_writer import SDBWriter, SDBConfig
+
+if __name__ == "__main__":
+    EMBED_DIM = 1536                              # e.g. OpenAI `text-embedding-3-small`
+
+    writer = SDBWriter(
+        cfg=SDBConfig(
+            url="ws://localhost:8000/rpc",
+            table="AnnualChunks",
+            dim=EMBED_DIM,
+        ),
+        batch_size=80,
+    )
+
+    runner = LocalRunner(
+        processor_config=ProcessorConfig(
+            verbose=True,
+            output_dir="./tmp-output",
+            num_processes=2,
+        ),
+        connector_config=SimpleLocalConfig(
+            input_path="example-docs/annual-report-2024.pdf",
+        ),
+        read_config=ReadConfig(),
+        partition_config=PartitionConfig(),
+        chunking_config=ChunkingConfig(chunk_elements=True),
+        embedding_config=EmbeddingConfig(provider="openai"),   # UNIQUE vs. prior
+        writer=writer,
+        writer_kwargs={},
+    )
+    runner.run()
+```
+
+Running `python ingest_to_surreal.py` will:
+
+1. Split the *2024 Annual Report* into clean text chunks
+2. Embed each chunk with the OpenAI provider
+3. Insert `{text, page, embedding}` rows into the `AnnualChunks` table with an HNSW index.
+
+
+## Querying SurrealDB
+
+```surql
+-- Retrieve the 6 chunks most similar to a query vector
+LET $q = <your-query-vector>;
+SELECT text, page,
+       vector::distance::cosine(embedding, $q) AS score
+FROM AnnualChunks
+WHERE embedding <|6|> $q
+ORDER BY score;
+```
+
+SurrealDB gives you the chunk text, the original page number, and a similarity score—all filterable and join-able with any other table.
+
+### Resources
+
+* [Unstructured docs](https://unstructured-io.github.io/unstructured/api.html)
+* Sample PDF used above – replace `annual-report-2024.pdf` with your own corp docs.
+
+By pairing Unstructured’s document intelligence with SurrealDB’s multi-model engine, you get a fully self-contained pipeline for RAG, semantic search and analytics—no extra vector stores, no ETL headaches.

@@ -1,0 +1,215 @@
+---
+sidebar_position: 1
+sidebar_label: Dagster
+title: Dagster | Integrations
+description: This section contains information about the Dagster framework and how to integrate it with SurrealDB.
+---
+
+# Dagster
+
+Dagster is a powerful tool for building data pipelines and workflows. It is a popular choice for data engineers and data scientists.
+
+## Install
+
+```bash title="Install"
+pip install dagster surrealdb openai  # or swap out OpenAI for any embedder
+# optional – launch a local SurrealDB daemon
+docker run -p 8000:8000 surrealdb/surrealdb:latest \
+       start --user root --pass root file:/data/db
+```
+
+## A Dagster "SurrealResource"
+
+```python title="src/dagster_surreal.py"
+import dagster as dg
+from surrealdb import Surreal
+from typing import List, Sequence, Optional
+import hashlib, json, os, contextlib
+
+_EMBED_DIM = 1536  # match your embedder
+
+def embed(text: str) -> List[float]:
+    """Tiny helper – replace with your preferred model."""
+    import openai
+    resp = openai.Embedding.create(
+        model="text-embedding-3-small",
+        input=[text],
+        dimensions=_EMBED_DIM,
+        api_key=os.getenv("OPENAI_API_KEY"),
+    )
+    return resp["data"][0]["embedding"]
+
+
+class SurrealConfig(dg.Config):
+    url: str = dg.Field(str, default_value="ws://localhost:8000/rpc")
+    namespace: str = dg.Field(str, default_value="dagster")
+    database: str = dg.Field(str, default_value="vector")
+    user: str = dg.Field(str, default_value="root")
+    password: str = dg.Field(str, default_value="root")
+
+
+@dg.resource(config_schema=SurrealConfig)
+class SurrealResource:
+    """
+    A very small wrapper that exposes .add() and .query() like dagster-qdrant.
+    """
+
+    def __init__(self, context):
+        cfg: SurrealConfig = context.resource_config
+        self.url = cfg.url
+        self.namespace = cfg.namespace
+        self.database = cfg.database
+        self.user = cfg.user
+        self.password = cfg.password
+        self.db = None
+
+    # — helpers ----------------------------------------------------------
+    def _ensure_table(self, table: str):
+        with Surreal(self.url) as db:
+            db.signin({"username": self.user, "password": self.password})
+            db.use(self.namespace, self.database)
+            db.query(
+                """
+                DEFINE TABLE $table SCHEMALESS;
+                DEFINE FIELD id        ON $table TYPE string;
+                DEFINE FIELD text      ON $table TYPE string;
+                DEFINE FIELD embedding ON $table TYPE array;
+                DEFINE INDEX ${table}_vec
+                       ON $table FIELDS embedding
+                       HNSW DIMENSION $dim DIST COSINE IF NOT EXISTS;
+                """,
+                {
+                    "table": table,
+                    "dim": _EMBED_DIM
+                }
+            )
+
+    # — public API -------------------------------------------------------
+    def add(self, collection_name: str, documents: Sequence[str]):
+        self._ensure_table(collection_name)
+        with Surreal(self.url) as db:
+            db.signin({"username": self.user, "password": self.password})
+            db.use(self.namespace, self.database)
+            for doc in documents:
+                rec = {
+                    "id": hashlib.sha1(doc.encode()).hexdigest(),
+                    "text": doc,
+                    "embedding": embed(doc),
+                }
+                db.create(collection_name, rec)
+
+    def query(
+        self,
+        collection_name: str,
+        query_text: str,
+        limit: int = 3,
+        score_threshold: float = 0.4,
+    ):
+        self._ensure_table(collection_name)
+        vec = embed(query_text)
+        with Surreal(self.url) as db:
+            db.signin({"username": self.user, "password": self.password})
+            db.use(self.namespace, self.database)
+            result = db.query(
+                """
+                SELECT text,
+                       vector::distance::cosine(embedding, $vec) AS score
+                FROM $table
+                WHERE embedding <|$limit|> $vec
+                ORDER BY score ASC
+                """,
+                {
+                    "table": collection_name,
+                    "vec": vec,
+                    "limit": limit
+                }
+            )
+            rows = result[0]["result"]
+            return [r for r in rows if r['score'] <= score_threshold or score_threshold == 0]
+
+    # Use the resource as a context-manager inside assets
+    @contextlib.contextmanager
+    def get_client(self):
+        try:
+            yield self
+        finally:
+            pass  # No need to close since we use context managers for each operation
+```
+
+## Unique example asset: **"fruit_recipes"**
+
+The asset saves four recipe blurbs and then finds the two closest matches to the prompt "tropical smoothie ideas"
+
+```python title="src/my_repo/assets.py"
+import dagster as dg
+from dagster_surreal import SurrealResource
+
+@dg.asset
+def fruit_recipes(surreal_resource: SurrealResource):
+    # No need for get_client() context manager since each operation manages its own connection
+    surreal_resource.add(
+        collection_name="recipe_collection",
+        documents=[
+            "Orange & ginger immunity juice",
+            "Pineapple coconut chia pudding",
+            "Strawberry basil lemonade",
+            "Cucumber mint cooler"
+        ],
+    )
+    results = surreal_resource.query(
+        collection_name="recipe_collection",
+        query_text="tropical smoothie ideas",
+        limit=2,
+        score_threshold=0.35,
+    )
+    # Dagster lets you materialise observational data
+    dg.get_dagster_logger().info(f"Vector search results → {results}")
+    return {"query": "tropical smoothie ideas", "results": results}
+```
+
+## Register everything with Dagster
+
+```python title="src/my_repo/__init__.py"
+import dagster as dg
+from my_repo.assets import fruit_recipes
+from dagster_surreal import SurrealResource, SurrealConfig
+
+defs = dg.Definitions(
+    assets=[fruit_recipes],
+    resources={
+        "surreal_resource": SurrealResource(
+            config=SurrealConfig(
+                url="ws://localhost:8000/rpc",
+                namespace="dagster",
+                database="vector",
+                user="root",  # Explicitly set credentials
+                password="root"
+            )
+        )
+    },
+)
+```
+
+Run it:
+
+```bash
+dagster dev            # open the UI
+# or
+dagster job execute -j fruit_recipes
+```
+
+You'll see the two documents about *pineapple* and *strawberry* surface as nearest neighbours, powered purely by SurrealDB's HNSW index.
+
+
+### Why this matters
+
+* **Single binary** – SurrealDB stores structured, graph and vector data together.
+* **No driver mismatch** – Everything happens over the Surreal Python SDK.
+* **Dagster observability** – vector-search outputs (scores, neighbours) flow through Dagster's lineage & asset catalog.
+
+Adapt the resource further (M-Tree indexes, metadata filters, async SDK) to fit your pipeline's needs, and you now have a fully open-source orchestration stack with integrated vector search. Happy orchestrating!
+
+## Resources
+
+- [Vector Search reference guide](/docs/surrealdb/reference-guide/vector-search)
+- [surrealdb/surrealdb.py](https://github.com/surrealdb/surrealdb.py)

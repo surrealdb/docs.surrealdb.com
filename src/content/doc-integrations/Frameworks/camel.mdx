@@ -1,0 +1,218 @@
+---
+sidebar_position: 1
+sidebar_label: Camel
+title: Camel | Integrations
+description: This section contains information about the Camel framework and how to integrate it with SurrealDB.
+---
+
+# CamelAI × SurrealDB
+
+[Camel](https://www.camel-ai.org) is a Python framework for building multi-agent LLM systems.
+SurrealDB is a multi-model database with first-class vector search (HNSW, brute-force or M-Tree).
+
+By adding a SurrealDB storage driver you can keep your agents' knowledge base—documents, metadata and embeddings—in a single database.
+
+## Installation
+
+```bash
+pip install "camel[vector-databases]" surrealdb     # Camel + async SurrealDB SDK
+surreal start --log trace --auth root root          # run SurrealDB locally
+```
+
+## A minimal `SurrealStorage` driver
+
+Camel's `VectorStorage` interface just needs three methods: `add`, `query` and `clear`.
+Below is a *lightweight* implementation that writes to a table called `AgentVectors` with an HNSW index.
+
+```python
+# surreal_storage.py
+import asyncio, math
+from typing import List
+from camel.storages import VectorStorage, VectorRecord, VectorDBQuery, VectorDBQueryResult
+from surrealdb import AsyncSurreal
+from camel.types import VectorDistance
+
+class SurrealStorage(VectorStorage):
+    def __init__(
+        self,
+        *,
+        url: str = "ws://localhost:8000/rpc",
+        table: str = "AgentVectors",
+        vector_dim: int = 768,
+        distance: VectorDistance = VectorDistance.COSINE,
+        namespace: str = "agents",
+        database: str = "demo",
+        user: str = "root",
+        password: str = "root",
+    ):
+        super().__init__(distance)
+        self.url = url
+        self.table = table
+        self.dim = vector_dim
+        self.ns = namespace
+        self.db = database
+        self.user = user
+        self.password = password
+
+    async def _ensure_table(self):
+        async with AsyncSurreal(self.url) as db:
+            await db.signin({"username": self.user, "password": self.password})
+            await db.use(self.ns, self.db)
+            await db.query(
+                """
+                DEFINE TABLE $table SCHEMALESS;
+                DEFINE FIELD payload    ON $table TYPE object;
+                DEFINE FIELD embedding  ON $table TYPE array;
+                DEFINE INDEX hnsw_idx   ON $table
+                             FIELDS embedding HNSW DIMENSION $dim;
+                """,
+                {
+                    "table": self.table,
+                    "dim": self.dim
+                }
+            )
+
+    # ---------- VectorStorage interface ---------------------------------
+    async def add(self, records: List[VectorRecord]) -> None:
+        await self._ensure_table()
+        async with AsyncSurreal(self.url) as db:
+            await db.signin({"username": self.user, "password": self.password})
+            await db.use(self.ns, self.db)
+            rows = [
+                {"id": f"vec:{i}", "payload": r.payload, "embedding": r.vector}
+                for i, r in enumerate(records)
+            ]
+            await db.create(self.table, rows)
+
+    async def query(self, q: VectorDBQuery) -> List[VectorDBQueryResult]:
+        await self._ensure_table()
+        metric = {
+            VectorDistance.COSINE: "cosine",
+            VectorDistance.EUCLIDEAN: "euclidean",
+            VectorDistance.DOT: "dot",
+        }[self.distance]
+
+        async with AsyncSurreal(self.url) as db:
+            await db.signin({"username": self.user, "password": self.password})
+            await db.use(self.ns, self.db)
+            result = await db.query(
+                """
+                SELECT payload,
+                       vector::distance::$metric(embedding, $vec) AS score
+                FROM $table
+                WHERE embedding <|$top_k,$metric|> $vec
+                ORDER BY score;
+                """,
+                {
+                    "table": self.table,
+                    "vec": q.query_vector,
+                    "top_k": q.top_k,
+                    "metric": metric
+                }
+            )
+
+            return [
+                VectorDBQueryResult(
+                    record=VectorRecord(vector=[], payload=row["payload"]),
+                    similarity=1.0 - row["score"] if metric == "cosine" else -row["score"],
+                )
+                for row in result[0]["result"]
+            ]
+
+    async def clear(self) -> None:
+        async with AsyncSurreal(self.url) as db:
+            await db.signin({"username": self.user, "password": self.password})
+            await db.use(self.ns, self.db)
+            await db.query(
+                "REMOVE TABLE $table;",
+                {"table": self.table}
+            )
+```
+
+> [!Note]
+> The driver uses SurrealDB's *Cosine*, *Euclidean* or *Dot-product* distances by mapping Camel's `VectorDistance` enum to SurrealQL functions.
+
+## Store and query vectors with Camel
+
+```python
+import asyncio
+from camel.storages import VectorRecord, VectorDBQuery
+from camel.types import VectorDistance
+from surreal_storage import SurrealStorage
+
+storage = SurrealStorage(
+    vector_dim=768,
+    distance=VectorDistance.COSINE,
+    user="root",  # Explicitly set credentials
+    password="root"
+)
+
+async def demo():
+    # ------------ write -----------------------------------------------
+    await storage.add([
+        VectorRecord(vector=[0.1]*768, payload={"title": "Alpha"}),
+        VectorRecord(vector=[0.2]*768, payload={"title": "Beta"}),
+    ])
+
+    # ------------ similarity search -----------------------------------
+    hits = await storage.query(VectorDBQuery(
+        query_vector=[0.11]*768,
+        top_k=5,
+    ))
+    for h in hits:
+        print(h.record.payload, h.similarity)
+
+    await storage.clear()
+
+asyncio.run(demo())
+```
+
+## Plug into Camel's retrievers
+
+```python
+from camel.embeddings import OpenAIEmbedding
+from camel.retrievers import VectorRetriever
+
+# SurrealDB storage with explicit configuration
+surreal_storage = SurrealStorage(
+    vector_dim=1536,
+    user="root",
+    password="root"
+)
+
+# Retriever with any embedding model Camel supports
+retriever = VectorRetriever(embedding_model=OpenAIEmbedding())
+
+# Process (embed + store) a piece of content
+retriever.process("https://example.com/LLM-primer.pdf", surreal_storage)
+
+# Query
+results = retriever.query("What is an LLM?", surreal_storage)
+print(results)
+```
+
+### Auto-retriever convenience
+
+```python
+from camel.retrievers import AutoRetriever
+from camel.types import StorageType
+
+auto = AutoRetriever(
+    storage_type=StorageType.CUSTOM,         # tell Camel we use a custom storage
+    custom_storage=surreal_storage,
+)
+
+info = auto.run_vector_retriever(
+    contents=["https://example.com/agents-blog-post.html"],
+    query="How do autonomous agents coordinate tasks?",
+    return_detailed_info=True,
+)
+
+print(info)
+```
+
+## Resources
+
+* [Camel documentation](https://docs.camel-ai.org/)
+
+With a lightweight driver you get *one* database for document chunks, agent memory and vector search—simplifying deployment and scaling for your Camel-powered applications.
