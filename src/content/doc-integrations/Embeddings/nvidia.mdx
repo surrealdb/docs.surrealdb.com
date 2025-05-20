@@ -8,7 +8,7 @@ description: Using Nvidia Embeddings with SurrealDB
 
 # Using Nvidia Embeddings with **SurrealDB**
 
-Nvidia’s **NV-Embed-QA** model delivers 1 024-dimensional sentence vectors that work nicely with SurrealDB’s built-in K-nearest-neighbour search (HNSW, brute-force or M-Tree). The walkthrough below shows how to store and query those vectors **without Qdrant**, using only SurrealDB and the Nvidia Retrieval API.
+Nvidia's **NV-Embed-QA** model delivers 1 024-dimensional sentence vectors that work nicely with SurrealDB's built-in K-nearest-neighbour search (HNSW, brute-force or M-Tree). The walkthrough below shows how to store and query those vectors **without Qdrant**, using only SurrealDB and the Nvidia Retrieval API.
 
 ## Prerequisites & Installation
 
@@ -20,20 +20,21 @@ pip install surrealdb requests
 *Run a local SurrealDB instance first, e.g.*
 
 ```bash
-surreal start --log trace --auth root root
+surreal start --user root --pass root --bind 0.0.0.0:8000 file:/data/db
 ```
 
 ## Prepare an Nvidia session
 
 ```python
-# python3
-import os, requests
+import os
+import requests
+from typing import List, Dict, Any
 
 NVIDIA_BASE = "https://ai.api.nvidia.com/v1/retrieval/nvidia/embeddings"
 NVIDIA_API_KEY = os.environ["NVIDIA_API_KEY"]          # set in your shell
 
-session  = requests.Session()
-headers  = {
+session = requests.Session()
+headers = {
     "Authorization": f"Bearer {NVIDIA_API_KEY}",
     "Accept":        "application/json",
     "Content-Type":  "application/json",
@@ -53,43 +54,47 @@ texts = [
 ## Call the NV-Embed-QA model
 
 ```python
-payload = {
-    "input": texts,
-    "input_type": "passage",
-    "model": "NV-Embed-QA",
-}
-emb_resp = session.post(NVIDIA_BASE, headers=headers, json=payload).json()
-vectors  = [row["embedding"] for row in emb_resp["data"]]
+def get_embeddings(inputs: List[str], input_type: str = "passage") -> List[List[float]]:
+    """Get embeddings from Nvidia API."""
+    payload = {
+        "input": inputs,
+        "input_type": input_type,
+        "model": "NV-Embed-QA",
+    }
+    resp = session.post(NVIDIA_BASE, headers=headers, json=payload).json()
+    return [row["embedding"] for row in resp["data"]]
+
+# Get embeddings for all texts
+vectors = get_embeddings(texts)
 ```
 
 ## Store vectors in SurrealDB
 
 ```python
 import asyncio
-from surrealdb import Surreal
+from surrealdb import AsyncSurreal
 
 TABLE = "GpuDocs"                              # our table name
 
 async def ingest():
-    db = Surreal("ws://localhost:8000/rpc")
-    await db.connect()
-    await db.signin({"user": "root", "pass": "root"})
-    await db.use("test", "test")               # <namespace>, <database>
+    async with AsyncSurreal("ws://localhost:8000/rpc") as db:
+        await db.signin({"username": "root", "password": "root"})
+        await db.use("test", "test")               # <namespace>, <database>
 
-    # ---- idempotent schema & HNSW index ----
-    await db.query(`
-        DEFINE TABLE IF NOT EXISTS {TABLE};
-        DEFINE FIELD  text       ON {TABLE} TYPE string;
-        DEFINE FIELD  embedding  ON {TABLE} TYPE array;
-        DEFINE INDEX  hnsw_embed ON {TABLE}
-                      FIELDS embedding HNSW DIMENSION 1024;
-    `)
+        # ---- idempotent schema & HNSW index ----
+        await db.query("""
+            DEFINE TABLE IF NOT EXISTS $table;
+            DEFINE FIELD  text       ON $table TYPE string;
+            DEFINE FIELD  embedding  ON $table TYPE array;
+            DEFINE INDEX  hnsw_embed ON $table
+                          FIELDS embedding HNSW DIMENSION 1024;
+        """, {"table": TABLE})
 
-    # ---- insert the rows -------------------
-    await db.create(TABLE, [
-        {"id": f"doc:{i}", "text": t, "embedding": v}
-        for i, (t, v) in enumerate(zip(texts, vectors))
-    ])
+        # ---- insert the rows -------------------
+        await db.create(TABLE, [
+            {"id": f"doc:{i}", "text": t, "embedding": v}
+            for i, (t, v) in enumerate(zip(texts, vectors))
+        ])
 
 asyncio.run(ingest())
 ```
@@ -97,33 +102,31 @@ asyncio.run(ingest())
 ## Similarity search
 
 ```python
-async def search(query: str, k: int = 3):
+async def search(query: str, k: int = 3) -> List[Dict[str, Any]]:
+    """Search for similar documents using vector similarity."""
     # ----- embed the query ------------------
-    q_payload = {
-        "input": query,
-        "input_type": "query",
-        "model": "NV-Embed-QA",
-    }
-    q_vec = session.post(NVIDIA_BASE, headers=headers,
-                         json=q_payload).json()["data"][0]["embedding"]
+    q_vec = get_embeddings([query], input_type="query")[0]
 
     # ----- SurrealDB KNN query --------------
-    db = Surreal("ws://localhost:8000/rpc")
-    await db.connect()
-    await db.signin({"user": "root", "pass": "root"})
-    await db.use("test", "test")
+    async with AsyncSurreal("ws://localhost:8000/rpc") as db:
+        await db.signin({"username": "root", "password": "root"})
+        await db.use("test", "test")
 
-    result = await db.query(`
-        LET $q = $vec;
-        SELECT text,
-               vector::distance::cosine(embedding, $q) AS score
-        FROM {TABLE}
-        WHERE embedding <|{k}|> $q          -- K-nearest-neighbour
-        ORDER BY score;                     -- lower = more similar
-    """, {"vec": q_vec})
+        result = await db.query("""
+            LET $q = $vec;
+            SELECT text,
+                   vector::distance::cosine(embedding, $q) AS score
+            FROM $table
+            WHERE embedding <|$k|> $q          -- K-nearest-neighbour
+            ORDER BY score;                     -- lower = more similar
+        """, {
+            "vec": q_vec,
+            "k": k,
+            "table": TABLE
+        })
+        return result[0]["result"]
 
-    return result[0]
-
+# Example usage
 matches = asyncio.run(search("How do I speed up LLM inference on GPUs?"))
 for row in matches:                              # pretty-print
     print(f"{row['score']:.4f}  {row['text']}")

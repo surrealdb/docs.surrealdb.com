@@ -5,81 +5,91 @@ title: Jina | Embeddings
 description: This section contains information about the Jina embeddings feature of SurrealDB.
 ---
 
-# Multimodal search with `jina-clip-v2` and SurrealDB
+# Multimodal search with `jina-clip-v2`
 
 `jina-clip-v2` produces a **unified 1 024-dimensional vector space** for both text **and** images.
-SurrealDB’s native k-nearest-neighbour search (HNSW, brute-force or M-Tree) lets you store those vectors right beside rich metadata, graphs or relational tables—so you can build fully multimodal search without any extra vector service.
+SurrealDB's native k-nearest-neighbour search (HNSW, brute-force or M-Tree) lets you store those vectors right beside rich metadata, graphs or relational tables—so you can build fully multimodal search without any extra vector service.
  
 ## Install & run
 
 ```bash
+# Install dependencies
 pip install surrealdb requests           # async SurrealDB client + HTTP for Jina
-surreal start --log trace --auth root root   # local server (or connect to your cluster)
+
+# Start SurrealDB server
+surreal start --user root --pass root --bind 0.0.0.0:8000 file:/data/db
 ```
 
 ## Create embeddings
 
-We’ll embed **one caption** and **one image**—a playful golden retriever in the snow.
+We'll embed **one caption** and **one image**—a playful golden retriever in the snow.
 
 ```python
 import os, requests, json
+from typing import List, Dict, Any
 
 API_KEY = os.environ["JINA_API_KEY"]           # export JINA_API_KEY=...
 MODEL   = "jina-clip-v2"
 DIM     = 1024
 
+def get_embeddings(inputs: List[Dict[str, str]]) -> List[List[float]]:
+    """Get embeddings from Jina API."""
+    resp = requests.post(
+        "https://api.jina.ai/v1/embeddings",
+        headers={
+            "Content-Type":  "application/json",
+            "Authorization": f"Bearer {API_KEY}",
+        },
+        json={
+            "input": inputs,
+            "model": MODEL,
+            "dimensions": DIM,
+        },
+    ).json()["data"]
+    return [item["embedding"] for item in resp]
+
 caption   = "A playful golden retriever puppy running through fresh snow"
 image_url = "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=800"
 
-resp = requests.post(
-    "https://api.jina.ai/v1/embeddings",
-    headers={
-        "Content-Type":  "application/json",
-        "Authorization": f"Bearer {API_KEY}",
-    },
-    json={
-        "input": [
-            {"text":  caption},
-            {"image": image_url},
-        ],
-        "model":      MODEL,
-        "dimensions": DIM,
-    },
-).json()["data"]
-
-text_vec, image_vec = resp[0]["embedding"], resp[1]["embedding"]
+# Get embeddings for both text and image
+embeddings = get_embeddings([
+    {"text": caption},
+    {"image": image_url},
+])
+text_vec, image_vec = embeddings
 ```
 
 ## Ingest into SurrealDB
 
 ```python
 import asyncio
-from surrealdb import Surreal
+from surrealdb import AsyncSurreal
 
 async def ingest():
-    db = Surreal("ws://localhost:8000/rpc")
-    await db.connect()
-    await db.signin({"user": "root", "pass": "root"})
-    await db.use("media", "demo")                # namespace, database
+    async with AsyncSurreal("ws://localhost:8000/rpc") as db:
+        await db.signin({"username": "root", "password": "root"})
+        await db.use("media", "demo")                # namespace, database
 
-    await db.query(`
-        DEFINE TABLE IF NOT EXISTS Pets;
-        DEFINE FIELD caption    ON Pets TYPE string;
-        DEFINE FIELD img_url    ON Pets TYPE string;
-        DEFINE FIELD text_vec   ON Pets TYPE array;
-        DEFINE FIELD image_vec  ON Pets TYPE array;
+        # Define schema and indexes
+        await db.query("""
+            DEFINE TABLE IF NOT EXISTS Pets;
+            DEFINE FIELD caption    ON Pets TYPE string;
+            DEFINE FIELD img_url    ON Pets TYPE string;
+            DEFINE FIELD text_vec   ON Pets TYPE array;
+            DEFINE FIELD image_vec  ON Pets TYPE array;
 
-        DEFINE INDEX h_text  ON Pets FIELDS text_vec  HNSW DIMENSION 1024;
-        DEFINE INDEX h_image ON Pets FIELDS image_vec HNSW DIMENSION 1024;
-    `)
+            DEFINE INDEX h_text  ON Pets FIELDS text_vec  HNSW DIMENSION 1024;
+            DEFINE INDEX h_image ON Pets FIELDS image_vec HNSW DIMENSION 1024;
+        """)
 
-    await db.create("Pets", {
-        "id":        "dog:0",
-        "caption":   caption,
-        "img_url":   image_url,
-        "text_vec":  text_vec,
-        "image_vec": image_vec,
-    })
+        # Create record
+        await db.create("Pets", {
+            "id":        "dog:0",
+            "caption":   caption,
+            "img_url":   image_url,
+            "text_vec":  text_vec,
+            "image_vec": image_vec,
+        })
 
 asyncio.run(ingest())
 ```
@@ -89,36 +99,29 @@ asyncio.run(ingest())
 ### Text → Image (text-to-image)
 
 ```python
-async def text2image(query: str, k: int = 3):
-    # Embed query text
-    q_vec = requests.post(
-        "https://api.jina.ai/v1/embeddings",
-        headers={
-            "Content-Type":  "application/json",
-            "Authorization": f"Bearer {API_KEY}",
-        },
-        json={
-            "input":       [{"text": query}],
-            "model":       MODEL,
-            "dimensions":  DIM,
-        },
-    ).json()["data"][0]["embedding"]
+async def text2image(query: str, k: int = 3) -> List[Dict[str, Any]]:
+    """Search images using text query."""
+    # Get query embedding
+    q_vec = get_embeddings([{"text": query}])[0]
 
-    db = Surreal("ws://localhost:8000/rpc")
-    await db.connect()
-    await db.signin({"user":"root","pass":"root"})
-    await db.use("media", "demo")
+    async with AsyncSurreal("ws://localhost:8000/rpc") as db:
+        await db.signin({"username": "root", "password": "root"})
+        await db.use("media", "demo")
 
-    results = await db.query(`
-        LET $q = $vec;
-        SELECT img_url, caption,
-               vector::distance::cosine(image_vec, $q) AS score
-        FROM Pets
-        WHERE image_vec <|{k}|> $q
-        ORDER BY score;
-    """, {"vec": q_vec})
-    return results[0]
+        result = await db.query("""
+            LET $q = $vec;
+            SELECT img_url, caption,
+                   vector::distance::cosine(image_vec, $q) AS score
+            FROM Pets
+            WHERE image_vec <|$k|> $q
+            ORDER BY score;
+        """, {
+            "vec": q_vec,
+            "k": k
+        })
+        return result[0]["result"]
 
+# Example usage
 matches = asyncio.run(text2image("dog playing in snow"))
 for m in matches:
     print(f"{m['score']:.4f}  {m['img_url']}")
@@ -127,35 +130,32 @@ for m in matches:
 ### Image → Text (image-to-text)
 
 ```python
-async def image2text(query_image_url: str, k: int = 3):
-    # Embed query image
-    q_vec = requests.post(
-        "https://api.jina.ai/v1/embeddings",
-        headers={
-            "Content-Type":  "application/json",
-            "Authorization": f"Bearer {API_KEY}",
-        },
-        json={
-            "input":       [{"image": query_image_url}],
-            "model":       MODEL,
-            "dimensions":  DIM,
-        },
-    ).json()["data"][0]["embedding"]
+async def image2text(query_image_url: str, k: int = 3) -> List[Dict[str, Any]]:
+    """Search text using image query."""
+    # Get query embedding
+    q_vec = get_embeddings([{"image": query_image_url}])[0]
 
-    db = Surreal("ws://localhost:8000/rpc")
-    await db.connect()
-    await db.signin({"user":"root","pass":"root"})
-    await db.use("media", "demo")
+    async with AsyncSurreal("ws://localhost:8000/rpc") as db:
+        await db.signin({"username": "root", "password": "root"})
+        await db.use("media", "demo")
 
-    results = await db.query(`
-        LET $q = $vec;
-        SELECT caption,
-               vector::distance::cosine(text_vec, $q) AS score
-        FROM Pets
-        WHERE text_vec <|{k}|> $q
-        ORDER BY score;
-    `, {"vec": q_vec})
-    return results[0]
+        result = await db.query("""
+            LET $q = $vec;
+            SELECT caption,
+                   vector::distance::cosine(text_vec, $q) AS score
+            FROM Pets
+            WHERE text_vec <|$k|> $q
+            ORDER BY score;
+        """, {
+            "vec": q_vec,
+            "k": k
+        })
+        return result[0]["result"]
+
+# Example usage
+matches = asyncio.run(image2text(image_url))
+for m in matches:
+    print(f"{m['score']:.4f}  {m['caption']}")
 ```
 
 ## Cheat-sheet
@@ -179,4 +179,4 @@ async def image2text(query_image_url: str, k: int = 3):
   </tr>
 </table>
 
-With `jina-clip-v2` you get a single vector space for both modalities, and SurrealDB’s built-in vector search makes the pipeline simple, fast and self-contained.
+With `jina-clip-v2` you get a single vector space for both modalities, and SurrealDB's built-in vector search makes the pipeline simple, fast and self-contained.
