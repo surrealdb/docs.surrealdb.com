@@ -1,6 +1,8 @@
 import type { CollectionKey } from 'astro:content';
 import type { Props as ImageProps } from '@components/Image.astro';
 
+import LightIntegrations from '@img/icon/dark/integrations.png';
+import DarkIntegrations from '@img/icon/dark/integrations.png';
 import LightDotnet from '@img/icon/light/dotnet.png';
 import LightGolang from '@img/icon/light/golang.png';
 import LightJava from '@img/icon/light/java.png';
@@ -190,6 +192,17 @@ export const metadata = {
         icon: {
             light: LightSurrealQL,
             dark: DarkSurrealQL,
+        },
+        repo: {
+            title: 'surrealdb/surrealdb',
+            href: 'https://github.com/surrealdb/surrealdb',
+        },
+    },
+    'doc-integrations': {
+        title: 'Integrations',
+        icon: {
+            light: LightIntegrations,
+            dark: DarkIntegrations,
         },
         repo: {
             title: 'surrealdb/surrealdb',

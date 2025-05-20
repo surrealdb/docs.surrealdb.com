@@ -1,0 +1,145 @@
+---
+sidebar_position: 1
+sidebar_label: Langchain
+title: Langchain
+description: Use SurrealDB native **HNSW** / **M-Tree** vector indexes as a drop-in `VectorStore` for LangChain.
+---
+
+# Langchain
+SurrealDB is a multi-model database that ships two built-in vector-search algorithms:
+
+| Algorithm | Kind | When to use |
+|-----------|------|-------------|
+| **HNSW**  | Approx. ANN, in-memory or on-disk | Low-latency semantic search / RAG |
+| **M-Tree**| Exact metric tree, on-disk       | Smaller datasets where recall = 100 % matters |
+
+You expose either one with a single `DEFINE INDEX … HNSW|MTREE` statement in SurrealQL
+
+## Install the packages
+
+```bash
+pip install surrealdb langchain-community langchain-openai   # swap in any embedding provider you like
+````
+
+* `surrealdb` → Python SDK
+* `langchain-community` → houses `SurrealDBStore`
+* `langchain-openai` (or HF, Cohere, etc.) → embeddings
+
+
+## Quick start – create a vector store from text
+
+```python
+from langchain_community.vectorstores.surrealdb import SurrealDBStore
+from langchain_openai import OpenAIEmbeddings          # use any Embeddings class
+
+emb = OpenAIEmbeddings()                               # or HF, Cohere, etc.
+
+store = SurrealDBStore.from_texts(
+    texts,                                             # list[str]
+    embedding=emb,
+    dburl="ws://localhost:8000/rpc",                   # SurrealDB RPC endpoint
+    ns="langchain", db="docstore", collection="texts",
+    db_user="root", db_pass="root",
+)
+```
+
+Under the hood the helper will:
+
+1. Create table **`texts`** (if it doesn’t exist).
+2. Add two fields – `text` & `embedding`.
+3. Add an **HNSW** index with the correct dimensionality.
+4. Insert each text with its freshly generated embedding.
+
+
+## Using an existing collection
+
+If you’ve already ingested vectors (e.g. via another app) just instantiate the store directly:
+
+```python
+from langchain_community.vectorstores.surrealdb import SurrealDBStore
+store = SurrealDBStore(
+    embedding_function=emb,
+    dburl="ws://localhost:8000/rpc",
+    ns="langchain",
+    db="docstore",
+    collection="texts",
+    db_user="root",
+    db_pass="root",
+)
+```
+
+## Local-mode SurrealDB for testing
+
+### In-memory
+
+```bash
+surreal start --mem --user root --pass root
+```
+
+Connect with `dburl="ws://localhost:8000/rpc"` and everything lives **in RAM only** – perfect for unit tests.
+
+### On-disk (single file)
+
+```bash
+surreal start file://./surreal.db --user root --pass root
+```
+
+Vectors (including the HNSW graph) are persisted between runs.
+
+### On-prem / cloud
+
+Spin SurrealDB in Docker, K8s, Nomad, Fly.io, Railway – connection string stays the same (`ws://host:8000/rpc` or `http://…/rpc`).
+
+## Similarity search
+
+### Dense vector search (default)
+
+```python
+query = "How do I enable vector search in SurrealDB?"
+docs = store.similarity_search(query, k=3)   # cosine by default
+```
+
+If your table has an **HNSW** index, LangChain will issue a query that looks like:
+
+```surql
+SELECT *, vector::distance::knn() AS score
+FROM texts
+WHERE embedding <|3,64|> $q_vec
+ORDER BY score;
+```
+
+* `<|K,EF|>` → SurrealDB’s built-in K-NN operator (K=3, efSearch=64).
+* `vector::distance::knn()` → pulls the pre-computed distance for free. ([SurrealDB][2])
+
+### Exact search (no index)
+
+Omit `DEFINE INDEX` and SurrealDBStore will fall back to `vector::distance::cosine()` for full-accuracy ranking.
+
+### Hybrid search (manual)
+
+SurrealDB doesn’t yet bundle a sparse index, but you can:
+
+1. **Full-text** index a `content` field with `SEARCH` in SurrealQL.
+2. Retrieve an FTS candidate set, then add a `vector_filter` to LangChain’s retriever to run a second vector pass for re-ranking.
+
+## Switching algorithms
+
+If you prefer **M-Tree** for exact search at the index level:
+
+```surql
+DEFINE INDEX mt_texts ON texts
+  FIELDS embedding
+  MTREE DIMENSION 768
+  DIST   COSINE;
+```
+
+LangChain code stays unchanged – only your `DEFINE INDEX` differs.
+
+
+### Next steps
+
+* [SurrealDB vector-search reference](/docs/surrealdb/reference-guide/vector-search)
+* [LangChain API docs for `SurrealDBStore`](https://api.python.langchain.com/en/latest/vectorstores/langchain_community.vectorstores.surrealdb.SurrealDBStore.html)
+* [YouTube deep-dive: Integrating SurrealDB with LangChain](https://www.youtube.com/watch?v=wOH7McJ_2wg)
+
+That’s it – you now have a fully-featured LangChain vector store powered by SurrealDB’s built-in HNSW / M-Tree indexes, no boilerplate required. 🚀

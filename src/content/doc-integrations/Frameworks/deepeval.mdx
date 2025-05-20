@@ -1,0 +1,252 @@
+---
+sidebar_position: 1
+sidebar_label: DeepEval
+title: DeepEval | Integrations
+description: This section contains information about the DeepEval framework and how to integrate it with SurrealDB.
+---
+
+# DeepEval
+
+[DeepEval](https://deepeval.com) by Confident AI is an open-source framework for testing large language model systems. Similar to Pytest but designed for LLM outputs, it evaluates metrics like G-Eval, hallucination, answer relevancy.
+
+DeepEval can be integrated with SurrealDB to evaluate RAG pipelines — ensuring your LLM applications return relevant, grounded, and faithful responses based on retrieved vector search context.
+
+SurrealDB's *native* vector engine, allows you to store vectors, documents and metadata in the same database that already stores the rest of your app data.
+
+
+## Install & run
+
+```bash
+pip install deepeval surrealdb openai   # swap OpenAI for any embedder you like
+# optional – start a local SurrealDB node
+docker run -p 8000:8000 surrealdb/surrealdb:latest \
+       start --user root --pass root file:/data/db
+```
+
+> [!NOTE]
+> SurrealDB ≥ v1.5 ships HNSW & M-Tree indexes for sub-millisecond k-NN search.
+
+## Set up a vector table & index (one-time)
+
+```sql
+-- SurrealQL – run in the DB console once.
+DEFINE TABLE rag_docs SCHEMALESS;
+DEFINE FIELD id        ON rag_docs TYPE string;  -- primary key
+DEFINE FIELD text      ON rag_docs TYPE string;
+DEFINE FIELD source    ON rag_docs TYPE string;
+DEFINE FIELD embedding ON rag_docs TYPE array;   -- float[]
+
+-- Fast approximate NN (cosine, 1536-D, OpenAI embeddings here)
+DEFINE INDEX rag_docs_vec
+  ON rag_docs FIELDS embedding
+  HNSW DIMENSION 1536 DIST COSINE IF NOT EXISTS;
+```
+
+## Python helper: Surreal client with add/query
+
+```python title="surreal_rag.py"
+from surrealdb import AsyncSurreal
+import hashlib, json, os
+from typing import List, Dict, Any
+import openai                         # or any local embedding model
+
+_EMBED_DIM = 1536
+
+def embed(text: str) -> List[float]:
+    resp = openai.Embedding.create(
+        model="text-embedding-3-small",
+        input=[text],
+        dimensions=_EMBED_DIM,
+        api_key=os.getenv("OPENAI_API_KEY"),
+    )
+    return resp["data"][0]["embedding"]
+
+
+class SurrealRAG:
+    def __init__(
+        self,
+        url: str = "ws://localhost:8000/rpc",
+        namespace: str = "rag",
+        database: str = "demo",
+        user: str = "root",
+        password: str = "root",
+    ):
+        self.url = url
+        self.namespace = namespace
+        self.database = database
+        self.user = user
+        self.password = password
+
+    async def _ensure_table(self):
+        async with AsyncSurreal(self.url) as db:
+            await db.signin({"username": self.user, "password": self.password})
+            await db.use(self.namespace, self.database)
+            await db.query(
+                """
+                DEFINE TABLE rag_docs SCHEMALESS;
+                DEFINE FIELD id        ON rag_docs TYPE string;
+                DEFINE FIELD text      ON rag_docs TYPE string;
+                DEFINE FIELD source    ON rag_docs TYPE string;
+                DEFINE FIELD embedding ON rag_docs TYPE array;
+                DEFINE INDEX rag_docs_vec
+                    ON rag_docs FIELDS embedding
+                    HNSW DIMENSION $dim DIST COSINE IF NOT EXISTS;
+                """,
+                {"dim": _EMBED_DIM}
+            )
+
+    # --- ingest --------------------------------------------------------
+    async def add(self, docs: List[Dict[str, str]]):
+        await self._ensure_table()
+        async with AsyncSurreal(self.url) as db:
+            await db.signin({"username": self.user, "password": self.password})
+            await db.use(self.namespace, self.database)
+            for d in docs:
+                rec = {
+                    "id": hashlib.sha1(d["text"].encode()).hexdigest(),
+                    "text": d["text"],
+                    "source": d["source"],
+                    "embedding": embed(d["text"]),
+                }
+                await db.create("rag_docs", rec)
+
+    # --- retrieve ------------------------------------------------------
+    async def query(self, text: str, k: int = 4) -> List[Dict[str, Any]]:
+        await self._ensure_table()
+        vec = embed(text)
+        async with AsyncSurreal(self.url) as db:
+            await db.signin({"username": self.user, "password": self.password})
+            await db.use(self.namespace, self.database)
+            result = await db.query(
+                """
+                SELECT text, source,
+                       vector::distance::cosine(embedding, $vec) AS score
+                FROM rag_docs
+                WHERE embedding <|$k|> $vec
+                ORDER BY score ASC
+                """,
+                {
+                    "vec": vec,
+                    "k": k
+                }
+            )
+            rows = result[0]["result"]
+            return [{"context": r["text"], "source": r["source"], "score": r["score"]} for r in rows]
+```
+
+## Unique DeepEval example
+
+We'll test whether an LLM correctly answers **"Which fruit is botanically a berry but commonly mistaken for a vegetable?"** using information fetched from SurrealDB.
+
+```python
+import asyncio
+from surreal_rag import SurrealRAG
+from deepeval.test_case import LLMTestCase
+from deepeval.metrics import (
+    AnswerRelevancyMetric,
+    FaithfulnessMetric,
+    ContextualPrecisionMetric,
+)
+from deepeval import evaluate
+import openai
+
+async def main():
+    rag = SurrealRAG()
+
+    # 1. Populate SurrealDB (first run only)
+    await rag.add([
+        {
+            "text": "The tomato is botanically classified as a berry because it develops \
+                     from a single ovary and contains seeds.",
+            "source": "https://en.wikipedia.org/wiki/Tomato",
+        },
+        {
+            "text": "A cucumber is a pepo, a type of berry with a hard rind.",
+            "source": "https://en.wikipedia.org/wiki/Cucumber",
+        },
+        {
+            "text": "Strawberries are accessory fruits; their 'seeds' are achenes.",
+            "source": "https://en.wikipedia.org/wiki/Strawberry",
+        },
+    ])
+
+    # 2. Retrieve context
+    query = "Which fruit is a berry but people think it's a vegetable?"
+    context = await rag.query(query, k=3)
+
+    # 3. Build prompt & generate answer
+    prompt = f"""Answer the question.\n\nContext:\n{context}\n\nQ: {query}\nA:"""
+    resp = openai.ChatCompletion.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    answer = resp.choices[0].message.content.strip()
+
+    # 4. DeepEval test case
+    test_case = LLMTestCase(
+        input=query,
+        actual_output=answer,
+        expected_output="tomato",
+        retrieval_context=context,
+    )
+
+    # 5. Evaluate
+    evaluate(
+        test_cases=[test_case],
+        metrics=[
+            AnswerRelevancyMetric(threshold=0.7),
+            FaithfulnessMetric(threshold=0.7),
+            ContextualPrecisionMetric(top_k=3),
+        ],
+    )
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+Running this script prints a local score report **and** uploads the run to the Confident AI dashboard for historical tracking (after you've logged in with `deepeval login`).
+
+Because the context objects already include `score` and `source`, DeepEval can show traceability back to the exact SurrealDB rows that justified the answer.
+
+## Scaling up
+
+* Replace the quick `rag.add()` list with a real corpus (CSV, PDFs, etc.).
+* Encapsulate the *embed + insert* logic inside a Dagster or Airflow asset if you already orchestrate ETL.
+* Use SurrealDB's metadata fields and SurrealQL predicates (`WHERE metadata.topic = 'law'`) to test retrieval recall for specific slices of your knowledge base.
+* Evaluate hundreds of examples by looping through a HuggingFace dataset and appending each `LLMTestCase` to a list before calling `evaluate()`.
+
+### Why SurrealDB + DeepEval?
+
+<table>
+    <thead>
+        <tr>
+            <th>Benefit</th>
+            <th>Why it matters</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Single data plane</strong></td>
+            <td>Store documents, vectors and relational metadata together – fewer moving parts.</td>
+        </tr>
+        <tr>
+            <td><strong>Built-in ANN index</strong></td>
+            <td>Define HNSW with one DDL statement; no external vector service to deploy.</td>
+        </tr>
+        <tr>
+            <td><strong>SurrealQL</strong></td>
+            <td>Flexible `SELECT … WHERE … <K>` queries mix Boolean filters with vector similarity.</td>
+        </tr>
+        <tr>
+            <td><strong>DeepEval dashboards</strong></td>
+            <td>Track how retrieval quality + answer faithfulness change as you tweak prompts or embeddings.</td>
+        </tr>
+    </tbody>
+</table>
+
+With these snippets you can drop SurrealDB into any DeepEval-based RAG test harness and keep the rest of your metric logic unchanged. Happy evaluating!
+
+## Resources
+
+- [Vector Search reference guide](/docs/surrealdb/reference-guide/vector-search)
+- [DEFINE INDEX statement](/docs/surrealql/statements/define/indexes)
