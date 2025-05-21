@@ -28,7 +28,9 @@ surreal start --user root --pass root --bind 0.0.0.0:8000 file:/data/db
 ```python
 import os
 import requests
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from surrealdb import AsyncSurreal
+from surrealdb.exception import SurrealException
 
 NVIDIA_BASE = "https://ai.api.nvidia.com/v1/retrieval/nvidia/embeddings"
 NVIDIA_API_KEY = os.environ["NVIDIA_API_KEY"]          # set in your shell
@@ -39,6 +41,131 @@ headers = {
     "Accept":        "application/json",
     "Content-Type":  "application/json",
 }
+
+def get_embeddings(inputs: List[str], input_type: str = "passage") -> List[List[float]]:
+    """Get embeddings from Nvidia API.
+    
+    Args:
+        inputs: List of text strings to embed
+        input_type: Type of input ('passage' or 'query')
+        
+    Returns:
+        List of embedding vectors
+        
+    Raises:
+        requests.RequestException: If API request fails
+        ValueError: If API response is invalid
+    """
+    try:
+        payload = {
+            "input": inputs,
+            "input_type": input_type,
+            "model": "NV-Embed-QA",
+        }
+        resp = session.post(NVIDIA_BASE, headers=headers, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        if "data" not in data:
+            raise ValueError("Invalid API response format")
+        return [row["embedding"] for row in data["data"]]
+    except requests.RequestException as e:
+        raise requests.RequestException(f"Failed to get embeddings: {str(e)}")
+
+async def ingest(texts: List[str], vectors: List[List[float]], table: str = "GpuDocs") -> None:
+    """Ingest text and vector data into SurrealDB.
+    
+    Args:
+        texts: List of text strings
+        vectors: List of embedding vectors
+        table: Table name to store data in
+        
+    Raises:
+        SurrealException: If database operations fail
+    """
+    try:
+        async with AsyncSurreal("ws://localhost:8000/rpc") as db:
+            await db.signin({"username": "root", "password": "root"})
+            await db.use("test", "test")
+
+            # ---- idempotent schema & HNSW index ----
+            await db.query("""
+                DEFINE TABLE IF NOT EXISTS $table;
+                DEFINE FIELD  text       ON $table TYPE string;
+                DEFINE FIELD  embedding  ON $table TYPE array;
+                DEFINE INDEX  hnsw_embed ON $table
+                              FIELDS embedding HNSW DIMENSION 1024;
+            """, {"table": table})
+
+            # ---- insert the rows -------------------
+            await db.create(table, [
+                {"id": f"doc:{i}", "text": t, "embedding": v}
+                for i, (t, v) in enumerate(zip(texts, vectors))
+            ])
+    except SurrealException as e:
+        raise SurrealException(f"Failed to ingest data: {str(e)}")
+
+async def search(query: str, k: int = 3, table: str = "GpuDocs") -> List[Dict[str, Any]]:
+    """Search for similar documents using vector similarity.
+    
+    Args:
+        query: Search query string
+        k: Number of nearest neighbors to return
+        table: Table name to search in
+        
+    Returns:
+        List of matching documents with scores
+        
+    Raises:
+        requests.RequestException: If embedding API fails
+        SurrealException: If database operations fail
+    """
+    try:
+        # ----- embed the query ------------------
+        q_vec = get_embeddings([query], input_type="query")[0]
+
+        # ----- SurrealDB KNN query --------------
+        async with AsyncSurreal("ws://localhost:8000/rpc") as db:
+            await db.signin({"username": "root", "password": "root"})
+            await db.use("test", "test")
+
+            result = await db.query("""
+                LET $q = $vec;
+                SELECT text,
+                       vector::distance::cosine(embedding, $q) AS score
+                FROM $table
+                WHERE embedding <|$k|> $q          -- K-nearest-neighbour
+                ORDER BY score;                     -- lower = more similar
+            """, {
+                "vec": q_vec,
+                "k": k,
+                "table": table
+            })
+            return result[0]["result"]
+    except (requests.RequestException, SurrealException) as e:
+        raise Exception(f"Search failed: {str(e)}")
+
+# Example usage
+if __name__ == "__main__":
+    texts = [
+        "CUDA 12 adds cooperative groups on all SM architectures.",
+        "TensorRT 10 delivers real-time LLM inference on Hopper GPUs.",
+        "NVLink enables high-bandwidth inter-GPU communication in DGX systems.",
+    ]
+    
+    try:
+        # Get embeddings
+        vectors = get_embeddings(texts)
+        
+        # Ingest data
+        asyncio.run(ingest(texts, vectors))
+        
+        # Search
+        matches = asyncio.run(search("How do I speed up LLM inference on GPUs?"))
+        for row in matches:
+            print(f"{row['score']:.4f}  {row['text']}")
+            
+    except Exception as e:
+        print(f"Error: {str(e)}")
 ```
 
 ## Text we want to embed 

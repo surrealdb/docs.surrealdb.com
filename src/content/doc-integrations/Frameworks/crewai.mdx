@@ -35,30 +35,65 @@ SurrealDB V2 has native vector search with HNSW / M-Tree indexes, so you get an 
 ## Define the SurrealDB storage class
 
 ```python title="src/mycrew/surreal_storage.py"
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from crewai.memory.storage.rag_storage import RAGStorage
 from surrealdb import AsyncSurreal
-import json, os, hashlib
+from surrealdb.exception import SurrealException
+import json
+import os
+import hashlib
+import logging
+from dataclasses import dataclass
 import openai                            # or any local embedding model
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 _EMBED_DIM = 1536                        # OpenAI text-embedding-3-small
 
-def embed(text: str) -> List[float]:
-    "Simple embedding helper. Replace with your own provider if needed."
-    resp = openai.Embedding.create(
-        model="text-embedding-3-small",
-        input=[text],
-        dimensions=_EMBED_DIM,
-        api_key=os.getenv("OPENAI_API_KEY"),
-    )
-    return resp["data"][0]["embedding"]
+@dataclass
+class EmbeddingConfig:
+    """Configuration for embedding model."""
+    model: str = "text-embedding-3-small"
+    dimensions: int = _EMBED_DIM
+    api_key: Optional[str] = None
+
+def embed(text: str, config: Optional[EmbeddingConfig] = None) -> List[float]:
+    """Generate embeddings for text using OpenAI's API.
+    
+    Args:
+        text: Text to embed
+        config: Optional configuration for embedding model
+        
+    Returns:
+        List of embedding values
+        
+    Raises:
+        Exception: If embedding generation fails
+    """
+    try:
+        config = config or EmbeddingConfig()
+        resp = openai.Embedding.create(
+            model=config.model,
+            input=[text],
+            dimensions=config.dimensions,
+            api_key=config.api_key or os.getenv("OPENAI_API_KEY"),
+        )
+        return resp["data"][0]["embedding"]
+    except Exception as e:
+        logger.error(f"Failed to generate embeddings: {str(e)}")
+        raise Exception(f"Embedding generation failed: {str(e)}")
 
 
 class SurrealStorage(RAGStorage):
     """
-    CrewAI → SurrealDB adapter that implements the small RAGStorage API:
-    save(), search(), reset().
-    One Surreal table per memory type ("short-term", "entity", …).
+    CrewAI → SurrealDB adapter that implements the RAGStorage API.
+    Provides vector search capabilities using SurrealDB's native HNSW index.
+    
+    Attributes:
+        typ: Memory type (e.g., "short-term", "entity")
+        table: SurrealDB table name for this memory type
     """
 
     def __init__(
@@ -73,6 +108,19 @@ class SurrealStorage(RAGStorage):
         user: str = "root",
         password: str = "root",
     ):
+        """Initialize the storage adapter.
+        
+        Args:
+            typ: Memory type identifier
+            allow_reset: Whether to allow table reset
+            embedder_config: Optional configuration for embedding model
+            crew: Optional reference to parent crew
+            url: SurrealDB connection URL
+            namespace: Database namespace
+            database: Database name
+            user: Authentication username
+            password: Authentication password
+        """
         super().__init__(typ, allow_reset, embedder_config, crew)
         self.url = url
         self.namespace = namespace
@@ -80,112 +128,156 @@ class SurrealStorage(RAGStorage):
         self.user = user
         self.password = password
         self.table = f"mem_{typ.replace('-', '_')}"
-
-    # ---------- RAGStorage API ------------------------------------------
+        self._embed_config = EmbeddingConfig(**(embedder_config or {}))
 
     async def save(self, value: Any, metadata: Dict[str, Any]) -> None:
-        await self._ensure_table_and_index()
-        async with AsyncSurreal(self.url) as db:
-            await db.signin({"username": self.user, "password": self.password})
-            await db.use(self.namespace, self.database)
-            rec = {
-                "id": hashlib.sha1(str(value).encode()).hexdigest(),  # stable PK
-                "text": value,
-                "metadata": metadata or {},
-                "embedding": embed(str(value)),
-            }
-            await db.create(self.table, rec)  # UPSERT semantics
+        """Save a value with metadata to SurrealDB.
+        
+        Args:
+            value: Value to store
+            metadata: Associated metadata
+            
+        Raises:
+            SurrealException: If database operations fail
+        """
+        try:
+            await self._ensure_table_and_index()
+            async with AsyncSurreal(self.url) as db:
+                await db.signin({"username": self.user, "password": self.password})
+                await db.use(self.namespace, self.database)
+                
+                rec = {
+                    "id": hashlib.sha1(str(value).encode()).hexdigest(),
+                    "text": value,
+                    "metadata": metadata or {},
+                    "embedding": embed(str(value), self._embed_config),
+                }
+                await db.create(self.table, rec)
+                logger.info(f"Saved record to {self.table}")
+        except SurrealException as e:
+            logger.error(f"Failed to save record: {str(e)}")
+            raise SurrealException(f"Save operation failed: {str(e)}")
 
     async def search(
         self,
         query: str,
         limit: int = 3,
-        filter: Optional[dict] = None,
+        filter: Optional[Dict[str, Any]] = None,
         score_threshold: float = 0,
     ) -> List[Dict[str, Any]]:
-        await self._ensure_table_and_index()
-        vec = embed(query)
+        """Search for similar records using vector similarity.
         
-        # Build filter conditions
-        filter_params = {}
-        where_clause = ""
-        if filter:
-            conditions = []
-            for i, (k, v) in enumerate(filter.items()):
-                param_name = f"filter_{i}"
-                conditions.append(f"metadata.{k} == ${param_name}")
-                filter_params[param_name] = v
-            where_clause = " AND " + " AND ".join(conditions)
-
-        async with AsyncSurreal(self.url) as db:
-            await db.signin({"username": self.user, "password": self.password})
-            await db.use(self.namespace, self.database)
-            result = await db.query(
-                f"""
-                SELECT *,
-                       vector::distance::cosine(embedding, $vec) AS score
-                FROM {self.table}
-                WHERE embedding <|$limit|> $vec{where_clause}
-                ORDER BY score ASC
-                """,
-                {
-                    "vec": vec,
-                    "limit": limit,
-                    **filter_params
-                }
-            )
+        Args:
+            query: Search query
+            limit: Maximum number of results
+            filter: Optional metadata filters
+            score_threshold: Minimum similarity score
             
-            rows = result[0]["result"]
-            return [
-                {
-                    "id": r["id"],
-                    "metadata": r["metadata"],
-                    "context": r["text"],
-                    "score": r["score"],
-                }
-                for r in rows
-                if r["score"] <= score_threshold or score_threshold == 0
-            ]
+        Returns:
+            List of matching records with scores
+            
+        Raises:
+            SurrealException: If database operations fail
+        """
+        try:
+            await self._ensure_table_and_index()
+            vec = embed(query, self._embed_config)
+            
+            # Build filter conditions
+            filter_params = {}
+            where_clause = ""
+            if filter:
+                conditions = []
+                for i, (k, v) in enumerate(filter.items()):
+                    param_name = f"filter_{i}"
+                    conditions.append(f"metadata.{k} == ${param_name}")
+                    filter_params[param_name] = v
+                where_clause = " AND " + " AND ".join(conditions)
+
+            async with AsyncSurreal(self.url) as db:
+                await db.signin({"username": self.user, "password": self.password})
+                await db.use(self.namespace, self.database)
+                
+                result = await db.query(
+                    f"""
+                    SELECT *,
+                           vector::distance::cosine(embedding, $vec) AS score
+                    FROM {self.table}
+                    WHERE embedding <|$limit|> $vec{where_clause}
+                    ORDER BY score ASC
+                    """,
+                    {
+                        "vec": vec,
+                        "limit": limit,
+                        **filter_params
+                    }
+                )
+                
+                rows = result[0]["result"]
+                return [
+                    {
+                        "id": r["id"],
+                        "metadata": r["metadata"],
+                        "context": r["text"],
+                        "score": r["score"],
+                    }
+                    for r in rows
+                    if r["score"] <= score_threshold or score_threshold == 0
+                ]
+        except SurrealException as e:
+            logger.error(f"Search operation failed: {str(e)}")
+            raise SurrealException(f"Search operation failed: {str(e)}")
 
     async def reset(self) -> None:
-        async with AsyncSurreal(self.url) as db:
-            await db.signin({"username": self.user, "password": self.password})
-            await db.use(self.namespace, self.database)
-            await db.query(
-                "REMOVE TABLE $table;",
-                {"table": self.table}
-            )
-            await self._ensure_table_and_index()
+        """Reset the storage by removing and recreating the table.
+        
+        Raises:
+            SurrealException: If database operations fail
+        """
+        try:
+            async with AsyncSurreal(self.url) as db:
+                await db.signin({"username": self.user, "password": self.password})
+                await db.use(self.namespace, self.database)
+                await db.query(
+                    "REMOVE TABLE $table;",
+                    {"table": self.table}
+                )
+                await self._ensure_table_and_index()
+                logger.info(f"Reset table {self.table}")
+        except SurrealException as e:
+            logger.error(f"Reset operation failed: {str(e)}")
+            raise SurrealException(f"Reset operation failed: {str(e)}")
 
-    # ---------- internals -----------------------------------------------
-
-    async def _ensure_table_and_index(self):
-        async with AsyncSurreal(self.url) as db:
-            await db.signin({"username": self.user, "password": self.password})
-            await db.use(self.namespace, self.database)
-            await db.query(
-                """
-                DEFINE TABLE $table SCHEMALESS;
-                DEFINE FIELD id        ON $table TYPE string;
-                DEFINE FIELD text      ON $table TYPE string;
-                DEFINE FIELD metadata  ON $table TYPE object;
-                DEFINE FIELD embedding ON $table TYPE array;
-                DEFINE INDEX ${table}_vec_idx
-                    ON $table FIELDS embedding
-                    HNSW DIMENSION $dim DIST COSINE IF NOT EXISTS;
-                """,
-                {
-                    "table": self.table,
-                    "dim": _EMBED_DIM
-                }
-            )
-```
-
-*Highlights*
-
-* Uses SurrealDB's WebSocket SDK (HTTP also works).([SurrealDB][3])
-* Vector index created with one `DEFINE INDEX … HNSW` command.([SurrealDB][4])
-* Minimal `save / search / reset` surface so the rest of CrewAI is untouched.
+    async def _ensure_table_and_index(self) -> None:
+        """Ensure the table and vector index exist.
+        
+        Raises:
+            SurrealException: If database operations fail
+        """
+        try:
+            async with AsyncSurreal(self.url) as db:
+                await db.signin({"username": self.user, "password": self.password})
+                await db.use(self.namespace, self.database)
+                await db.query(
+                    """
+                    DEFINE TABLE $table SCHEMALESS;
+                    DEFINE FIELD id        ON $table TYPE string;
+                    DEFINE FIELD text      ON $table TYPE string;
+                    DEFINE FIELD metadata  ON $table TYPE object;
+                    DEFINE FIELD embedding ON $table TYPE array;
+                    DEFINE INDEX IF NOT EXISTS ${table}_vec_idx
+                        ON $table FIELDS embedding
+                        HNSW DIMENSION $dim DIST COSINE;
+                    """,
+                    {
+                        "table": self.table,
+                        "dim": self._embed_config.dimensions
+                    }
+                )
+                logger.info(f"Ensured table and index for {self.table}")
+        except SurrealException as e:
+            logger.error(f"Failed to ensure table and index: {str(e)}")
+            raise SurrealException(f"Table/index setup failed: {str(e)}")
 
 ## Wire it into a crew
 
@@ -194,56 +286,105 @@ Their short-term memory persists the conversation; the entity memory stores fact
 
 ```python title="src/mycrew/crew.py"
 import asyncio
+import logging
+from typing import List, Optional
 from crewai import Agent, Task, Crew
 from crewai.memory.entity.entity_memory import EntityMemory
 from crewai.memory.short_term.short_term_memory import ShortTermMemory
 
-from mycrew.surreal_storage import SurrealStorage   # ← our adapter
+from mycrew.surreal_storage import SurrealStorage, EmbeddingConfig
 
-# --- Agents ------------------------------------------------------------
-researcher = Agent(
-    name="GeoResearcher",
-    role="Geo-intelligence analyst",
-    goal="collect up-to-date info on travel destinations",
-)
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-planner = Agent(
-    name="TripPlanner",
-    role="Personal itinerary planner",
-    goal="craft a perfect 48-hour city break",
-)
+async def create_crew(
+    openai_api_key: Optional[str] = None,
+    surreal_url: str = "ws://localhost:8000/rpc",
+) -> Crew:
+    """Create and configure a travel planning crew.
+    
+    Args:
+        openai_api_key: Optional OpenAI API key
+        surreal_url: SurrealDB connection URL
+        
+    Returns:
+        Configured Crew instance
+    """
+    try:
+        # Configure embedding model
+        embed_config = EmbeddingConfig(api_key=openai_api_key)
+        
+        # Initialize agents
+        researcher = Agent(
+            name="GeoResearcher",
+            role="Geo-intelligence analyst",
+            goal="collect up-to-date info on travel destinations",
+        )
 
-# --- Memory back-end ---------------------------------------------------
-entity_mem = EntityMemory(storage=SurrealStorage("entity"))
-short_mem = ShortTermMemory(storage=SurrealStorage("short-term"))
+        planner = Agent(
+            name="TripPlanner",
+            role="Personal itinerary planner",
+            goal="craft a perfect 48-hour city break",
+        )
 
-# --- Tasks -------------------------------------------------------------
-t1 = Task(
-    description="Find vibrant European cities with art festivals in June 2025.",
-    expected_output="Top 3 candidate cities with festival names and dates.",
-    agent=researcher,
-)
+        # Initialize memory backends
+        entity_mem = EntityMemory(
+            storage=SurrealStorage(
+                "entity",
+                url=surreal_url,
+                embedder_config={"api_key": openai_api_key}
+            )
+        )
+        short_mem = ShortTermMemory(
+            storage=SurrealStorage(
+                "short-term",
+                url=surreal_url,
+                embedder_config={"api_key": openai_api_key}
+            )
+        )
 
-t2 = Task(
-    description="Design a relaxed 2-day itinerary for the best candidate.",
-    expected_output="Detailed schedule with cafes, galleries, evening events.",
-    agent=planner,
-    context=[t1],                      # planner sees researcher output
-)
+        # Define tasks
+        t1 = Task(
+            description="Find vibrant European cities with art festivals in June 2025.",
+            expected_output="Top 3 candidate cities with festival names and dates.",
+            agent=researcher,
+        )
 
-# --- Crew --------------------------------------------------------------
-crew = Crew(
-    memory=True,
-    entity_memory=entity_mem,
-    short_term_memory=short_mem,
-)
+        t2 = Task(
+            description="Design a relaxed 2-day itinerary for the best candidate.",
+            expected_output="Detailed schedule with cafes, galleries, evening events.",
+            agent=planner,
+            context=[t1],
+        )
 
-crew.add_agents(researcher, planner)
-crew.add_tasks(t1, t2)
+        # Create and configure crew
+        crew = Crew(
+            memory=True,
+            entity_memory=entity_mem,
+            short_term_memory=short_mem,
+        )
 
-async def main():
-    result = await crew.run()
-    print(result)
+        crew.add_agents(researcher, planner)
+        crew.add_tasks(t1, t2)
+        
+        logger.info("Crew created successfully")
+        return crew
+        
+    except Exception as e:
+        logger.error(f"Failed to create crew: {str(e)}")
+        raise
+
+async def main() -> None:
+    """Run the travel planning crew."""
+    try:
+        crew = await create_crew()
+        result = await crew.run()
+        print(result)
+        logger.info("Crew execution completed successfully")
+    except Exception as e:
+        logger.error(f"Crew execution failed: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     asyncio.run(main())
