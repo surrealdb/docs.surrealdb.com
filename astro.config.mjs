@@ -47,4 +47,7 @@ export default defineConfig({
         ],
         syntaxHighlight: false,
     },
+    redirects: {
+        '/': '/docs/surrealdb',
+    },
 });
