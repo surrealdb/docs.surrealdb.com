@@ -15,7 +15,7 @@ import { rehypeNotesPlugin } from './src/util/rehypeNotesPlugin.mjs';
 
 import sitemap from '@astrojs/sitemap';
 
-const deployDomain = process.env.DEPLOY_DOMAIN ?? 'surrealdb.com';
+const deployDomain = import.meta.env.DEPLOY_DOMAIN ?? 'surrealdb.com';
 const site = `https://${deployDomain}`;
 
 // https://astro.build/config
@@ -46,8 +46,5 @@ export default defineConfig({
             rehypeCopyCodePlugin,
         ],
         syntaxHighlight: false,
-    },
-    redirects: {
-        '/': '/docs/surrealdb',
     },
 });
