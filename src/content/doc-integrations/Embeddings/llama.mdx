@@ -1,0 +1,301 @@
+---
+sidebar_position: 1
+sidebar_label: Llama
+title: Llama
+description: A framework for building RAG pipelines with SurrealDB's native HNSW vector index as the backing store.
+---
+
+# Llama
+
+Llama is a family of open-source language models from Meta AI. The latest Llama 4 models are trained on data up to August 2024 and support both text generation and embeddings.
+
+Modern open-source RAG pipelines need two things:
+
+1. **High-quality embeddings** – Llama 4 returns 4096-dimensional float vectors optimized for semantic search
+2. **Blazing-fast vector storage** – SurrealDB (`≥ v1.5`) ships an in-memory HNSW index, queried with the `<|K,EF|>` operator in SurrealQL
+
+Below you'll wire them together, from install → ingestion → search → production-ready script.
+
+### Prerequisites
+
+Install runtimes & grab a model
+
+```bash
+pip install surrealdb llama-cpp-python        # pure-Python, CPU or GPU
+wget https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct/resolve/main/llama-4-scout.Q4_K_M.gguf \
+     -O llama4.gguf
+```
+
+`llama-cpp-python` exposes **`.embed()`** (for vectors) and **callable chat** in one package, so the *same* weights power retrieval *and* generation.
+
+### Make a vector table once
+
+```surql
+-- SurrealQL
+DEFINE TABLE docs SCHEMALESS;
+DEFINE FIELD id        ON docs TYPE string;
+DEFINE FIELD text      ON docs TYPE string;
+DEFINE FIELD source    ON docs TYPE string;
+DEFINE FIELD embedding ON docs TYPE array;
+
+-- 4096-D cosine HNSW (matches Llama 4 embeddings)
+DEFINE INDEX IF NOT EXISTS docs_vec
+  ON docs FIELDS embedding
+  HNSW DIMENSION 4096 DIST COSINE;
+```
+
+> [!IMPORTANT]
+> `DEFINE INDEX … HNSW` adds a millisecond-latency ANN index without another service.
+
+### Helper: prompt builder + RAG client
+
+```python title="llama4_surreal_rag.py"
+from surrealdb import AsyncSurreal
+from surrealdb.exception import SurrealException
+from llama_cpp import Llama
+import hashlib
+import json
+import pathlib
+from typing import List, Dict, Any, Optional
+import asyncio
+
+MODEL_PATH = pathlib.Path("llama4.gguf")
+LLM = Llama(model_path=str(MODEL_PATH), n_ctx=8192, embedding=True)
+
+# --- 1) prompt builder -----------------------------------------------
+SYS_PROMPT = """
+You are an expert conversationalist who responds to the best of your ability … 
+Respond in the language the user speaks to you in. You are Llama 4. 
+Knowledge cutoff: Aug 2024.
+""".strip()   # shorten / customise as you wish
+
+def build_prompt(user_msg: str, ctx_passages: List[str]) -> str:
+    """Build a Llama 4 prompt with context passages.
+    
+    Args:
+        user_msg: The user's question/message
+        ctx_passages: List of context passages to include
+        
+    Returns:
+        Formatted prompt string with Llama 4 roles and tokens
+    """
+    # Llama 4 roles & tags
+    header = "<|begin_of_text|>"
+    system  = f"<|header_start|>system<|header_end|>\n{SYS_PROMPT}<|eot|>"
+    user    = (
+        f"<|header_start|>user<|header_end|>\n"
+        f"{''.join(f'- {p}\\n' for p in ctx_passages)}\n{user_msg}<|eot|>"
+    )
+    assistant = "<|header_start|>assistant<|header_end|>"
+    return header + system + user + assistant  # model will complete after this
+
+# --- 2) Surreal RAG ----------------------------------------------------
+class SurrealRAG:
+    def __init__(
+        self, 
+        url: str = "ws://localhost:8000/rpc",
+        namespace: str = "rag",
+        database: str = "demo",
+        username: str = "root",
+        password: str = "root"
+    ):
+        """Initialize the RAG client.
+        
+        Args:
+            url: SurrealDB connection URL
+            namespace: Database namespace
+            database: Database name
+            username: Authentication username
+            password: Authentication password
+        """
+        self.url = url
+        self.namespace = namespace
+        self.database = database
+        self.auth = {"username": username, "password": password}
+
+    def _embed(self, txt: str) -> List[float]:
+        """Get embeddings for text using Llama model.
+        
+        Args:
+            txt: Text to embed
+            
+        Returns:
+            List of embedding values
+            
+        Raises:
+            Exception: If embedding fails
+        """
+        try:
+            return LLM.embed(txt)
+        except Exception as e:
+            raise Exception(f"Failed to generate embeddings: {str(e)}")
+
+    async def ingest(self, docs: List[Dict[str, str]]) -> None:
+        """Ingest documents into SurrealDB with embeddings.
+        
+        Args:
+            docs: List of documents with text and source
+            
+        Raises:
+            SurrealException: If database operations fail
+        """
+        try:
+            async with AsyncSurreal(self.url) as db:
+                await db.signin(self.auth)
+                await db.use(self.namespace, self.database)
+
+                for d in docs:
+                    rec = {
+                        "id": hashlib.sha1(d["text"].encode()).hexdigest(),
+                        "text": d["text"],
+                        "source": d["source"],
+                        "embedding": self._embed(d["text"]),
+                    }
+                    await db.create("docs", rec)
+        except SurrealException as e:
+            raise SurrealException(f"Failed to ingest documents: {str(e)}")
+
+    async def retrieve(self, query: str, k: int = 4) -> List[Dict[str, Any]]:
+        """Retrieve similar documents using vector search.
+        
+        Args:
+            query: Search query
+            k: Number of nearest neighbors to return
+            
+        Returns:
+            List of matching documents with scores
+            
+        Raises:
+            SurrealException: If database operations fail
+        """
+        try:
+            qv = self._embed(query)
+            async with AsyncSurreal(self.url) as db:
+                await db.signin(self.auth)
+                await db.use(self.namespace, self.database)
+
+                result = await db.query("""
+                    LET $q = $vec;
+                    SELECT text, source,
+                           vector::distance::cosine(embedding, $q) AS score
+                    FROM docs
+                    WHERE embedding <|$k|> $q
+                    ORDER BY score ASC;
+                """, {
+                    "vec": qv,
+                    "k": k
+                })
+                return result[0]["result"]
+        except SurrealException as e:
+            raise SurrealException(f"Failed to retrieve documents: {str(e)}")
+
+    async def answer(self, question: str, k: int = 4) -> str:
+        """Generate an answer using RAG.
+        
+        Args:
+            question: User's question
+            k: Number of context passages to use
+            
+        Returns:
+            Generated answer text
+            
+        Raises:
+            Exception: If retrieval or generation fails
+        """
+        try:
+            ctx = await self.retrieve(question, k)
+            ctx_texts = [c["text"] for c in ctx]
+            prompt = build_prompt(question, ctx_texts)
+            out = LLM(prompt, max_tokens=256, temperature=0.2)
+            return out["choices"][0]["text"].strip()
+        except Exception as e:
+            raise Exception(f"Failed to generate answer: {str(e)}")
+
+# Example usage
+async def main():
+    kb = SurrealRAG()
+    
+    try:
+        # (1) one-off ingestion
+        await kb.ingest([
+            {"text": "Sharks have cartilaginous skeletons instead of bones.", "source": "NatGeo"},
+            {"text": "Octopuses possess three hearts and blue blood.", "source": "BBC"},
+            {"text": "Sea turtles navigate using Earth's magnetic field.", "source": "NOAA"},
+        ])
+
+        # (2) ask a question
+        answer = await kb.answer("How many hearts does an octopus have and why?", k=2)
+        print(answer)
+        
+    except Exception as e:
+        print(f"Error: {str(e)}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### Run a unique demo
+
+```python
+from llama4_surreal_rag import SurrealRAG
+
+kb = SurrealRAG()
+
+# (1) one-off ingestion
+kb.ingest([
+    {"text": "Sharks have cartilaginous skeletons instead of bones.", "source": "NatGeo"},
+    {"text": "Octopuses possess three hearts and blue blood.",           "source": "BBC"},
+    {"text": "Sea turtles navigate using Earth's magnetic field.",      "source": "NOAA"},
+])
+
+# (2) ask a question
+print(kb.answer("How many hearts does an octopus have and why?", k=2))
+```
+
+Expected reply (summarised):
+
+```
+An octopus has three hearts: two pump blood past the gills while the third
+pushes oxygenated blood to the rest of the body. (context: BBC)
+```
+
+Everything—from embedding, ANN search, to final generation—runs **locally** with a single SurrealDB binary and the Llama 4 weights.
+
+## Key Llama 4 prompt facts in play
+
+* **Roles**: `system`, `user`, `assistant`, `tool`
+* **Special tokens**: `<|begin_of_text|>`, `<|header_start|>…<|header_end|>`, `<|eot|>` etc.
+* Suggested system prompt template helps reduce refusals and "preachy" language.
+
+### Why SurrealDB for this?
+
+<table>
+    <thead>
+        <tr>
+            <th>SurrealDB capability</th>
+            <th>RAG benefit</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Single-line HNSW index</strong></td>
+            <td>Fast vector search without extra infra</td>
+        </tr>
+        <tr>
+            <td><strong><code>&lt;|K,EF|&gt;</code> operator + cosine distance</strong></td>
+            <td>Concise top-K retrieval in SQL-like syntax</td>
+        </tr>
+        <tr>
+            <td><strong>Multi-model engine</strong></td>
+            <td>Store scalar features, JSON metadata, and vectors in one table</td>
+        </tr>
+        <tr>
+            <td><strong>Live queries & auth</strong></td>
+            <td>Production-ready pipelines without external vector DB</td>
+        </tr>
+    </tbody>
+</table>
+
+With Llama 4's multimodal, multilingual power and SurrealDB's built-in ANN engine you have a private, offline RAG stack in less than 100 lines. Happy hacking!
+
+[1]: https://www.scribd.com/document/851116901/Llama-4-Model-Cards-and-Prompt-formats "Llama 4 _ Model Cards and Prompt formats | PDF | Parameter (Computer Programming) | Software Engineering"

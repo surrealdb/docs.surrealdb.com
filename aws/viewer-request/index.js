@@ -11,6 +11,7 @@ const validDocs = [
 	'sdk',
 	'tutorials',
 	'cloud',
+	'integrations',
 ];
 
 // We previously had versioned docs. Turns out this was terrible for SEO due to duplicate content, so we reverted that after a few months. 
@@ -111,6 +112,11 @@ const redirects = {
 	'/docs/surrealql/statements/remove/overview': '/docs/surrealql/statements/remove',
 	'/docs/surrealdb/surrealql/statements/remove/overview': '/docs/surrealql/statements/remove',
 	'/docs/surrealdb/installation/upgrading/beta': '/docs/installation/upgrading/migrating-data-to-2x',
+	// Redirect removed deployment guides to main deployment page
+	'/docs/surrealdb/deployment/heroku': '/docs/surrealdb/deployment',
+	'/docs/surrealdb/deployment/railway': '/docs/surrealdb/deployment',
+	'/docs/surrealdb/deployment/digitalocean': '/docs/surrealdb/deployment',
+	'/docs/surrealdb/deployment/fly': '/docs/surrealdb/deployment',
 };
 
 function compute(input) {

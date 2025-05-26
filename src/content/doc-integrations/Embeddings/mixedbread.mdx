@@ -1,0 +1,123 @@
+---
+sidebar_position: 1
+sidebar_label: MixedBread
+title: MixedBread | Embeddings
+description: This section contains information about the MixedBread embeddings feature of SurrealDB.
+---
+
+# MixedBread
+
+[MixedBread](https://mixedbread.ai/) produces domain-flexible sentence vectors that slot straight into SurrealDB's built-in k-nearest-neighbour search (HNSW, brute-force or M-Tree). The result: a single database that stores your documents, graphs and semantic vectors—no extra services needed.
+
+
+## Install & run
+
+```bash
+pip install mixedbread surrealdb          # MixedBread client + async SurrealDB SDK
+surreal start --log trace --auth root root   # local server (or connect to your cluster)
+```
+
+## Generate embeddings
+
+```python
+from mixedbread import MixedBreadModel
+
+model = MixedBreadModel("mixedbread-variant")
+
+sentences = [
+    "SurrealDB merges SQL, graph and vector queries under one query language.",
+    "MixedBread embeddings shine in e-commerce search scenarios.",
+    "Vector similarity enables smarter product recommendations.",
+]
+
+embeddings = [model.embed(t) for t in sentences]    # returns 3 float arrays
+DIM = len(embeddings[0])                            # auto-detect dimension
+```
+
+## Ingest into SurrealDB
+
+```python
+import asyncio
+from surrealdb import Surreal
+
+TABLE = "ProductDocs"
+
+async def ingest():
+    async with Surreal("ws://localhost:8000/rpc") as db:
+        await db.signin({"username": "root", "password": "root"})
+        await db.use("shop", "demo")             # namespace, database
+
+        # ── schema + HNSW index (idempotent) ────────────────────────────────
+        await db.query(`
+            DEFINE TABLE IF NOT EXISTS {TABLE};
+            DEFINE FIELD  text       ON {TABLE} TYPE string;
+            DEFINE FIELD  embedding  ON {TABLE} TYPE array;
+            DEFINE INDEX  hnsw_embed ON {TABLE}
+                         FIELDS embedding HNSW DIMENSION {DIM};
+        `)
+
+        # ── insert rows ─────────────────────────────────────────────────────
+        await db.create(TABLE, [
+            {"id": f"doc:{i}", "text": txt, "embedding": vec}
+            for i, (txt, vec) in enumerate(zip(sentences, embeddings))
+        ])
+
+asyncio.run(ingest())
+```
+
+## Semantic search
+
+```python
+async def search(query: str, k: int = 3):
+    q_vec = model.embed(query)               # vectorise the query
+
+    async with Surreal("ws://localhost:8000/rpc") as db:
+        await db.signin({"username": "root", "password": "root"})
+        await db.use("shop", "demo")
+
+        result = await db.query(`
+            LET $q = $vec;
+            SELECT text,
+                   vector::distance::cosine(embedding, $q) AS score
+            FROM {TABLE}
+            WHERE embedding <|{k}|> $q           -- top-k neighbours
+            ORDER BY score;
+        """, {"vec": q_vec})
+
+        return result[0]["result"]
+
+matches = asyncio.run(search("How do I unify SQL and vector search?"))
+for m in matches:
+    print(f"{m['score']:.4f}  {m['text']}")
+```
+
+Typical output:
+
+```
+0.1312  SurrealDB merges SQL, graph and vector queries under one query language.
+0.4279  Vector similarity enables smarter product recommendations.
+0.5127  MixedBread embeddings shine in e-commerce search scenarios.
+```
+
+## Cheat-sheet
+
+<table>
+  <tr>
+    <th>Task</th>
+    <th>SurrealQL snippet</th>
+  </tr>
+  <tr>
+    <td><strong>Create HNSW index</strong></td>
+    <td><code>DEFINE INDEX idx ON table FIELDS embedding HNSW DIMENSION n;</code></td>
+  </tr>
+  <tr>
+    <td><strong>Top-k query</strong></td>
+    <td><code>WHERE embedding &lt;|k|&gt; $vec</code></td>
+  </tr>
+  <tr>
+    <td><strong>Distance metric</strong></td>
+    <td><code>vector::distance::cosine(a, b)</code> (also <code>euclidean</code>, <code>manhattan</code>, …)</td>
+  </tr>
+</table>
+
+With MixedBread vectors inside SurrealDB, you get semantic search, recommendations and analytics from a single, lightweight engine—no separate vector store, no synchronisation headaches.

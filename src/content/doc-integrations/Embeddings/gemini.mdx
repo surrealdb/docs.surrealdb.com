@@ -1,0 +1,133 @@
+---
+sidebar_position: 1
+sidebar_label: Gemini
+title: Gemini | Embeddings
+description: This section contains information about the Gemini embeddings feature of SurrealDB.
+---
+
+# Gemini
+
+SurrealDB provides a number of different embeddings features that can be used to manage your data. This walkthrough shows how to embed your text with Gemini, store the vectors in SurrealDB, and run fast k‑nearest‑neighbour (KNN) searches—all from Python.
+
+## Install the SDKs
+
+```bash
+pip install surrealdb google-generativeai
+```
+
+SurrealDB’s Python SDK (`surrealdb`) connects over HTTP/WebSocket, while `google-generativeai` gives access to the Gemini Embedding API.
+
+## Connect to SurrealDB
+
+```python
+from surrealdb import Surreal              # Python ≥3.10
+import google.generativeai as genai
+import asyncio
+
+DB_URI        = "http://localhost:8000/rpc"
+DB_USER       = "root"
+DB_PASS       = "root"
+NAMESPACE     = "demo"
+DATABASE      = "demo"
+TABLE_NAME    = "knowledge_docs"           # <── renamed
+GEMINI_API_KEY = "YOUR_GEMINI_KEY"
+
+genai.configure(api_key=GEMINI_API_KEY)
+db = Surreal(DB_URI)
+
+async def setup():
+    await db.signin({"user": DB_USER, "pass": DB_PASS})
+    await db.use(NAMESPACE, DATABASE)
+
+asyncio.run(setup())
+```
+
+## Define a table and a vector index
+
+```python
+schema = """
+DEFINE TABLE $tb SCHEMALESS PERMISSIONS NONE;
+DEFINE FIELD embedding       ON $tb TYPE array;
+DEFINE FIELD original_text   ON $tb TYPE string;
+
+-- HNSW vector index on the embedding field
+DEFINE INDEX idx_hnsw ON $tb
+  FIELDS embedding
+  HNSW DIMENSION 768
+  DIST   COSINE;
+"""
+
+async def define_schema():
+    # The second argument binds `$tb` at query time
+    await db.query(schema, { "tb": TABLE_NAME })
+
+asyncio.run(define_schema())
+```
+
+SurrealDB exposes two ANN strategies (HNSW & M-Tree). [HNSW](/docs/surrealdb/reference-guide/vector-search) is in-memory and fastest for RAG-style look-ups. 
+
+## Embed and insert documents
+
+```python
+documents = [
+    "SurrealDB is a multi-model database that also works as a vector store.",
+    "Gemini models were introduced by Google in December 2023."
+]
+
+embeddings = [
+    genai.embed_content(
+        model="models/embedding-001",
+        content=doc,
+        task_type="retrieval_document",     # important!
+        title="Surreal × Gemini demo",
+    )["embedding"]
+    for doc in documents
+]
+
+async def ingest():
+    for i, (text, vec) in enumerate(zip(documents, embeddings), start=1):
+        await db.create(f"{TABLE_NAME}:{i}", {               # doc:1, doc:2 …
+            "original_text": text,
+            "embedding":     vec,
+        })
+
+asyncio.run(ingest())
+```
+
+## Query with a search prompt
+
+```python
+query_vec = genai.embed_content(
+    model="models/embedding-001",
+    content="Is SurrealDB compatible with Gemini?",
+    task_type="retrieval_query",
+)["embedding"]
+
+surql = """
+LET $q_vec = $vec;
+SELECT
+    id,
+    original_text,
+    vector::distance::knn() AS dist         -- avoids recomputing distance
+FROM {TABLE_NAME}
+WHERE embedding <|3,50|> $q_vec            -- Top-3 neighbours, EF-candidate list = 50
+ORDER BY dist;
+"""
+
+results = asyncio.run(db.query(surql, {"vec": query_vec}))
+print(results)
+```
+
+`<|K,EF|>` is SurrealQL’s K-nearest-neighbour operator. The accompanying `vector::distance::knn()` retrieves the distance already computed by the operator.
+
+## (About quantisation)
+
+SurrealDB stores vectors as plain `F32`/`F64` arrays and does **not yet ship built-in binary or int8 quantisation**. If you need ultra-compact vectors you can quantise offline (e.g. with `sentence-transformers` or `faiss`) and store the smaller arrays in a second field—Surreal’s vector functions work on any numeric array, so you can run a coarse int8 ANN pass and rescore with the full-precision field if desired.
+
+
+## Related resources
+- [Python SDKs](/docs/sdk/python)
+- [Vector Search](/docs/surrealdb/reference-guide/vector-search)
+- [Operators](/docs/surrealql/operators)
+- [Vector functions](/docs/surrealql/functions/database/vector)
+- [Features](/features)

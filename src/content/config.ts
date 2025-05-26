@@ -28,6 +28,7 @@ export const docs = [
     'surrealml',
     'surrealkv',
     'surrealql',
+    'integrations',
     'tutorials',
     'examples',
 ] as const;
