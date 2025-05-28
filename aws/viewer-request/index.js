@@ -32,6 +32,8 @@ const prefixes = {
 
 // List of static redirects from A to B
 const redirects = {
+	// Redirect root to SurrealDB docs
+	'/docs': '/docs/surrealdb',
 	// Redirect old sdk libraries page
 	'/docs/integration/libraries': '/docs/surrealdb/integration/sdks',
 	// Redirect old websocket protocol page
