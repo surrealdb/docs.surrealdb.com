@@ -12,6 +12,7 @@ const validDocs = [
 	'tutorials',
 	'cloud',
 	'integrations',
+	'examples',
 ];
 
 // We previously had versioned docs. Turns out this was terrible for SEO due to duplicate content, so we reverted that after a few months. 
@@ -32,6 +33,8 @@ const prefixes = {
 
 // List of static redirects from A to B
 const redirects = {
+	// Redirect root to SurrealDB docs
+	'/docs': '/docs/surrealdb',
 	// Redirect old sdk libraries page
 	'/docs/integration/libraries': '/docs/surrealdb/integration/sdks',
 	// Redirect old websocket protocol page
@@ -123,9 +126,14 @@ function compute(input) {
 	// Path should be lowercase
 	let path = input.toLowerCase();
 
+	// Special case for /docs/ with trailing slash for SEO
+	if (path === '/docs/') {
+		return {
+			path: '/docs/surrealdb',
+			raw: true
+		};
+	}
 	// Basic URLs
-	if (path === '/docs') return { path: '/docs/' };
-	if (path === '/docs/') return { path: '/docs/index.html', raw: true };
 	if (path === '/docs/llms.txt') return { path, raw: true };
 	if (path.startsWith('/docs/_astro/')) return { path: input, raw: true };
 
