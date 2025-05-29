@@ -4,4 +4,5 @@ export interface CategoryItem {
     description?: string;
     author?: string;
     platform?: string;
+	category: string;
 }
