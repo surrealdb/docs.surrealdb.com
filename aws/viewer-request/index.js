@@ -35,6 +35,7 @@ const prefixes = {
 const redirects = {
 	// Redirect root to SurrealDB docs
 	'/docs': '/docs/surrealdb',
+	'/docs/': '/docs/surrealdb',
 	// Redirect old sdk libraries page
 	'/docs/integration/libraries': '/docs/surrealdb/integration/sdks',
 	// Redirect old websocket protocol page
@@ -126,13 +127,14 @@ function compute(input) {
 	// Path should be lowercase
 	let path = input.toLowerCase();
 
-	// Special case for /docs/ with trailing slash for SEO
-	if (path === '/docs/') {
+	// Handle /docs and /docs/ cases
+	if (path === '/docs' || path === '/docs/') {
 		return {
 			path: '/docs/surrealdb',
 			raw: true
 		};
 	}
+
 	// Basic URLs
 	if (path === '/docs/llms.txt') return { path, raw: true };
 	if (path.startsWith('/docs/_astro/')) return { path: input, raw: true };
