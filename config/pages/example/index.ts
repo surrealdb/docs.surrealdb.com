@@ -24,7 +24,8 @@ const dataByCategory: Record<string, CategoryItem[]> = {
 			description:
 				'SurrealDB is a scalable, distributed, collaborative, document-graph database, for the realtime web.',
 			author: 'SurrealDB',
-			platform: 'rust',
+			lesson: 'ai',
+			difficulty: 'beginner'
 		},
 	],
 	'Client libraries': [
