@@ -24,8 +24,6 @@ const dataByCategory: Record<string, CategoryItem[]> = {
 			description:
 				'SurrealDB is a scalable, distributed, collaborative, document-graph database, for the realtime web.',
 			author: 'SurrealDB',
-			lesson: 'ai',
-			difficulty: 'beginner'
 		},
 	],
 	'Client libraries': [
@@ -35,7 +33,7 @@ const dataByCategory: Record<string, CategoryItem[]> = {
 			description:
 				'Typescript wrapper for surrealdb.js that holds queries until connection is established.',
 			author: 'The Open Source Company',
-			platform: 'typescript',
+			
 		},
 		{
 			text: 'mylk',
@@ -43,7 +41,7 @@ const dataByCategory: Record<string, CategoryItem[]> = {
 			description:
 				'Client library for Ruby with support for HTTP and WebSocket connections.',
 			author: 'Nat Rattan',
-			platform: 'ruby',
+			
 		},
 		{
 			text: 'surrealdb-cloudflare',
@@ -51,99 +49,97 @@ const dataByCategory: Record<string, CategoryItem[]> = {
 			description:
 				"A Typescript implementation for SurrealDB's HTTP API. Can also be used outside of Cloudflare.",
 			author: 'The Open Source Company',
-			platform: 'cloudflare',
+			
 		},
 		{
 			text: 'surrealdb-erlang',
 			url: 'https://github.com/meppu/surreal',
 			description: 'Client library for Erlang and other BEAM languages.',
-			platform: 'erlang',
+			
 		},
 		{
 			text: 'surrealdb-flutter',
 			url: 'https://github.com/duhanbalci/surrealdb_flutter',
 			description: 'Client library for Dart and Flutter.',
-			platform: 'flutter',
+			
 		},
 		{
 			text: 'surrealdb-spring-client',
 			url: 'https://github.com/Mukund2900/surrealdb-spring-client',
 			description:
 				'An unofficial maven library to easily integrate surrealdb with springboot.',
-			platform: 'java',
+			
 		},
 		{
 			text: 'surrealdb.c',
 			url: 'https://github.com/surrealdb/surrealdb.c',
 			description: 'Official driver for C.',
-			platform: 'c',
+			
 		},
 		{
 			text: 'surrealdb.cr',
 			url: 'https://github.com/yorci/surrealdb.cr',
 			description:
 				'Client library for Crystal with support for HTTP and WebSocket connections.',
-			platform: 'crystal',
+			
 		},
 		{
 			text: 'surrealdb.go',
 			url: 'https://github.com/surrealdb/surrealdb.go',
 			description: 'Official driver for Golang.',
-			platform: 'go',
+			
 		},
 		{
 			text: 'surrealdb.java',
 			url: 'https://github.com/surrealdb/surrealdb.java',
 			description: 'Official driver for Java.',
-			platform: 'java',
+			
 		},
 		{
 			text: 'surrealdb.js',
 			url: 'https://github.com/surrealdb/surrealdb.js',
 			description: 'Official driver for JavaScript.',
-			platform: 'typescript',
+			
 		},
 		{
 			text: 'surrealdb.net',
 			url: 'https://github.com/surrealdb/surrealdb.net',
 			description: 'Official driver for .NET.',
-			platform: 'dot-net',
+			
 		},
 		{
 			text: 'surrealdb.node',
 			url: 'https://github.com/surrealdb/surrealdb.node',
 			description: 'Official driver for Node.js.',
-			platform: 'nodejs',
+			
 		},
 		{
 			text: 'surrealdb.php',
 			url: 'https://github.com/surrealdb/surrealdb.php',
 			description: 'Official driver for PHP.',
-			platform: 'php',
+			
 		},
 		{
 			text: 'surrealdb.py',
 			url: 'https://github.com/surrealdb/surrealdb.py',
 			description: 'Official driver for Python.',
-			platform: 'python',
 		},
 		{
 			text: 'surrealdb.wasm',
 			url: 'https://github.com/surrealdb/surrealdb.wasm',
 			description: 'Official driver for WebAssembly.',
-			platform: 'wasm',
+			
 		},
 		{
 			text: 'surrealdb',
 			url: 'https://github.com/surrealdb/surrealdb/tree/main/crates/sdk',
 			description: 'Official driver for Rust.',
-			platform: 'rust',
 		},
 		{
 			text: 'SurrealDB_DSL',
 			url: 'https://github.com/mnbjhu/SurrealDB_DSL',
 			description: 'An unofficial Kotlin DSL and driver.',
-			platform: 'kotlin',
+			
 		},
 	],
 	'Management interfaces': [
@@ -152,26 +148,26 @@ const dataByCategory: Record<string, CategoryItem[]> = {
 			url: 'https://github.com/sachinbhutani/surrealdb-admin',
 			description:
 				'A serverless app to browse and query your SurrealDB instance.',
-			platform: 'svelte',
+			
 		},
 		{
 			text: 'SurrealDB Explorer',
 			url: 'https://github.com/iDevelopThings/SurrealDB-Explorer',
 			description: 'A simple database viewer/editor for SurrealDB.',
-			platform: 'go',
+			
 		},
 		{
 			text: 'Surrealist',
 			url: 'https://github.com/surrealdb/surrealist',
 			description:
 				'Official dashboard, query playground and database explorer for SurrealDB.',
-			platform: 'react',
+			
 		},
 		{
 			text: 'SurrealReact',
 			url: 'https://github.com/rvdende/surrealreact',
 			description: 'An explorer UI written in react.',
-			platform: 'react',
+			
 		},
 	],
 	'Development tools': [
@@ -180,14 +176,14 @@ const dataByCategory: Record<string, CategoryItem[]> = {
 			url: 'https://github.com/siteforge-io/surreal-codegen',
 			description:
 				'SurrealDB Typescript type-safe client generator which extends the official SurrealDB package.',
-			platform: 'rust',
+			
 		},
 		{
 			text: 'surrealdb-client-generator',
 			url: 'https://github.com/sebastianwessel/surrealdb-client-generator',
 			description:
 				'A handy tool that simplifies the process of generating zod schemas and TypeScript clients.',
-			platform: 'typescript',
+			
 		},
 	],
 	'Deployment tools': [
@@ -195,21 +191,24 @@ const dataByCategory: Record<string, CategoryItem[]> = {
 			text: 'Dokku Surrealdb',
 			url: 'https://github.com/IgnisDa/dokku-surrealdb',
 			description: 'A plugin to deploy SurrealDB as a Dokku plugin.',
-			platform: 'docker',
+			deploy: 'standard'
+			
 		},
 		{
 			text: 'GKE using Terraform',
 			url: 'https://github.com/dvanmali/terraform-google-surrealdb',
 			description:
 				'Multicluster Cross-Regional Deployment using GKE Autopilot and Terraform.',
-			platform: 'terraform',
+			deploy: 'standard'
+			
 		},
 		{
 			text: 'Pterodactyl Egg',
 			url: 'https://github.com/Stefanuk12/Pterodactyl/blob/master/eggs/misc/egg-surrealdb.json',
 			description:
 				'An egg to deploy SurrealDB for the Pterodactyl Panel.',
-			platform: 'bash',
+			deploy: 'standard'
+			
 		},
 	],
 	'Docker images': [
@@ -217,7 +216,7 @@ const dataByCategory: Record<string, CategoryItem[]> = {
 			text: 'surrealdb/surrealdb',
 			url: 'https://hub.docker.com/r/surrealdb/surrealdb',
 			description: 'Official Docker image.',
-			platform: 'docker',
+			
 		},
 	],
 	Integrations: [
@@ -226,14 +225,14 @@ const dataByCategory: Record<string, CategoryItem[]> = {
 			url: 'https://python.langchain.com/docs/integrations/document_loaders/surrealdb',
 			description:
 				'A simple document loader implementation around SurrealDB for LangChain.',
-			platform: 'langchain',
+			
 		},
 		{
 			text: 'SurrealDB Vector Store for LangChain',
 			url: 'https://python.langchain.com/docs/integrations/vectorstores/surrealdb',
 			description:
 				'Use SurrealDB as a vector store backed retriever within LangChain to build rich Generative AI applications with Large Language Models.',
-			platform: 'langchain',
+			
 		},
 	],
 	Libraries: [
@@ -242,107 +241,107 @@ const dataByCategory: Record<string, CategoryItem[]> = {
 			url: 'https://github.com/itsumura-h/nim-allographer',
 			description:
 				'A query builder and schema builder for Nim that also supports SurrealDB.',
-			platform: 'neovim',
+			
 		},
 		{
 			text: 'kysely-surrealdb',
 			url: 'https://github.com/igalklebanov/kysely-surrealdb',
 			description:
 				'Kysely (type-safe sql query builder) dialects, plugins and other goodies for SurrealDB.',
-			platform: 'typescript',
+			
 		},
 		{
 			text: 'PySurrealDB',
 			url: 'https://github.com/aurelion314/pysurrealdb',
 			description: 'SurrealDB driver and query builder for Python.',
-			platform: 'surrealdb',
+			
 		},
 		{
 			text: 'ra-surrealdb',
 			url: 'https://github.com/djedi23/ra-surrealdb',
 			description:
 				'A data provider and an auth provider for react admin to integrate with SurrealDB.',
-			platform: 'react',
+			
 		},
 		{
 			text: 'Sirqle',
 			url: 'https://github.com/PythiaSocialTech/sirqle',
 			description: 'Python wrapper for surrealdb.py.',
-			platform: 'python',
+			
 		},
 		{
 			text: 'surreal-id',
 			url: 'https://github.com/liamwh/surreal-id',
 			description:
 				'Create custom ID types that are guaranteed to be valid RecordIds in SurrealDB.',
-			platform: 'rust',
+			
 		},
 		{
 			text: 'surrealdb_extra',
 			url: 'https://github.com/jakin010/surrealdb_extra',
 			description: 'Query builder and orm.',
-			platform: 'rust',
+			
 		},
 		{
 			text: 'surrealdb_migration_engine',
 			url: 'https://github.com/mcmah309/surrealdb_migration_engine',
 			description: 'Simple yet powerful migration engine for SurrealDB.',
-			platform: 'typescript',
+			
 		},
 		{
 			text: 'surrealdb_query_builder',
 			url: 'https://github.com/AyushChothe/surrealdb_query_builder',
 			description: 'SurrealDB query builder for Dart and Flutter.',
-			platform: 'flutter',
+			
 		},
 		{
 			text: 'surrealdb-extras',
 			url: 'https://docs.rs/surrealdb-extras/latest/surrealdb_extras/',
 			description:
 				'Creates namespace, database, tables and defines attributes automatically.',
-			platform: 'rust',
+			
 		},
 		{
 			text: 'surrealdb-migrations',
 			url: 'https://github.com/Odonno/surrealdb-migrations',
 			description:
 				'An awesome SurrealDB migration tool, with a user-friendly CLI and a versatile Rust library.',
-			platform: 'cli',
+			
 		},
 		{
 			text: 'surrealdb-valibot',
 			url: 'https://github.com/ShadowWolf308/surrealdb-valibot',
 			description:
 				"Re-usable valibot schema's for use with the JavaScript SDK.",
-			platform: 'typescript',
+			
 		},
 		{
 			text: 'surrealdb-zod',
 			url: 'https://github.com/ShadowWolf308/surrealdb-zod',
 			description:
 				"Re-usable zod schema's for use with the JavaScript SDK.",
-			platform: 'typescript',
+			
 		},
 		{
 			text: 'Surrealised',
 			url: 'https://github.com/ozone-team/surrealised',
 			description:
 				'A Server-Side TypeScript SurrealDB Client with a fluent query builder.',
-			platform: 'typescript',
+			
 		},
 		{
 			text: 'surrealist',
 			url: 'https://github.com/kotolex/surrealist',
 			description:
 				'Python synchronous client with support for HTTP and WebSocket connections, and all SurrealDB features.',
-			platform: 'python',
+			
 		},
 		{
 			text: 'type-surrealdb',
 			url: 'https://github.com/ibilux/type-surrealdb',
 			description:
 				'Generate schemas and .surql for SurrealDB using TypeScript classes and decorators.',
-			platform: 'typescript',
+			
 		},
 	],
 	'GitHub Actions': [
@@ -351,20 +350,20 @@ const dataByCategory: Record<string, CategoryItem[]> = {
 			url: 'https://github.com/marketplace/actions/surrealdb-in-github-action',
 			description:
 				'Official GitHub Action to use SurrealDB in GitHub Continuous Integration pipelines.',
-			platform: 'github',
+			
 		},
 		{
 			text: 'surrealdb-migrations',
 			url: 'https://github.com/marketplace/actions/surrealdb-migrations',
 			description:
 				'This GitHub Action installs and runs surrealdb-migrations.',
-			platform: 'github',
+			
 		},
 		{
 			text: 'Use SurrealDB in GitHub Actions',
 			url: 'https://github.com/marketplace/actions/use-surrealdb-in-github-actions',
 			description: 'GitHub Action for using SurrealDB in your tests.',
-			platform: 'github',
+			
 		},
 	],
 	'Starter Kits': [
@@ -373,112 +372,112 @@ const dataByCategory: Record<string, CategoryItem[]> = {
 			url: 'https://github.com/PDROJACK/surrealdb-springboot-starter',
 			description: 'Starter Kit for SurrealDB + SpringBoot.',
 			author: 'PDROJACK',
-			platform: 'java',
+			
 		},
 		{
 			text: 'Starter Kit for SurrealDB + Tauri + Next.js.',
 			url: 'https://github.com/reymom/surrealdb-starter-taurikit',
 			description: 'Starter Kit for SurrealDB + Tauri + Next.js.',
 			author: 'Reymom',
-			platform: 'tauri',
+			
 		},
 		{
 			text: 'SurrealDB + FastAPI-NextJS Starter.',
 			url: 'https://github.com/richie-omondi/fastapi-nextjs-surrealdb-starterkit',
 			description: 'Starter Kit for SurrealDB + FastAPI-NextJS.',
 			author: 'Mardav Chirag and Richard Orido',
-			platform: 'nextjs',
+			
 		},
 		{
 			text: 'SurrealDB + Flask Starter.',
 			url: 'https://github.com/syedzubeen/surrealdb_flask_starter_app',
 			description: 'Starter Kit for SurrealDB + Flask.',
 			author: 'Syed Zubeen',
-			platform: 'flask',
+			
 		},
 		{
 			text: 'SurrealDB + Go Driver Starter.',
 			url: 'https://github.com/sbshah97/surrealdb-go-starter-project',
 			description: 'Starter Kit for SurrealDB + Go Driver.',
 			author: 'Salman Shah',
-			platform: 'go',
+			
 		},
 		{
 			text: 'SurrealDB + Koa starter rest api.',
 			url: 'https://github.com/jerempy/surrealdb-starter-koa',
 			description: 'Starter Kit for SurrealDB + Koa.',
 			author: 'Jerempy',
-			platform: 'koa',
+			
 		},
 		{
 			text: 'SurrealDB + Nuxt 3 Starter.',
 			url: 'https://github.com/dvanmali/surrealdb-nuxt-starter',
 			description: 'Starter Kit for SurrealDB + Nuxt 3.',
 			author: 'Dylan Vanmali',
-			platform: 'nuxt',
+			
 		},
 		{
 			text: 'SurrealDB + React-Nodejs starter.',
 			url: 'https://github.com/MSaiKiran9/react.nodejs_starter',
 			description: 'Starter Kit for SurrealDB + React-Nodejs.',
 			author: 'M SaiKiran',
-			platform: 'nodejs',
+			
 		},
 		{
 			text: 'SurrealDB + Rocket.',
 			url: 'https://github.com/davidzr/surrealdb-rocket-starter',
 			description: 'Starter Kit for SurrealDB + Rocket.',
 			author: 'David Zabala',
-			platform: 'rocket',
+			
 		},
 		{
 			text: 'SurrealDB + SolidStart Starter.',
 			url: 'https://github.com/metruzanca/surreal-solid-template',
 			description: 'Starter Kit for SurrealDB + SolidStart.',
 			author: 'Sam "metru" Zanca',
-			platform: 'solidjs',
+			
 		},
 		{
 			text: 'SurrealDB + Streamlit Starter.',
 			url: 'https://github.com/LuciAkirami/surrealdb-streamlit-starter-kit',
 			description: 'Starter Kit for SurrealDB + Streamlit.',
 			author: 'Lucifer Akirami',
-			platform: 'streamlit',
+			
 		},
 		{
 			text: 'SurrealDB + SvelteKit Auth Example.',
 			url: 'https://github.com/AlbertMarashi/surrealdb-svelte-auth-template',
 			description: 'Starter Kit for SurrealDB + SvelteKit Auth Example.',
 			author: 'Albert Marashi',
-			platform: 'svelte',
+			
 		},
 		{
 			text: 'SurrealDB + SvelteKit Starter.',
 			url: 'https://github.com/spinspire/surrealdb-sveltekit-starter',
 			description: 'Starter Kit for SurrealDB + SvelteKit.',
 			author: 'Jitesh Doshi',
-			platform: 'svelte',
+			
 		},
 		{
 			text: 'SurrealDB + SvelteKit.',
 			url: 'https://github.com/oskar-gmerek/surreal-sveltekit',
 			description: 'Starter Kit for SurrealDB + SvelteKit.',
 			author: 'Oskar Gmerek',
-			platform: 'svelte',
+			
 		},
 		{
 			text: 'SurrealDB + Vue Blog Starter.',
 			url: 'https://github.com/SrWither/surrealdb-vuejs',
 			description: 'Starter Kit for SurrealDB + Vue Blog Starter.',
 			author: 'SrWither',
-			platform: 'vue',
+			
 		},
 		{
 			text: 'SurrealDB + Vue Starter.',
 			url: 'https://github.com/inkollusireeshaadharani/vue-starter-kit',
 			description: 'Starter Kit for SurrealDB + Vue Starter.',
 			author: 'Dharani Inkollu',
-			platform: 'vue',
+			
 		},
 	],
 	Tutorials: [
@@ -488,6 +487,7 @@ const dataByCategory: Record<string, CategoryItem[]> = {
 			description:
 				'Official book for in-depth learning through storytelling.',
 			author: 'SurrealDB',
+			difficulty: 'beginner'
 		},
 		{
 			text: 'Build an AI RAG Agent',
@@ -495,6 +495,8 @@ const dataByCategory: Record<string, CategoryItem[]> = {
 			description:
 				'Build an AI RAG Agent with LangGraph, Ollama, Llama2, and SurrealDB.',
 			author: 'Karim Lalani',
+			lesson: 'ai',
+			difficulty: 'advanced'
 		},
 		{
 			text: 'CLI phone book in Python using SurrealDB as database.',
@@ -502,51 +504,65 @@ const dataByCategory: Record<string, CategoryItem[]> = {
 			description:
 				'CLI phone book in Python using SurrealDB as database.',
 			author: 'Gabor Szabo',
+			lesson: 'python sdk',
+			difficulty: 'beginner'
 		},
 		{
 			text: 'Getting started with SurrealDB using Python and Docker.',
 			url: 'https://code-maven.com/surrealdb-getting-started',
 			author: 'Gabor Szabo',
+			deploy: 'standard',
+			lesson: 'python sdk',
+			difficulty: 'beginner'
 		},
 		{
 			text: 'Getting started with SurrealDB.',
 			url: '/blog/getting-started-with-surrealdb',
 			author: 'SurrealDB',
+			difficulty: 'beginner'
 		},
 		{
 			text: 'Hosting Surreal DB in Rust in Less Than 3 Minutes.',
 			url: 'https://www.youtube.com/watch?v=VoRoeL1tal4',
 			author: 'Gui Bibeau',
+			difficulty: 'beginner'
 		},
 		{
 			text: 'How to Use SurrealDb with the Fresh Framework and Deno.',
 			url: 'https://www.freecodecamp.org/news/how-to-use-surrealdb-with-fresh-framework/',
 			author: 'Rajdeep Singh',
+			difficulty: 'beginner'
 		},
 		{
 			text: 'Improve database management with SurrealDB.',
 			url: 'https://blog.logrocket.com/improve-database-management-surrealdb/',
 			author: 'Alexander Nnakwue',
+			difficulty: 'beginner',
+			lesson: 'query performance'
 		},
 		{
 			text: 'Simple API with Gin/Gonic and SurrealDB (GO).',
 			url: 'https://atoo.hashnode.dev/simple-api-with-gingonic-and-surrealdb',
 			author: 'Atharva Deshpande',
+			difficulty: 'beginner'
 		},
 		{
 			text: 'SurrealDB - Rust Embedded Database - Quick Tutorial.',
 			url: 'https://www.youtube.com/watch?v=iOyvum0D3LM',
 			author: 'Jeremy Chone',
+			difficulty: 'beginner'
 		},
 		{
 			text: 'SurrealDB Fundamentals Course - Official course to efficiently learn SurrealDB in 3 hours.',
 			url: '/learn/fundamentals',
 			author: 'SurrealDB',
+			difficulty: 'beginner',
 		},
 		{
 			text: 'Unlocking SurrealDB: Building a Real-World Multi-Tenant RBAC System Made Easy (4 Part Series).',
 			url: 'https://dev.to/sebastian_wessel/series/24535',
 			author: 'Sebastian Wessel',
+			difficulty: 'intermediate',
 		},
 	],
 	Videos: [
