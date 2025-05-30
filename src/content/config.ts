@@ -10,6 +10,7 @@ const abstractDoc = defineCollection({
             sidebar_position: z.number().optional(),
             sidebar_label: z.string().optional(),
             no_page_headings: z.boolean().optional(),
+            no_sidebar: z.boolean().optional(),
         }),
 });
 
@@ -30,6 +31,7 @@ export const docs = [
     'surrealql',
     'integrations',
     'tutorials',
+    'examples',
 ] as const;
 
 export const sdks = [
