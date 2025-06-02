@@ -121,7 +121,7 @@ const redirects = {
 	'/docs/surrealdb/deployment/railway': '/docs/surrealdb/deployment',
 	'/docs/surrealdb/deployment/digitalocean': '/docs/surrealdb/deployment',
 	'/docs/surrealdb/deployment/fly': '/docs/surrealdb/deployment',
-	'/docs/integrations/data-mangaement': '/docs/integrations/data-managaement',
+	'/docs/integrations/data-mangaement': '/docs/integrations/data-management',
 };
 
 function compute(input) {
