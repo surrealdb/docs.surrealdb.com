@@ -18,8 +18,14 @@ export interface CategoryItem {
 	text: string;
 	url: string;
 	description?: string;
-	author?: string;
-	deploy?: FilterDocsDeploy;
-	lesson?: FilterDocsLessons;
-	difficulty?: FilterDocsDifficulty;
+	author?: CategoryItemAuthor | "surrealdb";
+	deploy: FilterDocsDeploy;
+	lesson: FilterDocsLessons;
+	difficulty: FilterDocsDifficulty;
+}
+
+export interface CategoryItemAuthor {
+	name: string;
+	role: string; // e.g. "Developer Advocate" or "Software Engineer"
+	image: string; // URL to the author's image
 }
