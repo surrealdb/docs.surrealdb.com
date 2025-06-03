@@ -1,31 +1,29 @@
-export type FilterDocsDifficulty = "beginner"
-	| "intermediate"
-	| "advanced";
+export type FilterDocsDifficulty = 'beginner' | 'intermediate' | 'advanced';
 
-export type FilterDocsDeploy = "shared-tier"
-	| "standard";
+export type FilterDocsDeploy = 'shared-tier' | 'standard';
 
-export type FilterDocsLessons = "ai"
-	| "data management"
-	| "ingest"
-	| "integrations"
-	| "kai"
-	| "python sdk"
-	| "query performance"
-	| "real-time";
+export type FilterDocsLessons =
+    | 'ai'
+    | 'data management'
+    | 'ingest'
+    | 'integrations'
+    | 'kai'
+    | 'python sdk'
+    | 'query performance'
+    | 'real-time';
 
 export interface CategoryItem {
-	text: string;
-	url: string;
-	description?: string;
-	author?: CategoryItemAuthor | "surrealdb";
-	deploy: FilterDocsDeploy;
-	lesson: FilterDocsLessons;
-	difficulty: FilterDocsDifficulty;
+    text: string;
+    url: string;
+    description?: string;
+    author?: CategoryItemAuthor | 'surrealdb';
+    deploy: FilterDocsDeploy;
+    lesson: FilterDocsLessons;
+    difficulty: FilterDocsDifficulty;
 }
 
 export interface CategoryItemAuthor {
-	name: string;
-	role: string; // e.g. "Developer Advocate" or "Software Engineer"
-	image: string; // URL to the author's image
+    name: string;
+    role: string; // e.g. "Developer Advocate" or "Software Engineer"
+    image: string; // URL to the author's image
 }
