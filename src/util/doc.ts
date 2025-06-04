@@ -123,6 +123,16 @@ export function titleFromSlug(slug: string): string {
     return tmp[0].toUpperCase() + tmp.slice(1);
 }
 
+export function slug(value = '') {
+    return String(value)
+        .replace(/[\s.]/gi, '-')
+        .replace(/[^a-zA-Z0-9_-]+/g, '')
+        .replace(/--/, '-')
+        .replace(/-+$/g, '') // Only remove trailing dashes
+        .toLowerCase();
+}
+
+
 // STUB!
 // NOTE: Beware, for future maintenance, syncing is needed
 // (or find a better solution, once APIs are more mature / exposed)
