@@ -1,4 +1,4 @@
-import type { ImageMetadata } from "astro";
+import type { ImageMetadata } from 'astro';
 
 export type FilterDocsDifficulty = 'beginner' | 'intermediate' | 'advanced';
 

@@ -132,7 +132,6 @@ export function slug(value = '') {
         .toLowerCase();
 }
 
-
 // STUB!
 // NOTE: Beware, for future maintenance, syncing is needed
 // (or find a better solution, once APIs are more mature / exposed)
