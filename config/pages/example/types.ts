@@ -12,15 +12,15 @@ export type FilterDocsLessons =
     | 'kai'
     | 'python sdk'
     | 'query performance'
-    | 'real-time';
+    | 'real-time'
+	| 'embedding';
 
 export interface CategoryItem {
     text: string;
     url: string;
-    description?: string;
     author: CategoryItemAuthor | 'surrealdb';
     deploy: FilterDocsDeploy;
-    lesson: FilterDocsLessons;
+    lesson: FilterDocsLessons | [FilterDocsLessons, FilterDocsLessons];
     difficulty: FilterDocsDifficulty;
 }
 
