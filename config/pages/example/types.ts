@@ -18,7 +18,7 @@ export interface CategoryItem {
     text: string;
     url: string;
     description?: string;
-    author?: CategoryItemAuthor | 'surrealdb';
+    author: CategoryItemAuthor | 'surrealdb';
     deploy: FilterDocsDeploy;
     lesson: FilterDocsLessons;
     difficulty: FilterDocsDifficulty;
