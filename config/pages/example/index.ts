@@ -1078,7 +1078,7 @@ const dataByCategory: Record<string, CategoryItem[]> = {
         {
             text: 'SurrealDB Presence Demo - Demo project on how to create a realtime presence web application using SurrealDB Live Queries.',
             url: 'https://github.com/Odonno/surrealdb-presence-demo',
-            lesson: 'ingest',
+            lesson: ['ingest', 'real-time'],
             difficulty: 'advanced',
             deploy: 'standard',
             author: {

@@ -9,7 +9,6 @@ export type FilterDocsLessons =
     | 'data management'
     | 'ingest'
     | 'integrations'
-    | 'kai'
     | 'python sdk'
     | 'query performance'
     | 'real-time'
