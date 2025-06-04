@@ -1,3 +1,5 @@
+import type { ImageMetadata } from "astro";
+
 export type FilterDocsDifficulty = 'beginner' | 'intermediate' | 'advanced';
 
 export type FilterDocsDeploy = 'shared-tier' | 'standard';
@@ -25,5 +27,5 @@ export interface CategoryItem {
 export interface CategoryItemAuthor {
     name: string;
     role: string; // e.g. "Developer Advocate" or "Software Engineer"
-    image: string; // URL to the author's image
+    image?: ImageMetadata; // URL to the author's image
 }
