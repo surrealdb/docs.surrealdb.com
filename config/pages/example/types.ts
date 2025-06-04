@@ -13,7 +13,7 @@ export type FilterDocsLessons =
     | 'python sdk'
     | 'query performance'
     | 'real-time'
-	| 'embedding';
+    | 'embedding';
 
 export interface CategoryItem {
     text: string;
