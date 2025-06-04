@@ -1143,7 +1143,7 @@ const dataByCategory: Record<string, CategoryItem[]> = {
         {
             text: 'SurrealML vs PyTorch vs ONNX - Benchmarking the performance of SurrealML against PyTorch and ONNX - Vladimir Rotariu.',
             url: 'https://github.com/vladimirrotariu/surrealml-vs-onnx-vs-pytorch/tree/main',
-            lesson: 'ai',
+            lesson: 'query performance',
             difficulty: 'advanced',
             deploy: 'standard',
             author: {
