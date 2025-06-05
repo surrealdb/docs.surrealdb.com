@@ -18,6 +18,7 @@ export const LAB_TOPICS = [
     'Security',
     'Examples',
     'Optimisation',
+    'Beginner',
 ];
 
 export const LAB_SIDEBAR = [
