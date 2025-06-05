@@ -31,7 +31,6 @@ export const docs = [
     'surrealql',
     'integrations',
     'tutorials',
-    'examples',
 ] as const;
 
 export const sdks = [
