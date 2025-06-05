@@ -1,17 +1,35 @@
-import { defineCollection } from 'astro:content';
+import { defineCollection, type CollectionEntry } from 'astro:content';
 import { z } from 'astro/zod';
 
 const abstractDoc = defineCollection({
-    type: 'content',
-    schema: () =>
-        z.object({
-            title: z.string().optional(),
-            description: z.string().optional(),
-            sidebar_position: z.number().optional(),
-            sidebar_label: z.string().optional(),
-            no_page_headings: z.boolean().optional(),
-            no_sidebar: z.boolean().optional(),
-        }),
+	type: 'content',
+	schema: () =>
+		z.object({
+			title: z.string().optional(),
+			description: z.string().optional(),
+			sidebar_position: z.number().optional(),
+			sidebar_label: z.string().optional(),
+			no_page_headings: z.boolean().optional(),
+			no_sidebar: z.boolean().optional(),
+		}),
+});
+
+const labCollection = defineCollection({
+	type: 'content',
+	schema: () =>
+		z.object({
+			title: z.string(),
+			url: z.string().optional(),
+			category: z.string(),
+			author: z.literal("surrealdb").or(
+				z.object({
+					name: z.string(),
+					role: z.string(),
+					avatar: z.string()
+				})
+			),
+			topics: z.string().array().min(1).max(2)
+		})
 });
 
 ///////////////////////////////////////////////////////////
@@ -23,52 +41,53 @@ const abstractDoc = defineCollection({
 ///////////////////////////////////////////////////////////
 
 export const docs = [
-    'surrealdb',
-    'cloud',
-    'surrealist',
-    'surrealml',
-    'surrealkv',
-    'surrealql',
-    'integrations',
-    'tutorials',
+	'surrealdb',
+	'cloud',
+	'surrealist',
+	'surrealml',
+	'surrealkv',
+	'surrealql',
+	'integrations',
+	'tutorials',
 ] as const;
 
 export const sdks = [
-    'dotnet',
-    'golang',
-    'java',
-    'javascript',
-    'php',
-    'python',
-    'rust',
+	'dotnet',
+	'golang',
+	'java',
+	'javascript',
+	'php',
+	'python',
+	'rust',
 ] as const;
 
 export const collections = {
-    ...docs.reduce<Docs>((prev, curr) => {
-        prev[`doc-${curr}`] = abstractDoc;
-        return prev;
-    }, {} as Docs),
-    ...sdks.reduce<Sdks>((prev, curr) => {
-        prev[`doc-sdk-${curr}`] = abstractDoc;
-        return prev;
-    }, {} as Sdks),
+	...docs.reduce<Docs>((prev, curr) => {
+		prev[`doc-${curr}`] = abstractDoc;
+		return prev;
+	}, {} as Docs),
+	...sdks.reduce<Sdks>((prev, curr) => {
+		prev[`doc-sdk-${curr}`] = abstractDoc;
+		return prev;
+	}, {} as Sdks),
+	"labs-items": labCollection
 };
 
 export const urlForCollection = {
-    ...docs.reduce<Record<DocKey, Doc>>(
-        (prev, curr) => {
-            prev[`doc-${curr}`] = curr;
-            return prev;
-        },
-        {} as Record<DocKey, Doc>
-    ),
-    ...sdks.reduce<Record<SdkKey, string>>(
-        (prev, curr) => {
-            prev[`doc-sdk-${curr}`] = `sdk/${curr}`;
-            return prev;
-        },
-        {} as Record<SdkKey, string>
-    ),
+	...docs.reduce<Record<DocKey, Doc>>(
+		(prev, curr) => {
+			prev[`doc-${curr}`] = curr;
+			return prev;
+		},
+		{} as Record<DocKey, Doc>
+	),
+	...sdks.reduce<Record<SdkKey, string>>(
+		(prev, curr) => {
+			prev[`doc-sdk-${curr}`] = `sdk/${curr}`;
+			return prev;
+		},
+		{} as Record<SdkKey, string>
+	),
 };
 
 export type Doc = (typeof docs)[number];
@@ -78,3 +97,5 @@ export type Docs = Record<DocKey, typeof abstractDoc>;
 export type Sdk = (typeof sdks)[number];
 export type SdkKey = `doc-sdk-${Sdk}`;
 export type Sdks = Record<SdkKey, typeof abstractDoc>;
+
+export type LabItem = CollectionEntry<'labs-items'>['data'];
