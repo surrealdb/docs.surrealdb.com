@@ -1,7 +1,7 @@
 ---
 title: "SurrealDB + SpringBoot."
 url: https://github.com/PDROJACK/surrealdb-springboot-starter
-category: Starter Kits
+category: Templates
 author:
   name: Priyadarshan Singh
   role: Software Engineer

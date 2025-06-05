@@ -1,7 +1,7 @@
 ---
 title: "SurrealDB + Flask Starter."
 url: https://github.com/syedzubeen/surrealdb_flask_starter_app
-category: Starter Kits
+category: Templates
 author:
   name: Syed Zubeen
   role: Software Engineer

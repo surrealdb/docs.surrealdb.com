@@ -1,7 +1,7 @@
 ---
 title: "SurrealDB + Vue Starter."
 url: https://github.com/inkollusireeshaadharani/vue-starter-kit
-category: Starter Kits
+category: Templates
 author:
   name: Dharani Inkollu
   role: Software Engineer

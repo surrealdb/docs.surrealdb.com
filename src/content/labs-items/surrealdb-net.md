@@ -1,7 +1,7 @@
 ---
 title: "surrealdb.net"
 url: https://github.com/surrealdb/surrealdb.net
-category: Client libraries
+category: SDKs
 author: surrealdb
 topics:
   - integrations

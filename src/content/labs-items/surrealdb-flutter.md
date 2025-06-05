@@ -1,7 +1,7 @@
 ---
 title: "surrealdb-flutter"
 url: https://github.com/duhanbalci/surrealdb_flutter
-category: Client libraries
+category: SDKs
 author:
   name: Duhan Balci
   role: Software Engineer

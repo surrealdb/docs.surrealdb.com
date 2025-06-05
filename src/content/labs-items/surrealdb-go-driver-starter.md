@@ -1,7 +1,7 @@
 ---
 title: "SurrealDB + Go Driver Starter."
 url: https://github.com/sbshah97/surrealdb-go-starter-project
-category: Starter Kits
+category: Templates
 author:
   name: Salman Shah
   role: Software Engineer

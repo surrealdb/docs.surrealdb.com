@@ -1,7 +1,7 @@
 ---
 title: "surreal-codegen"
 url: https://github.com/siteforge-io/surreal-codegen
-category: Development tools
+category: Development Tools
 author:
   name: Albert Marashi
   role: Software Engineer

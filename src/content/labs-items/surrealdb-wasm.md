@@ -1,7 +1,7 @@
 ---
 title: "surrealdb.wasm"
 url: https://github.com/surrealdb/surrealdb.wasm
-category: Client libraries
+category: SDKs
 author: surrealdb
 topics:
   - integrations

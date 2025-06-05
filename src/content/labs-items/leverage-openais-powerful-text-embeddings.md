@@ -1,7 +1,7 @@
 ---
 title: "Leverage OpenAI’s powerful text embeddings"
 url: /docs/integrations/embeddings/openai
-category: Embeddings
+category: Integrations
 author: surrealdb
 topics:
   - embedding

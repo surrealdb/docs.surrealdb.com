@@ -1,7 +1,7 @@
 ---
 title: "surrealdb.c"
 url: https://github.com/surrealdb/surrealdb.c
-category: Client libraries
+category: SDKs
 author: surrealdb
 topics:
   - integrations

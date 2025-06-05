@@ -1,7 +1,7 @@
 ---
 title: "Surrealist"
 url: https://github.com/surrealdb/surrealist
-category: Management interfaces
+category: Development Tools
 author: surrealdb
 topics:
   - integrations

@@ -1,7 +1,7 @@
 ---
 title: "SurrealDB + SolidStart Starter."
 url: https://github.com/metruzanca/surreal-solid-template
-category: Starter Kits
+category: Templates
 author:
   name: Sam Zanca
   role: Software Engineer

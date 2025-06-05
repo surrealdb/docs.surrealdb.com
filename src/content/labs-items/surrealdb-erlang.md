@@ -1,7 +1,7 @@
 ---
 title: "surrealdb-erlang"
 url: https://github.com/meppu/surreal
-category: Client libraries
+category: SDKs
 author:
   name: Meppu
   role: Software Engineer

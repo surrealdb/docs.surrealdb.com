@@ -1,7 +1,7 @@
 ---
 title: "SurrealDB + SvelteKit Auth Example."
 url: https://github.com/AlbertMarashi/surrealdb-svelte-auth-template
-category: Starter Kits
+category: Templates
 author:
   name: Albert Marashi
   role: Software Engineer

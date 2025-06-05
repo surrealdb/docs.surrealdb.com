@@ -1,7 +1,7 @@
 ---
 title: "surrealdb-migrations"
 url: https://github.com/marketplace/actions/surrealdb-migrations
-category: GitHub Actions
+category: CI/CD
 author:
   name: David Bottiau
   role: Software Engineer

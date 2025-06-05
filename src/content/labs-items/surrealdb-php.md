@@ -1,7 +1,7 @@
 ---
 title: "surrealdb.php"
 url: https://github.com/surrealdb/surrealdb.php
-category: Client libraries
+category: SDKs
 author: surrealdb
 topics:
   - integrations

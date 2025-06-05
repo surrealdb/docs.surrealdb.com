@@ -1,7 +1,7 @@
 ---
 title: "surrealdb.node"
 url: https://github.com/surrealdb/surrealdb.node
-category: Client libraries
+category: SDKs
 author: surrealdb
 topics:
   - integrations

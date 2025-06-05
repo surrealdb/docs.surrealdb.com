@@ -1,7 +1,7 @@
 ---
 title: "SurrealDB + Streamlit Starter."
 url: https://github.com/LuciAkirami/surrealdb-streamlit-starter-kit
-category: Starter Kits
+category: Templates
 author:
   name: Lucifer Akirami
   role: Software Engineer

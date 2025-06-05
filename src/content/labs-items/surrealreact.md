@@ -1,7 +1,7 @@
 ---
 title: "SurrealReact"
 url: https://github.com/rvdende/surrealreact
-category: Management interfaces
+category: Development Tools
 author:
   name: Rouan van der Ende
   role: Software Engineer

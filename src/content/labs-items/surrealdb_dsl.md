@@ -1,7 +1,7 @@
 ---
 title: "SurrealDB_DSL"
 url: https://github.com/mnbjhu/SurrealDB_DSL
-category: Client libraries
+category: SDKs
 author:
   name: Mnbjhu
   role: Software Engineer

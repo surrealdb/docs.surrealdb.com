@@ -1,7 +1,7 @@
 ---
 title: "SurrealDB Admin"
 url: https://github.com/sachinbhutani/surrealdb-admin
-category: Management interfaces
+category: Development Tools
 author:
   name: Sachin Bhutani
   role: Software Engineer

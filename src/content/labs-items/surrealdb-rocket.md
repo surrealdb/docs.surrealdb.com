@@ -1,7 +1,7 @@
 ---
 title: "SurrealDB + Rocket."
 url: https://github.com/davidzr/surrealdb-rocket-starter
-category: Starter Kits
+category: Templates
 author:
   name: David Zabala
   role: Software Engineer

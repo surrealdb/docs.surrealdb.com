@@ -1,7 +1,7 @@
 ---
 title: "Generate embeddings with Google’s Gemini models"
 url: /docs/integrations/embeddings/gemini
-category: Embeddings
+category: Integrations
 author: surrealdb
 topics:
   - embedding

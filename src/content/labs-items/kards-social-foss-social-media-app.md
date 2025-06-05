@@ -1,7 +1,7 @@
 ---
 title: "Kards Social - FOSS social media app."
 url: https://github.com/theopensource-company/kards-social
-category: Projects
+category: Examples
 author:
   name: Micha de Vries
   role: Software Engineer
