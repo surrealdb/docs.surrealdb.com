@@ -1147,7 +1147,7 @@ const dataByCategory: Record<string, CategoryItem[]> = {
         },
         {
             text: 'Domain-flexible sentence vectors with k-NN search',
-            url: '/docs/integrations/embeddings/mixedbreads',
+            url: '/docs/integrations/embeddings/mixedbread',
             author: 'surrealdb',
             deploy: 'standard',
             difficulty: 'intermediate',
