@@ -1,5 +1,5 @@
 ---
-title: surreal-codegen
+title: "surreal-codegen"
 url: https://github.com/siteforge-io/surreal-codegen
 category: Development tools
 author:

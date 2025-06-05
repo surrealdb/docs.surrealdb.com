@@ -1,5 +1,5 @@
 ---
-title: Sirqle
+title: "Sirqle"
 url: https://github.com/PythiaSocialTech/sirqle
 category: Libraries
 author:

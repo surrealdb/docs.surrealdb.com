@@ -1,5 +1,5 @@
 ---
-title: MECOMP - A local music player that uses surrealdb as the backend.
+title: "MECOMP - A local music player that uses surrealdb as the backend."
 url: https://github.com/AnthonyMichaelTDM/mecomp
 category: Projects
 author:

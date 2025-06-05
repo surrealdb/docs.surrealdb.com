@@ -1,5 +1,5 @@
 ---
-title: surrealdb-erlang
+title: "surrealdb-erlang"
 url: https://github.com/meppu/surreal
 category: Client libraries
 author:

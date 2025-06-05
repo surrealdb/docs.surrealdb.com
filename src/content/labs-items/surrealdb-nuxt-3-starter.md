@@ -1,5 +1,5 @@
 ---
-title: SurrealDB + Nuxt 3 Starter.
+title: "SurrealDB + Nuxt 3 Starter."
 url: https://github.com/dvanmali/surrealdb-nuxt-starter
 category: Starter Kits
 author:

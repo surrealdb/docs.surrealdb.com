@@ -1,5 +1,5 @@
 ---
-title: SurrealDB + Go Driver Starter.
+title: "SurrealDB + Go Driver Starter."
 url: https://github.com/sbshah97/surrealdb-go-starter-project
 category: Starter Kits
 author:

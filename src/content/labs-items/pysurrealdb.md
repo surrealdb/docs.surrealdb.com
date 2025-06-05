@@ -1,5 +1,5 @@
 ---
-title: PySurrealDB
+title: "PySurrealDB"
 url: https://github.com/aurelion314/pysurrealdb
 category: Libraries
 author:

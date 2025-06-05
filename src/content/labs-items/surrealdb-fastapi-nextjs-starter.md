@@ -1,5 +1,5 @@
 ---
-title: SurrealDB + FastAPI-NextJS Starter.
+title: "SurrealDB + FastAPI-NextJS Starter."
 url: https://github.com/richie-omondi/fastapi-nextjs-surrealdb-starterkit
 category: Starter Kits
 author:

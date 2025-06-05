@@ -1,5 +1,5 @@
 ---
-title: Dokku Surrealdb
+title: "Dokku Surrealdb"
 url: https://github.com/IgnisDa/dokku-surrealdb
 category: Deployment tools
 author:

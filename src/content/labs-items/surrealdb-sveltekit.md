@@ -1,5 +1,5 @@
 ---
-title: SurrealDB + SvelteKit.
+title: "SurrealDB + SvelteKit."
 url: https://github.com/oskar-gmerek/surreal-sveltekit
 category: Starter Kits
 author:

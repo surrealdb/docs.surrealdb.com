@@ -1,5 +1,5 @@
 ---
-title: Improve database management with SurrealDB.
+title: "Improve database management with SurrealDB."
 url: https://blog.logrocket.com/improve-database-management-surrealdb/
 category: Tutorials
 author:

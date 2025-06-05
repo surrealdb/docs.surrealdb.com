@@ -1,5 +1,5 @@
 ---
-title: surreal-id
+title: "surreal-id"
 url: https://github.com/liamwh/surreal-id
 category: Libraries
 author:

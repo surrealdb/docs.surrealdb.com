@@ -1,5 +1,5 @@
 ---
-title: GKE using Terraform
+title: "GKE using Terraform"
 url: https://github.com/dvanmali/terraform-google-surrealdb
 category: Deployment tools
 author:

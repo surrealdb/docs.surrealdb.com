@@ -1,5 +1,5 @@
 ---
-title: SurrealDB + Koa starter rest api.
+title: "SurrealDB + Koa starter rest api."
 url: https://github.com/jerempy/surrealdb-starter-koa
 category: Starter Kits
 author:

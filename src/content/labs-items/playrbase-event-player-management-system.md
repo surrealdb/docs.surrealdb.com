@@ -1,5 +1,5 @@
 ---
-title: Playrbase - Event & player management system.
+title: "Playrbase - Event & player management system."
 url: https://github.com/theopensource-company/playrbase
 category: Projects
 author:

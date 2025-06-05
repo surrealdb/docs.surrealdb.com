@@ -1,5 +1,5 @@
 ---
-title: Surrealised
+title: "Surrealised"
 url: https://github.com/ozone-team/surrealised
 category: Libraries
 author:

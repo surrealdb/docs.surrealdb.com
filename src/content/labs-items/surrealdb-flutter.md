@@ -1,5 +1,5 @@
 ---
-title: surrealdb-flutter
+title: "surrealdb-flutter"
 url: https://github.com/duhanbalci/surrealdb_flutter
 category: Client libraries
 author:

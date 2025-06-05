@@ -1,5 +1,5 @@
 ---
-title: Use SurrealDB in GitHub Actions
+title: "Use SurrealDB in GitHub Actions"
 url: https://github.com/marketplace/actions/use-surrealdb-in-github-actions
 category: GitHub Actions
 author:

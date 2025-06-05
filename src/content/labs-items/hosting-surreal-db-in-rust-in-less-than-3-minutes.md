@@ -1,5 +1,5 @@
 ---
-title: Hosting Surreal DB in Rust in Less Than 3 Minutes.
+title: "Hosting Surreal DB in Rust in Less Than 3 Minutes."
 url: https://www.youtube.com/watch?v=VoRoeL1tal4
 category: Tutorials
 author:

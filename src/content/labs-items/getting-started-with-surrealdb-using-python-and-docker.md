@@ -1,5 +1,5 @@
 ---
-title: Getting started with SurrealDB using Python and Docker.
+title: "Getting started with SurrealDB using Python and Docker."
 url: https://code-maven.com/surrealdb-getting-started
 category: Tutorials
 author:

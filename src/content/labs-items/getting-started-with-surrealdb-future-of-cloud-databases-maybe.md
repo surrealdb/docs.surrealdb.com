@@ -1,5 +1,5 @@
 ---
-title: Getting started with SurrealDB! Future of cloud databases (maybe)?
+title: "Getting started with SurrealDB! Future of cloud databases (maybe)?"
 url: https://www.youtube.com/watch?v=D41jb4DDIdA
 category: Videos
 author:

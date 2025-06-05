@@ -1,5 +1,5 @@
 ---
-title: surrealdb-extras
+title: "surrealdb-extras"
 url: https://docs.rs/surrealdb-extras/latest/surrealdb_extras/
 category: Libraries
 author:

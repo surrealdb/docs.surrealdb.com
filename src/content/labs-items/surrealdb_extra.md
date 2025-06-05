@@ -1,5 +1,5 @@
 ---
-title: surrealdb_extra
+title: "surrealdb_extra"
 url: https://github.com/jakin010/surrealdb_extra
 category: Libraries
 author:

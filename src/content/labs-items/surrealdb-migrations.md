@@ -1,5 +1,5 @@
 ---
-title: surrealdb-migrations
+title: "surrealdb-migrations"
 url: https://github.com/Odonno/surrealdb-migrations
 category: Libraries
 author:

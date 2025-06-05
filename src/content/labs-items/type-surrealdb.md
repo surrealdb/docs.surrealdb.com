@@ -1,5 +1,5 @@
 ---
-title: type-surrealdb
+title: "type-surrealdb"
 url: https://github.com/ibilux/type-surrealdb
 category: Libraries
 author:

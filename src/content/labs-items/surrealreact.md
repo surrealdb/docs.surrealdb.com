@@ -1,5 +1,5 @@
 ---
-title: SurrealReact
+title: "SurrealReact"
 url: https://github.com/rvdende/surrealreact
 category: Management interfaces
 author:

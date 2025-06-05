@@ -1,5 +1,5 @@
 ---
-title: surrealdb-migrations
+title: "surrealdb-migrations"
 url: https://github.com/marketplace/actions/surrealdb-migrations
 category: GitHub Actions
 author:

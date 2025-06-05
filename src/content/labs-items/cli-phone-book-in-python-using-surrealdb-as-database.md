@@ -1,5 +1,5 @@
 ---
-title: CLI phone book in Python using SurrealDB as database.
+title: "CLI phone book in Python using SurrealDB as database."
 url: https://code-maven.com/surrealdb-python-cli-phonebook
 category: Tutorials
 author:

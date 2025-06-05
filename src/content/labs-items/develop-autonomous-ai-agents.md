@@ -1,5 +1,5 @@
 ---
-title: Develop autonomous AI agents
+title: "Develop autonomous AI agents"
 url: /docs/integrations/frameworks/camel
 category: Integrations
 author: surrealdb

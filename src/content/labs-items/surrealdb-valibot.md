@@ -1,5 +1,5 @@
 ---
-title: surrealdb-valibot
+title: "surrealdb-valibot"
 url: https://github.com/ShadowWolf308/surrealdb-valibot
 category: Libraries
 author:

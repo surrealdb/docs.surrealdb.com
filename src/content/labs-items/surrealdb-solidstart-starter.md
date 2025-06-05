@@ -1,5 +1,5 @@
 ---
-title: SurrealDB + SolidStart Starter.
+title: "SurrealDB + SolidStart Starter."
 url: https://github.com/metruzanca/surreal-solid-template
 category: Starter Kits
 author:

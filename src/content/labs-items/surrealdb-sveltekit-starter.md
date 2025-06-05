@@ -1,5 +1,5 @@
 ---
-title: SurrealDB + SvelteKit Starter.
+title: "SurrealDB + SvelteKit Starter."
 url: https://github.com/spinspire/surrealdb-sveltekit-starter
 category: Starter Kits
 author:

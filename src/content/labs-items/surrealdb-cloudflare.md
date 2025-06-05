@@ -1,5 +1,5 @@
 ---
-title: surrealdb-cloudflare
+title: "surrealdb-cloudflare"
 url: https://github.com/theopensource-company/surrealdb-cloudflare
 category: Client libraries
 author:

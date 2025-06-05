@@ -1,5 +1,5 @@
 ---
-title: surrealdb-client-generator
+title: "surrealdb-client-generator"
 url: https://github.com/sebastianwessel/surrealdb-client-generator
 category: Development tools
 author:

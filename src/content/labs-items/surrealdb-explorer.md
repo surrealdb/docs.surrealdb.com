@@ -1,5 +1,5 @@
 ---
-title: SurrealDB Explorer
+title: "SurrealDB Explorer"
 url: https://github.com/iDevelopThings/SurrealDB-Explorer
 category: Management interfaces
 author:

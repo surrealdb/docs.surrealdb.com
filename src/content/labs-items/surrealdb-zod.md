@@ -1,5 +1,5 @@
 ---
-title: surrealdb-zod
+title: "surrealdb-zod"
 url: https://github.com/ShadowWolf308/surrealdb-zod
 category: Libraries
 author:

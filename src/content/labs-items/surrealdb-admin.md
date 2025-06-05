@@ -1,5 +1,5 @@
 ---
-title: SurrealDB Admin
+title: "SurrealDB Admin"
 url: https://github.com/sachinbhutani/surrealdb-admin
 category: Management interfaces
 author:

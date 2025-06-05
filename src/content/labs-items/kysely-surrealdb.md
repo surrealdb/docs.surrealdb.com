@@ -1,5 +1,5 @@
 ---
-title: kysely-surrealdb
+title: "kysely-surrealdb"
 url: https://github.com/igalklebanov/kysely-surrealdb
 category: Libraries
 author:

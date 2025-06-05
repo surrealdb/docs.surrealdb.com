@@ -1,5 +1,5 @@
 ---
-title: allographer
+title: "allographer"
 url: https://github.com/itsumura-h/nim-allographer
 category: Libraries
 author:

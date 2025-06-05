@@ -1,5 +1,5 @@
 ---
-title: SurrealDB Vector Store for LangChain
+title: "SurrealDB Vector Store for LangChain"
 url: https://python.langchain.com/docs/integrations/vectorstores/surrealdb
 category: Integrations
 author:

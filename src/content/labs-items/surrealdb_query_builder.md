@@ -1,5 +1,5 @@
 ---
-title: surrealdb_query_builder
+title: "surrealdb_query_builder"
 url: https://github.com/AyushChothe/surrealdb_query_builder
 category: Libraries
 author:

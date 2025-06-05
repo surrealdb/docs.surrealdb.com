@@ -1,5 +1,5 @@
 ---
-title: SurrealDB + Streamlit Starter.
+title: "SurrealDB + Streamlit Starter."
 url: https://github.com/LuciAkirami/surrealdb-streamlit-starter-kit
 category: Starter Kits
 author:

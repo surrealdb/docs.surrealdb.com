@@ -45,7 +45,7 @@ Object.entries(dataByCategory).forEach(([category, items]) => {
         // Create frontmatter content
         const frontmatter = [
             '---',
-            `title: ${item.text.replace(/"/g, '\\"')}`,
+            `title: "${item.text.replace(/"/g, '\\"')}"`,
             `url: ${item.url}`,
             `category: ${category}`,
             typeof item.author === 'string'

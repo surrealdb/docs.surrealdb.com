@@ -1,5 +1,5 @@
 ---
-title: Rust Powered Database SurrealDB (It's Pretty Ambitious) - Code to the Moon.
+title: "Rust Powered Database SurrealDB (It's Pretty Ambitious) - Code to the Moon."
 url: https://www.youtube.com/watch?v=DPQbuW9dQ7w
 category: Videos
 author:

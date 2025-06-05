@@ -1,5 +1,5 @@
 ---
-title: SurrealDB Document Loader for LangChain
+title: "SurrealDB Document Loader for LangChain"
 url: https://python.langchain.com/docs/integrations/document_loaders/surrealdb
 category: Integrations
 author:

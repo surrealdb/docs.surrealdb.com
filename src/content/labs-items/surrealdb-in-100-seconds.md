@@ -1,5 +1,5 @@
 ---
-title: SurrealDB in 100 seconds.
+title: "SurrealDB in 100 seconds."
 url: https://www.youtube.com/watch?v=C7WFwgDRStM
 category: Videos
 author:

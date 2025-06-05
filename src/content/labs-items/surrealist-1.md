@@ -1,5 +1,5 @@
 ---
-title: surrealist
+title: "surrealist"
 url: https://github.com/kotolex/surrealist
 category: Libraries
 author:

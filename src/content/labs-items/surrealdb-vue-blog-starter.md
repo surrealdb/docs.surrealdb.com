@@ -1,5 +1,5 @@
 ---
-title: SurrealDB + Vue Blog Starter.
+title: "SurrealDB + Vue Blog Starter."
 url: https://github.com/SrWither/surrealdb-vuejs
 category: Starter Kits
 author:

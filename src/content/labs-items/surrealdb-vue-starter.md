@@ -1,5 +1,5 @@
 ---
-title: SurrealDB + Vue Starter.
+title: "SurrealDB + Vue Starter."
 url: https://github.com/inkollusireeshaadharani/vue-starter-kit
 category: Starter Kits
 author:

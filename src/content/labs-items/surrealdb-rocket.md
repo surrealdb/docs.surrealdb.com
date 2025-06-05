@@ -1,5 +1,5 @@
 ---
-title: SurrealDB + Rocket.
+title: "SurrealDB + Rocket."
 url: https://github.com/davidzr/surrealdb-rocket-starter
 category: Starter Kits
 author:

@@ -1,5 +1,5 @@
 ---
-title: surrealdb.node
+title: "surrealdb.node"
 url: https://github.com/surrealdb/surrealdb.node
 category: Client libraries
 author: surrealdb

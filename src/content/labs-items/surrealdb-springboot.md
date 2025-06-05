@@ -1,5 +1,5 @@
 ---
-title: SurrealDB + SpringBoot.
+title: "SurrealDB + SpringBoot."
 url: https://github.com/PDROJACK/surrealdb-springboot-starter
 category: Starter Kits
 author:

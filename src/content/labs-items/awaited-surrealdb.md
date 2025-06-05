@@ -1,5 +1,5 @@
 ---
-title: awaited-surrealdb
+title: "awaited-surrealdb"
 url: https://github.com/theopensource-company/awaited-surrealdb
 category: Client libraries
 author:
