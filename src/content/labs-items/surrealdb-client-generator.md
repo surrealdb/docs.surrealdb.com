@@ -6,7 +6,6 @@ author:
   name: Sebastian Wessel
   role: Software Engineer
   avatar: sebastian-wessel
-topics:
-  - integrations
+topics: []
 ---
 

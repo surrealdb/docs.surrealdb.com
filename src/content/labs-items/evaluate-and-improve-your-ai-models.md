@@ -4,6 +4,7 @@ url: /docs/integrations/frameworks/deepeval
 category: Integrations
 author: surrealdb
 topics:
-  - ai
+  - AI
+  - Embedding
 ---
 

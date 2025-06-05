@@ -7,6 +7,7 @@ author:
   role: Software Engineer
   avatar: jerempy
 topics:
-  - integrations
+  - Examples
+  - Beginner
 ---
 

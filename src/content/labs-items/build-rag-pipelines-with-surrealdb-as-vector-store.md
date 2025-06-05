@@ -4,6 +4,6 @@ url: /docs/integrations/frameworks/llama-index
 category: Integrations
 author: surrealdb
 topics:
-  - ai
+  - AI
 ---
 

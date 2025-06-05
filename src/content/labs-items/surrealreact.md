@@ -6,7 +6,6 @@ author:
   name: Rouan van der Ende
   role: Software Engineer
   avatar: rouan-van-der-ende
-topics:
-  - integrations
+topics: []
 ---
 

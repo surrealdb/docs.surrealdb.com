@@ -7,6 +7,7 @@ author:
   role: Software Engineer
   avatar: albert-marashi
 topics:
-  - integrations
+  - Security
+  - Examples
 ---
 

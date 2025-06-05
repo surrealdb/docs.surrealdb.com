@@ -6,7 +6,6 @@ author:
   name: Meppu
   role: Software Engineer
   avatar: meppu
-topics:
-  - integrations
+topics: []
 ---
 

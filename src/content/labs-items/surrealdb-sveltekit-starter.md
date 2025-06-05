@@ -7,6 +7,7 @@ author:
   role: Software Engineer
   avatar: jitesh-doshi
 topics:
-  - integrations
+  - Examples
+  - Beginner
 ---
 

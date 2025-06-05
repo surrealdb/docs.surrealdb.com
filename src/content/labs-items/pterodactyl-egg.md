@@ -6,7 +6,6 @@ author:
   name: Stefan
   role: Freelance Developer
   avatar: stefan
-topics:
-  - integrations
+topics: []
 ---
 

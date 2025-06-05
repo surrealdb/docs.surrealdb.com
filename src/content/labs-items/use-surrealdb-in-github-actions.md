@@ -6,7 +6,6 @@ author:
   name: Jan Vollmer
   role: Software Engineer
   avatar: jan-vollmer
-topics:
-  - integrations
+topics: []
 ---
 

@@ -7,6 +7,7 @@ author:
   role: Software Engineer
   avatar: sam-zanca
 topics:
-  - integrations
+  - Examples
+  - Beginner
 ---
 

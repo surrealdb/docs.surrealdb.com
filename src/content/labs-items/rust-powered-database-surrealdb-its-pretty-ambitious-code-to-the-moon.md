@@ -6,7 +6,6 @@ author:
   name: Code to the Moon
   role: Content Creator
   avatar: code-to-the-moon
-topics:
-  - ingest
+topics: []
 ---
 

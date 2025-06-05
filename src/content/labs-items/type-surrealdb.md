@@ -6,7 +6,6 @@ author:
   name: Bilux
   role: Software Engineer
   avatar: bilux
-topics:
-  - integrations
+topics: []
 ---
 

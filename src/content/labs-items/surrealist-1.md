@@ -6,7 +6,6 @@ author:
   name: Kotolex
   role: Software Engineer
   avatar: kotolex
-topics:
-  - integrations
+topics: []
 ---
 

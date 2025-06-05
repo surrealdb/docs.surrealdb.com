@@ -6,7 +6,6 @@ author:
   name: Albert Marashi
   role: Software Engineer
   avatar: albert-marashi
-topics:
-  - integrations
+topics: []
 ---
 

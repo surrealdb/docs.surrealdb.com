@@ -7,6 +7,7 @@ author:
   role: Software Engineer
   avatar: lucifer-akirami
 topics:
-  - integrations
+  - AI
+  - Examples
 ---
 

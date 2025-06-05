@@ -6,7 +6,6 @@ author:
   name: Frederik Uni
   role: Software Engineer
   avatar: frederik-uni
-topics:
-  - integrations
+topics: []
 ---
 

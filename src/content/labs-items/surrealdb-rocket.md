@@ -7,6 +7,7 @@ author:
   role: Software Engineer
   avatar: david-zabala
 topics:
-  - integrations
+  - Examples
+  - Beginner
 ---
 

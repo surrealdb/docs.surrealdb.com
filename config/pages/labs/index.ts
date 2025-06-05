@@ -6,6 +6,7 @@ import EmbedImage from '@assets/img/image/example/embed.png';
 
 export const LAB_CATEGORIES = [
     'CI/CD',
+    'Demos',
     'Deployment Tools',
     'Development Tools',
     'Docker Images',
@@ -46,14 +47,14 @@ export const LAB_SIDEBAR = [
 ];
 
 export const LAB_IMAGE_MAP = {
-	'CI/CD': EmbedImage,
-	'Deployment Tools': RelationalImage,
-	'Development Tools': SearchImage,
-	'Docker Images': GraphImage,
-	'Integrations': MachineLearningImage,
-	'Libraries': RelationalImage,
-	'SDKs': SearchImage,
-	'Templates': GraphImage,
-	'Tutorials': MachineLearningImage,
-	'Videos': EmbedImage, 
+    'CI/CD': EmbedImage,
+    'Deployment Tools': RelationalImage,
+    'Development Tools': SearchImage,
+    'Docker Images': GraphImage,
+    Integrations: MachineLearningImage,
+    Libraries: RelationalImage,
+    SDKs: SearchImage,
+    Templates: GraphImage,
+    Tutorials: MachineLearningImage,
+    Videos: EmbedImage,
 } as const;

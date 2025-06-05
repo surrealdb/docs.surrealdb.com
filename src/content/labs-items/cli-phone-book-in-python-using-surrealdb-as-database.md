@@ -7,6 +7,7 @@ author:
   role: Software Engineer
   avatar: gabor-szabo
 topics:
-  - data management
+  - Data Management
+  - Examples
 ---
 

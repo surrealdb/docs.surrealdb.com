@@ -4,6 +4,7 @@ url: /learn/book
 category: Tutorials
 author: surrealdb
 topics:
-  - data management
+  - Examples
+  - Beginner
 ---
 

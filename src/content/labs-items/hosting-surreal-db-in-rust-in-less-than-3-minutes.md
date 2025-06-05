@@ -6,7 +6,7 @@ author:
   name: Gui Bibeau
   role: Software Engineer
   avatar: gui-bibeau
-topics:
-  - ai
+topics: 
+  - Beginner
 ---
 

@@ -6,7 +6,6 @@ author:
   name: Diptesh Choudhuri
   role: Software Engineer
   avatar: diptesh-choudhuri
-topics:
-  - integrations
+topics: []
 ---
 

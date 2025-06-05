@@ -7,6 +7,7 @@ author:
   role: Software Engineer
   avatar: dharani-inkollu
 topics:
-  - integrations
+  - Examples
+  - Beginner
 ---
 

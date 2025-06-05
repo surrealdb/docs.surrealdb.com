@@ -7,6 +7,7 @@ author:
   role: Software Engineer
   avatar: karim-lalani
 topics:
-  - ai
+  - AI
+  - Examples
 ---
 

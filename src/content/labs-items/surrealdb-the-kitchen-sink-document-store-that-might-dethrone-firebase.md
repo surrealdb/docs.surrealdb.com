@@ -6,7 +6,6 @@ author:
   name: Ray Villalobos
   role: Content Creator
   avatar: ray-villalobos
-topics:
-  - ingest
+topics: []
 ---
 

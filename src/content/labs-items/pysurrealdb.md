@@ -6,7 +6,6 @@ author:
   name: Mike Aurelion
   role: Software Engineer
   avatar: mike-aurelion
-topics:
-  - integrations
+topics: []
 ---
 

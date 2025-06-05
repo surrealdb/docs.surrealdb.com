@@ -7,6 +7,7 @@ author:
   role: Software Engineer
   avatar: fadel-srwither
 topics:
-  - integrations
+  - Examples
+  - Beginner
 ---
 

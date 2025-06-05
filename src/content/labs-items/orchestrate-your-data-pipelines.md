@@ -4,6 +4,6 @@ url: /docs/integrations/frameworks/dagster
 category: Integrations
 author: surrealdb
 topics:
-  - ai
+  - Data Management
 ---
 

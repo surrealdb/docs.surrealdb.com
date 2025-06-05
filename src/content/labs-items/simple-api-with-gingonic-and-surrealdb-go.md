@@ -6,7 +6,6 @@ author:
   name: Atharva Deshpande
   role: Software Engineer
   avatar: atharva-deshpande
-topics:
-  - ingest
+topics: []
 ---
 

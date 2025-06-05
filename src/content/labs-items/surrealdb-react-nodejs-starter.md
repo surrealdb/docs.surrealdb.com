@@ -7,6 +7,7 @@ author:
   role: Software Engineer
   avatar: sai-kiran
 topics:
-  - integrations
+  - AI
+  - Beginner
 ---
 

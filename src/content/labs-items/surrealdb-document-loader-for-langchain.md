@@ -7,6 +7,7 @@ author:
   role: Open Source Project
   avatar: langchain
 topics:
-  - integrations
+  - AI
+  - Embedding
 ---
 

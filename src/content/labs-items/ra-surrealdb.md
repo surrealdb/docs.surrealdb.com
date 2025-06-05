@@ -6,7 +6,6 @@ author:
   name: Moïse Valvassori
   role: Software Engineer
   avatar: mose-valvassori
-topics:
-  - integrations
+topics: []
 ---
 

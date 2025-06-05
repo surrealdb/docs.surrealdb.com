@@ -4,6 +4,7 @@ url: https://github.com/surrealdb/langchain-surrealdb
 category: Integrations
 author: surrealdb
 topics:
-  - ai
+  - AI
+  - Embedding
 ---
 

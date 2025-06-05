@@ -6,7 +6,6 @@ author:
   name: Duhan Balci
   role: Software Engineer
   avatar: duhan-balci
-topics:
-  - integrations
+topics: []
 ---
 

@@ -6,7 +6,6 @@ author:
   name: Jakin010
   role: Software Engineer
   avatar: jakin010
-topics:
-  - integrations
+topics: []
 ---
 

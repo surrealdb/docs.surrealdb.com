@@ -6,7 +6,6 @@ author:
   name: Xkonti
   role: Content Creator
   avatar: xkonti
-topics:
-  - ingest
+topics: []
 ---
 

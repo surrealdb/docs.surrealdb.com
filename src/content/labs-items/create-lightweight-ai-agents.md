@@ -4,6 +4,6 @@ url: /docs/integrations/frameworks/smolagents
 category: Integrations
 author: surrealdb
 topics:
-  - ai
+  - AI
 ---
 

@@ -6,7 +6,6 @@ author:
   name: Liam Woodleigh-Hardinge
   role: Lead Engineer
   avatar: liam-woodleigh-hardinge
-topics:
-  - integrations
+topics: []
 ---
 

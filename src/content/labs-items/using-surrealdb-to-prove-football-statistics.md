@@ -6,7 +6,6 @@ author:
   name: Joseph McCarthy
   role: Content Creator
   avatar: joseph-mccarthy
-topics:
-  - ingest
+topics: []
 ---
 

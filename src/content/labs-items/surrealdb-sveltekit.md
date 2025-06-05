@@ -6,7 +6,6 @@ author:
   name: Oskar Gmerek
   role: Software Engineer
   avatar: oskar-gmerek
-topics:
-  - integrations
+topics: []
 ---
 

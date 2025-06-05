@@ -7,6 +7,6 @@ author:
   role: Content Creator
   avatar: fireship
 topics:
-  - ingest
+  - Beginner
 ---
 

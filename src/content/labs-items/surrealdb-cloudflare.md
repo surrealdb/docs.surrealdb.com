@@ -6,7 +6,6 @@ author:
   name: Micha de Vries
   role: Software Engineer
   avatar: micha-de-vries
-topics:
-  - integrations
+topics: []
 ---
 

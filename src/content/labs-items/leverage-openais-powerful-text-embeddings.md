@@ -4,7 +4,7 @@ url: /docs/integrations/embeddings/openai
 category: Integrations
 author: surrealdb
 topics:
-  - embedding
-  - ai
+  - AI
+  - Embedding
 ---
 

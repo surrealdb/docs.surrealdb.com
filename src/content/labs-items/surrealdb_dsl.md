@@ -6,7 +6,6 @@ author:
   name: Mnbjhu
   role: Software Engineer
   avatar: mnbjhu
-topics:
-  - integrations
+topics: []
 ---
 

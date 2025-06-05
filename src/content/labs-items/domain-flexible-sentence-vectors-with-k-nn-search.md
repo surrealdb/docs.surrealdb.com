@@ -4,6 +4,6 @@ url: /docs/integrations/embeddings/mixedbread
 category: Integrations
 author: surrealdb
 topics:
-  - embedding
+  - Embedding
 ---
 

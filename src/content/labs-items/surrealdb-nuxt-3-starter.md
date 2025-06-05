@@ -7,6 +7,7 @@ author:
   role: Software Engineer
   avatar: dylan-vanmali
 topics:
-  - integrations
+  - Examples
+  - Beginner
 ---
 

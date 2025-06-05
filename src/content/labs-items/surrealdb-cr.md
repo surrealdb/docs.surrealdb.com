@@ -6,7 +6,6 @@ author:
   name: Muhammed Yaşar
   role: Backend Crafter
   avatar: muhammed-yaar
-topics:
-  - integrations
+topics: []
 ---
 

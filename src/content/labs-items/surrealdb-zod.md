@@ -6,7 +6,6 @@ author:
   name: Levy van der Valk
   role: Web Developer
   avatar: levy-van-der-valk
-topics:
-  - integrations
+topics: []
 ---
 

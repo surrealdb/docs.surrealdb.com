@@ -7,6 +7,7 @@ author:
   role: Software Engineer
   avatar: jeremy-chone
 topics:
-  - ingest
+  - Data Management
+  - Beginner
 ---
 

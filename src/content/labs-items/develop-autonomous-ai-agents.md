@@ -4,6 +4,6 @@ url: /docs/integrations/frameworks/camel
 category: Integrations
 author: surrealdb
 topics:
-  - ai
+  - AI
 ---
 

@@ -7,6 +7,6 @@ author:
   role: Software Engineer
   avatar: alexander-nnakwue
 topics:
-  - ingest
+  - Data Management
 ---
 

@@ -7,6 +7,6 @@ author:
   role: Software Engineer
   avatar: gabor-szabo
 topics:
-  - python sdk
+  - Beginner
 ---
 

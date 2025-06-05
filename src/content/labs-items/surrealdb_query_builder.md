@@ -6,7 +6,6 @@ author:
   name: Ayush Chothe
   role: Software Engineer
   avatar: ayush-chothe
-topics:
-  - integrations
+topics: []
 ---
 

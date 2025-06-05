@@ -7,6 +7,7 @@ author:
   role: Software Engineer
   avatar: syed-zubeen
 topics:
-  - integrations
+  - Examples
+  - Beginner
 ---
 

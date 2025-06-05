@@ -4,6 +4,6 @@ url: /learn/fundamentals
 category: Tutorials
 author: surrealdb
 topics:
-  - ingest
+  - Beginner
 ---
 

@@ -6,7 +6,6 @@ author:
   name: Sachin Bhutani
   role: Software Engineer
   avatar: sachin-bhutani
-topics:
-  - integrations
+topics: []
 ---
 

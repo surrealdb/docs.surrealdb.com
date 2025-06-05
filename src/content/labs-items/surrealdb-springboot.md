@@ -7,6 +7,7 @@ author:
   role: Software Engineer
   avatar: priyadarshan-singh
 topics:
-  - integrations
+  - Examples
+  - Beginner
 ---
 

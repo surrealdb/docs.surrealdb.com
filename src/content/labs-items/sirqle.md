@@ -6,7 +6,6 @@ author:
   name: Tudor Andrei Dumitrascu
   role: Lead AI Developer
   avatar: tudor-andrei-dumitrascu
-topics:
-  - integrations
+topics: []
 ---
 

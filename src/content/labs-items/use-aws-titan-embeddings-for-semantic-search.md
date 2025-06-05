@@ -4,6 +4,6 @@ url: /docs/integrations/embeddings/bedrock
 category: Integrations
 author: surrealdb
 topics:
-  - embedding
+  - Embedding
 ---
 

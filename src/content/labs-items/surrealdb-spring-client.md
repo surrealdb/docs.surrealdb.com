@@ -6,7 +6,6 @@ author:
   name: Mukund Mundhra
   role: Software Engineer
   avatar: mukund-mundhra
-topics:
-  - integrations
+topics: []
 ---
 

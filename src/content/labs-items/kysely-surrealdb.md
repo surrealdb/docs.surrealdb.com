@@ -6,7 +6,6 @@ author:
   name: Igal Klebanov
   role: Software Engineer
   avatar: igal-klebanov
-topics:
-  - integrations
+topics: []
 ---
 

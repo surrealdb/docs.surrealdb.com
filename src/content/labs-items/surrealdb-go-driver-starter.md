@@ -7,6 +7,7 @@ author:
   role: Software Engineer
   avatar: salman-shah
 topics:
-  - integrations
+  - Examples
+  - Beginner
 ---
 

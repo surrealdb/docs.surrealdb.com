@@ -6,7 +6,6 @@ author:
   name: Itsumura H.
   role: Software Engineer
   avatar: itsumura-h
-topics:
-  - integrations
+topics: []
 ---
 

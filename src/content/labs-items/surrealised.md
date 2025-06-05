@@ -6,7 +6,6 @@ author:
   name: Harry Carpenter
   role: Software Engineer
   avatar: harry-carpenter
-topics:
-  - integrations
+topics: []
 ---
 
