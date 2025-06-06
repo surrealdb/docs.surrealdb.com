@@ -1,7 +1,7 @@
-import { args, slugify } from './_utils';
-import { input, select, checkbox } from '@inquirer/prompts';
-import { LAB_CATEGORIES, LAB_TOPICS } from '@config/pages/labs';
 import { resolve } from 'node:path';
+import { LAB_CATEGORIES, LAB_TOPICS } from '@config/pages/labs';
+import { checkbox, input, select } from '@inquirer/prompts';
+import { args, slugify } from './_utils';
 
 try {
     const config = {
