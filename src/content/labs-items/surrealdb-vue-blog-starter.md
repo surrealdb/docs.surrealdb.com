@@ -8,6 +8,5 @@ author:
   avatar: fadel-srwither
 topics:
   - Examples
-  - Beginner
 ---
 

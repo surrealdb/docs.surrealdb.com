@@ -7,7 +7,7 @@ author:
   role: Software Engineer
   avatar: sai-kiran
 topics:
-  - AI
+  - Examples
   - Beginner
 ---
 

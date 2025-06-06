@@ -7,7 +7,6 @@ author:
   role: Software Engineer
   avatar: lucifer-akirami
 topics:
-  - AI
   - Examples
 ---
 
