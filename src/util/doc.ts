@@ -16,7 +16,7 @@ type Item = SidebarItem & {
 };
 
 export async function generateSidebar(
-    name: CollectionKey
+    name: Exclude<CollectionKey, 'labs-items'>
 ): Promise<{ items: Item[]; flat: Item[] }> {
     // biome-ignore lint/suspicious/noExplicitAny: alternative is a cirular type definition which is not allowed
     const urls = {} as Record<string, any>;
@@ -56,7 +56,7 @@ export async function generateSidebar(
                     urlSlug,
                 ]
                     .filter((a) => !!a)
-                    .join('/');
+                    .join('/') as string;
 
                 return [
                     meta.sidebar_position,
@@ -99,7 +99,7 @@ export async function generateSidebar(
 }
 
 export async function generateBreadcrumb(
-    name: CollectionKey,
+    name: Exclude<CollectionKey, 'labs-items'>,
     slug: string
 ): Promise<{ items: { title: string; href?: string }[] }> {
     const parts = slug.split('/').filter((a) => a !== '');
@@ -203,7 +203,7 @@ export async function getMeta<CK extends CollectionKey>(
 }
 
 export function getTitle(
-    meta: CollectionEntry<CollectionKey>['data'],
+    meta: CollectionEntry<Exclude<CollectionKey, 'labs-items'>>['data'],
     slug: string
 ): string {
     return meta.sidebar_label ?? meta.title ?? titleFromSlug(slug);
