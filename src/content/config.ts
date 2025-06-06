@@ -28,7 +28,15 @@ const labCollection = defineCollection({
                     avatar: z.string(),
                 })
             ),
-            topics: z.string().array().max(2),
+            topics: z.enum([
+				"AI",
+				"Data Management",
+				"Embedding",
+				"Security",
+				"Examples",
+				"Optimisation",
+				"Beginner",
+			]).array().max(2),
         }),
 });
 
