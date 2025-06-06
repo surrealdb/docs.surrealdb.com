@@ -12,7 +12,7 @@ const validDocs = [
 	'tutorials',
 	'cloud',
 	'integrations',
-	'examples',
+	'labs',
 ];
 
 // We previously had versioned docs. Turns out this was terrible for SEO due to duplicate content, so we reverted that after a few months. 
