@@ -16,7 +16,7 @@ export const LAB_CATEGORIES = [
     'Templates',
     'Tutorials',
     'Videos',
-];
+] as const;
 
 export const LAB_TOPICS = [
     'AI',
@@ -26,7 +26,7 @@ export const LAB_TOPICS = [
     'Examples',
     'Optimisation',
     'Beginner',
-];
+] as const;
 
 export const LAB_SIDEBAR = [
     {
@@ -47,14 +47,24 @@ export const LAB_SIDEBAR = [
 ];
 
 export const LAB_IMAGE_MAP = {
-    'CI/CD': EmbedImage,
-    'Deployment Tools': RelationalImage,
-    'Development Tools': SearchImage,
-    'Docker Images': GraphImage,
-    Integrations: MachineLearningImage,
-    Libraries: RelationalImage,
-    SDKs: SearchImage,
-    Templates: GraphImage,
-    Tutorials: MachineLearningImage,
-    Videos: EmbedImage,
+	'CI/CD': EmbedImage,
+	'Deployment Tools': RelationalImage,
+	'Development Tools': SearchImage,
+	'Docker Images': GraphImage,
+	'Integrations': MachineLearningImage,
+	'Libraries': RelationalImage,
+	'SDKs': SearchImage,
+	'Templates': GraphImage,
+	'Tutorials': MachineLearningImage,
+	'Videos': EmbedImage, 
+} as const;
+
+export const LABS_TOPICS_MAP: Record<Lowercase<(typeof LAB_TOPICS)[number]>, string> = {
+	ai: 'AI',
+	'data management': 'Data Management',
+	embedding: 'Embedding',
+	security: 'Security',
+	examples: 'Examples',
+	optimisation: 'Optimisation',
+	beginner: 'Beginner',
 } as const;
