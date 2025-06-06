@@ -20,7 +20,19 @@ const labCollection = defineCollection({
         z.object({
             title: z.string(),
             url: z.string().optional(),
-            category: z.string(),
+            category: z.enum([
+				"CI/CD",
+				"Demos",
+				"Deployment Tools",
+				"Development Tools",
+				"Docker Images",
+				"Integrations",
+				"Libraries",
+				"SDKs",
+				"Templates",
+				"Tutorials",
+				"Videos",
+			]),
             author: z.literal('surrealdb').or(
                 z.object({
                     name: z.string(),
