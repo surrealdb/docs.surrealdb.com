@@ -111,7 +111,7 @@ export const urlForCollection = {
         },
         {} as Record<SdkKey, string>
     ),
-	'labs-items': 'labs',
+    'labs-items': 'labs',
 };
 
 export type Doc = (typeof docs)[number];
