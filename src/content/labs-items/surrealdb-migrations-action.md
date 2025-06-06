@@ -1,5 +1,5 @@
 ---
-title: "surrealdb-migrations"
+title: "SurrealDB migration Action"
 url: https://github.com/marketplace/actions/surrealdb-migrations
 category: CI/CD
 author:
@@ -9,4 +9,3 @@ author:
 topics:
   - Data Management
 ---
-
