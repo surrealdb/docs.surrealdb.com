@@ -1,6 +1,6 @@
 ---
 title: "Surrealist"
-url: https://github.com/surrealdb/surrealist
+url: https://surrealist.app
 category: Development Tools
 author: surrealdb
 topics:
