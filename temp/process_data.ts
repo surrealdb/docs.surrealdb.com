@@ -1,6 +1,6 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { examplePageConfig } from '../config/pages/labs';
-import * as fs from 'fs';
-import * as path from 'path';
 
 const { dataByCategory } = examplePageConfig;
 
@@ -54,7 +54,7 @@ Object.entries(dataByCategory).forEach(([category, items]) => {
   name: ${item.author.name.replace(/"/g, '\\"')}
   role: ${item.author.role.replace(/"/g, '\\"')}
   avatar: ${slugify(item.author.name)}`,
-            `topics:`,
+            'topics:',
             ...topics.map((topic) => `  - ${topic}`),
             '---',
             '',

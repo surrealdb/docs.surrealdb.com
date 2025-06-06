@@ -1,4 +1,4 @@
-import { defineCollection, type CollectionEntry } from 'astro:content';
+import { type CollectionEntry, defineCollection } from 'astro:content';
 import { z } from 'astro/zod';
 
 const abstractDoc = defineCollection({
@@ -21,18 +21,18 @@ const labCollection = defineCollection({
             title: z.string(),
             url: z.string().optional(),
             category: z.enum([
-				"CI/CD",
-				"Demos",
-				"Deployment Tools",
-				"Development Tools",
-				"Docker Images",
-				"Integrations",
-				"Libraries",
-				"SDKs",
-				"Templates",
-				"Tutorials",
-				"Videos",
-			]),
+                'CI/CD',
+                'Demos',
+                'Deployment Tools',
+                'Development Tools',
+                'Docker Images',
+                'Integrations',
+                'Libraries',
+                'SDKs',
+                'Templates',
+                'Tutorials',
+                'Videos',
+            ]),
             author: z.literal('surrealdb').or(
                 z.object({
                     name: z.string(),
@@ -40,15 +40,18 @@ const labCollection = defineCollection({
                     avatar: z.string(),
                 })
             ),
-            topics: z.enum([
-				"AI",
-				"Data Management",
-				"Embedding",
-				"Security",
-				"Examples",
-				"Optimisation",
-				"Beginner",
-			]).array().max(2),
+            topics: z
+                .enum([
+                    'AI',
+                    'Data Management',
+                    'Embedding',
+                    'Security',
+                    'Examples',
+                    'Optimisation',
+                    'Beginner',
+                ])
+                .array()
+                .max(2),
         }),
 });
 
