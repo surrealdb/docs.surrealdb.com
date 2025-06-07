@@ -1,25 +1,25 @@
-import CiCdDarkImg from '@assets/img/labs-categories/ci-cd.png';
 import CiCdLightImg from '@assets/img/labs-categories/ci-cd.light.png';
-import DemosDarkImg from '@assets/img/labs-categories/demos.png';
+import CiCdDarkImg from '@assets/img/labs-categories/ci-cd.png';
 import DemosLightImg from '@assets/img/labs-categories/demos.light.png';
-import DeploymentToolsDarkImg from '@assets/img/labs-categories/deployment-tools.png';
+import DemosDarkImg from '@assets/img/labs-categories/demos.png';
 import DeploymentToolsLightImg from '@assets/img/labs-categories/deployment-tools.light.png';
-import DevelopmentToolsDarkImg from '@assets/img/labs-categories/development-tools.png';
+import DeploymentToolsDarkImg from '@assets/img/labs-categories/deployment-tools.png';
 import DevelopmentToolsLightImg from '@assets/img/labs-categories/development-tools.light.png';
-import DockerImagesDarkImg from '@assets/img/labs-categories/docker-images.png';
+import DevelopmentToolsDarkImg from '@assets/img/labs-categories/development-tools.png';
 import DockerImagesLightImg from '@assets/img/labs-categories/docker-images.light.png';
-import IntegrationsDarkImg from '@assets/img/labs-categories/integrations.png';
+import DockerImagesDarkImg from '@assets/img/labs-categories/docker-images.png';
 import IntegrationsLightImg from '@assets/img/labs-categories/integrations.light.png';
-import LibrariesDarkImg from '@assets/img/labs-categories/libraries.png';
+import IntegrationsDarkImg from '@assets/img/labs-categories/integrations.png';
 import LibrariesLightImg from '@assets/img/labs-categories/libraries.light.png';
-import SdksDarkImg from '@assets/img/labs-categories/sdks.png';
+import LibrariesDarkImg from '@assets/img/labs-categories/libraries.png';
 import SdksLightImg from '@assets/img/labs-categories/sdks.light.png';
-import TemplatesDarkImg from '@assets/img/labs-categories/templates.png';
+import SdksDarkImg from '@assets/img/labs-categories/sdks.png';
 import TemplatesLightImg from '@assets/img/labs-categories/templates.light.png';
-import TutorialsDarkImg from '@assets/img/labs-categories/tutorials.png';
+import TemplatesDarkImg from '@assets/img/labs-categories/templates.png';
 import TutorialsLightImg from '@assets/img/labs-categories/tutorials.light.png';
-import VideosDarkImg from '@assets/img/labs-categories/videos.png';
+import TutorialsDarkImg from '@assets/img/labs-categories/tutorials.png';
 import VideosLightImg from '@assets/img/labs-categories/videos.light.png';
+import VideosDarkImg from '@assets/img/labs-categories/videos.png';
 
 export const LAB_CATEGORIES = [
     'CI/CD',
