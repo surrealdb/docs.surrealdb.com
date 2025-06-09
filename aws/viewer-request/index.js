@@ -36,6 +36,7 @@ const redirects = {
 	// Redirect root to SurrealDB docs
 	'/docs': '/docs/surrealdb',
 	'/docs/': '/docs/surrealdb',
+	'/docs/index.html': '/docs/surrealdb',
 	// Redirect old sdk libraries page
 	'/docs/integration/libraries': '/docs/surrealdb/integration/sdks',
 	// Redirect old websocket protocol page
@@ -129,10 +130,10 @@ function compute(input) {
 	let path = input.toLowerCase();
 
 	// Handle /docs and /docs/ cases
-	if (path === '/docs' || path === '/docs/') {
+	if (path === '/docs' || path === '/docs/' || path === '/docs/index.html') {
 		return {
 			path: '/docs/surrealdb',
-			raw: true
+			raw: false
 		};
 	}
 
@@ -189,7 +190,7 @@ function handler(event) {
 	// Do we redirect to fix the URL first?
 	if (
 		host !== 'surrealdb.com' ||
-		(!computed.raw && (computed.path !== request.uri))
+		computed.path !== request.uri
 	) {
 		return {
 			statusCode: 301,
