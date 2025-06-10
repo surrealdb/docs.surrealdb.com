@@ -47,6 +47,11 @@ export const LAB_TOPICS = [
 
 export const LAB_SIDEBAR = [
     {
+        title: 'Filters',
+        key: 'filters',
+        options: ['SurrealDB Official'],
+    },
+    {
         title: 'Categories',
         key: 'categories',
         options: LAB_CATEGORIES,
@@ -55,11 +60,6 @@ export const LAB_SIDEBAR = [
         title: 'Topics',
         key: 'topics',
         options: LAB_TOPICS,
-    },
-    {
-        title: 'Filters',
-        key: 'filters',
-        options: ['SurrealDB Official'],
     },
 ];
 
