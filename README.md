@@ -84,6 +84,149 @@ To get started with contributing to the SurrealDB documentation, first install t
 bun i 
 ```
 
+## Contributing Lab content to SurrealDB Documentation
+
+## Overview
+Labs are a collection of community and official content that helps users learn and work with SurrealDB. This guide will help you contribute your own lab content to the documentation.
+
+## Prerequisites
+- [Bun](https://bun.sh/) installed on your system
+- A GitHub account
+- Basic knowledge of Markdown
+
+## Creating a new Lab
+
+### Using the Lab creation tool
+The easiest way to create a new lab is using the built-in tool:
+
+1. Clone the repository and install dependencies:
+
+```bash
+git clone https://github.com/surrealdb/docs.surrealdb.com.git
+cd docs.surrealdb.com
+bun install
+```
+
+2. Run the lab creation tool:
+
+```bash
+bun run make:lab
+```
+
+3. Follow the interactive prompts to provide:
+   - Lab name (required)
+   - URL (optional) - Link to your project/repository
+   - Category (required) - Choose from:
+     - CI/CD
+     - Demos
+     - Deployment Tools
+     - Development Tools
+     - Docker Images
+     - Integrations
+     - Libraries
+     - SDKs
+     - Templates
+     - Tutorials
+     - Videos
+   - Topics (optional) - Select one or more from:
+     - AI
+     - Data Management
+     - Embedding
+     - Security
+     - Examples
+     - Optimisation
+     - Beginner
+   - Author name (required)
+   - Author role (required for community content)
+
+### Manual creation
+Alternatively, you can create a lab manually by creating a new Markdown file in [`src/content/labs-items/`](https://github.com/surrealdb/docs.surrealdb.com/tree/main/src/content/labs-items) with the following structure:
+
+```markdown
+---
+title: "Your Lab Title"
+url: "https://your-project-url.com"  # Optional
+category: "Category Name"  # Must be one of the predefined categories
+topics:  # Optional
+  - Topic1
+  - Topic2
+author:
+  name: "Your Name"
+  role: "Your Role"
+  avatar: "your-name-slug"  # Will be automatically generated
+---
+
+Your lab content here...
+```
+
+> For the author avater field, you will also need to upload an avatar to /src/assets/img/labs-authors with the same file name as the author property in the lab markdown
+
+## Content guidelines
+
+### Categories
+Choose the most appropriate category for your lab:
+- **CI/CD**: Continuous integration and deployment tools
+- **Demos**: Example applications and demonstrations
+- **Deployment Tools**: Tools for deploying SurrealDB
+- **Development Tools**: Tools for development workflow
+- **Docker Images**: Docker-related resources
+- **Integrations**: Third-party integrations
+- **Libraries**: Code libraries and packages
+- **SDKs**: Software development kits
+- **Templates**: Project templates and starters
+- **Tutorials**: Step-by-step guides
+- **Videos**: Video content and tutorials
+
+### Topics
+Select relevant topics to help users find your content:
+- **AI**: Artificial Intelligence related content
+- **Data Management**: Data handling and management
+- **Embedding**: Embedding-related features
+- **Security**: Security features and best practices
+- **Examples**: Code examples and snippets
+- **Optimisation**: Performance optimization
+- **Beginner**: Content suitable for beginners
+
+## Best practices
+
+1. **Title**: Choose a clear, descriptive title that reflects the content. Keep it short and concise for better readability
+2. **Content** (Only required when no URL is provided):
+   - Start with a brief introduction
+   - Include clear instructions
+   - Add code examples where relevant
+   - Include screenshots or diagrams if helpful
+3. **URL**: If your lab has an associated project, include the URL
+4. **Author Information**: 
+   - Use your real name
+   - Provide a clear role description
+   - For official SurrealDB content, use "surrealdb" as the author name
+
+## Submitting your contribution
+
+1. Create a new branch for your lab
+2. Add your lab content
+3. Commit your changes
+4. Push to your fork
+5. Create a pull request
+
+## Review process
+
+Your lab will be reviewed for:
+- Technical accuracy
+- Content quality
+- Adherence to guidelines
+- Proper categorisation and topics
+
+## Need help?
+
+If you need assistance or have questions:
+- [Open an issue in the repository](https://github.com/surrealdb/docs.surrealdb.com/issues)
+- [Join the SurrealDB community channels](https://discord.com/invite/surrealdb)
+- [Check existing labs for examples](/docs/labs)
+
+Remember, your contribution helps the SurrealDB community grow and learn. Thank you for contributing!
+
+
 ## Development
 
 The following command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
