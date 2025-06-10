@@ -54,6 +54,31 @@
 
 <br>
 
+## Table of Contents
+
+- [Getting Started with SurrealDB](#getting-started-with-surrealdb)
+- [Learn SurrealDB](#learn-surrealdb)
+- [Contributing to the Documentation](#contributing-to-the-documentation)
+  - [Good First Issues](#good-first-issues)
+- [Installation](#installation)
+- [Contributing Lab Content](#contributing-lab-content-to-surrealdb-documentation)
+  - [Overview](#overview)
+  - [Prerequisites](#prerequisites)
+  - [Creating a New Lab](#creating-a-new-lab)
+    - [Using the Lab Creation Tool](#using-the-lab-creation-tool)
+- [Categories](#categories)
+- [Topics](#topics)
+- [Best practices](#best-practices)
+- [Submitting your contribution](#submitting-your-contribution)
+- [Review process](#review-process)
+- [Need help?](#need-help)
+- [Development](#development)
+- [Building](#building)
+- [Adding a new doc](#adding-a-new-doc)
+- [File structure](#file-structure)
+- [Linting](#linting)
+
+
 ## Getting started with SurrealDB
 
 Visit [surrealdb.com/docs](https://surrealdb.com/docs/surrealdb/) to get started with SurrealDB. 
@@ -140,6 +165,7 @@ bun run make:lab
    - Author role (required for community content)
 
 ### Manual creation
+
 Alternatively, you can create a lab manually by creating a new Markdown file in [`src/content/labs-items/`](https://github.com/surrealdb/docs.surrealdb.com/tree/main/src/content/labs-items) with the following structure:
 
 ```markdown
