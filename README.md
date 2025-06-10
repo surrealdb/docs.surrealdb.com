@@ -159,6 +159,8 @@ author:
 Your lab content here...
 ```
 
+> For the author avater field, you will also need to upload an avatar to /src/assets/img/labs-authors with the same file name as the author property in the lab markdown
+
 ## Content guidelines
 
 ### Categories
@@ -187,8 +189,8 @@ Select relevant topics to help users find your content:
 
 ## Best practices
 
-1. **Title**: Choose a clear, descriptive title that reflects the content
-2. **Content**: 
+1. **Title**: Choose a clear, descriptive title that reflects the content. Keep it short and concise for better readability
+2. **Content** (Only required when no URL is provided):
    - Start with a brief introduction
    - Include clear instructions
    - Add code examples where relevant
