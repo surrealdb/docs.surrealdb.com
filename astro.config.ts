@@ -1,9 +1,8 @@
 import mdx from '@astrojs/mdx';
 import solidJs from '@astrojs/solid-js';
-import tailwind from '@astrojs/tailwind';
+import tailwind from '@tailwindcss/vite';
 import compress from 'astro-compress';
 import icon from 'astro-icon';
-// @ts-check
 import { defineConfig } from 'astro/config';
 import rehypeAutolinkHeadings from 'rehype-autolink-headings';
 import rehypeSlug from 'rehype-slug';
@@ -12,7 +11,6 @@ import { rehypeCodemirrorPlugin } from './src/util/rehypeCodemirrorPlugin.mjs';
 import { rehypeCopyCodePlugin } from './src/util/rehypeCopyCodePlugin.mjs';
 import { autolinkConfig } from './src/util/rehypeHeadingsConfig';
 import { rehypeNotesPlugin } from './src/util/rehypeNotesPlugin.mjs';
-
 import sitemap from '@astrojs/sitemap';
 
 const deployDomain = import.meta.env.DEPLOY_DOMAIN ?? 'surrealdb.com';
@@ -23,14 +21,12 @@ export default defineConfig({
     site,
     base: '/docs',
     outDir: './dist/docs',
+	output: 'static',
     trailingSlash: 'never',
     integrations: [
         mdx(),
         solidJs({ devtools: true }),
         icon(),
-        tailwind({
-            nesting: true,
-        }),
         compress({
             Image: false,
         }),
@@ -47,4 +43,15 @@ export default defineConfig({
         ],
         syntaxHighlight: false,
     },
+	vite: {
+		build: {
+			emptyOutDir: true
+		},
+		plugins: [
+			tailwind()
+		]
+	},
+	experimental: {
+		contentIntellisense: true
+	}
 });
