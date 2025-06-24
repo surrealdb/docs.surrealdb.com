@@ -12,7 +12,7 @@ const validDocs = [
 	'tutorials',
 	'cloud',
 	'integrations',
-	'examples',
+	'labs',
 ];
 
 // We previously had versioned docs. Turns out this was terrible for SEO due to duplicate content, so we reverted that after a few months. 
@@ -35,6 +35,8 @@ const prefixes = {
 const redirects = {
 	// Redirect root to SurrealDB docs
 	'/docs': '/docs/surrealdb',
+	'/docs/': '/docs/surrealdb',
+	'/docs/index.html': '/docs/surrealdb',
 	// Redirect old sdk libraries page
 	'/docs/integration/libraries': '/docs/surrealdb/integration/sdks',
 	// Redirect old websocket protocol page
@@ -120,19 +122,21 @@ const redirects = {
 	'/docs/surrealdb/deployment/railway': '/docs/surrealdb/deployment',
 	'/docs/surrealdb/deployment/digitalocean': '/docs/surrealdb/deployment',
 	'/docs/surrealdb/deployment/fly': '/docs/surrealdb/deployment',
+	'/docs/integrations/data-mangaement': '/docs/integrations/data-management',
 };
 
 function compute(input) {
 	// Path should be lowercase
 	let path = input.toLowerCase();
 
-	// Special case for /docs/ with trailing slash for SEO
-	if (path === '/docs/') {
+	// Handle /docs and /docs/ cases
+	if (path === '/docs' || path === '/docs/' || path === '/docs/index.html') {
 		return {
 			path: '/docs/surrealdb',
-			raw: true
+			raw: false
 		};
 	}
+
 	// Basic URLs
 	if (path === '/docs/llms.txt') return { path, raw: true };
 	if (path.startsWith('/docs/_astro/')) return { path: input, raw: true };
@@ -186,7 +190,7 @@ function handler(event) {
 	// Do we redirect to fix the URL first?
 	if (
 		host !== 'surrealdb.com' ||
-		(!computed.raw && (computed.path !== request.uri))
+		computed.path !== request.uri
 	) {
 		return {
 			statusCode: 301,
