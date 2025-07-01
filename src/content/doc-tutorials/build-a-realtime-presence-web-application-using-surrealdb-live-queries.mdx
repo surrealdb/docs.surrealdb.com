@@ -1,0 +1,455 @@
+---
+sidebar_position: 7
+sidebar_label: Build a realtime presence web application
+title: Build a realtime presence web application | Tutorials
+description: In this guide, you'll learn how to implement realtime presence tracking that can be integrated in any application including chat applications, multiplayer games, and more.
+---
+
+# Build a realtime presence web application using SurrealDB Live Queries
+
+SurrealDB offers various features including a realtime notification mechanism called Live Queries. This feature allows you to subscribe to changes in your database and receive notifications in real-time. In this guide, you’ll learn how to implement realtime presence tracking that can be integrated in any application including chat applications, multiplayer games, and more. The demo project is available on [GitHub](https://github.com/Odonno/surrealdb-presence-demo) using the following tech stack:
+
+- [SurrealDB](/) our database
+- [React](https://react.dev/) for the frontend with [Vite](https://vite.dev/) as a bundler
+- [TanStack Query](https://tanstack.com/query) to fetch and store data retrieved from the database
+- [Tailwind](https://tailwindcss.com/) for styling our application
+
+## Hello, are you there?
+
+![room-users.png](https://github.com/Odonno/surrealdb-presence-demo/raw/main/img/room-users.png)
+
+The demo application looks like a simple chat application with basic features allowing users to join a room and send messages. The application also displays the number of users in the room and their presence status. The presence status is updated in real-time using SurrealDB Live Queries. The mechanism used to detect the presence of a user is a periodic ping sent by the client to the server.
+
+The following configuration is used to setup the project:
+
+- Signal user presence in room periodically every **10 seconds**
+- Display status badge based on idle time
+        - 🟩 < **2 minutes** of inactivity
+        - 🟨 < **10 minutes** of inactivity
+        - ⬜ beyond **10 minutes** of inactivity
+
+Note: Those values are completely arbitrary and can be changed to fit your needs.
+
+## Architecture
+
+This project is using the following folder structure:
+
+- `/schemas` - list of SurrealDB tables
+- `/events` - list of SurrealDB events
+- `/migrations` - list of db migrations that will be automatically applied
+- `/src`
+        - `/api` - TanStack query hooks
+        - `/components`
+        - `/constants`
+        - `/contexts` - Theme and SurrealDB providers
+        - `/hooks` - custom React hooks
+        - `/lib` - functions and app models
+        - `/mutations` - surql query files to create or update data, using SurrealDB events
+        - `/pages`
+        - `/queries` - surql query files to query the database, using SurrealDB tables
+
+## Prerequisites
+
+Before you begin this tutorial you’ll need the following:
+
+a. [SurrealDB](/docs/surrealdb/installation) installed on your machine (Make sure you upgrade to the latest version if you already have SurrealDB installed on your machine)
+
+b. The [Bun](https://bun.sh/docs/installation) runtime
+
+c. Optional: [surrealdb-migrations](https://github.com/Odonno/surrealdb-migrations) to manage and automate the deployment of your SurrealDB schema
+
+d. A basic understanding of React and TanStack Query
+
+## Step 0: Setup the project
+
+Once everything is installed, clone the project and navigate to it. Then:
+
+1. Start a new SurrealDB instance locally
+
+```bash
+surreal start --log debug --user root --pass root memory --allow-guests
+```
+
+2. Apply migrations to the database
+
+Either apply schema & migrations automatically by running the following command:
+
+```bash
+surrealdb-migrations apply
+```
+
+Or manually apply each file stored in the following folders:
+
+- `schemas`
+- `events`
+- `migrations`
+
+3. Install dependencies and run the web app
+
+```bash
+bun install
+bun start
+```
+
+4. Launch your web browser on the generated url (eg. http://localhost:5173/) and play with the app: create new accounts, join rooms, leave rooms, etc..
+
+## Step 1: Authentication
+
+For users to join rooms and interact with the app, we need users. And thankfully, SurrealDB also offers authentication mechanism. We will need some basic authentication such as a registration form, a login form, and a way to sign out.
+
+The `user` table will look like this:
+
+```surql
+DEFINE TABLE user SCHEMALESS;
+
+DEFINE FIELD username ON user TYPE string;
+DEFINE FIELD email ON user TYPE string PERMISSIONS FOR select NONE;
+DEFINE FIELD passcode ON user TYPE string PERMISSIONS FOR select NONE;
+DEFINE FIELD registered_at ON user TYPE datetime DEFAULT time::now();
+DEFINE FIELD avatar ON user TYPE option<string>;
+
+DEFINE INDEX unique_username ON user COLUMNS username UNIQUE;
+DEFINE INDEX unique_email ON user COLUMNS email UNIQUE;
+
+DEFINE ACCESS user_access
+    ON DATABASE TYPE RECORD
+    SIGNUP (
+        CREATE user
+        SET
+            username = $username,
+            email = $email,
+            avatar = "https://www.gravatar.com/avatar/" + crypto::md5($email) + "?d=identicon",
+            passcode = fn::create_passcode($email)
+    )
+    SIGNIN (
+        SELECT *
+        FROM user
+        WHERE email = $email AND passcode = $passcode
+    );
+```
+
+We can then create a [login form](https://github.com/Odonno/surrealdb-presence-demo/blob/main/src/components/SignInPopover.tsx) and a [sign up dialog](https://github.com/Odonno/surrealdb-presence-demo/blob/main/src/components/SignUpDialog.tsx).
+
+> [!NOTE]
+>We use a passcode to ensure a minimum security authentication. This passcode is generated by the signup function and is stored in the user record. The signin function checks if the passcode is correct. This is for a demonstration purpose only. In a real-world application, you should use a more secure authentication mechanism.
+
+## Step 2: Display room information
+
+We first start by writing the query that will be used to display room information.
+
+```surql
+SELECT
+    id,
+    name,
+    created_at,
+    (
+        RETURN $auth.id IN $parent.users
+    ) AS is_in_room,
+    array::len(
+        SELECT count()
+        FROM $parent.users
+        WHERE time::now() - ((
+            SELECT VALUE at
+            FROM last_presence
+            WHERE user == $parent.id
+        )[0] ?? time::from::secs(0)) < 5m
+    ) AS number_of_active_users,
+    owner.id != $auth.id AS can_leave
+FROM room
+ORDER BY created_at DESC;
+```
+
+Each `*.surql` query file can then be linked to a TanStack Query query, like this one:
+
+```ts
+import roomsQuery from "@/queries/rooms.surql?raw"; // importing raw text file query written in SurrealQL
+
+export const useRooms = () => {
+	const dbClient = useSurrealDbClient();
+
+	const getRoomsAsync = async () => {
+		const response = await dbClient.query<[Room[]]>(roomsQuery);
+		return response[0];
+	};
+
+	return useQuery({
+		...queryKeys.rooms.list,
+		queryFn: getRoomsAsync,
+	});
+};
+```
+
+Here, we will expose a new hook that encapsulates a `useQuery` hook underneath. The same can be done with TanStack query mutations.
+
+## Step 3: Signal user presence
+
+Signaling a presence from the client is almost too easy.
+
+We use the `usePageVisibility` hook to ensure the user is still looking at our app, meaning he did not put the app in the background. Note: this hook is using the [Page Visibility API](https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API) underneath.
+
+And if the page is visible, we use the `useInterval` hook to trigger the signal event every 10 seconds via a TanStack Query mutation .
+
+```ts
+const SIGNAL_PRESENCE_INTERVAL = 10 * SECOND;
+
+const SignalPresence = () => {
+	const isPageVisible = usePageVisibility();
+	const canSignalPresence = isPageVisible;
+
+	const dbClient = useSurrealDbClient();
+
+	const signalPresence = useMutation({
+		mutationKey: ["signalPresence"],
+		mutationFn: async () => {
+			await dbClient.query(signalPresenceQuery);
+		},
+	});
+
+	useInterval(
+		() => {
+			signalPresence.mutate();
+		},
+		canSignalPresence ? SIGNAL_PRESENCE_INTERVAL : null,
+	);
+
+	useEffect(() => {
+		if (canSignalPresence) {
+			signalPresence.mutate();
+		}
+	}, [isPageVisible]);
+
+	return null;
+};
+```
+
+The mutation will trigger the following SurrealDB event:
+
+```surql
+DEFINE EVENT signal_presence ON TABLE signal_presence WHEN $event == "CREATE" THEN (
+    CREATE presence SET user = $auth.id
+);
+```
+
+The `presence` table will store every presence detection event triggered by our application.
+
+## Step 4: Display realtime presence status
+
+Storing all the presence detection triggered is interesting but it's not very useful. We want to display the presence status of each user in realtime efficiently. To do so, we will create a new table called `last_presence` to retrieve the last presence detection event for each user. We will then be able to use this table to display the presence status of each user in realtime..
+
+```surql
+DEFINE TABLE last_presence AS
+	SELECT
+        user,
+        time::max(updated_at) AS at
+    FROM presence
+	GROUP BY user;
+```
+
+Displaying the presence status badge of a user is quite simple. We just need to retrieve the last presence detection event for the user and display the presence status badge based on the time difference between the last presence detection event and the current time.
+
+```ts
+const GREEN_STATUS_THRESHOLD = 2 * MINUTE;
+const ORANGE_STATUS_THRESHOLD = 10 * MINUTE;
+
+const getPresenceBackgroundClass = (
+	lastPresenceDate: Date | undefined,
+	now: Date,
+) => {
+	if (!lastPresenceDate) {
+		return "bg-gray-500";
+	}
+
+	const diffTimeInSeconds = now.getTime() - lastPresenceDate.getTime();
+
+	if (diffTimeInSeconds < GREEN_STATUS_THRESHOLD) {
+		return "bg-green-500";
+	}
+
+	if (diffTimeInSeconds < ORANGE_STATUS_THRESHOLD) {
+		return "bg-yellow-500";
+	}
+
+	return "bg-gray-500";
+};
+
+export type PresenceProps = {
+	lastPresenceDate?: Date;
+	className?: string;
+};
+
+const Presence = (props: PresenceProps) => {
+	const { lastPresenceDate, className } = props;
+
+	const [now, setNow] = useState(new Date());
+
+	useInterval(() => {
+		setNow(new Date());
+	}, SECOND);
+
+	const bgClass = getPresenceBackgroundClass(lastPresenceDate, now);
+
+	return (
+		<span className={cn(className, "w-2.5 h-2.5 rounded-full", bgClass)} />
+	);
+};
+```
+
+> [!NOTE]
+> We trigger a re-render every second to update the presence status. This may not be the most efficient way to do it, but it's enough for this demo. We could use a more specific interval, or use a more efficient way to notify the client when the presence status changes, but it's not the point of this demo.
+
+Now, this component can be easily integrated into another components, like this one:
+
+```ts
+const CurrentUserPresence = () => {
+	const lastPresenceDate = useRealtimeCurrentUserPresence();
+
+	return (
+		<Presence lastPresenceDate={lastPresenceDate} className="-ml-1 mt-1" />
+	);
+};
+```
+
+For reference, we query the last presence of the current user with this query:
+
+```surql
+SELECT VALUE at
+FROM last_presence
+WHERE user == $auth.id;
+```
+
+The `useRealtimeCurrentUserPresence` hook retrieves the last presence of the current user and is composed of multiple hooks:
+
+- `useCurrentUserPresence` - the base hook to retrieve the current user presence (without realtime capability)
+- `useCurrentUserPresenceLive` - the base hook that is notified by each changes in the database (pure realtime capability)
+- `useRealtimeCurrentUserPresence` - the hook itself that combines both previous hooks (current value + upcoming changes)
+
+```ts
+const useCurrentUserPresence = () => {
+	const dbClient = useSurrealDbClient();
+
+	const getCurrentUserPresenceAsync = async () => {
+		const response = await dbClient.query<[string]>(currentUserPresenceQuery);
+
+		if (!response?.[0]) {
+			throw new Error();
+		}
+
+		return new Date(response[0]);
+	};
+
+	return useQuery({
+		...queryKeys.users.current._ctx.presence,
+		queryFn: getCurrentUserPresenceAsync,
+	});
+};
+
+const useCurrentUserPresenceLive = (enabled: boolean) => {
+	const dbClient = useSurrealDbClient();
+
+	const getCurrentUserPresenceLiveAsync = async () => {
+		const query = `LIVE ${currentUserPresenceQuery}`;
+		const response = await dbClient.query<[Uuid]>(query);
+		return response?.[0];
+	};
+
+	return useQuery({
+		...queryKeys.users.current._ctx.presence._ctx.live,
+		queryFn: getCurrentUserPresenceLiveAsync,
+		enabled,
+	});
+};
+
+export const useRealtimeCurrentUserPresence = () => {
+	const queryClient = useQueryClient();
+
+	const { data: lastPresenceDate, isSuccess } = useCurrentUserPresence();
+	const { data: liveQueryUuid } = useCurrentUserPresenceLive(isSuccess);
+
+	useLiveQuery({
+		queryUuid: liveQueryUuid,
+		callback: (action, result) => {
+			if (action === "CREATE" || action === "UPDATE") {
+				queryClient.setQueryData(
+					queryKeys.users.current._ctx.presence.queryKey,
+					new Date(result as unknown as string),
+				);
+			}
+		},
+		enabled: Boolean(liveQueryUuid),
+	});
+
+	useMount(() => {
+		return () => {
+			queryClient.invalidateQueries({
+				queryKey: queryKeys.users.current._ctx.presence.queryKey,
+			});
+		};
+	});
+
+	return lastPresenceDate;
+};
+```
+
+## Step 5: Refactoring with the `useLiveQuery` hook
+
+One can notice the presence of the `useLiveQuery` hook. This hook is a custom hook that we created to simplify then lifecycle of a Live Query. It automatically subscribe to the Live Query when enabled and it will kill the Live Query on cleanup (when the component is unmounted). Correctly cleaning Live Queries would prevent from any memory leak.
+
+```typescript
+export type UseLiveQueryProps<
+	T extends Record<string, unknown> = Record<string, unknown>,
+> = {
+	queryUuid: Uuid | undefined;
+	callback: LiveHandler<T>;
+	enabled?: boolean;
+};
+
+export const useLiveQuery = ({
+	queryUuid,
+	callback,
+	enabled = true,
+}: UseLiveQueryProps) => {
+	const dbClient = useSurrealDbClient();
+
+	useEffect(() => {
+		if (enabled && !!queryUuid) {
+			const runLiveQuery = async () => {
+				await dbClient.subscribeLive(queryUuid, callback);
+			};
+
+			const clearLiveQuery = async () => {
+				await dbClient.kill(queryUuid);
+			};
+
+			const handleBeforeUnload = () => {
+				clearLiveQuery();
+			};
+
+			window.addEventListener("beforeunload", handleBeforeUnload);
+			runLiveQuery();
+
+			return () => {
+				clearLiveQuery();
+				window.removeEventListener("beforeunload", handleBeforeUnload);
+			};
+		}
+	}, [queryUuid, enabled]);
+};
+```
+
+## Bonus: the simulator
+
+Being alone is not really that fun, isn't it? We can't really test the realtime presence feature without having multiple users connected to the same room. That's why we can use the simulator script built to generate some fake users that will interact with the app while active. You can run the following command to start the simulator:
+
+```bash
+bun run .\simulator.ts
+```
+
+And then let's enjoy the nature of randomness make the app alive!
+
+## Resources
+
+- [Live demo](https://surrealdb-presence-demo.vercel.app/) - The live demo of the application
+- [GitHub repository](https://github.com/Odonno/surrealdb-presence-demo) - The GitHub repository of the application
+- [SurrealDB Live Queries](/docs/surrealql/statements/live) - The SurrealDB Live Queries documentation
+- [SurrealQL Documentation](/docs/surrealql) - The SurrealQL documentation
+- [Javascript SDK Documentation](/docs/sdk/javascript) - The Javascript SDK documentation
