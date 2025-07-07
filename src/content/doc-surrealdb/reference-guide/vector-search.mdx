@@ -33,6 +33,114 @@ Vector search isn't new to the world of data science. [Gerard Salton](https://en
 
 If you’re interested in understanding Vector search in depth, checkout this academic paper on [Vector Retrieval](https://arxiv.org/abs/2401.09350) written by Sebastian Bruch.
 
+
+## Vector Search Cheat Sheet
+
+- M-Tree: when you need the exact nearest neighbour
+- HNSW: efficient approximation for high dimensions or large datasets
+- Brute force: when you don’t define an index, or you want exact nearest neighbours, or when you provide a distance function to the query
+
+### M-Tree Index
+
+| Parameter     | Default   | Options                 | Description   |
+| ------------- | --------- | ----------------------- | ------------- |
+| DIMENSION     |           |                         | Size of the vector
+| DIST          | EUCLIDEAN | EUCLIDEAN, COSINE, MANHATTAN | Distance function
+| TYPE          | F64       | F64, F32, I64, I32, I16 | Vector type
+| CAPACITY      | 40        |                         | Max number of records that can be stored in the index
+| DOC_IDS_ORDER | 100       |                         |
+| DOC_IDS_CACHE | 100       |                         |
+| MTREE_CACHE   | 100       |                         |
+
+Examples:
+
+```surql
+-- User statement:
+DEFINE INDEX mt_idx ON pts FIELDS point MTREE DIMENSION 3;
+-- Defaults to:
+DEFINE INDEX mt_idx ON pts FIELDS point MTREE DIMENSION 3 DIST EUCLIDEAN TYPE F64 CAPACITY 40 DOC_IDS_ORDER 100 DOC_IDS_CACHE 100 MTREE_CACHE 100;
+```
+
+### HNSW Index
+
+| Parameter     | Default   | Options                 | Description   |
+| ------------- | --------- | ----------------------- | ------------- |
+| DIMENSION     |           |                         | Size of the vector
+| DIST          | EUCLIDEAN | EUCLIDEAN, COSINE, MANHATTAN | Distance function
+| TYPE          | F64       | F64, F32, I64, I32, I16 | Vector type
+| EFC           | 150       |                         | EF construction
+| M             | 12        |                         | Max connections per element
+| M0            | 24        |                         | Max connections in the lowest layer
+| LM            | 0.40242960438184466f |              | Multiplier for level generation. This value is automatically calculated with a value considered as optimal.
+
+Examples:
+
+```surql
+-- User statement:
+DEFINE INDEX hnsw_idx ON pts FIELDS point HNSW DIMENSION 4;
+-- Defaults to:
+DEFINE INDEX hnsw_idx ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F64 EFC 150 M 12 M0 24 LM 0.40242960438184466f;
+-- Users are strongly suggested not to set an LM value, as it is computed based on other parameters. Only users completely versed in the field should manually set it
+```
+
+More details in [`DEFINE INDEX` statement](/docs/surrealql/statements/define/indexes#hnsw-hierarchical-navigable-small-world).
+
+### Querying
+
+```surql
+DEFINE INDEX hnsw_idx ON pts FIELDS point HNSW DIMENSION 4;
+
+LET $vector = [2,3,4];
+SELECT
+    id,
+    vector::distance::knn() as dist  -- distance from $vector
+                                     -- knn reuses the value computed during
+                                     -- the query, in this case the euclidean
+                                     -- distance
+FROM pts
+WHERE point
+    <|2|>  -- return 2, in this case using the distance function defined in the
+           -- index: euclidean
+    $vector;
+```
+
+| SELECT Functions                                 |     |
+| ------------------------------------------------ | --- |
+| `vector::distance::knn()`                        | reuses the value computed during the query
+| `vector::distance::chebyshev(point, $vector)`    |
+| `vector::distance::euclidean(point, $vector)`    |
+| `vector::distance::hamming(point, $vector)`      |
+| `vector::distance::manhattan(point, $vector)`    |
+| `vector::distance::minkowski(point, $vector, 3)` | third param is [𝑝](#notes)
+| `vector::similarity::cosine(point, $vector)`     |
+| `vector::similarity::jaccard(point, $vector)`    |
+| `vector::similarity::pearson(point, $vector)`    |
+
+**WHERE statement**
+
+| Query                   | M-tree index           | HNSW index |
+| ----------------------- | ---------------------- | ---------- |
+| `<\|2\|>`               | uses distance function defined in index | same
+| `<\|2, EUCLIDEAN\|>`    | brute force methood    | same
+| `<\|2, COSINE\|>`       | brute force method     | same
+| `<\|2, MANHATTAN\|>`    | brute force method     | same
+| `<\|2, MINKOWSKI, 3\|>` | brute force method (third param is [𝑝](#notes)) | same
+| `<\|2, CHEBYSHEV\|>`    | brute force method     | same
+| `<\|2, HAMMING\|>`      | brute force method     | same
+| `<\|2, 10\|>`           | invalid, only for HNSW | second param is effort*
+
+*effort: Tells HNSW how far to go in trying to find the exact response. HNSW is approximate, and may miss some vectors.
+
+### Notes
+
+- Verify index utilization in queries using the [`EXPLAIN FULL` clause](/docs/surrealql/statements/select#the-explain-clause). E.g: `SELECT id FROM pts WHERE point <|10|> [2,3,4,5] EXPLAIN FULL;`
+- 𝑝 values: (more about 𝑝 in [Minkowski distance](https://en.wikipedia.org/wiki/Minkowski_distance))
+  - 2<sup>0</sup> = 1 → manhattan/diamond ◇
+  - 2<sup>1</sup> = 2 → euclidean/circle ○
+  - 2<sup>2</sup> = 4 → squircle ▢
+  - 2<sup>∞</sup> = ∞ → square □
+
+
 ## Vector Search vs Full-Text Search
 
 <Image
@@ -50,7 +158,7 @@ In the example below, we have a table called `liquids` with a `sample` field and
 Then, using the select statement to retrieve all the samples containing the chemical lead will also bring up samples that mention the word `lead`.
 
 <SurrealistMini
-	url="https://surrealist.app/mini?query=--+Insert+a+sample+%26+content+field+into+a+liquids+table%0A%0AINSERT+INTO+liquids+%5B%0A++++%7Bsample%3A%27Sea+water%27%2C+content%3A+%27The+sea+water+contains+some+amount+of+lead%27%7D%2C%0A++++%7Bsample%3A%27Tap+water%27%2C+content%3A+%27The+team+lead+by+Dr.+Rose+found+out+that+the+tap+water+in+was+potable%27%7D%2C%0A++++%7Bsample%3A%27Sewage+water%27%2C+content%3A+%27High+amounts+of+a+were+found+in+Sewage+water%27%7D%0A%5D%3B%0A%0A--+Define+an+analyzer+for+the+liquid+table+and+an+index+on+the+content+field+with+the+analyzer%0A%0ADEFINE+ANALYZER+liquid_analyzer+TOKENIZERS+blank%2Cclass%2Ccamel%2Cpunct+FILTERS+snowball%28english%29%3B%0ADEFINE+INDEX+liquid_content+ON+liquids+FIELDS+content+SEARCH+ANALYZER+liquid_analyzer+BM25+HIGHLIGHTS%3B%0A%0A--+Retrieve+all+the+samples+containing+the+chemical+lead+will+also+bring+up+samples+that+simply+mention+the+word+lead%0A%0ASELECT%0A++sample%2C%0A++content%0AFROM+liquids%0AWHERE+content+%400%40+%27lead%27%3B&orientation=horizontal"
+	url="https://app.surrealdb.com/mini?query=--+Insert+a+sample+%26+content+field+into+a+liquids+table%0A%0AINSERT+INTO+liquids+%5B%0A++++%7Bsample%3A%27Sea+water%27%2C+content%3A+%27The+sea+water+contains+some+amount+of+lead%27%7D%2C%0A++++%7Bsample%3A%27Tap+water%27%2C+content%3A+%27The+team+lead+by+Dr.+Rose+found+out+that+the+tap+water+in+was+potable%27%7D%2C%0A++++%7Bsample%3A%27Sewage+water%27%2C+content%3A+%27High+amounts+of+a+were+found+in+Sewage+water%27%7D%0A%5D%3B%0A%0A--+Define+an+analyzer+for+the+liquid+table+and+an+index+on+the+content+field+with+the+analyzer%0A%0ADEFINE+ANALYZER+liquid_analyzer+TOKENIZERS+blank%2Cclass%2Ccamel%2Cpunct+FILTERS+snowball%28english%29%3B%0ADEFINE+INDEX+liquid_content+ON+liquids+FIELDS+content+SEARCH+ANALYZER+liquid_analyzer+BM25+HIGHLIGHTS%3B%0A%0A--+Retrieve+all+the+samples+containing+the+chemical+lead+will+also+bring+up+samples+that+simply+mention+the+word+lead%0A%0ASELECT%0A++sample%2C%0A++content%0AFROM+liquids%0AWHERE+content+%400%40+%27lead%27%3B&orientation=horizontal"
 />
 
 If you read through the content of the tap water sample, you’ll notice that it does not contain any lead in it but it has the mention of the word `lead` under “The team lead by Dr. Rose…” which means that the team was guided by Dr. Rose.
@@ -91,7 +199,7 @@ As you want to perform a nearest neighbour search and not an exact search, you w
 
 
 
-<SurrealistMini url="https://surrealist.app/mini?setup=--+Insert+a+sample+%26+content+field+into+a+liquids+table%0AINSERT+INTO+liquidsVector+%5B%0A++++%7Bsample%3A%27Sea+water%27%2C+content%3A+%27The+sea+water+contains+some+amount+of+lead%27%2C+embedding%3A+%5B0.1%2C+0.2%2C+0.3%2C+0.4%5D+%7D%2C%0A++++%7Bsample%3A%27Tap+water%27%2C+content%3A+%27The+team+lead+by+Dr.+Rose+found+out+that+the+tap+water+in+was+potable%27%2C+embedding%3A%5B1.0%2C+0.1%2C+0.4%2C+0.3%5D%7D%2C%0A++++%7Bsample%3A%27Sewage+water%27%2C+content%3A+%27High+amounts+of+a+were+found+in+Sewage+water%27%2C+embedding+%3A+%5B0.4%2C+0.3%2C+0.2%2C+0.1%5D%7D%0A%5D%3B&query=--+Add+embeddings+for+what+lead+as+a+harmful+substance+should+be.+%0ALET+%24lead_harmful+%3D+%5B0.15%2C+0.25%2C+0.35%2C+0.45%5D%3B%0A%0A--+Define+a+vector+index+on+the+liquidsVector+table+for+embedding+field+%0ADEFINE+INDEX+mt_pts+ON+liquidsVector+FIELDS+embedding+MTREE+DIMENSION+4+DIST+COSINE+TYPE+F32%3B%0A%0A--+Select+the+sample+and+content+from+the+liquids+table+with+cosine+similarity+%0ASELECT+sample%2C+content%2C+vector%3A%3Asimilarity%3A%3Acosine%28embedding%2C+%24lead_harmful%29+AS+dist+FROM+liquidsVector+WHERE+embedding+%3C%7C2%7C%3E+%24lead_harmful%3B&orientation=horizontal"/>
+<SurrealistMini url="https://app.surrealdb.com/mini?setup=--+Insert+a+sample+%26+content+field+into+a+liquids+table%0AINSERT+INTO+liquidsVector+%5B%0A++++%7Bsample%3A%27Sea+water%27%2C+content%3A+%27The+sea+water+contains+some+amount+of+lead%27%2C+embedding%3A+%5B0.1%2C+0.2%2C+0.3%2C+0.4%5D+%7D%2C%0A++++%7Bsample%3A%27Tap+water%27%2C+content%3A+%27The+team+lead+by+Dr.+Rose+found+out+that+the+tap+water+in+was+potable%27%2C+embedding%3A%5B1.0%2C+0.1%2C+0.4%2C+0.3%5D%7D%2C%0A++++%7Bsample%3A%27Sewage+water%27%2C+content%3A+%27High+amounts+of+a+were+found+in+Sewage+water%27%2C+embedding+%3A+%5B0.4%2C+0.3%2C+0.2%2C+0.1%5D%7D%0A%5D%3B&query=--+Add+embeddings+for+what+lead+as+a+harmful+substance+should+be.+%0ALET+%24lead_harmful+%3D+%5B0.15%2C+0.25%2C+0.35%2C+0.45%5D%3B%0A%0A--+Define+a+vector+index+on+the+liquidsVector+table+for+embedding+field+%0ADEFINE+INDEX+mt_pts+ON+liquidsVector+FIELDS+embedding+MTREE+DIMENSION+4+DIST+COSINE+TYPE+F32%3B%0A%0A--+Select+the+sample+and+content+from+the+liquids+table+with+cosine+similarity+%0ASELECT+sample%2C+content%2C+vector%3A%3Asimilarity%3A%3Acosine%28embedding%2C+%24lead_harmful%29+AS+dist+FROM+liquidsVector+WHERE+embedding+%3C%7C2%7C%3E+%24lead_harmful%3B&orientation=horizontal"/>
 
 
 In the example above you can see that the results are more accurate. The search pulled up only the `Sea water` sample which contains the harmful substance `lead` in it. This is the advantage of using Vector Search over Full-Text Search.
