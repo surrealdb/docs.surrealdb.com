@@ -5,10 +5,5 @@ category: Integrations
 topics:
   - AI
   - Examples
-author:
-  name: Martin Schaer
-  role: Solutions Engineer
-  avatar: martin-schaer
+author: surrealdb
 ---
-
-
