@@ -139,12 +139,14 @@ cargo add anyhow fastembed serde tokio surrealdb --features surrealdb/kv-mem
 
 The following example demonstrates how SurrealDB can be used to store the embeddings from the default language model for a number of phrases, after which it can be prompted to return the three closest results to a certain prompt.
 
+
+
 ```rust
 use anyhow::Error;
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use surrealdb::{
-    RecordId, Surreal, Value,
+    Surreal, Value,
     engine::any::{Any, connect},
 };
 
@@ -154,27 +156,23 @@ struct DocumentInput {
     embedding: Vec<f32>,
 }
 
-#[derive(Debug, Deserialize)]
-struct Document {
-    id: RecordId,
-    embedding: Vec<f32>,
-    text: String,
-}
-
-fn create_embed(input: &str, model: &mut TextEmbedding) -> Result<Vec<f32>, Error> {
-    let mut result = model.embed(vec![input], None)?;
-    Ok(result.remove(0))
-}
-
-async fn store_doc(input: &str, db: &Surreal<Any>, model: &mut TextEmbedding) -> Result<(), Error> {
-    let embeds = create_embed(input, model)?;
-
-    let _in_db = db
-        .create::<Option<Document>>("document")
-        .content(DocumentInput {
-            text: input.into(),
-            embedding: embeds,
+async fn store_docs(
+    input: Vec<&str>,
+    db: &Surreal<Any>,
+    model: &mut TextEmbedding,
+) -> Result<(), Error> {
+    let docs = model
+        .embed(input.clone(), None)?
+        .into_iter()
+        .zip(input.into_iter())
+        .map(|(embedding, text)| DocumentInput {
+            text: text.to_string(),
+            embedding,
         })
+        .collect::<Vec<DocumentInput>>();
+
+    db.query("INSERT INTO document $docs")
+        .bind(("docs", docs))
         .await?;
     Ok(())
 }
@@ -184,7 +182,9 @@ async fn test_embed(
     db: &Surreal<Any>,
     model: &mut TextEmbedding,
 ) -> Result<(), Error> {
-    let embeds = create_embed(input, model)?;
+    let Some(embeds) = model.embed(vec![input], None)?.into_iter().next() else {
+        return Err(anyhow::anyhow!("Nothing found at index 0"));
+    };
 
     let val = db
         .query(
@@ -195,7 +195,7 @@ async fn test_embed(
         WHERE embedding <|3,COSINE|> $embeds
         ORDER BY distance;",
         )
-        .bind(("embeds", embeds))
+        .bind(("embeds", embeds.clone()))
         .await?
         .take::<Value>(0)?;
     println!("{val}\n");
@@ -222,7 +222,7 @@ async fn main() -> Result<(), Error> {
         )
         .await?;
 
-    for input in [
+    let input = vec![
         // Cities
         "Calgary is a city in the Canadian province of Alberta.",
         "Ljubljana is the capital and largest city of Slovenia.",
@@ -238,9 +238,8 @@ async fn main() -> Result<(), Error> {
         // Sea animals
         "Octopuses have a complex nervous system and are among the most intelligent and behaviourally diverse invertebrates.",
         "Clams have no central nervous system at all and are near to plants in intelligence.",
-    ] {
-        store_doc(input, &db, &mut model).await?
-    }
+    ];
+    store_docs(input, &db, &mut model).await?;
 
     println!("Edmonton is closest to:");
     test_embed("Edmonton", &db, &mut model).await?;
@@ -261,7 +260,7 @@ async fn main() -> Result<(), Error> {
 }
 ```
 
-Output of the example:
+Output of the example with the default model:
 
 ```
 Edmonton is closest to:
