@@ -77,7 +77,8 @@ export async function getLastModifiedDateOfFile(
     // Fallback: query GitHub API for the last commit affecting this file (useful when .git is absent in build env)
     async function tryGitHubApi(): Promise<Date | undefined> {
         try {
-            const ownerRepo = process.env.GITHUB_REPOSITORY ?? 'surrealdb/docs.surrealdb.com';
+            const ownerRepo =
+                process.env.GITHUB_REPOSITORY ?? 'surrealdb/docs.surrealdb.com';
             const [owner, repo] = ownerRepo.split('/');
             if (!owner || !repo) return undefined;
 
@@ -86,7 +87,9 @@ export async function getLastModifiedDateOfFile(
                 process.env.GITHUB_REF_NAME ||
                 'main';
 
-            const url = new URL(`https://api.github.com/repos/${owner}/${repo}/commits`);
+            const url = new URL(
+                `https://api.github.com/repos/${owner}/${repo}/commits`
+            );
             url.searchParams.set('path', filePath);
             url.searchParams.set('sha', branch);
             url.searchParams.set('per_page', '1');
@@ -110,8 +113,8 @@ export async function getLastModifiedDateOfFile(
             const first = Array.isArray(data)
                 ? (data[0] as GitHubCommitListItem | undefined)
                 : undefined;
-            const dateStr = first?.commit?.committer?.date
-                || first?.commit?.author?.date;
+            const dateStr =
+                first?.commit?.committer?.date || first?.commit?.author?.date;
             if (dateStr) return new Date(dateStr);
         } catch (_) {
             // Ignore network or API errors and continue to filesystem fallback
