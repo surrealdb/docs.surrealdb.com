@@ -47,7 +47,9 @@ export async function getLastModifiedDateOfFile(
 
             const branch = 'main';
 
-            const url = new URL(`https://api.github.com/repos/${owner}/${repo}/commits`);
+            const url = new URL(
+                `https://api.github.com/repos/${owner}/${repo}/commits`
+            );
             url.searchParams.set('path', filePath);
             url.searchParams.set('sha', branch);
             url.searchParams.set('per_page', '1');
@@ -70,7 +72,8 @@ export async function getLastModifiedDateOfFile(
             const first = Array.isArray(data)
                 ? (data[0] as GitHubCommitListItem | undefined)
                 : undefined;
-            const dateStr = first?.commit?.committer?.date || first?.commit?.author?.date;
+            const dateStr =
+                first?.commit?.committer?.date || first?.commit?.author?.date;
             if (dateStr) {
                 const date = new Date(dateStr);
                 commitDateCache.set(filePath, date);
