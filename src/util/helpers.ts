@@ -1,4 +1,8 @@
+import { execFile } from 'node:child_process';
 import { stat } from 'node:fs/promises';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 export function escapeRegex(str: string): string {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -27,8 +31,27 @@ export function at(value: unknown): string {
 export async function getLastModifiedDateOfFile(
     filePath: string
 ): Promise<Date | undefined> {
+    // Prefer Git last commit timestamp for this file, fallback to filesystem mtime
     try {
-        return stat(filePath).then((stats) => stats.mtime);
+        const { stdout } = await execFileAsync('git', [
+            'log',
+            '-1',
+            '--format=%ct',
+            '--',
+            filePath,
+        ]);
+
+        const unixSeconds = Number.parseInt(stdout.trim(), 10);
+        if (!Number.isNaN(unixSeconds) && unixSeconds > 0) {
+            return new Date(unixSeconds * 1000);
+        }
+    } catch (_) {
+        // Ignore Git errors (e.g., not a git repo, shallow clone, or file untracked)
+    }
+
+    try {
+        const stats = await stat(filePath);
+        return stats.mtime;
     } catch (error) {
         console.error(
             `Error getting last modified date of file ${filePath}:`,
