@@ -1,3 +1,5 @@
+import { stat } from 'node:fs/promises';
+
 export function escapeRegex(str: string): string {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -20,4 +22,18 @@ export function at(value: unknown): string {
     }
 
     return JSON.stringify(value);
+}
+
+export async function getLastModifiedDateOfFile(
+    filePath: string
+): Promise<Date | undefined> {
+    try {
+        return stat(filePath).then((stats) => stats.mtime);
+    } catch (error) {
+        console.error(
+            `Error getting last modified date of file ${filePath}:`,
+            error
+        );
+        return undefined;
+    }
 }
