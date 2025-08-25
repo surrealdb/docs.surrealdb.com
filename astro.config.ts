@@ -1,6 +1,6 @@
 import mdx from '@astrojs/mdx';
 import solidJs from '@astrojs/solid-js';
-import tailwind from '@astrojs/tailwind';
+import tailwind from '@tailwindcss/vite';
 import compress from 'astro-compress';
 import icon from 'astro-icon';
 // @ts-check
@@ -28,14 +28,16 @@ export default defineConfig({
         mdx(),
         solidJs({ devtools: true }),
         icon(),
-        tailwind({
-            nesting: true,
-        }),
         compress({
             Image: false,
         }),
         sitemap(),
     ],
+	vite: {
+		plugins: [
+			tailwind()
+		]
+	},
     markdown: {
         remarkPlugins: [remarkCustomHeadingId],
         rehypePlugins: [
