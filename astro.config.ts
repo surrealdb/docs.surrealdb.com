@@ -33,11 +33,9 @@ export default defineConfig({
         }),
         sitemap(),
     ],
-	vite: {
-		plugins: [
-			tailwind()
-		]
-	},
+    vite: {
+        plugins: [tailwind()],
+    },
     markdown: {
         remarkPlugins: [remarkCustomHeadingId],
         rehypePlugins: [
