@@ -532,7 +532,10 @@ if (!autoYes && (autoNo || bad.length > 0)) {
 }
 
 if (proceed) {
-    await writeFile(join(DOCS_PATH, 'llms.txt'), withHeaderFooter(groupedMarkdown(MAP, false)));
+    await writeFile(
+        join(DOCS_PATH, 'llms.txt'),
+        withHeaderFooter(groupedMarkdown(MAP, false))
+    );
     await writeFile(
         join(DOCS_PATH, 'llms-full.txt'),
         withHeaderFooter(groupedMarkdown(MAP, true))
