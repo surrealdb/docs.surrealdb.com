@@ -6,7 +6,6 @@ export const ALLOW_FILES_EXTENSIONS = ['html'];
 
 import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import { parse } from 'node-html-parser';
 
 interface MapEntryLink {
@@ -332,37 +331,28 @@ async function generateMap(): Promise<MapEntry[]> {
     return sections;
 }
 
+const titleFromSdkFolderMap = new Map<string, string>([
+    ['php', 'PHP'],
+    ['python', 'Python'],
+    ['rust', 'Rust'],
+    ['golang', 'Golang'],
+    ['javascript', 'JavaScript'],
+    ['typescript', 'TypeScript'],
+    ['dotnet', '.NET'],
+    ['java', 'Java'],
+    ['wasm', 'WebAssembly'],
+    ['nodejs', 'Node.js'],
+    ['node.js', 'Node.js'],
+    ['node', 'Node.js'],
+    ['go', 'Golang'],
+    ['csharp', '.NET'],
+    ['c#', '.NET'],
+]);
+
 function titleFromSdkFolder(folder: string) {
-    switch (folder.toLowerCase()) {
-        case 'php':
-            return 'PHP';
-        case 'python':
-            return 'Python';
-        case 'rust':
-            return 'Rust';
-        case 'golang':
-        case 'go':
-            return 'Golang';
-        case 'javascript':
-            return 'JavaScript';
-        case 'typescript':
-            return 'TypeScript';
-        case 'dotnet':
-        case '.net':
-        case 'csharp':
-            return '.NET';
-        case 'java':
-            return 'Java';
-        case 'wasm':
-        case 'webassembly':
-            return 'WebAssembly';
-        case 'node':
-        case 'nodejs':
-        case 'node.js':
-            return 'Node.js';
-        default:
-            return folder.charAt(0).toUpperCase() + folder.slice(1);
-    }
+    const value = titleFromSdkFolderMap.get(folder.toLowerCase());
+    if (value) return value;
+    return folder.charAt(0).toUpperCase() + folder.slice(1);
 }
 
 function linksToMarkdownLines(links: MapEntryLink[]): string[] {
@@ -418,7 +408,6 @@ function groupedMarkdown(
     return blocks.join('\n\n');
 }
 
-console.time('generateMap');
 const MAP: MapEntry[] = await generateMap();
 
 // Prepend header and append footer around the grouped markdown
@@ -449,25 +438,42 @@ function collectLinks(
     return out;
 }
 
-// Validate links by checking local file existence under dist/docs
-async function isLinkOk(url: string): Promise<boolean> {
+// Remote existence check with HEAD fallback to GET
+async function remoteExists(url: string): Promise<boolean> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    try {
+        let res = await fetch(url, {
+            method: 'HEAD',
+            redirect: 'follow',
+            signal: controller.signal,
+        });
+        if (res.status === 405 || res.status === 501) {
+            res = await fetch(url, {
+                method: 'GET',
+                redirect: 'follow',
+                signal: controller.signal,
+            });
+        }
+        return res.ok;
+    } catch {
+        return false;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+// Local existence check for /docs/... mapped to dist/docs
+async function localExists(url: string): Promise<boolean> {
     try {
         const u = new URL(url);
         const pathname = u.pathname.replace(/\/?$/, '');
         if (!pathname.startsWith('/docs')) return true;
-
-        // Map "/docs/..." to local file candidates in dist/docs
         const rel = pathname.replace(/^\/docs\/?/, '');
         if (!rel) {
-            // /docs -> dist/docs/index.html
-            try {
-                await stat(join(DOCS_PATH, 'index.html'));
-                return true;
-            } catch {
-                return false;
-            }
+            await stat(join(DOCS_PATH, 'index.html'));
+            return true;
         }
-
         const htmlPath = join(DOCS_PATH, `${rel}.html`);
         const indexPath = join(DOCS_PATH, rel, 'index.html');
         try {
@@ -484,74 +490,68 @@ async function isLinkOk(url: string): Promise<boolean> {
     }
 }
 
-async function checkLinks(urls: string[], concurrency = 12) {
+async function checkLinks(urls: string[]) {
     const unique = Array.from(new Set(urls));
+    const total = unique.length;
     const bad: string[] = [];
-    let index = 0;
-    async function worker() {
-        while (index < unique.length) {
-            const i = index++;
-            const url = unique[i];
-            const ok = await isLinkOk(url);
-            if (!ok) bad.push(url);
-            await delay(0);
+    const localOnly: string[] = [];
+
+    let processed = 0;
+    for (const url of unique) {
+        processed++;
+        try {
+            const pathname = new URL(url).pathname || url;
+            process.stdout.write(
+                `\r\x1b[2K[${processed}/${total}] Checking: ${pathname}`
+            );
+        } catch {
+            process.stdout.write(
+                `\r\x1b[2K[${processed}/${total}] Checking: ${url}`
+            );
         }
+
+        const [isRemote, isLocal] = await Promise.all([
+            remoteExists(url),
+            localExists(url),
+        ]);
+
+        if (isRemote) {
+            continue;
+        }
+
+        if (isLocal) {
+            localOnly.push(url);
+            continue;
+        }
+
+        bad.push(url);
     }
-    await Promise.all(
-        Array.from({ length: Math.min(concurrency, unique.length) }, worker)
-    );
-    return { bad, total: unique.length };
+
+    process.stdout.write(`\r\x1b[2KChecked ${total} links.\n`);
+    return { bad, localOnly, total };
 }
 
-const minimalLinks = collectLinks(MAP, false).map((l) => l.url);
 const fullLinks = collectLinks(MAP, true).map((l) => l.url);
 const allToCheck = Array.from(new Set([...fullLinks]));
-const { bad, total } = await checkLinks(allToCheck);
+const { bad, localOnly, total } = await checkLinks(allToCheck);
 
 if (bad.length) {
     console.warn(`\nBroken links detected (${bad.length}/${total}):`);
     for (const url of bad) console.warn(` - [BROKEN] ${url}`);
 }
 
-// Prompt for permission if there are broken links, unless auto-approved
-const argv = process.argv.slice(2);
-const autoYes =
-    argv.includes('--yes') ||
-    argv.includes('-y') ||
-    process.env.GENERATE_WRITE === '1';
-const autoNo = argv.includes('--no') || process.env.GENERATE_WRITE === '0';
-
-let proceed = true;
-if (!autoYes && (autoNo || bad.length > 0)) {
-    if (autoNo) {
-        proceed = false;
-    } else {
-        const { createInterface } = await import('node:readline/promises');
-        const { stdin: input, stdout: output } = await import('node:process');
-        const rl = createInterface({ input, output });
-        const answer = (
-            await rl.question(
-                'Write outputs to llms.txt and llms-full.txt despite broken links? [y/N] '
-            )
-        )
-            .trim()
-            .toLowerCase();
-        rl.close();
-        proceed = answer === 'y' || answer === 'yes';
-    }
+if (localOnly.length) {
+    console.warn(
+        `\nLinks not available remotely but present locally (${localOnly.length}):`
+    );
+    for (const url of localOnly) console.warn(` - [LOCAL-ONLY] ${url}`);
 }
 
-if (proceed) {
-    await writeFile(
-        join(DOCS_PATH, 'llms.txt'),
-        withHeaderFooter(groupedMarkdown(MAP, false))
-    );
-    await writeFile(
-        join(DOCS_PATH, 'llms-full.txt'),
-        withHeaderFooter(groupedMarkdown(MAP, true))
-    );
-} else {
-    console.log('Aborted writing outputs due to broken links.');
-}
-
-console.timeEnd('generateMap');
+await writeFile(
+    join(DOCS_PATH, 'llms.txt'),
+    withHeaderFooter(groupedMarkdown(MAP, false))
+);
+await writeFile(
+    join(DOCS_PATH, 'llms-full.txt'),
+    withHeaderFooter(groupedMarkdown(MAP, true))
+);
