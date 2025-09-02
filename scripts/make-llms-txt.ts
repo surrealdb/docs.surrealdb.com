@@ -420,8 +420,9 @@ const [headerContent, footerContent] = await Promise.all([
 ]).then(([header, footer]) => [header.trim(), footer.trim()]);
 
 function withHeaderFooter(body: string) {
-    const parts = [headerContent, body.trim(), footerContent].filter(Boolean);
-    return `${parts.join('\n\n')}\n`;
+    return `${[headerContent, body.trim(), footerContent]
+        .filter(Boolean)
+        .join('\n\n')}\n`;
 }
 
 // Collect links for validation
@@ -440,54 +441,41 @@ function collectLinks(
 
 // Remote existence check with HEAD fallback to GET
 async function remoteExists(url: string): Promise<boolean> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
-    try {
-        let res = await fetch(url, {
-            method: 'HEAD',
-            redirect: 'follow',
-            signal: controller.signal,
-        });
-        if (res.status === 405 || res.status === 501) {
-            res = await fetch(url, {
-                method: 'GET',
-                redirect: 'follow',
-                signal: controller.signal,
-            });
-        }
-        return res.ok;
-    } catch {
+    const res = await fetch(url, {
+        method: 'HEAD',
+        redirect: 'follow',
+    });
+
+    if (res.status === 405 || res.status === 501) {
         return false;
-    } finally {
-        clearTimeout(timeout);
     }
+
+    return res.ok;
 }
 
 // Local existence check for /docs/... mapped to dist/docs
 async function localExists(url: string): Promise<boolean> {
-    try {
-        const u = new URL(url);
-        const pathname = u.pathname.replace(/\/?$/, '');
-        if (!pathname.startsWith('/docs')) return true;
-        const rel = pathname.replace(/^\/docs\/?/, '');
-        if (!rel) {
-            await stat(join(DOCS_PATH, 'index.html'));
-            return true;
-        }
-        const htmlPath = join(DOCS_PATH, `${rel}.html`);
-        const indexPath = join(DOCS_PATH, rel, 'index.html');
-        try {
-            await stat(htmlPath);
-            return true;
-        } catch {}
-        try {
-            await stat(indexPath);
-            return true;
-        } catch {}
-        return false;
-    } catch {
-        return false;
+    const u = new URL(url);
+    const pathname = u.pathname.replace(/\/?$/, '');
+
+    if (!pathname.startsWith('/docs')) {
+        return true;
     }
+
+    const rel = pathname.replace(/^\/docs\/?/, '');
+
+    if (!rel) {
+        return await stat(join(DOCS_PATH, 'index.html'))
+            .then(() => true)
+            .catch(() => false);
+    }
+
+    const htmlPath = join(DOCS_PATH, `${rel}.html`);
+    const indexPath = join(DOCS_PATH, rel, 'index.html');
+
+    return await Promise.race([stat(htmlPath), stat(indexPath)])
+        .then(() => true)
+        .catch(() => false);
 }
 
 async function checkLinks(urls: string[]) {
@@ -497,18 +485,12 @@ async function checkLinks(urls: string[]) {
     const localOnly: string[] = [];
 
     let processed = 0;
+
     for (const url of unique) {
-        processed++;
-        try {
-            const pathname = new URL(url).pathname || url;
-            process.stdout.write(
-                `\r\x1b[2K[${processed}/${total}] Checking: ${pathname}`
-            );
-        } catch {
-            process.stdout.write(
-                `\r\x1b[2K[${processed}/${total}] Checking: ${url}`
-            );
-        }
+        const pathname = new URL(url).pathname || url;
+        process.stdout.write(
+            `\r\x1b[2K[${++processed}/${total}] Checking: ${pathname}`
+        );
 
         const [isRemote, isLocal] = await Promise.all([
             remoteExists(url),
