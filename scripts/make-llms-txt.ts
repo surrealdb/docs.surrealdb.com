@@ -449,28 +449,38 @@ function collectLinks(
     return out;
 }
 
-// Validate links (HEAD fallback to GET), limited concurrency
+// Validate links by checking local file existence under dist/docs
 async function isLinkOk(url: string): Promise<boolean> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
     try {
-        let res = await fetch(url, {
-            method: 'HEAD',
-            redirect: 'follow',
-            signal: controller.signal,
-        });
-        if (res.status === 405 || res.status === 501) {
-            res = await fetch(url, {
-                method: 'GET',
-                redirect: 'follow',
-                signal: controller.signal,
-            });
+        const u = new URL(url);
+        const pathname = u.pathname.replace(/\/?$/, '');
+        if (!pathname.startsWith('/docs')) return true;
+
+        // Map "/docs/..." to local file candidates in dist/docs
+        const rel = pathname.replace(/^\/docs\/?/, '');
+        if (!rel) {
+            // /docs -> dist/docs/index.html
+            try {
+                await stat(join(DOCS_PATH, 'index.html'));
+                return true;
+            } catch {
+                return false;
+            }
         }
-        return res.ok;
+
+        const htmlPath = join(DOCS_PATH, `${rel}.html`);
+        const indexPath = join(DOCS_PATH, rel, 'index.html');
+        try {
+            await stat(htmlPath);
+            return true;
+        } catch {}
+        try {
+            await stat(indexPath);
+            return true;
+        } catch {}
+        return false;
     } catch {
         return false;
-    } finally {
-        clearTimeout(timeout);
     }
 }
 
