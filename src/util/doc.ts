@@ -8,7 +8,7 @@ import {
     getEntry,
 } from 'astro:content';
 import type { SidebarItem } from '@components/Sidebar/SidebarItem.astro';
-import { collections, urlForCollection } from '@src/content/config';
+import { collections, urlForCollection } from '@src/content.config';
 import { z } from 'astro/zod';
 
 type Item = SidebarItem & {
