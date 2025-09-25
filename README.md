@@ -261,6 +261,44 @@ The following command starts a local development server and opens up a browser w
 bun dev
 ```
 
+### Railroad diagrams (reusable)
+
+This repo includes a reusable helper to generate SVG railroad diagrams using the JS library by Tab Atkins ([JS README](https://tabatkins.github.io/railroad-diagrams/README-js.html), [project page](https://tabatkins.github.io/railroad-diagrams/)).
+
+- Utility: `src/util/railroad.ts`
+- Component: `src/components/RailroadDiagram.astro`
+- CSS: included from the `railroad-diagrams` package
+
+Usage in MDX/Markdown (Astro Content):
+
+```mdx
+import RailroadDiagram from "../../components/RailroadDiagram.astro";
+
+export const ast = {
+  type: "Diagram",
+  padding: [10, 20, 10, 20],
+  children: [
+    { type: "Start", startType: "simple", label: "statement" },
+    {
+      type: "Sequence",
+      children: [
+        { type: "NonTerminal", text: "ACCESS" },
+        { type: "Choice", index: 1, children: [
+          { type: "Terminal", text: "ON" },
+          { type: "Terminal", text: "TO" }
+        ]},
+        { type: "NonTerminal", text: "resource" },
+      ]
+    },
+    { type: "End" }
+  ]
+};
+
+<RailroadDiagram ast={ast} className="my-6" />
+```
+
+You can also compose diagrams directly with the library and pass a prebuilt diagram to the helper functions in `src/util/railroad.ts` if needed.
+
 ## Building
 
 The following command builds and generates static content into the `build` directory, and can then be served using any static contents hosting service.
