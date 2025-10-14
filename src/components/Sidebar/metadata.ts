@@ -142,7 +142,7 @@ export const metadata = {
         thumbnail: ThumbnailSurrealDB,
     },
     'doc-cloud': {
-        title: 'Surreal Cloud',
+        title: 'SurrealDB Cloud ',
         icon: {
             light: LightCloud,
             dark: DarkCloud,
