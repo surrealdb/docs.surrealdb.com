@@ -47,4 +47,25 @@ export default defineConfig({
         ],
         syntaxHighlight: false,
     },
+    vite: {
+        ssr: {
+            noExternal: [
+                '@codemirror/language',
+                '@codemirror/lang-sql',
+                '@codemirror/legacy-modes',
+                '@lezer/common',
+                '@lezer/highlight',
+                '@lezer/javascript',
+                '@lezer/json',
+                '@lezer/go',
+                '@lezer/php',
+                '@lezer/python',
+                '@lezer/rust',
+                '@lezer/yaml',
+                '@fig/lezer-bash',
+                'lezer-toml',
+                '@surrealdb/lezer',
+            ],
+        },
+    },
 });
