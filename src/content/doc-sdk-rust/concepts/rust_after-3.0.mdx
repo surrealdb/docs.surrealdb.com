@@ -1,0 +1,286 @@
+---
+sidebar_position: 7
+sidebar_label: After 3.0
+title: Using the Rust crate after SurrealDB 3.0
+description: Many structural changes were implemented in SurrealDB 3.0, bringing large improviments to working with types in the Rust SDK.
+---
+
+import Since from "@components/shared/Since.astro";
+
+<Since v="v3.0.0-alpha.11" />
+
+# The `surrealdb-types` crate
+
+The largest user experience improvement for Rust users of SurrealDB 3.0 is the [surrealdb-types](https://crates.io/crates/surrealdb-types) crate, which was created to have a shared public value type system for SurrealDB.
+
+This crate was separated from the SurrealDB core to decouple types and type conversions from core database logic, and to allow other crates to make use of types on their own without needing the entire SurrealDB database along with it.
+
+# The `SurrealValue` trait
+
+The main difference between SurrealDB 3.0 and previous versions for Rust users is the existence of a `SurrealValue` trait that can be derived in the 
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb_types::SurrealValue;
+
+#[derive(Debug, SurrealValue)]
+struct Employee {
+    name: String,
+    active: bool,
+}
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+
+    db.use_ns("ns").use_db("db").await.unwrap();
+
+    let mut res = db
+        .query("CREATE employee:bobby SET name = 'Bobby', active = true")
+        .await
+        .unwrap();
+
+    let bobby = res.take::<Option<Employee>>(0).unwrap().unwrap();
+
+    // Employee { name: "Bobby", active: true }
+    println!("{bobby:?}");
+}
+```
+
+```rust
+#[derive(Debug)]
+struct MyOwnDateTime(i64);
+
+impl SurrealValue for MyOwnDateTime {
+    fn kind_of() -> surrealdb_types::Kind {
+        Kind::Datetime
+    }
+
+    fn into_value(self) -> surrealdb_types::Value {
+        Value::Datetime(Datetime::from_timestamp(self.0, 0).unwrap())
+    }
+
+    fn from_value(value: surrealdb_types::Value) -> anyhow::Result<Self>
+    where
+        Self: Sized,
+    {
+        match value {
+            Value::Datetime(n) => Ok(MyOwnDateTime(n.timestamp_millis())),
+            _ => Err(anyhow!("No good")),
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+
+    db.use_ns("ns").use_db("db").await.unwrap();
+
+    println!(
+        "{:?}",
+        db.query("time::now()")
+            .await
+            .unwrap()
+            .take::<Option<MyOwnDateTime>>(0)
+    );
+}
+```
+
+This trait can be implemented manually via three methods: one to indicate the matching SurrealDB type, a second to convert into a SurrealDB Value, and a third to convert out of a SurrealDB Value.
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb_types::{
+    Datetime, Kind, SurrealValue, Value,
+    anyhow::{self, anyhow},
+};
+
+#[derive(Debug)]
+struct MyOwnDateTime(i64);
+
+impl SurrealValue for MyOwnDateTime {
+    fn kind_of() -> surrealdb_types::Kind {
+        Kind::Datetime
+    }
+
+    fn into_value(self) -> surrealdb_types::Value {
+        Value::Datetime(Datetime::from_timestamp(self.0, 0).unwrap())
+    }
+
+    fn from_value(value: surrealdb_types::Value) -> anyhow::Result<Self>
+    where
+        Self: Sized,
+    {
+        match value {
+            Value::Datetime(n) => Ok(MyOwnDateTime(n.timestamp_millis())),
+            other => Err(anyhow!("Couldn't convert {other:?} to MyOwnDateTime")),
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+
+    db.use_ns("ns").use_db("db").await.unwrap();
+
+    println!(
+        "{:?}\n",
+        db.query("time::now()")
+            .await
+            .unwrap()
+            .take::<Option<MyOwnDateTime>>(0)
+    );
+
+    println!(
+        "{:?}",
+        db.query("CREATE person")
+            .await
+            .unwrap()
+            .take::<Option<MyOwnDateTime>>(0)
+    );
+}
+```
+
+Output:
+
+```
+Ok(Some(MyOwnDateTime(1760330504574)))
+
+Err(InternalError("Couldn't convert Object(Object({\"id\": RecordId(RecordId { table: \"person\", key: String(\"tcblzaktx3ponin9dyci\") })})) to MyOwnDateTime"))
+```
+
+# Convenience methods for the `Value` type
+
+Importing the `SurrealValue` trait gives access to a lot of convenience methods.
+
+```rust
+use surrealdb_types::{SurrealValue, Value};
+
+fn main() {
+    let string_val = "string".into_value();
+    assert!(string_val.is_string());
+    assert_eq!(string_val, Value::String("string".into()));
+}
+```
+
+These convenience methods exist for most types, including collection types:
+
+```rust
+use std::collections::HashMap;
+
+use surrealdb::engine::any::connect;
+use surrealdb_types::{SurrealValue, Value};
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    db.use_ns("db").use_db("db").await.unwrap();
+
+    let mut map = HashMap::new();
+    map.insert("name".to_string(), "Billy");
+    map.insert("id".to_string(), "person:one");
+
+    // Turn HashMap into SurrealDB Value
+    let as_person = map.into_value();
+
+    // Object(Object({"id": String("person:one"), "name": String("Billy")}))
+    println!("{as_person:?}");
+
+    // Insert it into a query to create a record
+    let res = db
+        .query("CREATE ONLY person CONTENT $person")
+        .bind(("person", as_person))
+        .await
+        .unwrap()
+        .take::<Value>(0)
+        .unwrap();
+
+    // Object(Object({"id": RecordId(RecordId { table: "person", key: String("person:one") }), "name": String("Billy")}))
+    println!("{res:?}");
+}
+```
+
+A `Value` can be manually constructed using any of the various structs and enums contained within it. This is particularly useful when constructing a complex ID made up of a table name and an array for the key.
+
+```rust
+use std::str::FromStr;
+
+use surrealdb::engine::any::connect;
+use surrealdb_types::{Array, Datetime, RecordId, RecordIdKey, Value};
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    db.use_ns("db").use_db("db").await.unwrap();
+
+    let date = "2025-10-13T05:16:11.343Z";
+
+    let complex_id = RecordId {
+        table: "weather".into(),
+        key: RecordIdKey::Array(Array::from(vec![
+            Value::String("London".to_string()),
+            Value::Datetime(Datetime::from_str(date).unwrap()),
+        ])),
+    };
+
+    let mut res = db
+        .query("CREATE ONLY weather SET id = $id")
+        .bind(("id", complex_id))
+        .await
+        .unwrap();
+
+    // Object(Object({"id": RecordId(RecordId { table: "weather", key: Array(Array([String("London"), Datetime(Datetime(2025-10-13T05:16:11.343Z))])) })}))
+    println!("{:?}", res.take::<Value>(0).unwrap());
+}
+```
+
+The `.is()` method for a `Value` returns `true` if the type(s) in question can be converted to the type indicated when the method is called.
+
+```rust
+use std::collections::HashMap;
+use surrealdb_types::SurrealValue;
+
+fn main() {
+    // true
+    println!("{}", "string".into_value().is::<String>());
+
+    let mut map = HashMap::new();
+    map.insert("name".to_string(), "Billy");
+    map.insert("id".to_string(), "person:one");
+
+    // true
+    println!("{}", map.clone().into_value().is::<HashMap<String, &str>>());
+    // Also true
+    println!("{}", map.into_value().is::<HashMap<String, String>>());
+}
+```
+
+A `Value` can be converted into a `serde_json::Value` using the `.into_json_value()` method, and vice versa using `.into_value()`.
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb_types::Value;
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    db.use_ns("db").use_db("db").await.unwrap();
+
+    let value = db
+        .query("CREATE ONLY person:one SET age = 21")
+        .await
+        .unwrap()
+        .take::<Value>(0)
+        .unwrap();
+
+    // Object(Object({"age": Number(Int(21)), "id": RecordId(RecordId { table: "person", key: String("one") })}))
+    println!("{value:?}");
+    // Object {"age": Number(21), "id": String("person:one")}
+    println!("{:?}", value.into_json_value());
+
+    // Round trip
+    value.into_json_value().into_value();
+}
+```
