@@ -632,6 +632,174 @@ To include various fields in a query that begins from a record ID, the destructu
 user:mcuserson.{ name, cats: ->likes->cat };
 ```
 
+### Automatic flattening in graph queries
+
+Automatic flattening is one of the nice features when using graph query syntax, and happens when two lookups follow each other or when a filter is used after a lookup. This can be seen in the following query that checks to see who an employee works for, followed by who that person works for, and then back down the same way.
+
+```surql
+CREATE 
+	// One president
+	person:president, 
+	// Two managers
+	person:manager1, person:manager2,
+	// Four employees
+	person:employee1, person:employee2, person:employee3, person:employee4;
+
+// Employees work two to a manager, managers work two to a president
+RELATE [person:manager1, person:manager2]->works_for->person:president;
+RELATE [person:employee1, person:employee2]->works_for->person:manager1;
+RELATE [person:employee3, person:employee4]->works_for->person:manager2;
+
+[person:employee1, person:employee2, person:employee3, person:employee4]->works_for->person->works_for->person<-works_for<-person<-works_for<-person;
+```
+
+The output shows four arrays, each with four employees. Each employee has gone up the path to the president, and then back down from the president to return the employees that the president works for.
+
+```surql
+[
+	[
+		person:employee4,
+		person:employee3,
+		person:employee2,
+		person:employee1
+	],
+	[
+		person:employee4,
+		person:employee3,
+		person:employee2,
+		person:employee1
+	],
+	[
+		person:employee4,
+		person:employee3,
+		person:employee2,
+		person:employee1
+	],
+	[
+		person:employee4,
+		person:employee3,
+		person:employee2,
+		person:employee1
+	]
+]
+```
+
+This can be done manually by doing a `SELECT` from the `works_for` table, returning the `out` value for the record if the `in` record matches. Each result can be mapped, after which the same query is called again.
+
+However, because the first level returns an array for each record, each time this is called it will return an array that is further nested than the previous one.
+
+```surql
+[person:employee1, person:employee2, person:employee3, person:employee4]
+	// Each $p is a single record: an array<record>
+    .map(|$p| SELECT VALUE out FROM works_for WHERE in = $p.id)
+	// Each $p is an array, so now you have to map each item inside that
+    .map(|$p| $p.map(|$p| SELECT VALUE out FROM works_for WHERE in = $p.id))
+    // Now an array<array<array<record>>>
+	.map(|$p| $p.map(|$p| $p.map(|$p| SELECT VALUE in FROM works_for WHERE out = $p.id)))
+    // Now an array<array<array<array<record>>>>
+	.map(|$p| $p.map(|$p| $p.map(|$p| $p.map(|$p| SELECT VALUE in FROM works_for WHERE out = $p.id))));
+```
+
+The final result still shows the same employees, but not flattened into a single array as would be the case using the graph syntax.
+
+```surql
+[
+	[
+		[
+			[
+				[
+					person:employee4,
+					person:employee3
+				],
+				[
+					person:employee2,
+					person:employee1
+				]
+			]
+		]
+	],
+	[
+		[
+			[
+				[
+					person:employee4,
+					person:employee3
+				],
+				[
+					person:employee2,
+					person:employee1
+				]
+			]
+		]
+	],
+	[
+		[
+			[
+				[
+					person:employee4,
+					person:employee3
+				],
+				[
+					person:employee2,
+					person:employee1
+				]
+			]
+		]
+	],
+	[
+		[
+			[
+				[
+					person:employee4,
+					person:employee3
+				],
+				[
+					person:employee2,
+					person:employee1
+				]
+			]
+		]
+	]
+]
+```
+
+The flattening in graph queries should be thought of as a maintaining of the original structure as opposed to a flattening that takes place after a query is executed. We can see this by calling `flatten()` at every step of the way instead of going further down into nested mapping.
+
+```surql
+[person:employee1, person:employee2, person:employee3, person:employee4]
+	// Each $p is a single record: an array<record>
+    .map(|$p| SELECT VALUE out FROM works_for WHERE in = $p.id).flatten()
+	// Each $p is an array, so now you have to map each item inside that
+    .map(|$p| SELECT VALUE out FROM works_for WHERE in = $p.id).flatten()
+    // Now an array<array<array<record>>>
+	.map(|$p| SELECT VALUE in FROM works_for WHERE out = $p.id).flatten()
+    // Now an array<array<array<array<record>>>>
+	.map(|$p| SELECT VALUE in FROM works_for WHERE out = $p.id).flatten();
+```
+
+The result is a true post-query flattening that removes all the nesting encountered along the way, placing each record encountered during each query inside a single array.
+
+```surql
+[
+	person:employee3,
+	person:employee4,
+	person:employee2,
+	person:employee1,
+	person:employee3,
+	person:employee4,
+	person:employee2,
+	person:employee1,
+	person:employee3,
+	person:employee4,
+	person:employee2,
+	person:employee1,
+	person:employee3,
+	person:employee4,
+	person:employee2,
+	person:employee1
+]
+```
+
 ### Graph paths in schemas
 
 While most examples in the documentation show how to traverse graph paths inside a `SELECT` statement, they can just as easily be defined as a field on a table.
