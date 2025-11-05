@@ -1,11 +1,10 @@
 ---
-title: "smig"
+title: "smig schema migration tool"
 url: https://github.com/kathysledge/smig
 category: Development Tools
 topics:
   - Data Management
   - Examples
-  - Beginner
 author:
   name: Chris Harris
   role: Maker
