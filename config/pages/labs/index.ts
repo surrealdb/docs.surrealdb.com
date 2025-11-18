@@ -61,9 +61,9 @@ export const LAB_SIDEBAR = [
         options: ['SurrealDB Official'],
     },
     {
-        title: 'Categories',
-        key: 'categories',
-        options: LAB_CATEGORIES,
+        title: 'Language',
+        key: 'languages',
+        options: LAB_LANGUAGES,
     },
     {
         title: 'Topics',
@@ -71,9 +71,9 @@ export const LAB_SIDEBAR = [
         options: LAB_TOPICS,
     },
     {
-        title: 'Language',
-        key: 'languages',
-        options: LAB_LANGUAGES,
+        title: 'Categories',
+        key: 'categories',
+        options: LAB_CATEGORIES,
     },
 ];
 
