@@ -1,0 +1,203 @@
+---
+sidebar_position: 3
+sidebar_label: PostgreSQL
+title: Migrating from PostgreSQL to SurrealDB
+description: "How to map existing data and concepts from PostgreSQL to SurrealDB"
+---
+
+
+# Moving from PostgreSQL to SurrealDB
+
+This page details some common PostgreSQL patterns and their SurrealQL equivalents.
+
+## Inserting data
+
+```surql
+// PostgreSQL
+INSERT INTO product
+    (name, description, price, category, images, options)
+    VALUES
+    ("Shirt", "Slim fit", 6, "clothing", ARRAY['image1.jpg', 'image2.jpg', 'image3.jpg'])
+;
+
+// SurrealQL
+CREATE product CONTENT {
+    name: 'Shirt',
+    id: 'shirt',
+    description: 'Slim fit',
+    price: 6,
+    category: 'clothing',
+    images: ['image1.jpg', 'image2.jpg', 'image3.jpg']
+};
+```
+
+## Defining a schemafull table
+
+A table in PostgreSQL might be defined as follows.
+
+```surql
+CREATE TABLE product (
+    id SERIAL PRIMARY KEY,
+    name TEXT,
+    description TEXT,
+    price NUMERIC(8,2),
+    category TEXT,
+    images TEXT[]
+);
+```
+
+In SurrealQL, a table does not by default need to be defined before it can be used. However, the following statements will produce a strict schema similar to the PostgreSQL one above.
+
+```surql
+DEFINE TABLE product SCHEMAFULL;
+DEFINE FIELD name ON TABLE product TYPE string;
+DEFINE FIELD description ON TABLE product TYPE string;
+DEFINE FIELD price ON TABLE product 
+    TYPE number 
+    // Only show two digits after decimal point
+    VALUE math::fixed($value, 2) 
+    // Price must be within this range
+    ASSERT $value IN 0..=99999999;
+DEFINE FIELD category ON TABLE product TYPE string;
+DEFINE FIELD images ON TABLE product TYPE array<string>;
+```
+
+One difference between this and the PostgreSQL schema above is that a `product` will have a randomly generated ID as opposed to an incrementing one.
+
+```surql
+CREATE product SET 
+    name = 'Shirt', 
+    description = 'Nice shirt', 
+    price = 20.449, 
+    category = 'Clothing', 
+    images = ["some_img.ping", "another_img.png"];
+
+-- Output
+[
+	{
+		category: 'Clothing',
+		description: 'Nice shirt',
+		id: product:1j29aq5q0do48k6xvyem,
+		images: [
+			'some_img.ping',
+			'another_img.png'
+		],
+		name: 'Shirt',
+		price: 20.45f
+	}
+]
+```
+
+### Selecting data
+
+Selecting records using an ID:
+
+```surql
+// PostgreSQL
+SELECT * FROM product WHERE id=1;
+
+// SurrealQL
+SELECT * FROM product:shirt;
+```
+
+Selecting multiple specific records:
+
+```surql
+// PostgreSQL
+SELECT * FROM product WHERE id IN (1, 2, 3);
+
+// SurrealQL
+SELECT * FROM [product:1, product:2, product:3];
+```
+
+Counting the number of records in a table:
+
+```surql
+// PostgreSQL
+SELECT COUNT(*) FROM product;
+
+// SurrealQL
+SELECT count() FROM product GROUP ALL;
+```
+
+### Queries with identical syntax
+
+As the SurrealQL is inspired by SQL, many queries between it and PostgreSQL are identical.
+
+```surql
+SELECT * FROM product LIMIT 5;
+SELECT name, price FROM product;
+SELECT * FROM product ORDER BY price DESC;
+SELECT * FROM order_item WHERE quantity = 2;
+```
+
+### Using record ID instead of the `WHERE` clause
+
+If a record ID is known, be sure to query by the record ID itself instead of using a `WHERE` clause in SurrealQL. This will avoid a full table scan if the field is not indexed.
+
+```surql
+// PostgreSQL
+SELECT * FROM product WHERE id = 1;
+
+// This works in SurrealQL too...
+SELECT * FROM product WHERE id = 1;
+// But accessing the record directly will
+// take a fraction of the time
+product:1.*;
+```
+
+### Joining and querying related tables
+
+Take the following query with joins in PostgreSQL:
+
+```surql
+SELECT p.id AS product_id, p.name AS product_name
+FROM product p
+JOIN order_item oi ON p.id = oi.product_id
+JOIN customer_order co ON oi.order_id = co.order_id
+JOIN customer c ON co.customer_id = c.customer_id
+WHERE c.name = 'Pratim'
+ORDER BY p.id;
+```
+
+In SurrealQL, tables can be joined to each other via edges, such as the `bought` edge in this example.
+
+```surql
+// Relate a 'customer' to a 'product' via 'bought'
+RELATE customer:tobie->bought->product:iphone CONTENT {
+    option: { Size: 'M', Color: 'Max' },
+    quantity: 1,
+    total: 600,
+    status: 'Pending',
+    created_at: time::now()
+};
+```
+
+Once the tables have been related (joined), they can be queried with this syntax.
+
+```surql
+SELECT * FROM customer:tobie->bought;
+```
+
+An example of more complex query with joins to return all people who bought the same products as a certain customer (including the original customer).
+
+```surql
+// PostgreSQL
+SELECT DISTINCT c.*
+FROM customer c
+JOIN customer_order co ON c.customer_id = co.customer_id
+JOIN order_item oi ON co.order_id = oi.order_id
+JOIN product p ON oi.product_id = p.id
+WHERE p.id IN (
+    -- Subquery: Get all product IDs bought by Tobie
+    SELECT p2.id
+    FROM product p2
+    JOIN order_item oi2 ON p2.id = oi2.product_id
+    JOIN customer_order co2 ON oi2.order_id = co2.order_id
+    JOIN customer c2 ON co2.customer_id = c2.customer_id
+    WHERE c2.name = 'Tobie'
+)
+
+// SurrealQL
+customer:tobie->bought->product<-bought<-customer.*;
+```
