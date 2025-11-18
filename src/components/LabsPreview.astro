@@ -1,0 +1,295 @@
+---
+/**
+ * LabsPreview Component
+ * 
+ * A component for displaying preview cards of labs content within MDX/Markdown files.
+ * 
+ * Usage in MDX:
+ * ```mdx
+ * import LabsPreview from "@components/LabsPreview.astro";
+ * 
+ * // Show a single lab by slug:
+ * <LabsPreview slug="langchain-integration" />
+ * 
+ * // Show multiple labs filtered by topics:
+ * <LabsPreview topics={["ai", "python", "langchain"]} />
+ * 
+ * // With optional props for slug mode:
+ * <LabsPreview 
+ *   slug="langchain-integration" 
+ *   description="A custom description for this lab"
+ *   showTopics={true}
+ *   showAuthor={true}
+ * />
+ * 
+ * // With optional props for topics mode:
+ * <LabsPreview 
+ *   topics={["ai", "examples"]}
+ *   showTopics={true}
+ *   showAuthor={true}
+ * />
+ * 
+ * // Limit the number of items shown (default: 2):
+ * <LabsPreview topics={["ai"]} limit={5} />
+ * ```
+ * 
+ * Props:
+ * - slug (optional): The filename of the lab item without the .md extension. When provided, shows a single lab.
+ * - topics (optional): Array of topic strings to filter labs (case-insensitive). When provided, shows all matching labs in a grid.
+ *   Topics can match against:
+ *   - Official topic names (AI, Examples, etc.)
+ *   - Partial topic names (e.g., "ai" matches "AI")
+ *   - Title or category text (e.g., "langchain" matches labs with "langchain" in title)
+ * - limit (optional): Maximum number of items to display (default: 2). Only applies when using topics mode.
+ * - description (optional): Custom description text to display (only for slug mode)
+ * - showTopics (optional): Whether to show topic badges (default: false)
+ * - showAuthor (optional): Whether to show author information (default: false)
+ * - hideSeeMore (optional): Whether to hide the "See more" link (default: false)
+ * 
+ * Note: Either `slug` or `topics` must be provided, but not both.
+ */
+import { getEntry, getCollection } from 'astro:content';
+import type { CollectionEntry } from 'astro:content';
+import SurrealDBAuthorImage from '@assets/img/icon/icon.svg';
+import { LABS_TOPICS_MAP, LAB_IMAGE_MAP } from '@config/pages/labs';
+import Image from '@src/components/Image.astro';
+
+const surrealDBAuthor = {
+    name: 'SurrealDB',
+    role: 'Official',
+    avatar: '',
+} as const;
+
+interface Props {
+    slug?: string;
+    topics?: string[];
+    limit?: number;
+    description?: string;
+    showTopics?: boolean;
+    showAuthor?: boolean;
+    hideSeeMore?: boolean;
+}
+
+const { slug, topics, limit = 2, description: customDescription, showTopics = false, showAuthor = false, hideSeeMore = false } = Astro.props;
+
+// Validate that either slug or topics is provided, but not both
+if (!slug && !topics) {
+    throw new Error('LabsPreview: Either `slug` or `topics` must be provided');
+}
+if (slug && topics) {
+    throw new Error('LabsPreview: Cannot use both `slug` and `topics` props');
+}
+
+const images = LAB_IMAGE_MAP;
+const avatarMap = import.meta.glob<{ default: ImageMetadata }>(
+    '@assets/img/labs-authors/*.{jpg,jpeg,png}'
+);
+
+// Helper function to get avatar
+function getAvatar(author: typeof surrealDBAuthor | { name: string; role: string; avatar: string }) {
+    if (author === surrealDBAuthor) {
+        return null;
+    }
+    return avatarMap[`/src/assets/img/labs-authors/${author.avatar}.jpg`] ??
+        (() => import('@assets/img/labs-authors/placeholder.png'));
+}
+
+// Helper function to extract description from entry
+function extractDescription(entry: CollectionEntry<'labs-items'>, customDesc?: string): string | undefined {
+    if (customDesc) return customDesc;
+    // Note: entry.body is not directly available in Astro content collections
+    // Description would need to be provided via prop or stored in frontmatter
+    return undefined;
+}
+
+// Helper function to check if item matches topics
+function matchesTopics(item: CollectionEntry<'labs-items'>['data'], filterTopics: string[]): boolean {
+    if (!item.topics || item.topics.length === 0) return false;
+    
+    const itemTopicsLower = item.topics.map(t => t.toLowerCase().trim());
+    const filterTopicsLower = filterTopics.map(t => t.toLowerCase().trim());
+    
+    // Normalize topic names using LABS_TOPICS_MAP for better matching
+    const normalizedItemTopics = itemTopicsLower.map(topic => {
+        // Try to find in LABS_TOPICS_MAP first
+        const mapped = LABS_TOPICS_MAP[topic as keyof typeof LABS_TOPICS_MAP];
+        return mapped ? mapped.toLowerCase() : topic;
+    });
+    
+    // Check if all filter topics match any item topic (AND logic)
+    // Also check for partial matches (e.g., "langchain" matches "AI" if it's in the title/category)
+    return filterTopicsLower.every(filterTopic => {
+        // Direct topic match
+        if (normalizedItemTopics.some(itemTopic => 
+            itemTopic === filterTopic || 
+            itemTopic.includes(filterTopic) || 
+            filterTopic.includes(itemTopic)
+        )) {
+            return true;
+        }
+        
+        // Also check if filter topic appears in title or category (for flexible matching)
+        const titleLower = item.title.toLowerCase();
+        const categoryLower = item.category.toLowerCase();
+        return titleLower.includes(filterTopic) || categoryLower.includes(filterTopic);
+    });
+}
+
+// Get lab items based on mode
+let entries: CollectionEntry<'labs-items'>[] = [];
+let totalFilteredCount = 0;
+if (slug) {
+    // Single item mode
+    const entry = await getEntry('labs-items', slug);
+    if (!entry) {
+        throw new Error(`Lab item not found: ${slug}`);
+    }
+    entries = [entry];
+    totalFilteredCount = 1;
+} else if (topics) {
+    // Multiple items mode - filter by topics
+    const allEntries = await getCollection('labs-items');
+    const filteredEntries = allEntries.filter(entry => matchesTopics(entry.data, topics));
+    totalFilteredCount = filteredEntries.length;
+    // Apply limit
+    entries = filteredEntries.slice(0, limit); 
+}
+
+// Build "see more" URL with topics as filters
+function buildSeeMoreUrl(filterTopics: string[]): string {
+    // Normalize topics to lowercase to match the format used by the labs page
+    const normalizedTopics = filterTopics.map(topic => {
+        const lower = topic.toLowerCase().trim();
+        // Try to map to official topic name
+        const mapped = LABS_TOPICS_MAP[lower as keyof typeof LABS_TOPICS_MAP];
+        return mapped ? mapped.toLowerCase() : lower;
+    });
+    
+    // Join topics with comma and URL encode
+    const filtersParam = normalizedTopics.join(',');
+    return `/docs/labs?filters=${encodeURIComponent(filtersParam)}`;
+}
+
+---
+
+<style>
+    .labs-preview {
+        @apply border border-border rounded-lg p-6 hover:border-surreal-pink/50 transition-colors;
+    }
+    
+    .labs-preview__badge {
+        @apply bg-gradient-to-tl to-[#6F79884D] from-[#6F79881A] py-1 px-2 rounded-full text-xs text-bwr;
+    }
+    .labs-preview-grid {
+        @apply grid gap-4;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    }
+</style>
+{entries.length === 0 ? (
+    <p class="text-faint text-sm">No labs found matching the specified criteria.</p>
+) : (
+    <>
+        <div class={slug ? '' : 'labs-preview-grid'}>
+            {entries.map((entry) => {
+                const item = entry.data;
+                const author = item.author === 'surrealdb' ? surrealDBAuthor : item.author;
+                const category = item.category as keyof typeof images;
+                const description = slug ? extractDescription(entry, customDescription) : undefined;
+                const avatar = getAvatar(author);
+                
+                return (
+                    <a
+                        class="labs-preview block hover:!no-underline group"
+                        href={item.url || `/docs/labs#${entry.slug}`}
+                        title={item.title}
+                    >
+                        <div class="flex gap-4">
+                            <!-- Thumbnail -->
+                            <div class="flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden bg-code border border-border">
+                                <Image
+                                    src={images[category]}
+                                    alt={item.category}
+                                    loading="lazy"
+                                    class="w-full h-full object-cover"
+                                />
+                            </div>
+                            
+                            <!-- Content -->
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-start justify-between gap-2 mb-2">
+                                    <div class="flex-1 min-w-0">
+                                        <p class="text-faint text-xs font-medium mb-1">
+                                            {category}
+                                        </p>
+                                        <h3 class="text-lg font-semibold text-bwr group-hover:text-surreal-pink transition-colors line-clamp-2 mb-2 !mt-0">
+                                            {item.title}
+                                        </h3>
+                                    </div>
+                                </div>
+                                
+                                {description && (
+                                    <p class="text-sm text-faint mb-3 line-clamp-2">
+                                        {description}
+                                    </p>
+                                )}
+                                
+                                <div class="flex items-center gap-3 flex-wrap">
+                                    {showTopics && item.topics && item.topics.length > 0 && (
+                                        <div class="flex flex-wrap gap-2">
+                                            {item.topics.map((topic) => (
+                                                <span class="labs-preview__badge">
+                                                    {LABS_TOPICS_MAP[topic.toLowerCase() as keyof typeof LABS_TOPICS_MAP] || topic}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
+                                    
+                                    {showAuthor && (
+                                        <div class="flex items-center gap-2 text-xs text-faint">
+                                            {item.author === "surrealdb" ? (
+                                                <div class="size-5 flex">
+                                                    <Image
+                                                        class="object-contain w-full h-full"
+                                                        src={SurrealDBAuthorImage}
+                                                        alt="SurrealDB"
+                                                        loading="lazy"
+                                                        width={20}
+                                                        height={20}
+                                                    />
+                                                </div>
+                                            ) : (
+                                                <div class="size-5 flex rounded-full overflow-hidden">
+                                                    {avatar && (
+                                                        <Image
+                                                            class="object-cover w-full h-full"
+                                                            src={avatar()}
+                                                            alt={author?.name || "Unknown Author"}
+                                                            loading="lazy"
+                                                            width={20}
+                                                            height={20}
+                                                        />
+                                                    )}
+                                                </div>
+                                            )}
+                                            <span>{author?.name || "Unknown Author"}</span>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </a>
+                );
+            })}
+        </div>
+    {topics && totalFilteredCount > limit && !hideSeeMore && (
+            <div class="mt-4 text-center">
+                <a
+                    href={buildSeeMoreUrl(topics)}
+                    class="text-surreal-pink hover:underline text-sm font-medium"
+                >
+                    See more ({totalFilteredCount - limit} more)
+                </a>
+            </div>
+        )}
+    </>
+)}
