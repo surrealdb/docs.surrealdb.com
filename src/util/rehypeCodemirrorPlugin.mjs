@@ -248,8 +248,7 @@ class Processor {
 
 function createHighlightedCode(input, lang) {
     const pro = new Processor();
-    const { code, test } = extractTest(input);
-    console.log(test);
+    const { code } = extractTest(input);
 
     if (!parser[lang]) {
         for (const line of code.split('\n')) {
