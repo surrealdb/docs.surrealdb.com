@@ -7,5 +7,7 @@ author:
   role: Software Engineer
   avatar: sebastian-wessel
 topics: []
+languages:
+  - TypeScript
 ---
 

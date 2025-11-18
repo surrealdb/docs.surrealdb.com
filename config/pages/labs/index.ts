@@ -45,6 +45,15 @@ export const LAB_TOPICS = [
     'Beginner',
 ] as const;
 
+export const LAB_LANGUAGES = [
+    'Python',
+    'Rust',
+    'TypeScript',
+    'Go',
+    'Java',
+    'PHP',
+] as const;
+
 export const LAB_SIDEBAR = [
     {
         title: 'Filters',
@@ -60,6 +69,11 @@ export const LAB_SIDEBAR = [
         title: 'Topics',
         key: 'topics',
         options: LAB_TOPICS,
+    },
+    {
+        title: 'Language',
+        key: 'languages',
+        options: LAB_LANGUAGES,
     },
 ];
 

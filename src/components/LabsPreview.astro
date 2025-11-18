@@ -14,6 +14,12 @@
  * // Show multiple labs filtered by topics:
  * <LabsPreview topics={["ai", "python", "langchain"]} />
  * 
+ * // Show multiple labs filtered by languages:
+ * <LabsPreview languages={["python", "rust"]} />
+ * 
+ * // Show multiple labs filtered by both topics and languages:
+ * <LabsPreview topics={["ai"]} languages={["python"]} />
+ * 
  * // With optional props for slug mode:
  * <LabsPreview 
  *   slug="langchain-integration" 
@@ -40,13 +46,16 @@
  *   - Official topic names (AI, Examples, etc.)
  *   - Partial topic names (e.g., "ai" matches "AI")
  *   - Title or category text (e.g., "langchain" matches labs with "langchain" in title)
- * - limit (optional): Maximum number of items to display (default: 2). Only applies when using topics mode.
+ * - languages (optional): Array of language strings to filter labs (case-insensitive). When provided, shows all matching labs in a grid.
+ *   Languages can match against: Python, Rust, TypeScript, Go, Java, PHP
+ *   Uses OR logic: if any selected language matches, the lab is shown.
+ * - limit (optional): Maximum number of items to display (default: 2). Only applies when using topics/languages mode.
  * - description (optional): Custom description text to display (only for slug mode)
  * - showTopics (optional): Whether to show topic badges (default: false)
  * - showAuthor (optional): Whether to show author information (default: false)
  * - hideSeeMore (optional): Whether to hide the "See more" link (default: false)
  * 
- * Note: Either `slug` or `topics` must be provided, but not both.
+ * Note: Either `slug` or at least one of `topics`/`languages` must be provided, but not both.
  */
 import { getEntry, getCollection } from 'astro:content';
 import type { CollectionEntry } from 'astro:content';
@@ -63,6 +72,7 @@ const surrealDBAuthor = {
 interface Props {
     slug?: string;
     topics?: string[];
+    languages?: string[];
     limit?: number;
     description?: string;
     showTopics?: boolean;
@@ -70,14 +80,14 @@ interface Props {
     hideSeeMore?: boolean;
 }
 
-const { slug, topics, limit = 2, description: customDescription, showTopics = false, showAuthor = false, hideSeeMore = false } = Astro.props;
+const { slug, topics, languages, limit = 2, description: customDescription, showTopics = false, showAuthor = false, hideSeeMore = false } = Astro.props;
 
-// Validate that either slug or topics is provided, but not both
-if (!slug && !topics) {
-    throw new Error('LabsPreview: Either `slug` or `topics` must be provided');
+// Validate that either slug or at least one filter (topics/languages) is provided, but not both
+if (!slug && !topics && !languages) {
+    throw new Error('LabsPreview: Either `slug` or at least one of `topics`/`languages` must be provided');
 }
-if (slug && topics) {
-    throw new Error('LabsPreview: Cannot use both `slug` and `topics` props');
+if (slug && (topics || languages)) {
+    throw new Error('LabsPreview: Cannot use `slug` with `topics` or `languages` props');
 }
 
 const images = LAB_IMAGE_MAP;
@@ -135,6 +145,23 @@ function matchesTopics(item: CollectionEntry<'labs-items'>['data'], filterTopics
     });
 }
 
+// Helper function to check if item matches languages
+function matchesLanguages(item: CollectionEntry<'labs-items'>['data'], filterLanguages: string[]): boolean {
+    if (!item.languages || item.languages.length === 0) return false;
+    
+    const itemLanguagesLower = item.languages.map(l => l.toLowerCase().trim());
+    const filterLanguagesLower = filterLanguages.map(l => l.toLowerCase().trim());
+    
+    // Check if any filter language matches any item language (OR logic)
+    return filterLanguagesLower.some(filterLang => {
+        return itemLanguagesLower.some(itemLang => 
+            itemLang === filterLang || 
+            itemLang.includes(filterLang) || 
+            filterLang.includes(itemLang)
+        );
+    });
+}
+
 // Get lab items based on mode
 let entries: CollectionEntry<'labs-items'>[] = [];
 let totalFilteredCount = 0;
@@ -146,27 +173,51 @@ if (slug) {
     }
     entries = [entry];
     totalFilteredCount = 1;
-} else if (topics) {
-    // Multiple items mode - filter by topics
+} else if (topics || languages) {
+    // Multiple items mode - filter by topics and/or languages
     const allEntries = await getCollection('labs-items');
-    const filteredEntries = allEntries.filter(entry => matchesTopics(entry.data, topics));
+    let filteredEntries = allEntries;
+    
+    // Apply topic filter (AND logic - all topics must match)
+    if (topics && topics.length > 0) {
+        filteredEntries = filteredEntries.filter(entry => matchesTopics(entry.data, topics));
+    }
+    
+    // Apply language filter (OR logic - any language can match)
+    if (languages && languages.length > 0) {
+        filteredEntries = filteredEntries.filter(entry => matchesLanguages(entry.data, languages));
+    }
+    
     totalFilteredCount = filteredEntries.length;
     // Apply limit
     entries = filteredEntries.slice(0, limit); 
 }
 
-// Build "see more" URL with topics as filters
-function buildSeeMoreUrl(filterTopics: string[]): string {
-    // Normalize topics to lowercase to match the format used by the labs page
-    const normalizedTopics = filterTopics.map(topic => {
-        const lower = topic.toLowerCase().trim();
-        // Try to map to official topic name
-        const mapped = LABS_TOPICS_MAP[lower as keyof typeof LABS_TOPICS_MAP];
-        return mapped ? mapped.toLowerCase() : lower;
-    });
+// Build "see more" URL with topics and/or languages as filters
+function buildSeeMoreUrl(filterTopics?: string[], filterLanguages?: string[]): string {
+    const allFilters: string[] = [];
     
-    // Join topics with comma and URL encode
-    const filtersParam = normalizedTopics.join(',');
+    // Normalize topics to lowercase to match the format used by the labs page
+    if (filterTopics && filterTopics.length > 0) {
+        const normalizedTopics = filterTopics.map(topic => {
+            const lower = topic.toLowerCase().trim();
+            // Try to map to official topic name
+            const mapped = LABS_TOPICS_MAP[lower as keyof typeof LABS_TOPICS_MAP];
+            return mapped ? mapped.toLowerCase() : lower;
+        });
+        allFilters.push(...normalizedTopics);
+    }
+    
+    // Normalize languages to lowercase to match the format used by the labs page
+    if (filterLanguages && filterLanguages.length > 0) {
+        const normalizedLanguages = filterLanguages.map(lang => {
+            return lang.toLowerCase().trim();
+        });
+        allFilters.push(...normalizedLanguages);
+    }
+    
+    // Join all filters with comma and URL encode
+    const filtersParam = allFilters.join(',');
     return `/docs/labs?filters=${encodeURIComponent(filtersParam)}`;
 }
 
@@ -281,10 +332,10 @@ function buildSeeMoreUrl(filterTopics: string[]): string {
                 );
             })}
         </div>
-    {topics && totalFilteredCount > limit && !hideSeeMore && (
+    {(topics || languages) && totalFilteredCount > limit && !hideSeeMore && (
             <div class="mt-4 text-center">
                 <a
-                    href={buildSeeMoreUrl(topics)}
+                    href={buildSeeMoreUrl(topics, languages)}
                     class="text-surreal-pink hover:underline text-sm font-medium"
                 >
                     See more ({totalFilteredCount - limit} more)

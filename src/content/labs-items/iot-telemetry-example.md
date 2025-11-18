@@ -4,6 +4,8 @@ url: https://github.com/surrealdb/example-iot-telemetry
 category: Demos
 topics:
   - Examples
+languages:
+  - Rust
 author:
   name: Martin Schaer
   role: Solutions Engineer
