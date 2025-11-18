@@ -53,16 +53,9 @@ const labCollection = defineCollection({
                 .array()
                 .max(2),
             languages: z
-                .enum([
-                    'Python',
-                    'Rust',
-                    'TypeScript',
-                    'Go',
-                    'Java',
-                    'PHP',
-                ])
+                .enum(['Python', 'Rust', 'TypeScript', 'Go', 'Java', 'PHP'])
                 .array()
-                .optional()
+                .optional(),
         }),
 });
 
