@@ -5,8 +5,6 @@ category: Integrations
 topics:
   - Data Management
   - Embedding
-  - Security
-  - Optimisation
 author:
   name: Andrew G. Knackstedt
   role: Sr Backend Engineer
