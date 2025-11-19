@@ -282,6 +282,7 @@ function processMetastring(metastring) {
 }
 
 function extractTest(input) {
+    /* biome-ignore format: keep regex on one line for readability */
     const regex = /^(?:[ \t]*\r?\n)*(?:\/\*\*([\s\S]*?)\*\/(?:[ \t]*\r?\n)*)?([ \t]*[^\r\n][\s\S]*)$/;
     const [_, test, code] = input.match(regex);
     return { test, code };
