@@ -124,6 +124,7 @@ const redirects = {
 	'/docs/surrealdb/deployment/fly': '/docs/surrealdb/deployment',
 	'/docs/integrations/data-mangaement': '/docs/integrations/data-management',
 	// Redirect old reference-guide path to models
+	'/docs/surrealdb/reference-guide/graph_relations': '/docs/surrealdb/models/graph',
 	'/docs/surrealdb/reference-guide/graph-relations': '/docs/surrealdb/models/graph',
 };
 
