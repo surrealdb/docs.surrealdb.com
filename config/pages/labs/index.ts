@@ -49,7 +49,7 @@ export const LAB_SIDEBAR = [
     {
         title: 'Filters',
         key: 'filters',
-        options: ['SurrealDB Official'],
+        options: ['SurrealDB Official', 'Community projects'],
     },
     {
         title: 'Categories',
