@@ -4,5 +4,7 @@ url: https://github.com/surrealdb/surrealdb.go
 category: SDKs
 author: surrealdb
 topics: []
+languages:
+  - Go
 ---
 

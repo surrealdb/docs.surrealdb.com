@@ -7,5 +7,7 @@ author:
   role: Software Engineer
   avatar: mike-aurelion
 topics: []
+languages:
+  - Python
 ---
 

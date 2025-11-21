@@ -5,5 +5,7 @@ category: Integrations
 topics:
   - AI
   - Examples
+languages:
+  - Python
 author: surrealdb
 ---

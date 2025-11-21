@@ -8,5 +8,7 @@ author:
   avatar: gabor-szabo
 topics:
   - Beginner
+languages:
+  - Python
 ---
 

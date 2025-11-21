@@ -9,5 +9,7 @@ author:
 topics:
   - AI
   - Examples
+languages:
+  - Python
 ---
 
