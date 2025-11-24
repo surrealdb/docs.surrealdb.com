@@ -4,5 +4,7 @@ url: https://github.com/surrealdb/surrealdb.java
 category: SDKs
 author: surrealdb
 topics: []
+languages:
+  - Java
 ---
 
