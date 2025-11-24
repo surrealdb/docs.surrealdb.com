@@ -126,6 +126,8 @@ const redirects = {
 	// Redirect old reference-guide path to models
 	'/docs/surrealdb/reference-guide/graph_relations': '/docs/surrealdb/models/graph',
 	'/docs/surrealdb/reference-guide/graph-relations': '/docs/surrealdb/models/graph',
+	'/docs/surrealdb/reference-guide/vector_search': '/docs/surrealdb/models/vector',
+	'/docs/surrealdb/reference-guide/vector-search': '/docs/surrealdb/models/vector',
 };
 
 function compute(input) {
