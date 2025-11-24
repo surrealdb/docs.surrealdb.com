@@ -123,10 +123,8 @@ const redirects = {
 	'/docs/surrealdb/deployment/digitalocean': '/docs/surrealdb/deployment',
 	'/docs/surrealdb/deployment/fly': '/docs/surrealdb/deployment',
 	'/docs/integrations/data-mangaement': '/docs/integrations/data-management',
-	// Redirect old reference-guide path to models
-	'/docs/surrealdb/reference-guide/graph_relations': '/docs/surrealdb/models/graph',
+	// Redirect old reference-guide paths to models
 	'/docs/surrealdb/reference-guide/graph-relations': '/docs/surrealdb/models/graph',
-	'/docs/surrealdb/reference-guide/vector_search': '/docs/surrealdb/models/vector',
 	'/docs/surrealdb/reference-guide/vector-search': '/docs/surrealdb/models/vector',
 };
 
@@ -163,7 +161,7 @@ function compute(input) {
 	// Slash removal
 	if (path.endsWith('/')) path = path.slice(0, -1);
 
-	// Fixed redirects
+	// Fixed redirects (check original path first)
 	if (redirects[path]) path = redirects[path];
 
 	// Convert underscores to hyphens in any path
@@ -171,6 +169,8 @@ function compute(input) {
 		const newPath = path.replace(/_/g, '-');
 		if (newPath !== path) {
 			path = newPath;
+			// Check redirects again after conversion (in case redirect key uses hyphens)
+			if (redirects[path]) path = redirects[path];
 		}
 	}
 
