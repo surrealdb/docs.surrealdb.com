@@ -161,17 +161,17 @@ function compute(input) {
 	// Slash removal
 	if (path.endsWith('/')) path = path.slice(0, -1);
 
-	// Fixed redirects (check original path first)
-	if (redirects[path]) path = redirects[path];
-
-	// Convert underscores to hyphens in any path
+	// Convert underscores to hyphens in any path (do this before redirects)
 	if (path.includes('_')) {
-		const newPath = path.replace(/_/g, '-');
-		if (newPath !== path) {
-			path = newPath;
-			// Check redirects again after conversion (in case redirect key uses hyphens)
-			if (redirects[path]) path = redirects[path];
-		}
+		path = path.replace(/_/g, '-');
+	}
+
+	// Fixed redirects (check in a loop to handle chained redirects)
+	let redirectCount = 0;
+	const maxRedirects = 10; // Prevent infinite loops
+	while (redirects[path] && redirectCount < maxRedirects) {
+		path = redirects[path];
+		redirectCount++;
 	}
 
 	// Check that the URL points to a valid document
