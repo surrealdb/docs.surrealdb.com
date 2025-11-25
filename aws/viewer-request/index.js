@@ -128,6 +128,8 @@ const redirects = {
 	'/docs/surrealdb/reference-guide/vector-search': '/docs/surrealdb/models/vector',
 	'/docs/surrealdb/reference-guide/full-text-search': '/docs/surrealdb/models/full-text-search',
 	'/docs/surrealdb/reference-guide/full_text_search': '/docs/surrealdb/models/full-text-search',
+	'/docs/surrealdb/reference-guide/security-best-practices': '/docs/surrealdb/security/security-best-practices',
+	'/docs/surrealdb/reference-guide/security_best_practices': '/docs/surrealdb/security/security-best-practices',
 };
 
 function compute(input) {
