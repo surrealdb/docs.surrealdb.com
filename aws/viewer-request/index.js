@@ -130,6 +130,10 @@ const redirects = {
 	'/docs/surrealdb/reference-guide/full_text_search': '/docs/surrealdb/models/full-text-search',
 	'/docs/surrealdb/reference-guide/security-best-practices': '/docs/surrealdb/security/security-best-practices',
 	'/docs/surrealdb/reference-guide/security_best_practices': '/docs/surrealdb/security/security-best-practices',
+	// Redirect old concepts paths to single page
+	'/docs/surrealdb/introduction/concepts/namespace': '/docs/surrealdb/introduction/concepts#system-structure',
+	'/docs/surrealdb/introduction/concepts/database': '/docs/surrealdb/introduction/concepts#system-structure'
+	
 };
 
 function compute(input) {
