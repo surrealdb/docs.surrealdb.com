@@ -1,41 +1,23 @@
 ---
 sidebar_position: 4
-sidebar_label: Full Text Search
+sidebar_label: Text and full-text search
 title: Using SurrealDB as a Full Text Search Database | Data Models
 description: In this guide you will learn how to “think” in a full-text search model and show how SurrealDB helps you implement these concepts seamlessly.
 ---
 
-> [!NOTE]
-> Before SurrealDB version 3.0.0-alpha.8, the `FULLTEXT ANALYZER` clause used the syntax `SEARCH ANALYZER`.
-
 # Using SurrealDB as a Full Text Search Database
 
-A full-text search database is designed to index and retrieve text-based data (like articles, messages, or comments) based on the meaning and structure of the text itself, rather than exact, literal matches. This allows you to:
+A full-text search database is designed to index and retrieve text-based data (like articles, messages, or comments) based on tokenized and modified parts of the text itself, rather than exact, literal matches. This allows you to:
 
 * Find documents containing certain keywords.
 * Search for phrases or words with variants (e.g., “run,” “runs,” “running”).
 * Rank results by relevance, not just by literal string matches.
 
-Traditional relational databases have some limited text search capabilities (with varying degrees of support for text indexes), but more specialized systems—like Elasticsearch or Lucene-based solutions—excel at performing complex, scalable full-text queries.
+As a multi-model database, SurrealDB has integrated full-text search capabilities so that you can store your data and query it with advanced text search features. This guide will explain how to “think” in a full-text search model and show how SurrealDB helps you implement these concepts seamlessly.
 
-As a new multi-model database, SurrealDB has developed integrated full-text search capabilities so that you can store your data (as documents, graphs, or tables) and query it with advanced text search features. This guide will explain how to “think” in a full-text search model and show how SurrealDB helps you implement these concepts seamlessly.
+Note: SurrealDB has many other built-in ways of working with text besides full-text search. For more details, see [this section](#other-ways-to-work-with-text) in the same page below.
 
-## Core Concepts of Full-Text Search
-
-- **Analyzers**: In a robust full-text search system, analyzers define how the text is processed. An analyzer typically includes tokenizers (which split text) and filters (which modify tokens). Different languages or data types need different analyzers.
-
-- **Tokenization**: Splits text into smaller units (“tokens”). Depending on your use case, tokens may be entire words, word stems, or even n-grams. For example, tokenizing the sentence “The quick brown fox.” might produce ["the", "quick", "brown", "fox"].
-
-- **Filtering**: After splitting text into tokens, these tokens can be converted to lowercase, stripped of punctuation, or transformed (e.g., removing accents). Additional filters can include stemming or lemmatization, which reduce words to a base form (“running” -> “run”).
-
-- **Indexing**: Full-text search engines build specialized data structures (inverted indexes, suffix arrays, etc.) to let you quickly locate documents containing certain tokens. These indexes often store frequency, position, and other details that enable relevance scoring.
-
-
-- **Ranking / Scoring**: Once matches are found, an FTS engine ranks them to show the most relevant results first. Algorithms such as BM25 or TF-IDF look at how often terms appear in a document, or whether those terms appear in the title vs. the body, etc.
-
-- **Highlighting** : A good search experience shows where in the text the matches occur, often by wrapping matched terms in HTML tags or otherwise emphasizing them.
-
-## How Full-Text Search Differs from Keyword Matching
+## How full-text search differs from keyword matching
 
 In traditional databases, you might do something like:
 
@@ -47,17 +29,9 @@ This approach:
 
 - Doesn’t rank results by relevance—just returns every article containing “fox.”
 - Ignores language variations, e.g., “Foxes,” “FoX,” or synonyms like “vixen.”
-- Tends to scan entire columns, making it slower for large datasets.
+- May scan an entire table, making it slower for large datasets.
 
 Full-text search, by contrast, uses an inverted index or other specialized structures for fast lookups and can handle a variety of linguistic transformations. It can highlight results and rank them by how relevant or frequent the terms are.
-
-
-## SurrealDB as a Full-Text Search Database
-SurrealDB combines multi-model data storage (document, graph, vector, etc.) with an integrated full-text search engine. This means you can:
-
-- Store your text in a SurrealDB table or document.
-- Define analyzers that specify how SurrealDB will tokenize and filter your text.
-- Define indexes that use those analyzers for full-text search, optionally with advanced features like BM25 scoring and highlighting.
 
 ## Advantages of SurrealDB for FTS
 
@@ -66,71 +40,558 @@ SurrealDB combines multi-model data storage (document, graph, vector, etc.) with
 - **Powerful Query Language**: SurrealQL blends SQL-like syntax with searching syntax (the [`@@` matching operator](/docs/surrealql/operators#matches) for FTS queries, advanced indexing features, etc.).
 - **Real-Time Updates**: SurrealDB can handle real-time changes, so newly inserted or updated text becomes searchable quickly.
 
+## Implementing full-text search
 
-### Creating and Managing Full-Text Search in SurrealDB
-Below is an example of how you might define a table for “articles,” define an analyzer that lowercases and removes accents, and create a full-text index on the “title” and “body” fields:
+There are three steps involved in full-text search. They are:
+
+- Defining an analyzer
+- Defining an index that uses the analyzer
+- Querying using syntax that specifically uses full-text search
+
+Let's take a look of each of these steps one at a time.
+
+### Defining an analyzer
+
+The first step to using full-text search is to [define an analyzer](/docs/surrealql/statements/define/analyzer) using a `DEFINE ANALYZER` statement.
+
+An analyzer is not defined on a table, but works independently. Once an analyzer has been defined, its output tokens for any given string can be tested bp using the [`search::analyze`](/docs/surrealql/functions/database/search#searchanalyze) function, which returns an array of strings from an input string.
+
+An analyzer can make use of a user-defined function, tokenizers, and filters.
+
+Let's look at each of these features one at a time.
+
+#### A user-defined function
+
+With the `FUNCTION` clause, an analyzer can take a [user-defined function](/docs/surrealql/statements/define/function) that takes a string as both the argument and return value.
 
 ```surql
-USE NAMESPACE myapp DB content;
+DEFINE FUNCTION fn::remove_bad_word($input: string) -> string {
+  $input.replace("smurf", "****")
+};
 
--- Create a table for articles (schemaless or define fields explicitly)
-CREATE TABLE articles SCHEMALESS;
+DEFINE ANALYZER remove_bad_word FUNCTION fn::remove_bad_word;
 
--- Define a custom analyzer
-DEFINE ANALYZER my_custom_analyzer
+search::analyze("remove_bad_word", "It's that smurfing mallet. I smurfed my foot with it, Papa Smurf!");
+```
+
+```surql title="Output"
+["It's that ****ing mallet. I ****ed my foot with it, Papa Smurf!"]
+```
+
+#### Tokenization
+
+With the `TOKENIZERS` clause, an analyzer can split text into smaller units (“tokens”). Depending on your use case, tokens may be entire words, word stems, or even n-grams.
+
+```surql
+DEFINE ANALYZER blank TOKENIZERS blank;
+
+search::analyze("blank", "The quick brown fox.");
+```
+
+```surql title="Output"
+['The', 'quick', 'brown', 'fox.']
+```
+
+#### Filtering
+
+With the `FILTERS` clause, an analyzer can convert text - most likely after it has been split into tokens. Some examples of filtering are: converting to lowercase, stripping punctuation, and removing accents. Additional filters can include stemming or lemmatization, which reduce words to a base form (“running” -> “run”).
+
+```surql
+DEFINE ANALYZER just_edgengram FILTERS edgengram(1,4);
+
+search::analyze("just_edgengram", "cars!");
+```
+
+```surql title="Output"
+['c', 'ca', 'car', 'cars']
+```
+
+#### Text analyzer example
+
+An analyzer will almost always be composed of a combination of tokenizers, filters, and an optional user-defined function.
+
+Take the following analyzer for example, which uses `blank` to split a string by whitespace, and `edgengram(3, 10)` to output all of the instances of the first three to ten letters of a word.
+
+```surql
+DEFINE ANALYZER blank_edgengram TOKENIZERS blank FILTERS edgengram(3, 10);
+search::analyze("blank_edgengram", "The Wheel of Time turns, and Ages come and pass, leaving memories that become legend.");
+```
+
+The output includes strings like 'turns,' and 'legend.', which include punctuation marks.
+
+```surql title="Output"
+['The', 'Whe', 'Whee', 'Wheel', 'Tim', 'Time', 'tur', 'turn', 'turns', 'turns,', 'and', 'Age', 'Ages', 'com', 'come', 'and', 'pas', 'pass', 'pass,', 'lea', 'leav', 'leavi', 'leavin', 'leaving', 'mem', 'memo', 'memor', 'memori', 'memorie', 'memories', 'tha', 'that', 'bec', 'beco', 'becom', 'become', 'leg', 'lege', 'legen', 'legend', 'legend.']
+```
+
+If this is not desired, some looking through the `DEFINE ANALYZER` page will turn up another tokenizer called `punct` that can be included, now creating an analyzer that splits on whitespace as well as punctuation.
+
+```surql
+DEFINE ANALYZER blank_edgengram TOKENIZERS blank, punct FILTERS edgengram(3, 10);
+search::analyze("blank_edgengram", "The Wheel of Time turns, and Ages come and pass, leaving memories that become legend.");
+```
+
+```surql title="Output"
+['The', 'Whe', 'Whee', 'Wheel', 'Tim', 'Time', 'tur', 'turn', 'turns', 'and', 'Age', 'Ages', 'com', 'come', 'and', 'pas', 'pass', 'lea', 'leav', 'leavi', 'leavin', 'leaving', 'mem', 'memo', 'memor', 'memori', 'memorie', 'memories', 'tha', 'that', 'bec', 'beco', 'becom', 'become', 'leg', 'lege', 'legen', 'legend']
+```
+
+#### Types of tokenizers and filters
+
+The available tokenizers and filters are as follows:
+
+* Tokenizers `blank`, `camel`, `punct` to split by whitespace, camelcase, and punctuation. The `class` tokenizer splits when a class change is detected, such as letter to number, space to letter, punctuation to letter, and so on.
+* Filters `ascii`, `lowercase`, `uppercase` to change to ASCII, lowercase, and uppercase.
+
+The `ngram` filter is similar to the `edgengram` filter above in that it takes a minimum and maximum length, but instead moves from character to character inside a string as it attempts to find all the possible outputs in between these two lengths.
+
+```surql
+DEFINE ANALYZER example_analyzer FILTERS ngram(1,4);
+search::analyze("example_analyzer", "cars!");
+```
+
+Here is the output modified slightly to show the output of the `ngram` filter at each step of the way.
+
+```surql title="Output"
+[
+	'c', 'ca', 'car', 'cars',
+	'a', 'ar', 'ars', 'ars!',
+	'r', 'rs', 'rs!',
+	's', 's!',
+	'!'
+]
+```
+
+The last filters to mention are `snowball` and `mapper`, which are the most complex and versatile.
+
+The snowball filter is used to perform stemming: the reduction of a word to as basic and universal a form as possible. It is available for the languages Arabic, Danish, Dutch, English, Finnish, French, German, Greek, Hungarian, Italian, Norwegian, Portuguese, Romanian, Russian, Spanish, Swedish, Tamil, and Turkish.
+
+Stemming involves using an algorithm to reduce a word, but is unable to incorporate complex changes like the plural and verbal vowel changes in English.
+
+```surql
+DEFINE ANALYZER snowball_test TOKENIZERS blank,punct FILTERS snowball(english);
+search::analyze("snowball_test", "
+    manager managing management
+    running ran 
+    foot feet
+    introspective
+    introspection
+    introspected
+");
+```
+
+```surql title="Output"
+[
+	'manag',
+	'manag',
+	'manag',
+	'run',
+	'ran',
+	'foot',
+	'feet',
+	'introspect',
+	'introspect',
+	'introspect'
+]
+```
+
+Stemming is particularly useful in languages with complex but regular declension, such as Finnish. In the following example, the snowball filter is able to turn all declined forms of the word "talo" (house) into its root form.
+
+```surql
+DEFINE ANALYZER snowball_test TOKENIZERS blank,punct FILTERS snowball(finnish);
+search::analyze("snowball_test", "talo talon taloa talossa talostani taloonsa talolla talolta talolle talona taloksi taloin talotta taloineen");
+```
+
+```surql title="Output"
+['talo', 'talo', 'talo', 'talo', 'talo', 'talo', 'talo', 'talo', 'talo', 'talo', 'talo', 'talo', 'talot', 'talo']
+```
+
+The `mapper` filter is the most customizable of all, involving a list of strings and the strings they are to be mapped to. This filter requires a path to a text file, inside which each base form is followed by a word to map to it, separated by a tab.
+
+```text title="mapper.txt"
+run	ran
+foot	feet
+```
+
+In the case of the above example, the `mapper` will allow the output to show the base forms of the words "ran" and "feet".
+
+```surql
+DEFINE ANALYZER mapper TOKENIZERS blank FILTERS snowball(english),mapper('mapper.txt');
+search::analyze("mapper", "
+    manager managing management
+    running ran 
+    foot feet
+    introspective
+    introspection
+    introspected
+");
+```
+
+```surql
+[
+	'manag',
+	'manag',
+	'manag',
+	'run',
+	'run',
+	'foot',
+	'foot',
+	'introspect',
+	'introspect',
+	'introspect'
+]
+```
+
+The word `mapper` was intentionally chosen to be ambiguous, as this feature can be used to map any string to another string. It could be used for example to map cities to provinces, planets to stars, hieroglyphs to English words, and so on.
+
+```text title="mapper.txt"
+seated_man	𓀀
+man_with_hand_to_mouth	𓀁
+seated_woman	𓁐
+goddess_with_feather	𓁦
+```
+
+```surql
+DEFINE ANALYZER mapper TOKENIZERS blank FILTERS mapper('mapper.txt');
+search::analyze("mapper", "𓀀 𓁦");
+```
+
+```surql title="Output"
+[
+	'seated_man',
+	'goddess_with_feather'
+]
+```
+
+### Defining an index that uses an analyzer
+
+> [!NOTE]
+> Before SurrealDB version 3.0.0-alpha.8, the `FULLTEXT ANALYZER` clause used the syntax `SEARCH ANALYZER`.
+
+Once a search analyzer is defined, it can be applied to the fields of a table to make them searchable by [defining an index](/docs/surrealql/statements/define/indexes#full-text-search-index) that uses the `FULLTEXT ANALYZER` clause.
+
+```surql
+DEFINE ANALYZER my_analyzer
   TOKENIZERS class
   FILTERS lowercase, ascii;
 
--- Create a full-text search index
--- Full-text search indexes are defined on a single field
-DEFINE INDEX ml_title 
-  ON TABLE article 
-  FIELDS title 
-  FULLTEXT ANALYZER my_analyzer 
-  HIGHLIGHTS BM25;
-
-DEFINE INDEX ml_body 
-  ON TABLE article 
-  FIELDS body 
-  FULLTEXT ANALYZER my_analyzer 
-  HIGHLIGHTS BM25;
+DEFINE INDEX body_index ON TABLE article FIELDS body FULLTEXT ANALYZER my_analyzer;
+DEFINE INDEX title_index ON TABLE article FIELDS title FULLTEXT ANALYZER my_analyzer;
 ```
-With this setup:
 
-- `my_custom_analyzer` splits text by Unicode class changes (letters, digits, punctuation) and then lowercases and removes accents, turning the string `"Look! Full-Text-Search"` for example into the final tokens `['look', '!', 'full', '-', 'text', '-', 'search' ]`.
-- SurrealDB uses these tokens from the analyzer to build an inverted index over both the title and body fields.
-- The BM25 scoring function is used to rank documents.
-- `HIGHLIGHTS` are enabled, which allows SurrealDB to highlight matched terms in queries.
-
-### Querying Full-Text Data
-
-Assume you want to search for articles about “machine learning”, SurrealDB syntax might look like:
+An index can only be defined on a single field (column).
 
 ```surql
-SELECT *,
-  search::highlight("**", "**", 1) AS body,
-  search::highlight("##", "", 0) AS title,
-  search::score(0) + search::score(1) AS score
-FROM article
-WHERE title @0@ "machine"
-   OR body @1@ "machine learning"
-ORDER BY score DESC
-LIMIT 10;
+DEFINE ANALYZER my_analyzer
+  TOKENIZERS class
+  FILTERS lowercase, ascii;
+
+DEFINE INDEX body_index ON TABLE article FIELDS body, title FULLTEXT ANALYZER my_analyzer;
 ```
 
-Explanation:
+```surql title="Output"
+'Parse error: Expected one column, found 2
+ --> [5:55]
+  |
+5 | ...LDS body, title FULLTEXT ANALYZER my_analyzer;
+  |              ^^^^^
+'
+```
 
-- `search::highlight(...)`: SurrealDB can highlight the matched terms in the text.
-- `search::score()` works with the `BM25` ranking function to return the relevance score for the matched document.
-- `@@ "machine learning"`: SurrealDB will check if the tokens “machine” and “learning” appear in the title field’s FTS index. The number in between the two characters of the operator lets the database know in the above functions which part of the query to highlight and calculate a score for. If no search functions are used, this operator will be used as `@@` without a number (e.g. `WHERE title @@ "machine" OR body @@ "machine learning").
+### Querying
 
-## Resources 
+With the above indexes in place, it is now possible to use the `@@` operator (the `MATCHES` operator).
 
-- [Full Text Search reference guide](/docs/surrealdb/reference-guide/full-text-search), including comparison of Full Text Search to other methods
+- **Ranking / Scoring**: Once matches are found, an FTS engine ranks them to show the most relevant results first. Algorithms such as BM25 or TF-IDF look at how often terms appear in a document, or whether those terms appear in the title vs. the body, etc.
+
+- **Highlighting** : A good search experience shows where in the text the matches occur, often by wrapping matched terms in HTML tags or otherwise emphasizing them.
+
+```surql
+DEFINE ANALYZER my_analyzer
+  TOKENIZERS class
+  FILTERS lowercase, ascii;
+
+-- Two statements as full-text indexes must be defined on only one field
+DEFINE INDEX body_index ON TABLE article FIELDS body FULLTEXT ANALYZER my_analyzer;
+DEFINE INDEX title_index ON TABLE article FIELDS title FULLTEXT ANALYZER my_analyzer;
+
+CREATE article SET title = "Machine Learning!", body = "Machine learning, or ML, is all the rage these days. Developers are...";
+CREATE article SET title = "History of machines", body = "The earliest 'machine' used by our ancestors was a simple sharpened stone tool. It was...";
+
+SELECT body, title FROM article WHERE body @@ "machine" OR title @@ "machine";
+```
+
+```surql title="Output"
+[
+	{
+		body: 'Machine learning, or ML, is all the rage these days. Developers are...',
+		title: 'Machine Learning!'
+	},
+	{
+		body: "The earliest 'machine' used by our ancestors was a simple sharpened stone tool. It was...",
+		title: 'History of machines'
+	}
+]
+```
+
+To use highlighting and best match scoring on searches, the `BM25` and `HIGHLIGHTS` clauses can be added to the `DEFINE INDEX` statement. These enable you use the [`search::highlight`](/docs/surrealql/functions/database/search#searchhighlight) and [`search::score`](/docs/surrealql/functions/database/search#searchscore) functions.
+
+Inside a query, the `@@` operator takes a number that is matched with the same number passed into one of these functions. In the example below, the `WHERE text @0@ "night"` part of the query will match with `search::highlight("->", "<-", 0)` and `search::score(0) AS text_score`, while `title @1@ "hound"` will match with `search::score(1) AS title_score`.
+
+```surql
+DEFINE ANALYZER my_analyzer TOKENIZERS class, blank FILTERS lowercase, ascii;
+DEFINE INDEX text_index ON TABLE article FIELDS text FULLTEXT ANALYZER my_analyzer BM25 HIGHLIGHTS;
+DEFINE INDEX title_index ON TABLE article FIELDS title FULLTEXT ANALYZER my_analyzer BM25 HIGHLIGHTS;
+
+INSERT INTO article (title, text) VALUES
+    ("A Study in Scarlet", "IN the year 1878 I took my degree of Doctor of Medicine of the University of London, and proceeded to Netley to go through the course prescribed for surgeons in the army."),
+    ("A Study in Scarlet", "Having completed my studies there, I was duly attached to the Fifth Northumberland Fusiliers as Assistant Surgeon."),
+    ("The Sign of the Four", "SHERLOCK HOLMES took his bottle from the corner of the mantel-piece and his hypodermic syringe from its neat morocco case."),
+    ("The Hound of the Baskervilles", "MR. SHERLOCK HOLMES, who was usually very late in the mornings, save upon those not infrequent occasions when he was up all night, was seated at the breakfast table."),
+    ("The Hound of the Baskervilles", "I stood upon the hearth-rug and picked up the stick which our visitor had left behind him the night before.");
+
+SELECT
+    text,
+    title,
+    search::highlight("->", "<-", 0) AS title,
+    search::score(0) AS text_score,
+    search::score(1) AS title_score
+FROM article
+WHERE
+    text  @0@ "night" OR
+    title @1@ "hound";
+```
+
+```surql title="Output"
+[
+	{
+		text: 'MR. SHERLOCK HOLMES, who was usually very late in the mornings, save upon those not infrequent occasions when he was up all night, was seated at the breakfast table.',
+		text_score: 0.30209195613861084f,
+		title: 'MR. SHERLOCK HOLMES, who was usually very late in the mornings, save upon those not infrequent occasions when he was up all ->night<-, was seated at the breakfast table.',
+		title_score: 0.32491400837898254f
+	},
+	{
+		text: 'I stood upon the hearth-rug and picked up the stick which our visitor had left behind him the night before.',
+		text_score: 0.35619309544563293f,
+		title: 'I stood upon the hearth-rug and picked up the stick which our visitor had left behind him the ->night<- before.',
+		title_score: 0.32491400837898254f
+	}
+]
+```
+
+In addition to full-text search capabilities, SurrealDB has a number of other ways of working with text such as string similarity, regex matching, and functions that order text in different ways.
+
+## Other ways to work with text
+
+SurrealDB offers a large variety of ways to work with text, from simple operators to fuzzy searching, customized ordering, full-text search and more. In this guide, we will cover comparing and sorting text, contains functions and operators, equality and fuzzy equality, regex matching, string functions, and full-text search. 
+
+This will give you a comprehensive overview of the different ways to work with text in SurrealDB and which one to use in your specific use case.
+
+### Comparing and sorting text
+
+#### In `SELECT` queries
+
+The following example shows a few records created from an array of strings in an order that is sorted to the human eye: lowest to highest numbers, then A to Z.
+
+```surql
+FOR $word IN ['1', '2', '11', 'Ábaco', 'kitty', 'Zoo'] {
+	CREATE data SET val = $word;
+};
+```
+
+Inside a `SELECT` query, an `ORDER BY` clause can be used to order the output by one or more field names. For the above data, an ordered `SELECT` query looks like this.
+
+```surql
+SELECT VALUE val FROM data ORDER BY val;
+```
+
+However, in the case of strings, sorting is done by Unicode rank which often leads to output that seems out of order to the human eye. The output of the above query shows the following:
+
+```surql title="Output"
+[ '1', '11', '2', 'Zoo', 'kitty', 'Ábaco' ]
+```
+
+This is because:
+
+* '11' is ordered before '2', because the first character in the string '2' is greater than the first character in the string '1'.
+* 'Zoo' is ordered before 'kitty', because the first character in the string 'Zoo' is 'Z', number 0059 in the [list of Unicode characters](https://en.wikipedia.org/wiki/List_of_Unicode_characters#Basic_Latin). A lowercase 'k' is 0076 on the list and thus "greater", while the 'Á', registered as the "Latin Capital letter A with acute", is 0129 on the list.
+
+To sort strings in a more natural manner to the human eye, the keywords [`NUMERIC` and `COLLATE` (or both) can be used](/docs/surrealql/statements/select#sort-records-using-the-order-by-clause). `NUMERIC` will instruct strings that parse into numbers to be treated as such.
+
+```surql
+SELECT VALUE val FROM data ORDER BY val NUMERIC;
+```
+
+```surql title="Numberic strings now sorted as numbers"
+[ '1', '2', '11', 'Zoo', 'kitty', 'Ábaco' ]
+```
+
+`COLLATE` instructs unicode strings to sort by alphabetic order, rather than Unicode order.
+
+```surql
+SELECT VALUE val FROM data ORDER BY val COLLATE;
+```
+
+```surql title="Output"
+[ '1', '11', '2', 'Ábaco', 'kitty', 'Zoo' ]
+```
+
+And for the data in this example, `COLLATE NUMERIC` is likely what will be desired.
+
+```surql
+SELECT VALUE val FROM data ORDER BY val COLLATE NUMERIC;
+```
+
+```surql title="Output"
+[ '1', '2', '11', 'Ábaco', 'kitty', 'Zoo' ]
+```
+
+#### Sorting functions
+
+The functions [`array::sort_natural()`, `array::sort_lexical()`, and `array::sort_lexical_natural()`](/docs/surrealql/functions/database/array) can be used on ad-hoc data to return the same output as the `COLLATE` and `NUMERIC` clauses in a [`SELECT` statement](/docs/surrealql/statements/select).
+
+### Contains functions and operators
+
+The most basic way to see if one string is contained inside another is to use the `IN` operator, or the [`string::contains()` function](/docs/surrealql/functions/database/string#stringcontains).
+
+```surql
+-- false
+"Umple" IN "Rumplestiltskin";
+string::contains("Rumplestiltskin", "Umple");
+-- Same function using method syntax
+"Rumplestiltskin".contains("Umple");
+
+-- true
+"umple" IN "Rumplestiltskin";
+string::contains("Rumplestiltskin", "umple");
+"Rumplestiltskin".contains("umple");
+```
+
+SurrealDB has a number of [operators](/docs/surrealql/operators) to determine if all or some of the values of one array are contained in another, such as `CONTAINSALL` and `CONTAINSANY`, or `ALLINSIDE` and `ANYINSIDE`. The operators with `CONTAINS` and `INSIDE` perform the same behaviour, just in the opposite order.
+
+```surql
+-- If 1,2,3 contains each item in 1,2...
+[1,2,3] CONTAINSALL [1,2];
+-- then each item in 1,2 is inside 1,2,3
+[1,2] ALLINSIDE [1,2,3];
+```
+
+Because strings are essentially arrays of characters, these operators work with strings as well. 
+
+Both of these queries will return `true`.
+
+```surql
+"Rumplestiltskin" CONTAINSALL ["umple", "kin"];
+"kin" ALLINSIDE "Rumplestiltskin";
+["kin", "someotherstring"] ANYINSIDE "Rumplestiltskin";
+```
+
+### Equality and fuzzy equality
+
+SurrealDB offers quite a few algorithms inside the [string functions module](/docs/surrealql/functions/database/string) for distance or similarity comparison. They are:
+
+* `string::distance::damerau_levenshtein()`
+* `string::distance::normalized_damerau_levenshtein()`
+* `string::distance::hamming()`
+* `string::distance::levenshtein()`
+* `string::distance::normalized_levenshtein()`
+* `string::distance::osa_distance()`
+
+* `string::similarity::jaro()`
+* `string::similarity::jaro_winkler()`
+
+Which of these functions to choose depends on your personal use case.
+
+For example, fuzzy similarity and distance scores are not a measure of absolute equality and ordered similarity scores should only be used in comparisons against the same string. Take the following queries for example which return the score for the string "United" and "Unite":
+
+```surql
+-- return 131 and 111
+string::similarity::fuzzy("United Kingdom", "United");
+string::similarity::fuzzy("United Kingdom", "Unite");
+
+-- also return 131 and 111
+string::similarity::fuzzy("United", "United");
+string::similarity::fuzzy("United", "Unite");
+```
+
+While the word "Unite" is clearly closer to the word "United" than it is to "United Kingdom", the algorithm used for this function only considers how much of the second string is found in the first string.
+
+However, the `string::similarity::jaro()` function returns an output that approaches 1 if two strings are equal, making it a more apt solution when the first and second string may be entirely different. Using the same input strings as above shows that "Unite" is clearly the most similar of the strings that are not outright equal to "United".
+
+```surql
+-- 0.8095238095238096f
+string::similarity::jaro("United Kingdom", "United");
+-- 0.7857142857142857f
+string::similarity::jaro("United Kingdom", "Unite");
+-- 1
+string::similarity::jaro("United", "United");
+-- 0.9444444444444445f
+string::similarity::jaro("United", "Unite");
+```
+
+Another example of the large difference between algorithms is the Hamming distance algorithm, which only compares strings of equal length.
+
+```surql
+-- Error: strings have different length
+string::distance::hamming("United Kingdom", "United");
+-- Returns 0
+string::distance::hamming("United", "United");
+-- Returns 1
+string::distance::hamming("United", "Unitéd");
+-- Returns 6
+string::distance::hamming("United", "uNITED");
+```
+
+### Regex matching
+
+The `string::matches()` function can be used to perform regex matching on a string.
+
+```surql
+-- true
+string::matches("Cat", "[HC]at");
+-- Also true
+string::matches("Hat", "[HC]at");
+```
+
+### Other string functions
+
+SurrealDB has a large number of [string functions](/docs/surrealql/functions/database/string) that can be used manually to refine string searching, such as `string::lowercase()`, `string::starts_with()`, and `string::ends_with()`.
+
+```surql
+SELECT 
+    $this AS word, 
+    $this.lowercase() = "sleek" AS is_sleek
+FROM ["sleek", "SLEEK", "Sleek", "sleeek"];
+```
+
+```surql title="Output"
+[
+	{
+		is_sleek: true,
+		word: 'sleek'
+	},
+	{
+		is_sleek: true,
+		word: 'SLEEK'
+	},
+	{
+		is_sleek: true,
+		word: 'Sleek'
+	},
+	{
+		is_sleek: false,
+		word: 'sleeek'
+	}
+]
+```
+
+## Combining full-text and vector search
+
+SurrealDB has a number of function that combine full-text and vector search results. For more information on this pattern, see [this section](/docs/surrealdb/models/vector#hybrid-search-functions) in the page on vector search.
+
+## Resources
+
 - [`DEFINE INDEX`](/docs/surrealql/statements/define/indexes)
 - [`DEFINE ANALYZER`](/docs/surrealql/statements/define/analyzer)
 - [Search functions](/docs/surrealql/functions/database/search)
-    - `search::highlight`: Highlights the matching keywords for the predicate reference number.
-    - `search::offsets`: Returns the position of the matching keywords for the predicate reference number.
-    - `search::score`: Helps with scoring and ranking the search results based on their relevance to the search terms.
-    - `search::analyze`: Used to test the output of a defined search analyzer.
+- [SurrealDB search functions](/docs/surrealql/functions/database/search)
+- [SurrealDB operators](/docs/surrealql/operators)
+- Blog post: [Create a Search Engine with SurrealDB full-text Search](/blog/create-a-search-engine-with-surrealdb-full-text-search)
