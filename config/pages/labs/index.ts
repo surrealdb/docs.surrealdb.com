@@ -45,21 +45,35 @@ export const LAB_TOPICS = [
     'Beginner',
 ] as const;
 
+export const LAB_LANGUAGES = [
+    'Python',
+    'Rust',
+    'TypeScript',
+    'Go',
+    'Java',
+    'PHP',
+] as const;
+
 export const LAB_SIDEBAR = [
     {
         title: 'Filters',
         key: 'filters',
-        options: ['SurrealDB Official'],
+        options: ['SurrealDB Official', 'Community'],
     },
     {
-        title: 'Categories',
-        key: 'categories',
-        options: LAB_CATEGORIES,
+        title: 'Language',
+        key: 'languages',
+        options: LAB_LANGUAGES,
     },
     {
         title: 'Topics',
         key: 'topics',
         options: LAB_TOPICS,
+    },
+    {
+        title: 'Categories',
+        key: 'categories',
+        options: LAB_CATEGORIES,
     },
 ];
 

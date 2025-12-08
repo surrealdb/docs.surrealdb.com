@@ -8,5 +8,7 @@ author:
   avatar: lucifer-akirami
 topics:
   - Examples
+langugages:
+  - Python
 ---
 

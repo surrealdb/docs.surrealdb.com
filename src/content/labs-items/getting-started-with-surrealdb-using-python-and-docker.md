@@ -1,6 +1,6 @@
 ---
 title: "Getting started with SurrealDB using Python and Docker."
-url: https://code-maven.com/surrealdb-getting-started
+url: https://python.code-maven.com/surrealdb-getting-started
 category: Tutorials
 author:
   name: Gabor Szabo
@@ -8,5 +8,7 @@ author:
   avatar: gabor-szabo
 topics:
   - Beginner
+languages:
+  - Python
 ---
 

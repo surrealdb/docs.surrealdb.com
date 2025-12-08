@@ -5,5 +5,7 @@ category: Demos
 topics:
   - AI
   - Examples
+languages:
+  - Rust
 author: surrealdb
 ---

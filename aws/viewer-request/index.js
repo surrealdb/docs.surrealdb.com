@@ -123,6 +123,17 @@ const redirects = {
 	'/docs/surrealdb/deployment/digitalocean': '/docs/surrealdb/deployment',
 	'/docs/surrealdb/deployment/fly': '/docs/surrealdb/deployment',
 	'/docs/integrations/data-mangaement': '/docs/integrations/data-management',
+	// Redirect old reference-guide paths to models
+	'/docs/surrealdb/reference-guide/graph-relations': '/docs/surrealdb/models/graph',
+	'/docs/surrealdb/reference-guide/vector-search': '/docs/surrealdb/models/vector',
+	'/docs/surrealdb/reference-guide/full-text-search': '/docs/surrealdb/models/full-text-search',
+	'/docs/surrealdb/reference-guide/full_text_search': '/docs/surrealdb/models/full-text-search',
+	'/docs/surrealdb/reference-guide/security-best-practices': '/docs/surrealdb/security/security-best-practices',
+	'/docs/surrealdb/reference-guide/security_best_practices': '/docs/surrealdb/security/security-best-practices',
+	// Redirect old concepts paths to single page
+	'/docs/surrealdb/introduction/concepts/namespace': '/docs/surrealdb/introduction/concepts#system-structure',
+	'/docs/surrealdb/introduction/concepts/database': '/docs/surrealdb/introduction/concepts#system-structure'
+	
 };
 
 function compute(input) {
@@ -158,15 +169,17 @@ function compute(input) {
 	// Slash removal
 	if (path.endsWith('/')) path = path.slice(0, -1);
 
-	// Fixed redirects
-	if (redirects[path]) path = redirects[path];
-
-	// Convert underscores to hyphens in any path
+	// Convert underscores to hyphens in any path (do this before redirects)
 	if (path.includes('_')) {
-		const newPath = path.replace(/_/g, '-');
-		if (newPath !== path) {
-			path = newPath;
-		}
+		path = path.replace(/_/g, '-');
+	}
+
+	// Fixed redirects (check in a loop to handle chained redirects)
+	let redirectCount = 0;
+	const maxRedirects = 10; // Prevent infinite loops
+	while (redirects[path] && redirectCount < maxRedirects) {
+		path = redirects[path];
+		redirectCount++;
 	}
 
 	// Check that the URL points to a valid document
