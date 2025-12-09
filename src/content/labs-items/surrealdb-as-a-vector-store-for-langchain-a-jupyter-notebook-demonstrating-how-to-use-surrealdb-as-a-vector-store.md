@@ -9,5 +9,7 @@ author:
 topics:
   - Embedding
   - Examples
+languages:
+  - Python
 ---
 
