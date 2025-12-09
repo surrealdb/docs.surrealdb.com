@@ -1,7 +1,7 @@
 ---
 title: "SvelteKit Surreal Database Authentication"
 url: https://github.com/jdgamble555/sveltekit-surreal-js
-category: Tutorials
+category: Examples
 topics:
   - Examples
   - Beginner

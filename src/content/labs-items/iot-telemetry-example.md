@@ -1,7 +1,7 @@
 ---
 title: "IoT telemetry example"
 url: https://github.com/surrealdb/example-iot-telemetry
-category: Demos
+category: Examples
 topics:
   - Examples
 languages:
