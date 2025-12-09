@@ -22,27 +22,21 @@ import VideosLightImg from '@assets/img/labs-categories/videos.light.png';
 import VideosDarkImg from '@assets/img/labs-categories/videos.png';
 
 export const LAB_CATEGORIES = [
-    'CI/CD',
-    'Demos',
-    'Deployment Tools',
-    'Development Tools',
-    'Docker Images',
-    'Integrations',
-    'Libraries',
-    'SDKs',
-    'Templates',
-    'Tutorials',
-    'Videos',
+    'Blogposts',
+	'Code repositories',
+	'Videos'
 ] as const;
 
 export const LAB_TOPICS = [
     'AI',
+	'Embedding',
+	'Cloud',
     'Data Management',
-    'Embedding',
-    'Security',
     'Examples',
-    'Optimisation',
-    'Beginner',
+	'Libraries',
+    'Security',
+	'Templates',
+	'Tooling',
 ] as const;
 
 export const LAB_LANGUAGES = [
@@ -52,6 +46,7 @@ export const LAB_LANGUAGES = [
     'Go',
     'Java',
     'PHP',
+	'SurrealQL'
 ] as const;
 
 export const LAB_SIDEBAR = [
@@ -61,7 +56,7 @@ export const LAB_SIDEBAR = [
         options: ['SurrealDB Official', 'Community'],
     },
     {
-        title: 'Language',
+        title: 'Languages',
         key: 'languages',
         options: LAB_LANGUAGES,
     },
@@ -101,11 +96,13 @@ export const LABS_TOPICS_MAP: Record<
     Lowercase<(typeof LAB_TOPICS)[number]>,
     string
 > = {
-    ai: 'AI',
-    'data management': 'Data Management',
-    embedding: 'Embedding',
-    security: 'Security',
-    examples: 'Examples',
-    optimisation: 'Optimisation',
-    beginner: 'Beginner',
+	'ai': 'AI',
+	"data management": 'Data Management',
+	"examples": 'Examples',
+	"libraries": 'Libraries',
+	"security": 'Security',
+	"templates": 'Templates',
+	"tooling": 'Tooling',
+	"embedding": 'Embedding',
+	"cloud": 'Cloud',
 } as const;
