@@ -1,7 +1,7 @@
 ---
 title: "surrealdb-valibot"
 url: https://github.com/ShadowWolf308/surrealdb-valibot
-category: Libraries
+category: Code repositories
 author:
   name: Levy van der Valk
   role: Web Developer

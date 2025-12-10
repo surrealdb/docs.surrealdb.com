@@ -1,7 +1,7 @@
 ---
 title: "smig schema migration tool"
 url: https://github.com/kathysledge/smig
-category: Development Tools
+category: Code repositories
 topics:
   - Data Management
   - Examples

@@ -1,7 +1,7 @@
 ---
 title: "type-surrealdb"
 url: https://github.com/ibilux/type-surrealdb
-category: Libraries
+category: Code repositories
 author:
   name: Bilux
   role: Software Engineer

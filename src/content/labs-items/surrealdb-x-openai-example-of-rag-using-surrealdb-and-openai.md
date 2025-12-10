@@ -1,7 +1,7 @@
 ---
 title: "SurrealDB x OpenAI - Example of RAG using SurrealDB and OpenAI."
 url: https://github.com/Ce11an/surrealdb-openai
-category: Examples
+category: Code repositories
 author:
   name: Cellan Hall
   role: MLOps Engineer

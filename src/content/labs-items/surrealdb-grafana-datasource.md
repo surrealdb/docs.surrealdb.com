@@ -1,7 +1,7 @@
 ---
 title: "SurrealDB Grafana datasource"
 url: https://github.com/grafana/surrealdb-datasource
-category: Integrations
+category: Code repositories
 topics:
   - Data Management
 author:

@@ -7,7 +7,6 @@ author:
   role: Content Creator - Software Engineer
   avatar: fireship
 topics:
-  - Beginner
   - Examples
 ---
 

@@ -1,7 +1,7 @@
 ---
 title: "SurrealDB"
 url: https://github.com/surrealdb/surrealdb
-category: Development Tools
+category: Code repositories
 author: surrealdb
 topics: []
 ---

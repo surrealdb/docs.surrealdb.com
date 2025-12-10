@@ -1,10 +1,10 @@
 ---
 title: "SvelteKit Surreal Database Authentication"
 url: https://github.com/jdgamble555/sveltekit-surreal-js
-category: Examples
+category: Code repositories
 topics:
   - Examples
-  - Beginner
+  - Templates
 author:
   name: Jonathan Gamble
   role: Software Engineer

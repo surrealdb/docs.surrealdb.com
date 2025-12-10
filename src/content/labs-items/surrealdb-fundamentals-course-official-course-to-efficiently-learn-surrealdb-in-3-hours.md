@@ -3,7 +3,6 @@ title: "SurrealDB Fundamentals Course - Official course to efficiently learn Sur
 url: /learn/fundamentals
 category: Examples
 author: surrealdb
-topics:
-  - Beginner
+topics: []
 ---
 

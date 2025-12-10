@@ -7,6 +7,5 @@ author:
   role: Software Engineer
   avatar: dylan-vanmali
 topics:
-  - Data Management
+  - Tooling
 ---
-

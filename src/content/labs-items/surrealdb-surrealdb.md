@@ -1,7 +1,7 @@
 ---
 title: "surrealdb/surrealdb"
 url: https://hub.docker.com/r/surrealdb/surrealdb
-category: Docker Images
+category: Code repositories
 author: surrealdb
 topics: []
 ---

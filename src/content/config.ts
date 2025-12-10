@@ -29,14 +29,8 @@ const labCollection = defineCollection({
                     avatar: z.string(),
                 })
             ),
-            topics: z
-                .enum(LAB_TOPICS)
-                .array()
-                .max(2),
-            languages: z
-                .enum(LAB_LANGUAGES)
-                .array()
-                .optional(),
+            topics: z.optional(z.enum(LAB_TOPICS).array().max(2)),
+            languages: z.optional(z.enum(LAB_LANGUAGES).array().optional()),
         }),
 });
 

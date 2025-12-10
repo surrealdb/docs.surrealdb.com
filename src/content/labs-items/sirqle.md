@@ -1,11 +1,12 @@
 ---
 title: "Sirqle"
 url: https://github.com/PythiaSocialTech/sirqle
-category: Libraries
+category: Code repositories
 author:
   name: Tudor Andrei Dumitrascu
   role: Lead AI Developer
   avatar: tudor-andrei-dumitrascu
-topics: []
+topics:
+  - Libraries
 ---
 

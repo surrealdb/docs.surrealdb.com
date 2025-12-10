@@ -1,7 +1,7 @@
 ---
 title: "surrealdb-client-generator"
 url: https://github.com/sebastianwessel/surrealdb-client-generator
-category: Development Tools
+category: Code repositories
 author:
   name: Sebastian Wessel
   role: Software Engineer

@@ -1,7 +1,7 @@
 ---
 title: "surrealist"
 url: https://github.com/kotolex/surrealist
-category: Libraries
+category: Code repositories
 author:
   name: Kotolex
   role: Software Engineer
