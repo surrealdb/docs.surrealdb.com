@@ -23,21 +23,21 @@ import VideosDarkImg from '@assets/img/labs-categories/videos.png';
 
 export const LAB_CATEGORIES = [
     'Blogposts',
-	'Code repositories',
-	'Videos',
-	'Documentation',
-	'Learning Resources'
+    'Code repositories',
+    'Videos',
+    'Documentation',
+    'Learning Resources',
 ] as const;
 
 export const LAB_TOPICS = [
     'AI',
-	'Cloud',
+    'Cloud',
     'Data Management',
     'Examples',
-	'Libraries',
+    'Libraries',
     'Security',
-	'Templates',
-	'Tooling',
+    'Templates',
+    'Tooling',
 ] as const;
 
 export const LAB_LANGUAGES = [
@@ -47,7 +47,7 @@ export const LAB_LANGUAGES = [
     'Go',
     'Java',
     'PHP',
-	'SurrealQL'
+    'SurrealQL',
 ] as const;
 
 export const LAB_SIDEBAR = [
@@ -73,25 +73,28 @@ export const LAB_SIDEBAR = [
     },
 ];
 
-export const LAB_IMAGE_MAP: Record<typeof LAB_CATEGORIES[number], { light: ImageMetadata, dark: ImageMetadata }> = {
-	"Code repositories": { light: LibrariesLightImg, dark: LibrariesDarkImg },
-	"Videos": { light: VideosLightImg, dark: VideosDarkImg },
-	"Documentation": { light: IntegrationsLightImg, dark: IntegrationsDarkImg },
-	"Learning Resources": { light: DemosLightImg, dark: DemosDarkImg },
-	"Blogposts": { light: TemplatesLightImg, dark: TemplatesDarkImg },
+export const LAB_IMAGE_MAP: Record<
+    (typeof LAB_CATEGORIES)[number],
+    { light: ImageMetadata; dark: ImageMetadata }
+> = {
+    'Code repositories': { light: LibrariesLightImg, dark: LibrariesDarkImg },
+    Videos: { light: VideosLightImg, dark: VideosDarkImg },
+    Documentation: { light: IntegrationsLightImg, dark: IntegrationsDarkImg },
+    'Learning Resources': { light: DemosLightImg, dark: DemosDarkImg },
+    Blogposts: { light: TemplatesLightImg, dark: TemplatesDarkImg },
 } as const;
 
 export const LABS_TOPICS_MAP: Record<
     Lowercase<(typeof LAB_TOPICS)[number]>,
     string
 > = {
-	'ai': 'AI',
-	"data management": 'Data Management',
-	"examples": 'Examples',
-	"libraries": 'Libraries',
-	"security": 'Security',
-	"templates": 'Templates',
-	"tooling": 'Tooling',
-	"embedding": 'Embedding',
-	"cloud": 'Cloud',
+    ai: 'AI',
+    'data management': 'Data Management',
+    examples: 'Examples',
+    libraries: 'Libraries',
+    security: 'Security',
+    templates: 'Templates',
+    tooling: 'Tooling',
+    embedding: 'Embedding',
+    cloud: 'Cloud',
 } as const;

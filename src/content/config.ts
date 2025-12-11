@@ -1,6 +1,6 @@
 import { type CollectionEntry, defineCollection } from 'astro:content';
-import { z } from 'astro/zod';
 import { LAB_CATEGORIES, LAB_LANGUAGES, LAB_TOPICS } from '@config/pages/labs';
+import { z } from 'astro/zod';
 
 const abstractDoc = defineCollection({
     type: 'content',
