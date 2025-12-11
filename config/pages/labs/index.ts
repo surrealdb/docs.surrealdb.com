@@ -95,6 +95,5 @@ export const LABS_TOPICS_MAP: Record<
     security: 'Security',
     templates: 'Templates',
     tooling: 'Tooling',
-    embedding: 'Embedding',
     cloud: 'Cloud',
 } as const;
