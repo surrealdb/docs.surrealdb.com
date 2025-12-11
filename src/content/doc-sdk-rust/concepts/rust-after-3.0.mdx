@@ -13,7 +13,7 @@ The largest user experience improvement for Rust users of SurrealDB 3.0 is the [
 
 This crate was separated from the SurrealDB core to decouple types and type conversions from core database logic, and to allow other crates to make use of types on their own without needing the entire SurrealDB database along with it.
 
-# The `SurrealValue` trait
+## The `SurrealValue` trait
 
 The main difference between SurrealDB 3.0 and previous versions for Rust users is the existence of a `SurrealValue` trait that can be derived automatically. Deriving this trait is all that is needed to use a Rust type for serialization and deserialization.
 
@@ -122,7 +122,7 @@ Ok(Some(MyOwnDateTime(1760330504574)))
 Err(InternalError("Couldn't convert Object(Object({\"id\": RecordId(RecordId { table: \"person\", key: String(\"tcblzaktx3ponin9dyci\") })})) to MyOwnDateTime"))
 ```
 
-# Convenience methods for the `Value` type
+## Convenience methods for the `Value` type
 
 Importing the `SurrealValue` trait gives access to a lot of convenience methods.
 
@@ -256,4 +256,485 @@ async fn main() {
     // Round trip
     value.into_json_value().into_value();
 }
+```
+
+## Enum and struct attributes
+
+The `SurrealValue` trait can be customised using the `surreal` attribute. These are used in a similar way to [Serde attributes](https://serde.rs/attributes.html), though created in order to interact with SurrealQL in particular and thus often somewhat different.
+
+The currently available attributes are as follows.
+
+### `surreal(default)`
+
+The `surreal(default)` attribute is used to default to certain values when these values are not present when deserializing. The `Default` trait is required to use this.
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb_types::{SurrealValue, ToSql};
+
+#[derive(SurrealValue)]
+struct UserData {
+    num: i32,
+    other_num: i32,
+}
+
+#[derive(SurrealValue)]
+#[surreal(default)]
+struct UserDataDefault {
+    num: i32,
+    other_num: i32,
+}
+
+impl Default for UserDataDefault {
+    fn default() -> Self {
+        UserDataDefault {
+            num: 10,
+            other_num: 20,
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    db.use_ns("ns").use_db("db").await.unwrap();
+
+    let mut has_two_fields = db
+        .query("CREATE user SET num = 10, other_num = 20")
+        .await
+        .unwrap();
+
+    let mut has_one_field = db.query("CREATE user SET num = 5").await.unwrap();
+
+    println!(
+        "Regular deserialization from DB result: {}",
+        has_two_fields
+            .take::<Option<UserData>>(0)
+            .unwrap()
+            .unwrap()
+            .into_value()
+            .to_sql()
+    );
+
+    println!(
+        "Deserialization using DB result plus default value: {}",
+        has_one_field
+            .take::<Option<UserDataDefault>>(0)
+            .unwrap()
+            .unwrap()
+            .into_value()
+            .to_sql()
+    )
+}
+```
+
+```bash title="Output"
+Regular deserialization from DB result: { num: 10, other_num: 20 }
+Deserialization using DB result plus default value: { num: 5, other_num: 20 }
+```
+
+### `surreal(rename)`
+
+The `surreal(rename)` attribute is used to provide a different name for a field on the SurrealDB side than the one used in the Rust code.
+
+```rust
+use surrealdb_types::{SurrealValue, ToSql};
+
+#[derive(SurrealValue)]
+struct UserData {
+    num: i32,
+}
+
+#[derive(SurrealValue)]
+struct UserDataRename {
+    #[surreal(rename = "user_num")]
+    num: i32,
+}
+
+fn main() {
+    let user_data = UserData { num: 555 };
+    let user_data_rename = UserDataRename { num: 555 };
+
+    println!("Before rename: {}", user_data.into_value().to_sql());
+    println!("After rename: {}", user_data_rename.into_value().to_sql());
+}
+```
+
+```title = "Output"
+Before rename: { num: 555 }
+After rename: { user_num: 555 }
+```
+
+### `surreal(uppercase)` and `surreal(lowercase)`
+
+These two attributes are similar to `surreal(rename)` except that they apply to the casing of enum variants.
+
+```rust
+use surrealdb_types::{SurrealValue, ToSql};
+
+#[derive(SurrealValue)]
+enum LogLevel {
+    Debug(String),
+    Info(String),
+}
+
+#[derive(SurrealValue)]
+#[surreal(uppercase)]
+enum LogLevelUpper {
+    Debug(String),
+    Info(String),
+}
+
+#[derive(SurrealValue)]
+#[surreal(lowercase)]
+enum LogLevelLower {
+    Debug(String),
+    Info(String),
+}
+
+fn main() {
+    let log_level = LogLevel::Debug("User1".into());
+    let log_level_upper = LogLevelUpper::Debug("User1".into());
+    let log_level_lower = LogLevelLower::Debug("User1".into());
+
+    println!("Before attribute: {}", log_level.into_value().to_sql());
+    println!("After uppercase: {}", log_level_upper.into_value().to_sql());
+    println!("After lowercase: {}", log_level_lower.into_value().to_sql());
+}
+```
+
+```bash title = "Output"
+Before attribute: { Debug: 'User1' }
+After uppercase: { DEBUG: 'User1' }
+After lowercase: { debug: 'User1' }
+```
+
+### `surreal(tuple)`
+
+As SurrealQL does not have a tuple type, this attribute can be used to interface in which a Rust tuple struct is treated as an array (instead of a single value) and vice versa.
+
+```rust
+use surrealdb_types::{SurrealValue, ToSql};
+
+#[derive(SurrealValue)]
+struct UserData(i32);
+
+#[derive(SurrealValue)]
+#[surreal(tuple)]
+struct UserDataTuple(i32);
+
+fn main() {
+    println!(
+        "Without tuple attribute: {}",
+        UserData(555).into_value().to_sql()
+    );
+    println!(
+        "With tuple attribute: {}",
+        UserDataTuple(555).into_value().to_sql()
+    );
+}
+```
+
+```bash title="Output"
+Without tuple attribute: 555
+With tuple attribute: [555]
+```
+
+### `surreal(untagged)`
+
+The `surreal(untagged)` attribute removes the tag from the variant of an enum. This is similar to using `VALUE` in SurrealQL to show only the value and not the field name of a record.
+
+
+```rust
+use surrealdb_types::{SurrealValue, ToSql};
+
+#[derive(SurrealValue)]
+enum LogLevel {
+    Debug(String),
+    Info(String),
+}
+
+#[derive(SurrealValue)]
+#[surreal(untagged)]
+enum LogLevelUntagged {
+    Debug(String),
+    Info(String),
+}
+
+fn main() {
+    let log_level = LogLevel::Debug("User1".into());
+    let log_level_untagged = LogLevelUntagged::Debug("User1".into());
+
+    println!("Before untagged: {}", log_level.into_value().to_sql());
+    println!(
+        "After untagged: {}",
+        log_level_untagged.into_value().to_sql()
+    );
+}
+```
+
+
+```bash title="Output"
+Before untagged: { Debug: 'User1' }
+After untagged: 'User1'
+```
+
+### `surreal(tag)`
+
+The `surreal(tag)` attribute can be used to give a tag to a variant. This will create a structure in which the new tag value is the field name, and the variant its value.
+
+```rust
+use surrealdb_types::{SurrealValue, ToSql};
+
+#[derive(SurrealValue)]
+enum LogLevel {
+    Debug,
+    Info,
+}
+
+#[derive(SurrealValue)]
+#[surreal(tag = "log_level")]
+enum LogLevelTag {
+    Debug,
+    Info,
+}
+
+fn main() {
+    let log_level = LogLevel::Debug;
+    let log_level_tag = LogLevelTag::Debug;
+    println!("\n___surreal(tag)___");
+    println!("Before tag: {}", log_level.into_value().to_sql());
+    println!("After tag: {}", log_level_tag.into_value().to_sql());
+}
+```
+
+```bash title="Output"
+Before tag: { Debug: {  } }
+After tag: { log_level: 'Debug' }
+```
+
+### `surreal(content)`
+
+While the `surreal(tag)` attribute on its own can only be used on variants that do not hold data, the `surreal(content)` makes this possible.
+
+```rust
+use surrealdb_types::{SurrealValue, ToSql};
+
+#[derive(SurrealValue)]
+enum LogLevel {
+    Debug(String),
+    Info(String),
+}
+
+#[derive(SurrealValue)]
+#[surreal(tag = "log_level", content = "user")]
+enum LogLevelContent {
+    Debug(String),
+    Info(String),
+}
+
+fn main() {
+    let log_level = LogLevel::Debug("User1".to_string());
+    let log_level_tag = LogLevelContent::Debug("User1".to_string());
+
+    println!("Before content: {}", log_level.into_value().to_sql());
+    println!("After content: {}", log_level_tag.into_value().to_sql());
+}
+```
+
+```bash title="Output"
+Before content: { Debug: 'User1' }
+After content: { log_level: 'Debug', user: 'User1' }
+```
+
+### `surreal(value)`
+
+This attribute can be used on the fields of an enum marked with `surreal(untagged)` to give it a substitute value. The value that follows this attribute can be a NONE, NULL, bool, string, int, or float.
+
+```rust
+use surrealdb_types::{SurrealValue, ToSql};
+
+fn main() {
+    #[derive(Clone, Debug, SurrealValue)]
+    #[surreal(untagged)]
+    pub enum LogLevel {
+        Regular,
+        Verbose,
+        Off,
+    }
+
+    #[derive(Clone, Debug, SurrealValue)]
+    #[surreal(untagged)]
+    pub enum LogLevelValue {
+        #[surreal(value = "info")]
+        Regular,
+        #[surreal(value = "debug")]
+        Verbose,
+        #[surreal(value = NONE)]
+        Off,
+    }
+
+    println!("Only untagged: {}", LogLevel::Off.into_value().to_sql());
+    println!(
+        "Untagged plus value: {}",
+        LogLevelValue::Off.into_value().to_sql()
+    );
+}
+```
+
+```bash title="Output"
+With only untagged: 'Off'
+With untagged plus substitute value: NONE
+```
+
+### More examples
+
+Here are some more examples from the SurrealDB source code showing how the `surreal` attribute can be used.
+
+```rust
+use surrealdb_types::SurrealValue;
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(untagged)]
+enum EnumMixedWithValue {
+    #[surreal(value = false)]
+    None,
+    Some(Vec<String>),
+}
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(tag = "tag", content = "content")]
+enum EnumTaggedWithTagAndContent {
+    Foo,
+    Bar { prop: String },
+    Baz(String),
+    Qux(String, i64),
+}
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(tag = "tag", content = "content", lowercase)]
+enum EnumTaggedWithTagAndContentLowercase {
+    Foo,
+}
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(tag = "tag", content = "content", uppercase)]
+enum EnumTaggedWithTagAndContentUppercase {
+    Foo,
+}
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(tag = "tag")]
+enum EnumTaggedWithTag {
+    Foo,
+    Bar { prop: String },
+}
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(tag = "tag", lowercase)]
+enum EnumTaggedWithTagLowercase {
+    Foo,
+}
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(tag = "tag", uppercase)]
+enum EnumTaggedWithTagUppercase {
+    Foo,
+}
+
+#[derive(SurrealValue, Debug, PartialEq)]
+enum EnumTaggedVariant {
+    Foo,
+    Bar { prop: String },
+    Baz(String),
+    Qux(String, i64),
+}
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(lowercase)]
+enum EnumTaggedVariantLowercase {
+    Foo,
+}
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(uppercase)]
+enum EnumTaggedVariantUppercase {
+    Foo,
+}
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(untagged)]
+enum EnumUnitValue {
+    #[surreal(value = true)]
+    True,
+    #[surreal(value = false)]
+    False,
+    #[surreal(value = null)]
+    Null,
+    #[surreal(value = none)]
+    None,
+    #[surreal(value = "Hello")]
+    String,
+    #[surreal(value = 123)]
+    Int,
+    #[surreal(value = 123.45)]
+    Float,
+}
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(untagged)]
+enum EnumUntagged {
+    Foo,
+    Bar,
+}
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(untagged, lowercase)]
+enum EnumUntaggedLowercase {
+    Foo,
+    Bar,
+}
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(untagged, uppercase)]
+enum EnumUntaggedUppercase {
+    Foo,
+    Bar,
+}
+
+#[derive(SurrealValue, Debug, PartialEq)]
+struct PersonRenamed {
+    #[surreal(rename = "full_name")]
+    name: String,
+    #[surreal(rename = "years_old")]
+    age: i64,
+}
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(tuple)]
+struct StringWrapperTuple(String);
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(value = true)]
+struct UnitStructWithValue;
+
+#[derive(Clone, Debug, SurrealValue, PartialEq)]
+#[surreal(default)]
+struct TestDefault {
+    str: String,
+    boolean: bool,
+    optional: Option<String>,
+}
+
+impl Default for TestDefault {
+    fn default() -> Self {
+        TestDefault {
+            str: "default".to_string(),
+            boolean: true,
+            optional: None,
+        }
+    }
+}
+
+fn main() {}
 ```
