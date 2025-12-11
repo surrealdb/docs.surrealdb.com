@@ -24,12 +24,13 @@ import VideosDarkImg from '@assets/img/labs-categories/videos.png';
 export const LAB_CATEGORIES = [
     'Blogposts',
 	'Code repositories',
-	'Videos'
+	'Videos',
+	'Documentation',
+	'Learning Resources'
 ] as const;
 
 export const LAB_TOPICS = [
     'AI',
-	'Embedding',
 	'Cloud',
     'Data Management',
     'Examples',
@@ -72,24 +73,12 @@ export const LAB_SIDEBAR = [
     },
 ];
 
-export const LAB_IMAGE_MAP = {
-    'CI/CD': { light: CiCdLightImg, dark: CiCdDarkImg },
-    'Deployment Tools': {
-        light: DeploymentToolsLightImg,
-        dark: DeploymentToolsDarkImg,
-    },
-    'Development Tools': {
-        light: DevelopmentToolsLightImg,
-        dark: DevelopmentToolsDarkImg,
-    },
-    'Docker Images': { light: DockerImagesLightImg, dark: DockerImagesDarkImg },
-    Demos: { light: DemosLightImg, dark: DemosDarkImg },
-    Integrations: { light: IntegrationsLightImg, dark: IntegrationsDarkImg },
-    Libraries: { light: LibrariesLightImg, dark: LibrariesDarkImg },
-    SDKs: { light: SdksLightImg, dark: SdksDarkImg },
-    Templates: { light: TemplatesLightImg, dark: TemplatesDarkImg },
-    Tutorials: { light: TutorialsLightImg, dark: TutorialsDarkImg },
-    Videos: { light: VideosLightImg, dark: VideosDarkImg },
+export const LAB_IMAGE_MAP: Record<typeof LAB_CATEGORIES[number], { light: ImageMetadata, dark: ImageMetadata }> = {
+	"Code repositories": { light: LibrariesLightImg, dark: LibrariesDarkImg },
+	"Videos": { light: VideosLightImg, dark: VideosDarkImg },
+	"Documentation": { light: IntegrationsLightImg, dark: IntegrationsDarkImg },
+	"Learning Resources": { light: DemosLightImg, dark: DemosDarkImg },
+	"Blogposts": { light: TemplatesLightImg, dark: TemplatesDarkImg },
 } as const;
 
 export const LABS_TOPICS_MAP: Record<
