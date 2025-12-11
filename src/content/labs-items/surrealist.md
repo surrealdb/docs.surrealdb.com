@@ -4,6 +4,6 @@ url: https://app.surrealdb.com
 category: Code repositories
 author: surrealdb
 topics:
-  - Beginner
+  - Tooling
 ---
 

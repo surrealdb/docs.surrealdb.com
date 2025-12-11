@@ -7,7 +7,7 @@ author:
   role: Software Engineer
   avatar: karim-lalani
 topics:
-  - Embedding
+  - AI
   - Examples
 languages:
   - Python

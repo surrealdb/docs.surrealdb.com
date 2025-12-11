@@ -1,9 +1,8 @@
 ---
 title: "Aeon's Surreal Renaissance - Official book for in-depth learning through storytelling."
 url: /learn/book
-category: Blogposts
+category: Learning Resources
 author: surrealdb
-topics:
-	- Examples
+topics: []
 ---
 

@@ -1,7 +1,7 @@
 ---
 title: "Semantic search in Rust with SurrealDB and OpenAI"
 url: /blog/semantic-search-with-surrealdb-and-openai
-category: Examples
+category: Blogposts
 topics:
   - AI
   - Examples

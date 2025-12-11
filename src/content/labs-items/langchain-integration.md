@@ -1,7 +1,7 @@
 ---
 title: "LangChain integration"
 url: /docs/integrations/frameworks/langchain
-category: Integrations
+category: Documentation
 topics:
   - AI
   - Examples

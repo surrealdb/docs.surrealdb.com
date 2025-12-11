@@ -5,6 +5,6 @@ category: Code repositories
 author: surrealdb
 topics:
   - AI
-  - Embedding
+  - AI
 ---
 
