@@ -1,7 +1,7 @@
 ---
 title: "awaited-surrealdb"
 url: https://github.com/theopensource-company/awaited-surrealdb
-category: Libraries
+category: Code repositories
 author:
   name: Micha de Vries
   role: Software Engineer

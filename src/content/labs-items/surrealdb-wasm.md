@@ -1,7 +1,7 @@
 ---
 title: "surrealdb.wasm"
 url: https://github.com/surrealdb/surrealdb.wasm
-category: SDKs
+category: Code repositories
 author: surrealdb
 topics: []
 ---

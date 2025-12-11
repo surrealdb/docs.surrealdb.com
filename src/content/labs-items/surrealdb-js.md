@@ -1,7 +1,7 @@
 ---
 title: "surrealdb.js"
 url: https://github.com/surrealdb/surrealdb.js
-category: SDKs
+category: Code repositories
 author: surrealdb
 topics: []
 languages:

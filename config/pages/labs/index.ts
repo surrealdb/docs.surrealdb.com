@@ -22,27 +22,22 @@ import VideosLightImg from '@assets/img/labs-categories/videos.light.png';
 import VideosDarkImg from '@assets/img/labs-categories/videos.png';
 
 export const LAB_CATEGORIES = [
-    'CI/CD',
-    'Demos',
-    'Deployment Tools',
-    'Development Tools',
-    'Docker Images',
-    'Integrations',
-    'Libraries',
-    'SDKs',
-    'Templates',
-    'Tutorials',
+    'Blogposts',
+    'Code repositories',
     'Videos',
+    'Documentation',
+    'Learning Resources',
 ] as const;
 
 export const LAB_TOPICS = [
     'AI',
+    'Cloud',
     'Data Management',
-    'Embedding',
-    'Security',
     'Examples',
-    'Optimisation',
-    'Beginner',
+    'Libraries',
+    'Security',
+    'Templates',
+    'Tooling',
 ] as const;
 
 export const LAB_LANGUAGES = [
@@ -52,6 +47,7 @@ export const LAB_LANGUAGES = [
     'Go',
     'Java',
     'PHP',
+    'SurrealQL',
 ] as const;
 
 export const LAB_SIDEBAR = [
@@ -61,7 +57,7 @@ export const LAB_SIDEBAR = [
         options: ['SurrealDB Official', 'Community'],
     },
     {
-        title: 'Language',
+        title: 'Languages',
         key: 'languages',
         options: LAB_LANGUAGES,
     },
@@ -77,24 +73,15 @@ export const LAB_SIDEBAR = [
     },
 ];
 
-export const LAB_IMAGE_MAP = {
-    'CI/CD': { light: CiCdLightImg, dark: CiCdDarkImg },
-    'Deployment Tools': {
-        light: DeploymentToolsLightImg,
-        dark: DeploymentToolsDarkImg,
-    },
-    'Development Tools': {
-        light: DevelopmentToolsLightImg,
-        dark: DevelopmentToolsDarkImg,
-    },
-    'Docker Images': { light: DockerImagesLightImg, dark: DockerImagesDarkImg },
-    Demos: { light: DemosLightImg, dark: DemosDarkImg },
-    Integrations: { light: IntegrationsLightImg, dark: IntegrationsDarkImg },
-    Libraries: { light: LibrariesLightImg, dark: LibrariesDarkImg },
-    SDKs: { light: SdksLightImg, dark: SdksDarkImg },
-    Templates: { light: TemplatesLightImg, dark: TemplatesDarkImg },
-    Tutorials: { light: TutorialsLightImg, dark: TutorialsDarkImg },
+export const LAB_IMAGE_MAP: Record<
+    (typeof LAB_CATEGORIES)[number],
+    { light: ImageMetadata; dark: ImageMetadata }
+> = {
+    'Code repositories': { light: LibrariesLightImg, dark: LibrariesDarkImg },
     Videos: { light: VideosLightImg, dark: VideosDarkImg },
+    Documentation: { light: IntegrationsLightImg, dark: IntegrationsDarkImg },
+    'Learning Resources': { light: DemosLightImg, dark: DemosDarkImg },
+    Blogposts: { light: TemplatesLightImg, dark: TemplatesDarkImg },
 } as const;
 
 export const LABS_TOPICS_MAP: Record<
@@ -103,9 +90,10 @@ export const LABS_TOPICS_MAP: Record<
 > = {
     ai: 'AI',
     'data management': 'Data Management',
-    embedding: 'Embedding',
-    security: 'Security',
     examples: 'Examples',
-    optimisation: 'Optimisation',
-    beginner: 'Beginner',
+    libraries: 'Libraries',
+    security: 'Security',
+    templates: 'Templates',
+    tooling: 'Tooling',
+    cloud: 'Cloud',
 } as const;

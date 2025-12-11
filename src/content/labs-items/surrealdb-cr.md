@@ -1,7 +1,7 @@
 ---
 title: "surrealdb.cr"
 url: https://github.com/yorci/surrealdb.cr
-category: SDKs
+category: Code repositories
 author:
   name: Muhammed Yaşar
   role: Backend Crafter

@@ -1,9 +1,9 @@
 ---
 title: "Surrealist"
 url: https://app.surrealdb.com
-category: Development Tools
+category: Code repositories
 author: surrealdb
 topics:
-  - Beginner
+  - Tooling
 ---
 
