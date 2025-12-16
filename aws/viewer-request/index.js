@@ -9,7 +9,7 @@ const prefixExceptions = {
 	'/docs/cloud/advanced-topics/configure-an-instance': '/docs/cloud/getting-started/create-an-instance',
 	'/docs/cloud/advanced-topics/manage-organisation-permissions': '/docs/cloud/getting-started/create-an-organisation',
 	'/docs/cloud/advanced-topics/search-and-shortcuts': '/docs/cloud/tooling/search-and-shortcuts',
-	'/docs/cloud/advanced-topics/surrealql-editors': '/docs/cloud/tooling/surrealql-editors',
+	'/docs/cloud/advanced-topics/surrealql-editors': '/docs/cloud/tooling/search-and-shortcuts',
 }
 const redirects = {
 	'/docs': '/docs/surrealdb',
