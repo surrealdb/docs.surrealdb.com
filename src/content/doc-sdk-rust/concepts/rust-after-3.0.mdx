@@ -122,6 +122,238 @@ Ok(Some(MyOwnDateTime(1760330504574)))
 Err(InternalError("Couldn't convert Object(Object({\"id\": RecordId(RecordId { table: \"person\", key: String(\"tcblzaktx3ponin9dyci\") })})) to MyOwnDateTime"))
 ```
 
+## The `kind!` macro
+
+This crate includes a `kind!` macro which allows a SurrealQL type to be used directly instead of its Rust equivalent.
+
+This macro is especially useful when working with types like [literals](/docs/surrealql/datamodel/literals) which are similar to enums but can specify exact possible values in a way that Rust would require deriving `TryFrom` to work. In this case, the `SurrealValue` trait can be implemented manually and the `kind!` macro used for its `kind_of()` method.
+
+```rust
+fn kind_of() -> surrealdb_types::Kind {
+    kind!({ status: "good" } | { status: "goodwithnotification", notification: string} | { status: "error", at: datetime, reason: string })
+}
+```
+
+This is technically possible without the macro, but requires a lot more boilerplate. Here is the output when using `cargo expand` to show the generated code for the example above.
+
+```rust
+fn kind_of() -> surrealdb_types::Kind {
+    surrealdb_types::Kind::Either(
+        vec!([
+            surrealdb_types::Kind::Literal(
+                surrealdb_types::KindLiteral::Object(
+                    std::collections::BTreeMap::from([
+                        (
+                            "status".to_string(),
+                            surrealdb_types::Kind::Literal(
+                                surrealdb_types::KindLiteral::String("good".to_string()),
+                            ),
+                        ),
+                    ]),
+                ),
+            ),
+            surrealdb_types::Kind::Literal(
+                surrealdb_types::KindLiteral::Object(
+                    std::collections::BTreeMap::from([
+                        (
+                            "status".to_string(),
+                            surrealdb_types::Kind::Literal(
+                                surrealdb_types::KindLiteral::String(
+                                    "goodwithnotification".to_string(),
+                                ),
+                            ),
+                        ),
+                        ("notification".to_string(), surrealdb_types::Kind::String),
+                    ]),
+                ),
+            ),
+            surrealdb_types::Kind::Literal(
+                surrealdb_types::KindLiteral::Object(
+                    std::collections::BTreeMap::from([
+                        (
+                            "status".to_string(),
+                            surrealdb_types::Kind::Literal(
+                                surrealdb_types::KindLiteral::String("error".to_string()),
+                            ),
+                        ),
+                        ("at".to_string(), surrealdb_types::Kind::Datetime),
+                        ("reason".to_string(), surrealdb_types::Kind::String),
+                    ]),
+                ),
+            ),
+            ]),
+        ),
+}
+```
+
+The following example shows the `kind!` macro used for a Rust enum that manually implements `SurrealValue`, along with examples of its use from the Rust side to the SurrealDB side, and vice versa.
+
+```rust
+#[derive(SurrealValue)]
+struct Error {
+    at: Datetime,
+    reason: String,
+}
+
+enum Response {
+    Good,
+    GoodWithNotification(String),
+    Error(Error),
+}
+
+impl SurrealValue for Response {
+    fn kind_of() -> surrealdb_types::Kind {
+        kind!({ status: "good" } | { status: "goodwithnotification", notification: string} | { status: "error", at: datetime, reason: string })
+    }
+
+    fn into_value(self) -> Value {
+        let mut obj = Object::new();
+        match self {
+            Response::Good => {
+                obj.insert("status", "good");
+            }
+            Response::GoodWithNotification(n) => {
+                obj.insert("status", "goodwithnotification");
+                obj.insert("notification", n);
+            }
+            Response::Error(e) => {
+                obj.insert("status", "error");
+                obj.insert("at", e.at);
+                obj.insert("reason", e.reason);
+            }
+        }
+        Value::Object(obj)
+    }
+
+    fn from_value(value: Value) -> anyhow::Result<Self>
+    where
+        Self: Sized,
+    {
+        let Value::Object(o) = value else {
+            return Err(anyhow!("Should have been an object"));
+        };
+        let Some(Value::String(status)) = o.get("status") else {
+            return Err(anyhow!("Error trying to get 'status' field"));
+        };
+        match status.as_str() {
+            "Good" => Ok(Response::Good),
+            status @ "GoodWithNotification" => {
+                Ok(Response::GoodWithNotification(status.to_string()))
+            }
+            "Error" => {
+                let Some(Value::Datetime(at)) = o.get("at") else {
+                    return Err(anyhow!("Error trying to get 'at' field"));
+                };
+                let Some(Value::String(reason)) = o.get("reason") else {
+                    return Err(anyhow!("Error trying to get 'reason' field"));
+                };
+                Ok(Response::Error(Error {
+                    at: at.clone(),
+                    reason: reason.clone(),
+                }))
+            }
+            _ => Err(anyhow!("No status field for some reason")),
+        }
+    }
+
+    fn is_value(value: &Value) -> bool {
+        value.is_kind(&Self::kind_of())
+    }
+}
+
+use surrealdb::engine::any::connect;
+use surrealdb_types::{
+    Datetime, Object, SurrealValue, ToSql, Value,
+    anyhow::{self, anyhow},
+    kind,
+};
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    db.use_ns("main").use_db("main").await.unwrap();
+
+    // Turning DB results into Rust enum
+    let mut statuses = db.query("
+        { status: 'Good' };
+        { status: 'GoodWithNotification', notification: 'We need things to make us go. We need help.' };
+        { status: 'Error', at: d'1914-07-28', reason: 'General conflagration'};
+    ").await.unwrap();
+
+    println!(
+        "Good: {}",
+        statuses
+            .take::<Option<Response>>(0)
+            .unwrap()
+            .unwrap()
+            .into_value()
+            .to_sql_pretty()
+    );
+    println!(
+        "Good with notification: {}",
+        statuses
+            .take::<Option<Response>>(1)
+            .unwrap()
+            .unwrap()
+            .into_value()
+            .to_sql_pretty()
+    );
+    println!(
+        "Error: {}",
+        statuses
+            .take::<Option<Response>>(2)
+            .unwrap()
+            .unwrap()
+            .into_value()
+            .to_sql_pretty()
+    );
+
+    // Turn Rust enum into Values,
+    // use them in the CONTENT clause
+    // and then print the result
+    let good = Response::Good;
+    let good_but = Response::GoodWithNotification("Keep it up!".into());
+    let error = Response::Error(Error {
+        at: Datetime::now(),
+        reason: "Error: can't think of interesting error message".into(),
+    });
+
+    println!(
+        "Good: {:?}",
+        db.query("CREATE result CONTENT $content")
+            .bind(("content", good))
+            .await
+            .unwrap()
+            .take::<Option<Value>>(0)
+            .unwrap()
+            .unwrap()
+            .to_sql()
+    );
+    println!(
+        "Good but: {:?}",
+        db.query("CREATE result CONTENT $content")
+            .bind(("content", good_but))
+            .await
+            .unwrap()
+            .take::<Option<Value>>(0)
+            .unwrap()
+            .unwrap()
+            .to_sql()
+    );
+    println!(
+        "Error: {:?}",
+        db.query("CREATE result CONTENT $content")
+            .bind(("content", error))
+            .await
+            .unwrap()
+            .take::<Option<Value>>(0)
+            .unwrap()
+            .unwrap()
+            .to_sql()
+    );
+}
+```
+
 ## Convenience methods for the `Value` type
 
 Importing the `SurrealValue` trait gives access to a lot of convenience methods.
