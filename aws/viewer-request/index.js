@@ -29,6 +29,7 @@ const versions = [
 const prefixes = {
 	'/docs/integration/libraries/': '/docs/sdk/',
 	'/docs/surrealdb/integration/sdks/': '/docs/sdk/',
+	'/docs/cloud/advanced-topics/': '/docs/cloud/operate-and-manage/',
 }
 
 // List of static redirects from A to B
@@ -132,7 +133,10 @@ const redirects = {
 	'/docs/surrealdb/reference-guide/security_best_practices': '/docs/surrealdb/security/security-best-practices',
 	// Redirect old concepts paths to single page
 	'/docs/surrealdb/introduction/concepts/namespace': '/docs/surrealdb/introduction/concepts#system-structure',
-	'/docs/surrealdb/introduction/concepts/database': '/docs/surrealdb/introduction/concepts#system-structure'
+	'/docs/surrealdb/introduction/concepts/database': '/docs/surrealdb/introduction/concepts#system-structure',
+	// Redirect cloud advanced-topics to operate-and-manage
+	'/docs/cloud/advanced-topics': '/docs/cloud/operate-and-manage',
+	'/docs/cloud/advanced-topics/manage-organisation-permissions': '/docs/cloud/getting-started/create-an-organisation'
 	
 };
 
