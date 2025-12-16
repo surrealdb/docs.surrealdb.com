@@ -32,6 +32,14 @@ const prefixes = {
 	'/docs/cloud/advanced-topics/': '/docs/cloud/operate-and-manage/',
 }
 
+// Exceptions for prefix redirects - paths that need custom destinations
+const prefixExceptions = {
+	'/docs/cloud/advanced-topics/configure-an-instance': '/docs/cloud/getting-started/create-an-instance',
+	'/docs/cloud/advanced-topics/manage-organisation-permissions': '/docs/cloud/getting-started/create-an-organisation',
+	'/docs/cloud/advanced-topics/search-and-shortcuts': '/docs/cloud/tooling/search-and-shortcuts',
+	'/docs/cloud/advanced-topics/surrealql-editors': '/docs/cloud/tooling/surrealql-editors',
+}
+
 // List of static redirects from A to B
 const redirects = {
 	// Redirect root to SurrealDB docs
@@ -78,7 +86,6 @@ const redirects = {
 	'/docs/surrealdb/surrealql/functions/time': '/docs/surrealdb/surrealql/functions/database/time',
 	'/docs/surrealdb/surrealql/functions/type': '/docs/surrealdb/surrealql/functions/database/type',
 	'/docs/surrealdb/surrealql/functions/vector': '/docs/surrealdb/surrealql/functions/database/vector',
-	// Redirect old directory structure
 	'/docs/intro': '/docs/surrealdb',
 	'/docs/surrealdb/intro': '/docs/surrealdb',
 	'/docs/cli/overview': '/docs/surrealdb/cli',
@@ -118,26 +125,17 @@ const redirects = {
 	'/docs/surrealql/statements/remove/overview': '/docs/surrealql/statements/remove',
 	'/docs/surrealdb/surrealql/statements/remove/overview': '/docs/surrealql/statements/remove',
 	'/docs/surrealdb/installation/upgrading/beta': '/docs/installation/upgrading/migrating-data-to-2x',
-	// Redirect removed deployment guides to main deployment page
 	'/docs/surrealdb/deployment/heroku': '/docs/surrealdb/deployment',
 	'/docs/surrealdb/deployment/railway': '/docs/surrealdb/deployment',
 	'/docs/surrealdb/deployment/digitalocean': '/docs/surrealdb/deployment',
 	'/docs/surrealdb/deployment/fly': '/docs/surrealdb/deployment',
 	'/docs/integrations/data-mangaement': '/docs/integrations/data-management',
-	// Redirect old reference-guide paths to models
 	'/docs/surrealdb/reference-guide/graph-relations': '/docs/surrealdb/models/graph',
 	'/docs/surrealdb/reference-guide/vector-search': '/docs/surrealdb/models/vector',
 	'/docs/surrealdb/reference-guide/full-text-search': '/docs/surrealdb/models/full-text-search',
 	'/docs/surrealdb/reference-guide/full_text_search': '/docs/surrealdb/models/full-text-search',
 	'/docs/surrealdb/reference-guide/security-best-practices': '/docs/surrealdb/security/security-best-practices',
 	'/docs/surrealdb/reference-guide/security_best_practices': '/docs/surrealdb/security/security-best-practices',
-	// Redirect old concepts paths to single page
-	'/docs/surrealdb/introduction/concepts/namespace': '/docs/surrealdb/introduction/concepts#system-structure',
-	'/docs/surrealdb/introduction/concepts/database': '/docs/surrealdb/introduction/concepts#system-structure',
-	// Redirect cloud advanced-topics to operate-and-manage
-	'/docs/cloud/advanced-topics': '/docs/cloud/operate-and-manage',
-	'/docs/cloud/advanced-topics/manage-organisation-permissions': '/docs/cloud/getting-started/create-an-organisation'
-	
 };
 
 function compute(input) {
@@ -162,16 +160,21 @@ function compute(input) {
 		path = `/docs/surrealdb${match[2] || ''}`;
 	}
 
+	// Slash removal (before prefix redirects to match exception paths)
+	if (path.endsWith('/')) path = path.slice(0, -1);
+
 	// Prefixed redirects
-	for (const prefix in prefixes) {
-		if (path.startsWith(prefix)) {
-			path = `${prefixes[prefix]}${path.slice(prefix.length)}`;
-			break;
+	// Check exceptions first, then apply general prefix redirects
+	if (prefixExceptions[path]) {
+		path = prefixExceptions[path];
+	} else {
+		for (const prefix in prefixes) {
+			if (path.startsWith(prefix)) {
+				path = `${prefixes[prefix]}${path.slice(prefix.length)}`;
+				break;
+			}
 		}
 	}
-
-	// Slash removal
-	if (path.endsWith('/')) path = path.slice(0, -1);
 
 	// Convert underscores to hyphens in any path (do this before redirects)
 	if (path.includes('_')) {
