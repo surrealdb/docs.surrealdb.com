@@ -1,0 +1,295 @@
+---
+sidebar_position: 10
+sidebar_label: Multi-tenancy in 3.0
+title: Multi-tenancy in the Rust SDK
+description: Multi-tenancy was introduced in SurrealDB 3.0, allowing multiple connections to be used simultaneously in the Rust SDK.
+---
+
+# Multi-tenancy
+
+Multi-tenancy was introduced in SurrealDB 3.0, allowing each tenant to operate inside its own isolated namespace and database.
+
+This PR introduces multi-session support to the Rust SDK through a session cloning mechanism. When you clone a `Surreal<C>` client instance, it creates a new session with independent state while sharing the underlying database connection. Sessions share the same physical connection for efficiency, are thread-safe and can be used concurrently across Tokio tasks, and work with all connection types (embedded and remote).
+
+Each cloned instance maintains its own:
+
+* Namespace and database selection (use_ns/use_db)
+* Authentication state (signin/signup/invalidate)
+* Session variables (set/unset)
+* Transactions (begin/commit/cancel)
+
+Note that these will remain unchanged when cloning a connection.
+
+```rust
+use surrealdb::Surreal;
+use surrealdb::engine::local::Mem;
+use surrealdb_types::{ToSql, Value};
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = Surreal::new::<Mem>(()).await?;
+    db.use_ns("ns").use_db("db").await?;
+    db.set("val", 1).await?;
+    println!("$val is `{}`", db.query("$val").await?.take::<Value>(0).unwrap().to_sql());
+    let new = db.clone();
+    println!("$val is still `{}` in the new session", new.query("$val").await?.take::<Value>(0).unwrap().to_sql());
+    
+    // Set to a different value inside 'new'
+    new.set("val", 100).await?;
+
+    println!("$val is still `{}` in the original", db.query("$val").await?.take::<Value>(0).unwrap().to_sql());
+    println!("But is now `{}` in the new session", new.query("$val").await?.take::<Value>(0).unwrap().to_sql());
+    Ok(())
+}
+```
+
+If a connection without any set values is desired, using a static singleton along with a convenience function is one way to achieve this.
+
+```rust
+use std::sync::OnceLock;
+use surrealdb::engine::any::connect;
+use surrealdb::{Surreal, engine::any::Any};
+
+static DB: OnceLock<Surreal<Any>> = OnceLock::new();
+
+async fn new_with(namespace: &str, database: &str) -> Surreal<Any> {
+    let db = DB.get().unwrap().clone();
+    db.use_ns(namespace).use_db(database).await.unwrap();
+    db
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    // Set the overall connection
+    DB.set(connect("memory").await?).unwrap();
+
+    // NS and DB must now be specifically indicated to use
+    let session1 = new_with("acme", "app").await;
+    let session1 = new_with("user", "app").await;
+    Ok(())
+}
+```
+
+Before version 3.0, cloning a `Surreal<C>` would create a cheap clone of the same session. If you have been using `.clone()` to pass on a `Surreal<C>` without a need for multi-tenancy, it is now preferable to wrap the client inside a type like an `Arc` to ensure that only the wrapper is cloned. Doing so will be somewhat more performant, as this example shows.
+
+```rust
+use std::sync::Arc;
+use std::time::Instant;
+
+use surrealdb::Surreal;
+use surrealdb::engine::local::Mem;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = Surreal::new::<Mem>(()).await?;
+    db.use_ns("ns").use_db("db").await?;
+
+    let now = Instant::now();
+    for _ in 0..100 {
+        let cloned = db.clone();
+        cloned
+            .query(
+                "
+            LET $one = CREATE ONLY person;
+            LET $two = CREATE ONLY person;
+            RELATE $one->likes->$two;
+        ",
+            )
+            .await?;
+    }
+    println!("Elapsed: {:?}", now.elapsed());
+
+    let arced = Arc::new(db);
+    let now = Instant::now();
+    for _ in 0..100 {
+        let cloned_arc = Arc::clone(&arced);
+        cloned_arc
+            .query(
+                "
+            LET $one = CREATE ONLY person;
+            LET $two = CREATE ONLY person;
+            RELATE $one->likes->$two;
+        ",
+            )
+            .await?;
+    }
+    println!("Elapsed: {:?}", now.elapsed());
+
+    Ok(())
+}
+```
+
+Let's now take a look at some usage examples that take advantage of the new multi-tenancy available in SurrealDB 3.0.
+
+## Usage examples
+
+This first example shows how to use multi-session support to implement multi-tenancy, where each tenant operates in their own isolated namespace:
+
+```rust
+use surrealdb::Surreal;
+use surrealdb::engine::local::Mem;
+use surrealdb::opt::Resource;
+use surrealdb::types::{RecordId, SurrealValue, object};
+
+#[derive(Debug, SurrealValue)]
+struct User {
+    id: RecordId,
+    name: String,
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    // Create the base database connection
+    let db = Surreal::new::<Mem>(()).await?;
+
+    // Tenant 1: ACME Corporation
+    let acme_db = db.clone();
+    acme_db.use_ns("acme").use_db("app").await?;
+    acme_db
+        .create(Resource::from(("user", "john")))
+        .content(object! { name: "John from ACME" })
+        .await?;
+
+    // Tenant 2: Widget Inc
+    let widget_db = db.clone();
+    widget_db.use_ns("widget").use_db("app").await?;
+    widget_db
+        .create(Resource::from(("user", "john")))
+        .content(object! { name: "John from Widget Inc" })
+        .await?;
+
+    // Tenant 3: Example LLC
+    let example_db = db.clone();
+    example_db.use_ns("example").use_db("app").await?;
+    example_db
+        .create(Resource::from(("user", "john")))
+        .content(object! { name: "John from Example LLC" })
+        .await?;
+
+    // Each tenant sees only their own data
+    let acme_users: Vec<User> = acme_db.select("user").await?;
+    println!("ACME users: {acme_users:?}");
+    // Output: [User { id: user:john, name: "John from ACME" }]
+
+    let widget_users: Vec<User> = widget_db.select("user").await?;
+    println!("Widget users: {widget_users:?}");
+    // Output: [User { id: user:john, name: "John from Widget Inc" }]
+
+    // Tenants can operate concurrently without interfering with each other
+    let acme_alice = acme_db
+        .create(Resource::from(("user", "alice")))
+        .content(object! { name: "Alice from ACME" });
+    let widget_alice = widget_db
+        .create(Resource::from(("user", "alice")))
+        .content(object! { name: "Alice from Widget" });
+    tokio::try_join!(acme_alice, widget_alice)?;
+
+    Ok(())
+}
+```
+
+The next example demonstrates querying across multiple databases simultaneously to aggregate data:
+
+```rust
+use surrealdb::Surreal;
+use surrealdb::engine::local::Mem;
+use surrealdb::types::Decimal;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    // Create the base database connection
+    let db = Surreal::new::<Mem>(()).await?;
+
+    // Database 1: North America sales
+    let na_db = db.clone();
+    na_db.use_ns("company").use_db("sales_na").await?;
+    na_db
+        .query(r#"
+            CREATE sale:1 SET amount = 1000.00dec, region = "North America";
+            CREATE sale:2 SET amount = 1500.00dec, region = "North America";
+            CREATE sale:3 SET amount = 2000.00dec, region = "North America";
+        "#)
+        .await?
+        .check()?;
+
+    // Database 2: Europe sales
+    let eu_db = db.clone();
+    eu_db.use_ns("company").use_db("sales_eu").await?;
+    eu_db
+        .query(r#"
+            CREATE sale:1 SET amount = 1200.00dec, region = "Europe";
+            CREATE sale:2 SET amount = 1800.00dec, region = "Europe";
+        "#)
+        .await?
+        .check()?;
+
+    // Database 3: Asia sales
+    let asia_db = db.clone();
+    asia_db.use_ns("company").use_db("sales_asia").await?;
+    asia_db
+        .query(r#"
+            CREATE sale:1 SET amount = 3000.00dec, region = "Asia";
+            CREATE sale:2 SET amount = 2500.00dec, region = "Asia";
+            CREATE sale:3 SET amount = 1800.00dec, region = "Asia";
+        "#)
+        .await?
+        .check()?;
+
+    // Query all databases concurrently
+    let (mut na_result, mut eu_result, mut asia_result) = tokio::try_join!(
+        na_db.query("RETURN { total: math::sum((SELECT VALUE amount FROM sale)) }"),
+        eu_db.query("RETURN { total: math::sum((SELECT VALUE amount FROM sale)) }"),
+        asia_db.query("RETURN { total: math::sum((SELECT VALUE amount FROM sale)) }"),
+    )?;
+
+    let na_total = na_result
+        .take::<Option<Decimal>>("total")?
+        .unwrap_or_default();
+    let eu_total = eu_result
+        .take::<Option<Decimal>>("total")?
+        .unwrap_or_default();
+    let asia_total = asia_result
+        .take::<Option<Decimal>>("total")?
+        .unwrap_or_default();
+
+    println!("North America total: ${na_total:.2}"); // $4500.00
+    println!("Europe total: ${eu_total:.2}"); // $3000.00
+    println!("Asia total: ${asia_total:.2}"); // $7300.00
+    println!("Grand total: ${:.2}", na_total + eu_total + asia_total); // $14800.00
+
+    // You can also perform complex operations on specific databases
+    // while maintaining independent session variables
+    na_db.set("discount_rate", 0.1).await?;
+    eu_db.set("discount_rate", 0.15).await?;
+    asia_db.set("discount_rate", 0.05).await?;
+
+    let (mut na_result, mut eu_result, mut asia_result) = tokio::try_join!(
+        na_db.query(
+            "RETURN { total: math::sum((SELECT VALUE amount * (1 - $discount_rate) FROM sale)) }"
+        ),
+        eu_db.query(
+            "RETURN { total: math::sum((SELECT VALUE amount * (1 - $discount_rate) FROM sale)) }"
+        ),
+        asia_db.query(
+            "RETURN { total: math::sum((SELECT VALUE amount * (1 - $discount_rate) FROM sale)) }"
+        ),
+    )?;
+
+    println!("\nWith regional discounts:");
+    let na_disc = na_result
+        .take::<Option<Decimal>>("total")?
+        .unwrap_or_default();
+    let eu_disc = eu_result
+        .take::<Option<Decimal>>("total")?
+        .unwrap_or_default();
+    let asia_disc = asia_result
+        .take::<Option<Decimal>>("total")?
+        .unwrap_or_default();
+
+    println!("North America (10% off): ${na_disc:.2}"); // $4050.00
+    println!("Europe (15% off): ${eu_disc:.2}"); // $2550.00
+    println!("Asia (5% off): ${asia_disc:.2}"); // $6935.00
+
+    Ok(())
+}
+```
