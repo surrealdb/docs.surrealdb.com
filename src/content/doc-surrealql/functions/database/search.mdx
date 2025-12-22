@@ -1,9 +1,11 @@
 ---
-sidebar_position: 18
+sidebar_position: 19
 sidebar_label: Search functions
 title: Search functions | SurrealQL
 description: These functions are used in conjunction with the 'matches' operator to either collect the relevance score or highlight the searched keywords within the content.
 ---
+
+import Since from '@components/shared/Since.astro'
 
 # Search functions
 
@@ -24,8 +26,16 @@ These functions are used in conjunction with the [`@@` operator (the 'matches' o
       <td scope="row" data-label="Function"><a href="#searchhighlight"><code>search::highlight()</code></a></td>
       <td scope="row" data-label="Description">Highlights the matching keywords</td>
     <tr>
+    <tr>
+      <td scope="row" data-label="Function"><a href="#searchlinear"><code>search::linear()</code></a></td>
+      <td scope="row" data-label="Description"><Since v="v3.0.0-alpha.8" /> Performs weighted linear search</td>
+    </tr>
       <td scope="row" data-label="Function"><a href="#searchoffsets"><code>search::offsets()</code></a></td>
       <td scope="row" data-label="Description">Returns the position of the matching keywords</td>
+    </tr>
+    <tr>
+      <td scope="row" data-label="Function"><a href="#searchrrf"><code>search::rrf()</code></a></td>
+      <td scope="row" data-label="Description"><Since v="v3.0.0-alpha.8" /> Performs RRF (reciprocal rank fusion) search</td>
     </tr>
     <tr>
       <td scope="row" data-label="Function"><a href="#searchscore"><code>search::score()</code></a></td>
@@ -35,12 +45,16 @@ These functions are used in conjunction with the [`@@` operator (the 'matches' o
 </table>
 
 <br/>
+
+> [!NOTE]
+> Before SurrealDB version 3.0.0-alpha.8, the `FULLTEXT ANALYZER` clause used the syntax `SEARCH ANALYZER`.
+
 The examples below assume the following queries:
 
 ```surql
 CREATE book:1 SET title = "Rust Web Programming";
 DEFINE ANALYZER book_analyzer TOKENIZERS blank, class, camel, punct FILTERS snowball(english);
-DEFINE INDEX book_title ON book FIELDS title SEARCH ANALYZER book_analyzer BM25;
+DEFINE INDEX book_title ON book FIELDS title FULLTEXT ANALYZER book_analyzer BM25;
 ```
 
 ## `search::analyze`
@@ -85,34 +99,6 @@ RETURN search::analyze("book_analyzer", "A hands-on guide to developing, packagi
 ]
 ```
 
-## `search::score`
-
-The `search::score` function returns the relevance score corresponding to the given 'matches' predicate reference numbers.
-
-```surql title="API DEFINITION"
-search::score(number) -> number
-```
-
-The following example shows this function, and its output, when used in a [`RETURN`](/docs/surrealql/statements/return) statement:
-
-```surql
-SELECT id, title, search::score(1) AS score FROM book
-	WHERE title @1@ 'rust web'
-	ORDER BY score DESC;
-```
-
-```surql title="Output"
-[
-	{
-		id: book:1,
-		score: 0.9227996468544006,
-		title: [ 'Rust Web Programming' ],
-	}
-]
-```
-
-<br />
-
 ## `search::highlight`
 
 The `search::highlight` function highlights the matching keywords for the predicate reference number.
@@ -120,6 +106,7 @@ The `search::highlight` function highlights the matching keywords for the predic
 ```surql title="API DEFINITION"
 search::highlight(string, string, number, [boolean]) -> string | string[]
 ```
+
 The following example shows this function, and its output, when used in a [`RETURN`](/docs/surrealql/statements/return) statement:
 
 ```surql
@@ -141,6 +128,136 @@ or set to `false` to highlight only the sequence of characters we are looking fo
 The default value is true.
 
 <br />
+
+## `search::linear`
+
+```surql title="API DEFINITION"
+search::linear(lists: array, weights: array, limit: int, norm: 'minmax' | 'zscore') -> array<object>
+```
+
+Notes on the arguments and output of this function:
+
+- **Input**:
+  - `lists` - array of result arrays. Each inner array must be pre‑sorted most‑relevant‑first (BM25 score descending, distance ascending already inverted, etc.).
+  - `weights` - An array of numeric weights corresponding to each result(must have same length as results)
+  - `limit` - Maximum number of documents to return (must be ≥ 1)
+  - `norm` - Normalization method: "minmax" for MinMax normalization or "zscore" for Z-score normalization
+- **Processing:**
+  - Computes the union of all candidate ids.
+  - The function automatically extracts scores from documents using the following priority:
+    1. `distance` field - converted using `1.0 / (1.0 + distance)` (lower distance = higher score)
+    2. `ft_score` field - used directly (full-text search scores)
+    3. `score` field - used directly (generic scores)
+    4. Rank-based fallback - `1.0 / (1.0 + rank)` if no score field is found
+  - Normalization Methods:
+    - **MinMax**: Scales scores to [0,1] range using `(score - min) / (max - min)`
+    - **Z-score**: Standardizes scores using `(score - mean) / std_dev`
+  - When merging field data from the per‑list rows, keeps the first non‑null value encountered in the order the lists were supplied, or the last one if there are several fields with the same key.
+  - Sorts by `linear_score` descending and truncates to limit.
+- **Output:**
+  - Array of merged result objects, each containing original fields and an added fuse_score.
+
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "[{ embedding: [0.1f, 0.2f, 0.3f], id: test:1, text: 'Graph databases are great.' }]"
+
+[[test.results]]
+value = "[{ embedding: [0.05f, 0.1f, 0f], id: test:2, text: 'Relational databases store tables.' }]"
+
+[[test.results]]
+value = "[{ embedding: [0.2f, 0.1f, 0.25f], id: test:3, text: 'This document mentions graphs and networks.' }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: test:1, linear_score: 2f, score: 0.5366538763046265f }, { id: test:3, linear_score: 0f }]"
+
+[[test.results]]
+value = "[{ id: test:1, linear_score: 2f, score: 0.5366538763046265f }, { id: test:3, linear_score: -2f }]"
+
+*/
+
+-- Sample data --
+CREATE test:1 SET text = "Graph databases are great.", embedding = [0.10, 0.20, 0.30];
+CREATE test:2 SET text = "Relational databases store tables.", embedding = [0.05, 0.10, 0.00];
+CREATE test:3 SET text = "This document mentions graphs and networks.", embedding = [0.20, 0.10, 0.25];
+
+-- Analyzer used by the full‑text index
+DEFINE ANALYZER simple TOKENIZERS class, punct FILTERS lowercase, ascii;
+
+-- Full‑text index
+DEFINE INDEX idx_text ON TABLE test FIELDS text FULLTEXT ANALYZER simple BM25;
+
+-- Vector index (HNSW) on a 3‑dimensional embedding, using cosine distance
+DEFINE INDEX idx_embedding ON TABLE test FIELDS embedding HNSW DIMENSION 3 DIST COSINE;
+
+-- Query vector (whatever your embedding model produced for "graph databases")
+LET $qvec = [0.12, 0.18, 0.27];
+
+-- Vector search: top 2 nearest neighbours
+LET $vs = SELECT id FROM test  WHERE embedding <|2,100|> $qvec;
+
+-- Full‑text search: top 2 lexical matches
+LET $ft = SELECT id, search::score(1) as score FROM test
+          WHERE text @1@ 'graph' ORDER BY score DESC LIMIT 2;
+
+-- Fuse with Linear / minmax
+search::linear([$vs, $ft], [2, 1], 2, 'minmax');
+
+-- Fuse with Linear / zscore
+search::linear([$vs, $ft], [2, 1], 2, 'zscore');
+```
+
+Output of the final search::linear() queries:
+
+```surql
+-------- Query 1 --------
+
+[
+	{
+		ft_score: 0.5366538763046265f,
+		id: test:1,
+		linear_score: 2
+	},
+	{
+		id: test:3,
+		linear_score: 0
+	}
+]
+
+-------- Query 2 --------
+
+[
+	{
+		score: 0.5366538763046265f,
+		id: test:1,
+		linear_score: 1.9999999999999956f
+	},
+	{
+		id: test:3,
+		linear_score: -2.0000000000000044f
+	}
+]
+```
 
 ## `search::offsets`
 
@@ -177,6 +294,143 @@ The full-text index is capable of indexing both single strings and arrays of str
 
 The optional Boolean parameter can be set to `true` to explicitly request that the whole found term be highlighted,
 or set to `false` to highlight only the sequence of characters we are looking for. This must be used with an `edgengram` or `ngram` filter.
+
 The default value is true.
+
+<br />
+
+## `search::rrf`
+
+```surql title="API DEFINITION"
+search::rrf(lists: array, limit: int, k: option<int>) -> array<object>
+```
+
+Notes on the arguments and output of this function:
+
+- **Input**:
+  - lists: array of result arrays. Each inner array must be pre‑sorted most‑relevant‑first (BM25 score descending, distance ascending already inverted, etc.).
+  - limit: maximum number of fused results to return.
+  - k (optional): RRF constant; defaults to 60.
+
+See [this paper](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf) for why 60 tends to be the default `k` value:
+
+> Our intuition in choosing this formula derived from fact that while highly-ranked documents are more important, the importance of lower-ranked documents does not vanish as it would were, say, an exponential function used. The constant `k` mitigates the impact of high rankings by outlier systems.
+
+- **Processing:**
+  - Computes the union of all candidate ids.
+  -  For each candidate, derives its rank in each list and computes `rff_score = Σ 1/(k + rank)`.
+  - When merging field data from the per‑list rows, keeps the first non‑null value encountered in the order the lists were supplied, or the last one if there are several fields with the same key.
+  - Sorts by `rff_score` descending and truncates to limit.
+- **Output:**
+  - Array of merged result objects, each containing original fields and an added fuse_score.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "[{ embedding: [0.1f, 0.2f, 0.3f], id: test:1, text: 'Graph databases are great.' }]"
+
+[[test.results]]
+value = "[{ embedding: [0.05f, 0.1f, 0f], id: test:2, text: 'Relational databases store tables.' }]"
+
+[[test.results]]
+value = "[{ embedding: [0.2f, 0.1f, 0.25f], id: test:3, text: 'This document mentions graphs.' }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: test:1, rrf_score: 0.03278688524590164f, score: 0.5108256340026855f }, { id: test:3, rrf_score: 0.016129032258064516f }]"
+
+*/
+
+-- Sample data --
+CREATE test:1 SET text = "Graph databases are great.", embedding = [0.10, 0.20, 0.30];
+CREATE test:2 SET text = "Relational databases store tables.", embedding = [0.05, 0.10, 0.00];
+CREATE test:3 SET text = "This document mentions graphs.", embedding = [0.20, 0.10, 0.25];
+
+-- Analyzer used by the full‑text index
+DEFINE ANALYZER simple TOKENIZERS class, punct FILTERS lowercase, ascii;
+
+-- Full‑text index
+DEFINE INDEX idx_text ON TABLE test FIELDS text FULLTEXT ANALYZER simple BM25;
+
+-- Vector index (HNSW) on a 3‑dimensional embedding, using cosine distance
+DEFINE INDEX idx_embedding ON TABLE test FIELDS embedding HNSW DIMENSION 3 DIST COSINE;
+
+-- Query vector (whatever your embedding model produced for "graph databases")
+LET $qvec = [0.12, 0.18, 0.27];
+
+-- Vector search: top 2 nearest neighbours
+LET $vs = SELECT id FROM test  WHERE embedding <|2,100|> $qvec;
+
+-- Full‑text search: top 2 lexical matches
+LET $ft = SELECT id, search::score(1) as score FROM test
+          WHERE text @1@ 'graph' ORDER BY score DESC LIMIT 2;
+
+-- Fuse with Reciprocal Rank Fusion (k defaults to 60 if omitted)
+search::rrf([$vs, $ft], 2, 60);
+```
+
+Output of the final search::rrf() query:
+
+```surql
+[
+	{
+		score: 0.5366538763046265f,
+		id: test:1,
+		rrf_score: 0.03278688524590164f
+	},
+	{
+		id: test:3,
+		rrf_score: 0.016129032258064516f
+	}
+];
+```
+
+## `search::score`
+
+The `search::score` function returns the relevance score corresponding to the given 'matches' predicate reference numbers.
+
+```surql title="API DEFINITION"
+search::score(number) -> number
+```
+
+The following example shows this function, and its output, when used in a [`RETURN`](/docs/surrealql/statements/return) statement:
+
+```surql
+SELECT id, title, search::score(1) AS score FROM book
+	WHERE title @1@ 'rust web'
+	ORDER BY score DESC;
+```
+
+```surql title="Output"
+[
+	{
+		id: book:1,
+		score: 0.9227996468544006,
+		title: [ 'Rust Web Programming' ],
+	}
+]
+```
+
+<br />
+
+
 
 <br /><br />

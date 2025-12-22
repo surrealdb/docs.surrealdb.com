@@ -1,4 +1,5 @@
-import { defineCollection } from 'astro:content';
+import { type CollectionEntry, defineCollection } from 'astro:content';
+import { LAB_CATEGORIES, LAB_LANGUAGES, LAB_TOPICS } from '@config/pages/labs';
 import { z } from 'astro/zod';
 
 const abstractDoc = defineCollection({
@@ -10,6 +11,26 @@ const abstractDoc = defineCollection({
             sidebar_position: z.number().optional(),
             sidebar_label: z.string().optional(),
             no_page_headings: z.boolean().optional(),
+            no_sidebar: z.boolean().optional(),
+        }),
+});
+
+const labCollection = defineCollection({
+    type: 'content',
+    schema: () =>
+        z.object({
+            title: z.string(),
+            url: z.string().optional(),
+            category: z.enum(LAB_CATEGORIES),
+            author: z.literal('surrealdb').or(
+                z.object({
+                    name: z.string(),
+                    role: z.string(),
+                    avatar: z.string(),
+                })
+            ),
+            topics: z.optional(z.enum(LAB_TOPICS).array().max(2)),
+            languages: z.optional(z.enum(LAB_LANGUAGES).array().optional()),
         }),
 });
 
@@ -28,6 +49,7 @@ export const docs = [
     'surrealml',
     'surrealkv',
     'surrealql',
+    'integrations',
     'tutorials',
 ] as const;
 
@@ -50,6 +72,7 @@ export const collections = {
         prev[`doc-sdk-${curr}`] = abstractDoc;
         return prev;
     }, {} as Sdks),
+    'labs-items': labCollection,
 };
 
 export const urlForCollection = {
@@ -67,6 +90,7 @@ export const urlForCollection = {
         },
         {} as Record<SdkKey, string>
     ),
+    'labs-items': 'labs',
 };
 
 export type Doc = (typeof docs)[number];
@@ -76,3 +100,5 @@ export type Docs = Record<DocKey, typeof abstractDoc>;
 export type Sdk = (typeof sdks)[number];
 export type SdkKey = `doc-sdk-${Sdk}`;
 export type Sdks = Record<SdkKey, typeof abstractDoc>;
+
+export type LabItem = CollectionEntry<'labs-items'>['data'];
