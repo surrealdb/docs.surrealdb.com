@@ -7,6 +7,7 @@ import PreviewImage from '@assets/img/social-preview.jpg';
 import Icon from '@img/icon/icon.svg';
 import Navbar from '@src/components/layout/Navbar/Navbar.astro';
 import Analytics from './Analytics.astro';
+import { isVersionedSurrealQLPath, toVersionedPath } from '@src/util/surrealqlVersion';
 
 interface Props {
     title?: string;
@@ -34,6 +35,12 @@ const { rssFeedName, navShadowBackground, navDarkDefault } = Astro.props;
 const url = new URL(
     `${import.meta.env.SITE}${Astro.url.pathname}`
 ).href.replace(/\/$/, '');
+
+// SEO: Add noindex for versioned SurrealQL routes
+const isVersionedSurrealQL = isVersionedSurrealQLPath(Astro.url.pathname);
+const canonicalUrl = isVersionedSurrealQL 
+    ? new URL(toVersionedPath(Astro.url.pathname, 'latest'), import.meta.env.SITE).href.replace(/\/$/, '')
+    : (Astro.url.pathname === '/docs' ? 'https://surrealdb.com/docs/' : url);
 ---
 
 <!doctype html>
@@ -44,6 +51,11 @@ const url = new URL(
         <meta name="description" content={description} />
         <meta name="referrer" content="origin-when-cross-origin" />
         <meta name="viewport" content="viewport-fit=cover, width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=5" />
+        
+        {/* SEO: noindex for versioned SurrealQL routes */}
+        {isVersionedSurrealQL && (
+            <meta name="robots" content="noindex, follow" />
+        )}
 
         <link rel="sitemap" href="/sitemap.xml" />
         {
@@ -61,8 +73,8 @@ const url = new URL(
         <link rel="icon" href={Icon.src} type="image/svg+xml" />
 
         {/* Canonical link tags */}
-        <link rel="canonical" href={Astro.url.pathname === '/docs' ? 'https://surrealdb.com/docs/' : url} />
-        <meta name="og:url" property="og:url" content={Astro.url.pathname === '/docs' ? 'https://surrealdb.com/docs/' : url} />
+        <link rel="canonical" href={canonicalUrl} />
+        <meta name="og:url" property="og:url" content={canonicalUrl} />
 
         {/* Open Graph meta tags */}
         <meta name="og:title" property="og:title" content={title} />
@@ -96,5 +108,216 @@ const url = new URL(
         </style>
 
         <Analytics />
+        
+        {/* SurrealQL version persistence script */}
+        <script>
+            (function() {
+                const STORAGE_KEY = 'surrealqlPreferredVersion';
+                const SURREALQL_VERSIONS = ['latest', '3.x', '2.x'];
+                
+                /**
+                 * Get the preferred version from localStorage or URL
+                 */
+                function getPreferredVersion(): string {
+                    // Check URL first (if on a versioned page, use that)
+                    const pathname = window.location.pathname;
+                    const versionMatch = pathname.match(/^\/docs\/(2\.x|3\.0)\/surrealql/);
+                    if (versionMatch) {
+                        return versionMatch[1];
+                    }
+                    
+                    // Fall back to localStorage
+                    const stored = localStorage.getItem(STORAGE_KEY);
+                    if (stored && SURREALQL_VERSIONS.includes(stored)) {
+                        return stored;
+                    }
+                    
+                    return 'latest';
+                }
+                
+                /**
+                 * Convert a SurrealQL path to a versioned path
+                 */
+                function toVersionedPath(pathname: string, version: string): string {
+                    if (version === 'latest') {
+                        // Remove version prefix if present
+                        return pathname.replace(/^\/docs\/(?:2\.x|3\.x)\/surrealql/, '/docs/surrealql');
+                    }
+                    
+                    // Get relative path within SurrealQL docs
+                    let relativePath = '';
+                    const versionedMatch = pathname.match(/^\/docs\/(?:2\.x|3\.x)\/surrealql(.*)$/);
+                    if (versionedMatch) {
+                        relativePath = versionedMatch[1] || '';
+                    } else {
+                        const latestMatch = pathname.match(/^\/docs\/surrealql(.*)$/);
+                        if (latestMatch) {
+                            relativePath = latestMatch[1] || '';
+                        }
+                    }
+                    
+                    // Build versioned path
+                    return `/docs/${version}/surrealql${relativePath === '' ? '' : relativePath}`;
+                }
+                
+                /**
+                 * Check if a path is a SurrealQL docs path
+                 */
+                function isSurrealQLPath(pathname: string): boolean {
+                    return pathname.startsWith('/docs/surrealql') || 
+                           pathname.startsWith('/docs/2.x/surrealql') ||
+                           pathname.startsWith('/docs/3.x/surrealql');
+                }
+                
+                /**
+                 * Rewrite all SurrealQL links on the page
+                 */
+                function rewriteSurrealQLLinks() {
+                    const preferredVersion = getPreferredVersion();
+                    if (preferredVersion === 'latest') {
+                        // If latest is preferred, no rewriting needed
+                        return;
+                    }
+                    
+                    // Find all links that point to SurrealQL docs
+                    const links = document.querySelectorAll<HTMLAnchorElement>('a[href]');
+                    links.forEach((link) => {
+                        try {
+                            const href = link.getAttribute('href');
+                            if (!href) return;
+                            
+                            // Parse the href (could be relative or absolute)
+                            let pathname: string;
+                            if (href.startsWith('http://') || href.startsWith('https://')) {
+                                const url = new URL(href);
+                                pathname = url.pathname;
+                            } else if (href.startsWith('/')) {
+                                pathname = href.split('?')[0].split('#')[0]; // Remove query and hash
+                            } else {
+                                // Relative path - resolve it
+                                const base = window.location.pathname;
+                                const resolved = new URL(href, window.location.origin);
+                                pathname = resolved.pathname;
+                            }
+                            
+                            // Only rewrite SurrealQL links
+                            // Skip links with data-version-override (explicit version links)
+                            if (isSurrealQLPath(pathname) && !link.hasAttribute('data-version-override')) {
+                                const versionedPath = toVersionedPath(pathname, preferredVersion);
+                                
+                                // Update the href
+                                if (href.startsWith('http://') || href.startsWith('https://')) {
+                                    const url = new URL(href);
+                                    url.pathname = versionedPath;
+                                    link.href = url.href;
+                                } else if (href.startsWith('/')) {
+                                    // Preserve query string and hash
+                                    const [path, ...rest] = href.split('?');
+                                    const queryAndHash = rest.join('?');
+                                    link.href = versionedPath + (queryAndHash ? '?' + queryAndHash : '');
+                                } else {
+                                    // Relative path - this is trickier, but we'll try
+                                    const basePath = window.location.pathname;
+                                    const baseVersioned = toVersionedPath(basePath, preferredVersion);
+                                    const resolved = new URL(href, window.location.origin);
+                                    resolved.pathname = toVersionedPath(resolved.pathname, preferredVersion);
+                                    link.href = resolved.pathname + (resolved.search || '') + (resolved.hash || '');
+                                }
+                            }
+                        } catch (e) {
+                            // Silently ignore errors for malformed URLs
+                            console.debug('[SurrealQL Version] Error rewriting link:', e);
+                        }
+                    });
+                }
+                
+                /**
+                 * Intercept clicks on SurrealQL links to ensure version persistence
+                 */
+                function interceptSurrealQLLinkClicks() {
+                    document.addEventListener('click', (e) => {
+                        const target = (e.target as HTMLElement).closest('a');
+                        if (!target || !target.href) return;
+                        
+                        // Skip rewriting if link has data-version-override (explicit version links)
+                        if (target.hasAttribute('data-version-override')) {
+                            return;
+                        }
+                        
+                        try {
+                            const url = new URL(target.href);
+                            const pathname = url.pathname;
+                            
+                            // Only intercept SurrealQL links
+                            if (isSurrealQLPath(pathname)) {
+                                const preferredVersion = getPreferredVersion();
+                                
+                                // If the link is already pointing to the preferred version, let it proceed
+                                const currentVersion = pathname.match(/^\/docs\/(2\.x|3\.x)\/surrealql/) 
+                                    ? pathname.match(/^\/docs\/(2\.x|3\.x)\/surrealql/)?.[1]
+                                    : 'latest';
+                                
+                                if (currentVersion !== preferredVersion && preferredVersion !== 'latest') {
+                                    // Rewrite the URL to use preferred version
+                                    const versionedPath = toVersionedPath(pathname, preferredVersion);
+                                    url.pathname = versionedPath;
+                                    
+                                    // Save scroll position before navigation (for same-page navigation)
+                                    // Note: This won't work for cross-page navigation, but helps with version switching
+                                    const scrollKey = `surrealql:scroll:${window.location.pathname}`;
+                                    sessionStorage.setItem(scrollKey, window.scrollY.toString());
+                                    
+                                    // Navigate to the versioned URL
+                                    e.preventDefault();
+                                    window.location.href = url.href;
+                                }
+                            }
+                        } catch (e) {
+                            // Silently ignore errors
+                            console.debug('[SurrealQL Version] Error intercepting click:', e);
+                        }
+                    }, true); // Use capture phase to catch early
+                }
+                
+                /**
+                 * Restore scroll position if available
+                 */
+                function restoreScrollPosition() {
+                    const scrollKey = `surrealql:scroll:${window.location.pathname}`;
+                    const savedScroll = sessionStorage.getItem(scrollKey);
+                    if (savedScroll) {
+                        // Use requestAnimationFrame to ensure DOM is ready
+                        requestAnimationFrame(() => {
+                            window.scrollTo(0, parseInt(savedScroll, 10));
+                            // Clear after restoring to avoid stale positions
+                            sessionStorage.removeItem(scrollKey);
+                        });
+                    }
+                }
+                
+                // Run on page load
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', () => {
+                        rewriteSurrealQLLinks();
+                        interceptSurrealQLLinkClicks();
+                        restoreScrollPosition();
+                    });
+                } else {
+                    rewriteSurrealQLLinks();
+                    interceptSurrealQLLinkClicks();
+                    restoreScrollPosition();
+                }
+                
+                // Also watch for dynamically added content (e.g., from client-side navigation)
+                const observer = new MutationObserver(() => {
+                    rewriteSurrealQLLinks();
+                });
+                
+                observer.observe(document.body, {
+                    childList: true,
+                    subtree: true
+                });
+            })();
+        </script>
     </body>
 </html>

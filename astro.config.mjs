@@ -34,7 +34,13 @@ export default defineConfig({
         compress({
             Image: false,
         }),
-        sitemap(),
+        sitemap({
+            // Exclude versioned SurrealQL routes from sitemap (only include latest)
+            filter: (page) => {
+                // Exclude /docs/2.x/surrealql/** and /docs/3.x/surrealql/**
+                return !page.match(/\/docs\/(?:2\.x|3\.x)\/surrealql/);
+            },
+        }),
     ],
     markdown: {
         remarkPlugins: [remarkCustomHeadingId],
