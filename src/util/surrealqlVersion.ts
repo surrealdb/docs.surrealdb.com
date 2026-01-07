@@ -93,11 +93,11 @@ export function compareVersions(v1: string, v2: string): number {
     // Normalize versions
     const normalize = (v: string) => {
         // Remove 'v' prefix if present
-        v = v.replace(/^v/, '');
+        let normalized = v.replace(/^v/, '');
         // Handle 'x' as wildcard (treat as 0 for comparison)
-        v = v.replace(/\.x/g, '.0');
+        normalized = normalized.replace(/\.x/g, '.0');
         // Split into parts
-        const parts = v.split(/[.-]/).map((p) => {
+        const parts = normalized.split(/[.-]/).map((p) => {
             // Try to parse as number, otherwise return 0
             const num = Number.parseInt(p, 10);
             return Number.isNaN(num) ? 0 : num;
