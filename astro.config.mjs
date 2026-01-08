@@ -38,25 +38,16 @@ export default defineConfig({
             // Exclude versioned SurrealQL routes from sitemap (only include latest)
             // These routes redirect, so they shouldn't be in the sitemap
             filter: (page) => {
-                try {
-                    // Handle undefined or null pages - this is critical to prevent reduce errors
-                    if (!page || typeof page !== 'string') {
-                        return false;
-                    }
-                    // Exclude /docs/2.x/surrealql/** and /docs/3.x/surrealql/**
-                    // These are versioned routes that redirect to latest
-                    const shouldExclude =
-                        /\/docs\/(?:2\.x|3\.x)\/surrealql/.test(page);
-                    return !shouldExclude;
-                } catch (error) {
-                    // If anything goes wrong, exclude the page to prevent build errors
-                    console.warn(
-                        '[Sitemap] Error filtering page:',
-                        page,
-                        error
-                    );
+                if (!page || typeof page !== 'string' || page.trim().length === 0) {
                     return false;
                 }
+                
+                if (page.includes('/2.x/surrealql') || page.includes('/3.x/surrealql')) {
+                    return false;
+                }
+                
+                // Include all other pages
+                return true;
             },
         }),
     ],
