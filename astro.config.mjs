@@ -34,7 +34,29 @@ export default defineConfig({
         compress({
             Image: false,
         }),
-        sitemap(),
+        sitemap({
+            // Exclude versioned SurrealQL routes from sitemap (only include latest)
+            // These routes redirect, so they shouldn't be in the sitemap
+            filter: (page) => {
+                if (
+                    !page ||
+                    typeof page !== 'string' ||
+                    page.trim().length === 0
+                ) {
+                    return false;
+                }
+
+                if (
+                    page.includes('/2.x/surrealql') ||
+                    page.includes('/3.x/surrealql')
+                ) {
+                    return false;
+                }
+
+                // Include all other pages
+                return true;
+            },
+        }),
     ],
     markdown: {
         remarkPlugins: [remarkCustomHeadingId],
