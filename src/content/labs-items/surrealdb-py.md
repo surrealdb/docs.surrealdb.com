@@ -1,9 +1,10 @@
 ---
 title: "surrealdb.py"
 url: https://github.com/surrealdb/surrealdb.py
-category: SDKs
+category: Code repositories
 author: surrealdb
-topics: []
+topics:
+  - Libraries
 languages:
   - Python
 ---

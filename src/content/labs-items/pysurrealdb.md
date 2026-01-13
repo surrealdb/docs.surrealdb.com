@@ -1,12 +1,13 @@
 ---
 title: "PySurrealDB"
 url: https://github.com/aurelion314/pysurrealdb
-category: Libraries
+category: Code repositories
 author:
   name: Mike Aurelion
   role: Software Engineer
   avatar: mike-aurelion
-topics: []
+topics:
+  - Libraries
 languages:
   - Python
 ---

@@ -1,7 +1,7 @@
 ---
 title: "UnrealORM: TypeScript ORM built for SurrealDB"
 url: https://unreal-orm.jimpex.dev
-category: Libraries
+category: Code repositories
 topics:
   - Data Management
 author:

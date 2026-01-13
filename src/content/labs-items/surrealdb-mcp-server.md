@@ -1,7 +1,7 @@
 ---
 title: "SurrealDB MCP Server"
 url: https://github.com/nsxdavid/surrealdb-mcp-server
-category: Integrations
+category: Code repositories
 topics:
   - AI
 author:

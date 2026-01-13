@@ -1,7 +1,7 @@
 ---
 title: "surrealdb-cloudflare"
 url: https://github.com/theopensource-company/surrealdb-cloudflare
-category: SDKs
+category: Code repositories
 author:
   name: Micha de Vries
   role: Software Engineer

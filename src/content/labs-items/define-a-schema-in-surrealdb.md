@@ -1,9 +1,9 @@
 ---
 title: "Define a Schema in SurrealDB"
 url: /docs/tutorials/define-a-schema
-category: Tutorials
+category: Documentation
 topics:
-  - Beginner
+  - Examples
 author: surrealdb
 ---
 

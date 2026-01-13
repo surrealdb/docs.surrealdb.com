@@ -1,7 +1,7 @@
 ---
 title: "Aspire Integration"
 url: https://www.nuget.org/packages/CommunityToolkit.Aspire.Hosting.SurrealDb
-category: Libraries
+category: Code repositories
 topics: []
 author:
   name: David Bottiau

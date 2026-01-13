@@ -1,7 +1,7 @@
 ---
 title: "surrealdb-migrations"
 url: https://github.com/Odonno/surrealdb-migrations
-category: Libraries
+category: Code repositories
 author:
   name: David Bottiau
   role: Software Engineer

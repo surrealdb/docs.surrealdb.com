@@ -1,10 +1,9 @@
 ---
 title: "Setting up an invite system"
 url: https://mord-blog.vercel.app/articles/surrealdb-invitation-system
-category: Tutorials
+category: Blogposts
 topics:
   - Examples
-  - Beginner
 author:
   name: Mordechai Hadad
   role: Software Engineer

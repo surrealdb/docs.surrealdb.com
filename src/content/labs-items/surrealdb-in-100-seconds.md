@@ -6,7 +6,5 @@ author:
   name: Fireship
   role: Content Creator
   avatar: fireship
-topics:
-  - Beginner
+topics: []
 ---
-

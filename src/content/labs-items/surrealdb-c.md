@@ -1,7 +1,7 @@
 ---
 title: "surrealdb.c"
 url: https://github.com/surrealdb/surrealdb.c
-category: SDKs
+category: Code repositories
 author: surrealdb
 topics: []
 ---

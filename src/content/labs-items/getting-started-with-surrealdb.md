@@ -1,9 +1,7 @@
 ---
 title: "Getting started with SurrealDB."
 url: /docs/surrealdb/introduction/start
-category: Tutorials
+category: Documentation
 author: surrealdb
-topics:
-  - Beginner
 ---
 

@@ -1,7 +1,7 @@
 ---
 title: "surrealdb_migration_engine"
 url: https://github.com/mcmah309/surrealdb_migration_engine
-category: Libraries
+category: Code repositories
 author:
   name: Henry
   role: Software Engineer
