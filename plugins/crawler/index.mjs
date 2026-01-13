@@ -5,30 +5,6 @@ import { parse as parseHTML } from 'node-html-parser';
 import Surreal, { RecordId, surql } from 'surrealdb';
 import { parseStringPromise } from 'xml2js';
 
-const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
-const OLLAMA_MODEL =
-    process.env.OLLAMA_MODEL ?? 'jina/jina-embeddings-v2-base-en';
-
-async function embedOne(text) {
-    const res = await fetch(`${OLLAMA_URL}/api/embed`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-            model: OLLAMA_MODEL,
-            input: text,
-            truncate: true,
-        }),
-    });
-
-    if (!res.ok) {
-        const msg = await res.text();
-        throw new Error(`Ollama embed failed: ${res.status} ${msg}`);
-    }
-
-    const data = await res.json();
-    return data.embeddings?.[0];
-}
-
 export async function onSuccess() {
     const applyIndexes =
         process.env.DEPLOY_URL !== 'https://0--surrealdb-docs.netlify.app';
@@ -164,31 +140,46 @@ export async function onSuccess() {
                         ...content.slice(0, MAX_BLOCKS).map((b) => `Body: ${b}`),
                     ].filter(Boolean);
 
-                    const embeddingText = `passage: ${importantBlocks.join('\n')}`;
+                    const embedText = importantBlocks.join('\n');
 
-                    let embedding = null;
-                    try {
-                        embedding = await embedOne(embeddingText);
-                    } catch (e) {
-                        console.log(`[IX] Embedding failed for "${subject}"`, e);
-                        // You can decide: throw to fail the job, or proceed without embedding
-                    }
+                    const openaiKey = process.env.OPENAI_API_KEY;
 
-                    await db.upsert(subject, {
-                        title,
-                        description,
-                        path: pathname,
-                        hostname,
-                        h1,
-                        h2,
-                        h3,
-                        h4,
-                        content,
-                        code,
-                        embedding,
-                        date: jobDate,
-                    });
-
+                    await db.query(
+                        `
+                              RETURN fn::page::upsert_with_embedding(
+                                $id,
+                                $hostname,
+                                $path,
+                                $title,
+                                $description,
+                                $h1,
+                                $h2,
+                                $h3,
+                                $h4,
+                                $content,
+                                $code,
+                                $date,
+                                $embed_text,
+                                $openai_key
+                              );
+                              `,
+                        {
+                            id: subject,
+                            hostname,
+                            path: pathname,
+                            title,
+                            description,
+                            h1,
+                            h2,
+                            h3,
+                            h4,
+                            content,
+                            code,
+                            date: jobDate,
+                            embedText,
+                            openai_key: openaiKey,
+                        }
+                    );
                     const elapsed = Date.now() - start;
                     console.log(`[IX] Took ${elapsed}ms to index "${subject}"`);
                 } else {

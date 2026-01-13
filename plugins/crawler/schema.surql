@@ -12,9 +12,73 @@ DEFINE INDEX OVERWRITE page_h3 ON page FIELDS h3 FULLTEXT ANALYZER simple BM25(1
 DEFINE INDEX OVERWRITE page_h4 ON page FIELDS h4 FULLTEXT ANALYZER simple BM25(1.2,0.75);
 DEFINE INDEX OVERWRITE page_content ON page FIELDS content FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
 DEFINE INDEX OVERWRITE page_code ON page FIELDS code FULLTEXT ANALYZER simple BM25(1.2,0.75);
-DEFINE INDEX OVERWRITE page_embedding_hnsw ON TABLE page FIELDS embedding HNSW DIMENSION 768 DIST COSINE;
+DEFINE INDEX OVERWRITE page_embedding_hnsw ON TABLE page FIELDS embedding HNSW DIMENSION 1536 DIST COSINE;
 
-DEFINE FUNCTION OVERWRITE fn::search($hostname: string, $query: string, $qvec: array<float>) {
+DEFINE FUNCTION OVERWRITE fn::openai::embed(
+  $text: string,
+  $openai_key: string
+) {
+  LET $resp = http::post(
+    "https://api.openai.com/v1/embeddings",
+    {
+      model: "text-embedding-3-small",
+      input: $text
+    },
+    {
+      "Authorization": "Bearer " + $openai_key,
+      "Content-Type": "application/json"
+    }
+  );
+
+  RETURN $resp.data[0].embedding;
+};
+
+DEFINE FUNCTION OVERWRITE fn::page::upsert(
+  $id: record,
+  $hostname: string,
+  $path: string,
+  $title: string,
+  $description: string,
+  $h1: array<string>,
+  $h2: array<string>,
+  $h3: array<string>,
+  $h4: array<string>,
+  $content: array<string>,
+  $code: array<string>,
+  $date: datetime,
+  $embed_text: string,
+  $openai_key: string
+) {
+  -- Generate embedding
+  LET $embedding = fn::openai::embed($embed_text, $openai_key);
+
+  -- Upsert page
+  UPSERT $id MERGE {
+    hostname: $hostname,
+    path: $path,
+    title: $title,
+    description: $description,
+    h1: $h1,
+    h2: $h2,
+    h3: $h3,
+    h4: $h4,
+    content: $content,
+    code: $code,
+    date: $date,
+
+    embed_text: $embed_text,
+    embedding: $embedding,
+    updated_at: time::now(),
+  };
+
+  RETURN NONE;
+};
+
+
+DEFINE FUNCTION OVERWRITE fn::search($hostname: string, $query: string, $openai_key: string) {
+
+-- Compute query embedding
+  LET $qvec = fn::openai::embed($query, $openai_key);
 
 -- Vector search candidates (bigger than final limit so RRF has room)
   LET $vs = (
