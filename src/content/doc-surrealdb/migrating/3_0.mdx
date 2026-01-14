@@ -1,0 +1,330 @@
+
+
+# Possible issues
+
+## Incompatible future
+
+- Severity: Will break.
+
+Some futures can be resolved automattically but any future still left will have to be manually addressed.
+
+### Description
+
+In 3.0 it is no longer possible to store arbitrary queries in record data.
+For this issue this specifically means that futures in the form of `<future> { expression } ` have been completely removed from the language.
+To replace this feature we have introduce COMPUTED fields.
+When migrating from version 2 to version 3 the export will automattically confert futures which can be converted from a future to a computed field.
+
+For example:
+```surql
+DEFINE FIELD future_field ON table VALUE <future> { expression };
+```
+Will be converted to
+```surql
+DEFINE FIELD future_field ON table COMPUTED { expression };
+```
+
+However it is not possible to convert all futures.
+Futures which have been stored in a record cannot be converted.
+For example
+```surql
+
+CREATE foo SET field = <future> { expression };
+// Or
+DEFINE FIELD future_field ON table DEFAULT <future> { expression };
+```
+
+### Mitigation
+
+Fixing this issue might require re-architecting your schema.
+The common most used use case of futures will be addressed by when exporting for 3.0 but for the other use cases there is no 
+direct replacement.
+
+
+## `$this` `$parent` `$self` parameters
+
+- Severity: Can break.
+
+This will break when the parameters are used in unorthodox positions or when used from within a parenthesized expression
+
+### Description
+
+The `$this` `$parent` and `$self` special parameters refer to the current or parent document of a query.
+The meaning of what the _current_ and _parent_ document are have changed in 3.0.
+
+Before 3.0 each parenthesis pair `()` would create a new document.
+So to refer to the document of a select statement when parenthesising an expression you would have to use `$parent`.
+```surql
+    CREATE table SET a = 42;
+    SELECT 2 * ($parent.a + 1) as calc FROM table;
+```
+
+In 3.0 only when issueing a query which actually has a document is the value of `$this`, `$self` and `$parent` updated.
+So the above query would have to be manually changed to the following to keep the same behavior.
+```surql
+    SELECT 2 * ($this.a + 1) as calc FROM table;
+    // Or equivalent
+    SELECT 2 * (a + 1) as calc FROM table;
+```
+
+Besides the changes with `()` `$this` and other special parameters will also only have a value when within a context 
+where a document is present. 
+See below for examples of places where `$this` no longer has a value.
+```surql
+// $this has no defined value since there is no single record document and usage will throw an error.
+SELECT $this FROM foo GROUP BY field;
+
+// The `FROM` clause is computed before the rest of the SELECT clause and so there is no valid document.
+// in this context
+SELECT field FROM $this;
+
+// `$this` here is valid but referes to the top level select's document.
+SELECT (SELECT foo FROM type::table($this)) FROM table;
+```
+
+### Mitigation
+
+For cases where the query is affected by the changes to `()` fixing this issue will require manually checking the usages 
+of `$parent` and changing them to `$this` or ommiting it where required.
+
+For the cases where the document is no longer present there is no direct fix, although the document in those cases was ill-defined 
+and queries which relied on documents being present where they shouldn't have been would probably have had strange undefined behavior.
+These types of queries should probably be redesigned to not require the value that previously was in the special parameters.
+
+## All Idiom `.*`
+
+- Severity: Can break
+
+This will break when the idiom is used to derefence record-id's in an array or to get the values from an object.
+
+### Description
+
+The result of the all idiom `.*` has changed when it is used on an array or an object.
+
+Previously `.*` on an array would just return the same value with the exception that all 
+subsequent idiom operators would now run on the elements instead of the whole array.
+
+```surql
+[a:1, a:2].* // returns [a:1, a:2]
+
+[a:1, a:2].*.* // returns an array with the values of the records the record id's point to.
+```
+
+In 3.0 `.*` works on the elements of the array when the reciever value is an array.
+So the above `[a:1, a:2].*.*` can just be written as `[a:1, a:2].*`
+
+On objects `.*` would return an array with the values of the object. 
+```surql
+{ a: 1, b: "foo" }.* // returns [1, "foo"]
+```
+Now `.*` just returns the object.
+
+### Mitigation
+
+Fixing this issue will require checking if the usage of the all idiom is used to derefence record-id's in an array and then replacing the previous `.*.*` with just a single `.*`
+If the `.*` was used to retrieve the value of an object it should be replaced with a call to the `object::values` function.
+
+## Field idiom `.field` followed by another idiom part.
+
+- Severity: Can break
+
+This will break when the field idiom is on an array of objects and then followed by another idiom part.
+
+### Description
+
+Previously calling using a field idiom `.field` on an array would index the field for every element and then construct an array with the results and 
+the following parameter would be evaluated on that whole array.
+```surql
+[{ a: ["a","b"]}, {a: [1,2]}].a[0] 
+// returns 
+// ([{ a: ["a","b"]}, {a: [1,2]}].a)[0] =
+// [["a","b"],[1,2]][0] =
+// ["a","b"]
+```
+With 3.0 the idioms have the default behavior of working on the elements of arrays instead of the whole array.
+A field idiom followed by other idiom part evaluated on an array are now evaluated on the individual results of the index operation on every element.
+```surql
+[{ a: ["a","b"]}, {a: [1,2]}].a[0] 
+// returns 
+// [{ a: ["a","b"]}, {a: [1,2]}].a[0] =
+// [({ a: ["a","b"]}.a)[0], ({a: [1,2]}.a)[0])] =
+// [(["a","b"][0]), ([1,2][0])] = 
+// ["a",1]
+```
+
+### Mitigation
+
+If the previous behavior was desired the idiomatic way to get this is to swap the idiom parts.
+So if you previously did `.field[0]` instead do `[0].field` this will get the same behavior.
+
+## Edge case result for function `math::sqrt`
+
+- Severity: Unlikely break
+
+This issue can only break a query when it relied on the function returning the value `NONE` when called with a negative number.
+
+### Description
+
+The `math::sqrt` function in 3.0 has been updated to return `NaN` when called with an invalid value like `-1`.
+Previously this function would return `NONE` instead.
+
+### Mitigation
+
+Change any query which relies on the `NONE` result from `math::sqrt` to check for `NaN` instead.
+
+
+## Edge case result for function `math::sqrt`
+
+- Severity: Unlikely break
+
+This issue can only break a query when it relied on the function returning the value `NONE` when called with a negative number.
+
+### Description
+
+The `math::sqrt` function in 3.0 has been updated to return `NaN` when called with an invalid value like `-1`.
+Previously this function would return `NONE` instead.
+
+### Mitigation
+
+Change any query which relies on the `NONE` result from `math::sqrt` to check for `NaN` instead.
+
+
+## Edge case result for function `math::min`
+
+- Severity: Unlikely break
+
+This issue can only break a query when it relied on the function returning the value `NONE` when called with a empty array.
+
+### Description
+
+The `math::min` function in 3.0 has been updated to return `Infinity` when called with an empty array.
+Previously this function would return `NONE` instead.
+
+### Mitigation
+
+Change any query which relies on the `NONE` result from `math::min` to check for `Infinity` instead.
+
+
+## Edge case result for function `math::max`
+
+- Severity: Unlikely break
+
+This issue can only break a query when it relied on the function returning the value `NONE` when called with a empty array.
+
+### Description
+
+The `math::max` function in 3.0 has been updated to return `-Infinity` when called with an empty array.
+Previously this function would return `NONE` instead.
+
+### Mitigation
+
+Change any query which relies on the `NONE` result from `math::max` to check for `-Infinity` instead.
+
+
+## Change of result for `array::logical_and`
+
+- Severity: Unlikely break
+
+This change can cause a break when relying on the specific value, instead of thruthyness, returned from the array.
+
+### Description
+
+The resulting values of the `array::logical_and` function was inconsitent with documentation and the rest of the language.
+The function expects to be called with two arrays, for each pair of values of those arrays it would check if they were both truthy.
+If they were it would return the first of the pair which was true, otherwise it would return the first of the two values which was falsy.
+If the arrays were not of the same size it would consider missing value of the pairs to be `NULL`.
+
+```surql
+array::logical_and(["a"],[true]); // returns ["a"]
+array::logical_and([""],[false]); // returns [""]
+array::logical_and([true],[]); // returns [NULL]
+```
+
+This behavior was inconsitent with the `&&` operator as well as the index operator
+```surql
+"a" && true; // returns true
+[true][0] && [][0]; // returns NONE 
+```
+
+With 3.0 the function now behaves more as if it indexes every element in the array and then applies the `&&` operator to it.
+The `&&` operator checks if the first value is truthy, if it is it returns the second value, if not it returns the first value.
+```surql
+array::logical_and(["a"],[true]); // returns [true]
+array::logical_and([""],[false]); // returns [""]
+array::logical_and([true],[]); // returns [NONE]
+```
+
+### Mitigation
+
+Change any query which relies on the specific value returned from `array::logical_and`.
+If the query only relied on the thruthyness of the elements of `array::logical_and` then no changes have to be made.
+
+
+## Change of result for `array::logical_or`
+
+- Severity: Unlikely break
+
+This change can cause a break when relying on the specific value, instead of thruthyness, returned from the array.
+
+### Description
+
+The resulting values of the `array::logical_or` function was inconsitent with documentation and the rest of the language.
+The function expects to be called with two arrays, for each pair of values of those arrays it would check if either value was truthy.
+If either was it would return the first of the pair which was true, otherwise it would return the first of the two values which was falsy.
+If the arrays were not of the same size it would consider missing value of the pairs to be `NULL`.
+
+```surql
+array::logical_or(["a"],[true]); // returns ["a"]
+array::logical_or([""],[false]); // returns [""]
+array::logical_or([],[false]); // returns [NULL]
+```
+
+This behavior was inconsitent with the `||` operator as well as the index operator
+```surql
+"" || false; // returns false
+[false][0] || [][0]; // returns NONE 
+```
+
+With 3.0 the function now behaves more as if it indexes every element in the array and then applies the `||` operator to it.
+The `||` operator checks if the first value is truthy, if it is it returns the first value, if not it returns the second value.
+```surql
+array::logical_and(["a"],[true]); // returns ["a"]
+array::logical_and([""],[false]); // returns [false]
+array::logical_and([false],[]); // returns [NONE]
+```
+
+### Mitigation
+
+Change any query which relies on the specific value returned from `array::logical_or`.
+If the query only relied on the thruthyness of the elements of `array::logical_or` then no changes have to be made.
+
+
+## Change of argument meaning `array::range`
+
+- Severity: Will break
+
+The meaning of the arguments has changed, almost all usages, except for ones which fit the pattern `array::range(0, ..)`, will have different behavior.
+
+### Description
+
+Before 3.0 the arguments of `array::range` where `offset` and `count`.
+The first argument indicated the offset of a range of numbers and the second was the amount of numbers that range should contain. 
+```surql
+array::range(0, 5) // returns [0,1,2,3,4]
+array::range(-1, 5) // returns [-1,0,1,2,3]
+array::range(-5, 5) // returns [-5,-4,-3,-2,-1]
+```
+
+With the 3.0 release `array::range` behavior is now aligned with how ranges work, 
+supporting taking a range and having it's arguments be a start and end bound of a range of numbers.
+```surql
+array::range(0, 5) // returns [0,1,2,3,4]
+array::range(-1, 5) // returns [-1,0,1,2,3,4]
+array::range(-5, 5) // returns [-5,-4,-3,-2,-1,0,1,2,3,4]
+array::range(0..=1) // returns [0,1]
+```
+
+### Mitigation
+
+Change any query which relies on the specific value returned from `array::logical_or`.
+If the query only relied on the thruthyness of the elements of `array::logical_or` then no changes have to be made.
