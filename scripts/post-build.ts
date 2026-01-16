@@ -88,11 +88,17 @@ async function checkBrokenLinks() {
                     case href === '/docs':
                     case href.startsWith('/docs/'): {
                         // Check for HTML pages (with index.html)
-                        const htmlPath = path.join(__root, 'dist', href, 'index.html');
+                        const htmlPath = path.join(
+                            __root,
+                            'dist',
+                            href,
+                            'index.html'
+                        );
                         // Check for static files (like .mdc files from public folder)
                         const staticPath = path.join(__root, 'dist', href);
                         exists =
-                            fs.existsSync(htmlPath) || fs.existsSync(staticPath);
+                            fs.existsSync(htmlPath) ||
+                            fs.existsSync(staticPath);
                         break;
                     }
 
