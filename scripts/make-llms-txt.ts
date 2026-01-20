@@ -7,6 +7,10 @@ export const ALLOW_FILES_EXTENSIONS = ['html'];
 import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import { parse } from 'node-html-parser';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 interface MapEntryLink {
     text: string;
@@ -408,6 +412,14 @@ function groupedMarkdown(
     return blocks.join('\n\n');
 }
 
+// Detect CI/PR environment
+const isCI = !!(
+    process.env.CI ||
+    process.env.GITHUB_ACTIONS ||
+    process.env.GITHUB_PR_NUMBER
+);
+
+// Always generate full map for llms.txt generation (scan all files)
 const MAP: MapEntry[] = await generateMap();
 
 // Prepend header and append footer around the grouped markdown
@@ -478,11 +490,17 @@ async function localExists(url: string): Promise<boolean> {
         .catch(() => false);
 }
 
-async function checkLinks(urls: string[]) {
+async function checkLinks(urls: string[], skipRemote = false) {
     const unique = Array.from(new Set(urls));
     const total = unique.length;
     const bad: string[] = [];
     const localOnly: string[] = [];
+
+    // Skip link checking entirely if SKIP_LINK_CHECK is set (for faster PR builds)
+    if (process.env.SKIP_LINK_CHECK === 'true') {
+        console.log('Skipping link validation (SKIP_LINK_CHECK=true)');
+        return { bad: [], localOnly: [], total: 0 };
+    }
 
     let processed = 0;
 
@@ -492,30 +510,143 @@ async function checkLinks(urls: string[]) {
             `\r\x1b[2K[${++processed}/${total}] Checking: ${pathname}`
         );
 
-        const [isRemote, isLocal] = await Promise.all([
-            remoteExists(url),
-            localExists(url),
-        ]);
-
-        if (isRemote) {
-            continue;
-        }
-
+        const isLocal = await localExists(url);
+        
         if (isLocal) {
+            // If skipping remote checks (e.g., in PR/CI), only validate local files
+            if (skipRemote) {
+                continue; // Local file exists, skip remote check
+            }
+            
+            // Check remote only if local exists and we're not skipping remote
+            const isRemote = await remoteExists(url);
+            if (isRemote) {
+                continue; // Exists both locally and remotely
+            }
+            
             localOnly.push(url);
             continue;
         }
 
-        bad.push(url);
+        // Local file doesn't exist
+        if (skipRemote) {
+            // In CI/PR mode, only check local files - mark as bad if not found locally
+            bad.push(url);
+            continue;
+        }
+
+        // Check remote as fallback
+        const isRemote = await remoteExists(url);
+        if (!isRemote) {
+            bad.push(url);
+        }
     }
 
     process.stdout.write(`\r\x1b[2KChecked ${total} links.\n`);
     return { bad, localOnly, total };
 }
 
-const fullLinks = collectLinks(MAP, true).map((l) => l.url);
-const allToCheck = Array.from(new Set([...fullLinks]));
-const { bad, localOnly, total } = await checkLinks(allToCheck);
+// Get changed HTML files in PR/CI to only check new links
+async function getChangedHtmlFiles(): Promise<string[]> {
+    // Skip if not in CI
+    if (!isCI) {
+        return [];
+    }
+
+    try {
+        // Get base branch (default to main, or use GITHUB_BASE_REF if available)
+        const baseBranch = process.env.GITHUB_BASE_REF || 'main';
+        
+        // Get changed files
+        const { stdout } = await execFileAsync('git', [
+            'diff',
+            '--name-only',
+            '--diff-filter=AM', // Only Added and Modified files
+            baseBranch,
+            'HEAD'
+        ]);
+
+        const changedFiles = stdout
+            .trim()
+            .split('\n')
+            .filter(Boolean)
+            .filter((file) => file.endsWith('.html') || file.endsWith('.mdx'));
+
+        // Map source files to dist files
+        const distFiles: string[] = [];
+        for (const file of changedFiles) {
+            if (file.startsWith('src/content/')) {
+                // Convert src/content/doc-X/path.mdx to dist/docs/path/index.html
+                const relPath = file.replace(/^src\/content\/doc-[^/]+\//, '');
+                const withoutExt = relPath.replace(/\.mdx?$/, '');
+                const distPath = join(DOCS_PATH, withoutExt, 'index.html');
+                try {
+                    await stat(distPath);
+                    distFiles.push(distPath);
+                } catch {
+                    // File doesn't exist in dist yet, skip
+                }
+            } else if (file.startsWith('dist/docs/') && file.endsWith('.html')) {
+                distFiles.push(file);
+            }
+        }
+
+        return distFiles;
+    } catch (error) {
+        console.warn('Could not get changed files, checking all links:', error);
+        return [];
+    }
+}
+
+// Extract links from specific HTML files
+async function extractLinksFromFiles(filePaths: string[]): Promise<string[]> {
+    const links: string[] = [];
+    
+    for (const filePath of filePaths) {
+        try {
+            const content = await readFile(filePath, 'utf-8');
+            const html = parse(content);
+            const anchors = html.querySelectorAll('a[href]');
+            
+            for (const anchor of anchors) {
+                const href = anchor.getAttribute('href');
+                if (!href) continue;
+                
+                // Convert relative URLs to absolute
+                if (href.startsWith('/')) {
+                    const url = new URL(href, 'https://surrealdb.com').toString();
+                    links.push(url);
+                } else if (href.startsWith('http')) {
+                    links.push(href);
+                }
+            }
+        } catch (error) {
+            console.warn(`Error reading ${filePath}:`, error);
+        }
+    }
+    
+    return links;
+}
+
+// Skip remote checks in CI/PR environments for faster builds
+const skipRemoteChecks = isCI || process.env.SKIP_REMOTE_LINK_CHECK === 'true';
+
+// In CI/PR, automatically check only links from changed files (faster builds)
+// In local/dev, check all links
+const changedFiles = await getChangedHtmlFiles();
+let linksToCheck: string[];
+
+if (changedFiles.length > 0 && isCI) {
+    console.log(`Found ${changedFiles.length} changed files, checking only links from these files`);
+    linksToCheck = await extractLinksFromFiles(changedFiles);
+} else {
+    // Check all links (default behavior for local builds)
+    const fullLinks = collectLinks(MAP, true).map((l) => l.url);
+    linksToCheck = Array.from(new Set([...fullLinks]));
+}
+
+const allToCheck = Array.from(new Set(linksToCheck));
+const { bad, localOnly, total } = await checkLinks(allToCheck, skipRemoteChecks);
 
 if (bad.length) {
     console.warn(`\nBroken links detected (${bad.length}/${total}):`);
@@ -529,6 +660,7 @@ if (localOnly.length) {
     for (const url of localOnly) console.warn(` - [LOCAL-ONLY] ${url}`);
 }
 
+// Always generate llms.txt files (we always have a full map)
 await writeFile(
     join(DOCS_PATH, 'llms.txt'),
     withHeaderFooter(groupedMarkdown(MAP, false))
