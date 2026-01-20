@@ -4,11 +4,11 @@ export const IGNORE_DIRECTORIES_REGEX = ['_astro'];
 
 export const ALLOW_FILES_EXTENSIONS = ['html'];
 
+import { execFile } from 'node:child_process';
 import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
-import { parse } from 'node-html-parser';
-import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { parse } from 'node-html-parser';
 
 const execFileAsync = promisify(execFile);
 
@@ -511,19 +511,19 @@ async function checkLinks(urls: string[], skipRemote = false) {
         );
 
         const isLocal = await localExists(url);
-        
+
         if (isLocal) {
             // If skipping remote checks (e.g., in PR/CI), only validate local files
             if (skipRemote) {
                 continue; // Local file exists, skip remote check
             }
-            
+
             // Check remote only if local exists and we're not skipping remote
             const isRemote = await remoteExists(url);
             if (isRemote) {
                 continue; // Exists both locally and remotely
             }
-            
+
             localOnly.push(url);
             continue;
         }
@@ -556,14 +556,14 @@ async function getChangedHtmlFiles(): Promise<string[]> {
     try {
         // Get base branch (default to main, or use GITHUB_BASE_REF if available)
         const baseBranch = process.env.GITHUB_BASE_REF || 'main';
-        
+
         // Get changed files
         const { stdout } = await execFileAsync('git', [
             'diff',
             '--name-only',
             '--diff-filter=AM', // Only Added and Modified files
             baseBranch,
-            'HEAD'
+            'HEAD',
         ]);
 
         const changedFiles = stdout
@@ -586,7 +586,10 @@ async function getChangedHtmlFiles(): Promise<string[]> {
                 } catch {
                     // File doesn't exist in dist yet, skip
                 }
-            } else if (file.startsWith('dist/docs/') && file.endsWith('.html')) {
+            } else if (
+                file.startsWith('dist/docs/') &&
+                file.endsWith('.html')
+            ) {
                 distFiles.push(file);
             }
         }
@@ -601,20 +604,23 @@ async function getChangedHtmlFiles(): Promise<string[]> {
 // Extract links from specific HTML files
 async function extractLinksFromFiles(filePaths: string[]): Promise<string[]> {
     const links: string[] = [];
-    
+
     for (const filePath of filePaths) {
         try {
             const content = await readFile(filePath, 'utf-8');
             const html = parse(content);
             const anchors = html.querySelectorAll('a[href]');
-            
+
             for (const anchor of anchors) {
                 const href = anchor.getAttribute('href');
                 if (!href) continue;
-                
+
                 // Convert relative URLs to absolute
                 if (href.startsWith('/')) {
-                    const url = new URL(href, 'https://surrealdb.com').toString();
+                    const url = new URL(
+                        href,
+                        'https://surrealdb.com'
+                    ).toString();
                     links.push(url);
                 } else if (href.startsWith('http')) {
                     links.push(href);
@@ -624,7 +630,7 @@ async function extractLinksFromFiles(filePaths: string[]): Promise<string[]> {
             console.warn(`Error reading ${filePath}:`, error);
         }
     }
-    
+
     return links;
 }
 
@@ -637,7 +643,9 @@ const changedFiles = await getChangedHtmlFiles();
 let linksToCheck: string[];
 
 if (changedFiles.length > 0 && isCI) {
-    console.log(`Found ${changedFiles.length} changed files, checking only links from these files`);
+    console.log(
+        `Found ${changedFiles.length} changed files, checking only links from these files`
+    );
     linksToCheck = await extractLinksFromFiles(changedFiles);
 } else {
     // Check all links (default behavior for local builds)
@@ -646,7 +654,10 @@ if (changedFiles.length > 0 && isCI) {
 }
 
 const allToCheck = Array.from(new Set(linksToCheck));
-const { bad, localOnly, total } = await checkLinks(allToCheck, skipRemoteChecks);
+const { bad, localOnly, total } = await checkLinks(
+    allToCheck,
+    skipRemoteChecks
+);
 
 if (bad.length) {
     console.warn(`\nBroken links detected (${bad.length}/${total}):`);
