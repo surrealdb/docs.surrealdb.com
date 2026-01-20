@@ -5,12 +5,17 @@ title: Quick Start | Rust SDK | Integration | SurrealDB
 description: The SurrealDB SDK for Rust enables simple and advanced querying of a remote or embedded database.
 ---
 
+import Tabs from "@components/Tabs/Tabs.astro";
+import TabItem from "@components/Tabs/TabItem.astro";
 import Image from "@components/Image.astro";
 import LightLogo from "@img/icon/light/rust.png";
 import DarkLogo from "@img/icon/dark/rust.png";
 import Label from "@components/shared/Label.astro";
 
 # Quick start
+
+<Tabs>
+<TabItem label="2.x">
 
 First, create a new project using `cargo new` and add the following dependencies:
 
@@ -403,3 +408,422 @@ Found 9 for param $x, but expected a string
 ```
 
 For more on web frameworks using the Rust SDK, see the pages on [Actix](/docs/sdk/rust/frameworks/actix), [Axum](/docs/sdk/rust/frameworks/axum), and [Rocket](/docs/sdk/rust/frameworks/rocket).
+
+</TabItem>
+
+<TabItem label="3.x">
+
+First, create a new project using `cargo new` and add the following dependencies:
+
+* [`surrealdb`](https://crates.io/crates/surrealdb)
+* [`tokio`](https://crates.io/crates/tokio), in order to to use the database inside `fn main()`. You will most likely want to enable the `macros` and `rt-multi-thread` features so that the `#[tokio::main]` attribute can be used on top of `fn main()`.
+
+All together, that leads to the following commands to get started:
+
+```sh
+cargo new my_project
+cd my_project
+cargo add surrealdb
+cargo add tokio --features macros,rt-multi-thread
+```
+
+The examples inside this SDK manual assume that all of these crates and features are present.
+
+To maximize performance when compiling in release mode, it is recommended to use the following profile inside `Cargo.toml`, the same as [the profile used by SurrealDB](https://github.com/surrealdb/surrealdb/blob/main/Cargo.toml#L45C1-L50C18) when building each version for release.
+
+```toml
+[profile.release]
+lto = true
+strip = true
+opt-level = 3
+panic = 'abort'
+codegen-units = 1
+```
+
+### Start SurrealDB
+
+Before using `cargo run` to try out your code, make sure that the SurrealDB server is running by using the [`surreal start`](/docs/surrealdb/cli/start) command. The following command will start an in-memory server with a single root user at the default address `127.0.0.1:8000`.
+
+```bash
+surreal start --user root --pass secret
+```
+
+If you prefer to do everything through Surrealist, you can also use the [`Start serving`](/docs/surrealist/concepts/local-database-serving) button to do the same as long as you have Surrealist installed locally on your computer.
+
+### Connect to SurrealDB
+
+Open `src/main.rs` and replace everything with the following code to try out some basic operations using the SurrealDB SDK.
+
+```rust
+use surrealdb::engine::remote::ws::Ws;
+use surrealdb::opt::auth::Root;
+use surrealdb::Surreal;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+
+    // Connect to the server
+    let db = Surreal::new::<Ws>("127.0.0.1:8000").await?;
+
+    // Signin as a namespace, database, or root user
+    db.signin(Root {
+        username: "root".to_string(),
+        password: "secret".to_string(),
+    })
+    .await?;
+
+    // Select a specific namespace / database
+    db.use_ns("test").use_db("test").await?;
+
+    let some_queries = db.query("
+        RETURN 9; 
+        RETURN 10; 
+        SELECT * FROM { is: 'Nice database' };
+    ").await?;
+    dbg!(some_queries);
+    Ok(())
+}
+```
+
+Note that the `.query()` method is able to hold more than one statement, in this case three statements; i.e. two [`RETURN`](/docs/surrealql/statements/return) statements and one [`SELECT`](/docs/surrealql/statements/return) statement. The `IndexedResults` struct returned contains a field called `results` which holds the output of each statement. Note that each result has its own index. This will become useful when using the `.take()` method in the example to follow, which can access a result by its index number.
+
+```surql title="Example output"
+results: {
+        0: (
+            DbResultStats {
+                execution_time: Some(
+                    43.583µs,
+                ),
+                query_type: Some(
+                    Other,
+                ),
+            },
+            Ok(
+                Number(
+                    Int(
+                        9,
+                    ),
+                ),
+            ),
+        ),
+        1: (
+            DbResultStats {
+                execution_time: Some(
+                    6.5µs,
+                ),
+                query_type: Some(
+                    Other,
+                ),
+            },
+            Ok(
+                Number(
+                    Int(
+                        10,
+                    ),
+                ),
+            ),
+        ),
+        2: (
+            DbResultStats {
+                execution_time: Some(
+                    88.333µs,
+                ),
+                query_type: Some(
+                    Other,
+                ),
+            },
+            Ok(
+                Array(
+                    Array(
+                        [
+                            Object(
+                                Object(
+                                    {
+                                        "is": String(
+                                            "Nice database",
+                                        ),
+                                    },
+                                ),
+                            ),
+                        ],
+                    ),
+                ),
+            ),
+        ),
+    }
+```
+
+Now that we have the basics down, it is time to try out some other methods like [`CREATE`](/docs/surrealql/statements/create) and [`UPDATE`](/docs/surrealql/statements/update). The most ergonomic way to do this is to use a struct that implements `SurrealValue` which allows for both serialization and deserialization between the Rust code and the database.
+
+```rust
+use surrealdb::Surreal;
+use surrealdb::engine::remote::ws::Ws;
+use surrealdb::opt::Resource;
+use surrealdb::opt::auth::Root;
+use surrealdb_types::{RecordId, SurrealValue, Value};
+
+#[derive(Debug, SurrealValue)]
+struct Name {
+    first: String,
+    last: String,
+}
+
+#[derive(Debug, SurrealValue)]
+struct Person {
+    title: String,
+    name: Name,
+    marketing: bool,
+}
+
+#[derive(Debug, SurrealValue)]
+struct Responsibility {
+    marketing: bool,
+}
+
+#[derive(Debug, SurrealValue)]
+struct Record {
+    id: RecordId,
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = Surreal::new::<Ws>("127.0.0.1:8000").await?;
+
+    db.signin(Root {
+        username: "root".to_string(),
+        password: "secret".to_string(),
+    })
+    .await?;
+
+    db.use_ns("test").use_db("test").await?;
+
+    // Create a new person with a random id
+    let created: Option<Record> = db
+        .create("person")
+        .content(Person {
+            title: "Founder & CEO".to_string(),
+            name: Name {
+                first: "Tobie".to_string(),
+                last: "Morgan Hitchcock".to_string(),
+            },
+            marketing: true,
+        })
+        .await?;
+    dbg!(created);
+
+    // Update a person record with a specific id
+    // We don't care about the response in this case
+    // so we are just going to use `Resource::from`
+    // to let the compiler return `surrealdb::Value`
+    db.update(Resource::from(("person", "jaime")))
+        .merge(Responsibility { marketing: true })
+        .await?;
+
+    // Select all people records
+    let people: Vec<Record> = db.select("person").await?;
+    dbg!(people);
+
+    // Perform a custom advanced query
+    let mut groups = db
+        .query("SELECT marketing, count() FROM type::table($table) GROUP BY marketing")
+        .bind(("table", "person"))
+        .await?;
+    // Use .take() to transform the first query result into
+    // anything that can be deserialized, in this case
+    // a Value
+    dbg!(groups.take::<Value>(0).unwrap());
+
+    Ok(())
+}
+```
+
+### Using a static singleton
+
+A static singleton can be used to ensure that a single database instance is available across very large or complicated applications. With the singleton, only one connection to the database is instantiated, and the database connection does not have to be shared across components or controllers. 
+
+The `LazyLock` struct below has been available in stable Rust since version 1.80, making it usable without a single external crate.
+
+```rust
+use std::sync::LazyLock;
+use surrealdb::Surreal;
+use surrealdb::engine::remote::ws::{Client, Ws};
+use surrealdb::opt::auth::Root;
+use surrealdb_types::{RecordId, SurrealValue};
+
+#[derive(Debug, SurrealValue)]
+struct Record {
+    id: RecordId,
+}
+
+#[derive(Debug, SurrealValue)]
+struct Person {
+    name: String,
+    marketing: bool,
+}
+
+static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
+
+async fn upsert_tobie() -> surrealdb::Result<()> {
+    // Create or update a specific record
+    let tobie: Option<Record> = DB
+        .upsert(("person", "tobie"))
+        .content(Person {
+            name: "Tobie".to_string(),
+            marketing: true,
+        })
+        .await?;
+    dbg!(tobie);
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    // Connect to the database
+    DB.connect::<Ws>("localhost:8000").await?;
+    // Sign in to the server
+    DB.signin(Root {
+        username: "root".to_string(),
+        password: "secret".to_string(),
+    })
+    .await?;
+    // Select a namespace + database
+    DB.use_ns("main").use_db("main").await?;
+    upsert_tobie().await?;
+    Ok(())
+}
+```
+
+### Other ways to see the results
+
+Besides printing out the results inside the Rust code above, you can sign in to the database using the CLI or Surrealist to view them.
+
+```bash
+surreal sql --user root --pass secret --pretty
+```
+
+Inside Surrealist, do the following:
+
+* Hover over the current connection and click on "Change connection"
+* Hover over "New connection" and click the pencil icon
+* Change the "Method" to "root". Enter "root" for the username and "secret" for the password.
+* You will now be connected as the root user, and can define and then select the namespace and databases called "main".
+
+Here is the last query in the example above to get started:
+
+```surql
+SELECT marketing, count() FROM person GROUP BY marketing;
+```
+
+### Using capabilities and experimental capabilities
+
+The Rust SDK has a single [`Capabilities`](https://docs.rs/surrealdb/latest/surrealdb/opt/capabilities/struct.Capabilities.html) struct that is used to allow or limit what users are allowed to do using queries. Each method on this struct is used to configure the capabilities for the database in the same way that [capabilities flags](/docs/surrealdb/security/capabilities#list) are passed in to the [`surreal start`](/docs/surrealdb/cli/start) command.
+
+```bash
+surreal start --allow-all --deny-funcs "http"
+surreal sql
+```
+
+```rust
+use surrealdb::{
+    Error,
+    engine::any::connect,
+    opt::{Config, capabilities::Capabilities},
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    let mut capabilities = Capabilities::all();
+    capabilities.deny_function("http").unwrap();
+    let config = Config::default().capabilities(capabilities);
+    let db = connect(("mem://", config)).await?;
+
+    db.use_ns("main").use_db("main").await?;
+
+    println!(
+        "{:?}",
+        db.query("http::get('http://www.surrealdb.com')").await
+    );
+
+    Ok(())
+}
+```
+
+SurrealDB also has a number of experimental capabilities which need to be specifically opted into and are not included inside an `--allow-all` flag or struct created by the `Capabilities::all()` function. These can be passed in individually using a slice of the [`ExperimentalFeature`](https://docs.rs/surrealdb/latest/surrealdb/opt/capabilities/enum.ExperimentalFeature.html) enum inside the [`.with_experimental_features_allowed`](https://docs.rs/surrealdb/latest/surrealdb/opt/capabilities/struct.Capabilities.html#method.with_experimental_features_allowed) method, or all at once with [`.with_all_experimental_features_allowed()`](https://docs.rs/surrealdb/latest/surrealdb/opt/capabilities/struct.Capabilities.html#method.with_all_experimental_features_allowed).
+
+```rust
+use surrealdb::{
+    Error,
+    engine::any::connect,
+    opt::{Config, capabilities::Capabilities},
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    let mut capabilities = Capabilities::all();
+    capabilities.allow_all_experimental_features();
+    let config = Config::default().capabilities(capabilities);
+    let db = connect(("mem://", config)).await?;
+
+    db.use_ns("main").use_db("main").await?;
+
+    println!("{:?}", db.query("DEFINE FIELD comics ON person TYPE option<array<record<comic_book>>> REFERENCE"));
+
+    Ok(())
+}
+```
+
+### Experimenting with an embedded instance
+
+An embedded in-memory instance of SurrealDB does not expose any endpoints. To experiment with such an instance without having to recompile the Rust code, a server can be spun up with a single endpoint that accepts a query. The following example uses Axum to create a `localhost:8080/query` endpoint that feeds any input into the `.query()` method, deserializes it into a `Value` and returns this as a `String`.
+
+```rust
+use axum::{Router, routing::post};
+use surrealdb_types::Value;
+use std::sync::OnceLock;
+use surrealdb::{
+    Surreal,
+    engine::any::{Any, connect},
+};
+use tokio::net::TcpListener;
+
+static DB: OnceLock<Surreal<Any>> = OnceLock::new();
+
+pub async fn query(query: String) -> Result<String, String> {
+    let mut res = DB.get().unwrap().query(query.to_string()).await.map_err(|e| e.to_string())?;
+    Ok(res.take::<Value>(0).map_err(|e| e.to_string())?.to_string())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    DB.set(connect("memory").await?).unwrap();
+
+    DB.get().unwrap().use_ns("main").use_db("main").await?;
+
+    let listener = TcpListener::bind("localhost:8080").await?;
+    let router = Router::new().route("/query", post(query));
+    axum::serve(listener, router).await?;
+    Ok(())
+}
+```
+
+Two examples of output:
+
+```bash
+curl -X POST http://localhost:8080/query \
+  -H "Content-Type: application/json" \
+  -d 'CREATE user SET name = "Billy"'
+
+[{ id: user:oktnnywt6mj9f5oka7d6, name: 'Billy' }]
+
+curl -X POST http://localhost:8080/query \
+  -H "Content-Type: application/json" \
+  -d 'LET $x: string = 9'            
+
+Found 9 for param $x, but expected a string
+```
+
+For more on web frameworks using the Rust SDK, see the pages on [Actix](/docs/sdk/rust/frameworks/actix), [Axum](/docs/sdk/rust/frameworks/axum), and [Rocket](/docs/sdk/rust/frameworks/rocket).
+
+</TabItem>
+
+</Tabs>
