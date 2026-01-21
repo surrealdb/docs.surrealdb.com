@@ -485,7 +485,7 @@ async fn main() -> surrealdb::Result<()> {
 }
 ```
 
-Note that the `.query()` method is able to hold more than one statement, in this case three statements; i.e. two [`RETURN`](/docs/surrealql/statements/return) statements and one [`SELECT`](/docs/surrealql/statements/return) statement. The `IndexedResults` struct returned contains a field called `results` which holds the output of each statement. Note that each result has its own index. This will become useful when using the `.take()` method in the example to follow, which can access a result by its index number.
+Note that the `.query()` method is able to hold more than one statement, in this case three statements; i.e. two [`RETURN`](/docs/surrealql/statements/return) statements and one [`SELECT`](/docs/surrealql/statements/return) statement. The [`IndexedResults`](https://docs.rs/surrealdb/3.0.0-beta.2/surrealdb/struct.IndexedResults.html) struct returned contains a field called `results` which holds the output of each statement. Note that each result has its own index. This will become useful when using the `.take()` method in the example to follow, which can access a result by its index number.
 
 ```surql title="Example output"
 results: {
@@ -553,7 +553,7 @@ results: {
     }
 ```
 
-Now that we have the basics down, it is time to try out some other methods like [`CREATE`](/docs/surrealql/statements/create) and [`UPDATE`](/docs/surrealql/statements/update). The most ergonomic way to do this is to use a struct that implements `SurrealValue` which allows for both serialization and deserialization between the Rust code and the database.
+Now that we have the basics down, it is time to try out some other methods like [`CREATE`](/docs/surrealql/statements/create) and [`UPDATE`](/docs/surrealql/statements/update). The most ergonomic way to do this is to use a struct that implements [`SurrealValue`](https://docs.rs/surrealdb/3.0.0-beta.2/surrealdb/types/trait.SurrealValue.html) which allows for both serialization and deserialization between the Rust code and the database.
 
 ```rust
 use surrealdb::Surreal;
@@ -719,15 +719,17 @@ SELECT marketing, count() FROM person GROUP BY marketing;
 The Rust SDK has a single [`Capabilities`](https://docs.rs/surrealdb/latest/surrealdb/opt/capabilities/struct.Capabilities.html) struct that is used to allow or limit what users are allowed to do using queries. Each method on this struct is used to configure the capabilities for the database in the same way that [capabilities flags](/docs/surrealdb/security/capabilities#list) are passed in to the [`surreal start`](/docs/surrealdb/cli/start) command.
 
 ```bash
-surreal start --allow-all --deny-funcs "http"
-surreal sql
+# Start the server
+surreal start --user root --pass secret --allow-all --deny-funcs "http"
+# Connect as root at default namespace 'main', database 'main'
+surreal sql --user root --pass secret
 ```
 
 ```rust
 use surrealdb::{
     Error,
     engine::any::connect,
-    opt::{Config, capabilities::Capabilities},
+    opt::{Config, auth::Root, capabilities::Capabilities},
 };
 
 #[tokio::main]
@@ -735,9 +737,15 @@ async fn main() -> Result<(), Error> {
     let mut capabilities = Capabilities::all();
     capabilities.deny_function("http").unwrap();
     let config = Config::default().capabilities(capabilities);
-    let db = connect(("mem://", config)).await?;
+    let db = connect(("ws://localhost:8000", config)).await?;
 
     db.use_ns("main").use_db("main").await?;
+
+    db.signin(Root {
+        username: "root".to_string(),
+        password: "secret".to_string(),
+    })
+    .await?;
 
     println!(
         "{:?}",
@@ -754,22 +762,76 @@ SurrealDB also has a number of experimental capabilities which need to be specif
 use surrealdb::{
     Error,
     engine::any::connect,
-    opt::{Config, capabilities::Capabilities},
+    opt::{Config, auth::Root, capabilities::Capabilities},
 };
+use surrealdb_types::ToSql;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let mut capabilities = Capabilities::all();
     capabilities.allow_all_experimental_features();
     let config = Config::default().capabilities(capabilities);
-    let db = connect(("mem://", config)).await?;
+    // Start server with command 'surreal start --user root --pass secret --allow-experimental define_api'
+    let db = connect(("ws://localhost:8000", config)).await?;
 
     db.use_ns("main").use_db("main").await?;
 
-    println!("{:?}", db.query("DEFINE FIELD comics ON person TYPE option<array<record<comic_book>>> REFERENCE"));
+    db.signin(Root {
+        username: "root".to_string(),
+        password: "secret".to_string(),
+    })
+    .await?;
+
+    db.query(
+        r#"DEFINE API "/test"
+    FOR get, post 
+        MIDDLEWARE
+            api::timeout(1s)
+        THEN {
+            {
+                status: 200,
+                body: {
+                    request: $request.body,
+                    response: "The server works"
+                },
+                headers: {
+                    'last-modified': <string>time::now(),
+                    'expires': <string>(time::now() + 4d)
+                }
+            };
+        };
+        
+        api::invoke("/test");
+
+        api::invoke("/test", {
+            body: {
+            hi: "please",
+                give: "me",
+                the: "information"
+            }
+        });
+        "#,
+    )
+    .await?
+    .results
+    .into_iter()
+    .for_each(|(_index, (_stats, res))| match res {
+        Ok(v) => println!("{}\n", v.to_sql()),
+        Err(e) => println!("{e}"),
+    });
 
     Ok(())
 }
+```
+
+Output:
+
+```surql
+NONE
+
+{ body: { request: NONE, response: 'The server works' }, context: {  }, headers: { expires: '2026-01-25T01:16:42.602300Z', "last-modified": '2026-01-21T01:16:42.602292Z' }, status: 200 }
+
+{ body: { request: { give: 'me', hi: 'please', the: 'information' }, response: 'The server works' }, context: {  }, headers: { expires: '2026-01-25T01:16:42.602412Z', "last-modified": '2026-01-21T01:16:42.602409Z' }, status: 200 }
 ```
 
 ### Experimenting with an embedded instance
@@ -778,7 +840,7 @@ An embedded in-memory instance of SurrealDB does not expose any endpoints. To ex
 
 ```rust
 use axum::{Router, routing::post};
-use surrealdb_types::Value;
+use surrealdb_types::{ToSql, Value};
 use std::sync::OnceLock;
 use surrealdb::{
     Surreal,
@@ -790,7 +852,7 @@ static DB: OnceLock<Surreal<Any>> = OnceLock::new();
 
 pub async fn query(query: String) -> Result<String, String> {
     let mut res = DB.get().unwrap().query(query.to_string()).await.map_err(|e| e.to_string())?;
-    Ok(res.take::<Value>(0).map_err(|e| e.to_string())?.to_string())
+    Ok(res.take::<Value>(0).map_err(|e| e.to_string())?.to_sql())
 }
 
 #[tokio::main]
@@ -819,7 +881,8 @@ curl -X POST http://localhost:8080/query \
   -H "Content-Type: application/json" \
   -d 'LET $x: string = 9'            
 
-Found 9 for param $x, but expected a string
+Internal error: Tried to set `$x`,
+but couldn't coerce value: Expected `string` but found `9`
 ```
 
 For more on web frameworks using the Rust SDK, see the pages on [Actix](/docs/sdk/rust/frameworks/actix), [Axum](/docs/sdk/rust/frameworks/axum), and [Rocket](/docs/sdk/rust/frameworks/rocket).
