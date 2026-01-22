@@ -1,0 +1,913 @@
+# Migrating from 2.x to 3.x
+
+This page details the changes to be aware of when migrating data from SurrealDB 2.x to 3.x. It is divided into three sections:
+
+* **Breaking changes**: changes that lead to a change in behaviour or output. Most breaking changes are due to new functionality, renaming or an issue that required a fix. Each of these starts with a **Severity** level and a recommended **Action**, followed by a longer explanation of the change.
+* **Behaviour fixes**: changes that introduce new output but are more akin to bug fixes. Most of these changes are likely to bring the output in line with what a user would have originally expected it to be.
+* **Non-breaking changes**: this section contains all the changes that have no effect on migrating from 2.x to 3.x code. However, it contains a great deal of new functionality that you may wish to restructure your code to take advantage of. If you are already planning to migrate to 3.x it is probably because of the features here!
+
+## Breaking changes
+
+Each breaking change has a level of severity. They are:
+
+- **Will break**: Any usage of the changed pattern will be almost gaurenteed to change the semantic of the query when porting it to 3.0
+- **Can break**: There are some use cases where the semantics will remain the same, but it is still likely to cause issues when porting to 3.0.
+- **Unlikely break**: Changes which can only be seen in edge cases or patterns expected to be very rare in actual useful queries.
+
+### Futures have been replaced with COMPUTED fields
+
+> * **Severity**: Will break.
+> * **Action 1**: Migrate schema using the migration tool or replace `VALUE <future> { }` with `COMPUTED` if migrating using manual export and import.
+> * **Action 2** (if necessary): Restructure code for any cases such as nested fields that are disallowed with computed fields.
+
+SurrealDB had a `future` type that represented a value that was computed every time it was accessed as opposed to being stored as a permanent value. This often involved storing arbitrary queries in record data, which is no longer available in 3.0.
+
+```surql
+DEFINE FIELD born ON person TYPE datetime;
+DEFINE FIELD age ON person VALUE <future> { time::year(time::now()) - time::year(born) };
+
+CREATE person:one SET born = d'1900-01-01';
+
+[
+	{
+		age: 126,
+		born: d'1900-01-01T00:00:00Z',
+		id: person:one
+	}
+]
+```
+
+Futures turned out to be unwieldy for a number of reasons and a decision was made to reimplement them as a `COMPUTED` field.
+
+Many futures can be automatically be converted from a future to a computed field when using the migration tool, which effectively will replace the above code with the following.
+
+```surql
+DEFINE FIELD born ON person TYPE datetime;
+DEFINE FIELD age ON person COMPUTED time::year(time::now()) - time::year(born);
+
+CREATE person:one SET born = d'1900-01-01';
+```
+
+This may not always work, because `COMPUTED` fields which have been stored in a record cannot be converted
+
+```surql
+
+CREATE foo SET field = <future> { expression };
+// Or
+DEFINE FIELD future_field ON table DEFAULT <future> { expression };
+```
+
+They also have a number of guardrails that futures never did to keep them from being used in unexpected ways. They are:
+
+* `COMPUTED` can only be used in a `DEFINE FIELD` statement.
+* There can be no nested fields defined inside a field that is `COMPUTED` (and vice versa, you can not define nested fields under an already defined `COMPUTED` field).
+* You can not use the COMPUTED clause on the id field.
+* You cannot use `COMPUTED` in combination with `VALUE`, `DEFAULT`, `READONLY`, `ASSERT`, `REFERENCE`, `FLEXIBLE`.
+* `COMPUTED` can not be used on nested fields, so only on top-level fields.
+
+So for an example like this:
+
+```surql
+DEFINE FIELD name.first ON person TYPE string;
+DEFINE FIELD name.last ON person TYPE string;
+DEFINE FIELD name.full ON person VALUE <future> { name.first + ' ' + name.last };
+
+CREATE person:one SET name = {
+    first: "Mat",
+    last: "Cauthon"
+};
+```
+
+The `COMPUTED` field would have to be renamed to something like `full_name` to ensure that it is not a nested field.
+
+```surql
+DEFINE FIELD name.first ON person TYPE string;
+DEFINE FIELD name.last ON person TYPE string;
+DEFINE FIELD full_name ON person COMPUTED name.first + ' ' + name.last;
+
+CREATE person:one SET name = {
+    first: "Mat",
+    last: "Cauthon"
+};
+```
+
+### Function name changes
+
+> * **Severity**: Will break.
+> * **Action**: Check the list to see if any functions you use have been renamed.
+
+A number of functions have been renamed in SurrealDB 3.0. The complete list is below. The change in names is due to one of the following reasons:
+
+* `::is::` and `::from::` to `::is_` and `::from_`. This is to match the syntax with the method syntax that is already in use. For example, the previous `type::is::string("a string")` was already in use as a method using the syntax `"a string".is_string()`.
+* `thing` to `record`. The name `Thing` was originally a pseudonym for a record. In SurrealDB 3.0 the `thing` name has disappeared and been replaced in its entirety with `record`.
+* `rand::guid()` to `rand::id()`. Renamed as this is the default format for record IDs in SurrealDB.
+* `string::distance::osa_distance` to `string::distance::osa`. Renamed as `_distance` does not need to appear twice in the function name.
+
+<details>
+<summary>**List of new vs. old function names** (click to open)</summary>
+
+| New function name | Previous name |
+| ------------- |:-------------:|
+|`duration::from_days`|`duration::from::days`|
+|`duration::from_hours`|`duration::from::hours`|
+|`duration::from_micros`|`duration::from::micros`|
+|`duration::from_millis`|`duration::from::millis`|
+|`duration::from_mins`|`duration::from::mins`|
+|`duration::from_nanos`|`duration::from::nanos`|
+|`duration::from_secs`|`duration::from::secs`|
+|`duration::from_weeks`|`duration::from::weeks`|
+|`rand::id`|`rand::guid`|
+|`string::distance::osa`|`string::distance::osa_distance`|
+|`string::is_alphanum`|`string::is::alphanum`|
+|`string::is_alpha`|`string::is::alpha`|
+|`string::is_ascii`|`string::is::ascii`|
+|`string::is_datetime`|`string::is::datetime`|
+|`string::is_domain`|`string::is::domain`|
+|`string::is_email`|`string::is::email`|
+|`string::is_hexadecimal`|`string::is::hexadecimal`|
+|`string::is_ip`|`string::is::ip`|
+|`string::is_ipv4`|`string::is::ipv4`|
+|`string::is_ipv6`|`string::is::ipv6`|
+|`string::is_latitude`|`string::is::latitude`|
+|`string::is_longitude`|`string::is::longitude`|
+|`string::is_numeric`|`string::is::numeric`|
+|`string::is_semver`|`string::is::semver`|
+|`string::is_url`|`string::is::url`|
+|`string::is_ulid`|`string::is::ulid`|
+|`string::is_uuid`|`string::is::uuid`|
+|`string::is_record`|`string::is::record`|
+|`time::from_micros`|`time::from::micros`|
+|`time::from_millis`|`time::from::millis`|
+|`time::from_nanos`|`time::from::nanos`|
+|`time::from_secs`|`time::from::secs`|
+|`time::from_ulid`|`time::from::ulid`|
+|`time::from_unix`|`time::from::unix`|
+|`time::from_uuid`|`time::from::uuid`|
+|`time::is_leap_year`|`time::is::leap_year`|
+|`type::record`|`type::thing`|
+|`type::is_array`|`type::is::array`|
+|`type::is_bool`|`type::is::bool`|
+|`type::is_bytes`|`type::is::bytes`|
+|`type::is_collection`|`type::is::collection`|
+|`type::is_datetime`|`type::is::datetime`|
+|`type::is_decimal`|`type::is::decimal`|
+|`type::is_duration`|`type::is::duration`|
+|`type::is_float`|`type::is::float`|
+|`type::is_geometry`|`type::is::geometry`|
+|`type::is_int`|`type::is::int`|
+|`type::is_line`|`type::is::line`|
+|`type::is_multiline`|`type::is::multiline`|
+|`type::is_multipoint`|`type::is::multipoint`|
+|`type::is_multipolygon`|`type::is::multipolygon`|
+|`type::is_none`|`type::is::none`|
+|`type::is_null`|`type::is::null`|
+|`type::is_number`|`type::is::number`|
+|`type::is_object`|`type::is::object`|
+|`type::is_point`|`type::is::point`|
+|`type::is_polygon`|`type::is::polygon`|
+|`type::is_range`|`type::is::range`|
+|`type::is_record`|`type::is::record`|
+|`type::is_string`|`type::is::string`|
+|`type::is_uuid`|`type::is::uuid`|
+
+</details>
+
+### Function behaviour changes
+
+The following functions have not been renamed, but have slightly different output and may require a change in your code.
+
+#### `array::logical_and`
+
+> * **Severity**: Unlikely break. This change can cause a break when relying on the specific value, instead of truthiness, returned from the array.
+> * **Action**: Change any query which relies on the specific value returned from `array::logical_and`. If the query only relied on the truthiness of the elements of `array::logical_and` then no changes have to be made.
+
+##### Description
+
+The resulting values of the `array::logical_and` function was inconsitent with documentation and the rest of the language. The function expects to be called with two arrays, for each pair of values of those arrays it would check if they were both truthy. If they were it would return the first of the pair which was true, otherwise it would return the first of the two values which was falsy. If the arrays were not of the same size it would consider missing value of the pairs to be `NULL`.
+
+```surql
+array::logical_and(["a"],[true]); // returns ["a"]
+array::logical_and([""],[false]); // returns [""]
+array::logical_and([true],[]); // returns [NULL]
+```
+
+This behavior was inconsistent with the `&&` operator as well as the index operator.
+
+```surql
+"a" && true; // returns true
+[true][0] && [][0]; // returns NONE 
+```
+
+With 3.0 the function now behaves more as if it indexes every element in the array and then applies the `&&` operator to it. The `&&` operator checks if the first value is truthy, if it is it returns the second value, if not it returns the first value.
+
+```surql
+array::logical_and(["a"],[true]); // returns [true]
+array::logical_and([""],[false]); // returns [""]
+array::logical_and([true],[]); // returns [NONE]
+```
+
+#### `array::logical_or`
+
+> * **Severity**: Unlikely break. This change can cause a break when relying on the specific value, instead of truthiness, returned from the array.
+> * **Action**: Change any query which relies on the specific value returned from `array::logical_or`. If the query only relied on the thruthyness of the elements of `array::logical_or` then no changes have to be made.
+
+##### Description
+
+The resulting values of the `array::logical_or` function was inconsistent with documentation and the rest of the language. The function expects to be called with two arrays, for each pair of values of those arrays it would check if either value was truthy. If either was it would return the first of the pair which was true, otherwise it would return the first of the two values which was falsy. If the arrays were not of the same size it would consider missing value of the pairs to be `NULL`.
+
+```surql
+array::logical_or(["a"],[true]); // returns ["a"]
+array::logical_or([""],[false]); // returns [""]
+array::logical_or([],[false]); // returns [NULL]
+```
+
+This behavior was inconsistent with the `||` operator as well as the index operator.
+
+```surql
+"" || false; // returns false
+[false][0] || [][0]; // returns NONE 
+```
+
+With 3.0 the function now behaves more as if it indexes every element in the array and then applies the `||` operator to it. The `||` operator checks if the first value is truthy, if it is it returns the first value, if not it returns the second value.
+
+```surql
+array::logical_and(["a"],[true]); // returns ["a"]
+array::logical_and([""],[false]); // returns [false]
+array::logical_and([false],[]); // returns [NONE]
+```
+
+#### `array::range`
+
+> * **Severity**: Will break.
+> * **Action**: Change the arguments for this function to take a range or a range or a start and end value, instead of an offset and a length.
+
+##### Description
+
+The arguments for this function have changed in almost all usages, except for ones which fit the pattern `array::range(0, ..)`.
+
+Before 3.0 the arguments of `array::range` were `offset` and `count`. The first argument indicated the offset of a range of numbers and the second was the amount of numbers that range should contain. 
+
+```surql
+array::range(0, 5)  // returns [0,1,2,3,4]
+array::range(-1, 5) // returns [-1,0,1,2,3]
+array::range(-5, 5) // returns [-5,-4,-3,-2,-1]
+```
+
+With the 3.0 release `array::range` behavior is now aligned with how ranges work, supporting taking a range and having it's arguments be a start and end bound of a range of numbers.
+
+```surql
+array::range(0, 5)  // returns [0,1,2,3,4]
+array::range(-1, 5) // returns [-1,0,1,2,3,4]
+array::range(-5, 5) // returns [-5,-4,-3,-2,-1,0,1,2,3,4]
+array::range(0..=1) // returns [0,1]
+```
+
+#### `math::sqrt`
+
+> * **Severity**: Unlikely break.
+> * **Action**: Change any query which relies on the `NONE` result from `math::sqrt` to check for `NaN` instead.
+
+##### Description
+
+The `math::sqrt` function in 3.0 has been updated to return `NaN` when called with an invalid value like `-1`.
+Previously this function would return `NONE` instead.
+
+This issue can only break a query when it relied on the function returning the value `NONE` when called with a negative number.
+
+#### `math::min`
+
+> * **Severity**: Unlikely break.
+> * **Action**: Change any query which relies on the `NONE` result from `math::min` to check for `Infinity` instead.
+
+##### Description
+
+The `math::min` function in 3.0 has been updated to return `Infinity` when called with an empty array.
+Previously this function would return `NONE` instead.
+
+This issue can only break a query when it relied on the function returning the value `NONE` when called with a empty array.
+
+#### `math::max`
+
+> * **Severity**: Unlikely break.
+> * **Action**: Change any query which relies on the `NONE` result from `math::max` to check for `-Infinity` instead.
+
+##### Description
+
+The `math::max` function in 3.0 has been updated to return `-Infinity` when called with an empty array.
+Previously this function would return `NONE` instead.
+
+This issue can only break a query when it relied on the function returning the value `NONE` when called with a empty array.
+
+
+
+
+### Mock ranges
+
+> * **Severity**: Unlikely break.
+> * **Action 1**: Change any queries that depend on the specific mock type of value being returned.
+> * **Action 2**: If migrating via manual export and import, add `=` to any existing mock ranges to keep them as inclusive ranges. 
+
+##### Description
+
+Mock ranges use a range syntax for records contained between bars: `|person:1..1000|`.
+
+Before 3.0 mocks were their own special value.
+
+```surql
+|a:1..2|;
+-- returns:
+|a:1..2|
+```
+
+This value has been removed, instead of which mocks now return an array.
+
+Note the use of `..=` mock ranges are no longer inclusive by default but this will be automatically changed when exporting for 3.0.
+
+```surql
+|a:1..=2| returns `[a:1,a:2}`
+```
+
+The use case for mocks was to generate a number of values at the same time. For example.
+
+```surql
+CREATE |a:100| SET a = 1;
+
+let $value = |a:1..2|;
+CREATE $value SET a = 1;
+```
+
+The above query would create a hundred records.
+
+While this behavior has not changed, mock syntax now returns an array which would result in the exact same behavior it previously.
+
+The only breaking change is a query directly depends on the type of the value returned.
+
+For example, `type::is_array(|a:1..2|)` now returns true.
+
+They now exclude the last number returning the records `person:1` up to and including `person:999`, aligning the syntax with the semantics of the `..` range operator.
+
+### `LET` required for parameters
+
+> * **Action**: Add `LET` before parameter declarations to allow them to parse again.
+
+##### Description
+
+Using `LET` to declare a parameter was optional before 3.0. This gave the impression that parameters were mutable.
+
+```surql
+LET $val = 10;
+
+FOR $num IN 0..10 {
+	// Actually evaluates to this local parameter
+	// that does not escape the block:
+	// LET $val = $val + $num;
+    $val = $val + $num;
+};
+
+$val; -- Value is still 10
+```
+
+In 3.0, an error is generated instead.
+
+```surql
+'Parse error: Parameter declarations without `let` are deprecated.
+ --> [4:5]
+  |
+4 | $val = $val + $num;
+  | ^^^^^^^^^^^^^^^^^^ Replace with `let $val = ...` to keep the previous behavior.
+'
+```
+
+### Parsing changes
+
+> * **Action**: Follow the instructions below to allow certain record ID and unicode parsing to work again.
+
+#### Record ID parsing
+
+Previously the starting characters of a record id behaved kind of like a denominater like `[]` is in an array, allowing you to write `r"a:b[r"c:d"]"`. Note the unescaped `"`. Now this is no longer allowed and " needs to be properly escaped. The previous record id string must now be written as `r"a:b[r\"c:d\"]"`.
+
+#### Unicode parsing
+
+Previously if a unicode surrogate leading character was immediately followed by the trailing surrogate it would be accepted by the parser, for example `"\uD83D\uDF15"` was valid. This is no longer allowed, instead you should now just write the correct character value for the desired unicode character in one escape sequence: `"\u{1F715}"`. 
+
+#### Escaping identifiers
+
+Identifiers can be escaped in SurrealQL with `` or  ⟨ . Identifiers which are escaped this way now support escape sequences like newlines \n, unicode escape sequences `\u{AB1234}` and others also supported in strings. 
+
+
+### New set type
+
+> * **Action**: Either migrate to new set type, or maintain current behaviour by adding `VALUE $value.distinct()` to the current `DEFINE FIELD` definition.
+
+##### Description
+
+The original [set type](/docs/surrealql/datamodel/sets) in SurrealDB 2.x was simply an array that deduplicated its items. The `set` type is now a distinct datatype that both deduplicates and orders its items, and displays its items inside `{}` instead of `[]`.
+
+```surql title="2.x set type"
+<set>[2,3,1,1];
+-- [2, 3, 1]
+```
+
+```surql title="2.x set type"
+<set>[2,3,1,1];
+-- {1, 2, 3}
+```
+
+### Like operators have been removed
+
+> * **Action**: replace `~`, `!~`, `?~`, `*~` with one of the `string::distance` or `string::similarity` functions.
+
+##### Description
+
+The `~` operator (the "like" operator) was originally used for fuzzy similarity.
+
+```surql
+-- false: not exactly the same
+"Mario" = "mario";
+-- true: somewhat the same
+"Mario" ~ "mario";
+```
+
+This operator was removed for two reasons:
+
+* SurrealDB now has more algorithms for fuzzy string similarity and distance, such as `string::similarity::jaro` and `string::distance::osa`.
+* The point at which two strings are similar should be determined by each user on a case by case basis.
+
+As such, it made no sense to have a special operator for one of many similarity algorithms based on a standard that was not clear to the user.
+
+If you are using the like operator and unsure which function to replace it with, try using `string::similarity::jaro()`. This function returns a number from 0 to 1, in which 1 means perfect equality. You can then test out some sample strings to see 
+
+```surql
+-- 0.8095238095238096f
+string::similarity::jaro("United Kingdom", "United");
+-- 0.7857142857142857f
+string::similarity::jaro("United Kingdom", "Unite");
+-- 1
+string::similarity::jaro("United", "United");
+-- 0.9444444444444445f
+string::similarity::jaro("United", "Unite");
+```
+
+Once you have decided on a cutoff, this can be put into its own function to reduce typing later on.
+
+```surql
+DEFINE FUNCTION fn::similar($one: string, $two: string) -> bool {
+    string::similarity::jaro($one, $two) > 0.8
+};
+
+fn::similar("United Kingdom", "United"); -- true
+```
+
+### `SEARCH ANALYZER` is now `FULLTEXT ANALYZER`
+
+> * **Action**: Change all instances of `SEARCH ANALYZER` to `FULLTEXT ANALYZER`.
+
+##### Description
+
+This breaking change is a simple one: replace the word `SEARCH` with `FULLTEXT`.
+
+```surql
+DEFINE ANALYZER example_ascii TOKENIZERS class FILTERS ascii;
+DEFINE INDEX userNameIndex ON TABLE user COLUMNS name FULLTEXT ANALYZER example_ascii BM25 HIGHLIGHTS;
+```
+
+This breaking change has an interesting story and comes with a nice perk. In February, full-text indexes were reimplemented [to allow concurrent writes](https://github.com/surrealdb/surrealdb/pull/5571), improving performance. This originally happened through a new `FULLTEXT` clause in addition to `SEARCH` which used the old implementation, after which the old implementation was removed. At this point, it made sense to keep `FULLTEXT` instead of `SEARCH`, making the code clearer as to what kind of index this is.
+
+### Schema and query strictness changes
+
+Changes were added in 3.0 to refine how strictness is defined, the output from the database for non-defined resources, and the behaviour of `SCHEMAFULL` tables.
+
+#### Strictness
+
+> * **Action**: Add `STRICT` to all `DEFINE DATABASE` statements for databases that previously were made strict on the instance level via the `--strict` flag.
+
+A strict database is one in which a resource must be defined before it can be used. For example, a `CREATE person` query in a non-strict setting will will define a namespace, database, and `person` table to allow the query to work.
+
+Before 3.0, only instances could be strict. This was done by passing in a `--strict` flag into the `surreal start` command.
+
+Since 3.0, strictness is now defined on the database level using `STRICT` after `DEFINE DATABASE`. This allows instances to hold multiple databases that can be either strict or not depending on the circumstance.
+
+#### Statements on non-existing tables now return an error
+
+> * **Action**: Handle errors for non-existing tables instead of expecting an empty array.
+
+Statements on non-existing tables that do not create them will now return an error instead of an empty array.
+
+```surql
+SELECT * FROM doesnt_exist;
+-- "The table 'doesnt_exist' does not exist"
+
+DELETE doesnt_exist;
+-- "The table 'doesnt_exist' does not exist"
+
+REMOVE TABLE doesnt_exist;
+-- "The table 'doesnt_exist' does not exist"
+```
+
+However, statements that do create them by default will still work if the database is not defined as `STRICT`.
+
+```surql
+CREATE doesnt_exist SET num = 10;
+-- [{ id: doesnt_exist:9ftgw37rzt6iwbn98v9g, num: 10 }]
+```
+
+#### Extra fields as input for `SCHEMAFULL` tables
+
+> * **Action**: Only pass in values for defined fields in `SCHEMAFULL` tables.
+
+A `SCHEMAFULL` table can now only accept input that conforms to the schema. This differs from 2.x which was still type safe, but would filter out extra fields.
+
+```surql
+DEFINE TABLE user SCHEMAFULL;
+DEFINE FIELD name ON user TYPE string;
+DEFINE FIELD num ON user TYPE int;
+CREATE user CONTENT { name: "Billy", num: 10, other: "other" };
+-- "Found field 'other', but no such field exists for table 'user'"
+```
+
+To avoid this error, use the destructuring operator can be used to only pass in defined fields.
+
+```surql
+CREATE user CONTENT { name: "Billy", num: 10, other: "other" }.{ name, num };
+```
+
+### `MTREE` removal
+
+> * **Action**: USE `HNSW` instead of `MTREE` in indexes.
+
+`MTREE` vector search inside a [DEFINE INDEX](/docs/surrealql/statements/define/indexes) statement has been deprecated for some time and has [now been removed](https://github.com/surrealdb/surrealdb/pull/6553) in lieu of `HNSW`.
+
+### Idiom fetching changes
+
+> * **Action**: Check if any queries using these idioms need to be rewritten.
+
+A number of improvements were made to idiom fetching, the details of which can be seen [in this PR](https://github.com/surrealdb/surrealdb/pull/6318). The examples in the PR have been summed up in this chart, showing which parts have changed and which have not.
+
+The following chart shows a top-level view of the changes.
+
+| Example  | 2.x output | 3.x output |
+| ------------- | -- |:-------------:|
+| `[1, a:1].*` | `[1, a:1]` | `[1, { id: a:1 }]` |
+| `[1, a:1].*.*` | `[NONE, { id: a:1 }]` | `[NONE, { id: a:1 }]` |
+| `a:1.*` | `{ id: a:1 }` | `{ id: a:1 }` |
+| `{ key: 123 }.*` | `[ 123 ]` | `{ key: 123 }` |
+| `"foobar".*` | `NONE` | `NONE` |
+| -- | -- | -- |
+| `a:1<-edge` | `[edge:1]` | `[edge:1]` |
+| `a:1<-edge[0]` | `{ id: edge: 1 }` | `edge:1` |
+| -- | -- | -- |
+| `[{ n: 1 }, { n: 2 }].n[0]` | `1` | `[NONE, NONE]` |
+
+An explanation of the individual idioms is as follows.
+
+#### All Idiom `.*`
+
+> * **Severity**: Can break.
+
+This will break when the idiom is used to derefence record IDs in an array or to get the values from an object.
+
+##### Description
+
+The result of the all idiom `.*` has changed when it is used on an array or an object.
+
+Previously `.*` on an array would just return the same value with the exception that all 
+subsequent idiom operators would now run on the elements instead of the whole array.
+
+```surql
+[a:1, a:2].* // returns [a:1, a:2]
+
+[a:1, a:2].*.* // returns an array with the values of the records the record id's point to.
+```
+
+In 3.0 `.*` works on the elements of the array when the reciever value is an array.
+So the above `[a:1, a:2].*.*` can just be written as `[a:1, a:2].*`
+
+On objects `.*` would return an array with the values of the object. 
+```surql
+{ a: 1, b: "foo" }.* // returns [1, "foo"]
+```
+Now `.*` just returns the object.
+
+##### Mitigation
+
+Fixing this issue will require checking if the usage of the all idiom is used to derefence record-id's in an array and then replacing the previous `.*.*` with just a single `.*`
+If the `.*` was used to retrieve the value of an object it should be replaced with a call to the `object::values` function.
+
+#### Field idiom `.field` followed by another idiom part.
+
+> * **Severity**: Can break
+
+This will break when the field idiom is on an array of objects and then followed by another idiom part.
+
+##### Description
+
+Previously calling using a field idiom `.field` on an array would index the field for every element and then construct an array with the results and 
+the following parameter would be evaluated on that whole array.
+```surql
+[{ a: ["a","b"]}, {a: [1,2]}].a[0] 
+// returns 
+// ([{ a: ["a","b"]}, {a: [1,2]}].a)[0] =
+// [["a","b"],[1,2]][0] =
+// ["a","b"]
+```
+With 3.0 the idioms have the default behavior of working on the elements of arrays instead of the whole array.
+A field idiom followed by other idiom part evaluated on an array are now evaluated on the individual results of the index operation on every element.
+```surql
+[{ a: ["a","b"]}, {a: [1,2]}].a[0] 
+// returns 
+// [{ a: ["a","b"]}, {a: [1,2]}].a[0] =
+// [({ a: ["a","b"]}.a)[0], ({a: [1,2]}.a)[0])] =
+// [(["a","b"][0]), ([1,2][0])] = 
+// ["a",1]
+```
+
+##### Mitigation
+
+If the previous behavior was desired the idiomatic way to get this is to swap the idiom parts.
+So if you previously did `.field[0]` instead do `[0].field` this will get the same behavior.
+
+### Optional parts
+
+> * **Severity**: Can break.
+> * **Action**: Change `?` to `.?` after an optional value.
+
+The `?` operator is used in SurrealDB 2.x to avoid the error of calling a method on a NONE value.
+
+```surql title="Version 2.x"
+["string", "another string", NONE]
+	// Only call .len() if value is not NONE
+	.map(|$val| $val?.len());
+```
+
+A refinement to the parser was made in 3.0 to avoid confusion between the existing `??` operator and the optional part operator on an `option<option<value>>` which had used `?` twice.
+
+The `?` operator is now replaced with `.?` to allow the parser to distinguish between these two cases.
+
+```surql title="Version 3.x"
+["string", "another string", NONE].map(|$val| $val.?.len());
+```
+
+## Behaviour fixes
+
+The following changes produce a different output than in 2.x versions, but one that is more in line with user expectations and thus more similar to a bug fix than a breaking change requiring an action.
+
+Nevertheless, please review each to ensure that the new output matches with the expectations for your code.
+
+### Output of blocks
+
+Blocks now return the last expression in the block regardless of whether it is preceded by `RETURN` or not. The following query will return `[{ id: person:one }]` instead of the previous `NONE`.
+
+```surql
+{ 
+	CREATE person:one;
+}
+```
+
+### Record ID ordering
+
+Natural ordering is the ordering of types, by their id, as they are fetched from the KV store. So doing SELECT * FROM foo will return all the entries in their natural order as there is no ORDER BY .. clause. Previously a:[2] would be ordered before a:[1f] as the type of number had an impact on where it was ordered. Now all numbers will be order according to their numerical value. So a:[2] will be ordered after a:[1f] and a:[1] and a:[1f] now refer to the same entry.
+
+### `$this` and `$parent` in statements
+
+The semantics of $this and $parent changed. Previously whenever you would use a `()` (parentheses), `$this` and `$parent` would refer to a new document. This included when `()` was used for simple operator precedence like in `($this.number + 1) * 3`. Now `()` has no effect on `$this` and `$parent`. Instead, the value of these parameters are now updated only when a new query statement, like `SELECT` or `UPDATE`, is executed.
+
+## Non-breaking changes
+
+The following items don't require your attention to migrate from version 2.x to 3.x, but are capable of vastly improving your experience with SurrealDB.
+
+### `$input` is now available inside an event
+
+The `$input` parameter used to always be `NONE` inside an event. Now you can access it for fine tuning on how events behave.
+
+```surql
+-- Set CREATE in event to only trigger when record has `true` for `log_event`
+DEFINE EVENT something ON person WHEN $input.log_event = true THEN {
+    CREATE log SET at = time::now(), of = $input;
+};
+
+-- Set to `false`, does not trigger CREATE
+CREATE person:debug SET name = "Billy", log_event = false;
+-- Triggers CREATE
+CREATE person:real SET name = "Bobby", log_event = true;
+
+SELECT * FROM log;
+```
+
+Output:
+
+```surql
+[
+	{
+		at: d'2025-10-14T06:15:21.141Z',
+		id: log:svbr2qhjywml20mufb0o,
+		of: {
+			log_event: true,
+			name: 'Bobby'
+		}
+	}
+]
+```
+
+### Parameters work in many places now
+
+Parameters work in a lot more places than before.
+
+* The `ident` after `DEFINE TABLE ident ...` is now an expression
+* The `ident` after `DEFINE NAMESPACE ident ...` is now an expression.
+* The `ident` after `DEFINE DATABASE ident ...` is now an expression.
+* The `ident` after `DEFINE USER ident ...` is now an expression.
+* The `ident` after `DEFINE ACCESS ident ...` is now an expression.
+* Both `ident` and `table` after `DEFINE EVENT ident ON table ...` are now expressions.
+* Both `ident` and `table` after `DEFINE FIELD ident ON table ...` are now expressions.
+* The `ident` after `DEFINE ANALYZER ident ...` is now an expression.
+* The `ident` after `DEFINE BUCKET ident ...` is now an expression.
+* The `ident` after `DEFINE SEQUENCE ident ...` is now an expression.
+* The `ident` after `INFO FOR TABLE ident ...` is now an expression.
+* The `ident` after `INFO FOR USER ident ...` is now an expression.
+* Both `ident` and `table` after `INFO FOR INDEX ident ON table ...` are now expressions.
+* The `ident` after `REMOVE TABLE ident ...` is now an expression
+* The `ident` after `REMOVE NAMESPACE ident ...` is now an expression.
+* The `ident` after `REMOVE DATABASE ident ...` is now an expression.
+* The `ident` after `REMOVE USER ident ...` is now an expression.
+* The `ident` after `REMOVE ACCESS ident ...` is now an expression.
+* Both `ident` and `table` after `REMOVE EVENT ident ON table ...` are now expressions.
+* Both `ident` and `table` after `REMOVE FIELD ident ON table ...` are now expressions.
+* Both `ident` and `table` after `REMOVE INDEX ident ON table ...` are now expressions.
+* The `ident` after `REMOVE ANALYZER ident ...` is now an expression.
+* The `ident` after `REMOVE BUCKET ident ...` is now an expression.
+* The `ident` after `REMOVE SEQUENCE ident ...` is now an expression.
+
+### Closures now capture parameters
+
+The following query did not work before because closures (the `|$n` after `.filter()`) were not able to capture parameters defined in the scope in which they are used.
+
+```surql
+LET $okay_nums = [1,2,3];
+
+-- Inside this closure $okay_nums used to
+-- be NONE, now it is [1, 2, 3]
+[1,5,6,7,0].filter(|$n| $n IN $okay_nums);
+```
+
+### Table view improvements
+
+Many fixes have been merged to improve the consistency of table views.
+
+### Client-side transactions
+
+TODO: Should these be available in all the SDKs by GA? Or just mention that they are in the RPC methods and some SDKs will have them?
+
+https://github.com/surrealdb/surrealdb/pull/6533
+
+### New functions and constants
+
+The following functions and constants have been added.
+
+```surql
+// Functions
+encoding::cbor::encode()
+encoding::cbor::decode()
+crypto::joaat()
+object::extend()
+object::remove()
+record::is_edge()
+search::linear()
+search::rrf()
+sequence::next()
+set::add()
+set::complement()
+set::contains()
+set::difference()
+set::intersect()
+set::is_empty()
+set::len()
+set::remove()
+set::union()
+string::capitalize()
+type::file()
+type::of()
+type::string_lossy()
+// Consts
+time::minimum
+time::maximum
+duration::max
+```
+
+### Surrealism
+
+In addition to the new functions above, SurrealDB 3.0 also allows you to use [Surrealism](/docs/surrealdb/querying/surrealism) plugins to write your own.
+
+These functions are exposed via a `#[surrealism]` attribute.
+
+```rust
+#[surrealism]
+fn can_drive(age: i64) -> bool {
+    age >= 18
+}
+```
+
+Once compiled to WASM, they can then be accessed after a [DEFINE MODULE](/docs/surrealql/statements/define/module) statement is used to indicate where the compiled functions are located.
+
+### ALTER INDEX PREPARE REMOVE
+
+This [new clause](/docs/surrealql/statements/alter#alter-index-prepare-remove) can be used to prepare an index for removal, after which it can be removed if desired, or rebuilt to keep it.
+
+### Files
+
+A bucket can now be defined inside which [files](/docs/surrealql/datamodel/files) can be created and worked with.
+
+```surql
+DEFINE BUCKET my_bucket BACKEND "memory";
+f"my_bucket:/some_file.txt".put("Some text inside");
+f"my_bucket:/some_file.txt".get();
+<string>f"my_bucket:/some_file.txt".get();
+```
+
+### New sequence type
+
+The new [sequence](/docs/surrealql/statements/define/sequence) type is used to generate reliable, monotonically increasing numeric sequences in both single-node and clustered SurrealDB deployments.
+
+```surql
+DEFINE SEQUENCE mySeq2 BATCH 1000 START 100 TIMEOUT 5s;
+sequence::nextval('mySeq2');
+-- Output: 100
+```
+
+### Expression output from statements
+
+The output of some statements can now be used as an expression. Some examples are:
+
+#### INFO statement
+
+The output of `INFO` still returns an object, but now can be used directly inside SurrealQL.
+
+```surql
+INFO FOR DB.{ 
+	tables, 
+	functions
+};
+```
+
+#### USE statement
+
+`USE` statements previously returned NONE, but now return an object containing the current namespace and database.
+
+```surql
+USE NS my_ns;
+
+-- Example output:
+-- { database: 'main', namespace: 'my_ns' }
+```
+
+#### KILL statement
+
+CHECK: Does this actually show? I haven't been able to reproduce it.
+
+```surql
+-- Notification (action: Killed, live query ID: cf447091-9463-4d75-b32a-08513eb2a07c)
+```
+
+### Object and array improvements
+
+Objects can now be added to each other using either the `+` operator or the `object::extend()` function.
+
+```surql
+{ 
+    one: "value",
+    two: "values"
+} + {
+    two: "new value",
+    three: "new field"
+};
+
+{ 
+    one: "value",
+    two: "values"
+}.extend({
+    two: "new value",
+    three: "new field"
+});
+```
+
+An array can now also be added to another array via the `+` operator.
+
+### Record references
+
+### `COUNT` indexes
+
+### Tokio console
+
+The [tokio console](/docs/surrealdb/reference-guide/observability#tokio-console) tool can now be used to observe low-level async tasks for the database.
+
+### `OR` operator inside `@@`
+
+The `OR` operator can now be used inside the `@@` operator (the "matches" operator).
+
+```surql
+CREATE document:1 SET text = "It is rare that I find myself penning a personal note in my chronicles.";
+DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
+DEFINE INDEX some_index ON document FIELDS text FULLTEXT ANALYZER simple;
+
+SELECT * FROM document WHERE text @AND@ "personal rare";
+SELECT * FROM document WHERE text @OR@ "personal nice weather today";
+```
