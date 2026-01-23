@@ -179,7 +179,9 @@ async function verifyAgentRuleFiles() {
     }
 
     if (!allExist) {
-        throw new Error('Some agent rule files are missing from the build output');
+        throw new Error(
+            'Some agent rule files are missing from the build output'
+        );
     }
 
     console.log('[VERIFY] All agent rule files verified');
