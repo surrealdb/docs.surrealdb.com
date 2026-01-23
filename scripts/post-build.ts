@@ -15,7 +15,6 @@ const scripts = [
 ];
 
 await checkBrokenLinks();
-await verifyAgentRuleFiles();
 await fetchRemoteResources();
 await extractInlineResources();
 
@@ -156,35 +155,6 @@ async function checkBrokenLinks() {
 
         throw new Error('Broken links found');
     }
-}
-
-async function verifyAgentRuleFiles() {
-    console.log('[VERIFY] Checking agent rule files...');
-    const agentRuleFiles = [
-        'integrations/agent-rules/surrealql.mdc',
-        'integrations/agent-rules/surrealdb-vector.mdc',
-        'integrations/agent-rules/surrealdb-python.mdc',
-        'integrations/agent-rules/surrealdb-python-embedded.mdc',
-    ];
-
-    let allExist = true;
-    for (const file of agentRuleFiles) {
-        const filePath = path.join(__root, 'dist', 'docs', file);
-        if (fs.existsSync(filePath)) {
-            console.log(`[VERIFY] ✓ ${file} exists`);
-        } else {
-            console.error(`[VERIFY] ✗ ${file} is missing!`);
-            allExist = false;
-        }
-    }
-
-    if (!allExist) {
-        throw new Error(
-            'Some agent rule files are missing from the build output'
-        );
-    }
-
-    console.log('[VERIFY] All agent rule files verified');
 }
 
 async function fetchRemoteResources() {
