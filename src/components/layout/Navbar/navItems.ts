@@ -101,7 +101,10 @@ export const navItems: NavItem[] = [
         ],
     },
     { label: 'Integrations', href: '/docs/integrations' },
-    { label: 'Examples', href: [{
+    {
+        label: 'Examples',
+        href: [
+            {
                 title: 'Lab Examples',
                 href: '/docs/labs?filters=examples',
                 icon: { light: LightExamples, dark: DarkExamples },
@@ -110,11 +113,13 @@ export const navItems: NavItem[] = [
                 title: 'Lab Tutorials',
                 href: '/docs/labs?filters=tutorials',
                 icon: { light: LightTutorials, dark: DarkTutorials },
-            },] },
+            },
+        ],
+    },
     {
         label: 'Education',
         href: [
-                        {
+            {
                 title: 'Quick tour',
                 href: '/learn/tour',
                 icon: { light: LightUniversity, dark: DarkUniversity },
@@ -132,7 +137,7 @@ export const navItems: NavItem[] = [
                 icon: { light: LightBook, dark: DarkBook },
                 external: true,
             },
-                        {
+            {
                 title: 'Movie database',
                 href: '/learn/movies',
                 icon: { light: LightBook, dark: DarkBook },
