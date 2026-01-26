@@ -47,9 +47,9 @@ export type NavItem = {
 export const navItems: NavItem[] = [
     { label: 'SurrealDB', href: '/docs/surrealdb' },
     { label: 'SurrealQL', href: '/docs/surrealql' },
-    { label: 'Surrealist', href: '/docs/surrealist' },
-    { label: 'Surrealism', href: '/docs/surrealdb/querying/surrealism' },
+    { label: 'Surrealist UI', href: '/docs/surrealist' },
     { label: 'Cloud', href: '/docs/cloud' },
+    { label: 'Extensions', href: '/docs/surrealdb/extensions' },
     {
         label: 'SDKs',
         href: [
@@ -101,22 +101,28 @@ export const navItems: NavItem[] = [
         ],
     },
     { label: 'Integrations', href: '/docs/integrations' },
-    {
-        label: 'Education',
-        href: [
-            {
-                title: 'Examples',
+    { label: 'Examples', href: [{
+                title: 'Lab Examples',
                 href: '/docs/labs?filters=examples',
                 icon: { light: LightExamples, dark: DarkExamples },
             },
             {
-                title: 'Tutorials',
+                title: 'Lab Tutorials',
                 href: '/docs/labs?filters=tutorials',
                 icon: { light: LightTutorials, dark: DarkTutorials },
+            },] },
+    {
+        label: 'Education',
+        href: [
+                        {
+                title: 'Quick tour',
+                href: '/learn/tour',
+                icon: { light: LightUniversity, dark: DarkUniversity },
+                external: true,
             },
             {
-                title: 'University',
-                href: '/learn',
+                title: 'Fundamentals',
+                href: '/learn/fundamentals',
                 icon: { light: LightUniversity, dark: DarkUniversity },
                 external: true,
             },
@@ -126,15 +132,20 @@ export const navItems: NavItem[] = [
                 icon: { light: LightBook, dark: DarkBook },
                 external: true,
             },
+                        {
+                title: 'Movie database',
+                href: '/learn/movies',
+                icon: { light: LightBook, dark: DarkBook },
+                external: true,
+            },
             {
-                title: 'Sidekick',
+                title: 'Sidekick assistant',
                 href: 'https://app.surrealdb.com/chat',
                 icon: { light: LightSidekick, dark: DarkSidekick },
                 external: true,
             },
         ],
     },
-    { label: 'Labs', href: '/docs/labs' },
 ];
 
 export const socialLinks = [
