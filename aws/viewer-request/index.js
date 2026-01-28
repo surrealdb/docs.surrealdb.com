@@ -4,6 +4,7 @@ const prefixes = {
 	'/docs/integration/libraries/': '/docs/sdk/',
 	'/docs/surrealdb/integration/sdks/': '/docs/sdk/',
 	'/docs/cloud/advanced-topics/': '/docs/cloud/operate-and-manage/',
+	'/docs/integrations/data-management/surreal-sync/': '/docs/surrealdb/migrating/surreal-sync/',
 }
 const prefixExceptions = {
 	'/docs/cloud/advanced-topics/configure-an-instance': '/docs/cloud/getting-started/create-an-instance',
