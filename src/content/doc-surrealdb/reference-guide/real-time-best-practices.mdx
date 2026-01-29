@@ -1,0 +1,508 @@
+---
+sidebar_position: 4
+sidebar_label: Real-time and events
+title: Real-time Best Practices | Reference guides
+description: This guide outlines some best practices for using SurrealDB in an event-driven and real-time manner.
+---
+
+# Real-time and event-driven best practices
+
+This page details some of the patterns you'll want to use when using SurrealDB when time is of the essence, reacting autonomously to changes in the database is required, or when you want to query on aggregated data updated automatically over time.
+
+## Temporal querying and record ranges
+
+Temporal querying is generally done to answer two questions: what/where, and when? For example:
+
+* What is the weather like in London at the timestamp `2026-01-28T01:02:56Z`?
+* What is the weather like in London between the timestamps `2026-01-28T00:00:00Z` (January 28th, 2026) and `2026-01-29T00:00:00Z` (the next day)?
+
+Databases that store this sort of data tend to be fairly massive. Data on weather, traffic, user activity, and anything else that holds one record per event at a certain point in time very quickly builds up.
+
+SurrealQL has a built-in method to keep querying time down in cases like these: a complex record ID made out of an array.
+
+```surql
+CREATE weather:["London", time::now()]      SET temperature = 9.0;
+CREATE weather:["London", time::now() + 1d] SET temperature = 8.0;
+```
+
+To see what makes an array special in a case like this, let's compare it with a more general approach that holds the time and location inside regular fields instead of the ID itself. We'll call this table `weather2` to differentiate one between the other.
+
+```surql
+CREATE weather2 SET 
+    location = "London",
+    at = time::now(),
+    temperature = 9.0;
+
+CREATE weather2 SET 
+    location = "London",
+    at = time::now() + 1d,
+    temperature = 8.0;
+```
+
+To see all the data for London between yesterday and tomorrow, you would add a number of `WHERE` clauses.
+
+```surql
+SELECT * FROM weather2
+WHERE 
+    location = "London" AND 
+    at > time::now() - 1d AND 
+    at < time::now() + 1d;
+```
+
+The query works just fine, but let's now add the `EXPLAIN` clause to the end of it to see how the operation was performed.
+
+```surql
+[
+	{
+		detail: {
+			direction: 'forward',
+			table: 'weather2'
+		},
+		operation: 'Iterate Table'
+	},
+	{
+		detail: {
+			type: 'Memory'
+		},
+		operation: 'Collector'
+	}
+]
+```
+
+The 'Iterate Table' part here means that the operation iterated through the entire table to find matching records. This is fine to a certain extent, but becomes less efficient as other data for times and locations begins to build up.
+
+To speed this up, an index can be added.
+
+```surql
+DEFINE INDEX weather ON weather2 FIELDS location, at;
+```
+
+With the index added, a query followed by `EXPLAIN` will show that we now iterated over the index, which is much more efficient.
+
+```surql
+[
+	{
+		detail: {
+			plan: {
+				index: 'weather',
+				prefix: [
+					'London'
+				],
+				ranges: [
+					{
+						operator: '>',
+						value: d'2026-01-27T02:02:18.367Z'
+					},
+					{
+						operator: '<',
+						value: d'2026-01-29T02:02:18.367Z'
+					}
+				]
+			},
+			table: 'weather2'
+		},
+		operation: 'Iterate Index'
+	},
+	{
+		detail: {
+			type: 'Memory'
+		},
+		operation: 'Collector'
+	}
+]
+```
+
+As you can see, there is nothing at all with using an index - and this may very well fit your own use case.
+
+But let's now compare it to the approach that uses a complex record ID.
+
+```surql
+CREATE weather:["London", time::now()] SET temperature = 9.0;
+CREATE weather:["London", time::now() + 1d] SET temperature = 8.0;
+```
+
+Technically, you could use the same query as before with a `WHERE` clause on each of the parts of the array-based ID. But that would result in another full table iteration.
+
+```surql
+SELECT * FROM weather
+WHERE 
+    id[0] = "London" AND 
+    id[1] > time::now() - 1d AND 
+    id[1] < time::now() + 1d;
+```
+
+Instead, we can query over a range of IDs: all the IDs that fall in between the starting point `["London", time::now() - 1d]` and the end point `["London", time::now() + 1d]`.
+
+```surql
+SELECT * FROM weather:["London", time::now() - 1d]..=["London", time::now() + 1d];
+```
+
+This is what is known as a record range query, or a table partition scan. It works by querying over just the fraction of record IDs that fall within this range, instead of every record in the table. And you don't need to define a separate index for it because a record ID is a direct pointer to the data itself.
+
+If you imagine a database that holds thousands of weather observations over time for thousands of cities, the space between `weather:["London", time::now() - 1d]` and `["London", time::now() + 1d]` is just a very tiny slice! Querying on a partition this small is like going into a large bookstore knowing that the books you want are all in section C7 as opposed to walking through the entire place looking at each book along the way.
+
+We can demonstrate the difference in performance by adding 100,000 random records using both formats over a period of time between now and one year ago.
+
+To make the output nice, we'll use a little bit of SurrealQL magic. First we'll put the two queries creating the records inside their own scope, and use the [value::chain()](/docs/surrealql/functions/database/value#chain) function to grab the output, ignore it, and turn it into a string showing what operation has just been performed. Then we'll do the same for a regular `SELECT` query over the `weather2` data, compared to the record range query for the `weather` data.
+
+```surql
+{
+    // 100,000 weather records
+    FOR $_ IN 0..100000 {
+    CREATE weather:["London", time::now() - rand::duration(0ns, 1y)] SET temperature = 9.0;
+    };
+
+    // 100,000 weather2 records
+    FOR $_ IN 0..100000 {
+        CREATE weather2 SET 
+        location = "London",
+        at = time::now() - rand::duration(0ns, 1y),
+        temperature = 9.0;
+    };
+}.chain(|$_| "Sample data added!");
+
+"Regular select" + (SELECT * FROM weather2
+WHERE 
+    location = "London" AND 
+    at > time::now() - 1d AND 
+    at < time::now() + 1d).chain(|$_| "");
+
+"Record range select" + (SELECT * FROM weather:["London", time::now() - 1d]..=["London", time::now() + 1d]).chain(|$_| "");
+```
+
+You should see a result showing that the record range is over a hundred times faster, which makes sense as it is only iterating over a surface area about 1/365th the size of the one that uses a full table scan.
+
+## ULIDs and UUIDs
+
+The standard record ID for SurrealDB is twenty characters long and composed of underscore letters and numbers.
+
+```surql
+qrfz62eovom9f6p9j0fk
+```
+
+If you want a record ID with temporal information you might want to try using a datetime, but datetimes can't be used as IDs in SurrealQL.
+
+```surql
+CREATE weather SET id = time::now(); -- Won't work
+```
+
+Technically you can cheat the system a little bit by setting the ID to a stringified datetime, or an array with a single datetime.
+
+```surql
+CREATE weather SET id = <string>time::now();
+CREATE weather:[time::now()];
+```
+
+However, when a record ID is composed of only a datetime, there is a very slight chance that the ID won't be unique. Though datetimes have nanosecond precision, you might be using SurrealDB on a system that rounds its datetimes to the millisecond or microsecond and creating multiple records at the same time may result in an error from two records having the same ID.
+
+Fortunately, there is another method: you can set the ID of the record to be a ULID or a UUID. Both of these contain the datetime at which they were created, but are always unique and have no chance of collision.
+
+```surql
+LET $now = time::now();
+CREATE weather:uuid() SET location = "London";
+CREATE weather:ulid() SET location = "London";
+```
+
+A ULID and UUID can be created from a datetime, and both ULIDs and UUIDs can be turned back into one as well.
+
+```surql
+LET $uuid = rand::uuid(d'1997-08-29');
+time::from_uuid($uuid);
+-- d'1997-08-29T00:00:00Z'
+
+LET $ulid = rand::ulid(d'1997-08-29');
+time::from_ulid($ulid);
+-- d'1997-08-29T00:00:00Z'
+```
+
+However, because datetimes have nanosecond precision but ULIDs and UUIDs have millisecond precision, a roundtrip from datetime to ULID/UUID and back will not be exactly the same as the original datetime.
+
+To remove the precision from the original datetime, you can use the [`time::floor()`](/docs/surrealql/functions/database/time#timefloor) function.
+
+```surql
+LET $now = time::now();
+LET $ulid = rand::ulid($now);
+LET $now_again = time::from_ulid($ulid);
+$now == $now_again;                  -- false
+time::floor($now, 1ms) = $now_again; -- true
+```
+
+## Live queries
+
+If you don't want to make a query every time you want to see the latest updates to a table, you can use a [live query](/docs/surrealql/statements/live) instead.
+
+Since results for live queries show up the moment a record is created or updated, you don't necessarily need a complex ID - though either way works.
+
+```surql
+-- Just used for live queries? WHERE location = "London" is fine
+LIVE SELECT * FROM weather WHERE location = "London";
+CREATE weather SET location = "London", temperature = 9.0;
+
+-- Querying 'weather' manually too? Probably opt for an array-based ID
+LIVE SELECT * FROM weather WHERE id[0] = "London";
+CREATE weather:["London", time::now()] SET temperature = 9.0;
+```
+
+A `LIVE SELECT` will always return a UUID, like this one.
+
+```surql
+u'20372f84-714c-412b-b259-c8703574d4f1'
+```
+
+If making a live query inside Surrealist, you'll also see a notification asking you if you would like to move to live mode to see the changes to a table as they come in. After clicking on this, you can open up another window to make queries (or use the CLI, an SDK, or anything else) and watch the events as they come in.
+
+Live query results can be listened for via SDKs as well. Here is one example showing how to listen for results on the `weather` table using the Rust SDK.
+
+```rust
+use futures::StreamExt;
+use surrealdb::engine::any::connect;
+use surrealdb::opt::auth::Root;
+use surrealdb_types::{RecordId, SurrealValue, ToSql};
+
+#[derive(Debug, SurrealValue)]
+struct Weather {
+    id: RecordId,
+    temperature: f64,
+    location: String,
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("ws://localhost:8000").await?;
+
+    db.signin(Root {
+        username: "root".to_string(),
+        password: "secret".to_string(),
+    })
+    .await?;
+
+    db.use_ns("main").use_db("main").await?;
+
+    let mut weather = db.select("weather").live().await?;
+
+    while let Some(result) = weather.next().await {
+        println!("Got something! {result:?}");
+        match result {
+            Ok(data) => {
+                let weather: Weather = data.data;
+                println!("{}", weather.into_value().to_sql());
+            }
+            Err(error) => eprintln!("{error}"),
+        }
+    }
+
+    Ok(())
+}
+```
+
+## Defining events
+
+Defining events is a bit similar to live queries, except that this time we are able to have the database automatically respond on its own instead of requiring an external listener to take care of it. If everything that you need to respond to an event can be done at the database level, then defining an event is the best way to handle it.
+
+Here is one example of an event that not only creates an `alert` whenever a weather condition is set to critical, but can even use an [http function](/docs/surrealql/functions/database/http) to let an external service know about it.
+
+```surql
+DEFINE EVENT alert ON weather WHEN severity = "critical" THEN {
+    LET $alert = CREATE ONLY alert SET at = time::now(), body = "Alert! " + $input.conditions + " in " + $input.location RETURN VALUE body;
+    http::post('https://jsonplaceholder.typicode.com/posts/', {
+        body: $alert
+    });
+};
+
+CREATE weather:uuid() SET location = "London", severity = "critical", conditions = "Too many tourists";
+
+SELECT * FROM alert;
+```
+
+Note that you will need to use the [--allow-net](/docs/surrealdb/security/capabilities#network) flag when starting up a SurrealDB instance to allow functions like `http::post()` to work, as they are disabled by default.
+
+### When and how not to use an event
+
+Generally it is best to keep event logic within a single event that does not itself lead to another event. For an extreme example, take the following event that creates a record that triggers another event, which itself triggers the first event.
+
+```surql
+DEFINE EVENT goes_forever ON weather THEN {
+    CREATE other;
+};
+
+DEFINE EVENT also_goes_forever ON other THEN {
+    CREATE weather;
+};
+
+CREATE weather;
+```
+
+Doing so will not cause the database to freeze, but instead will quickly lead to a maximum computation depth after which the query will fail. This is thanks to the fact that every operation in SurrealDB is done inside its own transaction. Since each event triggered by the event before is part of the original transaction, the entire operation is cancelled and rolled back.
+
+Note that the error output will show the chain of events at each depth before the limit was reached.
+
+```surql
+'Error while processing event goes_forever: Error while processing event also_goes_forever: Error while processing event goes_forever: Error while processing event also_goes_forever: Error while processing event goes_forever: Error while processing event also_goes_forever: Error while processing event goes_forever: Error while processing event also_goes_forever: Error while processing event goes_forever: Error while processing event also_goes_forever: Error while processing event goes_forever: Error while processing event also_goes_forever: Error while processing event goes_forever: Error while processing event also_goes_forever: Error while processing event goes_forever: Error while processing event also_goes_forever: Error while processing event goes_forever: Error while processing event also_goes_forever: Error while processing event goes_forever: Error while processing event also_goes_forever: Reached excessive computation depth due to functions, subqueries, or computed values'
+```
+
+If you find yourself using an event to update an aggregate like in the example below, a table view - introduced in the next section - might be what you are looking for.
+
+```surql
+CREATE sum SET date = "2026-01-29", amount = 0;
+
+DEFINE EVENT update_sum ON purchase WHEN $event = "CREATE" THEN {
+    UPSERT sum SET date = $after.date, amount += $after.amount WHERE date = $after.date;
+};
+
+CREATE purchase SET amount = 100, date = "2026-01-29";
+CREATE purchase SET amount = 200, date = "2026-01-29";
+CREATE purchase SET amount = 200, date = "2026-01-30";
+
+SELECT * FROM sum;
+
+-- Output:
+[
+	{
+		amount: 300,
+		date: '2026-01-29',
+		id: sum:m4qv5iqpr9lfmpe0sgqh
+	},
+	{
+		amount: 200,
+		date: '2026-01-30',
+		id: sum:vc7dxvrj5mdmm75bbqs5
+	}
+]
+```
+
+## Table views
+
+Sometimes you might not want either a real-time query or an instantaneous reaction to an event, but prefer instead to have an aggregate of all the data in a certain table whenever you need to know it.
+
+This can be done by defining a separate table as a `SELECT` expression preceded by the `AS` clause. The table that it draws from can be a regular table, like in the `purchase` example above. Alternatively, it can be followed by the `DROP` keyword if you only want to use it as a table view and don't need to query it directly.
+
+```surql
+DEFINE TABLE purchase;
+-- DEFINE TABLE purchase DROP <- Use DROP if you never want to query 'purchase'
+DEFINE TABLE sum AS SELECT math::sum(amount) AS amount, date FROM purchase GROUP BY date;
+
+CREATE purchase SET amount = 100, date = "2026-01-29";
+CREATE purchase SET amount = 200, date = "2026-01-29";
+CREATE purchase SET amount = 200, date = "2026-01-30";
+
+SELECT * FROM sum;
+```
+
+With the table view set up, you don't need to do anything but select from `sum` to see the aggregated results.
+
+```surql
+[
+	{
+		amount: 300,
+		date: '2026-01-29',
+		id: sum:[
+			'2026-01-29'
+		]
+	},
+	{
+		amount: 200,
+		date: '2026-01-30',
+		id: sum:[
+			'2026-01-30'
+		]
+	}
+]
+```
+
+The function `math::sum()` is one of a number of functions that can be used both on its own and as an aggregate function.
+
+For a full list of aggregate functions, see [this page](/docs/surrealql/functions/database#aggregate-functions).
+
+### Using predictable IDs for table views
+
+One nice thing about table views is how predictable the IDs of the grouped values can be. Take the following example which has a `traffic_snapshot` table that holds a timestamp along with the number of cars and trucks at a certain location. On top of it we have a table called `traffic` that groups the results according to hourly intervals by using the `time::format()` function to turn a timestamp into a string output like `'2026-01-28:06:00:00'`.
+
+```surql
+DEFINE TABLE traffic_snapshot;
+DEFINE TABLE traffic AS 
+    SELECT 
+        location, 
+        time::format(at, "%Y-%m-%d:%H:00:00") AS at, 
+        math::sum(cars) AS cars, math::sum(trucks) AS trucks 
+    FROM traffic_snapshot
+    GROUP BY location, at;
+
+CREATE traffic_snapshot SET location = "53rd St", at = time::now(),         cars = 10, trucks = 3;
+CREATE traffic_snapshot SET location = "53rd St", at = time::now() + 30m,   cars = 20, trucks = 5;
+CREATE traffic_snapshot SET location = "53rd St", at = time::now() + 1h,    cars = 50, trucks = 10;
+CREATE traffic_snapshot SET location = "53rd St", at = time::now() + 1h30m, cars = 34, trucks = 6;
+```
+
+Because the table view groups by `location` and `at`, we know that that will be the format of the `traffic` record IDs. As such, if you want to know what the traffic was like for a certain day, you can just pull it directly from the record ID - an operation which is close to instantaneous.
+
+```surql
+SELECT * FROM traffic:['53rd St', '2026-01-28:06:00:00'];
+SELECT * FROM traffic:['53rd St', '2026-01-28:07:00:00'];
+```
+
+```surql title="Output"
+-------- Query --------
+
+[
+	{
+		at: '2026-01-28:06:00:00',
+		cars: 70,
+		id: traffic:[
+			'53rd St',
+			'2026-01-28:06:00:00'
+		],
+		location: '53rd St',
+		trucks: 15
+	}
+]
+
+-------- Query --------
+
+[
+	{
+		at: '2026-01-28:07:00:00',
+		cars: 34,
+		id: traffic:[
+			'53rd St',
+			'2026-01-28:07:00:00'
+		],
+		location: '53rd St',
+		trucks: 6
+	}
+]
+```
+
+## Combining real-time and event-driven functionality
+
+In practice, you will probably want to combine many or even all of the approaches mentioned above. For example, you could have a schema that uses an array-based ID for quick record range queries, a defined event to respond to high volumes of traffic, and a table view to see aggregate traffic for certain units of time.
+
+```surql
+-- Define an event
+DEFINE EVENT alert ON traffic_snapshot WHEN $after.cars + $after.trucks > 50 THEN {
+    LET $alert = CREATE ONLY alert SET message = "Heavy traffic at " + $after.id[0] + " with " + <string>($after.cars + $after.trucks) + " vehicles reported at " + <string>time::now();
+    http::post('https://jsonplaceholder.typicode.com/posts/', {
+        body: {
+            message: $alert.message
+        }
+    });
+};
+
+-- Define a table view
+DEFINE TABLE traffic AS 
+    SELECT 
+        id[0] AS location, 
+        time::format(id[1], "%Y-%m-%d:%H:00:00") AS at, 
+        math::sum(cars) AS cars, math::sum(trucks) AS trucks 
+    FROM traffic_snapshot
+    GROUP BY location, at;
+
+-- Use an ID ideal for record range queries
+CREATE traffic_snapshot:["53rd St", time::now() - 1h30m] SET cars = 34, trucks = 6;
+CREATE traffic_snapshot:["53rd St", time::now() - 1h]    SET cars = 50, trucks = 10;
+CREATE traffic_snapshot:["53rd St", time::now() - 30m]   SET cars = 20, trucks = 5;
+CREATE traffic_snapshot:["53rd St", time::now()]         SET cars = 10, trucks = 3;
+
+SELECT * FROM traffic_snapshot:["53d St", time::now() - 1h]..;
+SELECT * FROM alert;
+SELECT * FROM traffic;
+```
