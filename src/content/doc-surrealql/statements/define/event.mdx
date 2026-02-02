@@ -36,7 +36,11 @@ Events allow you to define custom logic that is executed when a record is create
   <TabItem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
-DEFINE EVENT [ OVERWRITE | IF NOT EXISTS ] @name ON [ TABLE ] @table [ WHEN @expression ] THEN @expression [ COMMENT @string ]
+DEFINE EVENT [ IF NOT EXISTS | OVERWRITE ] @name ON [ TABLE ] @table
+  [ ASYNC [ RETRY @retry ] [ MAXDEPTH @max_depth ] ]
+  [ WHEN @condition ]
+  [ THEN @action ]
+  [ COMMENT @string ]
 ```
 
   </TabItem>
@@ -46,20 +50,108 @@ export const defineEventAst = {
   type: "Diagram",
   padding: [10, 20, 10, 20],
   children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "DEFINE" },
-      { type: "Terminal", text: "EVENT" },
-      { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Terminal", text: "OVERWRITE" }, { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "NOT" }, { type: "Terminal", text: "EXISTS" } ] } ] } },
-      { type: "NonTerminal", text: "@name" },
-      { type: "Terminal", text: "ON" },
-      { type: "Optional", child: { type: "Terminal", text: "TABLE" } },
-      { type: "NonTerminal", text: "@table" },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "WHEN" }, { type: "NonTerminal", text: "@expression" } ] } },
-      { type: "Terminal", text: "THEN" },
-      { type: "NonTerminal", text: "@expression" },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "COMMENT" }, { type: "NonTerminal", text: "@string" } ] } }
-    ]}
-  ]
+    {
+      type: "Sequence",
+      children: [
+        { type: "Terminal", text: "DEFINE" },
+        { type: "Terminal", text: "EVENT" },
+
+        // [ IF NOT EXISTS | OVERWRITE ]
+        {
+          type: "Optional",
+          child: {
+            type: "Choice",
+            index: 1,
+            children: [
+              { type: "Terminal", text: "OVERWRITE" },
+              {
+                type: "Sequence",
+                children: [
+                  { type: "Terminal", text: "IF" },
+                  { type: "Terminal", text: "NOT" },
+                  { type: "Terminal", text: "EXISTS" },
+                ],
+              },
+            ],
+          },
+        },
+
+        { type: "NonTerminal", text: "@name" },
+        { type: "Terminal", text: "ON" },
+        { type: "Optional", child: { type: "Terminal", text: "TABLE" } },
+        { type: "NonTerminal", text: "@table" },
+
+        // [ ASYNC [ RETRY @retry ] [ MAXDEPTH @max_depth ] ]
+        {
+          type: "Optional",
+          child: {
+            type: "Sequence",
+            children: [
+              { type: "Terminal", text: "ASYNC" },
+
+              {
+                type: "Optional",
+                child: {
+                  type: "Sequence",
+                  children: [
+                    { type: "Terminal", text: "RETRY" },
+                    { type: "NonTerminal", text: "@retry" },
+                  ],
+                },
+              },
+
+              {
+                type: "Optional",
+                child: {
+                  type: "Sequence",
+                  children: [
+                    { type: "Terminal", text: "MAXDEPTH" },
+                    { type: "NonTerminal", text: "@max_depth" },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+
+        // [ WHEN @condition ]
+        {
+          type: "Optional",
+          child: {
+            type: "Sequence",
+            children: [
+              { type: "Terminal", text: "WHEN" },
+              { type: "NonTerminal", text: "@condition" },
+            ],
+          },
+        },
+
+        // [ THEN @action ]
+        {
+          type: "Optional",
+          child: {
+            type: "Sequence",
+            children: [
+              { type: "Terminal", text: "THEN" },
+              { type: "NonTerminal", text: "@action" },
+            ],
+          },
+        },
+
+        // [ COMMENT @string ]
+        {
+          type: "Optional",
+          child: {
+            type: "Sequence",
+            children: [
+              { type: "Terminal", text: "COMMENT" },
+              { type: "NonTerminal", text: "@string" },
+            ],
+          },
+        },
+      ],
+    },
+  ],
 };
 
 <RailroadDiagram ast={defineEventAst} className="my-6" />
@@ -71,9 +163,10 @@ export const defineEventAst = {
 
 - **OVERWRITE**: Replaces the existing event if it already exists.
 - **IF NOT EXISTS**: Only creates the event if it doesn't already exist.
-- **WHEN**: Conditional logic that controls whether the event is triggered.
+- **WHEN**: Conditional logic that controls whether the event is triggered. Will show up in the event definition as `WHEN true` if not specified.
 - **THEN**: Specifies the action(s) to execute when the event is triggered.
 - **COMMENT**: Optional comment for describing the event.
+- **ASYNC**: Whether to run the event outside of the transaction that triggers it. Available since SurrealDB 3.0.0-beta.
 
 ## Example usage
 
@@ -361,3 +454,97 @@ Output:
 	}
 ]
 ```
+
+## Async events
+
+<Since v="v3.0.0-beta" />
+
+Events in SurrealDB are executed synchronously within the same transaction that triggers them. While this ensures consistency, it can lead to increased latency for write operations if the event logic is complex or resource intensive.
+
+To allow events to execute independently of the transaction that triggers them, the `ASYNC` clause can be used.
+
+### How async events are processed
+
+Async events are processed in an interval dependant on the environment variable `SURREAL_EVENT_PROCESSING_INTERVAL` (or `--event-processing-interval` when starting the server) which is set to 5 seconds as the default. Lowering this will reduce the latency between a document change and its events, while leading to more frequent polls by the background worker.
+
+* Atomicity: The event is enqueued within the same transaction as the document change. If the transaction fails, the event is never queued.
+* Consistency: Asynchronous events run in a separate transaction from the original change. They see the database state at the time they are executed.
+* Ordering: Events are generally processed in the order they were created, though parallel processing may occur within a single batch.
+
+### The `MAXDEPTH` clause
+
+The `MAXDEPTH` clause is used to set the maximum number of times that an async event can be triggered.
+
+While the default 5 for `MAXDEPTH` can seem low, events defined on other events that lead to record creation can quickly spiral out of control even at a depth of 5.
+
+Taking the following contrived example:
+
+```surql
+DEFINE EVENT start ON start THEN {
+    CREATE cat;
+};
+
+DEFINE EVENT cat ON person ASYNC MAXDEPTH 4 THEN {
+  CREATE |cat:9|;  
+};
+
+DEFINE EVENT person ON cat ASYNC MAXDEPTH 4 THEN {
+  CREATE |person:9|;
+};
+
+CREATE start;
+
+count(SELECT VALUE id FROM person, cat);
+```
+
+While the `MAXDEPTH` in this case is only one lower than the default, the sheer number of records created results in the final `count()` score being 184528 if set to the default, compared to 20503 if lowered by one.
+
+This is somewhat similar to recursive queries which can also quickly add up.
+
+```surql
+-- Create five people
+CREATE |person:1..=5|;
+-- Make each person friends with each of the four others
+UPDATE person SET friends = (SELECT VALUE id FROM person).complement([$this.id]);
+-- Count after five levels of depth is already 1024!
+count(person:1.{..5}.friends);
+```
+
+### The `RETRY` clause
+
+The `RETRY` clause is suitable for events that may fail but can succeed on successive attempts. 
+
+The example below shows two events that each have a 50% chance of failure and zero retries.
+
+```surql
+DEFINE EVENT one ON account ASYNC RETRY 0 THEN {
+    IF rand::bool() {
+        THROW "Failed!"
+    } ELSE {
+        CREATE it:worked SET very = "well";
+    }
+};
+
+DEFINE EVENT two ON account ASYNC RETRY 0 THEN {
+    IF rand::bool() {
+        THROW "Failed!"
+    } ELSE {
+        CREATE it:worked SET very = "well";
+    }
+};
+
+CREATE account;
+```
+
+Following up these events with a `SELECT * FROM it` will most likely lead to the following input.
+
+```surql
+[
+	{
+		id: it:worked,
+		very: 'well'
+	}
+]
+```
+
+However, with zero retries there is still a 25% chance that the query will only ever lead to the error `"The table 'it' does not exist"`.
