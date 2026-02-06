@@ -38,6 +38,7 @@ export const LAB_TOPICS = [
     'Security',
     'Templates',
     'Tooling',
+    'Tutorials',
 ] as const;
 
 export const LAB_LANGUAGES = [
@@ -95,5 +96,6 @@ export const LABS_TOPICS_MAP: Record<
     security: 'Security',
     templates: 'Templates',
     tooling: 'Tooling',
+    tutorials: 'Tutorials',
     cloud: 'Cloud',
 } as const;
