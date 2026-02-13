@@ -9,41 +9,31 @@ description: Best practices for creating schemas in SurrealDB.
 
 With SurrealDB, you can create a schema that is as simple or as complex as you need it to be. This page contains a number of best practices for creating schemas that are both easy to understand and easy to maintain.
 
-### Use a `set` for an array of distinct items
-
-The lowly [`set`](/docs/surrealql/datamodel/sets) is a subtype of `array` that doesn't get a great deal of attention, but has the convenience of holding no duplicate items.
-
-```surql
-DEFINE FIELD ordered_unique ON stuff TYPE set VALUE $value.sort();
-
-CREATE ONLY stuff SET ordered_unique = [8,7,8,8,8,8,6,45,3] RETURN VALUE ordered_unique;
--- Returns this:
-[ 3, 6, 7, 8, 45 ]
-```
-
-As the query above shows, a `set` is just a subtype and not its own type so you can pass in an `array` into anything expecting a `set`. The only difference is that it will never hold a duplicate item.
-
 ### Define arrays and sets with a type and maximum size
 
-In addition to a type, both arrays and sets can have a maximum number of items built into the type definition itself. The definition below pairs this with an assertion using the [`array::all()`](/docs/surrealql/functions/database/array#arrayall) function to also  ensure that every item in the `bytes` field is between 0 and 255.
+In addition to a type, both arrays and sets can have a maximum number of items built into the type definition itself. The definition below pairs this with an assertion using the [`array::all()`](/docs/surrealql/functions/database/array#arrayall) function to also ensure that every item in the `small_bytes` field is between 0 and 255.
 
 ```surql
-DEFINE FIELD bytes ON data TYPE array<int, 640> ASSERT $value.all(|$int| $int IN 0..=255);
+DEFINE FIELD small_bytes ON data TYPE array<int, 8> ASSERT $value.all(|$int| $int IN 0..=255);
 ```
 
 Learn more about [database functions](/docs/surrealql/functions/database).
 
-### Define nested indexes
+### Define individual indexes of an array
 
-Even the individual indexes of an array can be defined. This is useful for data types like RGB colours that can must be exactly three items in length. This time the schema uses an `ASSERT value.len() = 3` instead of `array<3>` to ensure that the array is an exact length instead of a maximum length. 
+Even the individual indexes of an array can be defined. This is useful for data types like RGB colours that must be exactly three items in length.
 
 ```surql
-DEFINE FIELD rgb ON colour TYPE array ASSERT $value.len() = 3;
+DEFINE FIELD rgb ON colour TYPE <array, 3>;
 DEFINE FIELD rgb[0] ON colour TYPE int ASSERT $value IN 0..=255;
 DEFINE FIELD rgb[1] ON colour TYPE int ASSERT $value IN 0..=255;
 DEFINE FIELD rgb[2] ON colour TYPE int ASSERT $value IN 0..=255;
 
 CREATE colour SET rgb = [0, 2, 30];
+-- Fails: must have three items
+CREATE colour SET rgb = [0, 2, 30];
+-- Fails: must be between 0 and 255
+CREATE colour SET rgb = [0, 2, 400];
 ```
 
 [Learn more about assertions in `DEFINE FIELD`](/docs/surrealql/statements/define/field#assertions)
@@ -196,7 +186,7 @@ CREATE user RETURN id, since;
 [
 	{
 		id: user:50s2riya8fm3cdbrhwpe,
-		since: '2025-06-12'
+		since: '2026-02-12'
 	}
 ]
 ```
@@ -218,22 +208,22 @@ DEFINE FIELD OVERWRITE name ON character TYPE string ASSERT !!$value;
 CREATE character SET name = "", metadata = {};
 ```
 
-
-
 ### Use `DEFINE PARAM` for clarity
 
 If you find that parts of your table- or field-specific code are getting a bit long, it might be time to think about moving parts of it to a [database-wide parameter](/docs/surrealql/statements/define/param).
 
 ```surql
-DEFINE FIELD month_published ON book TYPE string ASSERT $value IN ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+DEFINE FIELD month_published
+    ON book 
+    TYPE string 
+    ASSERT $value IN ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 ```
-
-
 
 Doing so not only makes the code cleaner, but makes it easy to reuse in other parts of the schema as well.
 
 ```surql
-DEFINE PARAM $MONTHS VALUE ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+DEFINE PARAM $MONTHS
+    VALUE ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 DEFINE FIELD month_published ON book TYPE string ASSERT $value IN $MONTHS;
 DEFINE FUNCTION fn::do_something_with_month($input: string) {
@@ -244,8 +234,6 @@ DEFINE FUNCTION fn::do_something_with_month($input: string) {
     }
 };
 ```
-
-
 
 ### Use literals to return rich error output
 
@@ -261,20 +249,37 @@ DEFINE FUNCTION fn::return_response($input:
     int) {
     IF $input.is_int() {
         IF $input IN $ERROR_CODES {
-            RETURN $input
+            $input
         } ELSE {
             THROW "Input must be one of " + <string>$ERROR_CODES;
         }
     } ELSE {
-        RETURN $input
+        $input
     }
 };
 
 fn::return_response(500);
+fn::return_response(999999);
 fn::return_response({ type: "internal_error", message: "You can't do that"});
+fn::return_response(a:wrong_argument);
 ```
 
+```surql title="Response"
+-------- Query --------
+500
 
+-------- Query --------
+'An error occurred: Input must be one of [200, 300, 400, 500]'
+
+-------- Query --------
+{
+	message: "You can't do that",
+	type: 'internal_error'
+}
+
+-------- Query --------
+"Expected `{ message: string, type: 'internal_error' } | { message: string, type: 'bad_request' } | { expected: 'YYYY-MM-DD', got: any, type: 'invalid_date' } | int` but found `a:wrong_argument`"
+```
 
 ### Use graph queries in the schema
 
@@ -283,13 +288,18 @@ While graph queries are usually seen in `SELECT` statements in the documentation
 ```surql
 DEFINE FIELD parents ON person ASSERT <-parent_of<-person OR first_generation;
 
+-- Is first_generation, doesn't need to indicate parents
 CREATE person:one SET first_generation = true;
+
+-- Error: 
+-- 'Found NONE for field `parents`, with record `person:two`,
+-- but field must conform to: <-parent_of<-person OR first_generation'
 CREATE person:two;
 
+-- Give person:two a parent
 RELATE person:one->parent_of->person:two;
+-- CREATE now works 
 CREATE person:two;
 ```
-
-
 
 By the way, this pattern is possible because `RELATE` statements can be used before the records to relate exist. To disallow this, you can add the [`ENFORCED`](/docs/surrealql/statements/define/table#using-enforced-to-ensure-that-related-records-exist) clause to a `DEFINE TABLE table_name TYPE RECORD` definition.
