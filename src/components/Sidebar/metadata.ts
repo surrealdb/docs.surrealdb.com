@@ -149,7 +149,7 @@ export const metadata = {
         },
         repo: {
             title: 'Forum',
-            href: '/community',
+            href: 'https://discord.gg/surrealdb',
         },
         thumbnail: ThumbnailCloud,
     },
