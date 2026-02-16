@@ -161,24 +161,118 @@ Thrown when a reconnect iterator fails to iterate.
 
 ## Response Errors
 
-### `ResponseError` {#responseerror}
+### `ServerError` {#servererror}
 
-Thrown when a database query fails with an error response.
+Thrown when a database query or RPC call fails with an error response from the server. Provides structured error information with `kind`, `details`, and optional cause chaining. For the wire format, see the [RPC protocol Error Handling](/docs/surrealdb/integration/rpc#error-handling) documentation.
 
 **Properties:**
-- `code` (number) - Error code from the database
-- `message` (string) - Error message from the database
+- `kind` (string) - Error category (e.g. `"NotAllowed"`, `"NotFound"`, `"Validation"`)
+- `message` (string) - Human-readable error description
+- `code` (number) - Legacy numeric error code (for backward compatibility; prefer `kind`)
+- `details` (object | string | undefined) - Structured details specific to the error kind
+- `cause` (ServerError | undefined) - The underlying error in the chain
+
+**Methods:**
+- `hasKind(kind: string): boolean` - Returns whether this error or any error in the cause chain matches the given kind
+- `findCause(kind: string): ServerError | undefined` - Returns the first error in the cause chain matching the given kind
 
 **Example:**
 ```ts
+import { ServerError, NotAllowedError, NotFoundError } from "surrealdb";
+
 try {
-    await db.query('INVALID QUERY');
+    await db.query("SELECT * FROM users");
 } catch (error) {
-    if (error instanceof ResponseError) {
-        console.error(`Database error [${error.code}]: ${error.message}`);
+    if (error instanceof NotAllowedError) {
+        if (error.isTokenExpired) {
+            await db.signin({ /* re-authenticate */ });
+        } else {
+            console.error("Permission denied:", error.message);
+        }
+    } else if (error instanceof NotFoundError) {
+        console.error("Table not found:", error.tableName);
+    } else if (error instanceof ServerError) {
+        console.error(`Server error [${error.kind}]: ${error.message}`);
     }
 }
 ```
+
+**Backward compatibility:** `ResponseError` is a deprecated alias for `ServerError`. The SDK accepts both old (code-only) and new (kind + details) error formats from the server. Prefer `ServerError` or the typed subclasses below, and use `error.kind` instead of `error.code` for branching logic.
+
+---
+
+### `ResponseError` {#responseerror}
+
+Deprecated alias for [`ServerError`](#servererror). Use `ServerError` or the typed subclasses for new code.
+
+### Typed server error subclasses
+
+The SDK provides subclasses of `ServerError` for each error `kind`, with typed accessors for common detail patterns. Use `instanceof` checks to narrow the type and access these properties.
+
+#### `ErrorKind` constants {#errorkind}
+
+Import and use `ErrorKind` for string comparisons:
+
+```ts
+import { ErrorKind } from "surrealdb";
+
+ErrorKind.Validation
+ErrorKind.Configuration
+ErrorKind.Thrown
+ErrorKind.Query
+ErrorKind.Serialization
+ErrorKind.NotAllowed
+ErrorKind.NotFound
+ErrorKind.AlreadyExists
+ErrorKind.Connection
+ErrorKind.Internal
+```
+
+#### `ValidationError` {#validationerror}
+
+**Kind:** `"Validation"`. Invalid input, parse error, or bad parameters.
+
+**Accessors:** `isParseError` (boolean), `parameterName` (string | undefined)
+
+#### `NotAllowedError` {#notallowederror}
+
+**Kind:** `"NotAllowed"`. Permission or authorization error.
+
+**Accessors:** `isTokenExpired`, `isInvalidAuth`, `isScriptingBlocked` (boolean), `methodName`, `functionName` (string | undefined)
+
+#### `NotFoundError` {#notfounderror}
+
+**Kind:** `"NotFound"`. Resource not found (table, record, method, namespace, database).
+
+**Accessors:** `tableName`, `recordId`, `methodName`, `namespaceName`, `databaseName` (string | undefined)
+
+#### `QueryError` {#queryerror}
+
+**Kind:** `"Query"`. Query execution failure (timeout, cancelled, not executed).
+
+**Accessors:** `isNotExecuted`, `isTimedOut`, `isCancelled` (boolean), `timeout` (`{ secs: number; nanos: number } | undefined`)
+
+#### `AlreadyExistsError` {#alreadyexistserror}
+
+**Kind:** `"AlreadyExists"`. Duplicate resource (record, table, namespace).
+
+#### `ThrownError` {#thrownerror}
+
+**Kind:** `"Thrown"`. User-thrown error from a SurrealQL `THROW` statement.
+
+#### `ConfigurationError` {#configurationerror}
+
+**Kind:** `"Configuration"`. Feature or configuration not supported (e.g. live queries disabled, bad GraphQL config).
+
+#### `SerializationError` {#serializationerror}
+
+**Kind:** `"Serialization"`. Serialization or deserialization failure.
+
+**Accessors:** `isDeserialization` (boolean)
+
+#### `InternalError` {#internalerror}
+
+**Kind:** `"Internal"`. Unexpected server error; catch-all for unknown failures.
 
 ---
 
@@ -492,8 +586,8 @@ async function executeWithRetry(fn: () => Promise<any>, maxRetries = 3) {
                 // Reconnect and retry
                 await db.connect('ws://localhost:8000');
                 continue;
-            } else if (error instanceof ResponseError && attempt < maxRetries - 1) {
-                // Retry on response errors
+            } else if (error instanceof ServerError && attempt < maxRetries - 1) {
+                // Retry on server errors (e.g. transient failures)
                 continue;
             }
             throw error;
@@ -527,11 +621,16 @@ db.subscribe('error', (error) => {
 Handle specific error types for better error recovery:
 
 ```ts
-// Good: Specific handling
+// Good: Specific handling with typed server errors
 try {
-    await operation();
+    await db.query("SELECT * FROM users");
 } catch (error) {
-    if (error instanceof AuthenticationError) {
+    if (error instanceof NotAllowedError) {
+        if (error.isTokenExpired) await db.signin({ /* ... */ });
+        else console.error("Permission denied:", error.message);
+    } else if (error instanceof NotFoundError) {
+        console.error("Missing resource:", error.tableName ?? error.recordId);
+    } else if (error instanceof AuthenticationError) {
         redirectToLogin();
     } else if (error instanceof ConnectionUnavailableError) {
         showConnectionError();
@@ -561,23 +660,41 @@ if (isConnectionError(error)) {
 }
 ```
 
-### 3. Log Error Details
+### 3. Inspect the cause chain
+
+Use `hasKind()` and `findCause()` when errors wrap an underlying cause:
+
+```ts
+try {
+    await db.query("SELECT * FROM secrets");
+} catch (error) {
+    if (error instanceof ServerError && error.hasKind("NotAllowed")) {
+        const authError = error.findCause("NotAllowed");
+        if (authError instanceof NotAllowedError && authError.isTokenExpired) {
+            await db.signin({ /* re-authenticate */ });
+        }
+    }
+}
+```
+
+### 4. Log Error Details
 
 Include error details in logs for debugging:
 
 ```ts
 catch (error) {
-    if (error instanceof ResponseError) {
+    if (error instanceof ServerError) {
         logger.error('Query failed', {
-            code: error.code,
+            kind: error.kind,
             message: error.message,
+            details: error.details,
             query: originalQuery
         });
     }
 }
 ```
 
-### 4. Clean Up on Error
+### 5. Clean Up on Error
 
 Ensure resources are cleaned up even when errors occur:
 
@@ -592,6 +709,7 @@ try {
 
 ## See Also
 
+- [RPC Protocol — Error Handling](/docs/surrealdb/integration/rpc#error-handling) - Wire format and error kinds reference
 - [Core Classes](/docs/sdk/javascript/api/core/) - Classes that may throw errors
 - [Surreal](/docs/sdk/javascript/api/core/surreal) - Connection methods that may throw errors
 - [SurrealSession](/docs/sdk/javascript/api/core/surreal-session) - Session methods that may throw errors
