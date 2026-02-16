@@ -41,6 +41,9 @@ export default {
                 'label-yellow': withOpacity('label-yellow'),
                 'label-grey': withOpacity('label-grey'),
                 'label-purple': withOpacity('label-purple'),
+				'violet-hover': withOpacity('violet-hover'),
+				'surreal-passion': withOpacity('surreal-passion'),
+				'surreal-energy': withOpacity('surreal-energy'),
             },
             screens: {
                 xs: '390px',
