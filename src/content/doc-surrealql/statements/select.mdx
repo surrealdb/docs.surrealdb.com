@@ -28,16 +28,16 @@ SELECT
     [ WITH [ NOINDEX | INDEX @indexes ... ]]
     [ WHERE @conditions ]
     [ SPLIT [ ON ] @field, ... ]
-    [ GROUP [ ALL | [ BY ] @field, ... ]]
-    [ ORDER [ BY ] 
-        @field [ COLLATE ] [ NUMERIC ] [ ASC | DESC ], ...
-        | RAND() ]
+    [ 
+		GROUP [ ALL | [ BY ] @field, ... ] | 
+		ORDER [ BY ] RAND() | @field [ COLLATE ] [ NUMERIC ] [ ASC | DESC ], ...
+	]
     [ LIMIT [ BY ] @limit ]
     [ START [ AT ] @start 0 ]
     [ FETCH @fields ... ]
     [ TIMEOUT @duration ]
     [ TEMPFILES ]
-    [ EXPLAIN [ FULL ]]
+    [ EXPLAIN [ FULL ] ]
 ;
 ```
 
@@ -67,8 +67,43 @@ export const selectAst = {
         { type: "NonTerminal", text: "@targets" },
         { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "WITH" }, { type: "Choice", index: 1, children: [ { type: "Terminal", text: "NOINDEX" }, { type: "Sequence", children: [ { type: "Terminal", text: "INDEX" }, { type: "NonTerminal", text: "@indexes ..." } ] } ] } ] } },
         { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "WHERE" }, { type: "NonTerminal", text: "@conditions" } ] } },
-        { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "SPLIT" }, { type: "Optional", child: { type: "Terminal", text: "ON" } }, { type: "NonTerminal", text: "@field, ..." } ] } },
-        { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "GROUP" }, { type: "Choice", index: 1, children: [ { type: "Terminal", text: "ALL" }, { type: "Sequence", children: [ { type: "Optional", child: { type: "Terminal", text: "BY" } }, { type: "NonTerminal", text: "@field, ..." } ] } ] } ] } },
+{
+  type: "Optional",
+  child: {
+    type: "Choice",
+    index: 1,
+    children: [
+      {
+        type: "Sequence",
+        children: [
+          { type: "Terminal", text: "SPLIT" },
+          { type: "Optional", child: { type: "Terminal", text: "ON" } },
+          { type: "NonTerminal", text: "@field, ..." }
+        ]
+      },
+      {
+        type: "Sequence",
+        children: [
+          { type: "Terminal", text: "GROUP" },
+          {
+            type: "Choice",
+            index: 1,
+            children: [
+              { type: "Terminal", text: "ALL" },
+              {
+                type: "Sequence",
+                children: [
+                  { type: "Optional", child: { type: "Terminal", text: "BY" } },
+                  { type: "NonTerminal", text: "@field, ..." }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+},
         { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "ORDER" }, { type: "Optional", child: { type: "Terminal", text: "BY" } }, { type: "Choice", index: 1, children: [ { type: "Sequence", children: [ { type: "NonTerminal", text: "@field" }, { type: "Optional", child: { type: "Terminal", text: "COLLATE" } }, { type: "Optional", child: { type: "Terminal", text: "NUMERIC" } }, { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Terminal", text: "ASC" }, { type: "Terminal", text: "DESC" } ] } } ] }, { type: "Terminal", text: "RAND()" } ] } ] } },
         { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "LIMIT" }, { type: "Optional", child: { type: "Terminal", text: "BY" } }, { type: "NonTerminal", text: "@limit" } ] } },
         { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "START" }, { type: "Optional", child: { type: "Terminal", text: "AT" } }, { type: "NonTerminal", text: "@start" } ] } },
@@ -257,7 +292,7 @@ SELECT ->likes->friend.name AS friends FROM person:tobie;
 -- Use the result of a subquery as a returned field
 SELECT *, (SELECT * FROM events WHERE type = 'activity' LIMIT 5) AS history FROM user;
 
--- Restructure objects in a select expression after `.` operator (since version 2.0.0)
+-- Restructure objects in a select expression after `.` operator
 SELECT address.{city, country} FROM person;
 ```
 
@@ -380,7 +415,7 @@ SELECT * FROM person;
 -- Omit the password field and security field in the options object
 SELECT * OMIT password, opts.security FROM person;
 
--- Using destructuring syntax (since 2.0.0)
+-- Using destructuring syntax
 SELECT * OMIT password, opts.{ security, enabled } FROM person;
 ```
 
@@ -592,9 +627,61 @@ SELECT count() AS number_of_records FROM person GROUP ALL;
 ]
 ```
 
+### `GROUP` and `SPLIT` incompatibility
+
+The `GROUP` and `SPLIT` clauses are incompatible with each other due to opposing behaviour: while `SPLIT` is a post-processing clause that multiplies the output of a query, `GROUP` works in the other way by collapsing the output.
+
+Versions before 3.0.0-beta allowed these two clauses to be used together, after which attempting to do so results in a parsing error.
+
+```surql
+SELECT * FROM person SPLIT name GROUP BY name;
+```
+
+```surql title="Output"
+'Parse error: SPLIT and GROUP are mutually exclusive
+ --> [6:22]
+  |
+6 | SELECT * FROM person SPLIT name GROUP BY name;
+  |                      ^^^^^^^^^^ SPLIT cannot be used with GROUP
+ --> [6:33]
+  |
+6 | SELECT * FROM person SPLIT name GROUP BY name;
+  |                                 ^^^^^^^^^^^^^ GROUP cannot be used with SPLIT
+'
+```
+
+Disallowing the two clauses together forces a query that uses both to have one inside a subquery, which makes it clear which operation is to be performed first.
+
+```surql
+CREATE user SET
+    name = "Jack",
+    emails = ["my@firstemail.com", "another@builder.com"],
+    age = 37;
+
+CREATE user SET
+    name = "Ellen",
+    emails = ["ruler@forest.com", "wife@tom.com"],
+    age = 50;
+
+CREATE user SET
+    name = "Phillip",
+    emails = ["prior@kingsbridge.com", "boss@remigius.com"],
+    age = 50;
+
+SELECT age, emails FROM (SELECT * FROM user SPLIT emails) GROUP BY age;
+
+SELECT age, emails
+FROM (
+  SELECT age, array::group(emails) AS emails
+  FROM user
+  GROUP BY age
+)
+SPLIT emails;
+```
+
 ### Using a `COUNT` index to speed up `count()` in `GROUP ALL` queries
 
-<Since v="v3.0.0-alpha.10" />
+<Since v="v3.0.0-beta" />
 
 To speed up the `count()` function along with `GROUP ALL` to get the total number of records in a table, a `COUNT` index can be used. This keeps track of the total number of records as a single value as opposed to a dynamic iteration of the table to get the full count every time a query is run.
 
@@ -605,7 +692,7 @@ SELECT count() AS number_of_records FROM person GROUP ALL;
 
 ### `math::stddev()` and `math::variance()` in table views
 
-<Since v="v3.0.0-alpha.11" />
+<Since v="v3.0.0-beta" />
 
 The `math::stddev()` and `math::variance()` functions can also be used in table views.
 

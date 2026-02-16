@@ -4,6 +4,7 @@ const prefixes = {
 	'/docs/integration/libraries/': '/docs/sdk/',
 	'/docs/surrealdb/integration/sdks/': '/docs/sdk/',
 	'/docs/cloud/advanced-topics/': '/docs/cloud/operate-and-manage/',
+	'/docs/integrations/data-management/surreal-sync/': '/docs/surrealdb/migrating/surreal-sync/',
 }
 const prefixExceptions = {
 	'/docs/cloud/advanced-topics/configure-an-instance': '/docs/cloud/getting-started/create-an-instance',
@@ -28,8 +29,8 @@ const redirects = {
 	'/docs/sdk/javascript/core/initialization': '/docs/sdk/javascript/core/create-a-new-connection',
 	'/docs/sdk/javascript/core/authentication': '/docs/sdk/javascript/core/handling-authentication',
 	'/docs/sdk/javascript/core/data-querying': '/docs/sdk/javascript/core/data-maniplulation',
-	'/docs/sdk/javascript/core/methods/authenticate': '/docs/sdk/javascript/methods/authenticate',
-	'/docs/sdk/javascript/core/methods/invalidate': '/docs/sdk/javascript/methods/invalidate',
+	'/docs/sdk/javascript/core/methods/authenticate': '/docs/sdk/javascript/api/core/surreal-session',
+	'/docs/sdk/javascript/core/methods/invalidate': '/docs/sdk/javascript/api/core/surreal-session',
 	'/docs/surrealdb/surrealql/functions/array': '/docs/surrealdb/surrealql/functions/database/array',
 	'/docs/surrealdb/surrealql/functions/count': '/docs/surrealdb/surrealql/functions/database/count',
 	'/docs/surrealdb/surrealql/functions/crypto': '/docs/surrealdb/surrealql/functions/database/crypto',
@@ -51,42 +52,8 @@ const redirects = {
 	'/docs/surrealdb/surrealql/functions/vector': '/docs/surrealdb/surrealql/functions/database/vector',
 	'/docs/intro': '/docs/surrealdb',
 	'/docs/surrealdb/intro': '/docs/surrealdb',
-	'/docs/cli/overview': '/docs/surrealdb/cli',
-	'/docs/surrealdb/cli/overview': '/docs/surrealdb/cli',
-	'/docs/deployment/overview': '/docs/surrealdb/deployment',
-	'/docs/surrealdb/deployment/overview': '/docs/surrealdb/deployment',
-	'/docs/embedding/overview': '/docs/surrealdb/embedding',
-	'/docs/surrealdb/embedding/overview': '/docs/surrealdb/embedding',
-	'/docs/faqs/overview': '/docs/surrealdb/faqs',
-	'/docs/surrealdb/faqs/overview': '/docs/surrealdb/faqs',
-	'/docs/how-to/overview': '/docs/tutorials',
-	'/docs/surrealdb/how-to/overview': '/docs/tutorials',
-	'/docs/tutorials/overview': '/docs/tutorials',
-	'/docs/surrealdb/tutorials/overview': '/docs/tutorials',
 	'/docs/surrealdb/tutorials': '/docs/tutorials',
-	'/docs/installation/overview': '/docs/surrealdb/installation',
-	'/docs/surrealdb/installation/overview': '/docs/surrealdb/installation',
-	'/docs/integration/overview': '/docs/surrealdb/integration',
-	'/docs/surrealdb/integration/overview': '/docs/surrealdb/integration',
-	'/docs/integration/sdks/overview': '/docs/surrealdb/integration/sdks',
-	'/docs/surrealdb/integration/sdks/overview': '/docs/surrealdb/integration/sdks',
-	'/docs/introduction/overview': '/docs/surrealdb/introduction',
-	'/docs/surrealdb/introduction/overview': '/docs/surrealdb/introduction',
-	'/docs/surrealql/overview': '/docs/surrealql',
-	'/docs/surrealdb/surrealql/overview': '/docs/surrealql',
-	'/docs/surrealql/datamodel/overview': '/docs/surrealql/datamodel',
-	'/docs/surrealdb/surrealql/datamodel/overview': '/docs/surrealql/datamodel',
-	'/docs/surrealql/functions/overview': '/docs/surrealql/functions',
-	'/docs/surrealdb/surrealql/functions/overview': '/docs/surrealql/functions',
-	'/docs/surrealql/functions/script/overview': '/docs/surrealql/functions/script',
-	'/docs/surrealdb/surrealql/functions/script/overview': '/docs/surrealql/functions/script',
-	'/docs/surrealql/statements/overview': '/docs/surrealql/statements',
-	'/docs/surrealdb/surrealql/statements/overview': '/docs/surrealql/statements',
 	'/docs/surrealdb/surrealql': '/docs/surrealql',
-	'/docs/surrealql/statements/define/overview': '/docs/surrealql/statements/define',
-	'/docs/surrealdb/surrealql/statements/define/overview': '/docs/surrealql/statements/define',
-	'/docs/surrealql/statements/remove/overview': '/docs/surrealql/statements/remove',
-	'/docs/surrealdb/surrealql/statements/remove/overview': '/docs/surrealql/statements/remove',
 	'/docs/surrealdb/installation/upgrading/beta': '/docs/installation/upgrading/migrating-data-to-2x',
 	'/docs/surrealdb/deployment/heroku': '/docs/surrealdb/deployment',
 	'/docs/surrealdb/deployment/railway': '/docs/surrealdb/deployment',
@@ -107,11 +74,37 @@ function compute(input) {
 	}
 	if (path === '/docs/llms.txt') return { path, raw: true };
 	if (path.startsWith('/docs/_astro/')) return { path: input, raw: true };
+	// Allow versioned SurrealQL routes (2.x and 3.x)
+	if (path.startsWith('/docs/2.x/surrealql') || 
+	    path.startsWith('/docs/3.x/surrealql') ||
+	    path.startsWith('/docs/surrealdb/2.x/surrealql') ||
+	    path.startsWith('/docs/surrealdb/3.x/surrealql')) {
+		if (path.startsWith('/docs/surrealdb/2.x/surrealql')) {
+			path = `/docs/2.x/surrealql${path.slice('/docs/surrealdb/2.x/surrealql'.length)}`;
+		} else if (path.startsWith('/docs/surrealdb/3.x/surrealql')) {
+			path = `/docs/3.x/surrealql${path.slice('/docs/surrealdb/3.x/surrealql'.length)}`;
+		}
+		if (path.endsWith('/')) path = path.slice(0, -1);
+		return { path };
+	}
 	const match = path.match(/^\/docs\/(?:surrealdb\/)?([^\/]+)(\/.*)?$/);
 	if (match && versions.includes(match[1])) {
 		path = `/docs/surrealdb${match[2] || ''}`;
 	}
 	if (path.endsWith('/')) path = path.slice(0, -1);
+	// Handle /overview pattern redirects
+	if (path.endsWith('/overview')) {
+		const base = path.slice(0, -9);
+		if (base.startsWith('/docs/surrealql/')) {
+			path = base;
+		} else if (base.startsWith('/docs/surrealdb/surrealql/')) {
+			path = `/docs/surrealql${base.slice(24)}`;
+		} else if (base.startsWith('/docs/surrealdb/')) {
+			path = base;
+		} else if (base.startsWith('/docs/')) {
+			path = `/docs/surrealdb${base.slice(5)}`;
+		}
+	}
 	if (prefixExceptions[path]) {
 		path = prefixExceptions[path];
 	} else {
@@ -132,9 +125,12 @@ function compute(input) {
 		redirectCount++;
 	}
 	if (path.startsWith('/docs/')) {
-		const doc = path.split('/')[2];
-		if (!validDocs.includes(doc)) {
-			path = `/docs/surrealdb/${path.slice(6)}`;
+		// Skip validation for versioned SurrealQL routes (they are valid)
+		if (!path.startsWith('/docs/2.x/surrealql') && !path.startsWith('/docs/3.x/surrealql')) {
+			const doc = path.split('/')[2];
+			if (!validDocs.includes(doc)) {
+				path = `/docs/surrealdb/${path.slice(6)}`;
+			}
 		}
 	}
 	return { path };
