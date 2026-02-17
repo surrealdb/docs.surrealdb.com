@@ -82,8 +82,8 @@ function Heading({ depth, text, slug }: HeadingProps) {
                 >
                     <span
                         class={cn(
-                            'text-text transition-all duration-300 group-hover:text-hover',
-                            active() && 'text-hover/100'
+                            'text-text transition-all duration-300 group-hover:text-surreal-energy',
+                            active() && 'text-surreal-energy'
                         )}
                     >
                         {text}
@@ -96,8 +96,8 @@ function Heading({ depth, text, slug }: HeadingProps) {
                 >
                     <span
                         class={cn(
-                            'text-text transition-all duration-300 group-hover:text-hover',
-                            active() && 'text-hover/100'
+                            'text-text transition-all duration-300 group-hover:text-surreal-energy',
+                            active() && 'text-surreal-energy'
                         )}
                     >
                         {text}
