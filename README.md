@@ -83,7 +83,6 @@
 
 Visit [surrealdb.com/docs](https://surrealdb.com/docs/surrealdb/) to get started with SurrealDB. 
 
-
 ## Learn SurrealDB
 
 - SurrealDB University: https://surrealdb.com/learn/fundamentals

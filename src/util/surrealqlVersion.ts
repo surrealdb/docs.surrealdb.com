@@ -86,7 +86,7 @@ export function toVersionedPath(
 }
 
 /**
- * Compare version strings (e.g., "v2.2.0" vs "v3.0.0-beta")
+ * Compare version strings (e.g., "v2.2.0" vs "v3.0.0")
  * Returns: -1 if v1 < v2, 0 if v1 === v2, 1 if v1 > v2
  */
 export function compareVersions(v1: string, v2: string): number {
