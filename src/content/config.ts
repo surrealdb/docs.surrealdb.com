@@ -91,7 +91,7 @@ export const urlForCollection = {
         },
         {} as Record<SdkKey, string>
     ),
-    'doc-sdk-javascript-1x': 'sdk/javascript',
+    'doc-sdk-javascript-1x': '1.x/sdk/javascript',
     'labs-items': 'labs',
 };
 

@@ -14,7 +14,9 @@ export const SDK_JS_DOC_PATH = '/docs/sdk/javascript';
  */
 export function getVersionFromPath(pathname: string): SdkJsVersion {
     // Match /docs/1.x/sdk/javascript/** or /docs/2.x/sdk/javascript/**
-    const versionMatch = pathname.match(/^\/docs\/(1\.x|2\.x)\/sdk\/javascript/);
+    const versionMatch = pathname.match(
+        /^\/docs\/(1\.x|2\.x)\/sdk\/javascript/
+    );
     if (versionMatch) {
         return versionMatch[1] as SdkJsVersion;
     }
