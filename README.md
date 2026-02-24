@@ -1,346 +1,60 @@
+Generated with [vike.dev/new](https://vike.dev/new) ([version 581](https://www.npmjs.com/package/create-vike/v/0.0.581)) using this command:
 
-<p align="center">
-    <a href="https://surrealdb.com#gh-dark-mode-only" target="_blank">
-        <img width="300" src="src/assets/img/logo/dark/logo.svg" alt="SurrealDB Logo">
-    </a>
-</p>
-
-<h3 align="center">
-    <a href="https://surrealdb.com#gh-dark-mode-only" target="_blank">
-        <img src="src/assets/img/logo/dark/text.svg" height="15" alt="SurrealDB">
-    </a>
-    is the ultimate cloud <br> database for tomorrow's applications
-</h3>
-
-<h3 align="center">Develop easier. &nbsp; Build faster. &nbsp; Scale quicker.</h3>
-
-<br>
-
-<p align="center">The documentation for <a href="https://github.com/surrealdb/surrealdb" target="_blank">SurrealDB</a>, built using <a href="https://astro.build/" target="_blank">Astro</a>.</p>
-
-<p align="center">If you want to contribute, then please read the <a href="https://github.com/surrealdb/docs.surrealdb.com/blob/main/CONTRIBUTING.md" target="_blank">contributing guidelines</a>.</p>
-
-<br>
-
-<p align="center">
-    <a href="https://surrealdb.com/discord"><img src="https://img.shields.io/discord/902568124350599239?label=discord&style=flat-square&color=5a66f6"></a>
-    &nbsp;
-    <a href="https://twitter.com/surrealdb"><img src="https://img.shields.io/badge/twitter-follow_us-1d9bf0.svg?style=flat-square"></a>
-    &nbsp;
-    <a href="https://dev.to/surrealdb"><img src="https://img.shields.io/badge/dev-join_us-86f7b7.svg?style=flat-square"></a>
-    &nbsp;
-    <a href="https://www.linkedin.com/company/surrealdb/"><img src="https://img.shields.io/badge/linkedin-connect_with_us-0a66c2.svg?style=flat-square"></a>
-    &nbsp;
-    <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><img src="https://img.shields.io/badge/youtube-subscribe-ff0000.svg?style=flat-square"></a>
-</p>
-
-<p align="center">
-    <a href="https://surrealdb.com/blog"><img height="25" src="src/assets/img/logo/dark/blog.svg" alt="Blog"></a>
-    &nbsp;
-    <a href="https://github.com/surrealdb/surrealdb"><img height="25" src="src/assets/img/logo/dark/github.svg" alt="Github	"></a>
-    &nbsp;
-    <a href="https://www.linkedin.com/company/surrealdb/"><img height="25" src="src/assets/img/logo/dark/linkedin.svg" alt="LinkedIn"></a>
-    &nbsp;
-    <a href="https://twitter.com/surrealdb"><img height="25" src="src/assets/img/logo/dark/twitter.svg" alt="Twitter"></a>
-    &nbsp;
-    <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><img height="25" src="src/assets/img/logo/dark/youtube.svg" alt="Youtube"></a>
-    &nbsp;
-    <a href="https://dev.to/surrealdb"><img height="25" src="src/assets/img/logo/dark/dev.svg" alt="Dev"></a>
-    &nbsp;
-    <a href="https://surrealdb.com/discord"><img height="25" src="src/assets/img/logo/dark/discrod.svg" alt="Discord"></a>
-    &nbsp;
-    <a href="https://stackoverflow.com/questions/tagged/surrealdb"><img height="25" src="src/assets/img/logo/dark/stack-overflow.svg" alt="StackOverflow"></a>
-</p>
-
-<br>
-
-## Table of Contents
-
-- [Getting Started with SurrealDB](#getting-started-with-surrealdb)
-- [Learn SurrealDB](#learn-surrealdb)
-- [Contributing to the Documentation](#contributing-to-the-documentation)
-  - [Good First Issues](#good-first-issues)
-- [Installation](#installation)
-- [Contributing Lab Content](#contributing-lab-content-to-surrealdb-documentation)
-  - [Overview](#overview)
-  - [Prerequisites](#prerequisites)
-  - [Creating a New Lab](#creating-a-new-lab)
-    - [Using the Lab Creation Tool](#using-the-lab-creation-tool)
-- [Categories](#categories)
-- [Topics](#topics)
-- [Best practices](#best-practices)
-- [Submitting your contribution](#submitting-your-contribution)
-- [Review process](#review-process)
-- [Need help?](#need-help)
-- [Development](#development)
-- [Building](#building)
-- [Adding a new doc](#adding-a-new-doc)
-- [File structure](#file-structure)
-- [Linting](#linting)
-
-
-## Getting started with SurrealDB
-
-Visit [surrealdb.com/docs](https://surrealdb.com/docs/surrealdb/) to get started with SurrealDB. 
-
-## Learn SurrealDB
-
-- SurrealDB University: https://surrealdb.com/learn/fundamentals
-- Aeon's Surreal Renaissance (Interative book): https://surrealdb.com/learn/book
-- Documentation: https://surrealdb.com/docs
-
-
-## Contributing to the documentation
-
-Please see our [contributing guidelines](/CONTRIBUTING.md).
-
-### Good First Issues
-
-We have a list of [good first issues](https://github.com/surrealdb/docs.surrealdb.com/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22) that contain bugs that have a relatively limited scope. This is a great place to get started, gain experience, and get familiar with our contribution process.
-
-## Installation
-
-To get started with contributing to the SurrealDB documentation, first install the required packages using the following command. 
-
-> This project uses [Bun](https://bun.sh/) as our package manager. If you haven't installed Bun yet, then please see the [installation guide](https://bun.sh/docs/installation) for your operating system. It also requires Node.js v20.0.0 or higher.
-
-```bash
-bun i 
+```sh
+bun create vike@latest --react --mantine --google-analytics --biome --googleAnalytics
 ```
 
-## Contributing Lab content to SurrealDB Documentation
+## Contents
 
-## Overview
-Labs are a collection of community and official content that helps users learn and work with SurrealDB. This guide will help you contribute your own lab content to the documentation.
+- [Vike](#vike)
+  - [Plus files](#plus-files)
+  - [Routing](#routing)
+  - [SSR](#ssr)
+  - [HTML Streaming](#html-streaming)
+- [Mantine](#mantine)
 
-## Prerequisites
-- [Bun](https://bun.sh/) installed on your system
-- A GitHub account
-- Basic knowledge of Markdown
+## Vike
 
-## Creating a new Lab
+This app is ready to start. It's powered by [Vike](https://vike.dev) and [React](https://react.dev/learn).
 
-### Using the Lab creation tool
-The easiest way to create a new lab is using the built-in tool:
+### Plus files
 
-1. Clone the repository and install dependencies:
+[The + files are the interface](https://vike.dev/config) between Vike and your code.
 
-```bash
-git clone https://github.com/surrealdb/docs.surrealdb.com.git
-cd docs.surrealdb.com
-bun install
-```
+- [`+config.ts`](https://vike.dev/settings) — Settings (e.g. `<title>`)
+- [`+Page.tsx`](https://vike.dev/Page) — The `<Page>` component
+- [`+data.ts`](https://vike.dev/data) — Fetching data (for your `<Page>` component)
+- [`+Layout.tsx`](https://vike.dev/Layout) — The `<Layout>` component (wraps your `<Page>` components)
+- [`+Head.tsx`](https://vike.dev/Head) - Sets `<head>` tags
+- [`/pages/_error/+Page.tsx`](https://vike.dev/error-page) — The error page (rendered when an error occurs)
+- [`+onPageTransitionStart.ts`](https://vike.dev/onPageTransitionStart) and `+onPageTransitionEnd.ts` — For page transition animations
 
-2. Run the lab creation tool:
+### Routing
 
-```bash
-bun run make:lab
-```
+[Vike's built-in router](https://vike.dev/routing) lets you choose between:
 
-3. Follow the interactive prompts to provide:
-   - Lab name (required)
-   - URL (optional) - Link to your project/repository
-   - Languages
-     - Python
-     - Rust
-     - TypeScript
-     - Go
-     - Java
-     - PHP
-     - SurrealQL   
-   - Category (required) - Choose from:
-     - Blogposts
-     - Code Repositories
-     - Videos
-     - Documentation
-     - Learning Resources
-   - Topics (optional) - Select one or more from:
-     - AI
-     - Cloud
-     - Data Management
-     - Examples
-     - Libraries
-     - Security
-     - Templates
-     - Tooling
-   - Author name (required)
-   - Author role (required for community content)
+- [Filesystem Routing](https://vike.dev/filesystem-routing) (the URL of a page is determined based on where its `+Page.jsx` file is located on the filesystem)
+- [Route Strings](https://vike.dev/route-string)
+- [Route Functions](https://vike.dev/route-function)
 
-### Manual creation
+### SSR
 
-Alternatively, you can create a lab manually by creating a new Markdown file in [`src/content/labs-items/`](https://github.com/surrealdb/docs.surrealdb.com/tree/main/src/content/labs-items) with the following structure:
+SSR is enabled by default. You can [disable it](https://vike.dev/ssr) for all or specific pages.
 
-```markdown
----
-title: "Your Lab Title"
-url: "https://your-project-url.com"  # Optional
-category: "Category Name"  # Must be one of the predefined categories
-topics:  # Optional
-  - Topic1
-  - Topic2
-author:
-  name: "Your Name"
-  role: "Your Role"
-  avatar: "your-name-slug"  # Will be automatically generated
----
+### HTML Streaming
 
-Your lab content here...
-```
+You can [enable/disable HTML streaming](https://vike.dev/stream) for all or specific pages.
 
-> For the author avatar field, you will also need to upload an avatar to /src/assets/img/labs-authors with the same file name as the author property in the lab markdown
+## Mantine
 
-## Content guidelines
+This is a boilerplate for Mantine based on the [Getting Started](https://mantine.dev/docs/getting-started/) guide.
 
-### Categories
-Choose the most appropriate category for your lab:
-- **Blogposts**: Blog posts and written content
-- **Code Repositories**: Code libraries and packages
-- **Videos**: Video content and tutorials
-- **Documentation**: Documentation and guides
-- **Learning Resource**: Other form of learning resource
+The following Packages are installed:
 
-### Topics
-Select relevant topics to help users find your content:
-- **AI**: Artificial Intelligence related content
-- **Cloud**: content related to cloud deployments and SurrealDB Cloud
-- **Data Management**: Data handling and management
-- **Examples**: Practical examples and guides
-- **Libraries**: Client libraries and SDKs
-- **Security**: Security features and best practices
-- **Templates**: Reusable project starters, schemas, and boilerplates
-- **Tooling**: Developer tools, CLIs, integrations, plugins, and utilities
+- `@mantine/hooks` Hooks for state and UI management
+- `@mantine/core` Core components library: inputs, buttons, overlays, etc.
 
-## Best practices
+If you add more packages, make sure to update the `layouts/Layout.tsx` file to include the required CSSs.
 
-1. **Title**: Choose a clear, descriptive title that reflects the content. Keep it short and concise for better readability
-2. **Content** (Only required when no URL is provided):
-   - Start with a brief introduction
-   - Include clear instructions
-   - Add code examples where relevant
-   - Include screenshots or diagrams if helpful
-3. **URL**: If your lab has an associated project, include the URL
-4. **Author Information**: 
-   - Use your real name
-   - Provide a clear role description
-   - For official SurrealDB content, use "surrealdb" as the author name
+The theme is defined in `layouts/theme.ts`.
 
-## Submitting your contribution
-
-1. Create a new branch for your lab
-2. Add your lab content
-3. Commit your changes
-4. Push to your fork
-5. Create a pull request
-
-## Review process
-
-Your lab will be reviewed for:
-- Technical accuracy
-- Content quality
-- Adherence to guidelines
-- Proper categorisation and topics
-
-## Need help?
-
-If you need assistance or have questions:
-- [Open an issue in the repository](https://github.com/surrealdb/docs.surrealdb.com/issues)
-- [Join the SurrealDB community channels](https://discord.com/invite/surrealdb)
-- [Check existing labs for examples](/docs/labs)
-
-Remember, your contribution helps the SurrealDB community grow and learn. Thank you for contributing!
-
-
-## Development
-
-The following command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
-
-```
-bun dev
-```
-
-### Railroad diagrams (reusable)
-
-This repo includes a reusable helper to generate SVG railroad diagrams using the JS library by Tab Atkins ([JS README](https://tabatkins.github.io/railroad-diagrams/README-js.html), [project page](https://tabatkins.github.io/railroad-diagrams/)).
-
-- Utility: `src/util/railroad.ts`
-- Component: `src/components/RailroadDiagram.astro`
-- CSS: included from the `railroad-diagrams` package
-
-Usage in MDX/Markdown (Astro Content):
-
-```mdx
-import RailroadDiagram from "../../components/RailroadDiagram.astro";
-
-export const ast = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Start", startType: "simple", label: "statement" },
-    {
-      type: "Sequence",
-      children: [
-        { type: "NonTerminal", text: "ACCESS" },
-        { type: "Choice", index: 1, children: [
-          { type: "Terminal", text: "ON" },
-          { type: "Terminal", text: "TO" }
-        ]},
-        { type: "NonTerminal", text: "resource" },
-      ]
-    },
-    { type: "End" }
-  ]
-};
-
-<RailroadDiagram ast={ast} className="my-6" />
-```
-
-You can also compose diagrams directly with the library and pass a prebuilt diagram to the helper functions in `src/util/railroad.ts` if needed.
-
-## Building
-
-The following command builds and generates static content into the `build` directory, and can then be served using any static contents hosting service.
-
-```
-bun run build
-```
-
-## Adding a new doc
-
-**READ VERY CAREFULLY**
-
-When adding a new doc, you MUST update redirect logic <br />
-If this does not happen, you'll get endless redirects :D <br />
-In: project://aws/viewer-request/index.js#4
-
-## File structure
-
-To contribute to the documentation, most of your changes will be made to the `src/content` directory. Each section of the documentation has its own subdirectory, and each page is an MDX file. 
-
-```md
-src/
-    assets/
-    components/
-    content/
-        doc-surrealdb/
-        doc-surrealql/
-        doc-surrealist/
-        ...
-    layouts/
-    pages/
-    styles/
-    util/ 
-```
-
-## Linting
-
-To ensure the documentation is consistent and follows our style guide, we use `make qc` to check for linting errors. You can also use `make qa` to automatically fix most of the errors. 
-
-Here are the commands for some of the common commands you may need to use.
-
-- `make install` - Install dependencies, first time or when they change
-- `make dev` - Run a development server
-- `make build` - Build the website
-- `make preview` - Preview a build you made
-- `make qc` - Check code quality (fmt + lint)
-- `make qa` - Apply safe code quality suggestions
-- `make qau` - Apply (un)safe code quality suggestions
