@@ -1,4 +1,4 @@
-import { ActionIcon, Anchor, type AnchorProps, Container, Flex } from "@mantine/core";
+import { ActionIcon, Anchor, type AnchorProps, Flex } from "@mantine/core";
 import {
     Icon,
     iconBrandBluesky,
@@ -6,7 +6,6 @@ import {
     iconBrandGitHub,
     iconBrandX,
     iconBrandYouTube,
-    Spacer,
 } from "@surrealdb/ui";
 import type { PropsWithChildren } from "react";
 

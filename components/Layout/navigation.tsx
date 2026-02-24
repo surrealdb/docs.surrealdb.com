@@ -2,7 +2,7 @@ import { SearchDocs } from "@components/SearchDocs";
 import { SearchModal } from "@components/SearchModal";
 import { Anchor, Box, Burger, Button, Flex, Menu, Text } from "@mantine/core";
 import { useDisclosure, useHotkeys } from "@mantine/hooks";
-import { brandAWS, Icon, iconChevronDown, Spacer } from "@surrealdb/ui";
+import { Icon, iconChevronDown, Spacer } from "@surrealdb/ui";
 import classes from "./style.module.scss";
 
 export interface NavigationProps {
