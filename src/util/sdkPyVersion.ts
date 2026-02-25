@@ -13,9 +13,7 @@ export const SDK_PY_DOC_PATH = '/docs/sdk/python';
  * Returns 'latest' if no version is found
  */
 export function getVersionFromPath(pathname: string): SdkPyVersion {
-    const versionMatch = pathname.match(
-        /^\/docs\/(1\.x|2\.x)\/sdk\/python/
-    );
+    const versionMatch = pathname.match(/^\/docs\/(1\.x|2\.x)\/sdk\/python/);
     if (versionMatch) {
         return versionMatch[1] as SdkPyVersion;
     }
