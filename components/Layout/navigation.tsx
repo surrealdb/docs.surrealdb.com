@@ -1,8 +1,7 @@
-import { SearchDocs } from "@components/SearchDocs";
-import { SearchModal } from "@components/SearchModal";
-import { Anchor, Box, Burger, Button, Flex, Menu, Text } from "@mantine/core";
-import { useDisclosure, useHotkeys } from "@mantine/hooks";
-import { Icon, iconChevronDown, Spacer } from "@surrealdb/ui";
+import DocsDark from "@assets/img/logo/dark/docs.svg";
+import LogoDark from "@assets/img/logo/dark/surrealdb.svg";
+import { Anchor, Box, Burger, Button, Divider, Flex, Image, Menu } from "@mantine/core";
+import { Icon, iconChevronDown } from "@surrealdb/ui";
 import classes from "./style.module.scss";
 
 export interface NavigationProps {
@@ -145,35 +144,46 @@ function NavDropdown({ label, items }: NavMenuGroup) {
 }
 
 export function Navigation({ opened, onToggle }: NavigationProps) {
-    const [searchOpened, { open: openSearch, close: closeSearch }] = useDisclosure(false);
-
-    useHotkeys([["mod+/", openSearch]]);
-
     return (
         <Box
-            component="nav"
+            component="header"
             aria-label="Main navigation"
             h="100%"
+            px={1}
         >
             <Flex
                 align="center"
                 h="100%"
-                px="md"
-                gap="xl"
+                px="xl"
+                gap="md"
             >
+                <Anchor href="/">
+                    <Image
+                        src={LogoDark}
+                        alt="SurrealDB"
+                        height={24}
+                    />
+                </Anchor>
+                <Divider
+                    orientation="vertical"
+                    variant="solid"
+                    size="xs"
+                    h="24px"
+                    mt="auto"
+                    mb="auto"
+                    color="obsidian.6"
+                />
                 <Anchor
                     display="flex"
-                    href="/"
+                    href="/docs/"
                     underline="never"
                     aria-label="SurrealDB Docs home"
                 >
-                    <Text
-                        c="white"
-                        fw={600}
-                        fz="lg"
-                    >
-                        Docs
-                    </Text>
+                    <Image
+                        src={DocsDark}
+                        alt="SurrealDB Docs"
+                        height={24}
+                    />
                 </Anchor>
 
                 <Flex
@@ -182,6 +192,7 @@ export function Navigation({ opened, onToggle }: NavigationProps) {
                     gap="xl"
                     style={{ listStyle: "none", margin: 0, padding: 0 }}
                     visibleFrom="lg"
+                    mx="auto"
                 >
                     {NAV_LINKS.map((entry) => (
                         <Box
@@ -196,10 +207,6 @@ export function Navigation({ opened, onToggle }: NavigationProps) {
                         </Box>
                     ))}
                 </Flex>
-
-                <Spacer />
-
-                <SearchDocs onOpen={openSearch} />
 
                 <Button
                     component="a"
@@ -222,11 +229,6 @@ export function Navigation({ opened, onToggle }: NavigationProps) {
                     aria-label="Toggle navigation"
                 />
             </Flex>
-
-            <SearchModal
-                opened={searchOpened}
-                onClose={closeSearch}
-            />
         </Box>
     );
 }

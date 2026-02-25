@@ -1,7 +1,6 @@
 import { Box, Flex, Modal, Text, TextInput } from "@mantine/core";
 import { Icon, iconSearch } from "@surrealdb/ui";
 import { useState } from "react";
-import classes from "./style.module.scss";
 
 export interface SearchModalProps {
     opened: boolean;
@@ -18,11 +17,9 @@ export function SearchModal({ opened, onClose }: SearchModalProps) {
             size="lg"
             padding={0}
             withCloseButton={false}
-            classNames={{ body: classes.body }}
             aria-label="Search documentation"
         >
             <TextInput
-                className={classes.input}
                 placeholder="Search the docs..."
                 value={query}
                 onChange={(e) => setQuery(e.currentTarget.value)}
@@ -36,7 +33,7 @@ export function SearchModal({ opened, onClose }: SearchModalProps) {
                 autoFocus
                 aria-label="Search query"
             />
-            <Box className={classes.results}>
+            <Box>
                 {query.length > 0 ? (
                     <Flex
                         align="center"

@@ -1,4 +1,7 @@
-import { Box, NavLink, ScrollArea, Stack, Text } from "@mantine/core";
+import { SearchDocs } from "@components/SearchDocs";
+import { SearchModal } from "@components/SearchModal";
+import { Box, NavLink, Stack, Text } from "@mantine/core";
+import { useDisclosure, useHotkeys } from "@mantine/hooks";
 import type { SidebarItem } from "@util/sidebar";
 import { usePageContext } from "vike-react/usePageContext";
 import classes from "./style.module.scss";
@@ -34,7 +37,8 @@ function SidebarNavLink({ item }: { item: SidebarItem }) {
                 defaultOpened={expanded}
                 aria-expanded={expanded}
                 bdrs={4}
-                bg={expanded ? "obsidian.7" : "transparent"}
+                bg={expanded ? "rgba(from var(--surreal-color-primary) r g b / 0.2" : "transparent"}
+                styles={{ label: { color: expanded ? "var(--surreal-color-primary)" : undefined } }}
             >
                 {item.children.map((child) => (
                     <SidebarNavLink
@@ -55,7 +59,8 @@ function SidebarNavLink({ item }: { item: SidebarItem }) {
             variant={active ? "filled" : "subtle"}
             aria-current={active ? "page" : undefined}
             bdrs={4}
-            bg={active ? "obsidian.7" : "transparent"}
+            bg={active ? "rgba(from var(--surreal-color-primary) r g b / 0.2" : "transparent"}
+            styles={{ label: { color: active ? "var(--surreal-color-primary)" : undefined } }}
         />
     );
 }
@@ -90,26 +95,38 @@ function SidebarSection({ item }: { item: SidebarItem }) {
 }
 
 export function Navbar({ sidebar }: NavbarProps) {
+    const [searchOpened, { open: openSearch, close: closeSearch }] = useDisclosure(false);
+    useHotkeys([["mod+/", openSearch]]);
     return (
-        <ScrollArea
-            p="sm"
-            scrollbarSize={6}
-        >
-            <Stack gap={0}>
-                {sidebar?.map((item) =>
-                    item.children?.length ? (
-                        <SidebarSection
-                            key={item.href}
-                            item={item}
-                        />
-                    ) : (
-                        <SidebarNavLink
-                            key={item.href}
-                            item={item}
-                        />
-                    ),
-                )}
-            </Stack>
-        </ScrollArea>
+        <>
+            <Box py="sm">
+                <Box px="lg">
+                    <SearchDocs onOpen={openSearch} />
+                </Box>
+                <Stack
+                    gap={0}
+                    component="nav"
+                    px="lg"
+                >
+                    {sidebar?.map((item) =>
+                        item.children?.length ? (
+                            <SidebarSection
+                                key={item.href}
+                                item={item}
+                            />
+                        ) : (
+                            <SidebarNavLink
+                                key={item.href}
+                                item={item}
+                            />
+                        ),
+                    )}
+                </Stack>
+            </Box>
+            <SearchModal
+                opened={searchOpened}
+                onClose={closeSearch}
+            />
+        </>
     );
 }

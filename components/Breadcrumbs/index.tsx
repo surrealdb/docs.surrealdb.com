@@ -2,7 +2,6 @@ import { Anchor, Breadcrumbs } from "@mantine/core";
 import { Icon, iconChevronRight, iconHome } from "@surrealdb/ui";
 import { findBreadcrumbTrail, type SidebarItem } from "@util/sidebar";
 import { usePageContext } from "vike-react/usePageContext";
-import classes from "./style.module.scss";
 
 export interface PageBreadcrumbsProps {
     sidebar: SidebarItem[];
@@ -16,7 +15,6 @@ export function PageBreadcrumbs({ sidebar }: PageBreadcrumbsProps) {
 
     return (
         <Breadcrumbs
-            className={classes.breadcrumbs}
             separator={
                 <Icon
                     path={iconChevronRight}

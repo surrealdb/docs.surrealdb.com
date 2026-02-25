@@ -1,4 +1,4 @@
-import { ActionIcon, Anchor, type AnchorProps, Flex } from "@mantine/core";
+import { ActionIcon, Flex } from "@mantine/core";
 import {
     Icon,
     iconBrandBluesky,
@@ -7,45 +7,25 @@ import {
     iconBrandX,
     iconBrandYouTube,
 } from "@surrealdb/ui";
-import type { PropsWithChildren } from "react";
+import { FooterLink } from "./link";
 
-interface FooterLinkProps extends PropsWithChildren<AnchorProps> {
-    href: string;
-}
-
-function FooterLink({ children, href, ...props }: FooterLinkProps) {
-    const isExternal = href.startsWith("http");
-    return (
-        <Anchor
-            href={href}
-            target={isExternal ? "_blank" : undefined}
-            rel={isExternal ? "noopener noreferrer external" : undefined}
-            c="white"
-            fz={12}
-            {...props}
-        >
-            {children}
-        </Anchor>
-    );
-}
+const links = [
+    {
+        label: "Contributing",
+        href: "https://github.com/surrealdb/docs.surrealdb.com/blob/main/README.md#contributing-to-the-documentation",
+    },
+    {
+        label: "Open Source",
+        href: "/opensource",
+    },
+];
 
 export function Footer() {
-    const links = [
-        {
-            label: "Contributing",
-            href: "https://github.com/surrealdb/docs.surrealdb.com/blob/main/README.md#contributing-to-the-documentation",
-        },
-        {
-            label: "Open Source",
-            href: "/opensource",
-        },
-    ];
-
     return (
         <Flex
             component="footer"
             role="contentinfo"
-            p="lg"
+            py="lg"
             align="center"
             justify="flex-start"
             gap={6}
@@ -53,8 +33,6 @@ export function Footer() {
             c="obsidian.4"
             fz="sm"
             fs="normal"
-            mt="auto"
-            w="100%"
         >
             <FooterLink
                 href="https://github.com/surrealdb"

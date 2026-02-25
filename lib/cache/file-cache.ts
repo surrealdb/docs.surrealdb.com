@@ -6,7 +6,6 @@ interface CacheEnvelope<T> {
 
 export class FileCache {
     private readonly cacheDirectoryName: string;
-
     private readonly ttlMs: number;
 
     constructor(options?: { cacheDirectory?: string; ttlMs?: number }) {
