@@ -29,8 +29,8 @@ const redirects = {
 	'/docs/sdk/javascript/core/initialization': '/docs/sdk/javascript/core/create-a-new-connection',
 	'/docs/sdk/javascript/core/authentication': '/docs/sdk/javascript/core/handling-authentication',
 	'/docs/sdk/javascript/core/data-querying': '/docs/sdk/javascript/core/data-maniplulation',
-	'/docs/sdk/javascript/core/methods/authenticate': '/docs/sdk/javascript/api/core/surreal-session',
-	'/docs/sdk/javascript/core/methods/invalidate': '/docs/sdk/javascript/api/core/surreal-session',
+	'/docs/sdk/javascript/core/methods/authenticate': '/docs/sdk/javascript/methods/authenticate',
+	'/docs/sdk/javascript/core/methods/invalidate': '/docs/sdk/javascript/methods/invalidate',
 	'/docs/surrealdb/surrealql/functions/array': '/docs/surrealdb/surrealql/functions/database/array',
 	'/docs/surrealdb/surrealql/functions/count': '/docs/surrealdb/surrealql/functions/database/count',
 	'/docs/surrealdb/surrealql/functions/crypto': '/docs/surrealdb/surrealql/functions/database/crypto',
@@ -75,7 +75,7 @@ function compute(input) {
 	if (path === '/docs/llms.txt') return { path, raw: true };
 	if (path.startsWith('/docs/_astro/')) return { path: input, raw: true };
 	// Allow versioned SurrealQL routes (2.x and 3.x)
-	if (path.startsWith('/docs/2.x/surrealql') || 
+	if (path.startsWith('/docs/2.x/surrealql') ||
 	    path.startsWith('/docs/3.x/surrealql') ||
 	    path.startsWith('/docs/surrealdb/2.x/surrealql') ||
 	    path.startsWith('/docs/surrealdb/3.x/surrealql')) {
@@ -84,6 +84,12 @@ function compute(input) {
 		} else if (path.startsWith('/docs/surrealdb/3.x/surrealql')) {
 			path = `/docs/3.x/surrealql${path.slice('/docs/surrealdb/3.x/surrealql'.length)}`;
 		}
+		if (path.endsWith('/')) path = path.slice(0, -1);
+		return { path };
+	}
+	// Allow versioned SDK JS routes (1.x and 2.x)
+	if (path.startsWith('/docs/1.x/sdk/javascript') ||
+	    path.startsWith('/docs/2.x/sdk/javascript')) {
 		if (path.endsWith('/')) path = path.slice(0, -1);
 		return { path };
 	}
@@ -125,8 +131,9 @@ function compute(input) {
 		redirectCount++;
 	}
 	if (path.startsWith('/docs/')) {
-		// Skip validation for versioned SurrealQL routes (they are valid)
-		if (!path.startsWith('/docs/2.x/surrealql') && !path.startsWith('/docs/3.x/surrealql')) {
+		// Skip validation for versioned routes (they are valid)
+		if (!path.startsWith('/docs/2.x/surrealql') && !path.startsWith('/docs/3.x/surrealql') &&
+		    !path.startsWith('/docs/1.x/sdk/javascript') && !path.startsWith('/docs/2.x/sdk/javascript')) {
 			const doc = path.split('/')[2];
 			if (!validDocs.includes(doc)) {
 				path = `/docs/surrealdb/${path.slice(6)}`;

@@ -72,6 +72,7 @@ export const collections = {
         prev[`doc-sdk-${curr}`] = abstractDoc;
         return prev;
     }, {} as Sdks),
+    'doc-sdk-javascript-1x': abstractDoc,
     'labs-items': labCollection,
 };
 
@@ -90,6 +91,7 @@ export const urlForCollection = {
         },
         {} as Record<SdkKey, string>
     ),
+    'doc-sdk-javascript-1x': '1.x/sdk/javascript',
     'labs-items': 'labs',
 };
 
