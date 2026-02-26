@@ -10,7 +10,8 @@ import {
 import type { LLMChatURLs } from "@util/llms";
 import { useCallback } from "react";
 import { usePageContext } from "vike-react/usePageContext";
-import classes from "./style.module.scss";
+
+// import classes from "./style.module.scss";
 
 const RAW_BASE_URL =
     "https://raw.githubusercontent.com/surrealdb/docs.surrealdb.com/main/src/content";
@@ -56,7 +57,6 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                 <Button
                     size="xs"
                     bdrs={4}
-                    className={classes.copyPageButton}
                     leftSection={
                         <Icon
                             path={iconCopy}
@@ -73,7 +73,7 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                     Copy page
                 </Button>
             </Menu.Target>
-            <Menu.Dropdown className={classes.copyPageDropdown}>
+            <Menu.Dropdown>
                 <Menu.Item
                     leftSection={
                         <Icon
@@ -82,7 +82,6 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                         />
                     }
                     onClick={handleCopyMarkdown}
-                    className={classes.copyPageMenuItem}
                 >
                     <Stack gap={0}>
                         <Text
@@ -114,7 +113,6 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                         />
                     }
                     onClick={handleOpenChatGPT}
-                    className={classes.copyPageMenuItem}
                 >
                     <Stack gap={0}>
                         <Text
@@ -146,7 +144,6 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                         />
                     }
                     onClick={handleOpenClaude}
-                    className={classes.copyPageMenuItem}
                 >
                     <Stack gap={0}>
                         <Text

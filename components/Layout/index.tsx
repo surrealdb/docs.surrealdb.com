@@ -1,11 +1,12 @@
 import { PageContentActions } from "@components/ContentActions";
 import { PageAside } from "@components/PageAside";
+// import { PageAside } from "@components/PageAside";
 import type { HeadingData } from "@lib/markdown";
-import { Box, Container, Flex, Group } from "@mantine/core";
+import { Box, Container, Flex, Group, Stack } from "@mantine/core";
 import type { SidebarItem } from "@util/sidebar";
 import { PageBreadcrumbs } from "../Breadcrumbs";
+import { CopyPageMenu } from "../CopyPageMenu";
 import { Footer } from "../Footer";
-import { CopyPageMenu } from "./copy-page-menu";
 import { Navbar } from "./navbar";
 import { Navigation } from "./navigation";
 import { PageNavigation } from "./page-navigation";
@@ -17,9 +18,16 @@ export interface DefaultLayoutProps {
     headings: HeadingData[];
     contentPath: string;
     lastUpdated?: string;
+    showToc?: boolean;
 }
 
-export function DefaultLayout({ children, sidebar, headings, contentPath }: DefaultLayoutProps) {
+export function DefaultLayout({
+    children,
+    sidebar,
+    headings,
+    contentPath,
+    showToc = true,
+}: DefaultLayoutProps) {
     return (
         <div className={classes.layout}>
             <Navigation />
@@ -28,7 +36,12 @@ export function DefaultLayout({ children, sidebar, headings, contentPath }: Defa
                 justify="center"
                 align="flex-start"
             >
-                <Container size="sm">
+                <Container
+                    component={Stack}
+                    size="sm"
+                    h="100%"
+                    flex={1}
+                >
                     <Flex
                         justify="space-between"
                         align="center"
@@ -47,7 +60,7 @@ export function DefaultLayout({ children, sidebar, headings, contentPath }: Defa
                     <PageNavigation sidebar={sidebar} />
                     <Footer />
                 </Container>
-                <PageAside headings={headings} />
+                {showToc && <PageAside headings={headings} />}
             </Group>
         </div>
     );

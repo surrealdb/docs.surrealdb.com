@@ -21,12 +21,9 @@ export function PageNavigation({ sidebar }: PageNavigationProps) {
     if (!prev && !next) return null;
 
     return (
-        <Flex
+        <Box
             className={classes.pageNavigation}
-            justify="space-between"
-            align="stretch"
             mt="xl"
-            gap="md"
         >
             {prev ? (
                 <Anchor
@@ -98,6 +95,6 @@ export function PageNavigation({ sidebar }: PageNavigationProps) {
             ) : (
                 <Box />
             )}
-        </Flex>
+        </Box>
     );
 }
