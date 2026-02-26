@@ -148,7 +148,7 @@ export function Navigation({ opened, onToggle }: NavigationProps) {
         <Box
             component="header"
             aria-label="Main navigation"
-            h="100%"
+            h="56px"
             px={1}
         >
             <Flex

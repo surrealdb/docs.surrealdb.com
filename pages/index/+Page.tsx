@@ -1,3 +1,284 @@
+import { Anchor, Box, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import {
+    brandDotNet,
+    brandGo,
+    brandJava,
+    brandJavaScript,
+    brandPHP,
+    brandPython,
+    brandRust,
+    Icon,
+    iconArrowUpRight,
+    pictoCloud,
+    pictoIntegrations,
+    pictoML,
+    pictoQL,
+    pictoSurrealDB,
+    pictoSurrealist,
+    pictoTutorials,
+    pictoUniversity,
+} from "@surrealdb/ui";
+import classes from "./style.module.scss";
+
+interface ProductItem {
+    title: string;
+    description: string;
+    href: string;
+    icon: string;
+}
+
+interface SdkItem {
+    label: string;
+    href: string;
+    icon: string;
+}
+
+interface ResourceItem {
+    title: string;
+    description: string;
+    href: string;
+    icon: string;
+}
+
+const PRODUCTS: ProductItem[] = [
+    {
+        title: "SurrealDB",
+        description:
+            "Learn about SurrealDB's architecture, installation, configuration, and core concepts.",
+        href: "/docs/surrealdb/",
+        icon: pictoSurrealDB,
+    },
+    {
+        title: "SurrealQL",
+        description:
+            "Explore the powerful query language for SurrealDB with statements, functions, operators, and data types.",
+        href: "/docs/surrealql/",
+        icon: pictoQL,
+    },
+    {
+        title: "Surrealist",
+        description:
+            "Get started with the official IDE for SurrealDB, featuring a query editor, designer, and explorer.",
+        href: "/docs/surrealist/",
+        icon: pictoSurrealist,
+    },
+    {
+        title: "Cloud",
+        description:
+            "Deploy and manage SurrealDB instances in the cloud with automatic scaling and backups.",
+        href: "/docs/cloud/",
+        icon: pictoCloud,
+    },
+    {
+        title: "SurrealML",
+        description:
+            "Integrate machine learning models directly into your database for intelligent data processing.",
+        href: "/docs/surrealml/",
+        icon: pictoML,
+    },
+];
+
+const SDKS: SdkItem[] = [
+    { label: "JavaScript", href: "/docs/sdk/javascript/", icon: brandJavaScript },
+    { label: "Python", href: "/docs/sdk/python/", icon: brandPython },
+    { label: "Rust", href: "/docs/sdk/rust/", icon: brandRust },
+    { label: "Go", href: "/docs/sdk/golang/", icon: brandGo },
+    { label: "Java", href: "/docs/sdk/java/", icon: brandJava },
+    { label: "PHP", href: "/docs/sdk/php/", icon: brandPHP },
+    { label: ".NET", href: "/docs/sdk/dotnet/", icon: brandDotNet },
+];
+
+const RESOURCES: ResourceItem[] = [
+    {
+        title: "Integrations",
+        description: "Connect SurrealDB with your favorite tools and platforms.",
+        href: "/docs/integrations/",
+        icon: pictoIntegrations,
+    },
+    {
+        title: "Tutorials",
+        description: "Step-by-step guides to build real applications with SurrealDB.",
+        href: "/docs/tutorials/",
+        icon: pictoTutorials,
+    },
+    {
+        title: "SurrealDB University",
+        description: "Structured courses to master SurrealDB from beginner to advanced.",
+        href: "/learn",
+        icon: pictoUniversity,
+    },
+];
+
+function ProductCard({ title, description, href, icon }: ProductItem) {
+    return (
+        <Anchor
+            href={href}
+            underline="never"
+            className={classes.productCard}
+        >
+            <Icon
+                path={icon}
+                size={36}
+                color="surreal"
+            />
+            <Title
+                order={3}
+                fz="lg"
+                c="white"
+            >
+                {title}
+            </Title>
+            <Text
+                fz="sm"
+                c="obsidian.3"
+            >
+                {description}
+            </Text>
+        </Anchor>
+    );
+}
+
+function SdkCard({ label, href, icon }: SdkItem) {
+    return (
+        <Anchor
+            href={href}
+            underline="never"
+            className={classes.sdkCard}
+        >
+            <Icon
+                path={icon}
+                size={28}
+                color="white"
+            />
+            <Text
+                fz="sm"
+                c="obsidian.2"
+                fw={500}
+            >
+                {label}
+            </Text>
+        </Anchor>
+    );
+}
+
+function ResourceCard({ title, description, href, icon }: ResourceItem) {
+    return (
+        <Anchor
+            href={href}
+            underline="never"
+            className={classes.resourceCard}
+        >
+            <Icon
+                path={icon}
+                size={32}
+                color="surreal"
+            />
+            <Box flex={1}>
+                <Text
+                    fz="md"
+                    c="white"
+                    fw={600}
+                >
+                    {title}
+                </Text>
+                <Text
+                    fz="sm"
+                    c="obsidian.3"
+                >
+                    {description}
+                </Text>
+            </Box>
+            <Icon
+                path={iconArrowUpRight}
+                size="sm"
+                color="obsidian.4"
+            />
+        </Anchor>
+    );
+}
+
 export default function Page() {
-    return <div>Hello World</div>;
+    return (
+        <Stack
+            gap="xl"
+            pb="xl"
+        >
+            <Box className={classes.hero}>
+                <Title
+                    order={1}
+                    fz={36}
+                    c="white"
+                >
+                    SurrealDB Documentation
+                </Title>
+                <Text
+                    fz="lg"
+                    c="obsidian.3"
+                    mt="sm"
+                    maw={560}
+                    mx="auto"
+                >
+                    Learn how to get up and running with SurrealDB through tutorials, APIs, and
+                    platform resources.
+                </Text>
+            </Box>
+
+            <Box component="section">
+                <Title
+                    order={2}
+                    fz="xl"
+                    c="white"
+                    className={classes.sectionTitle}
+                >
+                    Products
+                </Title>
+                <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
+                    {PRODUCTS.map((product) => (
+                        <ProductCard
+                            key={product.href}
+                            {...product}
+                        />
+                    ))}
+                </SimpleGrid>
+            </Box>
+
+            <Box component="section">
+                <Title
+                    order={2}
+                    fz="xl"
+                    c="white"
+                    className={classes.sectionTitle}
+                >
+                    Client Libraries
+                </Title>
+                <SimpleGrid cols={{ base: 3, sm: 4, lg: 7 }}>
+                    {SDKS.map((sdk) => (
+                        <SdkCard
+                            key={sdk.href}
+                            {...sdk}
+                        />
+                    ))}
+                </SimpleGrid>
+            </Box>
+
+            <Box component="section">
+                <Title
+                    order={2}
+                    fz="xl"
+                    c="white"
+                    className={classes.sectionTitle}
+                >
+                    Additional Resources
+                </Title>
+                <SimpleGrid cols={{ base: 1, sm: 3 }}>
+                    {RESOURCES.map((resource) => (
+                        <ResourceCard
+                            key={resource.href}
+                            {...resource}
+                        />
+                    ))}
+                </SimpleGrid>
+            </Box>
+        </Stack>
+    );
 }
