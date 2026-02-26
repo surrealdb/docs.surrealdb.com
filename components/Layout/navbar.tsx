@@ -1,7 +1,5 @@
 import { SearchDocs } from "@components/SearchDocs";
-import { SearchModal } from "@components/SearchModal";
 import { Box, NavLink, Stack, Text } from "@mantine/core";
-import { useDisclosure, useHotkeys } from "@mantine/hooks";
 import type { SidebarItem } from "@util/sidebar";
 import { usePageContext } from "vike-react/usePageContext";
 import classes from "./style.module.scss";
@@ -95,38 +93,30 @@ function SidebarSection({ item }: { item: SidebarItem }) {
 }
 
 export function Navbar({ sidebar }: NavbarProps) {
-    const [searchOpened, { open: openSearch, close: closeSearch }] = useDisclosure(false);
-    useHotkeys([["mod+/", openSearch]]);
     return (
-        <>
-            <Box py="sm">
-                <Box px="lg">
-                    <SearchDocs onOpen={openSearch} />
-                </Box>
-                <Stack
-                    gap={0}
-                    component="nav"
-                    px="lg"
-                >
-                    {sidebar?.map((item) =>
-                        item.children?.length ? (
-                            <SidebarSection
-                                key={item.href}
-                                item={item}
-                            />
-                        ) : (
-                            <SidebarNavLink
-                                key={item.href}
-                                item={item}
-                            />
-                        ),
-                    )}
-                </Stack>
+        <Box py="sm">
+            <Box px="lg">
+                <SearchDocs />
             </Box>
-            <SearchModal
-                opened={searchOpened}
-                onClose={closeSearch}
-            />
-        </>
+            <Stack
+                gap={0}
+                component="nav"
+                px="lg"
+            >
+                {sidebar?.map((item) =>
+                    item.children?.length ? (
+                        <SidebarSection
+                            key={item.href}
+                            item={item}
+                        />
+                    ) : (
+                        <SidebarNavLink
+                            key={item.href}
+                            item={item}
+                        />
+                    ),
+                )}
+            </Stack>
+        </Box>
     );
 }

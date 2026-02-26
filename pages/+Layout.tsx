@@ -6,6 +6,7 @@ import { MANTINE_THEME } from "@surrealdb/ui";
 import "@assets/styles/global.scss";
 import "@assets/styles/markdown.scss";
 import "@surrealdb/ui/styles.css";
+import "@mantine/spotlight/styles.css";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
     return (

@@ -1,7 +1,5 @@
 import { SearchDocs } from "@components/SearchDocs";
-import { SearchModal } from "@components/SearchModal";
 import { Anchor, Box, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
 import {
     brandDotNet,
     brandGo,
@@ -203,7 +201,6 @@ function ResourceCard({ title, description, href, icon }: ResourceItem) {
 }
 
 export default function Page() {
-    const [searchOpened, { open: openSearch, close: closeSearch }] = useDisclosure(false);
     return (
         <Stack
             gap="xl"
@@ -228,14 +225,9 @@ export default function Page() {
                     platform resources.
                 </Text>
                 <SearchDocs
-                    onOpen={openSearch}
                     maw={500}
                     mx="auto"
                     mt="xl"
-                />
-                <SearchModal
-                    opened={searchOpened}
-                    onClose={closeSearch}
                 />
             </Box>
 
