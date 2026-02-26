@@ -25,7 +25,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
                 },
             })),
         );
-    }, 300);
+    }, 500);
 
     const handleSearch = useCallback<ChangeEventHandler<HTMLInputElement>>(
         (event) => {
@@ -71,6 +71,9 @@ export function SearchDocs(props: UnstyledButtonProps) {
                 shortcut="mod+/"
                 scrollable
                 maxHeight={400}
+                classNames={{
+                    actionsList: classes.searchInput,
+                }}
                 searchProps={{
                     placeholder: "Search the docs",
                     autoFocus: true,

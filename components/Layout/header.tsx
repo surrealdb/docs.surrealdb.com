@@ -106,6 +106,7 @@ function NavDropdown({ label, items }: NavMenuGroup) {
             position="bottom-start"
             withinPortal
             trigger="click-hover"
+            variant="surreal"
         >
             <Menu.Target>
                 <Anchor
@@ -128,7 +129,7 @@ function NavDropdown({ label, items }: NavMenuGroup) {
                     </Flex>
                 </Anchor>
             </Menu.Target>
-            <Menu.Dropdown>
+            <Menu.Dropdown variant="surreal">
                 {items.map((item) => (
                     <Menu.Item
                         key={item.href}

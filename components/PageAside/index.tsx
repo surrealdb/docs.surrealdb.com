@@ -19,10 +19,13 @@ export function PageAside({ headings }: PageAsideProps) {
             pos="sticky"
             top="0"
             right="2rem"
+            display={headings.length > 0 ? "block" : "none"}
+            aria-hidden={headings.length === 0}
         >
             <Text
                 c="bright"
                 fw={700}
+                mb="md"
             >
                 On this page
             </Text>
