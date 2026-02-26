@@ -1,4 +1,7 @@
-import { Anchor, Box, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { SearchDocs } from "@components/SearchDocs";
+import { SearchModal } from "@components/SearchModal";
+import { Anchor, Box, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
 import {
     brandDotNet,
     brandGo,
@@ -114,26 +117,27 @@ function ProductCard({ title, description, href, icon }: ProductItem) {
         <Anchor
             href={href}
             underline="never"
-            className={classes.productCard}
         >
-            <Icon
-                path={icon}
-                size={36}
-                color="surreal"
-            />
-            <Title
-                order={3}
-                fz="lg"
-                c="white"
-            >
-                {title}
-            </Title>
-            <Text
-                fz="sm"
-                c="obsidian.3"
-            >
-                {description}
-            </Text>
+            <Paper className={classes.productCard}>
+                <Icon
+                    path={icon}
+                    size={36}
+                    color="surreal"
+                />
+                <Title
+                    order={3}
+                    fz="lg"
+                    c="white"
+                >
+                    {title}
+                </Title>
+                <Text
+                    fz="sm"
+                    c="obsidian.3"
+                >
+                    {description}
+                </Text>
+            </Paper>
         </Anchor>
     );
 }
@@ -143,20 +147,20 @@ function SdkCard({ label, href, icon }: SdkItem) {
         <Anchor
             href={href}
             underline="never"
-            className={classes.sdkCard}
         >
-            <Icon
-                path={icon}
-                size={28}
-                color="white"
-            />
-            <Text
-                fz="sm"
-                c="obsidian.2"
-                fw={500}
-            >
-                {label}
-            </Text>
+            <Paper className={classes.sdkCard}>
+                <Icon
+                    path={icon}
+                    size={28}
+                />
+                <Text
+                    fz="sm"
+                    c="obsidian.2"
+                    fw={500}
+                >
+                    {label}
+                </Text>
+            </Paper>
         </Anchor>
     );
 }
@@ -166,38 +170,40 @@ function ResourceCard({ title, description, href, icon }: ResourceItem) {
         <Anchor
             href={href}
             underline="never"
-            className={classes.resourceCard}
         >
-            <Icon
-                path={icon}
-                size={32}
-                color="surreal"
-            />
-            <Box flex={1}>
-                <Text
-                    fz="md"
-                    c="white"
-                    fw={600}
-                >
-                    {title}
-                </Text>
-                <Text
-                    fz="sm"
-                    c="obsidian.3"
-                >
-                    {description}
-                </Text>
-            </Box>
-            <Icon
-                path={iconArrowUpRight}
-                size="sm"
-                color="obsidian.4"
-            />
+            <Paper className={classes.resourceCard}>
+                <Icon
+                    path={icon}
+                    size={32}
+                    color="surreal"
+                />
+                <Box flex={1}>
+                    <Text
+                        fz="md"
+                        c="white"
+                        fw={600}
+                    >
+                        {title}
+                    </Text>
+                    <Text
+                        fz="sm"
+                        c="obsidian.3"
+                    >
+                        {description}
+                    </Text>
+                </Box>
+                <Icon
+                    path={iconArrowUpRight}
+                    size="sm"
+                    color="obsidian.4"
+                />
+            </Paper>
         </Anchor>
     );
 }
 
 export default function Page() {
+    const [searchOpened, { open: openSearch, close: closeSearch }] = useDisclosure(false);
     return (
         <Stack
             gap="xl"
@@ -221,6 +227,16 @@ export default function Page() {
                     Learn how to get up and running with SurrealDB through tutorials, APIs, and
                     platform resources.
                 </Text>
+                <SearchDocs
+                    onOpen={openSearch}
+                    maw={500}
+                    mx="auto"
+                    mt="xl"
+                />
+                <SearchModal
+                    opened={searchOpened}
+                    onClose={closeSearch}
+                />
             </Box>
 
             <Box component="section">
@@ -228,9 +244,9 @@ export default function Page() {
                     order={2}
                     fz="xl"
                     c="white"
-                    className={classes.sectionTitle}
+                    mb="md"
                 >
-                    Products
+                    Guides
                 </Title>
                 <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
                     {PRODUCTS.map((product) => (
@@ -247,7 +263,7 @@ export default function Page() {
                     order={2}
                     fz="xl"
                     c="white"
-                    className={classes.sectionTitle}
+                    mb="md"
                 >
                     Client Libraries
                 </Title>
@@ -266,7 +282,7 @@ export default function Page() {
                     order={2}
                     fz="xl"
                     c="white"
-                    className={classes.sectionTitle}
+                    mb="md"
                 >
                     Additional Resources
                 </Title>

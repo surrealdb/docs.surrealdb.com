@@ -1,12 +1,12 @@
-import { Flex, Text, UnstyledButton } from "@mantine/core";
+import { Flex, Text, UnstyledButton, type UnstyledButtonProps } from "@mantine/core";
 import { Icon, iconSearch } from "@surrealdb/ui";
 import classes from "./style.module.scss";
 
-export interface SearchDocsProps {
-    onOpen: () => void;
+export interface SearchDocsProps extends UnstyledButtonProps {
+    onOpen?: () => void;
 }
 
-export function SearchDocs({ onOpen }: SearchDocsProps) {
+export function SearchDocs({ onOpen, ...props }: SearchDocsProps) {
     return (
         <UnstyledButton
             className={classes.search}
@@ -17,6 +17,7 @@ export function SearchDocs({ onOpen }: SearchDocsProps) {
             px="md"
             mb="md"
             w="100%"
+            {...props}
         >
             <Flex
                 align="center"

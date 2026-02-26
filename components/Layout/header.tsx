@@ -143,7 +143,7 @@ function NavDropdown({ label, items }: NavMenuGroup) {
     );
 }
 
-export function Navigation({ opened, onToggle }: NavigationProps) {
+export function Header({ opened, onToggle }: NavigationProps) {
     return (
         <Box
             component="header"

@@ -1,6 +1,6 @@
 import { Footer } from "@components/Footer";
 import { Container, Stack } from "@mantine/core";
-import { Navigation } from "./navigation";
+import { Header } from "./header";
 import classes from "./style.module.scss";
 
 export function FullWidthLayout({ children }: { children: React.ReactNode }) {
@@ -8,8 +8,9 @@ export function FullWidthLayout({ children }: { children: React.ReactNode }) {
         <Stack
             className={classes.fullWidthLayout}
             h="100vh"
+            bg="obsidian.9"
         >
-            <Navigation />
+            <Header />
             <Container
                 component="main"
                 flex={1}

@@ -7,8 +7,8 @@ import type { SidebarItem } from "@util/sidebar";
 import { PageBreadcrumbs } from "../Breadcrumbs";
 import { CopyPageMenu } from "../CopyPageMenu";
 import { Footer } from "../Footer";
+import { Header } from "./header";
 import { Navbar } from "./navbar";
-import { Navigation } from "./navigation";
 import { PageNavigation } from "./page-navigation";
 import classes from "./style.module.scss";
 
@@ -30,7 +30,7 @@ export function DefaultLayout({
 }: DefaultLayoutProps) {
     return (
         <div className={classes.layout}>
-            <Navigation />
+            <Header />
             <Navbar sidebar={sidebar} />
             <Group
                 justify="center"
