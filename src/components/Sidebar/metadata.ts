@@ -129,6 +129,17 @@ export const metadata = {
             href: 'https://github.com/surrealdb/surrealdb.py',
         },
     },
+    'doc-sdk-python-1x': {
+        title: 'Python SDK',
+        icon: {
+            light: LightPython,
+            dark: DarkPython,
+        },
+        repo: {
+            title: 'surrealdb/surrealdb.py',
+            href: 'https://github.com/surrealdb/surrealdb.py',
+        },
+    },
     'doc-sdk-rust': {
         title: 'Rust SDK',
         icon: {

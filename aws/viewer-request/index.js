@@ -87,9 +87,11 @@ function compute(input) {
 		if (path.endsWith('/')) path = path.slice(0, -1);
 		return { path };
 	}
-	// Allow versioned SDK JS routes (1.x and 2.x)
+	// Allow versioned SDK routes (1.x and 2.x)
 	if (path.startsWith('/docs/1.x/sdk/javascript') ||
-	    path.startsWith('/docs/2.x/sdk/javascript')) {
+		path.startsWith('/docs/2.x/sdk/javascript') ||
+		path.startsWith('/docs/1.x/sdk/python') ||
+		path.startsWith('/docs/2.x/sdk/python')) {
 		if (path.endsWith('/')) path = path.slice(0, -1);
 		return { path };
 	}
