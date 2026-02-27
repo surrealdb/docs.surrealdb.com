@@ -96,6 +96,17 @@ export const metadata = {
             href: 'https://github.com/surrealdb/surrealdb.js',
         },
     },
+    'doc-sdk-javascript-1x': {
+        title: 'JavaScript SDK',
+        icon: {
+            light: LightJavascript,
+            dark: DarkJavascript,
+        },
+        repo: {
+            title: 'surrealdb/surrealdb.js',
+            href: 'https://github.com/surrealdb/surrealdb.js',
+        },
+    },
     'doc-sdk-php': {
         title: 'PHP SDK',
         icon: {
@@ -108,6 +119,17 @@ export const metadata = {
         },
     },
     'doc-sdk-python': {
+        title: 'Python SDK',
+        icon: {
+            light: LightPython,
+            dark: DarkPython,
+        },
+        repo: {
+            title: 'surrealdb/surrealdb.py',
+            href: 'https://github.com/surrealdb/surrealdb.py',
+        },
+    },
+    'doc-sdk-python-1x': {
         title: 'Python SDK',
         icon: {
             light: LightPython,
@@ -149,7 +171,7 @@ export const metadata = {
         },
         repo: {
             title: 'Forum',
-            href: '/community',
+            href: 'https://discord.gg/surrealdb',
         },
         thumbnail: ThumbnailCloud,
     },

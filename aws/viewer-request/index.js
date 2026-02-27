@@ -4,6 +4,7 @@ const prefixes = {
 	'/docs/integration/libraries/': '/docs/sdk/',
 	'/docs/surrealdb/integration/sdks/': '/docs/sdk/',
 	'/docs/cloud/advanced-topics/': '/docs/cloud/operate-and-manage/',
+	'/docs/integrations/data-management/surreal-sync/': '/docs/surrealdb/migrating/surreal-sync/',
 }
 const prefixExceptions = {
 	'/docs/cloud/advanced-topics/configure-an-instance': '/docs/cloud/getting-started/create-an-instance',
@@ -74,7 +75,7 @@ function compute(input) {
 	if (path === '/docs/llms.txt') return { path, raw: true };
 	if (path.startsWith('/docs/_astro/')) return { path: input, raw: true };
 	// Allow versioned SurrealQL routes (2.x and 3.x)
-	if (path.startsWith('/docs/2.x/surrealql') || 
+	if (path.startsWith('/docs/2.x/surrealql') ||
 	    path.startsWith('/docs/3.x/surrealql') ||
 	    path.startsWith('/docs/surrealdb/2.x/surrealql') ||
 	    path.startsWith('/docs/surrealdb/3.x/surrealql')) {
@@ -83,6 +84,14 @@ function compute(input) {
 		} else if (path.startsWith('/docs/surrealdb/3.x/surrealql')) {
 			path = `/docs/3.x/surrealql${path.slice('/docs/surrealdb/3.x/surrealql'.length)}`;
 		}
+		if (path.endsWith('/')) path = path.slice(0, -1);
+		return { path };
+	}
+	// Allow versioned SDK routes (1.x and 2.x)
+	if (path.startsWith('/docs/1.x/sdk/javascript') ||
+		path.startsWith('/docs/2.x/sdk/javascript') ||
+		path.startsWith('/docs/1.x/sdk/python') ||
+		path.startsWith('/docs/2.x/sdk/python')) {
 		if (path.endsWith('/')) path = path.slice(0, -1);
 		return { path };
 	}
@@ -124,8 +133,9 @@ function compute(input) {
 		redirectCount++;
 	}
 	if (path.startsWith('/docs/')) {
-		// Skip validation for versioned SurrealQL routes (they are valid)
-		if (!path.startsWith('/docs/2.x/surrealql') && !path.startsWith('/docs/3.x/surrealql')) {
+		// Skip validation for versioned routes (they are valid)
+		if (!path.startsWith('/docs/2.x/surrealql') && !path.startsWith('/docs/3.x/surrealql') &&
+		    !path.startsWith('/docs/1.x/sdk/javascript') && !path.startsWith('/docs/2.x/sdk/javascript')) {
 			const doc = path.split('/')[2];
 			if (!validDocs.includes(doc)) {
 				path = `/docs/surrealdb/${path.slice(6)}`;

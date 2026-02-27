@@ -1,5 +1,5 @@
 ---
-sidebar_position: 20
+sidebar_position: 21
 sidebar_label: SELECT
 title: SELECT statement | SurrealQL
 description: The SELECT statement can be used for selecting and querying data in a database.
@@ -28,16 +28,16 @@ SELECT
     [ WITH [ NOINDEX | INDEX @indexes ... ]]
     [ WHERE @conditions ]
     [ SPLIT [ ON ] @field, ... ]
-    [ GROUP [ ALL | [ BY ] @field, ... ]]
-    [ ORDER [ BY ] 
-        @field [ COLLATE ] [ NUMERIC ] [ ASC | DESC ], ...
-        | RAND() ]
+    [ 
+		GROUP [ ALL | [ BY ] @field, ... ] | 
+		ORDER [ BY ] RAND() | @field [ COLLATE ] [ NUMERIC ] [ ASC | DESC ], ...
+	]
     [ LIMIT [ BY ] @limit ]
     [ START [ AT ] @start 0 ]
     [ FETCH @fields ... ]
     [ TIMEOUT @duration ]
     [ TEMPFILES ]
-    [ EXPLAIN [ FULL ]]
+    [ EXPLAIN [ FULL ] ]
 ;
 ```
 
@@ -67,8 +67,43 @@ export const selectAst = {
         { type: "NonTerminal", text: "@targets" },
         { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "WITH" }, { type: "Choice", index: 1, children: [ { type: "Terminal", text: "NOINDEX" }, { type: "Sequence", children: [ { type: "Terminal", text: "INDEX" }, { type: "NonTerminal", text: "@indexes ..." } ] } ] } ] } },
         { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "WHERE" }, { type: "NonTerminal", text: "@conditions" } ] } },
-        { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "SPLIT" }, { type: "Optional", child: { type: "Terminal", text: "ON" } }, { type: "NonTerminal", text: "@field, ..." } ] } },
-        { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "GROUP" }, { type: "Choice", index: 1, children: [ { type: "Terminal", text: "ALL" }, { type: "Sequence", children: [ { type: "Optional", child: { type: "Terminal", text: "BY" } }, { type: "NonTerminal", text: "@field, ..." } ] } ] } ] } },
+{
+  type: "Optional",
+  child: {
+    type: "Choice",
+    index: 1,
+    children: [
+      {
+        type: "Sequence",
+        children: [
+          { type: "Terminal", text: "SPLIT" },
+          { type: "Optional", child: { type: "Terminal", text: "ON" } },
+          { type: "NonTerminal", text: "@field, ..." }
+        ]
+      },
+      {
+        type: "Sequence",
+        children: [
+          { type: "Terminal", text: "GROUP" },
+          {
+            type: "Choice",
+            index: 1,
+            children: [
+              { type: "Terminal", text: "ALL" },
+              {
+                type: "Sequence",
+                children: [
+                  { type: "Optional", child: { type: "Terminal", text: "BY" } },
+                  { type: "NonTerminal", text: "@field, ..." }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+},
         { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "ORDER" }, { type: "Optional", child: { type: "Terminal", text: "BY" } }, { type: "Choice", index: 1, children: [ { type: "Sequence", children: [ { type: "NonTerminal", text: "@field" }, { type: "Optional", child: { type: "Terminal", text: "COLLATE" } }, { type: "Optional", child: { type: "Terminal", text: "NUMERIC" } }, { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Terminal", text: "ASC" }, { type: "Terminal", text: "DESC" } ] } } ] }, { type: "Terminal", text: "RAND()" } ] } ] } },
         { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "LIMIT" }, { type: "Optional", child: { type: "Terminal", text: "BY" } }, { type: "NonTerminal", text: "@limit" } ] } },
         { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "START" }, { type: "Optional", child: { type: "Terminal", text: "AT" } }, { type: "NonTerminal", text: "@start" } ] } },
@@ -592,9 +627,61 @@ SELECT count() AS number_of_records FROM person GROUP ALL;
 ]
 ```
 
+### `GROUP` and `SPLIT` incompatibility
+
+The `GROUP` and `SPLIT` clauses are incompatible with each other due to opposing behaviour: while `SPLIT` is a post-processing clause that multiplies the output of a query, `GROUP` works in the other way by collapsing the output.
+
+Versions before 3.0.0-beta allowed these two clauses to be used together, after which attempting to do so results in a parsing error.
+
+```surql
+SELECT * FROM person SPLIT name GROUP BY name;
+```
+
+```surql title="Output"
+'Parse error: SPLIT and GROUP are mutually exclusive
+ --> [6:22]
+  |
+6 | SELECT * FROM person SPLIT name GROUP BY name;
+  |                      ^^^^^^^^^^ SPLIT cannot be used with GROUP
+ --> [6:33]
+  |
+6 | SELECT * FROM person SPLIT name GROUP BY name;
+  |                                 ^^^^^^^^^^^^^ GROUP cannot be used with SPLIT
+'
+```
+
+Disallowing the two clauses together forces a query that uses both to have one inside a subquery, which makes it clear which operation is to be performed first.
+
+```surql
+CREATE user SET
+    name = "Jack",
+    emails = ["my@firstemail.com", "another@builder.com"],
+    age = 37;
+
+CREATE user SET
+    name = "Ellen",
+    emails = ["ruler@forest.com", "wife@tom.com"],
+    age = 50;
+
+CREATE user SET
+    name = "Phillip",
+    emails = ["prior@kingsbridge.com", "boss@remigius.com"],
+    age = 50;
+
+SELECT age, emails FROM (SELECT * FROM user SPLIT emails) GROUP BY age;
+
+SELECT age, emails
+FROM (
+  SELECT age, array::group(emails) AS emails
+  FROM user
+  GROUP BY age
+)
+SPLIT emails;
+```
+
 ### Using a `COUNT` index to speed up `count()` in `GROUP ALL` queries
 
-<Since v="v3.0.0-beta" />
+<Since v="v3.0.0" />
 
 To speed up the `count()` function along with `GROUP ALL` to get the total number of records in a table, a `COUNT` index can be used. This keeps track of the total number of records as a single value as opposed to a dynamic iteration of the table to get the full count every time a query is run.
 
@@ -605,7 +692,7 @@ SELECT count() AS number_of_records FROM person GROUP ALL;
 
 ### `math::stddev()` and `math::variance()` in table views
 
-<Since v="v3.0.0-beta" />
+<Since v="v3.0.0" />
 
 The `math::stddev()` and `math::variance()` functions can also be used in table views.
 
@@ -968,7 +1055,7 @@ SELECT * FROM ONLY table_name LIMIT 1;
 
 <Since v="v2.0.0" />
 
-When you are starting a new database with [SurrealKV as the storage engine](/docs/surrealkv) with versioning enabled, you can specify a version for each record. This is useful for time-travel queries. You can query a specific version of a record by using the `VERSION` clause. The `VERSION` clause is always followed by a [datetime](/docs/surrealql/datamodel/datetimes) and when the specified timestamp does not exist, an empty array is returned.
+When you are starting a new database with memory or [SurrealKV as the storage engine](/docs/surrealkv) with versioning enabled, you can specify a version for each record. This is useful for time-travel queries. You can query a specific version of a record by using the `VERSION` clause. The `VERSION` clause is always followed by a [datetime](/docs/surrealql/datamodel/datetimes) and when the specified timestamp does not exist, an empty array is returned.
 
 
 > [!NOTE]
@@ -976,7 +1063,7 @@ When you are starting a new database with [SurrealKV as the storage engine](/doc
 
 ```surql
 -- Create a new record
-CREATE user:john SET name = 'John' VERSION d'2024-08-19T08:00:00Z';
+CREATE user:john SET name = 'John' VERSION d'2025-08-19T08:00:00Z';
 [[{ id: user:john, name: 'John' }]]
 
 -- Select the record as it is now
@@ -984,11 +1071,11 @@ SELECT * FROM user:john;
 [[{ id: user:john, name: 'John' }]]
 
 -- Select the record as it was at a specific point in time
-SELECT * FROM user:john VERSION d'2024-08-19T08:00:00Z';
+SELECT * FROM user:john VERSION d'2025-08-19T08:00:00Z';
 [[{ id: user:john, name: 'John' }]]
 
 -- Select the record as it was at a specific point in time that doesn't exist
-SELECT * FROM user:john VERSION d'2024-08-19T07:00:00Z';
+SELECT * FROM user:john VERSION d'2025-08-19T07:00:00Z';
 [[]]
 
 -- Update the record to the user john
@@ -1000,7 +1087,7 @@ SELECT * FROM user:john;
 [[{ hight: '55', id: user:john, name: 'John' }]]
 
 -- Select the record for the timestamp before the update
-SELECT * FROM user:john VERSION d'2024-08-19T08:00:00Z';
+SELECT * FROM user:john VERSION d'2025-08-19T08:00:00Z';
 [[{ id: user:john, name: 'John' }]]
 ```
 

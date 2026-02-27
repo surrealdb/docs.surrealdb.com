@@ -83,7 +83,6 @@
 
 Visit [surrealdb.com/docs](https://surrealdb.com/docs/surrealdb/) to get started with SurrealDB. 
 
-
 ## Learn SurrealDB
 
 - SurrealDB University: https://surrealdb.com/learn/fundamentals
@@ -141,26 +140,29 @@ bun run make:lab
 3. Follow the interactive prompts to provide:
    - Lab name (required)
    - URL (optional) - Link to your project/repository
+   - Languages
+     - Python
+     - Rust
+     - TypeScript
+     - Go
+     - Java
+     - PHP
+     - SurrealQL   
    - Category (required) - Choose from:
-     - CI/CD
-     - Demos
-     - Deployment Tools
-     - Development Tools
-     - Docker Images
-     - Integrations
-     - Libraries
-     - SDKs
-     - Templates
-     - Tutorials
+     - Blogposts
+     - Code Repositories
      - Videos
+     - Documentation
+     - Learning Resources
    - Topics (optional) - Select one or more from:
      - AI
+     - Cloud
      - Data Management
-     - Embedding
-     - Security
      - Examples
-     - Optimisation
-     - Beginner
+     - Libraries
+     - Security
+     - Templates
+     - Tooling
    - Author name (required)
    - Author role (required for community content)
 
@@ -185,33 +187,28 @@ author:
 Your lab content here...
 ```
 
-> For the author avater field, you will also need to upload an avatar to /src/assets/img/labs-authors with the same file name as the author property in the lab markdown
+> For the author avatar field, you will also need to upload an avatar to /src/assets/img/labs-authors with the same file name as the author property in the lab markdown
 
 ## Content guidelines
 
 ### Categories
 Choose the most appropriate category for your lab:
-- **CI/CD**: Continuous integration and deployment tools
-- **Demos**: Example applications and demonstrations
-- **Deployment Tools**: Tools for deploying SurrealDB
-- **Development Tools**: Tools for development workflow
-- **Docker Images**: Docker-related resources
-- **Integrations**: Third-party integrations
-- **Libraries**: Code libraries and packages
-- **SDKs**: Software development kits
-- **Templates**: Project templates and starters
-- **Tutorials**: Step-by-step guides
+- **Blogposts**: Blog posts and written content
+- **Code Repositories**: Code libraries and packages
 - **Videos**: Video content and tutorials
+- **Documentation**: Documentation and guides
+- **Learning Resource**: Other form of learning resource
 
 ### Topics
 Select relevant topics to help users find your content:
 - **AI**: Artificial Intelligence related content
+- **Cloud**: content related to cloud deployments and SurrealDB Cloud
 - **Data Management**: Data handling and management
-- **Embedding**: Embedding-related features
+- **Examples**: Practical examples and guides
+- **Libraries**: Client libraries and SDKs
 - **Security**: Security features and best practices
-- **Examples**: Code examples and snippets
-- **Optimisation**: Performance optimization
-- **Beginner**: Content suitable for beginners
+- **Templates**: Reusable project starters, schemas, and boilerplates
+- **Tooling**: Developer tools, CLIs, integrations, plugins, and utilities
 
 ## Best practices
 

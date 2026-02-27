@@ -7,6 +7,10 @@ import PreviewImage from '@assets/img/social-preview.jpg';
 import Icon from '@img/icon/icon.svg';
 import Navbar from '@src/components/layout/Navbar/Navbar.astro';
 import {
+    isVersionedSdkJsPath,
+    toVersionedPath as toVersionedSdkJsPath,
+} from '@src/util/sdkJsVersion';
+import {
     isVersionedSurrealQLPath,
     toVersionedPath,
 } from '@src/util/surrealqlVersion';
@@ -39,16 +43,23 @@ const url = new URL(
     `${import.meta.env.SITE}${Astro.url.pathname}`
 ).href.replace(/\/$/, '');
 
-// SEO: Add noindex for versioned SurrealQL routes
+// SEO: Add noindex for versioned SurrealQL and SDK JS routes
 const isVersionedSurrealQL = isVersionedSurrealQLPath(Astro.url.pathname);
+const isVersionedSdkJs = isVersionedSdkJsPath(Astro.url.pathname);
+const isVersionedPage = isVersionedSurrealQL || isVersionedSdkJs;
 const canonicalUrl = isVersionedSurrealQL
     ? new URL(
           toVersionedPath(Astro.url.pathname, 'latest'),
           import.meta.env.SITE
       ).href.replace(/\/$/, '')
-    : Astro.url.pathname === '/docs'
-      ? 'https://surrealdb.com/docs/'
-      : url;
+    : isVersionedSdkJs
+      ? new URL(
+            toVersionedSdkJsPath(Astro.url.pathname, 'latest'),
+            import.meta.env.SITE
+        ).href.replace(/\/$/, '')
+      : Astro.url.pathname === '/docs'
+        ? 'https://surrealdb.com/docs/'
+        : url;
 ---
 
 <!doctype html>
@@ -60,8 +71,8 @@ const canonicalUrl = isVersionedSurrealQL
         <meta name="referrer" content="origin-when-cross-origin" />
         <meta name="viewport" content="viewport-fit=cover, width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=5" />
         
-        {/* SEO: noindex for versioned SurrealQL routes */}
-        {isVersionedSurrealQL && (
+        {/* SEO: noindex for versioned routes (SurrealQL + SDK JS) */}
+        {isVersionedPage && (
             <meta name="robots" content="noindex, follow" />
         )}
 
@@ -111,7 +122,7 @@ const canonicalUrl = isVersionedSurrealQL
             }
 
             :global(a) {
-                @apply text-text transition-colors duration-300 hover:text-hover;
+                @apply text-text transition-colors duration-300 hover:text-surreal-energy;
             }
         </style>
 
@@ -325,6 +336,135 @@ const canonicalUrl = isVersionedSurrealQL
                     childList: true,
                     subtree: true
                 });
+            })();
+        </script>
+
+        {/* SDK JS version persistence script */}
+        <script>
+            (function() {
+                const STORAGE_KEY = 'sdkJsPreferredVersion';
+                const SDK_JS_VERSIONS = ['latest', '2.x', '1.x'];
+
+                function getPreferredVersion(): string {
+                    const pathname = window.location.pathname;
+                    const versionMatch = pathname.match(/^\/docs\/(1\.x|2\.x)\/sdk\/javascript/);
+                    if (versionMatch) {
+                        return versionMatch[1];
+                    }
+                    const stored = localStorage.getItem(STORAGE_KEY);
+                    if (stored && SDK_JS_VERSIONS.includes(stored)) {
+                        return stored;
+                    }
+                    return 'latest';
+                }
+
+                function toVersionedPath(pathname: string, version: string): string {
+                    if (version === 'latest') {
+                        return pathname.replace(/^\/docs\/(?:1\.x|2\.x)\/sdk\/javascript/, '/docs/sdk/javascript');
+                    }
+                    let relativePath = '';
+                    const versionedMatch = pathname.match(/^\/docs\/(?:1\.x|2\.x)\/sdk\/javascript(.*)$/);
+                    if (versionedMatch) {
+                        relativePath = versionedMatch[1] || '';
+                    } else {
+                        const latestMatch = pathname.match(/^\/docs\/sdk\/javascript(.*)$/);
+                        if (latestMatch) {
+                            relativePath = latestMatch[1] || '';
+                        }
+                    }
+                    return `/docs/${version}/sdk/javascript${relativePath === '' ? '' : relativePath}`;
+                }
+
+                function isSdkJsPath(pathname: string): boolean {
+                    return pathname.startsWith('/docs/sdk/javascript') ||
+                           pathname.startsWith('/docs/1.x/sdk/javascript') ||
+                           pathname.startsWith('/docs/2.x/sdk/javascript');
+                }
+
+                function isExplicitV2ApiPath(pathname: string): boolean {
+                    return pathname.startsWith('/docs/2.x/sdk/javascript/api');
+                }
+
+                function rewriteSdkJsLinks() {
+                    const preferredVersion = getPreferredVersion();
+                    if (preferredVersion === 'latest') return;
+
+                    const links = document.querySelectorAll<HTMLAnchorElement>('a[href]');
+                    links.forEach((link) => {
+                        try {
+                            const href = link.getAttribute('href');
+                            if (!href) return;
+
+                            let pathname: string;
+                            if (href.startsWith('http://') || href.startsWith('https://')) {
+                                pathname = new URL(href).pathname;
+                            } else if (href.startsWith('/')) {
+                                pathname = href.split('?')[0].split('#')[0];
+                            } else {
+                                pathname = new URL(href, window.location.origin).pathname;
+                            }
+
+                            if (
+                                isSdkJsPath(pathname) &&
+                                !isExplicitV2ApiPath(pathname) &&
+                                !link.hasAttribute('data-version-override')
+                            ) {
+                                const versionedPath = toVersionedPath(pathname, preferredVersion);
+                                if (href.startsWith('http://') || href.startsWith('https://')) {
+                                    const url = new URL(href);
+                                    url.pathname = versionedPath;
+                                    link.href = url.href;
+                                } else if (href.startsWith('/')) {
+                                    const [, ...rest] = href.split('?');
+                                    const queryAndHash = rest.join('?');
+                                    link.href = versionedPath + (queryAndHash ? '?' + queryAndHash : '');
+                                }
+                            }
+                        } catch (e) {
+                            console.debug('[SDK JS Version] Error rewriting link:', e);
+                        }
+                    });
+                }
+
+                function interceptSdkJsLinkClicks() {
+                    document.addEventListener('click', (e) => {
+                        const target = (e.target as HTMLElement).closest('a');
+                        if (!target || !target.href) return;
+                        if (target.hasAttribute('data-version-override')) return;
+
+                        try {
+                            const url = new URL(target.href);
+                            if (isSdkJsPath(url.pathname) && !isExplicitV2ApiPath(url.pathname)) {
+                                const preferredVersion = getPreferredVersion();
+                                const currentVersion = url.pathname.match(/^\/docs\/(1\.x|2\.x)\/sdk\/javascript/)
+                                    ? url.pathname.match(/^\/docs\/(1\.x|2\.x)\/sdk\/javascript/)?.[1]
+                                    : 'latest';
+
+                                if (currentVersion !== preferredVersion && preferredVersion !== 'latest') {
+                                    const versionedPath = toVersionedPath(url.pathname, preferredVersion);
+                                    url.pathname = versionedPath;
+                                    e.preventDefault();
+                                    window.location.href = url.href;
+                                }
+                            }
+                        } catch (e) {
+                            console.debug('[SDK JS Version] Error intercepting click:', e);
+                        }
+                    }, true);
+                }
+
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', () => {
+                        rewriteSdkJsLinks();
+                        interceptSdkJsLinkClicks();
+                    });
+                } else {
+                    rewriteSdkJsLinks();
+                    interceptSdkJsLinkClicks();
+                }
+
+                const observer = new MutationObserver(() => { rewriteSdkJsLinks(); });
+                observer.observe(document.body, { childList: true, subtree: true });
             })();
         </script>
     </body>

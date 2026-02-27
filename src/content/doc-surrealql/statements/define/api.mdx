@@ -12,18 +12,15 @@ import TabItem from '@components/Tabs/TabItem.astro'
 
 # DEFINE API statement
 
-<Since v="v2.2.0" />
-
-> [!CAUTION]
-> Currently, this is an experimental feature as such, it may be subject to breaking changes and may present unidentified security issues. Do not rely on this feature in production applications. To enable this, set the `SURREAL_CAPS_ALLOW_EXPERIMENTAL` [environment variable](/docs/surrealdb/cli/start) to `define_api`.
+<Since v="v3.0.0" />
 
 The `DEFINE API` statements allows a custom endpoint to be created. Each endpoint created by a `DEFINE API` statement is located at the `/api/:namespace/:database/:endpoint_name` path. For example, an endpoint for the path `get_users` for the namespace `my_namespace` and database `my_database` will have the path `/api/my_namespace/my_database/get_users`.
 
 The response is an object with a combination of the following properties:
-* `raw` - A boolean that when set to `true` sends the response back as raw bytes or a string.
 * `status` - A valid HTTP status code.
-* `headers` - An object of valid header key value pairs.
-* `body` - A SurrealQL value, automatically encoded back into how the user requested it. When `raw` is set to `true`, this needs to be a string or bytes value.
+* `body` - Any value.
+* `headers` - An object of valid header key value pairs. The value of each pair must be a string.
+* `context` - An object. 
 
 ## Statement syntax
 
@@ -79,17 +76,17 @@ value = "NONE"
 DEFINE API "/test"
     FOR get, post 
         MIDDLEWARE
-            api::req::raw_body(false)
+            api::timeout(1s)
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     request: $request.body,
                     response: "The server works"
                 },
                 headers: {
-                    'last-modified': time::now(),
-                    'expires': time::now() + 4d
+                    'last-modified': <string>time::now(),
+                    'expires': <string>(time::now() + 4d)
                 }
             };
         };
@@ -117,12 +114,12 @@ api::invoke("/test", {
 		request: NONE,
 		response: 'The server works'
 	},
+    context: {},
 	headers: {
 		"access-control-allow-origin": '*',
-		expires: '2025-02-24T02:43:50.137321Z',
+		expires: '2026-01-24T02:43:50.137321Z',
 		"last-modified": '2025-02-20T02:43:50.137326Z'
 	},
-	raw: false,
 	status: 200
 }
 
@@ -137,12 +134,12 @@ api::invoke("/test", {
 		},
 		response: 'The server works'
 	},
+    context: {},
 	headers: {
 		"access-control-allow-origin": '*',
 		expires: '2025-02-24T02:43:50.137455Z',
-		"last-modified": '2025-02-20T02:43:50.137457Z'
+		"last-modified": '2026-01-20T02:43:50.137457Z'
 	},
-	raw: false,
 	status: 200
 }
 ```
@@ -160,13 +157,13 @@ A dynamic path uses a `:` (colon) followed by a name, which will match on anythi
 value = "NONE"
 
 [[test.results]]
-value = "{ body: { some: 'data' }, headers: {  }, raw: false, status: 200 }"
+value = "{ body: { some: 'data' }, context: {  }, headers: {  }, status: 200 }"
 
 [[test.results]]
-value = "{ body: { some: 'data' }, headers: {  }, raw: false, status: 200 }"
+value = "{ body: { some: 'data' }, context: {  }, headers: {  }, status: 200 }"
 
 [[test.results]]
-value = "NONE"
+value = "{ body: NONE, context: {  }, headers: {  }, status: 404 }"
 
 */
 
@@ -186,13 +183,11 @@ api::invoke("/test/but/this/wont/match");
 The first two `api::invoke` calls return the output below, but the third returns nothing as `:anything_goes` only applies to a single path segment.
 
 ```surql title="Output"
-{
-	body: {
-		some: 'data'
-	},
-	headers: {},
-	raw: false,
-	status: 200
+{ 
+    body: NONE, 
+    context: {}, 
+    headers: {}, 
+    status: 404 
 }
 ```
 
@@ -205,13 +200,13 @@ To match on the remainder of a URL, change the `:` (colon) to a `*` (star).
 value = "NONE"
 
 [[test.results]]
-value = "{ body: { some: 'data' }, headers: {  }, raw: false, status: 200 }"
+value = "{ body: { some: 'data' }, context: {  }, headers: {  }, status: 200 }"
 
 [[test.results]]
-value = "{ body: { some: 'data' }, headers: {  }, raw: false, status: 200 }"
+value = "{ body: { some: 'data' }, context: {  }, headers: {  }, status: 200 }"
 
 [[test.results]]
-value = "{ body: { some: 'data' }, headers: {  }, raw: false, status: 200 }"
+value = "{ body: { some: 'data' }, context: {  }, headers: {  }, status: 200 }"
 
 */
 
@@ -235,8 +230,146 @@ All three `api::invoke` calls will now show the following output.
 	body: {
 		some: 'data'
 	},
+	context: {},
 	headers: {},
-	raw: false,
 	status: 200
-}
+};
+```
+
+## Custom middleware
+
+Custom middleware can be used in addition to the functions listed above.
+
+A custom middleware function is defined in the same way as any other [user-defined function](/docs/surrealql/statements/define/function).
+
+Each such function automatically receives two arguments:
+
+* An object that will contain the user request.
+* A function (a closure) that can be called to get the current state of the response to be returned.
+
+The parameter names `$req` for the first and `$next` for the second are commonly used, though the actual parameter names are of no consequence.
+
+The output of such a function must be an `object`. This is used to pass the response on to the next middleware function, or on to the actual response if there is no middleware left to call.
+
+```surql
+DEFINE FUNCTION fn::middleware_function($req: object, $next: function) -> object {};
+```
+
+These functions can take additional arguments on top of the required two.
+
+```surql
+DEFINE FUNCTION fn::middleware_function($req: object, $next: function, $some_string: string) -> object {};
+```
+
+### Custom middleware examples
+
+Here is an example of an API endpoint without any middleware.
+
+```surql
+DEFINE API "/custom_response"
+    FOR get
+        THEN {
+            {
+                status: 200,
+                body: {
+                    num: 1
+                }
+            };
+        };
+```
+
+Calling `api::invoke("/custom_response")` will return the following.
+
+```surql
+{
+	body: {
+		num: 1
+	},
+	context: {},
+	headers: {},
+	status: 200
+};
+```
+
+We will now add a middleware function that does the following:
+
+* Calls the `$next` closure on the `$req` object. This will return the value after `THEN`: the original return value.
+* Returns an object in which the `num` field inside `body` is increased by one.
+
+```surql
+DEFINE FUNCTION fn::increment_num($req: object, $next: function) -> object {
+    LET $res = $next($req);
+    $res + { body: { num: $res.body.num + 1 } }
+};
+
+DEFINE API "/custom_response"
+    FOR get
+        MIDDLEWARE
+            fn::increment_num()
+        THEN {
+            {
+                status: 200,
+                body: {
+                    num: 1
+                }
+            };
+        };
+```
+
+Calling `api::invoke("/custom_response")` will now return a modified output in which `num` is equal to 2.
+
+```surql
+{
+	body: {
+		num: 2
+	},
+	context: {},
+	headers: {},
+	status: 200
+};
+```
+
+Here is an example of the same endpoint with an extra custom middleware function which adds a `called_at` field to the `context` of the response to show when the API endpoint was called. 
+
+```surql
+DEFINE FUNCTION fn::start_timer($req: object, $next: function, $called_at: datetime) -> object {
+    LET $res = $next($req);
+    $res + { context: { called_at: $called_at }}
+};
+
+DEFINE FUNCTION fn::increment_num($req: object, $next: function) -> object {
+    LET $res = $next($req);
+    $res + { body: { num: $res.body.num + 1 } }
+};
+
+DEFINE API "/custom_response"
+    FOR get
+        MIDDLEWARE
+            fn::start_timer(time::now()),
+            fn::increment_num()
+        THEN {
+            {
+                status: 200,
+                body: {
+                    num: 1
+                }
+            };
+        };
+
+api::invoke("/custom_response");
+```
+
+The output will look something like this.
+
+```surql
+{
+	body: {
+		num: 2
+	},
+	context: {
+		api_called_at: d'2026-01-16T01:49:44.115351Z'
+	},
+	headers: {},
+	status: 200
+};
 ```
