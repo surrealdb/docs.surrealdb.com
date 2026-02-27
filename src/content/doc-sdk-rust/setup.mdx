@@ -22,12 +22,14 @@ First, create a new project using `cargo new` and add the following dependencies
 * [`surrealdb`](https://crates.io/crates/surrealdb)
 * [`tokio`](https://crates.io/crates/tokio), in order to to use the database inside `fn main()`. You will most likely want to enable the `macros` and `rt-multi-thread` features so that the `#[tokio::main]` attribute can be used on top of `fn main()`.
 
+The two main ways to connect to SurrealDB when getting started are by connecting to a running instance wia the `protocol-ws` feature, or by running an embedded instance in memory using the `kv-mem` feature. Each of these can be added via a feature flag in the SDK.
+
 All together, that leads to the following commands to get started:
 
 ```sh
 cargo new my_project
 cd my_project
-cargo add surrealdb
+cargo add surrealdb --features kv-mem,protocol-ws
 cargo add tokio --features macros,rt-multi-thread
 ```
 
@@ -322,13 +324,6 @@ SELECT marketing, count() FROM person GROUP BY marketing;
 
 The Rust SDK has a single [`Capabilities`](https://docs.rs/surrealdb/latest/surrealdb/opt/capabilities/struct.Capabilities.html) struct that is used to allow or limit what users are allowed to do using queries. Each method on this struct is used to configure the capabilities for the database in the same way that [capabilities flags](/docs/surrealdb/security/capabilities#list) are passed in to the [`surreal start`](/docs/surrealdb/cli/start) command.
 
-```bash
-# Start the server
-surreal start --user root --pass secret --allow-all --deny-funcs "http"
-# Connect as root at default namespace 'main', database 'main'
-surreal sql --user root --pass secret
-```
-
 ```rust
 use surrealdb::{
     Error,
@@ -360,82 +355,41 @@ async fn main() -> Result<(), Error> {
 }
 ```
 
+The output shows that this function was not allowed to be called.
+
+```
+Ok(IndexedResults { results: {0: (DbResultStats { execution_time: Some(1.703459ms), query_type: Some(Other) }, Err(Error { code: -32000, message: "Access to network target 'www.surrealdb.com:80' is not allowed", details: NotAllowed(Some(Target { name: "www.surrealdb.com:80" })) }))}, live_queries: {} })
+```
+
 SurrealDB also has a number of experimental capabilities which need to be specifically opted into and are not included inside an `--allow-all` flag or struct created by the `Capabilities::all()` function. These can be passed in individually using a slice of the [`ExperimentalFeature`](https://docs.rs/surrealdb/latest/surrealdb/opt/capabilities/enum.ExperimentalFeature.html) enum inside the [`.with_experimental_features_allowed`](https://docs.rs/surrealdb/latest/surrealdb/opt/capabilities/struct.Capabilities.html#method.with_experimental_features_allowed) method, or all at once with [`.with_all_experimental_features_allowed()`](https://docs.rs/surrealdb/latest/surrealdb/opt/capabilities/struct.Capabilities.html#method.with_all_experimental_features_allowed).
+
+This configuration on the SDK side is not needed if connecting to a remote instance that has the [`--allow-experimental`](/docs/surrealdb/cli/start#experimental-capabilities) flag passed in, but is if using an embedded instance like in the example below.
 
 ```rust
 use surrealdb::{
     Error,
     engine::any::connect,
-    opt::{Config, auth::Root, capabilities::Capabilities},
+    opt::{Config, capabilities::Capabilities},
 };
-use surrealdb_types::ToSql;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let mut capabilities = Capabilities::all();
     capabilities.allow_all_experimental_features();
     let config = Config::default().capabilities(capabilities);
-    // Start server with command 'surreal start --user root --pass secret'
-    let db = connect(("ws://localhost:8000", config)).await?;
+
+    let db = connect(("memory", config)).await?;
 
     db.use_ns("main").use_db("main").await?;
 
-    db.signin(Root {
-        username: "root".to_string(),
-        password: "secret".to_string(),
-    })
-    .await?;
-
-    db.query(
-        r#"DEFINE API "/test"
-    FOR get, post 
-        MIDDLEWARE
-            api::timeout(1s)
-        THEN {
-            {
-                status: 200,
-                body: {
-                    request: $request.body,
-                    response: "The server works"
-                },
-                headers: {
-                    'last-modified': <string>time::now(),
-                    'expires': <string>(time::now() + 4d)
-                }
-            };
-        };
-        
-        api::invoke("/test");
-
-        api::invoke("/test", {
-            body: {
-            hi: "please",
-                give: "me",
-                the: "information"
-            }
-        });
-        "#,
-    )
-    .await?
-    .results
-    .into_iter()
-    .for_each(|(_index, (_stats, res))| match res {
-        Ok(v) => println!("{}\n", v.to_sql()),
-        Err(e) => println!("{e}"),
-    });
+    // DEFINE BUCKET needs the 'files' experimental capability to be enabled
+    println!(
+        "{:?}",
+        db.query("DEFINE BUCKET my_bucket BACKEND 'memory'").await?
+    );
 
     Ok(())
 }
-```
-
-Output:
-
-```surql
-NONE
-
-{ body: { request: NONE, response: 'The server works' }, context: {  }, headers: { expires: '2026-01-25T01:16:42.602300Z', "last-modified": '2026-01-21T01:16:42.602292Z' }, status: 200 }
-
-{ body: { request: { give: 'me', hi: 'please', the: 'information' }, response: 'The server works' }, context: {  }, headers: { expires: '2026-01-25T01:16:42.602412Z', "last-modified": '2026-01-21T01:16:42.602409Z' }, status: 200 }
 ```
 
 ### Experimenting with an embedded instance
