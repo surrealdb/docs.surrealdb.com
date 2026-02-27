@@ -68,6 +68,7 @@ export function DefaultLayout({
                     component={Stack}
                     size="sm"
                     flex={1}
+                    h="100%"
                 >
                     <Flex
                         align="center"
