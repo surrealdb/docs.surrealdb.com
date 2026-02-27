@@ -21,6 +21,7 @@ export function PageAside({ headings }: PageAsideProps) {
             right="2rem"
             display={headings.length > 0 ? "block" : "none"}
             aria-hidden={headings.length === 0}
+            visibleFrom="lg"
         >
             <Text
                 c="bright"

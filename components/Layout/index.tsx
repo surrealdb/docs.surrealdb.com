@@ -63,12 +63,10 @@ export function DefaultLayout({
             <Group
                 justify="center"
                 align="flex-start"
-                h="fit-content"
             >
                 <Container
                     component={Stack}
                     size="sm"
-                    h="100%"
                     flex={1}
                 >
                     <Flex
@@ -104,14 +102,7 @@ export function DefaultLayout({
                     <PageNavigation sidebar={sidebar} />
                     <Footer />
                 </Container>
-                {showToc && (
-                    <Box
-                        visibleFrom="md"
-                        h="stretch"
-                    >
-                        <PageAside headings={headings} />
-                    </Box>
-                )}
+                {showToc && <PageAside headings={headings} />}
             </Group>
         </div>
     );
