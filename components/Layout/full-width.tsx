@@ -8,7 +8,6 @@ export function FullWidthLayout({ children }: { children: React.ReactNode }) {
         <Stack
             className={classes.fullWidthLayout}
             h="100vh"
-            bg="obsidian.9"
         >
             <Header />
             <Container

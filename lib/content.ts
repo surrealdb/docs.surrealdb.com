@@ -24,14 +24,14 @@ export type Entry<T extends CollectionName = CollectionName> = {
 
 // Load markdown as raw strings at build time.
 // Works for SSR + SPA (bundled by Vite).
-const modules = import.meta.glob(["../content/**/*.md", "../content/**/*.mdx"], {
+const modules = import.meta.glob(["../content/**/*.md"], {
     query: "?raw",
     import: "default",
     eager: true,
 }) as Record<string, string>;
 
 function parsePath(filePath: string): { collection: CollectionName; fileSlug: string } | null {
-    const m = filePath.match(/\/content\/([^/]+)\/(.+)\.mdx?$/);
+    const m = filePath.match(/\/content\/([^/]+)\/(.+)\.md$/);
     if (!m) return null;
     const collection = m[1] as CollectionName;
     const fileSlug = m[2];

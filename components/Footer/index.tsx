@@ -30,13 +30,13 @@ export function Footer() {
             justify="flex-start"
             gap={6}
             wrap="wrap"
-            c="obsidian.4"
+            c="dimmed"
             fz="sm"
             fs="normal"
         >
             <FooterLink
                 href="https://github.com/surrealdb"
-                c="obsidian.4"
+                c="dimmed"
             >
                 © SurrealDB 2026
             </FooterLink>
@@ -65,10 +65,7 @@ export function Footer() {
                 target="_blank"
                 aria-label="YouTube"
             >
-                <Icon
-                    path={iconBrandYouTube}
-                    style={{ fill: "white" }}
-                />
+                <Icon path={iconBrandYouTube} />
             </ActionIcon>
             <ActionIcon
                 component="a"
@@ -77,10 +74,7 @@ export function Footer() {
                 target="_blank"
                 aria-label="Twitter"
             >
-                <Icon
-                    path={iconBrandX}
-                    style={{ fill: "white" }}
-                />
+                <Icon path={iconBrandX} />
             </ActionIcon>
             <ActionIcon
                 component="a"
@@ -89,10 +83,7 @@ export function Footer() {
                 target="_blank"
                 aria-label="Github"
             >
-                <Icon
-                    path={iconBrandGitHub}
-                    style={{ fill: "white" }}
-                />
+                <Icon path={iconBrandGitHub} />
             </ActionIcon>
             <ActionIcon
                 component="a"
@@ -101,10 +92,7 @@ export function Footer() {
                 target="_blank"
                 aria-label="Discord"
             >
-                <Icon
-                    path={iconBrandDiscord}
-                    style={{ fill: "white" }}
-                />
+                <Icon path={iconBrandDiscord} />
             </ActionIcon>
             <ActionIcon
                 component="a"
@@ -113,10 +101,7 @@ export function Footer() {
                 target="_blank"
                 aria-label="Bluesky"
             >
-                <Icon
-                    path={iconBrandBluesky}
-                    style={{ fill: "white" }}
-                />
+                <Icon path={iconBrandBluesky} />
             </ActionIcon>
         </Flex>
     );

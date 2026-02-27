@@ -12,10 +12,7 @@ export function Head() {
                 rel="icon"
                 href={logoUrl}
             />
-            <ColorSchemeScript
-                forceColorScheme="dark"
-                defaultColorScheme="dark"
-            />
+            <ColorSchemeScript defaultColorScheme="dark" />
             <meta
                 name="robots"
                 content="index, follow"

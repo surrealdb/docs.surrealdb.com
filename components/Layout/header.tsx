@@ -1,7 +1,21 @@
 import DocsDark from "@assets/img/logo/dark/docs.svg";
 import LogoDark from "@assets/img/logo/dark/surrealdb.svg";
-import { Anchor, Box, Burger, Button, Divider, Flex, Image, Menu } from "@mantine/core";
-import { Icon, iconChevronDown } from "@surrealdb/ui";
+import DocsLight from "@assets/img/logo/light/docs.svg";
+import LogoLight from "@assets/img/logo/light/surrealdb.svg";
+import {
+    ActionIcon,
+    Anchor,
+    Box,
+    Burger,
+    Button,
+    Divider,
+    Flex,
+    Image,
+    Menu,
+    useComputedColorScheme,
+    useMantineColorScheme,
+} from "@mantine/core";
+import { Icon, iconChevronDown, iconMoon, iconSun } from "@surrealdb/ui";
 import classes from "./style.module.scss";
 
 export interface NavigationProps {
@@ -87,7 +101,6 @@ function NavLink({ label, href }: NavItem) {
     return (
         <Anchor
             href={href}
-            c="white"
             fz="sm"
             fw={500}
             underline="never"
@@ -106,12 +119,10 @@ function NavDropdown({ label, items }: NavMenuGroup) {
             position="bottom-start"
             withinPortal
             trigger="click-hover"
-            variant="surreal"
         >
             <Menu.Target>
                 <Anchor
                     component="button"
-                    c="white"
                     fz="sm"
                     fw={500}
                     underline="never"
@@ -129,12 +140,13 @@ function NavDropdown({ label, items }: NavMenuGroup) {
                     </Flex>
                 </Anchor>
             </Menu.Target>
-            <Menu.Dropdown variant="surreal">
+            <Menu.Dropdown className={classes.dropdown}>
                 {items.map((item) => (
                     <Menu.Item
                         key={item.href}
                         component="a"
                         href={item.href}
+                        className={classes.dropdownItem}
                     >
                         {item.label}
                     </Menu.Item>
@@ -145,6 +157,13 @@ function NavDropdown({ label, items }: NavMenuGroup) {
 }
 
 export function Header({ opened, onToggle }: NavigationProps) {
+    const { toggleColorScheme } = useMantineColorScheme();
+    const colorScheme = useComputedColorScheme("dark");
+
+    const isDark = colorScheme === "dark";
+    const logo = isDark ? LogoDark : LogoLight;
+    const docsLogo = isDark ? DocsDark : DocsLight;
+
     return (
         <Box
             component="header"
@@ -160,7 +179,7 @@ export function Header({ opened, onToggle }: NavigationProps) {
             >
                 <Anchor href="/">
                     <Image
-                        src={LogoDark}
+                        src={logo}
                         alt="SurrealDB"
                         height={24}
                     />
@@ -181,7 +200,7 @@ export function Header({ opened, onToggle }: NavigationProps) {
                     aria-label="SurrealDB Docs home"
                 >
                     <Image
-                        src={DocsDark}
+                        src={docsLogo}
                         alt="SurrealDB Docs"
                         height={24}
                     />
@@ -209,6 +228,16 @@ export function Header({ opened, onToggle }: NavigationProps) {
                     ))}
                 </Flex>
 
+                <ActionIcon
+                    variant="subtle"
+                    size="lg"
+                    onClick={toggleColorScheme}
+                    aria-label="Toggle color scheme"
+                    color="gray"
+                >
+                    <Icon path={isDark ? iconSun : iconMoon} />
+                </ActionIcon>
+
                 <Button
                     component="a"
                     href={SIGN_IN_URL}
@@ -226,7 +255,6 @@ export function Header({ opened, onToggle }: NavigationProps) {
                     onClick={onToggle}
                     hiddenFrom="lg"
                     size="sm"
-                    color="white"
                     aria-label="Toggle navigation"
                 />
             </Flex>

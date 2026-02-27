@@ -94,7 +94,10 @@ function SidebarSection({ item }: { item: SidebarItem }) {
 
 export function Navbar({ sidebar }: NavbarProps) {
     return (
-        <Box py="sm">
+        <Box
+            pt="xs"
+            pb="sm"
+        >
             <Box px="lg">
                 <SearchDocs />
             </Box>

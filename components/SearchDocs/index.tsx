@@ -41,7 +41,6 @@ export function SearchDocs(props: UnstyledButtonProps) {
             <UnstyledButton
                 className={classes.search}
                 aria-label="Search documentation"
-                bg="rgba(from var(--mantine-color-obsidian-7) r g b / 0.75)"
                 py={8}
                 px="md"
                 mb="md"

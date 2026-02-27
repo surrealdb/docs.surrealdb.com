@@ -9,13 +9,5 @@ import "@surrealdb/ui/styles.css";
 import "@mantine/spotlight/styles.css";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
-    return (
-        <MantineProvider
-            theme={MANTINE_THEME}
-            forceColorScheme="dark"
-            defaultColorScheme="dark"
-        >
-            {children}
-        </MantineProvider>
-    );
+    return <MantineProvider theme={MANTINE_THEME}>{children}</MantineProvider>;
 }

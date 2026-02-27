@@ -35,7 +35,7 @@ export default function Page() {
             align="center"
             justify="center"
             gap={{ base: "md", sm: 48 }}
-            mih="calc(100vh - 128px)"
+            h="100%"
             p="xl"
         >
             <Box className={classes.code}>{code}</Box>

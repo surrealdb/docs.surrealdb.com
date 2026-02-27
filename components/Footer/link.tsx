@@ -12,7 +12,7 @@ export function FooterLink({ children, href, ...props }: FooterLinkProps) {
             href={href}
             target={isExternal ? "_blank" : undefined}
             rel={isExternal ? "noopener noreferrer external" : undefined}
-            c="white"
+            c="dimmed"
             fz={12}
             {...props}
         >
