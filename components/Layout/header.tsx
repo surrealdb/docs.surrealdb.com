@@ -26,6 +26,7 @@ import {
     brandPython,
     brandRust,
     Icon,
+    iconCheck,
     iconChevronDown,
     iconMoon,
     iconSun,
@@ -68,7 +69,11 @@ export const NAV_LINKS: NavEntry[] = [
     {
         label: "SDKs",
         items: [
-            { label: "JavaScript", href: "/docs/sdk/javascript/", icon: brandJavaScript },
+            {
+                label: "JavaScript",
+                href: "/docs/sdk/javascript/",
+                icon: brandJavaScript,
+            },
             { label: "Python", href: "/docs/sdk/python/", icon: brandPython },
             { label: "Rust", href: "/docs/sdk/rust/", icon: brandRust },
             { label: "Go", href: "/docs/sdk/golang/", icon: brandGo },
@@ -82,7 +87,10 @@ export const NAV_LINKS: NavEntry[] = [
         label: "Examples",
         items: [
             { label: "Define a Schema", href: "/docs/tutorials/define-a-schema/" },
-            { label: "Using GitHub Actions", href: "/docs/tutorials/using-github-actions/" },
+            {
+                label: "Using GitHub Actions",
+                href: "/docs/tutorials/using-github-actions/",
+            },
             {
                 label: "Integrate Auth0",
                 href: "/docs/tutorials/integrate-auth0-as-authentication-provider/",
@@ -183,10 +191,10 @@ function NavDropdown({ label, items }: NavMenuGroup) {
 }
 
 export function Header({ opened, onToggle }: NavigationProps) {
-    const { toggleColorScheme } = useMantineColorScheme();
-    const colorScheme = useComputedColorScheme("dark");
+    const { colorScheme, setColorScheme } = useMantineColorScheme();
+    const computedScheme = useComputedColorScheme();
 
-    const isDark = colorScheme === "dark";
+    const isDark = computedScheme === "dark";
     const logo = isDark ? LogoDark : LogoLight;
     const docsLogo = isDark ? DocsDark : DocsLight;
 
@@ -259,15 +267,52 @@ export function Header({ opened, onToggle }: NavigationProps) {
                     hiddenFrom="lg"
                 />
 
-                <ActionIcon
-                    variant="subtle"
-                    size="lg"
-                    onClick={toggleColorScheme}
-                    aria-label="Toggle color scheme"
-                    color="gray"
+                <Menu
+                    trigger="hover"
+                    transitionProps={{ transition: "scale-y" }}
                 >
-                    <Icon path={isDark ? iconSun : iconMoon} />
-                </ActionIcon>
+                    <Menu.Target>
+                        <ActionIcon aria-label="Toggle color scheme">
+                            <Icon path={isDark ? iconMoon : iconSun} />
+                        </ActionIcon>
+                    </Menu.Target>
+                    <Menu.Dropdown miw={150}>
+                        <Menu.Label>Color scheme</Menu.Label>
+                        <Menu.Item
+                            onClick={() => setColorScheme("auto")}
+                            leftSection={
+                                <Icon
+                                    path={colorScheme === "auto" ? iconCheck : ""}
+                                    size="xs"
+                                />
+                            }
+                        >
+                            System
+                        </Menu.Item>
+                        <Menu.Item
+                            onClick={() => setColorScheme("light")}
+                            leftSection={
+                                <Icon
+                                    path={colorScheme === "light" ? iconCheck : ""}
+                                    size="sm"
+                                />
+                            }
+                        >
+                            Light
+                        </Menu.Item>
+                        <Menu.Item
+                            onClick={() => setColorScheme("dark")}
+                            leftSection={
+                                <Icon
+                                    path={colorScheme === "dark" ? iconCheck : ""}
+                                    size="sm"
+                                />
+                            }
+                        >
+                            Dark
+                        </Menu.Item>
+                    </Menu.Dropdown>
+                </Menu>
 
                 <Button
                     component="a"
