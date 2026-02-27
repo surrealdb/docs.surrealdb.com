@@ -1,5 +1,5 @@
 import { SearchDocs } from "@components/SearchDocs";
-import { Anchor, Box, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { Anchor, Box, Image, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import {
     brandDotNet,
     brandGo,
@@ -117,24 +117,27 @@ function ProductCard({ title, description, href, icon }: ProductItem) {
             underline="never"
         >
             <Paper className={classes.productCard}>
-                <Icon
-                    path={icon}
-                    size={36}
-                    color="surreal"
+                <Image
+                    className="blend"
+                    src={icon}
+                    w={36}
+                    h={36}
                 />
-                <Title
-                    order={3}
-                    fz="lg"
-                    c="bright"
-                >
-                    {title}
-                </Title>
-                <Text
-                    fz="sm"
-                    c="dimmed"
-                >
-                    {description}
-                </Text>
+                <Box>
+                    <Title
+                        order={3}
+                        fz="lg"
+                        c="bright"
+                    >
+                        {title}
+                    </Title>
+                    <Text
+                        fz="sm"
+                        c="dimmed"
+                    >
+                        {description}
+                    </Text>
+                </Box>
             </Paper>
         </Anchor>
     );
@@ -147,9 +150,11 @@ function SdkCard({ label, href, icon }: SdkItem) {
             underline="never"
         >
             <Paper className={classes.sdkCard}>
-                <Icon
-                    path={icon}
-                    size={28}
+                <Image
+                    src={icon}
+                    w={28}
+                    h={28}
+                    fit="contain"
                 />
                 <Text
                     fz="sm"
@@ -170,10 +175,11 @@ function ResourceCard({ title, description, href, icon }: ResourceItem) {
             underline="never"
         >
             <Paper className={classes.resourceCard}>
-                <Icon
-                    path={icon}
-                    size={32}
-                    color="surreal"
+                <Image
+                    className="blend"
+                    src={icon}
+                    w={32}
+                    h={32}
                 />
                 <Box flex={1}>
                     <Text

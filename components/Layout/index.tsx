@@ -1,13 +1,14 @@
 import { PageContentActions } from "@components/ContentActions";
 import { PageAside } from "@components/PageAside";
-// import { PageAside } from "@components/PageAside";
 import type { HeadingData } from "@lib/markdown";
-import { Box, Container, Flex, Group, Stack } from "@mantine/core";
+import { ActionIcon, Box, Container, Drawer, Flex, Group, Stack } from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
+import { Icon, iconSidebar } from "@surrealdb/ui";
 import type { SidebarItem } from "@util/sidebar";
 import { PageBreadcrumbs } from "../Breadcrumbs";
 import { CopyPageMenu } from "../CopyPageMenu";
 import { Footer } from "../Footer";
-import { Header } from "./header";
+import { Header, MobileNav } from "./header";
 import { Navbar } from "./navbar";
 import { PageNavigation } from "./page-navigation";
 import classes from "./style.module.scss";
@@ -28,13 +29,41 @@ export function DefaultLayout({
     contentPath,
     showToc = true,
 }: DefaultLayoutProps) {
+    const [menuOpened, { toggle: toggleMenu, close: closeMenu }] = useDisclosure();
+    const [sidebarOpened, { toggle: toggleSidebar, close: closeSidebar }] = useDisclosure();
+
     return (
         <div className={classes.layout}>
-            <Header />
-            <Navbar sidebar={sidebar} />
+            <Header
+                opened={menuOpened}
+                onToggle={toggleMenu}
+            />
+            <Navbar
+                sidebar={sidebar}
+                visibleFrom="lg"
+            />
+            <Drawer
+                opened={menuOpened}
+                onClose={closeMenu}
+                size="325px"
+                hiddenFrom="lg"
+                withCloseButton={false}
+            >
+                <MobileNav />
+            </Drawer>
+            <Drawer
+                opened={sidebarOpened}
+                onClose={closeSidebar}
+                size="325px"
+                hiddenFrom="lg"
+                withCloseButton={false}
+            >
+                <Navbar sidebar={sidebar} />
+            </Drawer>
             <Group
                 justify="center"
                 align="flex-start"
+                h="fit-content"
             >
                 <Container
                     component={Stack}
@@ -43,11 +72,26 @@ export function DefaultLayout({
                     flex={1}
                 >
                     <Flex
-                        justify="space-between"
                         align="center"
+                        gap="sm"
                         mb={32}
                     >
-                        <PageBreadcrumbs sidebar={sidebar} />
+                        <ActionIcon
+                            variant="subtle"
+                            color="gray"
+                            hiddenFrom="lg"
+                            onClick={toggleSidebar}
+                            aria-label="Toggle sidebar"
+                        >
+                            <Icon path={iconSidebar} />
+                        </ActionIcon>
+                        <Box
+                            flex={1}
+                            miw={0}
+                            className={classes.breadcrumbScroll}
+                        >
+                            <PageBreadcrumbs sidebar={sidebar} />
+                        </Box>
                         <CopyPageMenu contentPath={contentPath} />
                     </Flex>
                     <Box
@@ -60,7 +104,14 @@ export function DefaultLayout({
                     <PageNavigation sidebar={sidebar} />
                     <Footer />
                 </Container>
-                {showToc && <PageAside headings={headings} />}
+                {showToc && (
+                    <Box
+                        visibleFrom="md"
+                        h="stretch"
+                    >
+                        <PageAside headings={headings} />
+                    </Box>
+                )}
             </Group>
         </div>
     );

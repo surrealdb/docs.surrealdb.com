@@ -1,10 +1,10 @@
 import { SearchDocs } from "@components/SearchDocs";
-import { Box, NavLink, Stack, Text } from "@mantine/core";
+import { Box, type BoxProps, NavLink, Stack, Text } from "@mantine/core";
 import type { SidebarItem } from "@util/sidebar";
 import { usePageContext } from "vike-react/usePageContext";
 import classes from "./style.module.scss";
 
-export interface NavbarProps {
+export interface NavbarProps extends BoxProps {
     sidebar: SidebarItem[];
 }
 
@@ -99,11 +99,12 @@ function SidebarSection({ item }: { item: SidebarItem }) {
     );
 }
 
-export function Navbar({ sidebar }: NavbarProps) {
+export function Navbar({ sidebar, ...props }: NavbarProps) {
     return (
         <Box
             pt="xs"
             pb="sm"
+            {...props}
         >
             <Box px="lg">
                 <SearchDocs />

@@ -11,11 +11,27 @@ import {
     Divider,
     Flex,
     Image,
+    NavLink as MantineNavLink,
     Menu,
+    Stack,
     useComputedColorScheme,
     useMantineColorScheme,
 } from "@mantine/core";
-import { Icon, iconChevronDown, iconMoon, iconSun } from "@surrealdb/ui";
+import {
+    brandDotNet,
+    brandGo,
+    brandJava,
+    brandJavaScript,
+    brandPHP,
+    brandPython,
+    brandRust,
+    Icon,
+    iconChevronDown,
+    iconMoon,
+    iconSun,
+    pictoTutorials,
+    pictoUniversity,
+} from "@surrealdb/ui";
 import classes from "./style.module.scss";
 
 export interface NavigationProps {
@@ -26,23 +42,24 @@ export interface NavigationProps {
 const SIGN_IN_URL =
     "https://app.surrealdb.com/signin?_gl=1*6c6cw1*FPAU*MjUyNzg4NDQ3LjE3NzA3MzU0OTI.*_ga*MTUwNTkxNTcyNS4xNzcwNzM1NDky*_ga_J1NWM32T1V*czE3NzE4NDcxMTMkbzQ2JGcxJHQxNzcxODQ3MjAwJGo1NiRsMCRoNjUwODcxODU5*_fplc*dEpHdFVZdTN2eEolMkJBWkNUY1R5NUhKbmJySSUyRk56eEN6ZHlEcU52cTJzbUV0dXpOcmZhSU5MeXZFdW90bFdPZWRpbE4yTzA1dmZ1MiUyRlc5RnM3djhEZ2NVeGZhdmoyNW1rcFFsSmhwUXJzR1BoR2ZIWUdsMXYyZ0tJSXFmOW93JTNEJTNE";
 
-interface NavItem {
+export interface NavItem {
     label: string;
     href: string;
+    icon?: string;
 }
 
-interface NavMenuGroup {
+export interface NavMenuGroup {
     label: string;
     items: NavItem[];
 }
 
-type NavEntry = NavItem | NavMenuGroup;
+export type NavEntry = NavItem | NavMenuGroup;
 
 function isMenuGroup(entry: NavEntry): entry is NavMenuGroup {
     return "items" in entry;
 }
 
-const NAV_LINKS: NavEntry[] = [
+export const NAV_LINKS: NavEntry[] = [
     { label: "SurrealDB", href: "/docs/surrealdb/" },
     { label: "SurrealQL", href: "/docs/surrealql/" },
     { label: "Surrealist", href: "/docs/surrealist/" },
@@ -51,13 +68,13 @@ const NAV_LINKS: NavEntry[] = [
     {
         label: "SDKs",
         items: [
-            { label: "JavaScript", href: "/docs/sdk/javascript/" },
-            { label: "Python", href: "/docs/sdk/python/" },
-            { label: "Rust", href: "/docs/sdk/rust/" },
-            { label: "Go", href: "/docs/sdk/golang/" },
-            { label: "Java", href: "/docs/sdk/java/" },
-            { label: "PHP", href: "/docs/sdk/php/" },
-            { label: ".NET", href: "/docs/sdk/dotnet/" },
+            { label: "JavaScript", href: "/docs/sdk/javascript/", icon: brandJavaScript },
+            { label: "Python", href: "/docs/sdk/python/", icon: brandPython },
+            { label: "Rust", href: "/docs/sdk/rust/", icon: brandRust },
+            { label: "Go", href: "/docs/sdk/golang/", icon: brandGo },
+            { label: "Java", href: "/docs/sdk/java/", icon: brandJava },
+            { label: "PHP", href: "/docs/sdk/php/", icon: brandPHP },
+            { label: ".NET", href: "/docs/sdk/dotnet/", icon: brandDotNet },
         ],
     },
     { label: "Integrations", href: "/docs/integrations/" },
@@ -91,8 +108,8 @@ const NAV_LINKS: NavEntry[] = [
     {
         label: "Education",
         items: [
-            { label: "Tutorials", href: "/docs/tutorials/" },
-            { label: "SurrealDB University", href: "/learn" },
+            { label: "Tutorials", href: "/docs/tutorials/", icon: pictoTutorials },
+            { label: "SurrealDB University", href: "/learn", icon: pictoUniversity },
         ],
     },
 ];
@@ -140,13 +157,22 @@ function NavDropdown({ label, items }: NavMenuGroup) {
                     </Flex>
                 </Anchor>
             </Menu.Target>
-            <Menu.Dropdown className={classes.dropdown}>
+            <Menu.Dropdown>
                 {items.map((item) => (
                     <Menu.Item
                         key={item.href}
                         component="a"
                         href={item.href}
-                        className={classes.dropdownItem}
+                        leftSection={
+                            item.icon ? (
+                                <Image
+                                    src={item.icon}
+                                    w={20}
+                                    h={20}
+                                    fit="contain"
+                                />
+                            ) : undefined
+                        }
                     >
                         {item.label}
                     </Menu.Item>
@@ -174,7 +200,7 @@ export function Header({ opened, onToggle }: NavigationProps) {
             <Flex
                 align="center"
                 h="100%"
-                px="xl"
+                px={{ base: "md", lg: "xl" }}
                 gap="md"
             >
                 <Anchor href="/">
@@ -228,6 +254,11 @@ export function Header({ opened, onToggle }: NavigationProps) {
                     ))}
                 </Flex>
 
+                <Box
+                    flex={1}
+                    hiddenFrom="lg"
+                />
+
                 <ActionIcon
                     variant="subtle"
                     size="lg"
@@ -259,5 +290,51 @@ export function Header({ opened, onToggle }: NavigationProps) {
                 />
             </Flex>
         </Box>
+    );
+}
+
+export function MobileNav() {
+    return (
+        <Stack
+            component="nav"
+            gap={0}
+            px="sm"
+        >
+            {NAV_LINKS.map((entry) =>
+                isMenuGroup(entry) ? (
+                    <MantineNavLink
+                        key={entry.label}
+                        label={entry.label}
+                        childrenOffset={16}
+                    >
+                        {entry.items.map((item) => (
+                            <MantineNavLink
+                                key={item.href}
+                                label={item.label}
+                                href={item.href}
+                                component="a"
+                                leftSection={
+                                    item.icon ? (
+                                        <Image
+                                            src={item.icon}
+                                            w={20}
+                                            h={20}
+                                            fit="contain"
+                                        />
+                                    ) : undefined
+                                }
+                            />
+                        ))}
+                    </MantineNavLink>
+                ) : (
+                    <MantineNavLink
+                        key={entry.href}
+                        label={entry.label}
+                        href={entry.href}
+                        component="a"
+                    />
+                ),
+            )}
+        </Stack>
     );
 }

@@ -1,11 +1,11 @@
 import { Button, Menu, Stack, Text } from "@mantine/core";
 import {
-    brandOpenAi,
     Icon,
     iconArrowUpRight,
+    iconChatGPT,
     iconChevronDown,
+    iconClaude,
     iconCopy,
-    pictoClaude,
 } from "@surrealdb/ui";
 import type { LLMChatURLs } from "@util/llms";
 import { useCallback } from "react";
@@ -79,6 +79,7 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                         <Icon
                             path={iconCopy}
                             size="sm"
+                            c="bright"
                         />
                     }
                     onClick={handleCopyMarkdown}
@@ -101,8 +102,9 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                 <Menu.Item
                     leftSection={
                         <Icon
-                            path={brandOpenAi}
+                            path={iconChatGPT}
                             size="sm"
+                            c="bright"
                         />
                     }
                     rightSection={
@@ -132,8 +134,9 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                 <Menu.Item
                     leftSection={
                         <Icon
-                            path={pictoClaude}
+                            path={iconClaude}
                             size="sm"
+                            c="bright"
                         />
                     }
                     rightSection={
