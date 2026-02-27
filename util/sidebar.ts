@@ -98,7 +98,10 @@ export function flattenSidebar(items: SidebarItem[]): SidebarItem[] {
     const result: SidebarItem[] = [];
 
     for (const item of items) {
-        result.push(item);
+        const firstChildHref = item.children?.[0]?.href;
+        if (!item.children?.length || item.href !== firstChildHref) {
+            result.push(item);
+        }
         if (item.children?.length) {
             result.push(...flattenSidebar(item.children));
         }

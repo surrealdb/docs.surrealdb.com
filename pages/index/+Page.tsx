@@ -125,13 +125,13 @@ function ProductCard({ title, description, href, icon }: ProductItem) {
                 <Title
                     order={3}
                     fz="lg"
-                    c="white"
+                    c="bright"
                 >
                     {title}
                 </Title>
                 <Text
                     fz="sm"
-                    c="obsidian.3"
+                    c="dimmed"
                 >
                     {description}
                 </Text>
@@ -153,7 +153,7 @@ function SdkCard({ label, href, icon }: SdkItem) {
                 />
                 <Text
                     fz="sm"
-                    c="obsidian.2"
+                    c="bright"
                     fw={500}
                 >
                     {label}
@@ -178,14 +178,14 @@ function ResourceCard({ title, description, href, icon }: ResourceItem) {
                 <Box flex={1}>
                     <Text
                         fz="md"
-                        c="white"
+                        c="bright"
                         fw={600}
                     >
                         {title}
                     </Text>
                     <Text
                         fz="sm"
-                        c="obsidian.3"
+                        c="dimmed"
                     >
                         {description}
                     </Text>
@@ -193,7 +193,6 @@ function ResourceCard({ title, description, href, icon }: ResourceItem) {
                 <Icon
                     path={iconArrowUpRight}
                     size="sm"
-                    color="obsidian.4"
                 />
             </Paper>
         </Anchor>
@@ -210,13 +209,13 @@ export default function Page() {
                 <Title
                     order={1}
                     fz={36}
-                    c="white"
+                    c="bright"
                 >
                     SurrealDB Documentation
                 </Title>
                 <Text
                     fz="lg"
-                    c="obsidian.3"
+                    c="dimmed"
                     mt="sm"
                     maw={560}
                     mx="auto"
@@ -235,7 +234,7 @@ export default function Page() {
                 <Title
                     order={2}
                     fz="xl"
-                    c="white"
+                    c="bright"
                     mb="md"
                 >
                     Guides
@@ -254,7 +253,7 @@ export default function Page() {
                 <Title
                     order={2}
                     fz="xl"
-                    c="white"
+                    c="bright"
                     mb="md"
                 >
                     Client Libraries
@@ -273,7 +272,7 @@ export default function Page() {
                 <Title
                     order={2}
                     fz="xl"
-                    c="white"
+                    c="bright"
                     mb="md"
                 >
                     Additional Resources

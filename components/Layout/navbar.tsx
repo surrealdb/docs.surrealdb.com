@@ -8,10 +8,6 @@ export interface NavbarProps {
     sidebar: SidebarItem[];
 }
 
-function isRouteActive(urlPathname: string, href: string) {
-    return urlPathname === href || urlPathname.startsWith(`${href}/`);
-}
-
 function appendSlash(href: string) {
     return href.endsWith("/") ? href : `${href}/`;
 }
@@ -20,19 +16,30 @@ function stripDocsPrefix(href: string) {
     return href.replace("/docs/", "/");
 }
 
+function hasActiveDescendant(urlPathname: string, items: SidebarItem[]): boolean {
+    for (const item of items) {
+        const href = stripDocsPrefix(item.href);
+        if (appendSlash(urlPathname) === appendSlash(href)) return true;
+        if (item.children?.length && hasActiveDescendant(urlPathname, item.children)) return true;
+    }
+    return false;
+}
+
 function SidebarNavLink({ item }: { item: SidebarItem }) {
     const { urlPathname } = usePageContext();
     const href = stripDocsPrefix(item.href);
 
     if (item.children?.length) {
-        const expanded = isRouteActive(urlPathname, href);
+        const expanded =
+            appendSlash(urlPathname) === appendSlash(href) ||
+            hasActiveDescendant(urlPathname, item.children);
 
         return (
             <NavLink
                 label={item.label}
                 href={appendSlash(item.href)}
                 childrenOffset={16}
-                defaultOpened={expanded}
+                opened={expanded}
                 aria-expanded={expanded}
                 bdrs={4}
                 bg={expanded ? "rgba(from var(--surreal-color-primary) r g b / 0.2" : "transparent"}

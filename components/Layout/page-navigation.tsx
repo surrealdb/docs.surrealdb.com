@@ -37,17 +37,17 @@ export function PageNavigation({ sidebar }: PageNavigationProps) {
                     >
                         <Icon
                             path={iconChevronLeft}
-                            size="md"
+                            size="sm"
                         />
                         <Box>
                             <Text
-                                fz="md"
+                                fz="xs"
                                 c="dimmed"
                             >
                                 Previous
                             </Text>
                             <Text
-                                fz="lg"
+                                fz="md"
                                 fw={500}
                                 c="bright"
                             >
@@ -73,13 +73,13 @@ export function PageNavigation({ sidebar }: PageNavigationProps) {
                     >
                         <Box>
                             <Text
-                                fz="sm"
+                                fz="xs"
                                 c="dimmed"
                             >
                                 Next
                             </Text>
                             <Text
-                                fz="lg"
+                                fz="md"
                                 fw={500}
                                 c="bright"
                             >
@@ -88,7 +88,7 @@ export function PageNavigation({ sidebar }: PageNavigationProps) {
                         </Box>
                         <Icon
                             path={iconChevronRight}
-                            size="md"
+                            size="sm"
                         />
                     </Flex>
                 </Anchor>
