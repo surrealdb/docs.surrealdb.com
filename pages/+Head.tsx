@@ -11,8 +11,6 @@ import FavIcon from "@assets/img/favicon.svg";
 import { ColorSchemeScript } from "@mantine/core";
 
 export function Head() {
-    const fontUrl =
-        "https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap";
     return (
         <>
             <link
@@ -32,10 +30,6 @@ export function Head() {
                 rel="preconnect"
                 href="https://fonts.gstatic.com"
                 crossOrigin="anonymous"
-            />
-            <link
-                rel="stylesheet"
-                href={fontUrl}
             />
         </>
     );
