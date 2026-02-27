@@ -122,20 +122,64 @@ export async function onSuccess() {
                     const subject = new RecordId('page', [hostname, pathname]);
 
                     console.log(`[IX] Indexing "${subject}"`);
-                    await db.upsert(subject, {
-                        title,
-                        description,
-                        path: pathname,
-                        hostname,
-                        h1,
-                        h2,
-                        h3,
-                        h4,
-                        content,
-                        code,
-                        date: jobDate,
-                    });
 
+                    // Take only the first N content blocks to avoid huge pages.
+                    // content includes paragraphs/tables/headings/code in your current build.
+                    const MAX_BLOCKS = Number(process.env.EMBED_MAX_BLOCKS ?? 60);
+
+                    const importantBlocks = [
+                        `Title: ${title ?? ''}`,
+                        `Description: ${description ?? ''}`,
+                        // headings are already arrays of strings
+                        ...(h1?.length ? [`H1: ${h1.join(' | ')}`] : []),
+                        ...(h2?.length ? [`H2: ${h2.join(' | ')}`] : []),
+                        ...(h3?.length ? [`H3: ${h3.join(' | ')}`] : []),
+                        ...(h4?.length ? [`H4: ${h4.join(' | ')}`] : []),
+
+                        // add *some* body text (this is the big quality win)
+                        ...content.slice(0, MAX_BLOCKS).map((b) => `Body: ${b}`),
+                    ].filter(Boolean);
+
+                    const embedText = importantBlocks.join('\n');
+
+                    const openaiKey = process.env.OPENAI_API_KEY;
+
+                    await db.query(
+                        `
+                              RETURN fn::page::upsert_with_embedding(
+                                $id,
+                                $hostname,
+                                $path,
+                                $title,
+                                $description,
+                                $h1,
+                                $h2,
+                                $h3,
+                                $h4,
+                                $content,
+                                $code,
+                                $date,
+                                $embed_text,
+                                $openai_key
+                              );
+                              `,
+                        {
+                            id: subject,
+                            hostname,
+                            path: pathname,
+                            title,
+                            description,
+                            h1,
+                            h2,
+                            h3,
+                            h4,
+                            content,
+                            code,
+                            date: jobDate,
+                            embedText,
+                            openai_key: openaiKey,
+                        }
+                    );
                     const elapsed = Date.now() - start;
                     console.log(`[IX] Took ${elapsed}ms to index "${subject}"`);
                 } else {
