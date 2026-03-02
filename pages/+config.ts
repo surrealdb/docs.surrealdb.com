@@ -3,14 +3,14 @@ import type { Config } from "vike/types";
 import vikeReact from "vike-react/config";
 
 export default {
-	title: DEFAULT_META_TITLE,
-	description: DEFAULT_META_DESCRIPTION,
-	extends: [vikeReact],
-	prerender: true,
-	passToClient: ["llms"],
-	meta: {
-		Page: {
-			env: { client: true, server: true },
-		},
-	},
+    title: DEFAULT_META_TITLE,
+    description: DEFAULT_META_DESCRIPTION,
+    extends: [vikeReact],
+    prerender: true,
+    passToClient: ["llms"],
+    meta: {
+        Page: {
+            env: { client: true, server: true },
+        },
+    },
 } satisfies Config;
