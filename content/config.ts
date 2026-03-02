@@ -9,10 +9,39 @@ const abstractDoc = strictObject({
     no_sidebar: boolean().optional(),
 });
 
-const _labCollection = strictObject({
+export const labCategories = [
+    "Code repositories",
+    "Videos",
+    "Blogposts",
+    "Documentation",
+    "Learning Resources",
+] as const;
+
+export const labTopics = [
+    "AI",
+    "Cloud",
+    "Data Management",
+    "Examples",
+    "Libraries",
+    "Security",
+    "Templates",
+    "Tooling",
+] as const;
+
+export const labLanguages = [
+    "Python",
+    "Rust",
+    "TypeScript",
+    "Go",
+    "Java",
+    "PHP",
+    "SurrealQL",
+] as const;
+
+const labCollection = strictObject({
     title: string(),
     url: string().optional(),
-    category: _enum([]),
+    category: _enum(labCategories),
     author: literal("surrealdb").or(
         object({
             name: string(),
@@ -20,8 +49,8 @@ const _labCollection = strictObject({
             avatar: string(),
         }),
     ),
-    topics: _enum([]).array().max(2),
-    languages: _enum([]).array().optional(),
+    topics: _enum(labTopics).array().max(2).default([]),
+    languages: _enum(labLanguages).array().optional(),
 });
 
 ///////////////////////////////////////////////////////////
@@ -54,7 +83,7 @@ export const schema = {
         prev[`doc-sdk-${curr}`] = abstractDoc;
         return prev;
     }, {} as Sdks),
-    // "labs-items": labCollection,
+    "labs-items": labCollection,
 };
 
 export const urlForCollection = {
@@ -83,4 +112,6 @@ export type Sdk = (typeof sdks)[number];
 export type SdkKey = `doc-sdk-${Sdk}`;
 export type Sdks = Record<SdkKey, typeof abstractDoc>;
 
-// export type LabItem = Entry<"labs-items">["data"];
+export type LabCategory = (typeof labCategories)[number];
+export type LabTopic = (typeof labTopics)[number];
+export type LabLanguage = (typeof labLanguages)[number];

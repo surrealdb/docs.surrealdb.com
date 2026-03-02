@@ -8,7 +8,7 @@ author:
   avatar: lucifer-akirami
 topics:
   - Templates
-langugages:
+languages:
   - Python
 ---
 
