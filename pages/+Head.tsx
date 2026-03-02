@@ -3,7 +3,6 @@
 import "@mantine/core/styles.layer.css";
 import "@mantine/spotlight/styles.layer.css";
 import "@surrealdb/ui/styles.css";
-import "@surrealdb/ui/fonts.css";
 import "@assets/styles/global.scss";
 import "@assets/styles/markdown.scss";
 

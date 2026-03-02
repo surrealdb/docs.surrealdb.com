@@ -12,9 +12,7 @@ export function FullWidthLayout({ children }: { children: React.ReactNode }) {
             <Header />
             <Container
                 component="main"
-                flex={1}
                 size="lg"
-                w="100%"
             >
                 {children}
             </Container>
