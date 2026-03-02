@@ -2,6 +2,7 @@ import LabsDark from "@assets/img/logo/dark/labs.svg";
 import LabsLight from "@assets/img/logo/light/labs.svg";
 import { FilterSidebar } from "@components/FilterSidebar";
 import { LabCard } from "@components/LabCard";
+import { labLanguages, labTopics } from "@content/config";
 import {
     Anchor,
     Box,
@@ -13,10 +14,48 @@ import {
     useComputedColorScheme,
 } from "@mantine/core";
 import { Icon, iconSearch } from "@surrealdb/ui";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useData } from "vike-react/useData";
 import type { LabsPageData } from "./+data";
 import classes from "./style.module.scss";
+
+type FilterGroup = "author" | "language" | "topic";
+
+const FILTER_LOOKUP: Record<string, { group: FilterGroup; value: string }> = {
+    official: { group: "author", value: "official" },
+    community: { group: "author", value: "community" },
+};
+
+for (const lang of labLanguages) {
+    FILTER_LOOKUP[lang.toLowerCase()] = { group: "language", value: lang };
+}
+
+for (const topic of labTopics) {
+    FILTER_LOOKUP[topic.toLowerCase()] = { group: "topic", value: topic };
+}
+
+function parseFiltersFromURL(): {
+    author: string[];
+    language: string[];
+    topic: string[];
+} {
+    const result = { author: [] as string[], language: [] as string[], topic: [] as string[] };
+
+    if (typeof window === "undefined") return result;
+
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get("filters");
+    if (!raw) return result;
+
+    for (const segment of raw.split(",")) {
+        const match = FILTER_LOOKUP[segment.trim().toLowerCase()];
+        if (match) {
+            result[match.group].push(match.value);
+        }
+    }
+
+    return result;
+}
 
 export default function Page() {
     const { items } = useData<LabsPageData>();
@@ -25,10 +64,30 @@ export default function Page() {
 
     const labsLogo = isDark ? LabsDark : LabsLight;
 
+    const initial = useMemo(() => parseFiltersFromURL(), []);
+
     const [search, setSearch] = useState("");
-    const [authorFilter, setAuthorFilter] = useState<string[]>([]);
-    const [languageFilter, setLanguageFilter] = useState<string[]>([]);
-    const [topicFilter, setTopicFilter] = useState<string[]>([]);
+    const [authorFilter, setAuthorFilter] = useState<string[]>(initial.author);
+    const [languageFilter, setLanguageFilter] = useState<string[]>(initial.language);
+    const [topicFilter, setTopicFilter] = useState<string[]>(initial.topic);
+
+    useEffect(() => {
+        const all = [
+            ...authorFilter,
+            ...languageFilter.map((l) => l.toLowerCase()),
+            ...topicFilter.map((t) => t.toLowerCase()),
+        ];
+
+        const url = new URL(window.location.href);
+
+        if (all.length > 0) {
+            url.searchParams.set("filters", all.join(","));
+        } else {
+            url.searchParams.delete("filters");
+        }
+
+        window.history.replaceState(null, "", url.toString());
+    }, [authorFilter, languageFilter, topicFilter]);
 
     const filtered = useMemo(() => {
         return items.filter((item) => {
@@ -137,7 +196,10 @@ export default function Page() {
                         ))}
                     </SimpleGrid>
                 ) : (
-                    <Box className={classes.noResults}>
+                    <Box
+                        className={classes.noResults}
+                        w="852px"
+                    >
                         <Text
                             fz="lg"
                             c="dimmed"
