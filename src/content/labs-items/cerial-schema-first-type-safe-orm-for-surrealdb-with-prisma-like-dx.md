@@ -4,8 +4,6 @@ url: https://github.com/cerial-orm/cerial
 category: Code repositories
 topics:
   - Data Management
-  - Examples
-  - Libraries
   - Tooling
 author:
   name: Mohammed Younus
