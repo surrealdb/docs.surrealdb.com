@@ -66,6 +66,11 @@ const redirects = {
 	'/docs/surrealdb/reference-guide/full_text_search': '/docs/surrealdb/models/full-text-search',
 	'/docs/surrealdb/reference-guide/security-best-practices': '/docs/surrealdb/security/security-best-practices',
 	'/docs/surrealdb/reference-guide/security_best_practices': '/docs/surrealdb/security/security-best-practices',
+	'/docs/sdk/java/core': '/docs/sdk/java/concepts/connecting-to-surrealdb',
+	'/docs/sdk/java/core/create-a-new-connection': '/docs/sdk/java/concepts/connecting-to-surrealdb',
+	'/docs/sdk/java/core/handling-authentication': '/docs/sdk/java/concepts/authentication',
+	'/docs/sdk/java/data-types': '/docs/sdk/java/concepts/value-types',
+	'/docs/sdk/java/api-documentation': '/docs/sdk/java/api/core/surreal',
 };
 function compute(input) {
 	let path = input.toLowerCase();
@@ -88,7 +93,9 @@ function compute(input) {
 		return { path };
 	}
 	// Allow versioned SDK routes (1.x and 2.x)
-	if (path.startsWith('/docs/1.x/sdk/javascript') ||
+	if (path.startsWith('/docs/1.x/sdk/java') ||
+		path.startsWith('/docs/2.x/sdk/java') ||
+		path.startsWith('/docs/1.x/sdk/javascript') ||
 		path.startsWith('/docs/2.x/sdk/javascript') ||
 		path.startsWith('/docs/1.x/sdk/python') ||
 		path.startsWith('/docs/2.x/sdk/python')) {
@@ -135,7 +142,9 @@ function compute(input) {
 	if (path.startsWith('/docs/')) {
 		// Skip validation for versioned routes (they are valid)
 		if (!path.startsWith('/docs/2.x/surrealql') && !path.startsWith('/docs/3.x/surrealql') &&
-		    !path.startsWith('/docs/1.x/sdk/javascript') && !path.startsWith('/docs/2.x/sdk/javascript')) {
+		    !path.startsWith('/docs/1.x/sdk/java') && !path.startsWith('/docs/2.x/sdk/java') &&
+		    !path.startsWith('/docs/1.x/sdk/javascript') && !path.startsWith('/docs/2.x/sdk/javascript') &&
+		    !path.startsWith('/docs/1.x/sdk/python') && !path.startsWith('/docs/2.x/sdk/python')) {
 			const doc = path.split('/')[2];
 			if (!validDocs.includes(doc)) {
 				path = `/docs/surrealdb/${path.slice(6)}`;

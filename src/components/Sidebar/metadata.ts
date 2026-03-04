@@ -85,6 +85,17 @@ export const metadata = {
             href: 'https://github.com/surrealdb/surrealdb.java',
         },
     },
+    'doc-sdk-java-1x': {
+        title: 'Java SDK',
+        icon: {
+            light: LightJava,
+            dark: DarkJava,
+        },
+        repo: {
+            title: 'surrealdb/surrealdb.java',
+            href: 'https://github.com/surrealdb/surrealdb.java',
+        },
+    },
     'doc-sdk-javascript': {
         title: 'JavaScript SDK',
         icon: {

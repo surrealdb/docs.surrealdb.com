@@ -49,8 +49,12 @@ export default defineConfig({
                 if (
                     page.includes('/2.x/surrealql') ||
                     page.includes('/3.x/surrealql') ||
+                    page.includes('/1.x/sdk/java') ||
+                    page.includes('/2.x/sdk/java') ||
                     page.includes('/1.x/sdk/javascript') ||
-                    page.includes('/2.x/sdk/javascript')
+                    page.includes('/2.x/sdk/javascript') ||
+                    page.includes('/1.x/sdk/python') ||
+                    page.includes('/2.x/sdk/python')
                 ) {
                     return false;
                 }
