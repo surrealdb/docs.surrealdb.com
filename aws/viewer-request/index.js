@@ -1,4 +1,4 @@
-const validDocs = ['surrealdb', 'surrealml', 'surrealist', 'surrealkv', 'surrealism', 'surrealql', 'sdk', 'tutorials', 'cloud', 'integrations', 'labs'];
+const validDocs = ['surrealdb', 'surrealml', 'surrealist', 'surrealism', 'surrealql', 'sdk', 'tutorials', 'cloud', 'integrations', 'labs'];
 const versions = ['nightly', '1.0.x', '1.0.0', '1.1.x', '1.1.0', '1.2.x', '1.2.0', '1.3.x', '1.3.0', '2.x'];
 const prefixes = {
 	'/docs/integration/libraries/': '/docs/sdk/',

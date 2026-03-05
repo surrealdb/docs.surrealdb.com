@@ -234,8 +234,8 @@ function shouldIncludeInMinimal(
             return true;
     }
 
-    // 8) SurrealML / SurrealKV: include landing only
-    if (segments[0] === 'surrealml' || segments[0] === 'surrealkv') {
+    // 8) SurrealML: include landing only
+    if (segments[0] === 'surrealml') {
         return segments.length === 2 && segments[1] === 'index.html';
     }
 
@@ -256,8 +256,6 @@ function titleFromFolder(folder: string) {
             return 'SurrealQL';
         case 'surrealml':
             return 'SurrealML';
-        case 'surrealkv':
-            return 'SurrealKV';
         case 'surrealist':
             return 'Surrealist';
         case 'integrations':
