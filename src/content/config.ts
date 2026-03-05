@@ -47,7 +47,6 @@ export const docs = [
     'cloud',
     'surrealist',
     'surrealml',
-    'surrealkv',
     'surrealql',
     'integrations',
     'tutorials',
