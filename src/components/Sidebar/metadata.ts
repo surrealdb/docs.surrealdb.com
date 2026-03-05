@@ -198,17 +198,6 @@ export const metadata = {
             href: 'https://github.com/surrealdb/surrealml',
         },
     },
-    'doc-surrealkv': {
-        title: 'SurrealKV',
-        icon: {
-            light: LightSurrealKV,
-            dark: DarkSurrealKV,
-        },
-        repo: {
-            title: 'surrealdb/surrealkv',
-            href: 'https://github.com/surrealdb/surrealkv',
-        },
-    },
     'doc-surrealql': {
         title: 'SurrealQL',
         icon: {
