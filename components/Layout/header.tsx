@@ -10,6 +10,7 @@ import {
     Button,
     Divider,
     Flex,
+    Group,
     Image,
     NavLink as MantineNavLink,
     Menu,
@@ -205,42 +206,43 @@ export function Header({ opened, onToggle }: NavigationProps) {
             h="56px"
             px={1}
         >
-            <Flex
+            <Group
                 align="center"
                 h="100%"
                 px={{ base: "md", lg: "xl" }}
                 gap="md"
             >
-                <Anchor href="/">
-                    <Image
-                        src={logo}
-                        alt="SurrealDB"
-                        height={24}
+                <Group flex={1}>
+                    <Anchor href="/">
+                        <Image
+                            src={logo}
+                            alt="SurrealDB"
+                            height={24}
+                        />
+                    </Anchor>
+                    <Divider
+                        orientation="vertical"
+                        variant="solid"
+                        size="xs"
+                        h="24px"
+                        mt="auto"
+                        mb="auto"
+                        color="obsidian.6"
                     />
-                </Anchor>
-                <Divider
-                    orientation="vertical"
-                    variant="solid"
-                    size="xs"
-                    h="24px"
-                    mt="auto"
-                    mb="auto"
-                    color="obsidian.6"
-                />
-                <Anchor
-                    display="flex"
-                    href="/docs/"
-                    underline="never"
-                    aria-label="SurrealDB Docs home"
-                >
-                    <Image
-                        src={docsLogo}
-                        alt="SurrealDB Docs"
-                        height={24}
-                    />
-                </Anchor>
-
-                <Flex
+                    <Anchor
+                        display="flex"
+                        href="/docs/"
+                        underline="never"
+                        aria-label="SurrealDB Docs home"
+                    >
+                        <Image
+                            src={docsLogo}
+                            alt="SurrealDB Docs"
+                            height={24}
+                        />
+                    </Anchor>
+                </Group>
+                <Group
                     component="ul"
                     align="center"
                     gap="xl"
@@ -260,80 +262,79 @@ export function Header({ opened, onToggle }: NavigationProps) {
                             )}
                         </Box>
                     ))}
-                </Flex>
-
-                <Box
+                </Group>
+                <Group
                     flex={1}
-                    hiddenFrom="lg"
-                />
-
-                <Menu
-                    trigger="hover"
-                    transitionProps={{ transition: "scale-y" }}
+                    justify="flex-end"
                 >
-                    <Menu.Target>
-                        <ActionIcon aria-label="Toggle color scheme">
-                            <Icon path={isDark ? iconMoon : iconSun} />
-                        </ActionIcon>
-                    </Menu.Target>
-                    <Menu.Dropdown miw={150}>
-                        <Menu.Label>Color scheme</Menu.Label>
-                        <Menu.Item
-                            onClick={() => setColorScheme("auto")}
-                            leftSection={
-                                <Icon
-                                    path={colorScheme === "auto" ? iconCheck : ""}
-                                    size="xs"
-                                />
-                            }
-                        >
-                            System
-                        </Menu.Item>
-                        <Menu.Item
-                            onClick={() => setColorScheme("light")}
-                            leftSection={
-                                <Icon
-                                    path={colorScheme === "light" ? iconCheck : ""}
-                                    size="sm"
-                                />
-                            }
-                        >
-                            Light
-                        </Menu.Item>
-                        <Menu.Item
-                            onClick={() => setColorScheme("dark")}
-                            leftSection={
-                                <Icon
-                                    path={colorScheme === "dark" ? iconCheck : ""}
-                                    size="sm"
-                                />
-                            }
-                        >
-                            Dark
-                        </Menu.Item>
-                    </Menu.Dropdown>
-                </Menu>
+                    <Menu
+                        trigger="hover"
+                        transitionProps={{ transition: "scale-y" }}
+                    >
+                        <Menu.Target>
+                            <ActionIcon aria-label="Toggle color scheme">
+                                <Icon path={isDark ? iconMoon : iconSun} />
+                            </ActionIcon>
+                        </Menu.Target>
+                        <Menu.Dropdown miw={150}>
+                            <Menu.Label>Color scheme</Menu.Label>
+                            <Menu.Item
+                                onClick={() => setColorScheme("auto")}
+                                leftSection={
+                                    <Icon
+                                        path={colorScheme === "auto" ? iconCheck : ""}
+                                        size="xs"
+                                    />
+                                }
+                            >
+                                System
+                            </Menu.Item>
+                            <Menu.Item
+                                onClick={() => setColorScheme("light")}
+                                leftSection={
+                                    <Icon
+                                        path={colorScheme === "light" ? iconCheck : ""}
+                                        size="sm"
+                                    />
+                                }
+                            >
+                                Light
+                            </Menu.Item>
+                            <Menu.Item
+                                onClick={() => setColorScheme("dark")}
+                                leftSection={
+                                    <Icon
+                                        path={colorScheme === "dark" ? iconCheck : ""}
+                                        size="sm"
+                                    />
+                                }
+                            >
+                                Dark
+                            </Menu.Item>
+                        </Menu.Dropdown>
+                    </Menu>
 
-                <Button
-                    component="a"
-                    href={SIGN_IN_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    size="sm"
-                    variant="gradient"
-                    visibleFrom="sm"
-                >
-                    Sign In
-                </Button>
+                    <Button
+                        component="a"
+                        href={SIGN_IN_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        size="sm"
+                        variant="gradient"
+                        visibleFrom="sm"
+                    >
+                        Sign In
+                    </Button>
 
-                <Burger
-                    opened={opened}
-                    onClick={onToggle}
-                    hiddenFrom="lg"
-                    size="sm"
-                    aria-label="Toggle navigation"
-                />
-            </Flex>
+                    <Burger
+                        opened={opened}
+                        onClick={onToggle}
+                        hiddenFrom="lg"
+                        size="sm"
+                        aria-label="Toggle navigation"
+                    />
+                </Group>
+            </Group>
         </Box>
     );
 }
