@@ -4,10 +4,6 @@ sidebar_label: Quick start
 title: JavaScript | SDK | Quick start
 description: In this guide, we will walk you through setting up and querying your first project with the SurrealDB SDK for JavaScript.
 ---
-import Image from "@components/Image.astro";
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
-import QuickStartUI from "@img/quickstart-ui.png";
 
 # Quick start
 
@@ -55,36 +51,35 @@ Next, initialize a new project. This creates a `package.json` file within your p
 You can initialize a new project with any package manager. For this guide, we will use [Bun](https://bun.sh/).
 
 
-
-<Tabs groupId="node-package-manager">
-<TabItem value="bun" label="Bun" default>
+<tabs synckey="node-package-manager">
+<tabitem label="Bun">
 
 ```bash
 bun init -y
 ```
 
-</TabItem>
-  <TabItem value="npm" label="NPM">
+</tabitem>
+  <tabitem label="NPM">
 
 ```bash
 npm init -y
 ```
 
-  </TabItem>
-  <TabItem value="yarn" label="Yarn">
+  </tabitem>
+  <tabitem label="Yarn">
 
 ```bash
 yarn init -y
 ```
 
-  </TabItem>
-  <TabItem value="pnpm" label="PNPM">
+  </tabitem>
+  <tabitem label="PNPM">
 
 ```bash
 pnpm init -y
 ```
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 Next, open your project in your IDE. For this guide, we will use [Visual Studio Code](https://code.visualstudio.com/).
 
@@ -94,36 +89,36 @@ Now that you have initialized your project, you can install and import the SDK i
 
 From your terminal, in your project directory, install the [SDK](https://npmjs.com/package/surrealdb) using any of the following package managers (we recommend using bun for this guide):
 
-<Tabs groupId="node-package-manager">
-<TabItem value="bun" label="Bun" default>
+<tabs synckey="node-package-manager">
+<tabitem label="Bun">
 
 ```bash
 bun add surrealdb
 ```
 
-  </TabItem>
-  <TabItem value="npm" label="NPM">
+  </tabitem>
+  <tabitem label="NPM">
 
 ```bash
 npm install --save surrealdb
 ```
 
-  </TabItem>
-  <TabItem value="yarn" label="Yarn">
+  </tabitem>
+  <tabitem label="Yarn">
 
 ```bash
 yarn add surrealdb
 ```
 
-  </TabItem>
-  <TabItem value="pnpm" label="PNPM">
+  </tabitem>
+  <tabitem label="PNPM">
 
 ```bash
 pnpm install surrealdb
 ```
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 > [!IMPORTANT]
 > The SurrealDB SDK for JavaScript is also available in the JSR registry as [`@surrealdb/surrealdb`](https://jsr.io/@surrealdb/surrealdb).
@@ -136,22 +131,22 @@ pnpm install surrealdb
 After installing, you can then import the SDK into your project. Depending on your setup and environment, we support multiple options. For the sake of this guide, we will use ES6 syntax.
 
 
-<Tabs groupId="node-package-manager">
-<TabItem value="es6" label="ES6" default>
+<tabs synckey="node-package-manager">
+<tabitem label="ES6">
 
 ```ts
 import Surreal from 'surrealdb';
 ```
 
-</TabItem>
-<TabItem value="bun" label="CommonJS" >
+</tabitem>
+<tabitem label="CommonJS">
 
 ```ts
 const { Surreal } = require('surrealdb');
 ```
 
-</TabItem>
-<TabItem value="deno" label="Deno">
+</tabitem>
+<tabitem label="Deno">
 
 ```ts
 //Importing from Deno
@@ -161,8 +156,8 @@ import Surreal from "https://deno.land/x/surrealdb/mod.ts";
 import Surreal from "https://deno.land/x/surrealdb@1.0.0/mod.ts";
 ```
 
-</TabItem>
-  <TabItem value="CDN" label="CDN">
+</tabitem>
+  <tabitem label="CDN">
 
 ```ts
 import Surreal from "https://unpkg.com/surrealdb";
@@ -170,8 +165,8 @@ import Surreal from "https://unpkg.com/surrealdb";
 import Surreal from "https://cdn.jsdelivr.net/npm/surrealdb";
 ```
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 > [!NOTE]
 > It is recommended to import this in a utility file or a file that is shared across your application.
@@ -555,10 +550,7 @@ bun run src/index.ts
 
 You can now interact with the scripts by navigating to `http://localhost:3000` in your browser. 
 
-<Image
-  alt="SurrealDB SDK for JavaScript"
-  src={QuickStartUI}
-/>
+<img src="@assets/img/quickstart-ui.png" alt="SurrealDB SDK for JavaScript" />
 
 ## Next steps
 

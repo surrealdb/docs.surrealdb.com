@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Relate
 description: This method creates a relation between records.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Relate()` {#relate}
 
@@ -28,7 +27,7 @@ surrealdb.Relate(db, relationship)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or a [`RecordId`](/docs/sdk/golang/data-types#recordid) to create.
@@ -37,7 +36,7 @@ surrealdb.Relate(db, relationship)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>@in</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The edge of the relation.
@@ -46,7 +45,7 @@ surrealdb.Relate(db, relationship)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>@out</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The other edge of the relation.
@@ -55,7 +54,7 @@ surrealdb.Relate(db, relationship)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The document / record data to insert.

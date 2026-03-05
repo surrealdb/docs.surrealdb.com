@@ -5,7 +5,6 @@ title: Upsert Method in PHP | PHP SDK | Integration | SurrealDB
 description: The upsert method in the SurrealDB PHP SDK allows you to create or update a record in a table.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->upsert()` {#upsert}
 
@@ -29,7 +28,7 @@ $db->upsert($thing, $data);
 		<tr>
 			<td colspan="2" scope="row" data-label="Arguments">
 				<code>$thing</code>
-				<Label label="required" />
+				<label label="required" />
 			</td>
 			<td colspan="2" scope="row" data-label="Type">
 				`RecordId`. `StringRecordId` or `string`
@@ -41,7 +40,7 @@ $db->upsert($thing, $data);
 		<tr>
 			<td colspan="2" scope="row" data-label="Arguments">
 				<code>$data</code>
-				<Label label="required" />
+				<label label="required" />
 			</td>
 			<td colspan="2" scope="row" data-label="Type">
 				`mixed`

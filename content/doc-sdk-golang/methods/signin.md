@@ -5,10 +5,6 @@ title: Golang | SDK | Methods | SignIn
 description: This method signs in to a root, namespace, database or scope user.
 ---
 
-import Label from "@components/shared/Label.astro";
-import Since from "@components/shared/Since.astro";
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # `.SignIn()` {#signin}
 
@@ -31,7 +27,7 @@ await db.SignIn(credentials)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>credentials</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Variables used in a signin query.
@@ -42,8 +38,8 @@ await db.SignIn(credentials)
 
 ### Example usage
 
-<Tabs groupId="signin-example">
-<TabItem value="root" label="Root user">
+<tabs synckey="signin-example">
+<tabitem label="Root user">
 
 ```go
 // Sign in to authentication `db` using the root user
@@ -57,9 +53,9 @@ await db.SignIn(credentials)
 	}
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem value="namespace" label="Namespace user">
+<tabitem label="Namespace user">
 
 ```go
 // Sign in to authentication `db` using the root user
@@ -74,9 +70,9 @@ await db.SignIn(credentials)
 	}
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem value="database" label="Database user">
+<tabitem label="Database user">
 
 ```go
 // Sign in to authentication `db` using the root user
@@ -92,9 +88,9 @@ await db.SignIn(credentials)
 	}
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem value="record" label="Record Access">
+<tabitem label="Record Access">
 
 ```go
 // Sign in to authentication `db` using the root user
@@ -113,9 +109,9 @@ await db.SignIn(credentials)
 	}
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem value="scope" label="Scopes">
+<tabitem label="Scopes">
 
 ```go
 // Sign in to authentication `db` using the root user
@@ -134,7 +130,7 @@ await db.SignIn(credentials)
 	}
 ```
 
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 You can invalidate the authentication for the current connection using the [`Invalidate()` method](/docs/sdk/dotnet/methods/invalidate).

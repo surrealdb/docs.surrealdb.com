@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Authenticate
 description: The Golang SDK for SurrealDB enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Authenticate()` {#authenticate}
 
@@ -27,7 +26,7 @@ db.Authenticate(token)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>token</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2">
                 The JWT authentication token.

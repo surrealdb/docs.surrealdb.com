@@ -5,7 +5,6 @@ title: Python | SDK | Methods | delete
 description: The SurrealDB SDK for Python enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.delete()`
 
@@ -27,7 +26,7 @@ db.delete(thing,data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or a [`RecordID`](/docs/sdk/python/data-types#recordid) to delete.

@@ -5,12 +5,10 @@ title: DEFINE ACCESS ... TYPE JWT statement | SurrealQL
 description: A JWT access method allows accessing SurrealDB with a token signed by a trusted issuer.
 ---
 
-import Since from '@components/shared/Since.astro'
-
 
 # `DEFINE ACCESS ... TYPE JWT`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 A JWT access method allows accessing SurrealDB with a token signed by a trusted issuer. The contents of the token will be trusted by SurrealDB as long as it has been signed with a trusted credential.
 
@@ -351,7 +349,6 @@ DEFINE ACCESS IF NOT EXISTS example ON DATABASE TYPE JWT ALGORITHM HS512 KEY
 ## Using `OVERWRITE` clause
 
 The `OVERWRITE` clause can be used to define an access method of type JWT and overwrite an existing one if it already exists. You should use the `OVERWRITE` clause when you want to modify an existing access method definition. If the access method already exists, the `DEFINE ACCESS` statement will overwrite the existing access method definition with the new one.
-
 
 
 ```surql

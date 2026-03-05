@@ -5,14 +5,12 @@ title: Create Method in Rust | Rust SDK | Integration | SurrealDB
 description: The .create() method for the SurrealDB Rust SDK creates one or more records in the database.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # `create()`
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 Creates one or more records in the database.
 
@@ -94,9 +92,9 @@ async fn main() -> surrealdb::Result<()> {
 }
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 Creates one or more records in the database.
 
@@ -179,9 +177,9 @@ async fn main() -> surrealdb::Result<()> {
 }
 ```
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ### Translated query
 This function will run the following query in the database:

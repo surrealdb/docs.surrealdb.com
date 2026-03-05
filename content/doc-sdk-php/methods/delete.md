@@ -5,7 +5,6 @@ title: Delete Method in PHP | PHP SDK | Integration | SurrealDB
 description: Delete records from a table in the database using the delete method with the SurrealDB PHP SDK.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->delete()` {#delete}
 
@@ -28,7 +27,7 @@ $db->delete($thing)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>string</code>, <code>RecordId</code> or <code>StringRecordId</code>

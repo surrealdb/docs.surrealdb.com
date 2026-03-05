@@ -5,10 +5,6 @@ title: ALTER FIELD statement | SurrealQL
 description: The ALTER statement can be used to change authentication access and behaviour, global parameters, table configurations, table events, schema definitions, and indexes.
 ---
 
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 # `ALTER FIELD` statement
 
@@ -16,8 +12,8 @@ The `ALTER FIELD` statement is used to change or entirely drop clauses of a defi
 
 ## Statement syntax
 
-<Tabs syncKey="alter-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="alter-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 ALTER FIELD [ IF EXISTS ] ON [ TABLE ] @table 
@@ -47,134 +43,14 @@ ALTER FIELD [ IF EXISTS ] ON [ TABLE ] @table
 ]
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
-
-export const alterAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    {
-      type: "Sequence",
-      children: [
-        { type: "Terminal", text: "ALTER FIELD" },
-        {
-          type: "Optional",
-          child: {
-            type: "Sequence",
-            children: [
-              { type: "Terminal", text: "IF" },
-              { type: "Terminal", text: "EXISTS" },
-            ],
-          },
-        },
-        {
-          type: "OneOrMore",
-          child: {
-            type: "Choice",
-            index: 0,
-            children: [
-              {
-                type: "Sequence",
-                children: [
-                  { type: "Terminal", text: "DROP" },
-                  {
-                    type: "Choice",
-                    index: 0,
-                    children: [
-                      { type: "Terminal", text: "TYPE" },
-                      { type: "Terminal", text: "FLEXIBLE" },
-                      { type: "Terminal", text: "READONLY" },
-                      { type: "Terminal", text: "VALUE" },
-                      { type: "Terminal", text: "ASSERT" },
-                      { type: "Terminal", text: "DEFAULT" },
-                      { type: "Terminal", text: "COMMENT" },
-                      { type: "Terminal", text: "REFERENCE" },
-                    ],
-                  },
-                ],
-              },
-
-              { type: "Terminal", text: "FLEXIBLE" },
-              { type: "Terminal", text: "READONLY" },
-              { type: "Terminal", text: "REFERENCE" },
-
-              {
-                type: "Sequence",
-                children: [
-                  { type: "Terminal", text: "TYPE" },
-                  { type: "Terminal", text: "@type" },
-                ],
-              },
-              {
-                type: "Sequence",
-                children: [
-                  { type: "Terminal", text: "VALUE" },
-                  { type: "Terminal", text: "@value" },
-                ],
-              },
-              {
-                type: "Sequence",
-                children: [
-                  { type: "Terminal", text: "ASSERT" },
-                  { type: "Terminal", text: "@expression" },
-                ],
-              },
-              {
-                type: "Sequence",
-                children: [
-                  { type: "Terminal", text: "DEFAULT" },
-                  { type: "Optional", child: { type: "Terminal", text: "ALWAYS" } },
-                  { type: "Terminal", text: "@expression" },
-                ],
-              },
-
-              {
-                type: "Optional",
-                child: {
-                  type: "Sequence",
-                  children: [
-                    { type: "Terminal", text: "PERMISSIONS" },
-                    {
-                      type: "Choice",
-                      index: 1,
-                      children: [
-                        { type: "Terminal", text: "NONE" },
-                        { type: "Terminal", text: "FULL" },
-                        {
-                          type: "Sequence",
-                          children: [
-                            { type: "Terminal", text: "WHERE" },
-                            { type: "NonTerminal", text: "@condition" },
-                          ],
-                        },
-                      ],
-                    },
-                  ],
-                },
-              },
-
-              {
-                type: "Sequence",
-                children: [
-                  { type: "Terminal", text: "COMMENT" },
-                  { type: "Terminal", text: "@string" },
-                ],
-              },
-            ],
-          },
-          repeat: { type: "Skip" },
-        },
-      ],
-    },
-  ],
-};
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
 
-<RailroadDiagram ast={alterAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"ALTER FIELD"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"EXISTS"}]}},{"type":"OneOrMore","child":{"type":"Choice","index":0,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DROP"},{"type":"Choice","index":0,"children":[{"type":"Terminal","text":"TYPE"},{"type":"Terminal","text":"FLEXIBLE"},{"type":"Terminal","text":"READONLY"},{"type":"Terminal","text":"VALUE"},{"type":"Terminal","text":"ASSERT"},{"type":"Terminal","text":"DEFAULT"},{"type":"Terminal","text":"COMMENT"},{"type":"Terminal","text":"REFERENCE"}]}]},{"type":"Terminal","text":"FLEXIBLE"},{"type":"Terminal","text":"READONLY"},{"type":"Terminal","text":"REFERENCE"},{"type":"Sequence","children":[{"type":"Terminal","text":"TYPE"},{"type":"Terminal","text":"@type"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"VALUE"},{"type":"Terminal","text":"@value"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"ASSERT"},{"type":"Terminal","text":"@expression"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"DEFAULT"},{"type":"Optional","child":{"type":"Terminal","text":"ALWAYS"}},{"type":"Terminal","text":"@expression"}]},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"PERMISSIONS"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"NONE"},{"type":"Terminal","text":"FULL"},{"type":"Sequence","children":[{"type":"Terminal","text":"WHERE"},{"type":"NonTerminal","text":"@condition"}]}]}]}},{"type":"Sequence","children":[{"type":"Terminal","text":"COMMENT"},{"type":"Terminal","text":"@string"}]}]},"repeat":{"type":"Skip"}}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 
 ## Examples

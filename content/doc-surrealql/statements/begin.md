@@ -11,39 +11,22 @@ Each statement within SurrealDB is run within its own transaction by default. Th
 
 ### Statement syntax
 
-import RailroadDiagram from "@components/RailroadDiagram.astro";
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
-<Tabs syncKey="begin-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="begin-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 BEGIN [ TRANSACTION ];
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const beginAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    {
-      type: "Sequence",
-      children: [
-        { type: "Terminal", text: "BEGIN" },
-        { type: "Optional", child: { type: "Terminal", text: "TRANSACTION" } },
-        { type: "Terminal", text: ";" },
-      ],
-    },
-  ],
-};
 
-<RailroadDiagram ast={beginAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"BEGIN"},{"type":"Optional","child":{"type":"Terminal","text":"TRANSACTION"}},{"type":"Terminal","text":";"}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example usage
 

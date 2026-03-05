@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | Geometry Types
 description: Geometric and spatial data types for location-based applications.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Geometry Types {#geometry}
 

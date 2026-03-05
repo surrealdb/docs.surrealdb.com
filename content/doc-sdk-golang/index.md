@@ -5,21 +5,9 @@ title: Golang SDKs | Integration
 description: The SurrealDB SDK for Golang enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Image from "@components/Image.astro";
-import LightLogo from "@img/icon/light/golang.png";
-import DarkLogo from "@img/icon/dark/golang.png";
-import Version from "@components/Version.astro";
 
 <div class="flag-title">
-	<Image
-		alt="React"
-		width={42}
-		height={42}
-		src={{
-			light: LightLogo,
-			dark: DarkLogo,
-		}}
-	/>
+	<img src="@assets/img/icon/light/golang.png" darkSrc="@assets/img/icon/dark/golang.png" alt="React" style="width: 42px; height: 42px" />
 	# Golang SDK
 </div>
 

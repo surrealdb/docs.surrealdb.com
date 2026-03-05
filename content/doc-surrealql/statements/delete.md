@@ -9,14 +9,11 @@ description: The DELETE statement can be used to delete records from the databas
 
 The `DELETE` statement can be used to delete records from the database.
 
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 ### Statement syntax
 
-<Tabs syncKey="delete-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="delete-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 DELETE [ FROM | ONLY ] @targets
@@ -27,30 +24,14 @@ DELETE [ FROM | ONLY ] @targets
 ;
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const deleteAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "DELETE" },
-      { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Terminal", text: "FROM" }, { type: "Terminal", text: "ONLY" } ] } },
-      { type: "NonTerminal", text: "@targets" },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "WHERE" }, { type: "NonTerminal", text: "@condition" } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "RETURN" }, { type: "Choice", index: 1, children: [ { type: "Terminal", text: "NONE" }, { type: "Terminal", text: "BEFORE" }, { type: "Terminal", text: "AFTER" }, { type: "Terminal", text: "DIFF" }, { type: "NonTerminal", text: "@statement_param, ..." } ] } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "TIMEOUT" }, { type: "NonTerminal", text: "@duration" } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "EXPLAIN" }, { type: "Optional", child: { type: "Terminal", text: "FULL" } } ] } },
-      { type: "Terminal", text: ";" }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={deleteAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DELETE"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"FROM"},{"type":"Terminal","text":"ONLY"}]}},{"type":"NonTerminal","text":"@targets"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"WHERE"},{"type":"NonTerminal","text":"@condition"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"RETURN"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"NONE"},{"type":"Terminal","text":"BEFORE"},{"type":"Terminal","text":"AFTER"},{"type":"Terminal","text":"DIFF"},{"type":"NonTerminal","text":"@statement_param, ..."}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"TIMEOUT"},{"type":"NonTerminal","text":"@duration"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"EXPLAIN"},{"type":"Optional","child":{"type":"Terminal","text":"FULL"}}]}},{"type":"Terminal","text":";"}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example usage
 

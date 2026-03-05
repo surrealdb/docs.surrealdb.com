@@ -5,21 +5,9 @@ title: Python SDKs | Integration
 description: The SurrealDB SDK for Python enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Image from "@components/Image.astro";
-import LightLogo from "@img/icon/light/python.png";
-import DarkLogo from "@img/icon/dark/python.png";
-import Version from "@components/Version.astro";
 
 <div class="flag-title">
-	<Image
-		alt="Python"
-		width={42}
-		height={42}
-		src={{
-			light: LightLogo,
-			dark: DarkLogo,
-		}}
-	/>
+	<img src="@assets/img/icon/light/python.png" darkSrc="@assets/img/icon/dark/python.png" alt="Python" style="width: 42px; height: 42px" />
 	# Python SDK
 </div>
 
@@ -29,7 +17,7 @@ The SurrealDB SDK for Python enables you to interact with SurrealDB from server-
 > The SDK requires Python version `3.10` or greater, and is available as a [PyPI package](https://pypi.org/project/surrealdb/).
 
 > [!NOTE]
-> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <Version />, ensuring compatibility with the latest version.
+> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <version />, ensuring compatibility with the latest version.
 
 To contribute to the SDK code, submit an Issue or Pull Request in the [surrealdb.py](https://github.com/surrealdb/surrealdb.py) repository. To contribute to this documentation, submit an Issue or Pull Request in the [SurrealDB documentation](https://github.com/surrealdb/docs.surrealdb.com) repository.
 

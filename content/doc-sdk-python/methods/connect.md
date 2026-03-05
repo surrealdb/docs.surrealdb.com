@@ -4,7 +4,6 @@ sidebar_label: connect - Surreal
 title: Python | SDK | Methods | connect
 description: The SurrealDB SDK for Python enables simple and advanced querying of a remote or embedded database.
 ---
-import Label from "@components/shared/Label.astro";
 
 # `Surreal / AsyncSurreal`
 
@@ -27,7 +26,7 @@ AsyncSurreal(url)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>url</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The url of the database endpoint to connect to.

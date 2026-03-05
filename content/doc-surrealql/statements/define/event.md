@@ -5,10 +5,6 @@ title: DEFINE EVENT statement | SurrealQL
 description: The DEFINE EVENT statement can be used to create events which can be triggered after any change or modification to the data in a record.
 ---
 
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 # `DEFINE EVENT` statement
 
@@ -32,8 +28,8 @@ Events allow you to define custom logic that is executed when a record is create
 
 ## Statement syntax
 
-<Tabs syncKey="define-event-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="define-event-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 DEFINE EVENT [ IF NOT EXISTS | OVERWRITE ] @name ON [ TABLE ] @table
@@ -43,121 +39,14 @@ DEFINE EVENT [ IF NOT EXISTS | OVERWRITE ] @name ON [ TABLE ] @table
   [ COMMENT @string ]
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const defineEventAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    {
-      type: "Sequence",
-      children: [
-        { type: "Terminal", text: "DEFINE" },
-        { type: "Terminal", text: "EVENT" },
 
-        // [ IF NOT EXISTS | OVERWRITE ]
-        {
-          type: "Optional",
-          child: {
-            type: "Choice",
-            index: 1,
-            children: [
-              { type: "Terminal", text: "OVERWRITE" },
-              {
-                type: "Sequence",
-                children: [
-                  { type: "Terminal", text: "IF" },
-                  { type: "Terminal", text: "NOT" },
-                  { type: "Terminal", text: "EXISTS" },
-                ],
-              },
-            ],
-          },
-        },
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DEFINE"},{"type":"Terminal","text":"EVENT"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"OVERWRITE"},{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}]}},{"type":"NonTerminal","text":"@name"},{"type":"Terminal","text":"ON"},{"type":"Optional","child":{"type":"Terminal","text":"TABLE"}},{"type":"NonTerminal","text":"@table"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"ASYNC"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"RETRY"},{"type":"NonTerminal","text":"@retry"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"MAXDEPTH"},{"type":"NonTerminal","text":"@max_depth"}]}}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"WHEN"},{"type":"NonTerminal","text":"@condition"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"THEN"},{"type":"NonTerminal","text":"@action"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"COMMENT"},{"type":"NonTerminal","text":"@string"}]}}]}]}' />
 
-        { type: "NonTerminal", text: "@name" },
-        { type: "Terminal", text: "ON" },
-        { type: "Optional", child: { type: "Terminal", text: "TABLE" } },
-        { type: "NonTerminal", text: "@table" },
-
-        // [ ASYNC [ RETRY @retry ] [ MAXDEPTH @max_depth ] ]
-        {
-          type: "Optional",
-          child: {
-            type: "Sequence",
-            children: [
-              { type: "Terminal", text: "ASYNC" },
-
-              {
-                type: "Optional",
-                child: {
-                  type: "Sequence",
-                  children: [
-                    { type: "Terminal", text: "RETRY" },
-                    { type: "NonTerminal", text: "@retry" },
-                  ],
-                },
-              },
-
-              {
-                type: "Optional",
-                child: {
-                  type: "Sequence",
-                  children: [
-                    { type: "Terminal", text: "MAXDEPTH" },
-                    { type: "NonTerminal", text: "@max_depth" },
-                  ],
-                },
-              },
-            ],
-          },
-        },
-
-        // [ WHEN @condition ]
-        {
-          type: "Optional",
-          child: {
-            type: "Sequence",
-            children: [
-              { type: "Terminal", text: "WHEN" },
-              { type: "NonTerminal", text: "@condition" },
-            ],
-          },
-        },
-
-        // [ THEN @action ]
-        {
-          type: "Optional",
-          child: {
-            type: "Sequence",
-            children: [
-              { type: "Terminal", text: "THEN" },
-              { type: "NonTerminal", text: "@action" },
-            ],
-          },
-        },
-
-        // [ COMMENT @string ]
-        {
-          type: "Optional",
-          child: {
-            type: "Sequence",
-            children: [
-              { type: "Terminal", text: "COMMENT" },
-              { type: "NonTerminal", text: "@string" },
-            ],
-          },
-        },
-      ],
-    },
-  ],
-};
-
-<RailroadDiagram ast={defineEventAst} className="my-6" />
-
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ### Clauses:
 
@@ -342,7 +231,6 @@ DEFINE EVENT user_event ON TABLE user
 ## Using `IF NOT EXISTS` clause
 
 
-
 The `IF NOT EXISTS` clause can be used to define an event only if it does not already exist. You should use the `IF NOT EXISTS` clause when defining an event in SurrealDB if you want to ensure that the event is only created if it does not already exist. If the event already exists, the `DEFINE EVENT` statement will return an error.
 
 It's particularly useful when you want to safely attempt to define a event without manually checking its existence first.
@@ -363,7 +251,7 @@ DEFINE EVENT IF NOT EXISTS example ON example THEN {};
 
 ## Using `OVERWRITE` clause
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `OVERWRITE` clause can be used to define an event and overwrite an existing one if it already exists. You should use the `OVERWRITE` clause when you want to modify an existing event definition. If the event already exists, the `DEFINE EVENT` statement will overwrite the existing event definition with the new one.
 
@@ -422,7 +310,7 @@ DEFINE EVENT on_comment_created ON TABLE comment
 
 ## Accessing `$input` in events
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 The behaviour of events can be further refined via the `$input` parameter, which represents the record in question for the event.
 
@@ -457,7 +345,7 @@ Output:
 
 ## Async events
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 Events in SurrealDB are executed synchronously within the same transaction that triggers them. While this ensures consistency, it can lead to increased latency for write operations if the event logic is complex or resource intensive.
 

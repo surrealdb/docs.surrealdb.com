@@ -5,10 +5,6 @@ title: DEFINE USER statement | SurrealQL
 description: Use the DEFINE USER statement to create system users on SurrealDB.
 ---
 
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 # `DEFINE USER` statement
 
@@ -31,8 +27,8 @@ Use the `DEFINE USER` statement to create system users on SurrealDB
 
 ## Statement syntax
 
-<Tabs syncKey="define-user-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="define-user-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 DEFINE USER [ OVERWRITE | IF NOT EXISTS ] @name
@@ -43,38 +39,14 @@ DEFINE USER [ OVERWRITE | IF NOT EXISTS ] @name
   [ COMMENT @string ]
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const defineUserAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "DEFINE" },
-      { type: "Terminal", text: "USER" },
-      { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Terminal", text: "OVERWRITE" }, { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "NOT" }, { type: "Terminal", text: "EXISTS" } ] } ] } },
-      { type: "NonTerminal", text: "@name" },
-      { type: "Terminal", text: "ON" },
-      { type: "Choice", index: 1, children: [ { type: "Terminal", text: "ROOT" }, { type: "Terminal", text: "NAMESPACE" }, { type: "Terminal", text: "DATABASE" } ] },
-      { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Sequence", children: [ { type: "Terminal", text: "PASSWORD" }, { type: "NonTerminal", text: "@pass" } ] }, { type: "Sequence", children: [ { type: "Terminal", text: "PASSHASH" }, { type: "NonTerminal", text: "@hash" } ] } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "ROLES" }, { type: "NonTerminal", text: "@roles" } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [
-        { type: "Terminal", text: "DURATION" },
-        { type: "Choice", index: 1, children: [
-          { type: "Sequence", children: [ { type: "Terminal", text: "FOR" }, { type: "Terminal", text: "TOKEN" }, { type: "NonTerminal", text: "@duration" }, { type: "Optional", child: { type: "Terminal", text: "," } }, { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "FOR" }, { type: "Terminal", text: "SESSION" }, { type: "NonTerminal", text: "@duration" } ] } } ] },
-          { type: "Sequence", children: [ { type: "Terminal", text: "FOR" }, { type: "Terminal", text: "SESSION" }, { type: "NonTerminal", text: "@duration" }, { type: "Optional", child: { type: "Terminal", text: "," } }, { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "FOR" }, { type: "Terminal", text: "TOKEN" }, { type: "NonTerminal", text: "@duration" } ] } } ] }
-        ] }
-      ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "COMMENT" }, { type: "NonTerminal", text: "@string" } ] } }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={defineUserAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DEFINE"},{"type":"Terminal","text":"USER"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"OVERWRITE"},{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}]}},{"type":"NonTerminal","text":"@name"},{"type":"Terminal","text":"ON"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"ROOT"},{"type":"Terminal","text":"NAMESPACE"},{"type":"Terminal","text":"DATABASE"}]},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"PASSWORD"},{"type":"NonTerminal","text":"@pass"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"PASSHASH"},{"type":"NonTerminal","text":"@hash"}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"ROLES"},{"type":"NonTerminal","text":"@roles"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"DURATION"},{"type":"Choice","index":1,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"FOR"},{"type":"Terminal","text":"TOKEN"},{"type":"NonTerminal","text":"@duration"},{"type":"Optional","child":{"type":"Terminal","text":","}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"FOR"},{"type":"Terminal","text":"SESSION"},{"type":"NonTerminal","text":"@duration"}]}}]},{"type":"Sequence","children":[{"type":"Terminal","text":"FOR"},{"type":"Terminal","text":"SESSION"},{"type":"NonTerminal","text":"@duration"},{"type":"Optional","child":{"type":"Terminal","text":","}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"FOR"},{"type":"Terminal","text":"TOKEN"},{"type":"NonTerminal","text":"@duration"}]}}]}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"COMMENT"},{"type":"NonTerminal","text":"@string"}]}}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example usage
 
@@ -159,7 +131,7 @@ DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD "example" ROLES OWNER;
 
 ## Using `OVERWRITE` clause
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `OVERWRITE` clause can be used to define a user and overwrite an existing one if it already exists. You should use the `OVERWRITE` clause when you want to modify an existing user definition. If the user already exists, the `DEFINE USER` statement will overwrite the existing user definition with the new one.
 
@@ -204,6 +176,6 @@ Currently, only the built-in roles OWNER, EDITOR and VIEWER are available.
 
 ## Duration
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The duration clause specifies the duration of the token returned after successful authentication with a password or passhash as well as the duration of the session established both using a password or passhash and the aforementioned token. The difference between these concepts is explained in the [expiration](/docs/surrealdb/security/authentication#expiration) documentation.

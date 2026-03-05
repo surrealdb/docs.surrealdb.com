@@ -4,7 +4,6 @@ sidebar_label: Time functions
 title: Time functions | SurrealQL
 description: These functions can be used when working with and manipulating datetime values.
 ---
-import Since from '@components/shared/Since.astro'
 
 # Time Functions
 
@@ -381,7 +380,7 @@ See also:
 
 ## `time::maximum`
 
-<Since v="v2.3.0" />
+<since v="v2.3.0" />
 
 The `time::maximum` constant returns the greatest possible datetime that can be used.
 
@@ -431,7 +430,6 @@ true
 ## `time::micros`
 
 
-
 The `time::micros` function extracts the microseconds as a number from a datetime, or from the current date if no datetime argument is present.
 
 ```surql title="API DEFINITION"
@@ -456,7 +454,6 @@ RETURN time::micros(d"1987-06-22T08:30:45Z");
 <br />
 
 ## `time::millis`
-
 
 
 The `time::millis` function extracts the milliseconds as a number from a datetime, or from the current date if no datetime argument is present.
@@ -514,7 +511,7 @@ See also:
 
 ## `time::minimum`
 
-<Since v="v2.3.0" />
+<since v="v2.3.0" />
 
 The `time::minimum` constant returns the least possible datetime that can be used.
 
@@ -849,7 +846,6 @@ RETURN d'2024-09-03T02:33:15.349397Z'.is_leap_year();
 ## `time::from_micros`
 
 
-
 The `time::from_micros` function calculates a datetime based on the microseconds since January 1, 1970 0:00:00 UTC.
 
 ```surql title="API DEFINITION"
@@ -898,7 +894,6 @@ RETURN time::from_millis(1000);
 <br />
 
 ## `time::from_nanos`
-
 
 
 The `time::from_nanos` function calculates a datetime based on the nanoseconds since January 1, 1970 0:00:00 UTC.

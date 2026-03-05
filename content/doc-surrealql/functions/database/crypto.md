@@ -5,7 +5,6 @@ title: Crypto functions | SurrealQL
 description: These functions can be used when hashing data, encrypting data, and for securely authenticating users into the database.
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Crypto functions
 
@@ -80,7 +79,7 @@ These functions can be used when hashing data, encrypting data, and for securely
 
 ## `crypto::blake3`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `crypto::blake3` function returns the blake3 hash of the input value.
 
@@ -106,7 +105,7 @@ RETURN crypto::blake3("tobie");
 
 ## `crypto::joaat`
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 The `crypto::joaat` function returns the joaat hash of the input value.
 

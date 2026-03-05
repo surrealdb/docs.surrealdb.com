@@ -5,14 +5,12 @@ title: Upsert Method in Rust | Rust SDK | Integration | SurrealDB
 description: The .upsert() method for the SurrealDB Rust SDK upserts all or specific records in a table.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # `upsert()`
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 Upserts all records in a table, or a specific record.
 
@@ -311,9 +309,9 @@ UPSERT $resource PATCH $data;
 
 * [.upsert() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.upsert)
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 Upserts all records in a table, or a specific record.
 
@@ -619,6 +617,6 @@ UPSERT $resource PATCH $data;
 
 * [.upsert() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.upsert)
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

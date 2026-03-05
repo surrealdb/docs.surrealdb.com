@@ -5,7 +5,6 @@ title: Python | SDK | Methods | use
 description: The SurrealDB SDK for Python enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.use()`
 
@@ -27,7 +26,7 @@ db.use(namespace, database)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>namespace</code>
-                <Label label="Required" />
+                <label label="Required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Switches to a specific namespace.
@@ -36,7 +35,7 @@ db.use(namespace, database)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>database</code>
-                <Label label="Required" />
+                <label label="Required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Switches to a specific database.

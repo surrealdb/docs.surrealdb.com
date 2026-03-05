@@ -6,13 +6,12 @@ description: In the SurrealDB type system, values can be converted to other valu
 
 ---
 
-import Table from '@components/shared/Table.astro'
 
 # Casting
 
 In the SurrealDB type system, values can be converted to other values efficiently. This is useful if input is specified in a query which must be of a certain type, or if a user may have provided a parameter with an incorrect type.
 
-<Table>
+<table>
     <thead>
         <tr>
             <th scope="col" class="w-40">Type</th>
@@ -141,7 +140,7 @@ In the SurrealDB type system, values can be converted to other values efficientl
             </td>
         </tr>
     </tbody>
-</Table>
+</table>
 
 ## `<array>`
 

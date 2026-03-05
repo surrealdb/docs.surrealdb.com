@@ -5,9 +5,6 @@ title: Array functions | SurrealQL
 description: These functions can be used when working with, and manipulating arrays of data.
 ---
 
-import Since from '@components/shared/Since.astro'
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # Array functions
 
@@ -838,7 +835,7 @@ RETURN array::distinct([ 1, 2, 1, 3, 3, 4 ]);
 
 ## `array::fill`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `array::fill` function replaces all values of an array with a new value.
 
@@ -1250,7 +1247,7 @@ RETURN array::flatten([ [1, 2], [3, 4], 'SurrealDB', [5, 6, [7, 8]] ]);
 
 ## `array::fold`
 
-<Since v="v2.1.0" />
+<since v="v2.1.0" />
 
 The `array::fold` function returns a final value from the elements of an array by allowing an operation to be performed at each step of the way as each subsequent item in the array is encountered. To use `array::fold`, pass in an initial value, followed by parameter names for the current value and the next value and an operation to perform on them. If you only want to perform an operation on each item and do not need an initial value, use the [`array::reduce`](/docs/surrealql/functions/database/array#arrayreduce) function instead.
 
@@ -1506,7 +1503,7 @@ RETURN array::intersect([1, 2, 3, 4], [3, 4, 5, 6]);
 
 ## `array::is_empty`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `array::is_empty` function checks whether the array contains values.
 
@@ -2134,7 +2131,7 @@ RETURN array::push([1, 2, 3, 4], 5);
 
 ## `array::range`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `array::range` function creates an array of numbers from a given range.
 
@@ -2176,7 +2173,7 @@ RETURN array::range(1..=5);
 
 ## `array::reduce`
 
-<Since v="v2.1.0" />
+<since v="v2.1.0" />
 
 The `array::reduce` function reduces the elements of an array to a single final value by allowing an operation to be performed at each step of the way as each subsequent item in the array is encountered. To use `array::reduce`, pass in parameter names for the current value and the next value and an operation to perform on them. If you need an initial value to pass in before the other items are operated on, use the [`array::fold`](/docs/surrealql/functions/database/array#arrayfold) function instead.
 
@@ -2325,7 +2322,7 @@ RETURN array::remove([1, 2, 3, 4, 5], -2);
 
 ## `array::repeat`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `array::repeat` function creates an array of a given size contain the specified value for each element.
 
@@ -2390,7 +2387,7 @@ RETURN array::reverse([ 1, 2, 3, 4, 5 ]);
 
 ## `array::sequence`
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 The `array::sequence` function creates an array of sequential integers.
 
@@ -2415,7 +2412,7 @@ array::sequence(-5, 6);
 
 ## `array::shuffle`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `array::shuffle` function randomly shuffles the items of an array.
 
@@ -2804,7 +2801,7 @@ RETURN array::sort::desc([ 1, 2, 1, null, "something", 3, 3, 4, 0 ]);
 
 ## `array::swap`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `array::swap` function swaps two values of an array based on indexes.
 
@@ -2988,8 +2985,8 @@ value = "[['Movie', 'Avengers: Infinity War', 'Groundhog Day', 'Star Wars'], ['B
 ].transpose();
 ```
 
-<Tabs>
-  <TabItem label="Output since 2.2" default>
+<tabs>
+  <tabitem label="Output since 2.2">
 
 ```surql
 [
@@ -3008,9 +3005,9 @@ value = "[['Movie', 'Avengers: Infinity War', 'Groundhog Day', 'Star Wars'], ['B
 ]
 ```
 
-  </TabItem>
+  </tabitem>
 
-  <TabItem label="Output before 2.2" default>
+  <tabitem label="Output before 2.2">
 ```surql
 [
 	[
@@ -3026,8 +3023,8 @@ value = "[['Movie', 'Avengers: Infinity War', 'Groundhog Day', 'Star Wars'], ['B
 	]
 ]
 ```
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 This new behaviour allows transposed arrays to be transposed once more to restore the original output, except with `NONE` added in all the indexes that lack in any array.
 
@@ -3106,7 +3103,7 @@ RETURN array::union([1, 2, 1, 6], [1, 3, 4, 5, 6]);
 
 ## `array::windows`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 ```surql title="API DEFINITION"
 array::windows(array, $window_size: int) -> array
@@ -3173,7 +3170,7 @@ FROM person;
 
 ## Method chaining
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 Method chaining allows functions to be called using the `.` dot operator on a value of a certain type instead of the full path of the function followed by the value.
 

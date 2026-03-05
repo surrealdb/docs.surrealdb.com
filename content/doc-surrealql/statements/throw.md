@@ -9,37 +9,24 @@ description: The THROW statement can be used to stop execution of a query and re
 
 The `THROW` statement can be used to throw an error in a place where something unexpected is happening. Execution of the query will be aborted and the error will be returned to the client. While a string is most commonly seen after a `THROW` statement, any [value](/docs/surrealql/datamodel/values) at all can be used as error output.
 
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 ### Statement syntax
 
-<Tabs syncKey="throw-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="throw-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 THROW @error
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const throwAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "THROW" },
-      { type: "NonTerminal", text: "@error" }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={throwAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"THROW"},{"type":"NonTerminal","text":"@error"}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example usage
 

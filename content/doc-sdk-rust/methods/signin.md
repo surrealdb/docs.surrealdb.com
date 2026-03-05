@@ -5,14 +5,11 @@ title: Signin Method in Rust | Rust SDK | Integration | SurrealDB
 description: The .signin() method for the SurrealDB Rust SDK signs in to a specific access method.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
-import Label from "@components/shared/Label.astro";
 
 # `signin()`
 
-<Tabs>
-<TabItem label="2.x">
+<tabs>
+<tabitem label="2.x">
 
 Signs in to a specific access method for an already signed up record user.
 
@@ -88,9 +85,9 @@ async fn main() -> surrealdb::Result<()> {
 
 * [.signin() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.signin)
 
-</TabItem>
+</tabitem>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 Signs in to a specific access method for an already signed up record user.
 
@@ -169,6 +166,6 @@ async fn main() -> surrealdb::Result<()> {
 
 * [.signin() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.signin)
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

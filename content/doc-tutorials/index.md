@@ -5,21 +5,9 @@ title: Tutorials | SurrealDB Tutorials | How to guides | SurrealDB guides | Data
 description: In this section, you will find step-by-step guides and tutorials on how to perform various tasks and achieve specific goals using SurrealDB.
 ---
 
-import Image from "@components/Image.astro";
-
-import LightLogo from "@img/icon/light/tutorials-light.png";
-import DarkLogo from "@img/icon/dark/tutorials.png";
 
 <div class="flag-title">
-	<Image
-		alt="Tutorials"
-		width={42}
-		height={42}
-		src={{
-			light: LightLogo,
-			dark: DarkLogo,
-		}}
-	/>
+	<img src="@assets/img/icon/light/tutorials-light.png" darkSrc="@assets/img/icon/dark/tutorials.png" alt="Tutorials" style="width: 42px; height: 42px" />
 	# Tutorials
 </div>
 

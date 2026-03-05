@@ -4,7 +4,6 @@ sidebar_label: Run SurrealQL queries
 title: Run SurrealQL queries | .NET | SDK | Concepts
 description: SurrealDB supports a number of methods for interacting with the database and performing CRUD operations.
 ---
-import Label from "@components/shared/Label.astro";
 
 # Run SurrealQL queries
 
@@ -50,7 +49,7 @@ await db.Query(sql)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>sql</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Specifies the SurrealQL statements.
@@ -59,7 +58,7 @@ await db.Query(sql)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -105,7 +104,7 @@ await db.RawQuery(sql, params)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>sql</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Specifies the SurrealQL statements.
@@ -114,7 +113,7 @@ await db.RawQuery(sql, params)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>params</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Assigns variables which can be used in the query.
@@ -123,7 +122,7 @@ await db.RawQuery(sql, params)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.

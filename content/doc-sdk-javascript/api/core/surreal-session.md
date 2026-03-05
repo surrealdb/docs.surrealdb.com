@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | SurrealSession
 description: The SurrealSession class provides session-scoped context with authentication and query execution capabilities.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `SurrealSession` {#surrealsession}
 
@@ -213,7 +212,7 @@ session.use(what)
     </thead>
     <tbody>
         <tr>
-            <td><code>what</code> <Label label="required" /></td>
+            <td><code>what</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/types/#namespacedatabase">NamespaceDatabase</a> | null</code></td>
             <td>Object specifying namespace and/or database to switch to.</td>
         </tr>
@@ -265,12 +264,12 @@ session.set(variable, value)
     </thead>
     <tbody>
         <tr>
-            <td><code>variable</code> <Label label="required" /></td>
+            <td><code>variable</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>The name of the variable (without the $ prefix).</td>
         </tr>
         <tr>
-            <td><code>value</code> <Label label="required" /></td>
+            <td><code>value</code> <label label="required" /></td>
             <td><code>unknown</code></td>
             <td>The value to assign to the variable.</td>
         </tr>
@@ -310,7 +309,7 @@ session.unset(variable)
     </thead>
     <tbody>
         <tr>
-            <td><code>variable</code> <Label label="required" /></td>
+            <td><code>variable</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>The name of the variable to remove (without the $ prefix).</td>
         </tr>
@@ -373,7 +372,7 @@ session.signup(auth)
     </thead>
     <tbody>
         <tr>
-            <td><code>auth</code> <Label label="required" /></td>
+            <td><code>auth</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/types/#accessrecordauth">AccessRecordAuth</a></code></td>
             <td>The authentication details including access method and record data.</td>
         </tr>
@@ -422,7 +421,7 @@ session.signin(auth)
     </thead>
     <tbody>
         <tr>
-            <td><code>auth</code> <Label label="required" /></td>
+            <td><code>auth</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/types/#anyauth">AnyAuth</a></code></td>
             <td>Authentication details (system user, record user, or access method).</td>
         </tr>
@@ -477,7 +476,7 @@ session.authenticate(token)
     </thead>
     <tbody>
         <tr>
-            <td><code>token</code> <Label label="required" /></td>
+            <td><code>token</code> <label label="required" /></td>
             <td><code>string | <a href="/docs/2.x/sdk/javascript/api/types/#tokens">Tokens</a></code></td>
             <td>The access token string or tokens object with access and refresh tokens.</td>
         </tr>
@@ -574,12 +573,12 @@ session.subscribe(event, listener)
     </thead>
     <tbody>
         <tr>
-            <td><code>event</code> <Label label="required" /></td>
+            <td><code>event</code> <label label="required" /></td>
             <td><code>keyof <a href="/docs/2.x/sdk/javascript/api/types/#sessionevents">SessionEvents</a></code></td>
             <td>The event name to subscribe to (<code>"auth"</code> or <code>"using"</code>).</td>
         </tr>
         <tr>
-            <td><code>listener</code> <Label label="required" /></td>
+            <td><code>listener</code> <label label="required" /></td>
             <td><code>Function</code></td>
             <td>Callback function invoked when the event is emitted.</td>
         </tr>

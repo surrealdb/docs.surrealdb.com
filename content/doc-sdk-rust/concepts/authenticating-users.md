@@ -5,13 +5,11 @@ title: Authenticating Users in Rust | Rust SDK | SurrealDB
 description: The Rust SDK for SurrealDB supports a number of methods for authenticating users and securing the database.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # Authenticating users
 
-<Tabs>
-<TabItem label="3.x">
+<tabs>
+<tabitem label="3.x">
 
 The [`.signup()`](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.signup) and [`.signin()`](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.signin) methods are used for both system users (users created with a [DEFINE USER](/docs/surrealql/statements/define/user) statement) and record users (users created with a [DEFINE ACCESS](/docs/surrealql/statements/define/access) statement). These two methods take any type that implements the [`Credentials`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/trait.Credentials.html) trait, namely the structs [`Root`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Root.html), [`Namespace`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Namespace.html), [`Database`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Database.html), and [`Record`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Record.html).
 
@@ -288,9 +286,9 @@ Each of the crates featured in the Rust SDK also use the schema above. Three of 
 
 Learn more about authentication in SurrealDB in our [security best practices](/docs/surrealdb/security/security-best-practices#authentication) documentation and in the [security](/docs/surrealdb/security/authentication#expiration) section of the SurrealDB documentation.
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 The [`.signup()`](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.signup) and [`.signin()`](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.signin) methods are used for both system users (users created with a [DEFINE USER](/docs/surrealql/statements/define/user) statement) and record users (users created with a [DEFINE ACCESS](/docs/surrealql/statements/define/access) statement). These two methods take any type that implements the [`Credentials`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/trait.Credentials.html) trait, namely the structs [`Root`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Root.html), [`Namespace`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Namespace.html), [`Database`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Database.html), and [`Record`](https://docs.rs/surrealdb/latest/surrealdb/opt/auth/struct.Record.html).
 
@@ -334,7 +332,6 @@ DEFINE ACCESS account ON DATABASE TYPE RECORD
 ```
 
 Since the `params` of a `Record` struct used to sign up and sign can be any type that implements `Serialize`, we can put our own struct together and pass them into these methods. On signup, the database will CREATE a `user` record that holds the name and password, and on signin it will SELECT the user that has a matching name and password.
-
 
 
 ```rust
@@ -574,6 +571,6 @@ Each of the crates featured in the Rust SDK also use the schema above. Three of 
 
 Learn more about authentication in SurrealDB in our [security best practices](/docs/surrealdb/security/security-best-practices#authentication) documentation and in the [security](/docs/surrealdb/security/authentication#expiration) section of the SurrealDB documentation.
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

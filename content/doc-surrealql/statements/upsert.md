@@ -4,14 +4,10 @@ sidebar_label: UPSERT
 title: UPSERT statement | SurrealQL
 description: The UPSERT statement can be used to insert records or modify records that already exist
 ---
-import Since from '@components/shared/Since.astro'
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
-import RailroadDiagram from "@components/RailroadDiagram.astro";
 
 # `UPSERT` statement
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `UPSERT` statement can be used to insert records into the database, or to update them if they exist.
 
@@ -20,8 +16,8 @@ The `UPSERT` statement can be used to insert records into the database, or to up
 
 ### Statement syntax
 
-<Tabs syncKey="upsert-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="upsert-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 UPSERT [ ONLY ] @targets
@@ -38,37 +34,14 @@ UPSERT [ ONLY ] @targets
 ;
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const upsertAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "UPSERT" },
-      { type: "Optional", child: { type: "Terminal", text: "ONLY" } },
-      { type: "NonTerminal", text: "@targets" },
-      { type: "Optional", child: { type: "Choice", index: 1, children: [
-        { type: "Sequence", children: [ { type: "Terminal", text: "CONTENT" }, { type: "NonTerminal", text: "@value" } ] },
-        { type: "Sequence", children: [ { type: "Terminal", text: "MERGE" }, { type: "NonTerminal", text: "@value" } ] },
-        { type: "Sequence", children: [ { type: "Terminal", text: "PATCH" }, { type: "NonTerminal", text: "@value" } ] },
-        { type: "Sequence", children: [ { type: "Terminal", text: "REPLACE" }, { type: "NonTerminal", text: "@value" } ] },
-        { type: "Sequence", children: [ { type: "Choice", index: 1, children: [ { type: "Terminal", text: "SET" }, { type: "Terminal", text: "UNSET" } ] }, { type: "NonTerminal", text: "@field (=|,) @value ..." } ] }
-      ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "WHERE" }, { type: "NonTerminal", text: "@condition" } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "RETURN" }, { type: "Choice", index: 1, children: [ { type: "Terminal", text: "NONE" }, { type: "Terminal", text: "BEFORE" }, { type: "Terminal", text: "AFTER" }, { type: "Terminal", text: "DIFF" }, { type: "NonTerminal", text: "@statement_param, ..." }, { type: "Sequence", children: [ { type: "Terminal", text: "VALUE" }, { type: "NonTerminal", text: "@statement_param" } ] } ] } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "TIMEOUT" }, { type: "NonTerminal", text: "@duration" } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "EXPLAIN" }, { type: "Optional", child: { type: "Terminal", text: "FULL" } } ] } },
-      { type: "Terminal", text: ";" }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={upsertAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"UPSERT"},{"type":"Optional","child":{"type":"Terminal","text":"ONLY"}},{"type":"NonTerminal","text":"@targets"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"CONTENT"},{"type":"NonTerminal","text":"@value"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"MERGE"},{"type":"NonTerminal","text":"@value"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"PATCH"},{"type":"NonTerminal","text":"@value"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"REPLACE"},{"type":"NonTerminal","text":"@value"}]},{"type":"Sequence","children":[{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"SET"},{"type":"Terminal","text":"UNSET"}]},{"type":"NonTerminal","text":"@field (=|,) @value ..."}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"WHERE"},{"type":"NonTerminal","text":"@condition"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"RETURN"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"NONE"},{"type":"Terminal","text":"BEFORE"},{"type":"Terminal","text":"AFTER"},{"type":"Terminal","text":"DIFF"},{"type":"NonTerminal","text":"@statement_param, ..."},{"type":"Sequence","children":[{"type":"Terminal","text":"VALUE"},{"type":"NonTerminal","text":"@statement_param"}]}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"TIMEOUT"},{"type":"NonTerminal","text":"@duration"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"EXPLAIN"},{"type":"Optional","child":{"type":"Terminal","text":"FULL"}}]}},{"type":"Terminal","text":";"}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example usage
 
@@ -531,9 +504,9 @@ UPSERT person:gladys SET age = 90;
 UPSERT person:gladys CONTENT { age: 70 };
 ```
 
-<Tabs groupId="content">
+<tabs synckey="content">
 
-<TabItem value="Before" label="Output before 2.1.0" >
+<tabitem label="Output before 2.1.0">
 
 ```surql
 -------- Query --------
@@ -548,9 +521,9 @@ UPSERT person:gladys CONTENT { age: 70 };
 -------- Query --------
 'Found changed value for field `created`, with record `person:gladys`, but field is readonly'
 ```
-</TabItem>
+</tabitem>
 
-<TabItem value="After" label="Output after 2.1.0" >
+<tabitem label="Output after 2.1.0">
 
 ```surql
 -------- Query --------
@@ -571,8 +544,8 @@ UPSERT person:gladys CONTENT { age: 70 };
 	}
 ]
 ```
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 ## REPLACE clause
 

@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | InsertRelation
 description: The InsertRelation method inserts a relation between two records.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # .InsertRelation[T](table, data)
 
@@ -28,7 +27,7 @@ db.InsertRelation[T](table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>table</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Optionally pass along a table to insert into.
@@ -37,7 +36,7 @@ db.InsertRelation[T](table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Either a single document/record or an array of documents/records to insert

@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | LivePromise
 description: LivePromise variants for managing real-time live query subscriptions.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Live Query Promises {#livepromise}
 
@@ -63,7 +62,7 @@ livePromise.fields(...fields)
     </thead>
     <tbody>
         <tr>
-            <td><code>fields</code> <Label label="required" /></td>
+            <td><code>fields</code> <label label="required" /></td>
             <td><code>Field&lt;T&gt;[]</code></td>
             <td>Field names to include in updates.</td>
         </tr>
@@ -104,7 +103,7 @@ livePromise.value(field)
     </thead>
     <tbody>
         <tr>
-            <td><code>field</code> <Label label="required" /></td>
+            <td><code>field</code> <label label="required" /></td>
             <td><code>Field&lt;T&gt;</code></td>
             <td>Field name to extract.</td>
         </tr>
@@ -144,7 +143,7 @@ livePromise.where(condition)
     </thead>
     <tbody>
         <tr>
-            <td><code>condition</code> <Label label="required" /></td>
+            <td><code>condition</code> <label label="required" /></td>
             <td><code>ExprLike</code></td>
             <td>Condition expression to filter updates (string or <a href="/docs/2.x/sdk/javascript/api/utilities/expr">Expression</a> object).</td>
         </tr>
@@ -185,7 +184,7 @@ livePromise.fetch(...fields)
     </thead>
     <tbody>
         <tr>
-            <td><code>fields</code> <Label label="required" /></td>
+            <td><code>fields</code> <label label="required" /></td>
             <td><code>Field&lt;T&gt;[]</code></td>
             <td>Related fields to fetch.</td>
         </tr>

@@ -5,9 +5,6 @@ title: Connect via CLI | SurrealDB Cloud
 description: Connect to your SurrealDB Cloud instance using the CLI and run queries.
 ---
 
-import Image from "@components/Image.astro";
-
-import OpenInCLI from '@img/image/cloud/open-in-cli.png';
 
 # Connect via CLI
 
@@ -26,13 +23,7 @@ Once it is installed, you can connect to your SurrealDB Cloud Instance using the
 surreal sql --endpoint <endpoint> --ns <namespace> --db <database> --token <token>
 ```
 
-<Image
-alt="SurrealDB Cloud "
-src={{
-	light: OpenInCLI,
-	dark: OpenInCLI,
-	}}
-/>
+<img src="@assets/img/image/cloud/open-in-cli.png" alt="SurrealDB Cloud " />
 
 The `token` is a JSON Web Token (JWT) that is used to authenticate your connection to the SurrealDB Cloud Instance. You can find the token in the Instance details page in the SurrealDB Cloud console.
 

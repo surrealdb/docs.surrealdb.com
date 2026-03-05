@@ -4,10 +4,6 @@ sidebar_label: REMOVE
 title: REMOVE statement | SurrealQL
 description: The REMOVE statement is used to remove resources such as databases, tables, indexes, events and more.
 ---
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 # `REMOVE` statement
 
@@ -16,8 +12,8 @@ Similar to an SQL DROP statement.
 
 ### Statement syntax
 
-<Tabs syncKey="remove-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="remove-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 REMOVE [
@@ -35,36 +31,14 @@ REMOVE [
 ]
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const removeAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "REMOVE" },
-      { type: "Choice", index: 1, children: [
-        { type: "Sequence", children: [ { type: "Terminal", text: "NAMESPACE" }, { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "EXISTS" } ] } }, { type: "NonTerminal", text: "@name" } ] },
-        { type: "Sequence", children: [ { type: "Terminal", text: "DATABASE" }, { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "EXISTS" } ] } }, { type: "NonTerminal", text: "@name" } ] },
-        { type: "Sequence", children: [ { type: "Terminal", text: "USER" }, { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "EXISTS" } ] } }, { type: "NonTerminal", text: "@name" }, { type: "Terminal", text: "ON" }, { type: "Choice", index: 1, children: [ { type: "Terminal", text: "ROOT" }, { type: "Terminal", text: "NAMESPACE" }, { type: "Terminal", text: "DATABASE" } ] } ] },
-        { type: "Sequence", children: [ { type: "Terminal", text: "ACCESS" }, { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "EXISTS" } ] } }, { type: "NonTerminal", text: "@name" }, { type: "Terminal", text: "ON" }, { type: "Choice", index: 1, children: [ { type: "Terminal", text: "NAMESPACE" }, { type: "Terminal", text: "DATABASE" } ] } ] },
-        { type: "Sequence", children: [ { type: "Terminal", text: "EVENT" }, { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "EXISTS" } ] } }, { type: "NonTerminal", text: "@name" }, { type: "Terminal", text: "ON" }, { type: "Optional", child: { type: "Terminal", text: "TABLE" } }, { type: "NonTerminal", text: "@table" } ] },
-        { type: "Sequence", children: [ { type: "Terminal", text: "FIELD" }, { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "EXISTS" } ] } }, { type: "NonTerminal", text: "@name" }, { type: "Terminal", text: "ON" }, { type: "Optional", child: { type: "Terminal", text: "TABLE" } }, { type: "NonTerminal", text: "@table" } ] },
-        { type: "Sequence", children: [ { type: "Terminal", text: "INDEX" }, { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "EXISTS" } ] } }, { type: "NonTerminal", text: "@name" }, { type: "Terminal", text: "ON" }, { type: "Optional", child: { type: "Terminal", text: "TABLE" } }, { type: "NonTerminal", text: "@table" } ] },
-        { type: "Sequence", children: [ { type: "Terminal", text: "ANALYZER" }, { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "EXISTS" } ] } }, { type: "NonTerminal", text: "@name" } ] },
-        { type: "Sequence", children: [ { type: "Terminal", text: "FUNCTION" }, { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "EXISTS" } ] } }, { type: "Terminal", text: "fn::" }, { type: "NonTerminal", text: "@name" } ] },
-        { type: "Sequence", children: [ { type: "Terminal", text: "PARAM" }, { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "EXISTS" } ] } }, { type: "Terminal", text: "$" }, { type: "NonTerminal", text: "@name" } ] },
-        { type: "Sequence", children: [ { type: "Terminal", text: "TABLE" }, { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "EXISTS" } ] } }, { type: "NonTerminal", text: "@name" } ] }
-      ] }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={removeAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"REMOVE"},{"type":"Choice","index":1,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"NAMESPACE"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"EXISTS"}]}},{"type":"NonTerminal","text":"@name"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"DATABASE"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"EXISTS"}]}},{"type":"NonTerminal","text":"@name"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"USER"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"EXISTS"}]}},{"type":"NonTerminal","text":"@name"},{"type":"Terminal","text":"ON"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"ROOT"},{"type":"Terminal","text":"NAMESPACE"},{"type":"Terminal","text":"DATABASE"}]}]},{"type":"Sequence","children":[{"type":"Terminal","text":"ACCESS"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"EXISTS"}]}},{"type":"NonTerminal","text":"@name"},{"type":"Terminal","text":"ON"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"NAMESPACE"},{"type":"Terminal","text":"DATABASE"}]}]},{"type":"Sequence","children":[{"type":"Terminal","text":"EVENT"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"EXISTS"}]}},{"type":"NonTerminal","text":"@name"},{"type":"Terminal","text":"ON"},{"type":"Optional","child":{"type":"Terminal","text":"TABLE"}},{"type":"NonTerminal","text":"@table"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"FIELD"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"EXISTS"}]}},{"type":"NonTerminal","text":"@name"},{"type":"Terminal","text":"ON"},{"type":"Optional","child":{"type":"Terminal","text":"TABLE"}},{"type":"NonTerminal","text":"@table"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"INDEX"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"EXISTS"}]}},{"type":"NonTerminal","text":"@name"},{"type":"Terminal","text":"ON"},{"type":"Optional","child":{"type":"Terminal","text":"TABLE"}},{"type":"NonTerminal","text":"@table"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"ANALYZER"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"EXISTS"}]}},{"type":"NonTerminal","text":"@name"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"FUNCTION"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"EXISTS"}]}},{"type":"Terminal","text":"fn::"},{"type":"NonTerminal","text":"@name"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"PARAM"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"EXISTS"}]}},{"type":"Terminal","text":"$"},{"type":"NonTerminal","text":"@name"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"TABLE"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"EXISTS"}]}},{"type":"NonTerminal","text":"@name"}]}]}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example usage
 ### Basic usage
@@ -101,7 +75,6 @@ REMOVE TABLE article;
 ```
 
 ### Using if exists clause
-
 
 
 The following queries show an example of how to remove resources using the `IF EXISTS` clause, which will only remove the resource if it exists.
@@ -179,7 +152,7 @@ REMOVE TABLE IF EXISTS article;
 
 ### Usage in table views
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 A table used as a source for a table view cannot be removed until the table view itself has been removed.
 

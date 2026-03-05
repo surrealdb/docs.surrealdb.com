@@ -5,20 +5,9 @@ title: Embedding SurrealDB in .NET
 description: The documentation for embedding SurrealDB within .NET has been moved to the .NET SDK documentation.
 ---
 
-import Image from "@components/Image.astro";
-import LightLogo from "@img/icon/light/dotnet.png";
-import DarkLogo from "@img/icon/dark/dotnet.png";
 
 <div class="flag-title">
-	<Image
-		alt=".NET"
-		width={42}
-		height={42}
-		src={{
-			light: LightLogo,
-			dark: DarkLogo,
-		}}
-	/>
+	<img src="@assets/img/icon/light/dotnet.png" darkSrc="@assets/img/icon/dark/dotnet.png" alt=".NET" style="width: 42px; height: 42px" />
 	# Embedding in .NET
 </div>
 

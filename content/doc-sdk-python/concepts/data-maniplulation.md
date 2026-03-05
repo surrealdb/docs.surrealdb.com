@@ -5,7 +5,6 @@ title: Python | SDK | Data manipulation
 description: SurrealDB supports a number of methods for interacting with the database and performing CRUD operations.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Data manipulation
 
@@ -74,7 +73,7 @@ db.select(thing)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or a [`RecordID`](/docs/sdk/python/data-types#recordid) to select.
@@ -121,7 +120,7 @@ db.create(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or a [`RecordID`](/docs/sdk/python/data-types#recordid) to create.
@@ -130,7 +129,7 @@ db.create(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The document / record data to create.
@@ -183,7 +182,7 @@ db.insert(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name to insert to.
@@ -192,7 +191,7 @@ db.insert(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-            	<Label label="required" />
+            	<label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Either a single document/record or an array of documents/records to insert
@@ -261,7 +260,7 @@ db.insert_relation(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>table</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name to insert to.
@@ -270,7 +269,7 @@ db.insert_relation(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Either a single document/record or an array of documents/records to insert
@@ -334,7 +333,7 @@ db.update(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or the specific [`RecordID`](/docs/sdk/python/data-types#recordid) to update.
@@ -343,7 +342,7 @@ db.update(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The document / record data to update.
@@ -400,7 +399,7 @@ db.merge(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or the specific [`RecordID`](/docs/sdk/python/data-types#recordid) to merge.
@@ -409,7 +408,7 @@ db.merge(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The document / record data to merge.
@@ -468,7 +467,7 @@ db.patch(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or the specific [`RecordID`](/docs/sdk/python/data-types#recordid) to patch.
@@ -477,7 +476,7 @@ db.patch(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The JSON Patch data with which to patch the records.
@@ -530,7 +529,7 @@ db.delete(thing,data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or a [`RecordID`](/docs/sdk/python/data-types#recordid) to delete.

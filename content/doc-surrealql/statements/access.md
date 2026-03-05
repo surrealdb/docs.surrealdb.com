@@ -5,14 +5,10 @@ title: ACCESS statement | SurrealQL
 description: The ACCESS statement can be used to manage access grants.
 ---
 
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 # `ACCESS` statement
 
-<Since v="v2.2.0" />
+<since v="v2.2.0" />
 
 > [!CAUTION]
 > Currently, the `ACCESS` statement is an experimental feature intended to be used for validating its suitability and security. As such, it may be subject to breaking changes and may present unidentified security issues. Do not rely on this feature in production applications.
@@ -25,8 +21,8 @@ Operations that either create, revoke or purge access grants using the `ACCESS` 
 
 ### Statement syntax
 
-<Tabs syncKey="access-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="access-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 ACCESS @name [ ON [ ROOT | NAMESPACE | DATABASE ] ]
@@ -36,176 +32,14 @@ ACCESS @name [ ON [ ROOT | NAMESPACE | DATABASE ] ]
 	| PURGE [ EXPIRED | REVOKED [ , EXPIRED | REVOKED ] ] [ FOR @duration ]
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
 
-export const accessAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    {
-      type: "Sequence",
-      children: [
-        { type: "Terminal", text: "ACCESS" },
-        { type: "NonTerminal", text: "@name" },
-        {
-          type: "Optional",
-          child: {
-            type: "Sequence",
-            children: [
-              { type: "Terminal", text: "ON" },
-              { type: "Choice", index: 1, children: [
-                { type: "Terminal", text: "ROOT" },
-                { type: "Terminal", text: "NAMESPACE" },
-                { type: "Terminal", text: "DATABASE" }
-              ]}
-            ]
-          }
-        },
-        {
-          type: "Choice",
-          index: 1,
-          children: [
-              {
-                type: "Sequence",
-                children: [
-                  { type: "Terminal", text: "GRANT" },
-                  {
-                    type: "Choice",
-                    index: 1,
-                    children: [
-                      {
-                        type: "Sequence",
-                        children: [
-                          { type: "Terminal", text: "FOR" },
-                          { type: "Terminal", text: "USER" },
-                          { type: "NonTerminal", text: "@name" }
-                        ]
-                      },
-                      {
-                        type: "Sequence",
-                        children: [
-                          { type: "Terminal", text: "FOR" },
-                          { type: "Terminal", text: "RECORD" },
-                          { type: "NonTerminal", text: "@record" }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              },
-              {
-                type: "Sequence",
-                children: [
-                  { type: "Terminal", text: "SHOW" },
-                  {
-                    type: "Choice",
-                    index: 1,
-                    children: [
-                      {
-                        type: "Sequence",
-                        children: [
-                          { type: "Terminal", text: "GRANT" },
-                          { type: "NonTerminal", text: "@id" }
-                        ]
-                      },
-                      { type: "Terminal", text: "ALL" },
-                      {
-                        type: "Sequence",
-                        children: [
-                          { type: "Terminal", text: "WHERE" },
-                          { type: "NonTerminal", text: "@expression" }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              },
-              {
-                type: "Sequence",
-                children: [
-                  { type: "Terminal", text: "REVOKE" },
-                  {
-                    type: "Choice",
-                    index: 1,
-                    children: [
-                      {
-                        type: "Sequence",
-                        children: [
-                          { type: "Terminal", text: "GRANT" },
-                          { type: "NonTerminal", text: "@id" }
-                        ]
-                      },
-                      { type: "Terminal", text: "ALL" },
-                      {
-                        type: "Sequence",
-                        children: [
-                          { type: "Terminal", text: "WHERE" },
-                          { type: "NonTerminal", text: "@expression" }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              },
-              {
-                type: "Sequence",
-                children: [
-                  { type: "Terminal", text: "PURGE" },
-                  {
-                    type: "Choice",
-                    index: 1,
-                    children: [
-                      { type: "Terminal", text: "EXPIRED" },
-                      {
-                        type: "Sequence",
-                        children: [
-                          { type: "Terminal", text: "REVOKED" },
-                          {
-                            type: "Optional",
-                            child: {
-                              type: "Sequence",
-                              children: [
-                                { type: "Terminal", text: "," },
-                                {
-                                  type: "Choice",
-                                  index: 0,
-                                  children: [
-                                    { type: "Terminal", text: "EXPIRED" },
-                                    { type: "Terminal", text: "REVOKED" }
-                                  ]
-                                }
-                              ]
-                            }
-                          }
-                        ]
-                      }
-                    ]
-                  },
-                  {
-                    type: "Optional",
-                    child: {
-                      type: "Sequence",
-                      children: [
-                        { type: "Terminal", text: "FOR" },
-                        { type: "NonTerminal", text: "@duration" }
-                      ]
-                    }
-                  }
-                ]
-              }
-            ]
-        }
-      ]
-    }
-  ]
-};
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"ACCESS"},{"type":"NonTerminal","text":"@name"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"ON"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"ROOT"},{"type":"Terminal","text":"NAMESPACE"},{"type":"Terminal","text":"DATABASE"}]}]}},{"type":"Choice","index":1,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"GRANT"},{"type":"Choice","index":1,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"FOR"},{"type":"Terminal","text":"USER"},{"type":"NonTerminal","text":"@name"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"FOR"},{"type":"Terminal","text":"RECORD"},{"type":"NonTerminal","text":"@record"}]}]}]},{"type":"Sequence","children":[{"type":"Terminal","text":"SHOW"},{"type":"Choice","index":1,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"GRANT"},{"type":"NonTerminal","text":"@id"}]},{"type":"Terminal","text":"ALL"},{"type":"Sequence","children":[{"type":"Terminal","text":"WHERE"},{"type":"NonTerminal","text":"@expression"}]}]}]},{"type":"Sequence","children":[{"type":"Terminal","text":"REVOKE"},{"type":"Choice","index":1,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"GRANT"},{"type":"NonTerminal","text":"@id"}]},{"type":"Terminal","text":"ALL"},{"type":"Sequence","children":[{"type":"Terminal","text":"WHERE"},{"type":"NonTerminal","text":"@expression"}]}]}]},{"type":"Sequence","children":[{"type":"Terminal","text":"PURGE"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"EXPIRED"},{"type":"Sequence","children":[{"type":"Terminal","text":"REVOKED"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":","},{"type":"Choice","index":0,"children":[{"type":"Terminal","text":"EXPIRED"},{"type":"Terminal","text":"REVOKED"}]}]}}]}]},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"FOR"},{"type":"NonTerminal","text":"@duration"}]}}]}]}]}]}' />
 
-<RailroadDiagram ast={accessAst} className="my-6" />
-
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## `GRANT`
 

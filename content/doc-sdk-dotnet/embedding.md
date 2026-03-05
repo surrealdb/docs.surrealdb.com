@@ -5,23 +5,9 @@ title: Embedding SurrealDB | .NET SDK | Integration
 description: The documentation for embedding SurrealDB within .NET.
 ---
 
-import Image from "@components/Image.astro";
-import LightLogo from "@img/icon/light/dotnet.png";
-import DarkLogo from "@img/icon/dark/dotnet.png";
-
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 <div class="flag-title">
-	<Image
-		alt=".NET"
-		width={42}
-		height={42}
-		src={{
-			light: LightLogo,
-			dark: DarkLogo,
-		}}
-	/>
+	<img src="@assets/img/icon/light/dotnet.png" darkSrc="@assets/img/icon/dark/dotnet.png" alt=".NET" style="width: 42px; height: 42px" />
 	# Embedding in .NET
 </div>
 
@@ -86,27 +72,27 @@ Please refer to the [.NET client SDK](/docs/sdk/dotnet) documentation to get sta
 
 The file provider is a more advanced storage engine that can be used to persist data to disk.
 
-<Tabs groupId="file-embedded-modes">
-  <TabItem value="rocksdb" label="RocksDB" default>
+<tabs synckey="file-embedded-modes">
+  <tabitem label="RocksDB">
 
 ```bash
 dotnet add package SurrealDb.Embedded.RocksDb
 ```
 
-  </TabItem>
-  <TabItem value="surrealkv" label="SurrealKV">
+  </tabitem>
+  <tabitem label="SurrealKV">
 
 ```bash
 dotnet add package SurrealDb.Embedded.SurrealKv
 ```
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ### Consume the provider as-is
 
-<Tabs groupId="file-embedded-modes">
-  <TabItem value="rocksdb" label="RocksDB" default>
+<tabs synckey="file-embedded-modes">
+  <tabitem label="RocksDB">
 
 The simplest way to use a file-backed database instance of SurrealDB is to create an instance of the `SurrealDbRocksDbClient` class.
 Note that the `path` to the storage is mandatory.
@@ -127,8 +113,8 @@ var created = await db.Create(TABLE, person);
 Console.WriteLine(ToJsonString(created));
 ```
 
-  </TabItem>
-  <TabItem value="surrealkv" label="SurrealKV">
+  </tabitem>
+  <tabitem label="SurrealKV">
 
 The simplest way to use a file-backed database instance of SurrealDB is to create an instance of the `SurrealDbKvClient` class.
 Note that the `path` to the storage is mandatory.
@@ -149,13 +135,13 @@ var created = await db.Create(TABLE, person);
 Console.WriteLine(ToJsonString(created));
 ```
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ### Consume the provider via Dependency Injection
 
-<Tabs groupId="file-embedded-modes">
-  <TabItem value="rocksdb" label="RocksDB" default>
+<tabs synckey="file-embedded-modes">
+  <tabitem label="RocksDB">
 
 Following the .NET Dependency Injection pattern, you can register the file provider using the `AddRocksDbProvider` extension method.
 This will allow the `SurrealDbClient` to resolve the `rocksdb://` endpoint.
@@ -173,8 +159,8 @@ services
 // highlight-end
 ```
 
-  </TabItem>
-  <TabItem value="surrealkv" label="SurrealKV">
+  </tabitem>
+  <tabitem label="SurrealKV">
 
 Following the .NET Dependency Injection pattern, you can register the file provider using the `AddSurrealKvProvider` extension method.
 This will allow the `SurrealDbClient` to resolve the `surrealkv://` endpoint.
@@ -192,8 +178,8 @@ services
 // highlight-end
 ```
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 Learn more about [Dependency Injection with SurrealDB in .NET](/docs/sdk/dotnet/core/dependency-injection) in the SDK documentation.
 

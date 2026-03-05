@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Upsert
 description: The Upsert method creates or updates a specific record.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Upsert[T](table, data)` {#upsert}
 
@@ -31,7 +30,7 @@ db.Upsert[T](table, data)
             <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>table</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The table to upsert the record to.
@@ -40,7 +39,7 @@ db.Upsert[T](table, data)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The document / record data to upsert.

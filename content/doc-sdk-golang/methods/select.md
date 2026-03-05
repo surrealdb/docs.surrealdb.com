@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Select
 description: This method selects all records in a table, or a specific record, from the database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Select[T, R](resource)` {#select}
 
@@ -28,7 +27,7 @@ db.Select[T, R](resource)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>resource</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The table name (as <code>models.Table</code>) for selecting all records or a <code>RecordID</code> (as <code>models.RecordID</code>) to select a single record.
@@ -37,7 +36,7 @@ db.Select[T, R](resource)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>T</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The type to deserialize the result into, such as <code>Person</code> for a single record or <code>[]Person</code> for an array of records.
@@ -46,7 +45,7 @@ db.Select[T, R](resource)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>R</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The type of the <code>resource</code> parameter—use <code>models.RecordID</code> for a single record or <code>models.Table</code> for an entire table.

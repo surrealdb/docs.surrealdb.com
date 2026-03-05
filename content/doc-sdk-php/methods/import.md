@@ -5,7 +5,6 @@ title: Import Method in PHP | PHP SDK | Integration | SurrealDB
 description: Import data into an existing database using the import method with the SurrealDB PHP SDK.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->import()` {#import}
 
@@ -32,7 +31,7 @@ $db->import($content, $username, $password);
 		<tr>
 			<td colspan="2" scope="row" data-label="Arguments">
 				<code>content</code>
-				<Label label="required" />
+				<label label="required" />
 			</td>
 			<td colspan="2" scope="row" data-label="Type">
 				`string`
@@ -44,7 +43,7 @@ $db->import($content, $username, $password);
 		<tr>
 			<td colspan="2" scope="row" data-label="Arguments">
 				<code>username</code>
-				<Label label="required" />
+				<label label="required" />
 			</td>
 			<td colspan="2" scope="row" data-label="Type">
 				`string`
@@ -56,7 +55,7 @@ $db->import($content, $username, $password);
 		<tr>
 			<td colspan="2" scope="row" data-label="Arguments">
 				<code>password</code>
-				<Label label="required" />
+				<label label="required" />
 			</td>
 			<td colspan="2" scope="row" data-label="Type">
 				`string`

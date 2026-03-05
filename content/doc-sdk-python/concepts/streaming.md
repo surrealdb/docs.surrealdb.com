@@ -5,7 +5,6 @@ title: Python | SDK | Real-Time data streaming
 description: The SurrealDB SDK for Python allows you to create live queries that listen for changes in the database and automatically update your application when changes occur.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Real-Time data streaming
 
@@ -54,7 +53,7 @@ db.live(table, diff)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>table</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name to listen for changes for
@@ -63,7 +62,7 @@ db.live(table, diff)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>diff</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 If set to true, live notifications will include an array of JSON Patch objects, rather than the entire record for each notification.
@@ -103,7 +102,7 @@ db.subscribe_live(query_uuid)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>query_uuid</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The UUID of a running live query
@@ -142,7 +141,7 @@ db.kill(query_uuid)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>queryUuid</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The UUID of the live query you wish to kill

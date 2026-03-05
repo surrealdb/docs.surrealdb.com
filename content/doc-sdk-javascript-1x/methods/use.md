@@ -5,7 +5,6 @@ title: JavaScript | SDK | Methods | use
 description: The SurrealDB SDK for JavaScript enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.use()` {#use}
 
@@ -27,7 +26,7 @@ db.use({ namespace: 'surrealdb', database: 'docs' });
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>namespace</code>
-                <Label label="initially required" />
+                <label label="initially required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Switches to a specific namespace.
@@ -36,7 +35,7 @@ db.use({ namespace: 'surrealdb', database: 'docs' });
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>database</code>
-                <Label label="initially required" />
+                <label label="initially required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Switches to a specific database.

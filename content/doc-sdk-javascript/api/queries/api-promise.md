@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | ApiPromise
 description: ApiPromise provides methods for executing user-defined API calls.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `ApiPromise<Req, Res, V, J>` {#apipromise}
 
@@ -63,12 +62,12 @@ apiPromise.header(name, value)
     </thead>
     <tbody>
         <tr>
-            <td><code>name</code> <Label label="required" /></td>
+            <td><code>name</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>The header name.</td>
         </tr>
         <tr>
-            <td><code>value</code> <Label label="required" /></td>
+            <td><code>value</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>The header value.</td>
         </tr>

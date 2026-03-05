@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Invalidate
 description: This method invalidates the authentication for the current connection.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Invalidate()` {#invalidate}
 

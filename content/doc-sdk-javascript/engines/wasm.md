@@ -5,21 +5,9 @@ title: JavaScript | SDK | Engines | WebAssembly
 description: The SurrealDB SDK for JavaScript using the WebAssembly engine.
 ---
 
-import Image from "@components/Image.astro";
-
-import LightWasm from "@img/icon/light/webassembly.png";
-import DarkWasm from "@img/icon/dark/webassembly.png";
 
 <div class="flag-title">
-	<Image
-		alt="WebAssembly"
-		width={42}
-		height={42}
-		src={{
-			light: LightWasm,
-			dark: DarkWasm,
-		}}
-	/>
+	<img src="@assets/img/icon/light/webassembly.png" darkSrc="@assets/img/icon/dark/webassembly.png" alt="WebAssembly" style="width: 42px; height: 42px" />
 	# WebAssembly engine
 </div>
 
@@ -38,26 +26,24 @@ Before installing the WebAssembly engine, you need to install the JavaScript SDK
 
 After installing the SDK, install the Wasm engine using the following command:
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
-<Tabs groupId="installation">
-  <TabItem value="npm" label="npm" default>
+<tabs synckey="installation">
+  <tabitem label="npm">
     ```bash
     npm install --save @surrealdb/wasm
     ```
-  </TabItem>
-  <TabItem value="yarn" label="yarn">
+  </tabitem>
+  <tabitem label="yarn">
     ```bash
     yarn add @surrealdb/wasm
     ```
-  </TabItem>
-  <TabItem value="pnpm" label="pnpm">
+  </tabitem>
+  <tabitem label="pnpm">
     ```bash
     pnpm install @surrealdb/wasm
     ```
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Configuration
 

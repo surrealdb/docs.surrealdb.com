@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Info
 description: The Golang SDK for SurrealDB enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Info<T>()`
 

@@ -4,10 +4,6 @@ sidebar_label: INSERT
 title: INSERT statement | SurrealQL
 description: The INSERT statement can be used to insert or update data into the database, using the same statement syntax as the traditional SQL Insert statement.
 ---
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 # `INSERT` statement
 
@@ -15,8 +11,8 @@ The `INSERT` statement can be used to insert or update data into the database, u
 
 ### Statement syntax
 
-<Tabs syncKey="insert-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="insert-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 INSERT [ RELATION ] [ IGNORE ] INTO @what
@@ -28,33 +24,14 @@ INSERT [ RELATION ] [ IGNORE ] INTO @what
 ;
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const insertAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "INSERT" },
-      { type: "Optional", child: { type: "Terminal", text: "RELATION" } },
-      { type: "Optional", child: { type: "Terminal", text: "IGNORE" } },
-      { type: "Terminal", text: "INTO" },
-      { type: "NonTerminal", text: "@what" },
-      { type: "Optional", child: { type: "Choice", index: 1, children: [
-        { type: "NonTerminal", text: "@value" },
-        { type: "Sequence", children: [ { type: "Terminal", text: "(@fields)" }, { type: "Terminal", text: "VALUES" }, { type: "Terminal", text: "(@values)" }, { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "ON DUPLICATE KEY UPDATE" }, { type: "NonTerminal", text: "@field = @value ..." } ] } } ] }
-      ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "RETURN" }, { type: "Choice", index: 1, children: [ { type: "Terminal", text: "NONE" }, { type: "Terminal", text: "BEFORE" }, { type: "Terminal", text: "AFTER" }, { type: "Terminal", text: "DIFF" }, { type: "NonTerminal", text: "@statement_param, ..." }, { type: "Sequence", children: [ { type: "Terminal", text: "VALUE" }, { type: "NonTerminal", text: "@statement_param" } ] } ] } ] } },
-      { type: "Terminal", text: ";" }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={insertAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"INSERT"},{"type":"Optional","child":{"type":"Terminal","text":"RELATION"}},{"type":"Optional","child":{"type":"Terminal","text":"IGNORE"}},{"type":"Terminal","text":"INTO"},{"type":"NonTerminal","text":"@what"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"NonTerminal","text":"@value"},{"type":"Sequence","children":[{"type":"Terminal","text":"(@fields)"},{"type":"Terminal","text":"VALUES"},{"type":"Terminal","text":"(@values)"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"ON DUPLICATE KEY UPDATE"},{"type":"NonTerminal","text":"@field = @value ..."}]}}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"RETURN"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"NONE"},{"type":"Terminal","text":"BEFORE"},{"type":"Terminal","text":"AFTER"},{"type":"Terminal","text":"DIFF"},{"type":"NonTerminal","text":"@statement_param, ..."},{"type":"Sequence","children":[{"type":"Terminal","text":"VALUE"},{"type":"NonTerminal","text":"@statement_param"}]}]}]}},{"type":"Terminal","text":";"}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example usage
 
@@ -243,7 +220,7 @@ INSERT IGNORE INTO person [
 
 ### Return Values
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 By default, the `INSERT` statement returns the record once it has been inserted. To change what is returned, we can use the `RETURN` clause, specifying either `NONE`, `BEFORE`, `AFTER`, `DIFF`, or a comma-separated list of specific fields to return.
 
@@ -409,7 +386,7 @@ INSERT INTO planet [
 
 ## Bulk insert
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `INSERT` statement supports bulk insert, which allows multiple records to be inserted in a single query. The `@what` part of the syntax can be either a single object or an array of objects.
 

@@ -6,21 +6,9 @@ description: Surrealist is a user interface for interacting with your SurrealDB 
 no_page_headings: true
 ---
 
-import { Icon } from 'astro-icon/components';
-import Image from "@components/Image.astro";
-import ImageLogo from "@img/icon/dark/surrealist.png";
-import LightSurrealist from '@img/icon/light/surrealist-light.png';
 
 <div class="flag-title">
-	<Image
-		class="size-11 my-auto"
-		alt="Surrealist"
-		width={300}
-		src={{
-			light: LightSurrealist,
-			dark: ImageLogo,
-		}}
-	/>
+	<img src="@assets/img/icon/light/surrealist-light.png" darkSrc="@assets/img/icon/dark/surrealist.png" alt="Surrealist" class="size-11 my-auto" style="width: 300px" />
 	# Surrealist
 </div>
 

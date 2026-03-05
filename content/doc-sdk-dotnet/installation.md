@@ -5,11 +5,7 @@ title: .NET | SDK | Installation
 description: In this section, you will learn how to install the .NET SDK in your project.
 ---
 
-import Image from "@components/Image.astro";
-import NugetSearchImg from "@img/dotnet-nuget-search.png";
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 import { packageName, fetchNugetVersion } from './utils';
 
 export const value = await fetchNugetVersion();
@@ -28,15 +24,15 @@ This guide will walk you through the process of installing and importing the SDK
 Once ready, add the SurrealDB SDK to your dependencies:
 
 
-<Tabs groupId="dotnet-package-manager">
-  <TabItem value="dotnet-cli" label=".NET CLI" default>
+<tabs synckey="dotnet-package-manager">
+  <tabitem label=".NET CLI">
 
 ```bash
 dotnet add package SurrealDb.Net
 ```
 
-  </TabItem>
-  <TabItem value="package-reference" label="PackageReference">
+  </tabitem>
+  <tabitem label="PackageReference">
 
 <pre>
   <code class="language-xml">
@@ -44,18 +40,15 @@ dotnet add package SurrealDb.Net
   </code>
 </pre>
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 <br />
 
 Alternatively, you can install the SDK via the NuGet user interface provided in your IDE.
 Here is an example within Visual Studio:
 
-<Image
-    alt="Visual Studio NuGet Package Manager"
-    src={NugetSearchImg}
-/>
+<img src="@assets/img/dotnet-nuget-search.png" alt="Visual Studio NuGet Package Manager" />
 
 ## Initialize the SDK
 

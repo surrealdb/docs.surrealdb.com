@@ -4,7 +4,6 @@ sidebar_label: subscribe_live
 title: Python | SDK | Methods | subscribe_live
 description: The SurrealDB SDK for Python enables you to listen for changes to records in a table.
 ---
-import Label from "@components/shared/Label.astro";
 
 
 # `.subscribe_live()`
@@ -27,7 +26,7 @@ db.subscribe_live(query_uuid)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>query_uuid</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The UUID of a running live query

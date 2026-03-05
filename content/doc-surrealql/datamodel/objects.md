@@ -6,7 +6,6 @@ description: SurrealDB records can store objects with fields that can also hold 
 
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Objects
 
@@ -164,7 +163,7 @@ FROM { temps: [-5, 8, 9] };
 
 ## Extending objects and removing fields
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 Two objects can be merged by using either the `+` operator or the `object::extend()` function. Any fields in the second object will be added to the first object, thereby updating any existing fields and adding new fields to those that were not present.
 

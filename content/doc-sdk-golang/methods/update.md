@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Update
 description: The Update method updates all records in a table, or a specific record, in the database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Update[T](table, data)` {#update}
 
@@ -31,7 +30,7 @@ db.Update[T](table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or the specific [`RecordId`](/docs/sdk/golang/data-types#recordid) to update.
@@ -40,7 +39,7 @@ db.Update[T](table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The document / record data to update.

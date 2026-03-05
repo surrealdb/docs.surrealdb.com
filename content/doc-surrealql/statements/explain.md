@@ -5,15 +5,10 @@ title: EXPLAIN statement | SurrealQL
 description: The REBUILD statement is used to rebuild resources.
 ---
 
-import Since from '@components/shared/Since.astro'
-import SurrealistMini from "@components/SurrealistMini.astro"
-import RailroadDiagram from "@components/RailroadDiagram.astro"
-import Tabs from "@components/Tabs/Tabs.astro"
-import TabItem from "@components/Tabs/TabItem.astro"
 
 # `EXPLAIN` statement
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 > [!NOTE]
 > The output for the `EXPLAIN` statement is for informational purposes and subject to change. Be sure not to develop tools around it that rely on a single predictible output.
@@ -22,42 +17,21 @@ The `EXPLAIN` statement is used to display the query planner for a statement.
 
 ### Statement syntax
 
-<Tabs syncKey="rebuild-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="rebuild-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 EXPLAIN [ ANALYZE ] [ FORMAT TEXT | JSON ] @statement
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
-
-export const explainAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "EXPLAIN" },
-      { type: "Optional", child: { type: "Terminal", text: "ANALYZE" } },
-      { type: "Optional", child: {
-        type: "Sequence", children: [
-          { type: "Terminal", text: "FORMAT" },
-          { type: "Choice", index: 0, children: [
-            { type: "Terminal", text: "TEXT" },
-            { type: "Terminal", text: "JSON" }
-          ]}
-        ]
-      }},
-      { type: "NonTerminal", text: "@statement" }
-    ]}
-  ]
-};
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
 
-<RailroadDiagram ast={explainAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"EXPLAIN"},{"type":"Optional","child":{"type":"Terminal","text":"ANALYZE"}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"FORMAT"},{"type":"Choice","index":0,"children":[{"type":"Terminal","text":"TEXT"},{"type":"Terminal","text":"JSON"}]}]}},{"type":"NonTerminal","text":"@statement"}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example usage
 

@@ -5,10 +5,6 @@ title: Surrealist | Getting Started
 description: This page will guide you through the process of setting up and using Surrealist. At this point we assume you have already installed Surrealist on your system. If you have not done so yet, please refer to the installation guide.
 ---
 
-import Image from "@components/Image.astro";
-import ImageStart from "@img/image/surrealist/surrealist-overview-page.png";
-import ImageHttpConnection from "@img/image/surrealist/new-http-connection.png";
-import ImageSidebar from "@img/image/surrealist/sidebar.png";
 
 # Getting Started
 
@@ -24,10 +20,7 @@ If you are looking to connect to a local or remote hosted SurrealDB instance, yo
 
 Alternatively, you can select the **Cloud instance** option where you can create a new connection to a SurrealDB Cloud instance. Learn more about SurrealDB Cloud in the [SurrealDB Cloud documentation](/docs/cloud).
 
-<Image
-  alt="Start screen"
-  src={ImageStart}
-/>
+<img src="@assets/img/image/surrealist/surrealist-overview-page.png" alt="Start screen" />
 
 ## Connections
 
@@ -51,10 +44,7 @@ When creating a new connection you will be prompted with a dialog to enter your 
 
 Depending on the selected authentication method, you will be prompted to enter additional details such as a username and password, or a token.
 
-<Image
-  alt="Http connection"
-  src={ImageHttpConnection}
-/>
+<img src="@assets/img/image/surrealist/new-http-connection.png" alt="Http connection" />
 
 After filling in all fields, press **Create** to continue. If the connection was established successfully, you should see a green indicator next to the session name in the top left of the interface.
 

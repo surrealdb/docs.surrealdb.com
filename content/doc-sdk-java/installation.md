@@ -5,8 +5,6 @@ title: Java | SDKs | Installation
 description: In this section, you will learn how to install the Java SDK in your project.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # Installation
 
@@ -17,8 +15,8 @@ In this section, you will learn how to install the Java SDK in your project.
 First, install the [SurrealDB SDK](https://mvnrepository.com/artifact/com.surrealdb/surrealdb) from the Maven Central repository using [Gradle](https://gradle.org/) or [Maven](https://maven.apache.org/).
 
 
-<Tabs groupId="java-build-tool">
-  <TabItem value="gradle-groovy" label="Gradle (Groovy)" default>
+<tabs synckey="java-build-tool">
+  <tabitem label="Gradle (Groovy)">
 ```groovy
 ext {
     surrealdbVersion = "0.2.1"
@@ -28,9 +26,9 @@ dependencies {
     implementation "com.surrealdb:surrealdb:${surrealdbVersion}"
 }
 ```
-  </TabItem>
+  </tabitem>
   
-  <TabItem value="gradle-kotlin" label="Gradle (Kotlin)">
+  <tabitem label="Gradle (Kotlin)">
 
 ```groovy
 val surrealdbVersion by extra("0.2.1")
@@ -39,8 +37,8 @@ dependencies {
     implementation("com.surrealdb:surrealdb:${surrealdbVersion}")
 }
 ```
-  </TabItem>
-  <TabItem value="maven" label="Maven">
+  </tabitem>
+  <tabitem label="Maven">
 ```xml
 <dependency>
     <groupId>com.surrealdb</groupId>
@@ -48,8 +46,8 @@ dependencies {
     <version>0.2.1</version>
 </dependency>
 ```
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 <br />
 

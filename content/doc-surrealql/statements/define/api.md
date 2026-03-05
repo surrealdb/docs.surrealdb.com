@@ -4,15 +4,11 @@ sidebar_label: DEFINE API
 title: DEFINE API statement | SurrealQL
 description: A DEFINE API statement can be used to set endpoints with custom middleware and permissions.
 ---
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 
 # DEFINE API statement
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 The `DEFINE API` statements allows a custom endpoint to be created. Each endpoint created by a `DEFINE API` statement is located at the `/api/:namespace/:database/:endpoint_name` path. For example, an endpoint for the path `get_users` for the namespace `my_namespace` and database `my_database` will have the path `/api/my_namespace/my_database/get_users`.
 
@@ -24,8 +20,8 @@ The response is an object with a combination of the following properties:
 
 ## Statement syntax
 
-<Tabs syncKey="define-api-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="define-api-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 DEFINE API [ OVERWRITE | IF NOT EXISTS ] @endpoint
@@ -35,30 +31,14 @@ DEFINE API [ OVERWRITE | IF NOT EXISTS ] @endpoint
     [ PERMISSIONS [ NONE | FULL | @expression ]
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const defineApiAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "DEFINE" },
-      { type: "Terminal", text: "API" },
-      { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Terminal", text: "OVERWRITE" }, { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "NOT" }, { type: "Terminal", text: "EXISTS" } ] } ] } },
-      { type: "NonTerminal", text: "@endpoint" },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "FOR" }, { type: "NonTerminal", text: "@HTTP_method, .." } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "MIDDLEWARE" }, { type: "NonTerminal", text: "@function, .." } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "THEN" }, { type: "Terminal", text: "{" }, { type: "NonTerminal", text: "@value" }, { type: "Terminal", text: "}" } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "PERMISSIONS" }, { type: "Choice", index: 1, children: [ { type: "Terminal", text: "NONE" }, { type: "Terminal", text: "FULL" }, { type: "NonTerminal", text: "@expression" } ] } ] } }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={defineApiAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DEFINE"},{"type":"Terminal","text":"API"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"OVERWRITE"},{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}]}},{"type":"NonTerminal","text":"@endpoint"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"FOR"},{"type":"NonTerminal","text":"@HTTP_method, .."}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"MIDDLEWARE"},{"type":"NonTerminal","text":"@function, .."}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"THEN"},{"type":"Terminal","text":"{"},{"type":"NonTerminal","text":"@value"},{"type":"Terminal","text":"}"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"PERMISSIONS"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"NONE"},{"type":"Terminal","text":"FULL"},{"type":"NonTerminal","text":"@expression"}]}]}}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 
 `DEFINE API` is often used in conjunction with a [capabilities flag](/docs/surrealdb/security/capabilities) or [environment variable](/docs/surrealdb/cli/env) to disable arbitrary queries, thereby forcing record and anonymous users to interact with the database via API endpoints alone.

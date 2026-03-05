@@ -5,9 +5,6 @@ title: Java | SDK | Create a new connection
 description: The SurrealDB SDK for Java enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
-import Label from "@components/shared/Label.astro";
 
 # Create a new connection
 
@@ -67,8 +64,8 @@ The `.connect()` method accepts a `String` pointing to the desired local or remo
 ### Supported protocols
 This is the complete list of supported connection protocols. For more on connection parameters, see the [start command](/docs/surrealdb/cli/start#datastore-configuration) documentation.
 
-<Tabs>
-<TabItem label="3.x">
+<tabs>
+<tabitem label="3.x">
 
 - `http://` - Plain HTTP
 - `https://` - Secure HTTP
@@ -78,9 +75,9 @@ This is the complete list of supported connection protocols. For more on connect
 - `surrealkv://` - Disk-based database
 - `surrealkv://?versioned=true` - Disk-based database (with temporal data)
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 - `http://` - Plain HTTP
 - `https://` - Secure HTTP
@@ -90,9 +87,9 @@ This is the complete list of supported connection protocols. For more on connect
 - `surrealkv://` - Disk-based database
 - `surrealkv+versioned://` - Disk-based database (with temporal data)
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 <br />
 

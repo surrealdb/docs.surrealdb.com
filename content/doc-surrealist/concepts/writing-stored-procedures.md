@@ -5,8 +5,6 @@ title: Surrealist | Writing stored procedures
 description: Surrealist is a user interface for interacting with your SurrealDB database visually. It enables you to seamlessly connect to any SurrealDB instance, allowing you to execute queries, explore your tables, design your schemas, and much more.
 ---
 
-import Image from "@components/Image.astro";
-import ImageFunctions from "@img/image/surrealist/functions.png";
 
 # Writing stored procedures
 
@@ -14,10 +12,7 @@ SurrealDB provides the ability to write and store functions, also known as store
 
 Surrealist provides a useful view where you can manage and create these functions visually using an intuitive SurrealQL editor.
 
-<Image
-  alt="Surrealist functions view"
-  src={ImageFunctions}
-/>
+<img src="@assets/img/image/surrealist/functions.png" alt="Surrealist functions view" />
 
 ### Functions panel
 

@@ -5,9 +5,6 @@ title: SurrealML | Storage
 description: SurrealML enables machine learning models to be greatly simplified, ensuring reproducibility and consistency in machine learning pipelines.
 ---
 
-import Image from "@components/Image.astro";
-import LightSchema from "@img/image/light/surrealml-storage-schema.png";
-import DarkSchema from "@img/image/light/surrealml-storage-schema.png";
 
 # Storage
 
@@ -17,13 +14,7 @@ If you have completed the introduction, you would have stored your ML model in a
 
 A `.surml` file is essentially a header, with weights stored in the ONNX format. Interacting with the file takes the following form:
 
-<Image
-  alt="SurrealML Storage Schema"
-  src={{
-    light: LightSchema,
-    dark: DarkSchema,
-  }}
-/>
+<img src="@assets/img/image/light/surrealml-storage-schema.png" alt="SurrealML Storage Schema" />
 
 <br />
 <br />

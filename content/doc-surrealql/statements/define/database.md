@@ -4,10 +4,6 @@ sidebar_label: DEFINE DATABASE
 title: DEFINE DATABASE statement | SurrealQL
 description: The DEFINE DATABASE statement allows you to instantiate a named database, enabling you to specify security and configuration options.
 ---
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 # `DEFINE DATABASE` statement
 
@@ -20,35 +16,21 @@ The `DEFINE DATABASE` statement allows you to instantiate a named database, enab
 
 ## Statement syntax
 
-<Tabs syncKey="define-database-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="define-database-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 DEFINE DATABASE [ OVERWRITE | IF NOT EXISTS ] @name [ STRICT ] [ COMMENT @string ]
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const defineDatabaseAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "DEFINE" },
-      { type: "Terminal", text: "DATABASE" },
-      { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Terminal", text: "OVERWRITE" }, { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "NOT" }, { type: "Terminal", text: "EXISTS" } ] } ] } },
-      { type: "NonTerminal", text: "@name" },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "STRICT" } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "COMMENT" }, { type: "NonTerminal", text: "@string" } ] } }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={defineDatabaseAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DEFINE"},{"type":"Terminal","text":"DATABASE"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"OVERWRITE"},{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}]}},{"type":"NonTerminal","text":"@name"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"STRICT"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"COMMENT"},{"type":"NonTerminal","text":"@string"}]}}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example usage
 Below shows how you can create a database using the DEFINE DATABASE statement.
@@ -74,7 +56,6 @@ DEFINE DATABASE app_vitalsense;
 ## Using `IF NOT EXISTS` clause
 
 
-
 The `IF NOT EXISTS` clause can be used to define a database only if it does not already exist. You should use the `IF NOT EXISTS` clause when defining a database in SurrealDB if you want to ensure that the database is only created if it does not already exist. If the database already exists, the `DEFINE DATABASE` statement will return an error.
 
 It's particularly useful when you want to safely attempt to define a database without manually checking its existence first.
@@ -95,7 +76,7 @@ DEFINE DATABASE IF NOT EXISTS app_vitalsense;
 
 ## Using `OVERWRITE` clause
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `OVERWRITE` clause can be used to define a database and overwrite an existing one if it already exists. You should use the `OVERWRITE` clause when you want to modify an existing database definition. If the database already exists, the `DEFINE DATABASE` statement will overwrite the existing definition with the new one.
 
@@ -113,7 +94,7 @@ DEFINE DATABASE OVERWRITE app_vitalsense;
 
 ## Defining a `STRICT` database
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 A strict database is one that does not allow a resource to be used unless it has already been defined. The default behaviour in SurrealDB works otherwise, by allowing statements like [CREATE](/docs/surrealql/statements/create), [INSERT](/docs/surrealql/statements/insert) and [UPSERT](/docs/surrealql/statements/create) to work.
 

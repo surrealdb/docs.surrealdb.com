@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | RecordId
 description: Type-safe record identifiers with table name and ID components.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `RecordId<Tb, Id>` {#recordid}
 
@@ -44,17 +43,17 @@ new RecordId(table, id, validate?)
     </thead>
     <tbody>
         <tr>
-            <td><code>table</code> <Label label="required" /></td>
+            <td><code>table</code> <label label="required" /></td>
             <td><code>Tb</code></td>
             <td>The table name.</td>
         </tr>
         <tr>
-            <td><code>id</code> <Label label="required" /></td>
+            <td><code>id</code> <label label="required" /></td>
             <td><code>Id</code></td>
             <td>The record ID value (string, number, object, array, or RecordId).</td>
         </tr>
         <tr>
-            <td><code>validate</code> <Label label="optional" /></td>
+            <td><code>validate</code> <label label="optional" /></td>
             <td><code>boolean</code></td>
             <td>Whether to validate the table name format (default: <code>true</code>).</td>
         </tr>
@@ -137,7 +136,7 @@ RecordId.parse(str)
     </thead>
     <tbody>
         <tr>
-            <td><code>str</code> <Label label="required" /></td>
+            <td><code>str</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>The record ID string (format: <code>table:id</code>).</td>
         </tr>
@@ -183,7 +182,7 @@ RecordId.from(value)
     </thead>
     <tbody>
         <tr>
-            <td><code>value</code> <Label label="required" /></td>
+            <td><code>value</code> <label label="required" /></td>
             <td><code>unknown</code></td>
             <td>Value to convert to RecordId.</td>
         </tr>
@@ -263,7 +262,7 @@ recordId.equals(other)
     </thead>
     <tbody>
         <tr>
-            <td><code>other</code> <Label label="required" /></td>
+            <td><code>other</code> <label label="required" /></td>
             <td><code>unknown</code></td>
             <td>Value to compare.</td>
         </tr>
@@ -433,17 +432,17 @@ new RecordIdRange(table, begin, end)
     </thead>
     <tbody>
         <tr>
-            <td><code>table</code> <Label label="required" /></td>
+            <td><code>table</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>The table name.</td>
         </tr>
         <tr>
-            <td><code>begin</code> <Label label="required" /></td>
+            <td><code>begin</code> <label label="required" /></td>
             <td><code>string | number | RecordId</code></td>
             <td>Start of the range (inclusive).</td>
         </tr>
         <tr>
-            <td><code>end</code> <Label label="required" /></td>
+            <td><code>end</code> <label label="required" /></td>
             <td><code>string | number | RecordId</code></td>
             <td>End of the range (exclusive).</td>
         </tr>

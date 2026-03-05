@@ -5,9 +5,6 @@ title: Environment variables used for SurrealDB
 description: A list of the available environment variables used when running SurrealDB.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
-import Since from "@components/shared/Since.astro";
 
 # Environment variables
 
@@ -53,67 +50,67 @@ Many environment variables have a maximum value equivalent to the greatest possi
       <td scope="row" data-label="Notes">The interval at which to perform changefeed garbage collection.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_COUNT_BATCH_SIZE</code><Since v="v2.2.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_COUNT_BATCH_SIZE</code><since v="v2.2.0" /></td>
       <td scope="row" data-label="Default">10,000</td>
       <td scope="row" data-label="Allowed values">A usize</td>
       <td scope="row" data-label="Notes">The maximum number of keys that should be scanned at once for count queries.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_DATASTORE_AOL</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_DATASTORE_AOL</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Default">never</td>
       <td scope="row" data-label="Allowed values">never|sync|async</td>
       <td scope="row" data-label="Notes">Append-only log mode. Only used by the memory engine.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_DATASTORE_CACHE_SIZE</code><Since v="v2.1.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_DATASTORE_CACHE_SIZE</code><since v="v2.1.0" /></td>
       <td scope="row" data-label="Default">1,000</td>
       <td scope="row" data-label="Allowed values">A usize</td>
       <td scope="row" data-label="Notes">The number of definitions which can be cached across transactions.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_DATASTORE_PERSIST</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_DATASTORE_PERSIST</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Default">none</td>
       <td scope="row" data-label="Allowed values">String to a file path</td>
       <td scope="row" data-label="Notes">Filesystem path for persistence. Only used by the memory engine.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_DATASTORE_RETENTION</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_DATASTORE_RETENTION</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Default">0 (unlimited)</td>
       <td scope="row" data-label="Allowed values">A duration</td>
       <td scope="row" data-label="Notes">Version retention period as a duration string. Used by memory and surrealkv engines.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_DATASTORE_SNAPSHOT</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_DATASTORE_SNAPSHOT</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Default">never</td>
       <td scope="row" data-label="Allowed values">never|duration</td>
       <td scope="row" data-label="Notes">Snapshot interval. Only used by the memory engine.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_DATASTORE_SYNC_DATA</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_DATASTORE_SYNC_DATA</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Default">every</td>
       <td scope="row" data-label="Allowed values">never|every|duration</td>
       <td scope="row" data-label="Notes">The sync mode for the database. Used by memory, rocksdb, and surrealkv engines.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_DATASTORE_VERSIONED</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_DATASTORE_VERSIONED</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Default">false</td>
       <td scope="row" data-label="Allowed values">true|false|0|1</td>
       <td scope="row" data-label="Notes">Whether MVCC versioning is enabled. Used by memory and surrealkv engines.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_DEFAULT_DATABASE</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_DEFAULT_DATABASE</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Default">main</td>
       <td scope="row" data-label="Allowed values">A string</td>
       <td scope="row" data-label="Notes">The default database to use when starting a SurrealDB instance.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_DEFAULT_NAMESPACE</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_DEFAULT_NAMESPACE</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Default">main</td>
       <td scope="row" data-label="Allowed values">A string</td>
       <td scope="row" data-label="Notes">The default namespace to use when starting a SurrealDB instance.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_ASYNC_EVENT_PROCESSING_INTERVAL</code><Since v="v3.0.0" /> </td>
+      <td scope="row" data-label="Env var"><code>SURREAL_ASYNC_EVENT_PROCESSING_INTERVAL</code><since v="v3.0.0" /> </td>
       <td scope="row" data-label="Default">5s</td>
       <td scope="row" data-label="Allowed values">A duration</td>
       <td scope="row" data-label="Notes">The interval at which to process async events.</td>
@@ -131,7 +128,7 @@ Many environment variables have a maximum value equivalent to the greatest possi
       <td scope="row" data-label="Notes">The number of result records which will trigger on-disk sorting.</td>
     </tr>
      <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_FILE_ALLOWLIST</code><Since v="v2.1.5" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_FILE_ALLOWLIST</code><since v="v2.1.5" /></td>
       <td scope="row" data-label="Default">none</td>
       <td scope="row" data-label="Allowed values">Comma-separated paths</td>
       <td scope="row" data-label="Notes">Limits file access for the mapper filter to only the specified allowed file paths. The paths must be provided as absolute paths, separated by a colon (:) on Unix-like systems or a semicolon (;) on Windows.</td>
@@ -275,7 +272,7 @@ Many environment variables have a maximum value equivalent to the greatest possi
       <td scope="row" data-label="Notes">The maximum number of idle HTTP connections to maintain per host.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_MAX_HTTP_REDIRECTS</code><Since v="v2.0.5" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_MAX_HTTP_REDIRECTS</code><since v="v2.0.5" /></td>
       <td scope="row" data-label="Default">10</td>
       <td scope="row" data-label="Allowed values">A usize</td>
       <td scope="row" data-label="Notes">The maximum number of HTTP redirects allowed within http functions.</td>
@@ -287,7 +284,7 @@ Many environment variables have a maximum value equivalent to the greatest possi
       <td scope="row" data-label="Notes">Specifies how deep the parser will parse nested objects and arrays in a query.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE</code><Since v="v2.2.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE</code><since v="v2.2.0" /></td>
       <td scope="row" data-label="Default">1000</td>
       <td scope="row" data-label="Allowed values">A usize</td>
       <td scope="row" data-label="Notes">The maximum size of the priority queue triggering usage of the priority queue for the result collector.</td>
@@ -299,7 +296,7 @@ Many environment variables have a maximum value equivalent to the greatest possi
       <td scope="row" data-label="Notes">Specifies how deep the parser will parse recursive queries (queries within queries).</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_MEMORY_THRESHOLD</code><Since v="v2.1.5" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_MEMORY_THRESHOLD</code><since v="v2.1.5" /></td>
       <td scope="row" data-label="Default">0</td>
       <td scope="row" data-label="Allowed values">A usize or suffixed integer</td>
       <td scope="row" data-label="Notes">Configuring the memory threshold which can be used across the programme to check if the amount of memory available to the programme is lower than required. The value can be specified as bytes (b, or without any suffix), kibibytes (k, kb, or kib), mebibytes (m, mb, or mib), or gibibytes (g, gb, or gib). If the environment variable is not specified, then the threshold is not used, and no memory limit is enabled.</td>
@@ -311,7 +308,7 @@ Many environment variables have a maximum value equivalent to the greatest possi
       <td scope="row" data-label="Notes">How many concurrent network requests can be handled at once</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_NO_DEFAULTS</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_NO_DEFAULTS</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Default">false</td>
       <td scope="row" data-label="Allowed values">true, false</td>
       <td scope="row" data-label="Notes">Whether to disable default namespace and database creation. Conflicts with SURREAL_DEFAULT_DATABASE and SURREAL_DEFAULT_NAMESPACE, which set a default value for namespace and database for a new instance.</td>
@@ -341,13 +338,13 @@ Many environment variables have a maximum value equivalent to the greatest possi
       <td scope="row" data-label="Notes">The maximum number of keys that should be scanned at once in general queries.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_OPERATOR_BUFFER_SIZE</code><Since v="v2.1.5" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_OPERATOR_BUFFER_SIZE</code><since v="v2.1.5" /></td>
       <td scope="row" data-label="Default">2</td>
       <td scope="row" data-label="Allowed values">A usize</td>
       <td scope="row" data-label="Notes">The number of batches each operator buffers ahead of downstream demand. Set to 0 to disable operator-level pipeline buffering.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_PLANNER_STRATEGY</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_PLANNER_STRATEGY</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Default">best-effort</td>
       <td scope="row" data-label="Allowed values">best-effort|compute-only|all-read-only</td>
       <td scope="row" data-label="Notes">Which strategy to use with the new query planner introduced in SurrealDB 3.0. The default setting uses the new planner for read-only statements, falling back to the previous compute planner on unimplemented paths. The new planner can be skipped entirely by using compute-only.</td>
@@ -359,7 +356,7 @@ Many environment variables have a maximum value equivalent to the greatest possi
       <td scope="row" data-label="Notes">The number of computed regexes which can be cached in the engine.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_REGEX_SIZE_LIMIT</code><Since v="v2.1.5" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_REGEX_SIZE_LIMIT</code><since v="v2.1.5" /></td>
       <td scope="row" data-label="Default">10,485,760 (10 MiB)</td>
       <td scope="row" data-label="Allowed values">A usize</td>
       <td scope="row" data-label="Notes">Limits the maximum allowed size (in bytes) for regular expressions. This prevents excessive memory consumption when building complex or very large regex patterns.</td>
@@ -395,25 +392,25 @@ Many environment variables have a maximum value equivalent to the greatest possi
       <td scope="row" data-label="Notes">Maximum stack size of the JavaScript function runtime.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_SCRIPTING_MAX_TIME_LIMIT</code><Since v="v2.0.5" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_SCRIPTING_MAX_TIME_LIMIT</code><since v="v2.0.5" /></td>
       <td scope="row" data-label="Default">5000 (5000 milliseconds or 5 seconds</td>
       <td scope="row" data-label="Allowed values">A usize)</td>
       <td scope="row" data-label="Notes">Maximum allowed time in milliseconds that a JavaScript function is allowed to run for.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_SURREALISM_CACHE_SIZE</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_SURREALISM_CACHE_SIZE</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Default">100</td>
       <td scope="row" data-label="Allowed values">A usize</td>
       <td scope="row" data-label="Notes">The number of surrealism modules which can be cached across transactions.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_TELEMETRY_DISABLE_METRICS</code><Since v="v2.1.3" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_TELEMETRY_DISABLE_METRICS</code><since v="v2.1.3" /></td>
       <td scope="row" data-label="Default">false</td>
       <td scope="row" data-label="Allowed values">true, false</td>
       <td scope="row" data-label="Notes">Whether to disable sending metrics to the GRPC OTEL collector.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_TELEMETRY_DISABLE_TRACING</code><Since v="v2.1.3" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_TELEMETRY_DISABLE_TRACING</code><since v="v2.1.3" /></td>
       <td scope="row" data-label="Default">false</td>
       <td scope="row" data-label="Allowed values">true, false</td>
       <td scope="row" data-label="Notes">Whether to disable sending traces to the GRPC OTEL collector.</td>
@@ -437,19 +434,19 @@ Many environment variables have a maximum value equivalent to the greatest possi
       <td scope="row" data-label="Notes">Sets the directory for storing temporary database files.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_TOKIO_CONSOLE_ENABLED</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_TOKIO_CONSOLE_ENABLED</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Default">false</td>
       <td scope="row" data-label="Allowed values">true, false</td>
       <td scope="row" data-label="Notes">Whether to enable [tokio console](https://github.com/tokio-rs/console).</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_TOKIO_CONSOLE_RETENTION</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_TOKIO_CONSOLE_RETENTION</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Default">60</td>
       <td scope="row" data-label="Allowed values">A usize</td>
       <td scope="row" data-label="Notes">How long, in seconds, to retain data for completed events.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_TOKIO_CONSOLE_SOCKET_ADDR</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_TOKIO_CONSOLE_SOCKET_ADDR</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Default">false</td>
       <td scope="row" data-label="Allowed values">A string to a socket address</td>
       <td scope="row" data-label="Notes">The socket address that Tokio Console will bind to.</td>
@@ -517,24 +514,24 @@ As the `--allow-net` flag was passed in without a following value, the same will
 
 The command would then look like the following:
 
-<Tabs groupId="start-command">
+<tabs synckey="start-command">
 
-<TabItem value="bash" label="Bash" >
+<tabitem label="Bash">
 ```bash
 SURREAL_CAPS_ALLOW_NET
 SURREAL_CAPS_DENY_FUNC="crypto::md5, http::post, http::delete"
 surreal start --user root --pass root
 ```
-</TabItem>
+</tabitem>
 
-<TabItem value="powershell" label="PowerShell" >
+<tabitem label="PowerShell">
 ```powershell
 $env:SURREAL_CAPS_ALLOW_NET
 $env:SURREAL_CAPS_DENY_FUNC="crypto::md5, http::post, http::delete"
 surreal start --user root --pass root
 ```
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 ### Boolean values in command environment variables
 
@@ -644,7 +641,7 @@ surreal start --allow-all true
       <td scope="row" data-label="Details">Allow execution of embedded scripting functions.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_CAPS_ALLOW_INSECURE_STORABLE_CLOSURES</code><Since v="v2.5.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_CAPS_ALLOW_INSECURE_STORABLE_CLOSURES</code><since v="v2.5.0" /></td>
       <td scope="row" data-label="Command arg"><code>allow-insecure-storable-closures</code></td>
       <td scope="row" data-label="Command">`start`</td>
       <td scope="row" data-label="Default">false</td>
@@ -724,7 +721,7 @@ surreal start --allow-all true
       <td scope="row" data-label="Details">Whether to show the welcome message when starting the REPL.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_INDEX_COMPACTION_INTERVAL</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_INDEX_COMPACTION_INTERVAL</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Command arg"><code>index-compaction-interval</code></td>
       <td scope="row" data-label="Command">`start`</td>
       <td scope="row" data-label="Default">5s</td>
@@ -772,7 +769,7 @@ surreal start --allow-all true
       <td scope="row" data-label="Details">The logging level for the database server.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_LOG_FILE_ENABLED</code><Since v="v2.4.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_LOG_FILE_ENABLED</code><since v="v2.4.0" /></td>
       <td scope="row" data-label="Command arg"><code>log-file-enabled</code></td>
       <td scope="row" data-label="Command">`start`</td>
       <td scope="row" data-label="Default">true</td>
@@ -780,7 +777,7 @@ surreal start --allow-all true
       <td scope="row" data-label="Details">Toggles file output (default: false)</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_LOG_FILE_FORMAT</code><Since v="v2.4.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_LOG_FILE_FORMAT</code><since v="v2.4.0" /></td>
       <td scope="row" data-label="Command arg"><code>log-file-format</code></td>
       <td scope="row" data-label="Command">`start`</td>
       <td scope="row" data-label="Default">none</td>
@@ -788,7 +785,7 @@ surreal start --allow-all true
       <td scope="row" data-label="Details">The format for log file output.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_LOG_FILE_LEVEL</code><Since v="v2.4.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_LOG_FILE_LEVEL</code><since v="v2.4.0" /></td>
       <td scope="row" data-label="Command arg"><code>log-file-level</code></td>
       <td scope="row" data-label="Command">`start`</td>
       <td scope="row" data-label="Default">none</td>
@@ -796,7 +793,7 @@ surreal start --allow-all true
       <td scope="row" data-label="Details">Override the logging level for file output</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_LOG_FILE_NAME</code><Since v="v2.4.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_LOG_FILE_NAME</code><since v="v2.4.0" /></td>
       <td scope="row" data-label="Command arg"><code>log-file-name</code></td>
       <td scope="row" data-label="Command">`start`</td>
       <td scope="row" data-label="Default">surrealdb.log</td>
@@ -804,7 +801,7 @@ surreal start --allow-all true
       <td scope="row" data-label="Details">Filename for logs (default: `surrealdb.log`)</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_LOG_FILE_PATH</code><Since v="v2.4.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_LOG_FILE_PATH</code><since v="v2.4.0" /></td>
       <td scope="row" data-label="Command arg"><code>log-file-path</code></td>
       <td scope="row" data-label="Command">`start`</td>
       <td scope="row" data-label="Default">logs</td>
@@ -812,7 +809,7 @@ surreal start --allow-all true
       <td scope="row" data-label="Details">Sets the directory for logs</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_LOG_FILE_ROTATION</code><Since v="v2.4.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_LOG_FILE_ROTATION</code><since v="v2.4.0" /></td>
       <td scope="row" data-label="Command arg"><code>log-file-rotation</code></td>
       <td scope="row" data-label="Command">`start`</td>
       <td scope="row" data-label="Default">daily</td>
@@ -820,7 +817,7 @@ surreal start --allow-all true
       <td scope="row" data-label="Details">Sets the rotation duration for logs.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_LOG_FORMAT</code><Since v="v2.4.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_LOG_FORMAT</code><since v="v2.4.0" /></td>
       <td scope="row" data-label="Command arg"><code>log-format</code></td>
       <td scope="row" data-label="Command">`start`</td>
       <td scope="row" data-label="Default">text</td>
@@ -828,14 +825,14 @@ surreal start --allow-all true
       <td scope="row" data-label="Details">Sets the format for logs.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_LOG_OTEL_LEVEL</code><br /><code>log-otel-level</code> <Since v="v2.4.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_LOG_OTEL_LEVEL</code><br /><code>log-otel-level</code> <since v="v2.4.0" /></td>
       <td scope="row" data-label="Command">`start`</td>
       <td scope="row" data-label="Default">SURREAL_LOG logging level</td>
       <td scope="row" data-label="Allowed values">none, full, error, warn, info, debug, trace</td>
       <td scope="row" data-label="Details">Override the logging level for OpenTelemetry</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_LOG_SOCKET</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_LOG_SOCKET</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Command arg"><code>log-socket</code></td>
       <td scope="row" data-label="Command">`start`</td>
       <td scope="row" data-label="Default">none</td>
@@ -843,7 +840,7 @@ surreal start --allow-all true
       <td scope="row" data-label="Details">Send logs to the specified host:port</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_LOG_SOCKET_FORMAT</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_LOG_SOCKET_FORMAT</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Command arg"><code>log-socket-format</code></td>
       <td scope="row" data-label="Command">`start`</td>
       <td scope="row" data-label="Default">text</td>
@@ -851,7 +848,7 @@ surreal start --allow-all true
       <td scope="row" data-label="Details">  Set the format of the logs to the socket.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_LOG_SOCKET_LEVEL</code><Since v="v3.0.0" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_LOG_SOCKET_LEVEL</code><since v="v3.0.0" /></td>
       <td scope="row" data-label="Command arg"><code>log-socket-level</code></td>
       <td scope="row" data-label="Command">`start`</td>
       <td scope="row" data-label="Default">SURREAL_LOG logging level</td>
@@ -922,21 +919,21 @@ surreal start --allow-all true
       <td scope="row" data-label="Details">The maximum duration that a set of statements can run for.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_SLOW_QUERY_LOG_THRESHOLD</code><br /><code>slow-log-threshold</code> <Since v="v2.3.8" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_SLOW_QUERY_LOG_THRESHOLD</code><br /><code>slow-log-threshold</code> <since v="v2.3.8" /></td>
       <td scope="row" data-label="Command">`start`</td>
       <td scope="row" data-label="Default">none</td>
       <td scope="row" data-label="Allowed values">A duration</td>
       <td scope="row" data-label="Details">A duration specifying the minimum execution time after which a log is made to indicate a slow query</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_SLOW_QUERY_LOG_PARAM_ALLOW</code><br /><code>slow-log-param-allow</code> <Since v="v2.3.9" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_SLOW_QUERY_LOG_PARAM_ALLOW</code><br /><code>slow-log-param-allow</code> <since v="v2.3.9" /></td>
       <td scope="row" data-label="Command">`start`</td>
       <td scope="row" data-label="Default">none</td>
       <td scope="row" data-label="Allowed values">Comma-separated strings</td>
       <td scope="row" data-label="Details">A comma-separated list of parameter names to include in slow query logs.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_SLOW_QUERY_LOG_PARAM_DENY</code><Since v="v2.3.9" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_SLOW_QUERY_LOG_PARAM_DENY</code><since v="v2.3.9" /></td>
       <td scope="row" data-label="Command arg"><code>slow-log-param-deny</code></td>
       <td scope="row" data-label="Command">`start`</td>
       <td scope="row" data-label="Default">none</td>
@@ -1147,25 +1144,25 @@ The available environment variables for configuring a RocksDB instance are:
       <td scope="row" data-label="Notes">The readahead buffer size used during compaction.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_ROCKSDB_COMPACTION_STYLE</code> <Since v="v2.0.3" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_ROCKSDB_COMPACTION_STYLE</code> <since v="v2.0.3" /></td>
       <td scope="row" data-label="Default">level</td>
       <td scope="row" data-label="Allowed values">level, universal</td>
       <td scope="row" data-label="Notes">Use to specify the database compaction style.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_ROCKSDB_DELETION_FACTORY_DELETE_COUNT</code><Since v="v2.0.3" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_ROCKSDB_DELETION_FACTORY_DELETE_COUNT</code><since v="v2.0.3" /></td>
       <td scope="row" data-label="Default">50</td>
       <td scope="row" data-label="Allowed values">A usize</td>
       <td scope="row" data-label="Notes">The number of deletions to track in the window.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_ROCKSDB_DELETION_FACTORY_RATIO</code><Since v="v2.0.3" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_ROCKSDB_DELETION_FACTORY_RATIO</code><since v="v2.0.3" /></td>
       <td scope="row" data-label="Default">0.5</td>
       <td scope="row" data-label="Allowed values">A float</td>
       <td scope="row" data-label="Notes">The ratio of deletions to track in the window.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_ROCKSDB_DELETION_FACTORY_WINDOW_SIZE</code><Since v="v2.0.3" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_ROCKSDB_DELETION_FACTORY_WINDOW_SIZE</code><since v="v2.0.3" /></td>
       <td scope="row" data-label="Default">1000</td>
       <td scope="row" data-label="Allowed values">A usize</td>
       <td scope="row" data-label="Notes">The size of the window used to track deletions.</td>
@@ -1213,7 +1210,7 @@ The available environment variables for configuring a RocksDB instance are:
       <td scope="row" data-label="Notes">The number of files needed to trigger level 0 compaction.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_ROCKSDB_JOBS_COUNT</code> <Since v="v2.0.3" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_ROCKSDB_JOBS_COUNT</code> <since v="v2.0.3" /></td>
       <td scope="row" data-label="Default">Number of CPUs * 2</td>
       <td scope="row" data-label="Allowed values">A usize</td>
       <td scope="row" data-label="Notes">The maximum number of threads to use for flushing and compaction.</td>
@@ -1381,7 +1378,7 @@ The available environment variables for configuring a RocksDB instance are:
       <td scope="row" data-label="Notes">A string specifying the keyspace identifier for data isolation.</td>
     </tr>
     <tr>
-      <td scope="row" data-label="Env var"><code>SURREAL_TIKV_GRPC_MAX_DECODING_MESSAGE_SIZE</code><Since v="v2.1.8" /></td>
+      <td scope="row" data-label="Env var"><code>SURREAL_TIKV_GRPC_MAX_DECODING_MESSAGE_SIZE</code><since v="v2.1.8" /></td>
       <td scope="row" data-label="Default">4,194,304 (4 MiB)</td>
       <td scope="row" data-label="Allowed values">A usize</td>
       <td scope="row" data-label="Notes">Sets the maximum decoding size of a gRPC message.</td>

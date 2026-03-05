@@ -4,13 +4,7 @@ sidebar_label: Support
 title: Support | SurrealDB Cloud 
 description: Support offered by SurrealDB Cloud .
 ---
-import Image from "@components/Image.astro";
 
-import SurrealSidekickDark from '@img/image/cloud/sidekick.png';
-import AddSupportPlanLight from '@img/image/cloud/add-support-plan.png';
-import CreateSupportTicketLight from '@img/image/cloud/create-support-ticket.png';
-import CreateSupportTicketFormLight from '@img/image/cloud/create-support-ticket-form.png';
-import CreateSupportTicketPageLight from '@img/image/cloud/create-support-ticket-page.png';
 
 # Support
 
@@ -29,61 +23,30 @@ This will take you to the pricing page where you can choose the plan you want to
 >[!NOTE] 
 >If you already have a support plan this tab will display your support plan and any open tickets you have. 
 
-<Image
-alt="Surreal Sidekick"
-src={{
-	light: AddSupportPlanLight,
-	dark: AddSupportPlanLight,
-	}}  
-/>
+<img src="@assets/img/image/cloud/add-support-plan.png" alt="Surreal Sidekick" />
 
 ### Creating a support ticket
 
 After you have added a support plan to your organisation, you can create a support ticket by clicking on the **New Ticket** button in the Surrealist sidebar. This will take you to the support page where you can create a new ticket.
 
-<Image
-alt="Create support ticket"
-src={{
-	light: CreateSupportTicketLight,
-	dark: CreateSupportTicketLight,
-	}}  
-/>
+<img src="@assets/img/image/cloud/create-support-ticket.png" alt="Create support ticket" />
 
 You will see a form to enter the details of your support ticket. You can enter the title of the ticket and the description of the issue you are experiencing. You can also attach any files to the ticket.
 
-<Image
-alt="Create support ticket"
-src={{
-	light: CreateSupportTicketFormLight,
-	dark: CreateSupportTicketFormLight,
-	}}  
-/>
+<img src="@assets/img/image/cloud/create-support-ticket-form.png" alt="Create support ticket" />
 
 After you have entered the details of your ticket, you will be redirected to the support ticket page where you can view the details of your ticket.
 
-<Image
-alt="Create support ticket"
-src={{
-	light: CreateSupportTicketPageLight,
-	dark: CreateSupportTicketPageLight,
-	}}  
-/>
+<img src="@assets/img/image/cloud/create-support-ticket-page.png" alt="Create support ticket" />
 
 You can also view all your open tickets by clicking on the **All Tickets** option in the top right corner of the support page. Depending on the plan you have, response times may vary.
-
 
 
 ## Community support via Surreal Sidekick
 
 Surreal Sidekick is an AI copilot that can help you get started with SurrealDB, convert queries to SurrealQL, and answer general questions. Surreal Sidekick is only trained with public facing resources, such as our [SurrealDB documentation](/docs/surrealdb), [SurrealDB University](/learn), and the [SurrealDB Book](/learn/book).
 
-<Image
-alt="Surreal Sidekick"
-src={{
-	light: SurrealSidekickDark,
-	dark: SurrealSidekickDark,
-	}}  
-/>
+<img src="@assets/img/image/cloud/sidekick.png" alt="Surreal Sidekick" />
 
 ### Getting started
 To start using Surreal Sidekick, you'll need a [SurrealDB Cloud account](/docs/cloud/getting-started/create-an-account). Once logged in, navigate to Surreal Sidekick in the sidebar and start asking questions.

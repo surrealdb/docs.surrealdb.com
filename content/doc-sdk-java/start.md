@@ -4,11 +4,7 @@ sidebar_label: Quick start
 title: Java | SDK | Quick start
 description: In this guide, we will walk you through setting up and querying your first project with the SurrealDB SDK for Java.
 ---
-import Image from "@components/Image.astro";
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
-import QuickStartUI from "@img/quickstart-ui.png";
 
 # Quick start
 
@@ -32,10 +28,9 @@ This guide assumes the following:
 The SurrealDB Java SDK is available on the Maven Central repository. You can install it using [Gradle](https://gradle.org/) or [Maven](https://maven.apache.org/).
 Copy the relevant code snippet into your `build.gradle` or `pom.xml` file to add the SDK as a dependency.
 
-{/* The latest version of the SDK is currently <JavaVersion /> */}
 
-<Tabs groupId="java-build-tool">
-  <TabItem value="gradle-groovy" label="Gradle (Groovy)" default>
+<tabs synckey="java-build-tool">
+  <tabitem label="Gradle (Groovy)">
 ```groovy
 ext {
     surrealdbVersion = "0.2.1"
@@ -45,8 +40,8 @@ dependencies {
     implementation "com.surrealdb:surrealdb:${surrealdbVersion}"
 }
 ```
-  </TabItem>
-  <TabItem value="gradle-kotlin" label="Gradle (Kotlin)">
+  </tabitem>
+  <tabitem label="Gradle (Kotlin)">
 ```groovy
 val surrealdbVersion by extra("0.2.1")
 
@@ -54,8 +49,8 @@ dependencies {
     implementation("com.surrealdb:surrealdb:${surrealdbVersion}")
 }
 ```
-  </TabItem>
-  <TabItem value="maven" label="Maven">
+  </tabitem>
+  <tabitem label="Maven">
 ```xml
 <dependency>
     <groupId>com.surrealdb</groupId>
@@ -63,8 +58,8 @@ dependencies {
     <version>0.2.1</version>
 </dependency>
 ```
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ### Initialize the SDK
 

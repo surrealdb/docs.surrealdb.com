@@ -5,21 +5,9 @@ title: Install on Windows
 description: Use this tutorial to install SurrealDB on Windows using the SurrealDB install script, or using third-party package managers like Chocolatey or Scoop.
 ---
 
-import Version from '@components/Version.astro';
-import Image from "@components/Image.astro";
-import LightLogo from "@img/icon/light/windows.png";
-import DarkLogo from "@img/icon/dark/windows.png";
 
 <div class="flag-title">
-	<Image
-		alt="Windows"
-		width={42}
-		height={42}
-		src={{
-			light: LightLogo,
-			dark: DarkLogo,
-		}}
-	/>
+	<img src="@assets/img/icon/light/windows.png" darkSrc="@assets/img/icon/dark/windows.png" alt="Windows" style="width: 42px; height: 42px" />
 	# Install on Windows
 </div>
 
@@ -35,7 +23,7 @@ iwr https://windows.surrealdb.com -useb | iex
 
 ### Updating SurrealDB
 
-To ensure that you are using the latest stable version (<Version />), update SurrealDB using the following command.
+To ensure that you are using the latest stable version (<version />), update SurrealDB using the following command.
 
 ```bash
 surreal upgrade
@@ -101,7 +89,7 @@ choco install surreal
 
 ### Updating SurrealDB
 
-To ensure that you are using the latest stable version (<Version />), update SurrealDB using the following command.
+To ensure that you are using the latest stable version (<version />), update SurrealDB using the following command.
 
 ```bash
 choco update surreal
@@ -117,7 +105,7 @@ scoop install surrealdb
 
 ### Updating SurrealDB
 
-To ensure that you are using the latest stable version (<Version />), update SurrealDB using the following command.
+To ensure that you are using the latest stable version (<version />), update SurrealDB using the following command.
 
 ```bash
 scoop update surrealdb

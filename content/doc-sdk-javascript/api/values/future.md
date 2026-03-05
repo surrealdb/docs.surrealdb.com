@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | Future
 description: Deferred computation values (deprecated in SurrealDB 3.0).
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `Future` {#future}
 
@@ -42,7 +41,7 @@ new Future(expression)
     </thead>
     <tbody>
         <tr>
-            <td><code>body</code> <Label label="required" /></td>
+            <td><code>body</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>The SurrealQL expression to evaluate later.</td>
         </tr>

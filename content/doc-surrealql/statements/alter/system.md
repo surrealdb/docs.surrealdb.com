@@ -5,14 +5,10 @@ title: ALTER SYSTEM statement | SurrealQL
 description: The ALTER statement can be used to change authentication access and behaviour, global parameters, table configurations, table events, schema definitions, and indexes.
 ---
 
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 # `ALTER SYSTEM` statement
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 The `ALTER SYSTEM` statement is used to alter the entire datastore. It can be used to compact the system, or to set or drop a systemwide query timeout.
 
@@ -20,8 +16,8 @@ This statement is the only `ALTER` statement that does not have a corresponding 
 
 ## Statement syntax
 
-<Tabs syncKey="alter-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="alter-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 ALTER SYSTEM 
@@ -30,28 +26,14 @@ ALTER SYSTEM
     DROP QUERY_TIMEOUT
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const alterAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "ALTER SYSTEM" },
-      { type: "Choice", index: 0, children: [
-        { type: "Terminal", text: "COMPACT" },
-        { type: "Sequence", children: [ { type: "Terminal", text: "QUERY_TIMEOUT" }, { type: "NonTerminal", text: "@duration" } ] },
-        { type: "Terminal", text: "DROP QUERY_TIMEOUT" }
-      ]},
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={alterAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"ALTER SYSTEM"},{"type":"Choice","index":0,"children":[{"type":"Terminal","text":"COMPACT"},{"type":"Sequence","children":[{"type":"Terminal","text":"QUERY_TIMEOUT"},{"type":"NonTerminal","text":"@duration"}]},{"type":"Terminal","text":"DROP QUERY_TIMEOUT"}]}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## `QUERY_TIMEOUT` clause
 

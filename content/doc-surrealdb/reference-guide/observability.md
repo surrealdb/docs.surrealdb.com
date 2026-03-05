@@ -5,7 +5,6 @@ title: Observability | Reference guides
 description: In SurrealDB, metrics and traces are available if enabled⁠.
 ---
 
-import Since from "@components/shared/Since.astro";
 
 # Observability
 
@@ -119,7 +118,7 @@ The metrics are shown here in the form required by the [OpenTelemetry Metrics Se
 
 ## Tokio console
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 The [tokio console](https://github.com/tokio-rs/console) tool can also be used to observe the low-level async tasks for the database.
 

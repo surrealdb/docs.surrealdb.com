@@ -5,10 +5,6 @@ title: HTTP Protocol | Integration
 description: The HTTP endpoints enable selection and modification of data, along with custom SurrealQL queries, using traditional RESTful HTTP endpoints.
 ---
 
-import Since from '@components/shared/Since.astro';
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
-import Label from "@components/shared/Label.astro";
 
 # HTTP & Rest
 
@@ -208,9 +204,9 @@ This HTTP RESTful endpoint imports a set of SurrealQL queries into a specific na
 
 ### Headers
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" >
+<tabitem label="V2.x+">
 <table>
     <thead>
         <tr>
@@ -222,7 +218,7 @@ This HTTP RESTful endpoint imports a set of SurrealQL queries into a specific na
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the root, namespace, or database authentication data
@@ -231,7 +227,7 @@ This HTTP RESTful endpoint imports a set of SurrealQL queries into a specific na
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Header">
                 Sets the desired content-type of the response
@@ -240,7 +236,7 @@ This HTTP RESTful endpoint imports a set of SurrealQL queries into a specific na
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Header">
                 Sets the selected Namespace for queries.
@@ -249,7 +245,7 @@ This HTTP RESTful endpoint imports a set of SurrealQL queries into a specific na
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Header">
                 Sets the selected Database for queries.
@@ -257,9 +253,9 @@ This HTTP RESTful endpoint imports a set of SurrealQL queries into a specific na
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -271,7 +267,7 @@ This HTTP RESTful endpoint imports a set of SurrealQL queries into a specific na
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the root, namespace, or database authentication data
@@ -280,7 +276,7 @@ This HTTP RESTful endpoint imports a set of SurrealQL queries into a specific na
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Header">
                 Sets the desired content-type of the response
@@ -289,7 +285,7 @@ This HTTP RESTful endpoint imports a set of SurrealQL queries into a specific na
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Header">
                 Sets the selected Namespace for queries.
@@ -298,7 +294,7 @@ This HTTP RESTful endpoint imports a set of SurrealQL queries into a specific na
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Header">
                 Sets the selected Database for queries.
@@ -306,9 +302,9 @@ This HTTP RESTful endpoint imports a set of SurrealQL queries into a specific na
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ### Example usage
 
@@ -316,9 +312,9 @@ This HTTP RESTful endpoint imports a set of SurrealQL queries into a specific na
 > The `-u` in the example below is a shorthand used by curl to send an Authorization header (name and password), in this case assuming the username `root` and password `secret`.
 
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" default>
+<tabitem label="V2.x+">
 ```bash title="Request"
 curl -X POST -u "root:secret" \
   -H "Surreal-NS: main" \
@@ -327,9 +323,9 @@ curl -X POST -u "root:secret" \
   -d file.surql \
   http://localhost:8000/import
 ```
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x">
+<tabitem label="V1.x">
 ```bash title="Request"
 curl -X POST -u "root:secret" \
   -H "ns: main" \
@@ -338,9 +334,9 @@ curl -X POST -u "root:secret" \
   -d file.surql \
   http://localhost:8000/import
 ```
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 
 <br />
@@ -351,9 +347,9 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
 
 ### Headers
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" >
+<tabitem label="V2.x+">
 <table>
     <thead>
         <tr>
@@ -365,7 +361,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Header">
                 Sets the root, namespace, or database authentication data
@@ -374,7 +370,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Header">
                 Sets the selected Namespace for queries.
@@ -383,7 +379,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Header">
                 Sets the selected Database for queries.
@@ -391,9 +387,9 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -405,7 +401,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Header">
                 Sets the root, namespace, or database authentication data
@@ -414,7 +410,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Header">
                 Sets the selected Namespace for queries.
@@ -423,7 +419,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Header">
                 Sets the selected Database for queries.
@@ -431,7 +427,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
 #### Export options 
 
@@ -446,7 +442,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         <tr>
             <td>
                 `only`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether only specific resources should be exported. When provided, only the resources specified will be exported.
@@ -455,7 +451,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         <tr>
             <td>
                 `users`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether system users should be exported [possible values: true, false].
@@ -464,7 +460,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         <tr>
             <td>
                 `accesses`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether access methods (Record or JWT) should be exported [possible values: true, false]
@@ -473,7 +469,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         <tr>
             <td>
                 `params`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether databases parameters should be exported [possible values: true, false]
@@ -482,7 +478,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         <tr>
             <td>
                 `functions`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether functions should be exported [possible values: true, false]
@@ -491,7 +487,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         <tr>
             <td>
                 `analyzers`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether analyzers should be exported [possible values: true, false]
@@ -500,7 +496,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         <tr>
             <td>
                 `tables [tables]`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether tables should be exported, optionally providing a list of tables
@@ -509,7 +505,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         <tr>
             <td>
                 `versions`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether SurrealKV versioned records should be exported [possible values: true, false]
@@ -518,7 +514,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
         <tr>
             <td>
                 `records`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether records should be exported [possible values: true, false]
@@ -527,8 +523,7 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
     </tbody>
 </table>
 
-</Tabs>
-
+</tabs>
 
 
 ### Example usage
@@ -536,9 +531,9 @@ This HTTP RESTful endpoint exports all data for a specific Namespace and Databas
 > [!NOTE]
 > The `-u` in the example below is a shorthand used by curl to send an Authorization header (name and password), in this case assuming the username `root` and password `secret`. The `-o` allows the output to be written to a file.
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" default>
+<tabitem label="V2.x+">
 ```bash title="Request"
 curl -X GET \
   -u "root:secret" \
@@ -549,9 +544,9 @@ curl -X GET \
   http://localhost:8000/export
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x">
+<tabitem label="V1.x">
 ```bash title="Request"
 curl -X GET \
   -u "root:secret" \
@@ -561,8 +556,8 @@ curl -X GET \
   -o file.surql \
   http://localhost:8000/export
 ```
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 ```bash title="Exporting specific parameters"
 curl -X POST \
@@ -608,7 +603,7 @@ This HTTP RESTful endpoint is used to access an existing account inside the Surr
      <tr>
             <td colspan="2" scope="row" data-label="Header">
                     <code>Accept</code>
-                    <Label label="required" />
+                    <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -630,7 +625,7 @@ This HTTP RESTful endpoint is used to access an existing account inside the Surr
     <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required">REQUIRED FOR DB & RECORD</Label>
+                <label label="required">REQUIRED FOR DB & RECORD</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The namespace to sign in to this is required FOR DB & RECORD users
@@ -639,7 +634,7 @@ This HTTP RESTful endpoint is used to access an existing account inside the Surr
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required">REQUIRED FOR RECORD</Label>
+                <label label="required">REQUIRED FOR RECORD</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The database to sign in to required for RECORD users
@@ -648,7 +643,7 @@ This HTTP RESTful endpoint is used to access an existing account inside the Surr
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ac</code>
-                <Label label="required">REQUIRED FOR RECORD USER</Label>
+                <label label="required">REQUIRED FOR RECORD USER</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The record access method to use for signing in. required for RECORD users
@@ -657,7 +652,7 @@ This HTTP RESTful endpoint is used to access an existing account inside the Surr
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>user</code>
-                <Label label="required">REQUIRED FOR ROOT, NS & DB</Label>
+                <label label="required">REQUIRED FOR ROOT, NS & DB</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The username of the database user required for ROOT, NS & DB users
@@ -666,7 +661,7 @@ This HTTP RESTful endpoint is used to access an existing account inside the Surr
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>pass</code>
-                <Label label="required">REQUIRED FOR ROOT, NS & DB</Label>
+                <label label="required">REQUIRED FOR ROOT, NS & DB</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The password of the database user required for ROOT, NS & DB users
@@ -733,7 +728,6 @@ curl -X POST -H "Accept: application/json" -d '{"ns":"main","user":"johndoe","pa
 ```
 
 
-
 ### Example usage via Postman
 
 After you have defined the users permissions for the record user, you can use the `POST /signin` endpoint to sign in as a user.
@@ -748,7 +742,6 @@ Using the [user credentials](/docs/surrealdb/security/authentication#record-user
     "pass": "123456"
 }
 ```
-
 
 
 <br />
@@ -770,7 +763,7 @@ This HTTP RESTful endpoint is used to create an account inside the SurrealDB dat
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -792,7 +785,7 @@ This HTTP RESTful endpoint is used to create an account inside the SurrealDB dat
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required"></Label>
+                <label label="required"></label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The namespace to sign up to. This data is `REQUIRED FOR DB & RECORD`
@@ -801,7 +794,7 @@ This HTTP RESTful endpoint is used to create an account inside the SurrealDB dat
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required"></Label>
+                <label label="required"></label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The database to sign up to. This data is `REQUIRED FOR RECORD`
@@ -810,7 +803,7 @@ This HTTP RESTful endpoint is used to create an account inside the SurrealDB dat
                 <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>access</code>
-                <Label label="required"></Label>
+                <label label="required"></label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The record access method to use for signing up. This data is `REQUIRED FOR RECORD`
@@ -819,7 +812,7 @@ This HTTP RESTful endpoint is used to create an account inside the SurrealDB dat
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>user</code>
-                <Label label="required"></Label>
+                <label label="required"></label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The username of the database user. This data is `REQUIRED FOR ROOT, NS & DB`
@@ -828,7 +821,7 @@ This HTTP RESTful endpoint is used to create an account inside the SurrealDB dat
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>pass</code>
-                <Label label="required"></Label>
+                <label label="required"></label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The password of the database user. This data is `REQUIRED FOR ROOT, NS & DB`
@@ -916,9 +909,9 @@ This HTTP RESTful endpoint selects all records in a specific table in the databa
 
 ### Headers
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" >
+<tabitem label="V2.x+">
 <table>
     <thead>
         <tr>
@@ -930,7 +923,7 @@ This HTTP RESTful endpoint selects all records in a specific table in the databa
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -939,7 +932,7 @@ This HTTP RESTful endpoint selects all records in a specific table in the databa
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -948,7 +941,7 @@ This HTTP RESTful endpoint selects all records in a specific table in the databa
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -957,7 +950,7 @@ This HTTP RESTful endpoint selects all records in a specific table in the databa
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -965,9 +958,9 @@ This HTTP RESTful endpoint selects all records in a specific table in the databa
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -979,7 +972,7 @@ This HTTP RESTful endpoint selects all records in a specific table in the databa
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -988,7 +981,7 @@ This HTTP RESTful endpoint selects all records in a specific table in the databa
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -997,7 +990,7 @@ This HTTP RESTful endpoint selects all records in a specific table in the databa
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -1006,7 +999,7 @@ This HTTP RESTful endpoint selects all records in a specific table in the databa
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -1014,9 +1007,9 @@ This HTTP RESTful endpoint selects all records in a specific table in the databa
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 
 ### Translated query
@@ -1041,9 +1034,9 @@ This HTTP RESTful endpoint creates a record in a specific table in the database.
 
 ### Headers
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" >
+<tabitem label="V2.x+">
 <table>
     <thead>
         <tr>
@@ -1055,7 +1048,7 @@ This HTTP RESTful endpoint creates a record in a specific table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -1064,7 +1057,7 @@ This HTTP RESTful endpoint creates a record in a specific table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -1073,7 +1066,7 @@ This HTTP RESTful endpoint creates a record in a specific table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -1082,7 +1075,7 @@ This HTTP RESTful endpoint creates a record in a specific table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -1090,9 +1083,9 @@ This HTTP RESTful endpoint creates a record in a specific table in the database.
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -1104,7 +1097,7 @@ This HTTP RESTful endpoint creates a record in a specific table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -1113,7 +1106,7 @@ This HTTP RESTful endpoint creates a record in a specific table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -1122,7 +1115,7 @@ This HTTP RESTful endpoint creates a record in a specific table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -1131,7 +1124,7 @@ This HTTP RESTful endpoint creates a record in a specific table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -1139,9 +1132,9 @@ This HTTP RESTful endpoint creates a record in a specific table in the database.
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ### Translated query
 ```surql
@@ -1181,9 +1174,9 @@ This HTTP RESTful endpoint updates all records in a specific table in the databa
 
 ### Headers
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" >
+<tabitem label="V2.x+">
 <table>
     <thead>
         <tr>
@@ -1195,7 +1188,7 @@ This HTTP RESTful endpoint updates all records in a specific table in the databa
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -1204,7 +1197,7 @@ This HTTP RESTful endpoint updates all records in a specific table in the databa
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -1213,7 +1206,7 @@ This HTTP RESTful endpoint updates all records in a specific table in the databa
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -1222,7 +1215,7 @@ This HTTP RESTful endpoint updates all records in a specific table in the databa
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -1230,9 +1223,9 @@ This HTTP RESTful endpoint updates all records in a specific table in the databa
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -1244,7 +1237,7 @@ This HTTP RESTful endpoint updates all records in a specific table in the databa
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -1253,7 +1246,7 @@ This HTTP RESTful endpoint updates all records in a specific table in the databa
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -1262,7 +1255,7 @@ This HTTP RESTful endpoint updates all records in a specific table in the databa
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -1271,7 +1264,7 @@ This HTTP RESTful endpoint updates all records in a specific table in the databa
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -1279,9 +1272,9 @@ This HTTP RESTful endpoint updates all records in a specific table in the databa
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ### Translated query
 ```surql
@@ -1329,9 +1322,9 @@ This HTTP RESTful endpoint modifies all records in a specific table in the datab
 
 ### Headers
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" >
+<tabitem label="V2.x+">
 <table>
     <thead>
         <tr>
@@ -1343,7 +1336,7 @@ This HTTP RESTful endpoint modifies all records in a specific table in the datab
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -1352,7 +1345,7 @@ This HTTP RESTful endpoint modifies all records in a specific table in the datab
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -1361,7 +1354,7 @@ This HTTP RESTful endpoint modifies all records in a specific table in the datab
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -1370,7 +1363,7 @@ This HTTP RESTful endpoint modifies all records in a specific table in the datab
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -1378,9 +1371,9 @@ This HTTP RESTful endpoint modifies all records in a specific table in the datab
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -1392,7 +1385,7 @@ This HTTP RESTful endpoint modifies all records in a specific table in the datab
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -1401,7 +1394,7 @@ This HTTP RESTful endpoint modifies all records in a specific table in the datab
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -1410,7 +1403,7 @@ This HTTP RESTful endpoint modifies all records in a specific table in the datab
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -1419,7 +1412,7 @@ This HTTP RESTful endpoint modifies all records in a specific table in the datab
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -1427,9 +1420,9 @@ This HTTP RESTful endpoint modifies all records in a specific table in the datab
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ### Translated query
 ```surql
@@ -1474,9 +1467,9 @@ This HTTP RESTful endpoint deletes all records from the specified table in the d
 
 ### Headers
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" >
+<tabitem label="V2.x+">
 <table>
     <thead>
         <tr>
@@ -1488,7 +1481,7 @@ This HTTP RESTful endpoint deletes all records from the specified table in the d
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -1497,7 +1490,7 @@ This HTTP RESTful endpoint deletes all records from the specified table in the d
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -1506,7 +1499,7 @@ This HTTP RESTful endpoint deletes all records from the specified table in the d
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -1515,7 +1508,7 @@ This HTTP RESTful endpoint deletes all records from the specified table in the d
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -1523,9 +1516,9 @@ This HTTP RESTful endpoint deletes all records from the specified table in the d
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -1537,7 +1530,7 @@ This HTTP RESTful endpoint deletes all records from the specified table in the d
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -1546,7 +1539,7 @@ This HTTP RESTful endpoint deletes all records from the specified table in the d
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -1555,7 +1548,7 @@ This HTTP RESTful endpoint deletes all records from the specified table in the d
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -1564,7 +1557,7 @@ This HTTP RESTful endpoint deletes all records from the specified table in the d
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -1572,9 +1565,9 @@ This HTTP RESTful endpoint deletes all records from the specified table in the d
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ### Translated query
 ```surql
@@ -1619,9 +1612,9 @@ This HTTP RESTful endpoint selects a specific record from the database.
 
 ### Headers
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" >
+<tabitem label="V2.x+">
 <table>
     <thead>
         <tr>
@@ -1633,7 +1626,7 @@ This HTTP RESTful endpoint selects a specific record from the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -1642,7 +1635,7 @@ This HTTP RESTful endpoint selects a specific record from the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -1651,7 +1644,7 @@ This HTTP RESTful endpoint selects a specific record from the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -1660,7 +1653,7 @@ This HTTP RESTful endpoint selects a specific record from the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -1668,9 +1661,9 @@ This HTTP RESTful endpoint selects a specific record from the database.
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -1682,7 +1675,7 @@ This HTTP RESTful endpoint selects a specific record from the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -1691,7 +1684,7 @@ This HTTP RESTful endpoint selects a specific record from the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -1700,7 +1693,7 @@ This HTTP RESTful endpoint selects a specific record from the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -1709,7 +1702,7 @@ This HTTP RESTful endpoint selects a specific record from the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -1717,9 +1710,9 @@ This HTTP RESTful endpoint selects a specific record from the database.
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ### Translated query
 
@@ -1743,9 +1736,9 @@ This HTTP RESTful endpoint creates a specific record in a table in the database.
 
 ### Headers
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" >
+<tabitem label="V2.x+">
 <table>
     <thead>
         <tr>
@@ -1757,7 +1750,7 @@ This HTTP RESTful endpoint creates a specific record in a table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -1766,7 +1759,7 @@ This HTTP RESTful endpoint creates a specific record in a table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -1775,7 +1768,7 @@ This HTTP RESTful endpoint creates a specific record in a table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -1784,7 +1777,7 @@ This HTTP RESTful endpoint creates a specific record in a table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -1792,9 +1785,9 @@ This HTTP RESTful endpoint creates a specific record in a table in the database.
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -1806,7 +1799,7 @@ This HTTP RESTful endpoint creates a specific record in a table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -1815,7 +1808,7 @@ This HTTP RESTful endpoint creates a specific record in a table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -1824,7 +1817,7 @@ This HTTP RESTful endpoint creates a specific record in a table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -1833,7 +1826,7 @@ This HTTP RESTful endpoint creates a specific record in a table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -1841,9 +1834,9 @@ This HTTP RESTful endpoint creates a specific record in a table in the database.
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ### Translated query
 
@@ -1884,9 +1877,9 @@ This HTTP RESTful endpoint updates a specific record in a table in the database.
 
 ### Headers
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" >
+<tabitem label="V2.x+">
 <table>
     <thead>
         <tr>
@@ -1898,7 +1891,7 @@ This HTTP RESTful endpoint updates a specific record in a table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -1907,7 +1900,7 @@ This HTTP RESTful endpoint updates a specific record in a table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -1916,7 +1909,7 @@ This HTTP RESTful endpoint updates a specific record in a table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -1925,7 +1918,7 @@ This HTTP RESTful endpoint updates a specific record in a table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -1933,9 +1926,9 @@ This HTTP RESTful endpoint updates a specific record in a table in the database.
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -1947,7 +1940,7 @@ This HTTP RESTful endpoint updates a specific record in a table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -1956,7 +1949,7 @@ This HTTP RESTful endpoint updates a specific record in a table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -1965,7 +1958,7 @@ This HTTP RESTful endpoint updates a specific record in a table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -1974,7 +1967,7 @@ This HTTP RESTful endpoint updates a specific record in a table in the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -1982,9 +1975,9 @@ This HTTP RESTful endpoint updates a specific record in a table in the database.
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ### Translated query
 
@@ -2003,9 +1996,9 @@ This HTTP RESTful endpoint modifies a specific record in a table in the database
 
 ### Headers
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" >
+<tabitem label="V2.x+">
 <table>
     <thead>
         <tr>
@@ -2017,7 +2010,7 @@ This HTTP RESTful endpoint modifies a specific record in a table in the database
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -2026,7 +2019,7 @@ This HTTP RESTful endpoint modifies a specific record in a table in the database
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -2035,7 +2028,7 @@ This HTTP RESTful endpoint modifies a specific record in a table in the database
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -2044,7 +2037,7 @@ This HTTP RESTful endpoint modifies a specific record in a table in the database
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -2052,9 +2045,9 @@ This HTTP RESTful endpoint modifies a specific record in a table in the database
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -2066,7 +2059,7 @@ This HTTP RESTful endpoint modifies a specific record in a table in the database
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -2075,7 +2068,7 @@ This HTTP RESTful endpoint modifies a specific record in a table in the database
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -2084,7 +2077,7 @@ This HTTP RESTful endpoint modifies a specific record in a table in the database
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -2093,7 +2086,7 @@ This HTTP RESTful endpoint modifies a specific record in a table in the database
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -2101,9 +2094,9 @@ This HTTP RESTful endpoint modifies a specific record in a table in the database
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ### Translated query
 
@@ -2159,9 +2152,9 @@ This HTTP RESTful endpoint deletes a single specific record from the database.
 
 ### Headers
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" >
+<tabitem label="V2.x+">
 <table>
     <thead>
         <tr>
@@ -2173,7 +2166,7 @@ This HTTP RESTful endpoint deletes a single specific record from the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -2182,7 +2175,7 @@ This HTTP RESTful endpoint deletes a single specific record from the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -2191,7 +2184,7 @@ This HTTP RESTful endpoint deletes a single specific record from the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -2200,7 +2193,7 @@ This HTTP RESTful endpoint deletes a single specific record from the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -2208,9 +2201,9 @@ This HTTP RESTful endpoint deletes a single specific record from the database.
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -2222,7 +2215,7 @@ This HTTP RESTful endpoint deletes a single specific record from the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -2231,7 +2224,7 @@ This HTTP RESTful endpoint deletes a single specific record from the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -2240,7 +2233,7 @@ This HTTP RESTful endpoint deletes a single specific record from the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -2249,7 +2242,7 @@ This HTTP RESTful endpoint deletes a single specific record from the database.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -2257,9 +2250,9 @@ This HTTP RESTful endpoint deletes a single specific record from the database.
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ### Translated query
 
@@ -2310,9 +2303,9 @@ The SQL endpoint enables use of SurrealQL queries.
 
 ### Headers
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" >
+<tabitem label="V2.x+">
 <table>
     <thead>
         <tr>
@@ -2324,7 +2317,7 @@ The SQL endpoint enables use of SurrealQL queries.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -2333,7 +2326,7 @@ The SQL endpoint enables use of SurrealQL queries.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -2342,7 +2335,7 @@ The SQL endpoint enables use of SurrealQL queries.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -2351,7 +2344,7 @@ The SQL endpoint enables use of SurrealQL queries.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -2359,9 +2352,9 @@ The SQL endpoint enables use of SurrealQL queries.
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -2373,7 +2366,7 @@ The SQL endpoint enables use of SurrealQL queries.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -2382,7 +2375,7 @@ The SQL endpoint enables use of SurrealQL queries.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -2391,7 +2384,7 @@ The SQL endpoint enables use of SurrealQL queries.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -2400,7 +2393,7 @@ The SQL endpoint enables use of SurrealQL queries.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -2408,9 +2401,9 @@ The SQL endpoint enables use of SurrealQL queries.
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 
 ### Parameters
@@ -2422,30 +2415,30 @@ Query parameters can be provided via URL query parameters. These parameters will
 > [!NOTE]
 > The `-u` in the example below is a shorthand used by curl to send an Authorization header (name and password), in this case assuming the username `root` and password `secret`.
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" default>
+<tabitem label="V2.x+">
 ```bash title="Request"
 curl -X POST -u "root:secret" -H "Surreal-NS: main" -H "Surreal-DB: main" -H "Accept: application/json" \
   -d 'SELECT * FROM person WHERE age > $age' http://localhost:8000/sql?age=18
 ```
-</TabItem>
+</tabitem>
 
-<TabItem value="V2 - Token" label="V2.x with token" default>
+<tabitem label="V2.x with token">
 ```bash title="Request"
 curl -X POST -H "Bearer: YourToken" -H "Surreal-NS: main" -H "Surreal-DB: main" -H "Accept: application/json" \
   -d 'SELECT * FROM person WHERE age > $age' http://localhost:8000/sql?age=18
 ```
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x">
+<tabitem label="V1.x">
 ```bash title="Request"
 curl -X POST -u "root:secret" -H "ns: main" -H "db: main" -H "Accept: application/json" \
   -d 'SELECT * FROM person WHERE age > $age' http://localhost:8000/sql?age=18
 ```
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ```json title="Response"
 [
@@ -2472,7 +2465,7 @@ curl -X POST -u "root:secret" -H "ns: main" -H "db: main" -H "Accept: applicatio
 
 ## `POST /graphql` {#graphql}
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The GraphQL endpoint enables use of GraphQL queries to interact with your data.
 
@@ -2492,7 +2485,7 @@ The GraphQL endpoint enables use of GraphQL queries to interact with your data.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -2501,7 +2494,7 @@ The GraphQL endpoint enables use of GraphQL queries to interact with your data.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -2510,7 +2503,7 @@ The GraphQL endpoint enables use of GraphQL queries to interact with your data.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries
@@ -2519,7 +2512,7 @@ The GraphQL endpoint enables use of GraphQL queries to interact with your data.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries
@@ -2588,9 +2581,9 @@ This HTTP RESTful endpoint imports a SurrealML machine learning model into a spe
 
 ### Headers
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" >
+<tabitem label="V2.x+">
 <table>
     <thead>
         <tr>
@@ -2602,7 +2595,7 @@ This HTTP RESTful endpoint imports a SurrealML machine learning model into a spe
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -2611,7 +2604,7 @@ This HTTP RESTful endpoint imports a SurrealML machine learning model into a spe
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -2620,7 +2613,7 @@ This HTTP RESTful endpoint imports a SurrealML machine learning model into a spe
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -2628,9 +2621,9 @@ This HTTP RESTful endpoint imports a SurrealML machine learning model into a spe
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -2642,7 +2635,7 @@ This HTTP RESTful endpoint imports a SurrealML machine learning model into a spe
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -2651,7 +2644,7 @@ This HTTP RESTful endpoint imports a SurrealML machine learning model into a spe
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -2660,7 +2653,7 @@ This HTTP RESTful endpoint imports a SurrealML machine learning model into a spe
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -2668,18 +2661,18 @@ This HTTP RESTful endpoint imports a SurrealML machine learning model into a spe
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ### Example usage
 
 > [!NOTE]
 > The `-u` in the example below is a shorthand used by curl to send an Authorization header (name and password), in this case assuming the username `root` and password `secret`.
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" default>
+<tabitem label="V2.x+">
 ```bash title="Request"
 curl -X POST \
   -u "root:secret" \
@@ -2689,9 +2682,9 @@ curl -X POST \
   -d file.surml \
   http://localhost:8000/ml/import
 ```
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x">
+<tabitem label="V1.x">
 ```bash title="Request"
 curl -X POST \
   -u "root:secret" \
@@ -2701,9 +2694,9 @@ curl -X POST \
   -d file.surml \
   http://localhost:8000/ml/import
 ```
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ### Usage in Python
 
@@ -2724,9 +2717,9 @@ This HTTP RESTful endpoint exports a SurrealML machine learning model from a spe
 
 ### Headers
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" >
+<tabitem label="V2.x+">
 <table>
     <thead>
         <tr>
@@ -2738,7 +2731,7 @@ This HTTP RESTful endpoint exports a SurrealML machine learning model from a spe
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the root, namespace, or database authentication data
@@ -2747,7 +2740,7 @@ This HTTP RESTful endpoint exports a SurrealML machine learning model from a spe
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -2756,7 +2749,7 @@ This HTTP RESTful endpoint exports a SurrealML machine learning model from a spe
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -2764,9 +2757,9 @@ This HTTP RESTful endpoint exports a SurrealML machine learning model from a spe
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -2778,7 +2771,7 @@ This HTTP RESTful endpoint exports a SurrealML machine learning model from a spe
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the root, namespace, or database authentication data
@@ -2787,7 +2780,7 @@ This HTTP RESTful endpoint exports a SurrealML machine learning model from a spe
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>ns</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -2796,7 +2789,7 @@ This HTTP RESTful endpoint exports a SurrealML machine learning model from a spe
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>db</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.
@@ -2804,9 +2797,9 @@ This HTTP RESTful endpoint exports a SurrealML machine learning model from a spe
         </tr>
     </tbody>
 </table>
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ### Example usage
 
@@ -2814,9 +2807,9 @@ This HTTP RESTful endpoint exports a SurrealML machine learning model from a spe
 <em> Note: </em> The `-u` in the example below is a shorthand used by curl to send an Authorization header (name and password), in this case assuming the username `root` and password `secret`. The `-o` allows the output to be written to a file.
 
 
-<Tabs groupId="http-sql">
+<tabs synckey="http-sql">
 
-<TabItem value="V2" label="V2.x+" default>
+<tabitem label="V2.x+">
 ```bash title="Request"
 curl -X GET \
   -u "root:secret" \
@@ -2826,9 +2819,9 @@ curl -X GET \
   -o file.surml \
   http://localhost:8000/ml/export/prediction/1.0.0
 ```
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x">
+<tabitem label="V1.x">
 ```bash title="Request"
 curl -X GET \
   -u "root:secret" \
@@ -2838,13 +2831,13 @@ curl -X GET \
   -o file.surml \
   http://localhost:8000/ml/export/prediction/1.0.0
 ```
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ## Custom endpoint at `/api/:ns/:db/:endpoint` {#custom}
 
-<Since v="v2.2.0" />
+<since v="v2.2.0" />
 
 A custom endpoint can be set using a [`DEFINE API`](/docs/surrealql/statements/define/api) statement. The possible HTTP methods (GET, PUT, etc.) are set using the statement itself. The path begins with `/api`, continues with the namespace and database, and ends with a custom endpoint that can include both static and dynamic path segments.
 
@@ -2861,7 +2854,7 @@ A custom endpoint can be set using a [`DEFINE API`](/docs/surrealql/statements/d
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-                <Label label="optional" >OPTIONAL</Label>
+                <label label="optional">OPTIONAL</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the root, namespace, or database authentication data
@@ -2870,7 +2863,7 @@ A custom endpoint can be set using a [`DEFINE API`](/docs/surrealql/statements/d
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries.
@@ -2879,7 +2872,7 @@ A custom endpoint can be set using a [`DEFINE API`](/docs/surrealql/statements/d
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Surreal-DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries.

@@ -6,19 +6,9 @@ description: SurrealKV is A low-level, versioned, embedded, ACID-compliant, key-
 no_page_headings: true
 ---
 
-import Image from "@components/Image.astro";
-import LightLogo from "@img/icon/light/kv.png";
-import DarkLogo from "@img/icon/dark/kv.png";
 
 <div class="flag-title">
-	<Image
-		alt="SurrealKV"
-		width={42}
-		src={{
-			light: LightLogo,
-    		dark: DarkLogo,
-		}}
-	/>
+	<img src="@assets/img/icon/light/kv.png" darkSrc="@assets/img/icon/dark/kv.png" alt="SurrealKV" style="width: 42px" />
 	# SurrealKV
 </div>
 

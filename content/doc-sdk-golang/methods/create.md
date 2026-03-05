@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Create
 description: The create method creates a record in the database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Create[T](table, data)` {#create}
 
@@ -28,7 +27,7 @@ db.Create[T](table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>table</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or a [`RecordId`](/docs/sdk/golang/data-types#recordid) to create.
@@ -37,7 +36,7 @@ db.Create[T](table, data)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The document / record data to insert.

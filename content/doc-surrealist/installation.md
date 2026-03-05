@@ -5,7 +5,6 @@ title: Surrealist | Installation
 description: Get started with Surrealist by installing the desktop or web app. The desktop app offers more features and flexibility, while the web app is more accessible and portable.
 ---
 
-import { Icon } from 'astro-icon/components';
 
 # Installation
 

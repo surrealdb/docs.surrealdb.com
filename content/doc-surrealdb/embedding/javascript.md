@@ -5,20 +5,9 @@ title: Embedding SurrealDB in JavaScript
 description: The documentation for embedding SurrealDB within JavaScript has not yet been released.
 ---
 
-import Image from "@components/Image.astro";
-import LightLogo from "@img/icon/light/javascript.png";
-import DarkLogo from "@img/icon/dark/javascript.png";
 
 <div class="flag-title">
-	<Image
-		alt="JavaScript"
-		width={42}
-		height={42}
-		src={{
-			light: LightLogo,
-			dark: DarkLogo,
-		}}
-	/>
+	<img src="@assets/img/icon/light/javascript.png" darkSrc="@assets/img/icon/dark/javascript.png" alt="JavaScript" style="width: 42px; height: 42px" />
 	# Embedding in JavaScript
 </div>
 

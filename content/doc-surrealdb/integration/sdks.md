@@ -5,31 +5,6 @@ title: SDKs | Integration
 description: SurrealDB supports a number of methods for connecting to the database and performing data queries.
 ---
 
-import Boxes from "@components/boxes/Boxes.astro";
-import IconBox from "@components/boxes/IconBox.astro";
-import Image from "@components/Image.astro";
-
-import LightDotnet from "@img/icon/light/dotnet.png";
-import LightGolang from "@img/icon/light/golang.png";
-import LightJava from "@img/icon/light/java.png";
-import LightJavaScript from "@img/icon/light/javascript.png";
-import LightNodejs from "@img/icon/light/nodejs.png";
-import LightPhp from "@img/icon/light/php.png";
-import LightPython from "@img/icon/light/python.png";
-import LightRust from "@img/icon/light/rust.png";
-import LightTypescript from "@img/icon/light/typescript.png";
-import LightWasm from "@img/icon/light/webassembly.png";
-
-import DarkDotnet from "@img/icon/dark/dotnet.png";
-import DarkGolang from "@img/icon/dark/golang.png";
-import DarkJava from "@img/icon/dark/java.png";
-import DarkJavaScript from "@img/icon/dark/javascript.png";
-import DarkNodejs from "@img/icon/dark/nodejs.png";
-import DarkPhp from "@img/icon/dark/php.png";
-import DarkPython from "@img/icon/dark/python.png";
-import DarkRust from "@img/icon/dark/rust.png";
-import DarkTypescript from "@img/icon/dark/typescript.png";
-import DarkWasm from "@img/icon/dark/webassembly.png";
 
 # SDKs
 

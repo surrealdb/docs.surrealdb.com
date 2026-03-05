@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | QueryRaw
 description: This method runs a set of SurrealQL statements against the database, based on a raw SurrealQL query. 
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.QueryRaw()` {#query}
 
@@ -28,7 +27,7 @@ func QueryRaw(db *DB, queries *[]QueryStmt) error
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>sql</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Specifies the SurrealQL statements.
@@ -37,7 +36,7 @@ func QueryRaw(db *DB, queries *[]QueryStmt) error
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>params</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Assigns variables which can be used in the query.

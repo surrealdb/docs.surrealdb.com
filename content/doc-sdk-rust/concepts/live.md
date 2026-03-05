@@ -7,12 +7,10 @@ description: The Rust SDK for SurrealDB allows changes to tables in real time to
 
 # Live queries
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 A [`LIVE SELECT`](/docs/surrealql/statements/live) statement creates a session that keeps track of changes to a table in real time. Inside the Rust SDK, this is accomplished by appending [`.live()`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Select.html#method.live) to the end of a [`.select()`](/docs/sdk/rust/methods/select) query.
 
@@ -174,9 +172,9 @@ Delete from live ID aad570d6-1d3f-4dd6-81f5-582b92a6d8a4:
 }
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 A [`LIVE SELECT`](/docs/surrealql/statements/live) statement creates a session that keeps track of changes to a table in real time. Inside the Rust SDK, this is accomplished by appending [`.live()`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Select.html#method.live) to the end of a [`.select()`](/docs/sdk/rust/methods/select) query.
 
@@ -335,6 +333,6 @@ Delete from live ID 63853ee1-aa9b-4e04-a54a-3b900a3cbaaa:
 }
 ```
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

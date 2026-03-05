@@ -5,7 +5,6 @@ title: Get Started with SurrealDB Cloud
 description: SurrealDB Cloud is a cloud-based platform that provides a comprehensive suite of tools and services to help you build, manage, and deploy your database.
 ---
 
-import { Icon } from 'astro-icon/components';
 
 # Get started with SurrealDB Cloud 
 

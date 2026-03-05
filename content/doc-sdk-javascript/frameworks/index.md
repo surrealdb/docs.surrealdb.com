@@ -4,21 +4,6 @@ sidebar_label: Frameworks
 title: JavaScript | SDK | Frameworks
 description: The SurrealDB SDK for JavaScript can run in memory using the Node.js engine or in a browser using the WebAssembly engine.
 ---
-import Boxes from "@components/boxes/Boxes.astro";
-import IconBox from "@components/boxes/IconBox.astro";
-import LightReact from "@img/icon/light/reactjs.png";
-import LightNext from "@img/icon/light/nextjs.png";
-import LightVue from "@img/icon/light/vuejs.png";
-import LightAngular from "@img/icon/light/angular.png";
-import LightSolid from "@img/icon/light/solidjs.png";
-import LightSvelte from "@img/icon/light/svelte.png";
-import DarkReact from "@img/icon/dark/reactjs.png";
-import DarkNext from "@img/icon/dark/nextjs.png";
-import DarkVue from "@img/icon/dark/vuejs.png";
-import DarkAngular from "@img/icon/dark/angular.png";
-import DarkSolid from "@img/icon/dark/solidjs.png";
-import DarkSvelte from "@img/icon/dark/sveltejs.png";
-import Version from '@components/Version.astro';
 
 # Frameworks 
 

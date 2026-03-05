@@ -5,21 +5,9 @@ title: SurrealQL
 description: In this section, you will explore using SurrealQL, a powerful database query language that closely resembles traditional SQL but comes with unique differences and improvements to query data in SurrealDB.
 ---
 
-import Image from "@components/Image.astro";
-import LightLogo from "@img/icon/light/surrealql.png";
-import DarkLogo from "@img/icon/dark/surrealql.png";
-import ImageSurrealist from "@img/image/surrealist/query-new.png";
 
 <div class="flag-title">
-	<Image
-		alt="SurrealQL"
-		width={42}
-		height={42}
-		src={{
-			light: LightLogo,
-			dark: DarkLogo,
-		}}
-	/>
+	<img src="@assets/img/icon/light/surrealql.png" darkSrc="@assets/img/icon/dark/surrealql.png" alt="SurrealQL" style="width: 42px; height: 42px" />
 	# SurrealQL
 </div>
 
@@ -52,10 +40,7 @@ SurrealQL offers several key features that make it a powerful tool for working w
 
 - **Performance Optimization**: SurrealQL incorporates optimizations specific to SurrealDB, ensuring efficient execution of queries and minimizing resource usage.
 
-<Image
-  alt="Surrealist query view"
-  src={ImageSurrealist}
-/>
+<img src="@assets/img/image/surrealist/query-new.png" alt="Surrealist query view" />
 
 ## Resources
 

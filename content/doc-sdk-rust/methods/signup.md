@@ -5,14 +5,12 @@ title: Signup Method in Rust | Rust SDK | Integration | SurrealDB
 description: The .signup() method for the SurrealDB Rust SDK signs up to a specific access method.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # `signup()`
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 Signs up as a record user (formerly known as a scope user) to a specific access method.
 
@@ -88,9 +86,9 @@ async fn main() -> surrealdb::Result<()> {
 
 * [.signup() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.signup)
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 Signs up as a record user (formerly known as a scope user) to a specific access method.
 
@@ -166,6 +164,6 @@ async fn main() -> surrealdb::Result<()> {
 
 * [.signup() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.signup)
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

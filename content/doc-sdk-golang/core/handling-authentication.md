@@ -5,11 +5,6 @@ title: Golang | SDK | Handle authentication
 description: SurrealDB supports a number of methods for authenticating users and securing the database.
 ---
 
-import Label from "@components/shared/Label.astro";
-import Since from "@components/shared/Since.astro";
-import Version from '@components/Version.astro';
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # Handle authentication
 
@@ -20,7 +15,7 @@ In your SurrealDB database, you can create authentication login using the [`DEFI
 The access method used will inform the input for `access` in the `.SignUp()` and `.SignIn()` methods.
 
 > [!IMPORTANT]
-> If you are not on Version <Version /> of SurrealDB, you will use the `scope` property instead of `access`. 
+> If you are not on Version <version /> of SurrealDB, you will use the `scope` property instead of `access`. 
 
 <table>
 	<thead>
@@ -53,8 +48,8 @@ The access method used will inform the input for `access` in the `.SignUp()` and
 
 The Golang SDK has a [`.Query()` method](/docs/sdk/golang/methods/query) which allows you to write secure SurrealQL statements from within your application. Using this method, you can define access for your users and securely manage authentication. See the code example below:
 
-<Tabs groupId="define-access">
-<TabItem value="V2" label="V2.x" >
+<tabs synckey="define-access">
+<tabitem label="V2.x">
 ```go
 package main
 
@@ -252,8 +247,8 @@ func ExampleDB_record_user_custom_struct() {
 	// Authenticated user name: yusuke
 }
 ```
-</TabItem>
-<TabItem value="V1" label="V1.x" >
+</tabitem>
+<tabitem label="V1.x">
 
 ```go
 ...
@@ -271,11 +266,8 @@ func ExampleDB_record_user_custom_struct() {
 			);
 ...
 ```
-</TabItem>
-</Tabs>
-
-{/* > [!NOTE]
-> Depending on the connection protocol you choose, authentication tokens and sessions lifetime work differently. Refer to the [connection options](/docs/sdk/golang/core/create-a-new-connection#connection-options) documentation for more information. */}
+</tabitem>
+</tabs>
 
 
 ## Learn more

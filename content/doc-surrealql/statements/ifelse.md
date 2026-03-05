@@ -14,13 +14,10 @@ The `IF ELSE` statement can be used as a main statement, or within a parent stat
 
 An `IF ELSE` syntax uses `{}` to open up a code block on each condition check which will be run when it evaluates as [truthy](/docs/surrealql/datamodel/values#values-and-truthiness).
 
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
-<Tabs syncKey="ifelse-statement">
+<tabs synckey="ifelse-statement">
 
-  <TabItem label="Syntax">
+  <tabitem label="Syntax">
 
 ```surql title="Modern syntax"
 IF @condition { @expression; .. }
@@ -28,41 +25,14 @@ IF @condition { @expression; .. }
    [ ELSE { @expression; .. } ]
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const ifElseAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "IF" },
-      { type: "NonTerminal", text: "@condition" },
-      { type: "Terminal", text: "{" },
-      { type: "NonTerminal", text: "@expression; .." },
-      { type: "Terminal", text: "}" },
-      { type: "ZeroOrMore", child: { type: "Sequence", children: [
-        { type: "Terminal", text: "ELSE" },
-        { type: "Terminal", text: "IF" },
-        { type: "NonTerminal", text: "@condition" },
-        { type: "Terminal", text: "{" },
-        { type: "NonTerminal", text: "@expression; .." },
-        { type: "Terminal", text: "}" }
-      ] } },
-      { type: "Optional", child: { type: "Sequence", children: [
-        { type: "Terminal", text: "ELSE" },
-        { type: "Terminal", text: "{" },
-        { type: "NonTerminal", text: "@expression; .." },
-        { type: "Terminal", text: "}" }
-      ] } }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={ifElseAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"NonTerminal","text":"@condition"},{"type":"Terminal","text":"{"},{"type":"NonTerminal","text":"@expression; .."},{"type":"Terminal","text":"}"},{"type":"ZeroOrMore","child":{"type":"Sequence","children":[{"type":"Terminal","text":"ELSE"},{"type":"Terminal","text":"IF"},{"type":"NonTerminal","text":"@condition"},{"type":"Terminal","text":"{"},{"type":"NonTerminal","text":"@expression; .."},{"type":"Terminal","text":"}"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"ELSE"},{"type":"Terminal","text":"{"},{"type":"NonTerminal","text":"@expression; .."},{"type":"Terminal","text":"}"}]}}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example usage
 

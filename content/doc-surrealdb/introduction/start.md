@@ -6,31 +6,6 @@ description: In this guide, you will learn about the various ways you can start 
 
 ---
 
-import { Icon } from 'astro-icon/components';
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
-import SurrealistMini from "@components/SurrealistMini.astro";
-import IconBox from '@components/boxes/IconBox.astro';
-import IconLink from '@components/boxes/IconLink.astro';
-import LightDotnet from '@img/icon/light/dotnet.png';
-import LightGolang from '@img/icon/light/golang.png';
-import LightJava from '@img/icon/light/java.png';
-import LightJavascript from '@img/icon/light/javascript.png';
-import LightNodejs from '@img/icon/light/nodejs.png';
-import LightPhp from '@img/icon/light/php.png';
-import LightPython from '@img/icon/light/python.png';
-import LightRust from '@img/icon/light/rust.png';
-import LightWasm from '@img/icon/light/webassembly.png';
-
-import DarkDotnet from '@img/icon/dark/dotnet.png';
-import DarkGolang from '@img/icon/dark/golang.png';
-import DarkJava from '@img/icon/dark/java.png';
-import DarkJavascript from '@img/icon/dark/javascript.png';
-import DarkNodejs from '@img/icon/dark/nodejs.png';
-import DarkPhp from '@img/icon/dark/php.png';
-import DarkPython from '@img/icon/dark/python.png';
-import DarkRust from '@img/icon/dark/rust.png';
-import DarkWasm from '@img/icon/dark/webassembly.png';
 
 # Getting started
 
@@ -44,75 +19,6 @@ Queries are written using [SurrealQL](/docs/surrealql), SurrealDB's powerful and
 
 Let's take a look at some of the basic queries you can run in SurrealDB.
 
-{/* There are two main ways to use SurrealQL:
-
-1. **Surrealist**: A graphical user interface (GUI) that can be accessed via a web browser or used as a desktop application.
-2. **SurrealDB CLI**: A command-line interface that allows you to interact with SurrealQL directly from the terminal.
-
-For more information, you can visit [Surrealist](https://Surrealist.app) and the [SurrealDB CLI documentation](/docs/surrealdb/cli/). */}
-
-{/* <Tabs groupId="running-surrealql">
-  <TabItem value="npm" label="Using Surrealist" default>
-
-Once you have your database running, head over to [Surrealist](https://Surrealist.app). Surrealist offers a simple interface to run SurrealQL queries. You can run queries, view the results, and even save your queries for later use. To start running queries, you can either [set up a connection using your database credentials](/docs/surrealist/getting-started#creating-a-connection) or [use a sandbox](/docs/surrealist/getting-started#using-the-sandbox) which uses the default credentials.
-
-For the sake of this guide, we recommend using a sandbox connection. Once you have set up your connection, you can run your queries in the query editor.
-
-</TabItem>
-<TabItem value="CLI" label="Using CLI">
-Once you have your [database running](/docs/surrealdb/cli/start), you can use the [SurrealDB CLI](/docs/surrealdb/cli/) to run your queries. To do so, run the following commands:
-
-1. Running without relying on an external server
-
-```bash
-surreal sql --endpoint memory --ns namespace --db database --pretty
-```
-
-2. Running with a specific endpoint, username, and password, and namespace, and database, run the following command:
-
-```bash
-surreal sql --endpoint http://localhost:8000 --username root --password root --namespace test --database test
-```
-
-
-> [!NOTE]
-> The `--endpoint` flag is the URL of your SurrealDB instance. The `--username` and `--password` flags are the credentials you set when you started the database. The `--namespace` and `--database` flags are the namespace and database you want to connect to. The values above can be set to your preference. Learn more about this in the [Start command](/docs/surrealdb/cli/start) documentation.
-
-
-Once you see the `>`character you can type your SurrealQL query, followed by the enter key. The command has support for `↑` and `↓` arrows for selecting previous SurrealQL statements, and stores the statement history in a history.txt file. To exit the REPL use the `ctrl + c` or `ctrl + d` key combinations.
-</TabItem>
-</Tabs> */}
-
-
-
-
-{/* ## Start the database
-
-First ensure that your database is set up correctly. To do so, run:
-
-```bash
-surreal version
-```
-To start your database, run the start command specific to your machine.
-
-### macOS or Linux
-
-```bash
-surreal start memory -A --user root --pass secret
-```
-### Windows
-
-```shell
-surreal.exe start memory -A --user root --pass secret
-```
-
-Here's what each segment of this command does:
-
-- `surreal start`: This initiates the process of starting the SurrealDB database server.
-- `-A`: Enable all capabilities.
-- `--user root --pass secret`: These flags set the initial username and password to access the database. Here both are set as root. Once the initial credentials are created, they are persisted in the datastore, which means you don't have to include the command line arguments next time you start SurrealDB. Instead, they should be securely stored in [environment variables](/docs/surrealdb/cli/env) or some form of secret management system.
-- `memory`: This argument indicates that the database should be run in memory. Databases run in memory can have quicker data access times because they're not reading and writing from disk, but the data will be lost when the server is restarted. 
-*/}
 
 ### Creating data with CREATE
 
@@ -122,14 +28,12 @@ The following example demonstrates how to create a record in the `category` tabl
 
 <br /> 
 
-<SurrealistMini
-	resultMode="single"
-	query={`
+<surrealistmini resultMode="single"
+	query="
 		CREATE category SET
 			name = 'Technology',
 			created_at = time::now();
-	`}
-/>
+	"} />
 
 After executing this statement, the `category` record is created in the database, and a randomly generated unique id known as a [Record ID](/docs/surrealql/datamodel/ids) is assigned to it. This ID represents the primary key of our record, and can be used to reference the record in future queries.
 
@@ -137,9 +41,9 @@ When creating records, you can also explicitly set the record ID. This can be us
 
 <br />
 
-<SurrealistMini
+<surrealistmini 
 	resultMode="single"
-	query={`
+	query="
 		CREATE person:john SET
 			name.first = 'John',
 			name.last = 'Adams',
@@ -147,16 +51,14 @@ When creating records, you can also explicitly set the record ID. This can be us
 			age = 29,
 			admin = true,
 			signup_at = time::now();
-	`}
-/>
+	" />
 
 One of the many powerful features of SurrealDB is the ability to write subqueries, which in the following example is used to populate the `category` field of the `article` record with the ID of the `Technology` category.
 
 <br />
 
-<SurrealistMini
-	resultMode="single"
-	setup={`
+<surrealistmini resultMode="single"
+	setup="
 		CREATE category SET name = 'Technology', created_at = time::now();
 		CREATE person:john SET
 			name.first = 'John',
@@ -165,16 +67,15 @@ One of the many powerful features of SurrealDB is the ability to write subquerie
 			age = 29,
 			admin = true,
 			signup_at = time::now();
-	`}
-	query={`
+	"
+	query="
 		CREATE article SET
 			created_at = time::now(),
 			author = person:john,
 			title = 'Lorem ipsum dolor',
 			text = 'Donec eleifend, nunc vitae commodo accumsan, mauris est fringilla.',
 			category = SELECT VALUE id FROM ONLY category WHERE name = 'Technology' LIMIT 1;
-	`}
-/>
+	" />
 
 ### Querying data with SELECT
 
@@ -184,8 +85,8 @@ For example, in addition to selecting records from a single table, you can also 
 
 <br />
 
-<SurrealistMini
-	setup={`
+<surrealistmini 
+	setup="
 		CREATE category SET name = 'Technology', created_at = time::now();
 		CREATE person:john SET
 			name.first = 'John',
@@ -200,8 +101,8 @@ For example, in addition to selecting records from a single table, you can also 
 			title = 'Lorem ipsum dolor',
 			text = 'Donec eleifend, nunc vitae commodo accumsan, mauris est fringilla.',
 			category = SELECT VALUE id FROM ONLY category WHERE name = 'Technology' LIMIT 1;
-	`}
-	query={`
+	"
+	query="
 		-- Select all records from a table
 		SELECT * FROM article;
 
@@ -210,7 +111,7 @@ For example, in addition to selecting records from a single table, you can also 
 
 		-- Selecting specific records
 		SELECT * FROM person:john;
-	`}
+	" 
 />
 
 The [SELECT statement](/docs/surrealql/statements/select) offers a variety of different features, such as the ability to filter on fields, fetch and resolve record id contents, and the ability to access data directly from Record IDs without the need of JOINs or complex queries.
@@ -223,7 +124,7 @@ The following query combines a number of such features:
 
 <SurrealistMini
 	resultMode="single"
-	setup={`
+	setup="
 		CREATE category SET name = 'Technology', created_at = time::now();
 		CREATE person:john SET
 			name.first = 'John',
@@ -238,8 +139,8 @@ The following query combines a number of such features:
 			title = 'Lorem ipsum dolor',
 			text = 'Donec eleifend, nunc vitae commodo accumsan, mauris est fringilla.',
 			category = SELECT VALUE id FROM ONLY category WHERE name = 'Technology' LIMIT 1;
-	`}
-	query={`
+	"
+	query="
 		SELECT 
 			title, 
 			category.*, 
@@ -249,20 +150,18 @@ The following query combines a number of such features:
 			} 
 		FROM article
 		WHERE author.age < 30;
-	`}
+	"
 />
 
 ### Modifying data with UPDATE
 
-{/* Similar to other databases, SurrealDB allows you to update records using the [`UPDATE` statement](/docs/surrealql/statements/update). You can also update specific IDs, for example say you wanted to update the first name of a specific person you can simply run: */}
 
 Records can be updated using the [UPDATE](/docs/surrealql/statements/update) statement, which allows you to modify the contents of existing records.
 
 Much like the `SELECT` statement, you can pass both table names and individual record IDs to the `UPDATE` statement. This allows you to update specific records, or update multiple records at once.
 
-<SurrealistMini
-	resultMode="single"
-	setup={`
+<surrealistmini resultMode="single"
+	setup="
 		CREATE category SET name = 'Technology', created_at = time::now();
 		CREATE person:john SET
 			name.first = 'John',
@@ -277,21 +176,19 @@ Much like the `SELECT` statement, you can pass both table names and individual r
 			title = 'Lorem ipsum dolor',
 			text = 'Donec eleifend, nunc vitae commodo accumsan, mauris est fringilla.',
 			category = SELECT VALUE id FROM ONLY category WHERE name = 'Technology' LIMIT 1;
-	`}
-	query={`
+	"
+	query="
 		UPDATE person:john SET
 			age += 1,
 			admin = false;
-	`}
-/>
+	" />
 
 The `UPDATE` statement offers a variety of features to further filter down records, and apply different update strategies. The following example demonstrates how we can merge new data into records matching a specific condition.
 
 <br />
 
-<SurrealistMini
-	resultMode="single"
-	setup={`
+<surrealistmini resultMode="single"
+	setup="
 		CREATE category SET name = 'Technology', created_at = time::now();
 		CREATE person:john SET
 			name.first = 'David',
@@ -306,14 +203,13 @@ The `UPDATE` statement offers a variety of features to further filter down recor
 			title = 'Lorem ipsum dolor',
 			text = 'Donec eleifend, nunc vitae commodo accumsan, mauris est fringilla.',
 			category = SELECT VALUE id FROM ONLY category WHERE name = 'Technology' LIMIT 1;
-	`}
-	query={`
+	"
+	query="
 		UPDATE person MERGE {
 			age: 30,
 			admin: false
 		}
-	`}
-/>
+	" />
 
 In addition to the `UPDATE` statement, SurrealDB also offers an [UPSERT statement](/docs/surrealql/statements/upsert), which has the added functionality of creating a record if it does not already exist. This can be useful when you want to update a record if it exists, or create it if it does not.
 
@@ -325,9 +221,8 @@ The following example demonstrates the use of the `RETURN` clause, which instruc
 
 <br />
 
-<SurrealistMini
-	resultMode="single"
-	setup={`
+<surrealistmini resultMode="single"
+	setup="
 		CREATE category SET name = 'Technology', created_at = time::now();
 		CREATE person:john SET
 			name.first = 'David',
@@ -342,11 +237,10 @@ The following example demonstrates the use of the `RETURN` clause, which instruc
 			title = 'Lorem ipsum dolor',
 			text = 'Donec eleifend, nunc vitae commodo accumsan, mauris est fringilla.',
 			category = SELECT VALUE id FROM ONLY category WHERE name = 'Technology' LIMIT 1;
-	`}
-	query={`
+	"
+	query="
 		DELETE article WHERE author.name.first = 'David' RETURN BEFORE;
-	`}
-/>
+	" />
 
 Congratulations, you're now on your way to database and API simplicity! For the next steps, we will explore the different ways to integrate SurrealDB into your applications.
 
@@ -356,11 +250,6 @@ SurrealDB is built to be flexibile and versatile. This means it can be integrate
 
 ### Getting started via SurrealDB Cloud 
 
-{/* [SurrealDB Cloud ](/docs/cloud) transforms the database experience, providing the power and versatility of SurrealDB without the complexity of managing infrastructure. Whether you’re building for passion projects or enterprise-scale applications offers the scalability, resilience, and innovation you need to stay ahead.
-
-Enjoy a fully managed solution that takes the hassle out of infrastructure operations. With SurrealDB’s ACID compliance, you can confidently run transactions at scale across multiple environments, ensuring data integrity and reliability.
-
-To get started with SurrealDB Cloud , head over to the [SurrealDB Cloud Dashboard](https://app.surrealdb.com/Signup) on Surrealist our management dashboard and sign up for a free account. You can also refer to the [SurrealDB Cloud documentation](/docs/cloud) for more information on how to get started with your free Instance. */}
 
 [SurrealDB Cloud ](/docs/cloud) is the easiest way to get up and running with SurrealDB. It provides a fully managed solution that takes the hassle out of infrastructure operations, allowing you to focus on building your application.
 
@@ -449,8 +338,8 @@ After you have installed SurrealDB, you can start the database using the [`surre
 
 When you start the database, you must specify which storage engine to use. This can be done by providing the engine as as the connection URL protocol. The following examples demonstrate how to start SurrealDB using different storage engines.
 
-<Tabs groupId="node-package-manager">
-  <TabItem value="memory" label="In-Memory">
+<tabs synckey="node-package-manager">
+  <tabitem label="In-Memory">
     ```bash
 	# Implicitly show memory as the storage backend
     surreal start memory
@@ -458,8 +347,8 @@ When you start the database, you must specify which storage engine to use. This 
 	# Same as above: memory is the default
 	surreal start
     ```
-  </TabItem>
-  <TabItem value="surrealkv" label="Single node on-disk SurrealKV (beta)" default>
+  </tabitem>
+  <tabitem label="Single node on-disk SurrealKV (beta)">
     ```bash
 	# Without versioning (temporal queries)
     surreal start --user root --pass secret surrealkv://mydb
@@ -470,19 +359,19 @@ When you start the database, you must specify which storage engine to use. This 
 	# With versioning (previous versions)
 	surreal start --user root --pass secret surrealkv+versioned://mydb
     ```
-  </TabItem>
-  <TabItem value="rocksdb" label="Single node on-disk RocksDB">
+  </tabitem>
+  <tabitem label="Single node on-disk RocksDB">
     ```bash
     surreal start --user root --pass secret rocksdb://mydb
     ```
-  </TabItem>
-  <TabItem value="tikv" label="Multi-node scalable cluster">
+  </tabitem>
+  <tabitem label="Multi-node scalable cluster">
 
     ```bash
    surreal start tikv://127.0.0.1:2379
     ```
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 #### Additional resources
 - [Running a disk-based server](/docs/surrealdb/installation/running/file)

@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Merge
 description: The Merge method modifies all records in a table, or a specific record.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Merge[T](what, data)` {#merge}
 
@@ -31,7 +30,7 @@ db.Merge[T](what, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or the specific [`RecordId`](/docs/sdk/golang/data-types#recordid) to merge.
@@ -40,7 +39,7 @@ db.Merge[T](what, data)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The data with which to modify the records.

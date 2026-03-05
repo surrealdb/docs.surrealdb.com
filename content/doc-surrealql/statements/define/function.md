@@ -5,10 +5,6 @@ title: DEFINE FUNCTION statement | SurrealQL
 description: The DEFINE FUNCTION statement allows you to define custom functions that can be reused throughout a database.
 ---
 
-import SurrealistMini from "@components/SurrealistMini.astro";
-import Since from '@components/shared/Since.astro'
-import Image from '@components/Image.astro'
-import RecursiveStar from "@img/image/recursive_star.png";
 
 # `DEFINE FUNCTION` statement
 
@@ -245,13 +241,7 @@ SELECT id, ->to->? FROM person;
 
 The last query [can be viewed graphically](/blog/whats-new-in-surrealist-3-2#graph-visualisation) inside Surrealist, leading to an output showing a seven-pointed star.
 
-<Image
-  alt="An image of a seven-pointed star created visually by relating seven records to each other and displayed inside Surrealist's graph view."
-  src={{
-    light: RecursiveStar,
-    dark: RecursiveStar,
-  }}
-/>
+<img src="@assets/img/image/recursive_star.png" alt="An image of a seven-pointed star created visually by relating seven records to each other and displayed inside Surrealist's graph view." />
 
 ## Permissions
 
@@ -269,7 +259,7 @@ You can set the permissions for a custom function using the `PERMISSIONS` clause
 
 The `FULL` permission grants all users access to the function. The following example defines a function that fetches all products from the `product` table and grants the function full permissions to access the data to all users.
 
-<SurrealistMini url="https://app.surrealdb.com/mini?query=--+Define+a+function+to+fetch+all+products.+All+users+can+access+this+function%0ADEFINE+FUNCTION+fn%3A%3AfetchAllProducts%28%29+%7B%0A%09RETURN+%28SELECT+*+FROM+product+LIMIT+10%29%3B%0A%7D+PERMISSIONS+FULL%3B%0A%0A--+Returns%3A+The+first+10+products+in+the+product+table%0ARETURN+fn%3A%3AfetchAllProducts%28%29%3B&dataset=surreal-deal-store&orientation=horizontal"/>
+<surrealistmini url="https://app.surrealdb.com/mini?query=--+Define+a+function+to+fetch+all+products.+All+users+can+access+this+function%0ADEFINE+FUNCTION+fn%3A%3AfetchAllProducts%28%29+%7B%0A%09RETURN+%28SELECT+*+FROM+product+LIMIT+10%29%3B%0A%7D+PERMISSIONS+FULL%3B%0A%0A--+Returns%3A+The+first+10+products+in+the+product+table%0ARETURN+fn%3A%3AfetchAllProducts%28%29%3B&dataset=surreal-deal-store&orientation=horizontal" />
 
 ### Using the `NONE` permission
 
@@ -315,7 +305,6 @@ DEFINE FUNCTION fn::fetchAllProducts() {
 ## Using `IF NOT EXISTS` clause
 
 
-
 The `IF NOT EXISTS` clause can be used to define a function only if it does not already exist. You should use the `IF NOT EXISTS` clause when defining a function in SurrealDB if you want to ensure that the function is only created if it does not already exist. If the function already exists, the `DEFINE FUNCTION` statement will return an error.
 
 It's particularly useful when you want to safely attempt to define a function without manually checking its existence first.
@@ -336,7 +325,7 @@ DEFINE FUNCTION IF NOT EXISTS fn::example() {};
 
 ## Using `OVERWRITE` clause
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `OVERWRITE` clause can be used to define a function and overwrite an existing one if it already exists. You should use the `OVERWRITE` clause when you want to modify an existing user definition. If the user already exists, the `DEFINE FUNCTION` statement will overwrite the existing definition with the new one.
 
@@ -354,6 +343,6 @@ DEFINE FUNCTION OVERWRITE fn::example() {};
 
 ## Functions as custom middleware
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 A `DEFINE FUNCTION` statement can be used to define a function for use as custom middleware. For more details on defining a custom function in this manner, see the [`DEFINE API`](/docs/surrealql/statements/define/api#custom-middleware) page.

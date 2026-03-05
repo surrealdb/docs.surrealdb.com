@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Let
 description: The let method assigns a value as a parameter for this connection.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Let()` {#let}
 
@@ -28,7 +27,7 @@ db.Let(key string, value interface{})
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>key</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Specifies the name of the variable.
@@ -37,7 +36,7 @@ db.Let(key string, value interface{})
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>value</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Assigns the value to the variable name.

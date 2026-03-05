@@ -5,11 +5,6 @@ title: Data Export & Backup
 description: Learn how to export and backup your SurrealDB Cloud instance data for external storage and disaster recovery.
 ---
 
-import Image from "@components/Image.astro";
-import BackupLight from "@img/image/cloud/backup.png";
-import BackupDark from "@img/image/cloud/backup.png";
-import RestoreLight from "@img/image/cloud/restore.png";
-import RestoreDark from "@img/image/cloud/restore.png";
 
 # Backup and restore
 
@@ -26,24 +21,12 @@ SurrealDB Cloud provides a robust backup and restore solution for your SurrealDB
 
 In the resources section of the Instance dashboard, you can access the list of all your available backups. To restore from a backup, click the **Create from selected** button on the backup you want to restore from. 
 
-<Image
-alt="Restoring from a backup"
-src={{ 
-	light: BackupLight,
-	dark: BackupDark,
-	}}  
-/>
+<img src="@assets/img/image/cloud/backup.png" alt="Restoring from a backup" />
 
 
 This will will take you to the [create a new Instance](/docs/cloud/getting-started/create-an-instance#create-from-selected) page with the backup option already selected.
 
-<Image
-alt="Restoring from a backup"
-src={{ 
-	light: RestoreLight,
-	dark: RestoreDark,
-	}}  
-/>
+<img src="@assets/img/image/cloud/restore.png" alt="Restoring from a backup" />
 
 You can also view a list of all available backups from the backup select dropdown in the Instance creation page.
 

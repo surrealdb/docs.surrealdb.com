@@ -5,7 +5,6 @@ title: Statements | SurrealQL
 description: Statements are used to configure and query a database.
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Statements
 
@@ -92,7 +91,7 @@ For a full list of these automatically generated parameters, see the [parameters
 
 ## Output when resource not defined
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 Many but not all statements in versions before 3.0 returned an empty array when a resource was not defined.
 

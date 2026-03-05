@@ -5,19 +5,15 @@ title: ALTER INDEX statement | SurrealQL
 description: The ALTER statement can be used to change authentication access and behaviour, global parameters, table configurations, table events, schema definitions, and indexes.
 ---
 
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 # `ALTER INDEX` statement
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 The `ALTER INDEX` statement is used to alter a defined index on a table.
 
-<Tabs syncKey="alter-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="alter-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 ALTER INDEX @name ON TABLE @table
@@ -26,56 +22,14 @@ ALTER INDEX @name ON TABLE @table
     DROP COMMENT
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const alterIndexAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    {
-      type: "Sequence",
-      children: [
-        { type: "Terminal", text: "ALTER INDEX" },
-        { type: "NonTerminal", text: "@name" },
-        { type: "Terminal", text: "ON TABLE" },
-        { type: "NonTerminal", text: "@table" },
-        {
-          type: "Choice",
-          index: 0,
-          children: [
-            {
-              type: "Sequence",
-              children: [
-                { type: "Terminal", text: "COMMENT" },
-                { type: "NonTerminal", text: "@string" },
-              ],
-            },
-            {
-              type: "Sequence",
-              children: [
-                { type: "Terminal", text: "PREPARE" },
-                { type: "Terminal", text: "REMOVE" },
-              ],
-            },
-            {
-              type: "Sequence",
-              children: [
-                { type: "Terminal", text: "DROP" },
-                { type: "Terminal", text: "COMMENT" },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-  ],
-};
 
-<RailroadDiagram ast={alterIndexAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"ALTER INDEX"},{"type":"NonTerminal","text":"@name"},{"type":"Terminal","text":"ON TABLE"},{"type":"NonTerminal","text":"@table"},{"type":"Choice","index":0,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"COMMENT"},{"type":"NonTerminal","text":"@string"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"PREPARE"},{"type":"Terminal","text":"REMOVE"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"DROP"},{"type":"Terminal","text":"COMMENT"}]}]}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## `PREPARE REMOVE` clause
 

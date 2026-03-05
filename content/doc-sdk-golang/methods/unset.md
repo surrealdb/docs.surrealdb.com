@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Unset
 description: This method removes a parameter for this connection.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Unset()` {#unset}
 
@@ -28,7 +27,7 @@ db.Unset(key string)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>key</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Specifies the SurrealQL statements.

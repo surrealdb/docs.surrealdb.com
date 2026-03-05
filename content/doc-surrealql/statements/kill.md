@@ -5,10 +5,6 @@ title: KILL statement | SurrealQL
 description: The KILL statement is used to terminate a running live query.
 ---
 
-import Since from "@components/shared/Since.astro";
-import RailroadDiagram from "@components/RailroadDiagram.astro";
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # `KILL` statement
 
@@ -18,35 +14,21 @@ While the `KILL` statement does accept a value type, this value must resolve to 
 
 ### Statement syntax
 
-<Tabs syncKey="kill-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="kill-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 KILL @value;
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const killAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    {
-      type: "Sequence",
-      children: [
-        { type: "Terminal", text: "KILL" },
-        { type: "NonTerminal", text: "@value" },
-        { type: "Terminal", text: ";" },
-      ],
-    },
-  ],
-};
 
-<RailroadDiagram ast={killAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"KILL"},{"type":"NonTerminal","text":"@value"},{"type":"Terminal","text":";"}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example usage
 
@@ -86,7 +68,7 @@ KILL u'9276b05b-e59a-49cd-9dd1-17c6fd15c28f';
 
 ## Kill notifications
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 A separate notification is sent out when a `KILL` statement is enacted on a live query ID.
 

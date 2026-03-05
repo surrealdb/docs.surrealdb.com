@@ -5,14 +5,11 @@ title: Mistral
 description: End-to-end guide for building a fast semantic-search stack with Mistral-Embed vectors stored in SurrealDB’s native HNSW index.
 ---
 
-import Label from "@components/shared/Label.astro";
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # Mistral
 
-<Tabs>
-<TabItem label="Python">
+<tabs>
+<tabitem label="Python">
 
 Modern open-source RAG pipelines need two things:
 
@@ -207,111 +204,10 @@ If memory is critical you can:
 ### You’re done 🚀
 
 You now have a clean, fully-async SurrealDB setup that stores **Mistral-Embed** vectors, supports **fast HNSW search**, and can be dropped into any RAG or semantic-search workflow.
-{/* 
-```python
-# ───────────────────────── 0 · Imports & config ──────────────────────────
-from __future__ import annotations
-
-import os, asyncio, math, typing as T
-from mistralai.client import MistralClient
-from surrealdb import Surreal
-
-SDB_URL    = os.getenv("SDB_URL", "http://localhost:8000/rpc")
-SDB_USER   = os.getenv("SDB_USER", "root")
-SDB_PASS   = os.getenv("SDB_PASS", "secret")
-NS         = "demo"
-DB         = "demo"
-TABLE      = "mistral_docs"
-
-MISTRAL_KEY = os.getenv("MISTRAL_API_KEY")   # ▸ export MISTRAL_API_KEY=...
-assert MISTRAL_KEY, "No Mistral key found!"
-
-# ───────────────────────── 1 · Clients ───────────────────────────────────
-sdb   = Surreal(SDB_URL)
-mistr = MistralClient(api_key=MISTRAL_KEY)
-
-# ───────────────────────── 2 · Example documents ─────────────────────────
-DOCS = [
-    "SurrealDB ships an in-memory HNSW index for high-speed ANN search.",
-    "Mistral-Embed produces 1024-dimensional float vectors.",
-    "You can pair them for a full open-source semantic-search stack.",
-]
-
-# ───────────────────────── 3 · Helper funcs ──────────────────────────────
-async def	init_db() -> None:
-    """Connect and (re)create the schema if needed."""
-    await sdb.signin({"user": SDB_USER, "pass": SDB_PASS})
-    await sdb.use(NS, DB)
-
-    # embed *one* doc to get the true dimension
-    dim = len(
-        mistr.embeddings(model="mistral-embed", input=["ping"]).data[0].embedding
-    )
-
-    schema = `
-    DEFINE TABLE $tb SCHEMALESS PERMISSIONS NONE;
-    DEFINE FIELD text      ON $tb TYPE string;
-    DEFINE FIELD embedding ON $tb TYPE array;
-
-    DEFINE INDEX hnsw_idx ON $tb
-      FIELDS embedding
-      HNSW DIMENSION {dim}
-      DIST   COSINE;
-    """
-    await sdb.query(schema, {"tb": TABLE})
 
 
-async def	insert_docs(docs: list[str]) -> None:
-    """Batch-embed & insert documents via one SurrealQL call."""
-    batch_size = 64
-    rows: list[dict[str, T.Any]] = []
-
-    for i in range(0, len(docs), batch_size):
-        chunk  = docs[i : i + batch_size]
-        vecs   = mistr.embeddings(model="mistral-embed", input=chunk).data
-        rows  += [
-            {
-                "id":        f"{TABLE}:{i + j}",
-                "text":      chunk[j],
-                "embedding": vec.embedding,
-            }
-            for j, vec in enumerate(vecs)
-        ]
-
-    await sdb.query(f"INSERT INTO {TABLE} $data", {"data": rows})
-
-
-async def	search(query: str, k: int = 3, ef: int = 64):
-    """Return the top-k docs for a query."""
-    q_vec = mistr.embeddings(model="mistral-embed", input=[query]).data[0].embedding
-    surql = `
-    LET $q := $vec;
-    SELECT id, text, vector::distance::knn() AS score
-    FROM $tb
-    WHERE embedding <|{k},{ef}|> $q
-    ORDER BY score;
-    """
-    res = await sdb.query(surql, {"vec": q_vec, "tb": TABLE})
-    return res[0].result
-
-
-# ───────────────────────── 4 · Main entry - async all-in-one ─────────────
-async def main():
-    await init_db()
-
-    # ingest only if empty
-    count = (await sdb.query(f"SELECT count() FROM {TABLE};"))[0].result[0]["count"]
-    if count == 0:
-        await insert_docs(DOCS)
-
-    hits = await search("Which DB offers native vector search?")
-    for h in hits:
-        print(f"⭐ {h['text']}  (score={h['score']:.4f})")
-
-asyncio.run(main()) */}
-
-</TabItem>
-<TabItem label="Rust">
+</tabitem>
+<tabitem label="Rust">
 
 ## Setup
 
@@ -781,6 +677,6 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 ```
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

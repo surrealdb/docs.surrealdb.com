@@ -5,8 +5,6 @@ title: Create a new connection | .NET | SDK | Concepts
 description: The SurrealDB SDK for .NET enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # Create a new connection
 
@@ -37,24 +35,24 @@ new SurrealDbClient(endpoint)
 You can specify your connection protocol either as `http`, `https`, `ws`, or `wss`.
 Since SurrealDB also supports RPC over WebSocket, by default, it is specified with a `/rpc` suffix. 
 
-<Tabs groupId="connection-options">
-  <TabItem value="local" label="Local endpoint" default>
+<tabs synckey="connection-options">
+  <tabitem label="Local endpoint">
 
 ```csharp
 // Creates a new client using a local endpoint
 using var db = new SurrealDbClient("http://127.0.0.1:8000");
 ```
 
-  </TabItem>
-  <TabItem value="remote" label="Remote endpoint">
+  </tabitem>
+  <tabitem label="Remote endpoint">
 
 ```csharp
 // Creates a new client using a remote endpoint
 using var db = new SurrealDbClient("wss://cloud.surrealdb.com/rpc");
 ```
 
-  </TabItem>
-  <TabItem value="ns-db" label="Namespace and database">
+  </tabitem>
+  <tabitem label="Namespace and database">
 
 ```csharp
 var options = new SurrealDbOptions
@@ -68,8 +66,8 @@ var options = new SurrealDbOptions
 using var db = new SurrealDbClient(options);
 ```
 
-  </TabItem>
-  <TabItem value="token" label="Token">
+  </tabitem>
+  <tabitem label="Token">
 
 ```csharp
 var options = new SurrealDbOptions
@@ -82,8 +80,8 @@ var options = new SurrealDbOptions
 using var db = new SurrealDbClient(options);
 ```
 
-  </TabItem>
-  <TabItem value="credentials" label="Credentials">
+  </tabitem>
+  <tabitem label="Credentials">
 
 ```csharp
 var options = new SurrealDbOptions
@@ -97,8 +95,8 @@ var options = new SurrealDbOptions
 using var db = new SurrealDbClient(options);
 ```
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 > [!NOTE]
 > Having to manually set all these options into a `SurrealDbOptions` object can be cumbersome.

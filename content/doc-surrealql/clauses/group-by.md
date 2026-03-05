@@ -5,7 +5,6 @@ title: GROUP BY clause | SurrealQL
 description: The `GROUP BY` clause is used to group records by one or more columns.
 ---
 
-import SurrealistMini from "@components/SurrealistMini.astro";
 
 # `GROUP BY` clause
 
@@ -46,9 +45,8 @@ Explanation:
 
 This query will return a result set where each row represents a unique combination of `product_id` and `region`, along with the total sales amount for that combination. This is useful for understanding how different products are performing in different regions.
 
-<SurrealistMini
-	resultMode="single"
-	setup={`
+<surrealistmini resultMode="single"
+	setup="
 INSERT INTO rams [
     { gender: "M", age: 20, country: "Japan" },
     { gender: "M", age: 25, country: "Japan" },
@@ -57,8 +55,8 @@ INSERT INTO rams [
     { gender: "F", age: 25, country: "Korea" },
     { gender: "F", age: 45, country: "UK" },
 ];
-	`}
-	query={`
+	"
+	query="
 		SELECT
 	count() AS total,
 	math::mean(age) AS average_age,
@@ -66,8 +64,6 @@ INSERT INTO rams [
 	country
 FROM rams
 GROUP BY gender, country;
-	`}
-/>
-
+	" />
 
 

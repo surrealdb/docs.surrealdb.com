@@ -5,16 +5,6 @@ title: Using SurrealDB as a Vector Database | Introduction
 description: In this guide, you will learn about the basics of vector databases, how they differ from other data models, and how SurrealDB—a multi-model database—can store and query vector data alongside documents, graphs, and more.
 ---
 
-import Image from "@components/Image.astro";
-import SurrealistMini from "@components/SurrealistMini.astro";
-
-import ImageLead from "@img/lead.png";
-
-import LightImageVc from "@img/image/light/VC.png";
-import LightDistanceMetrics from "@img/image/light/distance-metrics.png";
-
-import DarkImageVc from "@img/image/dark/VC.png";
-import DarkDistanceMetrics from "@img/image/dark/distance-metrics.png";
 
 # Using SurrealDB as a Vector Database
 
@@ -95,10 +85,7 @@ In fact, embeddings retrieved from a model can be cut down to any length you pre
 
 SurrealDB supports [full-text search](/docs/surrealdb/models/full-text-search) and Vector Search. Full-text search (FTS) involves indexing documents using an [FTS index](/docs/surrealql/statements/define/indexes#full-text-search-fulltext-index) that makes use of an [analyzer](/docs/surrealql/statements/define/analyzer) that breaks down text using [tokenizers](/docs/surrealql/statements/define/analyzer#tokenizers) and [filters](/docs/surrealql/statements/define/analyzer#filters).
 
-<Image
-    alt="Google search for the word 'lead'"
-    src={ImageLead}
-/>
+<img src="@assets/img/lead.png" alt="Google search for the word 'lead'" />
 
 The image above is a Google search for the word “lead”, a word with more than one definition (and pronunciation!). Lead can mean 'taking initiative', as well as the chemical element with the symbol 'Pb'.
 
@@ -108,9 +95,7 @@ In the example below, we have a table called `liquids` with a `sample` field and
 
 Then, using the select statement to retrieve all the samples containing the chemical lead will also bring up samples that mention the word `lead`.
 
-<SurrealistMini
-	url="https://app.surrealdb.com/mini?query=--+Insert+a+sample+%26+content+field+into+a+liquids+table%0A%0AINSERT+INTO+liquids+%5B%0A++++%7Bsample%3A%27Sea+water%27%2C+content%3A+%27The+sea+water+contains+some+amount+of+lead%27%7D%2C%0A++++%7Bsample%3A%27Tap+water%27%2C+content%3A+%27The+team+lead+by+Dr.+Rose+found+out+that+the+tap+water+in+was+potable%27%7D%2C%0A++++%7Bsample%3A%27Sewage+water%27%2C+content%3A+%27High+amounts+of+a+were+found+in+Sewage+water%27%7D%0A%5D%3B%0A%0A--+Define+an+analyzer+for+the+liquid+table+and+an+index+on+the+content+field+with+the+analyzer%0A%0ADEFINE+ANALYZER+liquid_analyzer+TOKENIZERS+blank%2Cclass%2Ccamel%2Cpunct+FILTERS+snowball%28english%29%3B%0ADEFINE+INDEX+liquid_content+ON+liquids+FIELDS+content+SEARCH+ANALYZER+liquid_analyzer+BM25+HIGHLIGHTS%3B%0A%0A--+Retrieve+all+the+samples+containing+the+chemical+lead+will+also+bring+up+samples+that+simply+mention+the+word+lead%0A%0ASELECT%0A++sample%2C%0A++content%0AFROM+liquids%0AWHERE+content+%400%40+%27lead%27%3B&orientation=horizontal"
-/>
+<surrealistmini url="https://app.surrealdb.com/mini?query=--+Insert+a+sample+%26+content+field+into+a+liquids+table%0A%0AINSERT+INTO+liquids+%5B%0A++++%7Bsample%3A%27Sea+water%27%2C+content%3A+%27The+sea+water+contains+some+amount+of+lead%27%7D%2C%0A++++%7Bsample%3A%27Tap+water%27%2C+content%3A+%27The+team+lead+by+Dr.+Rose+found+out+that+the+tap+water+in+was+potable%27%7D%2C%0A++++%7Bsample%3A%27Sewage+water%27%2C+content%3A+%27High+amounts+of+a+were+found+in+Sewage+water%27%7D%0A%5D%3B%0A%0A--+Define+an+analyzer+for+the+liquid+table+and+an+index+on+the+content+field+with+the+analyzer%0A%0ADEFINE+ANALYZER+liquid_analyzer+TOKENIZERS+blank%2Cclass%2Ccamel%2Cpunct+FILTERS+snowball%28english%29%3B%0ADEFINE+INDEX+liquid_content+ON+liquids+FIELDS+content+SEARCH+ANALYZER+liquid_analyzer+BM25+HIGHLIGHTS%3B%0A%0A--+Retrieve+all+the+samples+containing+the+chemical+lead+will+also+bring+up+samples+that+simply+mention+the+word+lead%0A%0ASELECT%0A++sample%2C%0A++content%0AFROM+liquids%0AWHERE+content+%400%40+%27lead%27%3B&orientation=horizontal" />
 
 If you read through the content of the tap water sample, you’ll notice that it does not contain any lead in it but it has the mention of the word `lead` under “The team lead by Dr. Rose…” which means that the team was guided by Dr. Rose.
 
@@ -118,13 +103,7 @@ The search pulled up both the records although the tap water sample had no lead 
 
 ## Vector search in SurrealDB
 
-<Image
-  alt="What is Vector Search"
-  src={{
-    light: LightImageVc,
-    dark: DarkImageVc,
-  }}
-/>
+<img src="@assets/img/image/light/VC.png" darkSrc="@assets/img/image/dark/VC.png" alt="What is Vector Search" />
 
 The vector search feature of SurrealDB will help you do more and dig deeper into your data. This can be used in place of, or together with full-text search.
 
@@ -151,7 +130,7 @@ INSERT INTO liquidsVector [
 ```
 Notice that we have added an `embedding` field to the table. This field will store the vector embeddings of the content field so we can perform vector searches on it.
 
-<SurrealistMini url="https://app.surrealdb.com/mini?query=--+Define+a+vector+index+on+the+liquidsVector+table+for+embedding+field+%0ADEFINE+INDEX+mt_pts+ON+liquidsVector+FIELDS+embedding+HNSW+DIMENSION+4+DIST+COSINE+TYPE+F32%3B%0A%0A--+Insert+a+sample+%26+content+field+into+a+liquids+table%0AINSERT+INTO+liquidsVector+%5B%0A++++%7B%0A++++++++sample%3A%27Sea+water%27%2C+%0A++++++++content%3A+%27The+sea+water+contains+some+amount+of+lead%27%2C+%0A++++++++embedding%3A+%5B0.1%2C+0.2%2C+0.3%2C+0.4%5D+%7D%2C%0A++++%7B%0A++++++++sample%3A%27Tap+water%27%2C+%0A++++++++content%3A+%27The+team+lead+by+Dr.+Rose+found+out+that+the+tap+water+in+was+potable%27%2C+%0A++++++++embedding%3A%5B1.0%2C+0.1%2C+0.4%2C+0.3%5D%0A++++%7D%2C%0A++++%7B%0A++++++++sample%3A%27Sewage+water%27%2C+%0A++++++++content%3A+%27High+amounts+of+a+were+found+in+Sewage+water%27%2C+%0A++++++++embedding+%3A+%5B0.4%2C+0.3%2C+0.2%2C+0.1%5D%0A++++%7D%0A%5D%3B%0A%0A--+Add+embeddings+for+what+lead+as+a+harmful+substance+should+be.+%0ALET+%24lead_harmful+%3D+%5B0.15%2C+0.25%2C+0.35%2C+0.45%5D%3B%0A%0A--+Select+the+sample+and+content+from+the+liquids+table+with+cosine+similarity+%0ASELECT+sample%2C+content%2C+vector%3A%3Asimilarity%3A%3Acosine%28embedding%2C+%24lead_harmful%29+AS+dist+FROM+liquidsVector+WHERE+embedding+%3C%7C2%2CCOSINE%7C%3E+%24lead_harmful%3B&theme=auto&resultmode=combined"/>
+<surrealistmini url="https://app.surrealdb.com/mini?query=--+Define+a+vector+index+on+the+liquidsVector+table+for+embedding+field+%0ADEFINE+INDEX+mt_pts+ON+liquidsVector+FIELDS+embedding+HNSW+DIMENSION+4+DIST+COSINE+TYPE+F32%3B%0A%0A--+Insert+a+sample+%26+content+field+into+a+liquids+table%0AINSERT+INTO+liquidsVector+%5B%0A++++%7B%0A++++++++sample%3A%27Sea+water%27%2C+%0A++++++++content%3A+%27The+sea+water+contains+some+amount+of+lead%27%2C+%0A++++++++embedding%3A+%5B0.1%2C+0.2%2C+0.3%2C+0.4%5D+%7D%2C%0A++++%7B%0A++++++++sample%3A%27Tap+water%27%2C+%0A++++++++content%3A+%27The+team+lead+by+Dr.+Rose+found+out+that+the+tap+water+in+was+potable%27%2C+%0A++++++++embedding%3A%5B1.0%2C+0.1%2C+0.4%2C+0.3%5D%0A++++%7D%2C%0A++++%7B%0A++++++++sample%3A%27Sewage+water%27%2C+%0A++++++++content%3A+%27High+amounts+of+a+were+found+in+Sewage+water%27%2C+%0A++++++++embedding+%3A+%5B0.4%2C+0.3%2C+0.2%2C+0.1%5D%0A++++%7D%0A%5D%3B%0A%0A--+Add+embeddings+for+what+lead+as+a+harmful+substance+should+be.+%0ALET+%24lead_harmful+%3D+%5B0.15%2C+0.25%2C+0.35%2C+0.45%5D%3B%0A%0A--+Select+the+sample+and+content+from+the+liquids+table+with+cosine+similarity+%0ASELECT+sample%2C+content%2C+vector%3A%3Asimilarity%3A%3Acosine%28embedding%2C+%24lead_harmful%29+AS+dist+FROM+liquidsVector+WHERE+embedding+%3C%7C2%2CCOSINE%7C%3E+%24lead_harmful%3B&theme=auto&resultmode=combined" />
 
 In the example above you can see that the results are more accurate. The search pulled up only the results in which the word "lead" was used to mean the material, while the final `liquidsVector` record had the lowest score. This is the advantage of using vector search over full-text search.
 
@@ -164,13 +143,7 @@ SurrealDB provides [vector functions](/docs/surrealql/functions/database/vector)
 They also include similarity and distance functions, which help in understanding how similar or dissimilar two vectors are.
 Usually, the vector with the smallest distance or the largest cosine similarity value (closest to 1) is deemed the most similar to the item you are trying to search for.
 
-<Image
-  alt="Vector functions available in SurrealDB"
-  src={{
-    light: LightDistanceMetrics,
-    dark: DarkDistanceMetrics,
-  }}
-/>
+<img src="@assets/img/image/light/distance-metrics.png" darkSrc="@assets/img/image/dark/distance-metrics.png" alt="Vector functions available in SurrealDB" />
 
 The choice of distance or similarity function depends on the nature of your data and the specific requirements of your application.
 
@@ -364,8 +337,6 @@ WHERE point
   - 2<sup>1</sup> = 2 → euclidean/circle ○
   - 2<sup>2</sup> = 4 → squircle ▢
   - 2<sup>∞</sup> = ∞ → square □
-
-
 
 
 ## Conclusion

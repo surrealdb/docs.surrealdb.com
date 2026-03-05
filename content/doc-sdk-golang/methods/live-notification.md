@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | LiveNotification
 description: The Golang SDK enables you to listen for changes to records in a table.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.LiveNotifications<T>(queryUuid)` {#live-notifications}
 
@@ -27,7 +26,7 @@ db.LiveNotifications[UUID string](queryUuid)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>queryUuid</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The UUID of the live query to consume.

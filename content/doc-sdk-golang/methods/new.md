@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | New
 description: The Golang SDK for SurrealDB enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.New()` {#new}
 
@@ -27,7 +26,7 @@ surrealdb.New(url, options...)()
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>url</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2">
                 The URL of the database endpoint to connect to. Examples may include http://hostname:8000 or ws://hostname:8000/rpc .
@@ -36,7 +35,7 @@ surrealdb.New(url, options...)()
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>options</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2">
                 Set SurrealDB clients options such as Timeout etc.

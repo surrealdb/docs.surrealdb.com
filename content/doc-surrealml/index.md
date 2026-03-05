@@ -6,19 +6,9 @@ description: SurrealML enables machine learning models to be greatly simplified,
 no_page_headings: true
 ---
 
-import Image from "@components/Image.astro";
-import LightLogo from "@img/icon/light/ml-light.png";
-import DarkLogo from "@img/icon/dark/surrealml.png";
 
 <div class="flag-title">
-	<Image
-		alt="SurrealML"
-		width={42}
-		src={{
-			light: LightLogo,
-			dark: DarkLogo,
-		}}
-	/>
+	<img src="@assets/img/icon/light/ml-light.png" darkSrc="@assets/img/icon/dark/surrealml.png" alt="SurrealML" style="width: 42px" />
 	# SurrealML
 </div>
 

@@ -6,11 +6,10 @@ description: A value that may have multiple representations or formats.
 
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Literals
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 A literal is a value that may have multiple representations or formats, similar to an enum or a union type. A literal can be composed of strings, numbers, objects, arrays, or durations.
 

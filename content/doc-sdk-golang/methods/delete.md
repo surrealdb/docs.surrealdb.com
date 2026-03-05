@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Delete
 description: The Delete method deletes all records, or a specific record, in the database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Delete()` {#delete}
 
@@ -27,7 +26,7 @@ db.Delete[T any, R any](resource)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or a [`RecordId`](/docs/sdk/golang/data-types#recordid) to delete.

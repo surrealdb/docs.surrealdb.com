@@ -5,16 +5,12 @@ title: Export Method in Rust | Rust SDK | Integration | SurrealDB
 description: The .export() method for the SurrealDB Rust SDK dumps the database contents to a file.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
-
-import Since from "@components/shared/Since.astro";
 
 # `export()`
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 Dumps the database contents to a file.
 
@@ -114,9 +110,7 @@ The output for the above sample should look like the following.
 -- ------------------------------
 
 
-
 OPTION IMPORT;
-
 
 
 -- ------------------------------
@@ -126,9 +120,7 @@ OPTION IMPORT;
 -- ------------------------------
 
 
-
 DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE;
-
 
 
 -- ------------------------------
@@ -136,7 +128,6 @@ DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE;
 -- TABLE DATA: person
 
 -- ------------------------------
-
 
 
 INSERT [ { id: person:bgq0b0rblnozrufizdjm } ];
@@ -201,9 +192,9 @@ async fn main() -> surrealdb::Result<()> {
 
 * [.export() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.export)
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 Dumps the database contents to a file.
 
@@ -303,9 +294,7 @@ The output for the above sample should look like the following.
 -- ------------------------------
 
 
-
 OPTION IMPORT;
-
 
 
 -- ------------------------------
@@ -315,9 +304,7 @@ OPTION IMPORT;
 -- ------------------------------
 
 
-
 DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE;
-
 
 
 -- ------------------------------
@@ -327,13 +314,12 @@ DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE;
 -- ------------------------------
 
 
-
 INSERT [ { id: person:bgq0b0rblnozrufizdjm } ];
 ```
 
 ### Export configuration
 
-<Since v="v2.1.0" />
+<since v="v2.1.0" />
 
 The [`Export`](https://docs.rs/surrealdb/2/surrealdb/method/struct.Export.html) struct has a method called `.with_config()` that gives access to the configuration parameters for the export. These can be chained one after another inside a single line of code. The majority of these functions take a single `bool`:
 
@@ -393,6 +379,6 @@ async fn main() -> surrealdb::Result<()> {
 * [.export() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.export)
 
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

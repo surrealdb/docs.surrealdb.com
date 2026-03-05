@@ -5,9 +5,6 @@ title: Data Management | Overview
 description: This section contains information about the different data management features of SurrealDB.
 ---
 
-import Boxes from "@components/boxes/Boxes.astro";
-import IconBox from "@components/boxes/IconBox.astro";
-import Version from '@components/Version.astro';
 
 # Data Management
 

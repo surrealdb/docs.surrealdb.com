@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Query
 description: This method runs a set of SurrealQL statements against the database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Query()` {#query}
 
@@ -28,7 +27,7 @@ db.Query[TResult any](sql string, vars map[string]interface{}) (*[]QueryResult[T
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>sql</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Specifies the SurrealQL statements.
@@ -37,7 +36,7 @@ db.Query[TResult any](sql string, vars map[string]interface{}) (*[]QueryResult[T
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>vars</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2">
                 Assigns the value to the variable name.

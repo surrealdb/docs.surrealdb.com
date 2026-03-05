@@ -5,8 +5,6 @@ title: Upgrade command | CLI tool
 description: A command to change the current version of SurrealDB to another one, including the latest version, specified version, or nightly.
 ---
 
-import Since from '@components/shared/Since.astro'
-import Label from "@components/shared/Label.astro";
 
 # Upgrade command
 
@@ -29,7 +27,7 @@ The upgrade command upgrades SurrealDB to the latest version, nightly or a speci
         <tr>
             <td colspan="2">
                 `--nightly`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
             installs the latest nightly version of SurrealDB
@@ -38,7 +36,7 @@ The upgrade command upgrades SurrealDB to the latest version, nightly or a speci
                 <tr>
             <td colspan="2">
                 `--alpha`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
             installs the latest alpha version of SurrealDB
@@ -47,7 +45,7 @@ The upgrade command upgrades SurrealDB to the latest version, nightly or a speci
         <tr>
             <td colspan="2">
                 `--beta`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
             installs the latest beta version of SurrealDB
@@ -56,7 +54,7 @@ The upgrade command upgrades SurrealDB to the latest version, nightly or a speci
         <tr>
             <td colspan="2">
                 `--version`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
                 installs a specific version of SurrealDB
@@ -65,7 +63,7 @@ The upgrade command upgrades SurrealDB to the latest version, nightly or a speci
         <tr>
             <td colspan="2">
                 `--dry-run`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
                 Does not actually replace the currently installed version of SurrealDB.
@@ -105,7 +103,7 @@ For a list of available versions and their release notes, see the [releases](/re
 
 ## Install the alpha release
 
-<Since v="v1.5.3" />
+<since v="v1.5.3" />
 
 Use the `--alpha` flag to upgrade to the latest alpha version of SurrealDB.
 

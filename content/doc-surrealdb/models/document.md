@@ -5,11 +5,6 @@ title: Using SurrealDB as a Document Database | Data Models
 description: In this guide, you will learn how to “think” in a document model database and show how SurrealDB helps you implement these concepts seamlessly.
 ---
 
-import SurrealistMini from "@components/SurrealistMini.astro";
-import Image from "@components/Image.astro";
-import LightLogo from "@img/icon/light/mongodb.png";
-import DarkLogo from "@img/icon/dark/mongodb.png";
-
 
 # Using SurrealDB as a Document Database
 
@@ -25,8 +20,7 @@ But how do you “think” in a document model database? Thinking in a document 
 
 For example, you may have a table called `users` in your application, while the document model database will store user data (e.g., name, age, addresses) in a single JSON-like document. 
 
-<SurrealistMini
-	query={`CREATE users CONTENT {
+<surrealistmini query="CREATE users CONTENT {
     name: "Alice Smith",
     email: "alice@example.com",
     age: 29,
@@ -44,8 +38,7 @@ For example, you may have a table called `users` in your application, while the 
             country: "USA"
         }
     ]
-};`}
-/>
+};" />
 
 By clicking the **Run query** button, you will see the following result:
 
@@ -88,9 +81,7 @@ Document model databases are designed to store data in a flexible, nested struct
 
 For example, if you wanted to associate a `person` with an `article` they wrote, you could do this by assigning the person's ID to the `author` field of the article document. This binds the `person` and `article` together, allowing you to query the `article` by the `person`'s ID.
 
-<SurrealistMini
-	url="https://app.surrealdb.com/mini?query=CREATE+article+SET%0A%09created_at+%3D+time%3A%3Anow%28%29%2C%0A%09author+%3D+person%3Ajohn%2C%0A%09title+%3D+%27Lorem+ipsum+dolor%27%2C%0A%09text+%3D+%27Donec+eleifend%2C+nunc+vitae+commodo+accumsan%2C+mauris+est+fringilla.%27%3B%0A%0ACREATE+person%3Ajohn+SET%0A%09name.first+%3D+%27John%27%2C%0A%09name.last+%3D+%27Adams%27%2C%0A%09name.full+%3D+string%3A%3Ajoin%28%27+%27%2C+name.first%2C+name.last%29%2C%0A%09age+%3D+29%2C%0A%09admin+%3D+true%2C%0A%09signup_at+%3D+time%3A%3Anow%28%29%0A%3B"
-/>
+<surrealistmini url="https://app.surrealdb.com/mini?query=CREATE+article+SET%0A%09created_at+%3D+time%3A%3Anow%28%29%2C%0A%09author+%3D+person%3Ajohn%2C%0A%09title+%3D+%27Lorem+ipsum+dolor%27%2C%0A%09text+%3D+%27Donec+eleifend%2C+nunc+vitae+commodo+accumsan%2C+mauris+est+fringilla.%27%3B%0A%0ACREATE+person%3Ajohn+SET%0A%09name.first+%3D+%27John%27%2C%0A%09name.last+%3D+%27Adams%27%2C%0A%09name.full+%3D+string%3A%3Ajoin%28%27+%27%2C+name.first%2C+name.last%29%2C%0A%09age+%3D+29%2C%0A%09admin+%3D+true%2C%0A%09signup_at+%3D+time%3A%3Anow%28%29%0A%3B" />
 
 ## Concept mapping
 

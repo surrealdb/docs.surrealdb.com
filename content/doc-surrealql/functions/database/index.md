@@ -5,14 +5,12 @@ title: Database Functions | SurrealQL
 description: SurrealDB comes with a large number of in-built functions for checking, manipulating, and working with many different types of data.
 ---
 
-import Since from '@components/shared/Since.astro'
-import Table from '@components/shared/Table.astro'
 
 # Database Functions
 
 SurrealDB has many built-in functions designed to handle many common database tasks and work with SurrealDB's various data types, grouped into modules based on their purpose and the data types they are designed to work with. The table below lists all of SurrealDB's function modules, with descriptions and links to their own detailed documentation.
 
-<Table>
+<table>
 	<thead>
 		<tr>
 			<th scope="col" class="w-40">
@@ -392,7 +390,7 @@ SurrealDB has many built-in functions designed to handle many common database ta
 			</td>
 		</tr>
 	</tbody>
-</Table>
+</table>
 
 ## How to use database functions
 
@@ -434,7 +432,7 @@ cat:mr_meow
 
 ### Method syntax
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 Functions that are called on an existing value can be called using method syntax, using the `.` (dot) operator.
 
@@ -482,7 +480,7 @@ This can be made even more readable by splitting over multiple lines.
 
 ### Conversion from `::` (double colon) to `_` (underscore) syntax
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 Full function paths in SurrealDB were converted to match the method syntax detailed above.
 
@@ -529,6 +527,6 @@ These functions are:
 
 ## Anonymous functions
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 SurrealDB also allows for the creation of anonymous functions (also known as closures) that do not need to be defined on the database. See [the page on closures](/docs/surrealql/datamodel/closures) for more details.

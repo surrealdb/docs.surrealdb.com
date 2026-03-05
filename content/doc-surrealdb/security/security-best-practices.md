@@ -4,7 +4,6 @@ sidebar_label: Best practices
 title: Security Best Practices | Reference guides
 description: This guide outlines some key security best practices for using SurrealDB 2.0. While SurrealDB offers powerful and flexible features to support you in meeting your desired security standards, the use that you make of those features will ultimately determine whether or not you meet them.
 ---
-import SurrealistMini from "@components/SurrealistMini.astro";
 
 # Security Best Practices
 
@@ -127,11 +126,9 @@ Binding parameters ensure that untrusted data is passed to SurrealDB as SurrealQ
 
 ### Example: Bind parameters in the provided SDKs
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
-<Tabs groupId="language-sdk">
-  <TabItem value="rust" label="Rust" default>
+<tabs synckey="language-sdk">
+  <tabitem label="Rust">
 
 ```rust
 // Do this:
@@ -151,8 +148,8 @@ let mut result = db
     .await?;
 ```
 
-  </TabItem>
-  <TabItem value="js" label="JavaScript">
+  </tabitem>
+  <tabitem label="JavaScript">
 
 ```jsx
 // Do this:
@@ -170,8 +167,8 @@ const name = "tobie"; // User-controlled input.
 const result = await db.query(`CREATE person CONTENT name = "${name}";`);
 ```
 
-  </TabItem>
-  <TabItem value="csharp" label=".NET (C#)">
+  </tabitem>
+  <tabitem label=".NET (C#)">
 
 ```csharp
 // Do this:
@@ -189,26 +186,26 @@ string name = "tobie"; // User-controlled input.
 var result = await db.RawQuery($"CREATE person CONTENT name = "{name}";");
 ```
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ### Example: Bind parameters in the HTTP REST API
 
-<Tabs groupId="http-sql">
-<TabItem value="V2" label="V2.x+" default>
+<tabs synckey="http-sql">
+<tabitem label="V2.x+">
 ```bash title="Request"
 curl -X POST -u "root:secret" -H "surreal-ns: main" -H "surreal-db: main" -H "Accept: application/json" \
 -d 'SELECT * FROM person WHERE age > $age' http://localhost:8000/sql?age=18
 ```
-</TabItem>
-<TabItem value="V1" label="V1.x">
+</tabitem>
+<tabitem label="V1.x">
 ```bash title="Request"
 curl -X POST -u "root:secret" -H "ns: main" -H "db: main" -H "Accept: application/json" \
   -d 'SELECT * FROM person WHERE age > $age' http://localhost:8000/sql?age=18
 ```
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ## Content Safety
 

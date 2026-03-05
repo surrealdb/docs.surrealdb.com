@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | Data Types
 description: Type mapping between SurrealQL and JavaScript, and custom data type classes.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Data Types
 

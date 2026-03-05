@@ -5,24 +5,9 @@ title: .NET | SDK | Overview
 description: The SurrealDB SDK for .NET provides a number of methods for interacting with your SurrealDB database.
 ---
 
-import Boxes from "@components/boxes/Boxes.astro";
-import IconBox from "@components/boxes/IconBox.astro";
-import Version from '@components/Version.astro';
-import Image from "@components/Image.astro";
-
-import LightLogo from "@img/icon/light/dotnet.png";
-import DarkLogo from "@img/icon/dark/dotnet.png";
 
 <div class="flag-title">
-	<Image
-		alt=".NET"
-		width={42}
-		height={42}
-		src={{
-			light: LightLogo,
-			dark: DarkLogo,
-		}}
-	/>
+	<img src="@assets/img/icon/light/dotnet.png" darkSrc="@assets/img/icon/dark/dotnet.png" alt=".NET" style="width: 42px; height: 42px" />
 	# .NET SDK
 </div>
 
@@ -33,7 +18,7 @@ The SurrealDB SDK for C# and .NET enables you to interact with SurrealDB from se
 > The SDK is available as a [NuGet package](https://www.nuget.org/packages/SurrealDb.Net).
 
 > [!NOTE]
-> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <Version />, ensuring compatibility with the latest version.
+> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <version />, ensuring compatibility with the latest version.
 
 > [!WARNING]
 > This API is not yet fully stabilized and may be subject to change until the SDK reaches `1.0.0`.

@@ -4,10 +4,6 @@ sidebar_label: DEFINE CONFIG
 title: DEFINE CONFIG statement | SurrealQL
 description: This statement allows you to set external configurations on the database, either for API middleware and permissions, or for how the database's tables and functions are exposed via the GraphQL API.
 ---
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 
 # `DEFINE CONFIG` statement
@@ -23,8 +19,8 @@ The `DEFINE CONFIG` statement allows you to set external configurations on your 
 
 ## Statement syntax
 
-<Tabs syncKey="define-config-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="define-config-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```surql title="SurrealQL Syntax"
 
@@ -38,38 +34,14 @@ DEFINE CONFIG [ OVERWRITE | IF NOT EXISTS ]
 
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const defineConfigAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "DEFINE" },
-      { type: "Terminal", text: "CONFIG" },
-      { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Terminal", text: "OVERWRITE" }, { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "NOT" }, { type: "Terminal", text: "EXISTS" } ] } ] } },
-      { type: "Choice", index: 1, children: [
-        { type: "Sequence", children: [
-          { type: "Terminal", text: "API" },
-          { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "MIDDLEWARE" }, { type: "NonTerminal", text: "@expression, .." } ] } },
-          { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "PERMISSIONS" }, { type: "Choice", index: 1, children: [ { type: "Terminal", text: "NONE" }, { type: "Terminal", text: "FULL" }, { type: "NonTerminal", text: "@expression" } ] } ] } }
-        ] },
-        { type: "Sequence", children: [
-          { type: "Terminal", text: "GRAPHQL" },
-          { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Terminal", text: "AUTO" }, { type: "Terminal", text: "NONE" } ] } },
-          { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "TABLES" }, { type: "Choice", index: 1, children: [ { type: "Terminal", text: "AUTO" }, { type: "Terminal", text: "NONE" }, { type: "Sequence", children: [ { type: "Terminal", text: "INCLUDE" }, { type: "NonTerminal", text: "table1, table2, ..." } ] } ] } ] } },
-          { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "FUNCTIONS" }, { type: "Choice", index: 1, children: [ { type: "Terminal", text: "AUTO" }, { type: "Terminal", text: "NONE" }, { type: "Sequence", children: [ { type: "Terminal", text: "INCLUDE" }, { type: "NonTerminal", text: "[function1, function2, ...]" } ] }, { type: "Sequence", children: [ { type: "Terminal", text: "EXCLUDE" }, { type: "NonTerminal", text: "[function1, function2, ...]" } ] } ] } ] } }
-        ] }
-      ] }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={defineConfigAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DEFINE"},{"type":"Terminal","text":"CONFIG"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"OVERWRITE"},{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}]}},{"type":"Choice","index":1,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"API"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"MIDDLEWARE"},{"type":"NonTerminal","text":"@expression, .."}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"PERMISSIONS"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"NONE"},{"type":"Terminal","text":"FULL"},{"type":"NonTerminal","text":"@expression"}]}]}}]},{"type":"Sequence","children":[{"type":"Terminal","text":"GRAPHQL"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"AUTO"},{"type":"Terminal","text":"NONE"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"TABLES"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"AUTO"},{"type":"Terminal","text":"NONE"},{"type":"Sequence","children":[{"type":"Terminal","text":"INCLUDE"},{"type":"NonTerminal","text":"table1, table2, ..."}]}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"FUNCTIONS"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"AUTO"},{"type":"Terminal","text":"NONE"},{"type":"Sequence","children":[{"type":"Terminal","text":"INCLUDE"},{"type":"NonTerminal","text":"[function1, function2, ...]"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"EXCLUDE"},{"type":"NonTerminal","text":"[function1, function2, ...]"}]}]}]}}]}]}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## DEFINE CONFIG API
 
@@ -445,7 +417,6 @@ CREATE foo:1 SET val = 42;
 - You must authenticate using the appropriate credentials to access data via GraphQL.
 - Permissions set on tables and fields will affect the data accessible through the GraphQL API.
 - If you attempt to access data without sufficient permissions, you will receive an authentication error.
-
 
 
 #### Example: Basic Authentication

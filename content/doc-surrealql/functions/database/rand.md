@@ -5,7 +5,6 @@ title: Rand functions | SurrealQL
 description: These functions can be used when generating random data values.
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Rand functions
 
@@ -127,7 +126,7 @@ true
 
 ## `rand::duration`
 
-<Since v="v2.3.0" />
+<since v="v2.3.0" />
 
 The rand::duration function generates a random [`duration`](/docs/surrealql/datamodel/datetimes#durations-and-datetimes) value between two `duration` arguments.
 
@@ -371,7 +370,7 @@ RETURN rand::time(198371, 1223138713);
 -- d'1991-01-13T23:27:17Z'
 ```
 
-<Since v="v2.2.0" />
+<since v="v2.2.0" />
 
 This function can take two datetimes, returning a random datetime in between the least and greatest of the two.
 
@@ -381,7 +380,7 @@ RETURN rand::time(d'1970-01-01', d'2000-01-01');
 -- d'1999-05-29T17:02:16Z"
 ```
 
-<Since v="v2.3.0" />
+<since v="v2.3.0" />
 
 Either of the arguments of this function can now be either a number or a datetime.
 

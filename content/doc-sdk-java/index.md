@@ -5,24 +5,9 @@ title: Java | SDKs | Integration
 description: The SurrealDB SDK for Java enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Version from '@components/Version.astro';
-import Boxes from "@components/boxes/Boxes.astro";
-import IconBox from "@components/boxes/IconBox.astro";
-import Image from "@components/Image.astro";
-
-import LightLogo from "@img/icon/light/java.png";
-import DarkLogo from "@img/icon/dark/java.png";
 
 <div class="flag-title">
-	<Image
-		alt="Java"
-		width={42}
-		height={42}
-		src={{
-			light: LightLogo,
-			dark: DarkLogo,
-		}}
-	/>
+	<img src="@assets/img/icon/light/java.png" darkSrc="@assets/img/icon/dark/java.png" alt="Java" style="width: 42px; height: 42px" />
 	# Java SDK
 </div>
 
@@ -32,7 +17,7 @@ The SurrealDB SDK for Java enables you to interact with SurrealDB from client or
 > The SDK requires Java JDK version `8` or greater, and is available as a [Maven package](https://mvnrepository.com/artifact/com.surrealdb/surrealdb).
 
 > [!NOTE]
-> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <Version />, ensuring compatibility with the latest version.
+> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <version />, ensuring compatibility with the latest version.
 
 > [!WARNING]
 > This API is not yet fully stabilized and may be subject to change until the SDK reaches `1.0.0`.

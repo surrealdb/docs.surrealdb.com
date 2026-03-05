@@ -6,130 +6,9 @@ description: SurrealDB makes building and scaling realtime apps dramatically qui
 no_page_headings: true
 ---
 
-import { Icon } from 'astro-icon/components';
-import Image from "@components/Image.astro";
-import Check from "@components/Check.astro";
-import IconBox from '@components/boxes/IconBox.astro';
-import Boxes from '@src/components/boxes/Boxes.astro';
-import BasicBox from '@src/components/boxes/BasicBox.astro';
-import BaseLayout from '@src/components/layout/BaseLayout.astro';
-
-import Logo from "@img/icon/dark/surrealdb.png";
-import DarkLabs from '@img/logo/dark/labs.svg';
-import LightLabs from '@img/logo/light/labs.svg';
-
-import LightGettingStarted from "@img/image/light/gettingstarted.png";
-import DarkGettingStarted from "@img/image/dark/gettingstarted.png";
-
-import LightSidekick from '@img/icon/light/sidekick-light.png';
-import DarkSidekick from '@img/icon/dark/sidekick.png';
-
-import LightDeployment from '@img/icon/light/deployment-light.png';
-import DarkDeployment from '@img/icon/dark/deployment.png';
-
-import EmbeddingLight from '@img/icon/light/embeddingg-light.png';
-import EmbeddingDark from '@img/icon/dark/embeddingg.png';
-
-import CLIlight from '@img/icon/light/clisdb-light.png';
-import CLIdark from '@img/icon/dark/clisdb.png';
-
-import ReferenceLight from '@img/icon/light/reference-guides-light.png';
-import ReferenceDark from '@img/icon/dark/reference-guides.png';
-
-import CBORDark from '@img/icon/dark/cbor.png';
-import CBORLight from '@img/icon/light/cbor-light.png';
-
-import LightDotnet from '@img/icon/light/dotnet.png';
-import LightGolang from '@img/icon/light/golang.png';
-import LightJava from '@img/icon/light/java.png';
-import LightJavascript from '@img/icon/light/javascript.png';
-import LightNodejs from '@img/icon/light/nodejs.png';
-import LightPhp from '@img/icon/light/php.png';
-import LightPython from '@img/icon/light/python.png';
-import LightRust from '@img/icon/light/rust.png';
-import LightWasm from '@img/icon/light/webassembly.png';
-
-import LightIntegrations from '@img/icon/dark/integrations.png';
-import DarkIntegrations from '@img/icon/dark/integrations.png';
-import LightCloud from '@img/icon/light/cloud-light.png';
-import DarkCloud from '@img/icon/dark/cloud.png';
-
-import DarkDotnet from '@img/icon/dark/dotnet.png';
-import DarkGolang from '@img/icon/dark/golang.png';
-import DarkJava from '@img/icon/dark/java.png';
-import DarkJavascript from '@img/icon/dark/javascript.png';
-import DarkNodejs from '@img/icon/dark/nodejs.png';
-import DarkPhp from '@img/icon/dark/php.png';
-import DarkPython from '@img/icon/dark/python.png';
-import DarkRust from '@img/icon/dark/rust.png';
-import DarkWasm from '@img/icon/dark/webassembly.png';
-
-import LightBook from '@img/icon/light/book-light.png';
-import LightSurrealist from '@img/icon/light/surrealist-light.png';
-import LightUniversity from '@img/icon/light/university-light.png';
-
-import DarkBook from '@img/icon/dark/book.png';
-import DarkSurrealist from '@img/icon/dark/surrealist.png';
-import DarkUniversity from '@img/icon/dark/university.png';
-
-import LightSurrealKV from '@img/icon/light/kv.png';
-import LightSurrealML from '@img/icon/light/ml-light.png';
-import LightSurrealQL from '@img/icon/light/ql-light.png';
-import LightSurrealDB from '@img/icon/light/surrealdb.png';
-
-import DarkSurrealKV from '@img/icon/dark/kv.png';
-import DarkSurrealDB from '@img/icon/dark/surrealdb.png';
-import DarkSurrealML from '@img/icon/dark/surrealml.png';
-import DarkSurrealQL from '@img/icon/dark/surrealql.png';
-
-import DarkDocument from '@img/icon/dark/document.png';
-import LightDocument from '@img/icon/light/document-light.png';
-
-import DarkGeospatial from '@img/icon/dark/geospatial.png';
-import LightGeospatial from '@img/icon/light/geospatial-light.png';
-
-import DarkTimeSeries from '@img/icon/dark/time-series.png';
-import LightTimeSeries from '@img/icon/light/time-series-light.png';
-
-import FullTextSearchDark from '@img/icon/dark/full-text-search.png';
-import FullTextSearchLight from '@img/icon/light/full-text-search.png';
-
-import GraphDark from '@img/icon/dark/graph.png';
-import GraphLight from '@img/icon/light/graph.png';
-
-import HttpDark from '@img/icon/dark/http.png';
-import HttpLight from '@img/icon/light/http-light.png';
-
-import VectorDark from '@img/icon/dark/vector.png';
-import VectorLight from '@img/icon/light/vector.png';
-
-import SystemAccessDark from '@img/icon/dark/system-access.png';
-import SystemAccessLight from '@img/icon/light/system-access.png';
-
-import TokenAccessDark from '@img/icon/dark/token-access.png';
-import TokenAccessLight from '@img/icon/light/token-access.png';
-
-import RecordAccessDark from '@img/icon/dark/record-access.png';
-import RecordAccessLight from '@img/icon/light/record-access.png';
-
-import RPCDark from '@img/icon/dark/rpc.png';
-import RPCLight from '@img/icon/light/rpc-light.png';
-
-import SidekickDark from '@img/icon/dark/sidekick.png';
-import SidekickLight from '@img/icon/light/sidekick-light.png';
-
-import DarkSurreal from '@img/logo/dark/surrealdb.svg';
-import LightSurreal from '@img/logo/light/surrealdb.svg';
 
 <div class="flag-title">
-	<Image
-		class="h-12"
-		alt="SurrealDB"
-		src={{
-			light: LightSurreal,
-			dark: DarkSurreal,
-		}}
-	/>
+	<img src="@assets/img/logo/light/surrealdb.svg" darkSrc="@assets/img/logo/dark/surrealdb.svg" alt="SurrealDB" class="h-12" />
 </div>
 
 SurrealDB is a native, open-source, [multi-model database](/features) that lets you store and manage data across [relational](/docs/surrealql/statements/define), [document](/docs/surrealdb/models/document), [graph](/docs/surrealdb/models/graph), [time series](/docs/surrealdb/models/time-series), [vector search](/docs/surrealdb/models/vector), and [geospatial](/docs/surrealdb/models/geospatial) models—all in one place.
@@ -375,14 +254,7 @@ You can interact with SurrealDB through the [CLI](/docs/surrealdb/cli) and the [
 
 # Resources
 <BasicBox href="/docs/labs" class="group block">
-	<Image
-		class="block h-5"
-		alt="SurrealDB"
-		src={{
-			light: LightLabs,
-			dark: DarkLabs,
-		}}
-	/>
+	<img src="@assets/img/logo/light/labs.svg" darkSrc="@assets/img/logo/dark/labs.svg" alt="SurrealDB" class="block h-5" />
 	<div class="mt-6">
 		Dive into the full range of tools, libraries, and integrations built around SurrealDB. SurrealDB Labs brings together first- and third-party resources to help you build, manage, and extend your SurrealDB applications with ease.
 	</div>

@@ -6,11 +6,10 @@ description: A range of possible values.
 
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Ranges
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 A range is composed of `..` and possible delimiters to set the maximum and minimum possible values. The default syntax includes the lower limit and excludes the upper limit. A `=` can be used to make the upper limit inclusive, and `>` can be used to make the lower limit exclusive.
 
@@ -207,7 +206,7 @@ value = "[{ original: 130, square_root: 11.40175425099138f }, { original: 140, s
 
 ## Ranges in mock syntax for `CREATE` statements
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 `CREATE` statements have always been able to work on more than one record by enclosing either a single number or a range-like operator between two `||` bars.
 

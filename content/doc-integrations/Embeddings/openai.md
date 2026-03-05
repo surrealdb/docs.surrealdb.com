@@ -5,14 +5,11 @@ title: OpenAI | Embeddings
 description: This section contains information about the OpenAI embeddings feature of SurrealDB.
 ---
 
-import Label from "@components/shared/Label.astro";
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # OpenAI
 
-<Tabs>
-<TabItem label="Python">
+<tabs>
+<tabitem label="Python">
 
 SurrealDB provides a number of different embeddings features that can be used to manage your data. This walkthrough shows how to embed your text with OpenAI, store the vectors in SurrealDB, and run fast k‑nearest‑neighbour (KNN) searches—all from Python. It follows the same flow you might have seen for Qdrant, but swaps in SurrealDB’s native vector‑search features so you can keep documents, graphs, and embeddings in one place.
 
@@ -158,8 +155,8 @@ HNSW DIMENSION 1536 TYPE I32;
 
 This keeps the SurrealDB side simple while you experiment with different quantisers. For more information about vector search in SurrealDB, see the [Vector Search Reference guides](/docs/surrealdb/models/vector).
 
-</TabItem>
-<TabItem label="Rust">
+</tabitem>
+<tabitem label="Rust">
 
 # Semantic search using SurrealDB
 
@@ -636,6 +633,6 @@ async fn main() -> Result<(), Error> {
 }
 ```
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

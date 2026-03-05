@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Patch
 description: The Patch method applies JSON Patch changes to all records, or a specific record, in the database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Patch[T](what, patches)` {#patch}
 
@@ -31,7 +30,7 @@ db.Patch[T](what, patches)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or the specific [`RecordId`](/docs/sdk/golang/data-types#recordid) to patch.
@@ -40,7 +39,7 @@ db.Patch[T](what, patches)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The JSON Patch data with which to patch the records.

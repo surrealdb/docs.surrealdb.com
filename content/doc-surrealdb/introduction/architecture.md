@@ -5,9 +5,6 @@ title: Architecture | Introduction
 description: This page aims to give details about some of the core architecture choices of SurrealDB, including details about the different layers which make up a SurrealDB instance, or SurrealDB cluster.
 ---
 
-import Image from "@components/Image.astro";
-import LightArchitecture from "@img/image/light/storage-cluster.png";
-import DarkArchitecture from "@img/image/dark/storage-cluster.png";
 
 # Architecture
 
@@ -47,13 +44,7 @@ TiKV is used for highly scalable fault tolerant SurrealDB deployments.
 
 When you have deployed an HA cluster (High Availability), you will have a deployment that resembles the following configuration:
 
-<Image
-    alt="Storage_Cluster"
-    src={{
-        light: LightArchitecture,
-        dark: DarkArchitecture,
-    }}
-/>
+<img src="@assets/img/image/light/storage-cluster.png" darkSrc="@assets/img/image/dark/storage-cluster.png" alt="Storage_Cluster" />
 
 The HA deployment of your storage layer (TiKV) is the stateful part of the system.  Note the following points:
 

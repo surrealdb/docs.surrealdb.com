@@ -4,7 +4,6 @@ sidebar_label: FETCH
 title: FETCH clause | SurrealQL
 description: The `FETCH` clause is used to fetch records from a table.
 ---
-import SurrealistMini from "@components/SurrealistMini.astro";
 
 # `FETCH` clause
 
@@ -36,7 +35,7 @@ In addition to fetching related records, the `FETCH` clause can also be used to 
 
 <SurrealistMini
 	resultMode="single"
-	setup={`
+	setup="
 		CREATE category SET name = 'Technology', created_at = time::now();
 		CREATE person:john SET
 			name.first = 'John',
@@ -51,19 +50,19 @@ In addition to fetching related records, the `FETCH` clause can also be used to 
 			title = 'Lorem ipsum dolor',
 			text = 'Donec eleifend, nunc vitae commodo accumsan, mauris est fringilla.',
 			category = (SELECT VALUE id FROM ONLY category WHERE name = 'Technology' LIMIT 1);
-	`}
-	query={`
+	"
+	query="
 		SELECT title, category, author.name.full AS author_name FROM article
 		WHERE author.age < 30
 		FETCH author, category;
-	`}
+	"
 />
 
 ## Without the `FETCH` clause
 
 <SurrealistMini
 	resultMode="single"
-	setup={`
+	setup="
 		CREATE category SET name = 'Technology', created_at = time::now();
 		CREATE person:john SET
 			name.first = 'John',
@@ -78,12 +77,11 @@ In addition to fetching related records, the `FETCH` clause can also be used to 
 			title = 'Lorem ipsum dolor',
 			text = 'Donec eleifend, nunc vitae commodo accumsan, mauris est fringilla.',
 			category = (SELECT VALUE id FROM ONLY category WHERE name = 'Technology' LIMIT 1);
-	`}
-	query={`
+	"
+	query="
 		SELECT title, category, author.name.full AS author_name FROM article
 		WHERE author.age < 30;
-	`}
+	"
 />
-
 
 

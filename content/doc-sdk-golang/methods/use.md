@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Use
 description: The use method switches to a specific namespace and database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Use()` {#use}
 
@@ -28,7 +27,7 @@ db.Use(namespace, database)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>namespace</code>
-                <Label label="initially required" />
+                <label label="initially required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Switches to a specific namespace.
@@ -37,7 +36,7 @@ db.Use(namespace, database)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>database</code>
-                <Label label="initially required" />
+                <label label="initially required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Switches to a specific database.

@@ -5,11 +5,6 @@ title: JavaScript | SDK | Handle authentication
 description: SurrealDB supports a number of methods for authenticating users and securing the database.
 ---
 
-import Label from "@components/shared/Label.astro";
-import Since from "@components/shared/Since.astro";
-import Version from '@components/Version.astro';
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # Handle authentication
 
@@ -20,7 +15,7 @@ In your SurrealDB database, you can create authentication login using the [`DEFI
 The access method used will inform the input for `access` in the `.signup()` and `.signin()` methods.
 
 > [!IMPORTANT]
-> If you are not on Version <Version /> of SurrealDB, you will use the `scope` property instead of `access`. 
+> If you are not on Version <version /> of SurrealDB, you will use the `scope` property instead of `access`. 
 
 <table>
 	<thead>
@@ -53,8 +48,8 @@ The access method used will inform the input for `access` in the `.signup()` and
 
 The JavaScript SDK has a [`.query()` method](/docs/2.x/sdk/javascript/api/core/surreal-queryable#query) which allows you to write secure SurrealQL statements from within your application. Using this method, you can define access for your users and securely manage authentication. See the code example below:
 
-<Tabs groupId="define-access">
-<TabItem value="V2" label="V2.x" >
+<tabs synckey="define-access">
+<tabitem label="V2.x">
 ```ts
 ...
 // Assign the variable on the connection
@@ -66,8 +61,8 @@ const authentication = await db.query(
 );
 ...
 ```
-</TabItem>
-<TabItem value="V1" label="V1.x" >
+</tabitem>
+<tabitem label="V1.x">
 
 ```ts
 ...
@@ -79,8 +74,8 @@ const authentication = await db.query(
 );
 ...
 ```
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 > [!NOTE]
 > Depending on the connection protocol you choose, authentication tokens and sessions lifetime work differently. Refer to the [connection options](/docs/sdk/javascript/core/create-a-new-connection#connection-options) documentation for more information.
@@ -101,8 +96,8 @@ async db.signup({`{ namespace, database, [ scope | access ], [...] }`})
 
 ### Arguments
 
-<Tabs groupId="signup">
-<TabItem value="V2" label="V2.x" >
+<tabs synckey="signup">
+<tabitem label="V2.x">
 <table>
     <thead>
         <tr>
@@ -114,7 +109,7 @@ async db.signup({`{ namespace, database, [ scope | access ], [...] }`})
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>namespace</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The namespace to sign up to
@@ -123,7 +118,7 @@ async db.signup({`{ namespace, database, [ scope | access ], [...] }`})
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>database</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The database to sign up to
@@ -132,7 +127,7 @@ async db.signup({`{ namespace, database, [ scope | access ], [...] }`})
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>access  </code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The access to sign up to. Also pass any variables used in the access under the `variables` key. Only supported from SurrealDB 2.x onwards
@@ -141,7 +136,7 @@ async db.signup({`{ namespace, database, [ scope | access ], [...] }`})
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>variables</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The variables to pass to the access definition
@@ -150,9 +145,9 @@ async db.signup({`{ namespace, database, [ scope | access ], [...] }`})
     </tbody>
 </table>
 
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -164,7 +159,7 @@ async db.signup({`{ namespace, database, [ scope | access ], [...] }`})
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>namespace</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The namespace to sign up to
@@ -173,7 +168,7 @@ async db.signup({`{ namespace, database, [ scope | access ], [...] }`})
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>database</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The database to sign up to
@@ -182,7 +177,7 @@ async db.signup({`{ namespace, database, [ scope | access ], [...] }`})
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>scope</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The scope to sign up to. Also pass any variables used in the scope. Only supported in SurrealDB 1.x
@@ -190,14 +185,14 @@ async db.signup({`{ namespace, database, [ scope | access ], [...] }`})
         </tr>
     </tbody>
 </table>
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 ### Example usage
 
-<Tabs groupId="signup-example">
+<tabs synckey="signup-example">
 
-<TabItem value="V2" label="V2.x" >
+<tabitem label="V2.x">
 
 ```ts
 // With Record Access
@@ -213,9 +208,9 @@ const token = await db.signup({
     },
 });
 ```
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 ```ts
 
 // With Scopes
@@ -229,8 +224,8 @@ const token = await db.signup({
 	pass: '123456',
 });
 ```
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 <br />
 
@@ -245,8 +240,8 @@ async db.signin({`{ ... }`})
 ### Arguments
 
 
-<Tabs groupId="http-sql">
-<TabItem value="V2" label="V2.x" >
+<tabs synckey="http-sql">
+<tabitem label="V2.x">
 <table>
     <thead>
         <tr>
@@ -258,7 +253,7 @@ async db.signin({`{ ... }`})
         <tr>
             <td colspan="2" scope="row" data-label="Properties">
                 <code>username</code>
-                <Label label="REQUIRED FOR ROOT, NAMESPACE & DATABASE" />
+                <label label="REQUIRED FOR ROOT, NAMESPACE & DATABASE" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The username of the database user
@@ -267,7 +262,7 @@ async db.signin({`{ ... }`})
         <tr>
             <td colspan="2" scope="row" data-label="Properties">
                 <code>password</code>
-                <Label label="REQUIRED FOR ROOT, NAMESPACE & DATABASE" />
+                <label label="REQUIRED FOR ROOT, NAMESPACE & DATABASE" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The password of the database user
@@ -276,7 +271,7 @@ async db.signin({`{ ... }`})
         <tr>
             <td colspan="2" scope="row" data-label="Properties">
                 <code>namespace</code>
-                <Label label="REQUIRED FOR DATABASE & ACCESS" />
+                <label label="REQUIRED FOR DATABASE & ACCESS" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The namespace to sign in to
@@ -285,7 +280,7 @@ async db.signin({`{ ... }`})
         <tr>
             <td colspan="2" scope="row" data-label="Properties">
                 <code>database</code>
-                <Label label="REQUIRED FOR ACCESS" />
+                <label label="REQUIRED FOR ACCESS" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The database to sign in to
@@ -302,9 +297,9 @@ async db.signin({`{ ... }`})
     </tbody>
 </table>
 
-</TabItem>
+</tabitem>
 
-<TabItem value="V1" label="V1.x" >
+<tabitem label="V1.x">
 <table>
     <thead>
         <tr>
@@ -316,7 +311,7 @@ async db.signin({`{ ... }`})
         <tr>
             <td colspan="2" scope="row" data-label="Properties">
                 <code>username</code>
-                <Label label="REQUIRED FOR ROOT, NAMESPACE & DATABASE" />
+                <label label="REQUIRED FOR ROOT, NAMESPACE & DATABASE" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The username of the database user
@@ -325,7 +320,7 @@ async db.signin({`{ ... }`})
         <tr>
             <td colspan="2" scope="row" data-label="Properties">
                 <code>password</code>
-                <Label label="REQUIRED FOR ROOT, NAMESPACE & DATABASE" />
+                <label label="REQUIRED FOR ROOT, NAMESPACE & DATABASE" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The password of the database user
@@ -334,7 +329,7 @@ async db.signin({`{ ... }`})
         <tr>
             <td colspan="2" scope="row" data-label="Properties">
                 <code>namespace</code>
-                <Label label="REQUIRED FOR DATABASE & SCOPE" />
+                <label label="REQUIRED FOR DATABASE & SCOPE" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The namespace to sign in to
@@ -343,7 +338,7 @@ async db.signin({`{ ... }`})
         <tr>
             <td colspan="2" scope="row" data-label="Properties">
                 <code>database</code>
-                <Label label="REQUIRED FOR SCOPE" />
+                <label label="REQUIRED FOR SCOPE" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The database to sign in to
@@ -359,14 +354,14 @@ async db.signin({`{ ... }`})
         </tr>
     </tbody>
 </table>
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 ### Example usage
 
-<Tabs groupId="signin-example">
+<tabs synckey="signin-example">
 
-<TabItem value="root" label="Root user" >
+<tabitem label="Root user">
 ```ts
 // Authenticate with a root user
 const token = await db.signin({
@@ -374,9 +369,9 @@ const token = await db.signin({
 	password: 'surrealdb',
 });
 ```
-</TabItem>
+</tabitem>
 
-<TabItem value="namespace" label="Namespace user" >
+<tabitem label="Namespace user">
 ```ts
 // Authenticate with a Namespace user
 const token = await db.signin({
@@ -385,9 +380,9 @@ const token = await db.signin({
 	password: 'surrealdb',
 });
 ```
-</TabItem>
+</tabitem>
 
-<TabItem value="database" label="Database user" >
+<tabitem label="Database user">
 ```ts
 // Authenticate with a Database user
 const token = await db.signin({
@@ -397,8 +392,8 @@ const token = await db.signin({
 	password: 'surrealdb',
 });
 ```
-</TabItem>
-<TabItem value="record" label="Record Access" >
+</tabitem>
+<tabitem label="Record Access">
 ```ts
 // Authenticate with Record Access
 const token = await db.signin({
@@ -413,8 +408,8 @@ const token = await db.signin({
     },
 });
 ```
-</TabItem>
-<TabItem value="scope" label="Scopes" >
+</tabitem>
+<tabitem label="Scopes">
 ```ts
 // Authenticate with Scopes
 const token = await db.signin({
@@ -427,8 +422,8 @@ const token = await db.signin({
 	pass: '123456',
 });
 ```
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 
 <br />
@@ -468,7 +463,7 @@ async db.authenticate(token)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>token</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The JWT authentication token.

@@ -4,11 +4,8 @@ sidebar_label: Set functions
 title: Set functions | SurrealQL
 description: These functions can be used when working with, and manipulating sets of data.
 ---
-import Since from '@components/shared/Since.astro'
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 # Set functions
 

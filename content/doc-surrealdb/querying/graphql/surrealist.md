@@ -5,14 +5,6 @@ title: GraphQL via Surrealist | GraphQL
 description: In this section, you will explore querying SurrealDB using Surrealist.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
-import Image from "@components/Image.astro";
-
-import ImageConnection from "@img/image/surrealist/connection.png";
-import ImageQuerying from "@img/image/surrealist/graphql-querying-fields.png";
-import ImageTypeInference from "@img/image/surrealist/graphql-type-inference.png";
-
 
 # GraphQL via Surrealist
 
@@ -22,18 +14,18 @@ In this section, you will explore writing GraphQL queries in [Surrealist](https:
 
 Before you can start making queries, you need to start SurrealDB with the GraphQL module enabled. You can do this by starting a new instance of SurrealDB with the [`surreal start`](/docs/surrealdb/cli/start) command.
 
-<Tabs groupId="start-surreal">
-<TabItem value="macOS" label="MacOS">
+<tabs synckey="start-surreal">
+<tabitem label="MacOS">
 ```bash
 surreal start --log debug --user root --password secret
 ```
-</TabItem>
-<TabItem value="Windows" label="Windows">
+</tabitem>
+<tabitem label="Windows">
 ```bash
 surreal start --log debug --user root --password secret
 ```
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 After starting the SurrealDB instance, you can navigate to the Surrealist to start a new connection.
 
@@ -52,10 +44,7 @@ Before you can start writing queries, you need to set the [namespace and databas
 
 Additionally, you can start [a serving in Surrealist](/docs/surrealist/concepts/local-database-serving) which also enables GraphQL automatically, starting a server on `http://localhost:8000` by default for a root user with username and password `root`.
 
-<Image
-  alt="Surrealist connection settings"
-  src={ImageConnection}
-/>
+<img src="@assets/img/image/surrealist/connection.png" alt="Surrealist connection settings" />
 
 ### Preparing your database
 
@@ -104,10 +93,7 @@ For example, to query the `person` table for all records, you can write the foll
 }
 ```
 
-<Image
-  alt="Surrealist GraphQL query"
-  src={ImageQuerying}
-/>
+<img src="@assets/img/image/surrealist/graphql-querying-fields.png" alt="Surrealist GraphQL query" />
 
 And to get the person with the email "Jon.Doe@surrealdb.com", you can write the following GraphQL query:
 
@@ -126,10 +112,7 @@ Surrealist will automatically validate the query and provide you with the result
 
 Surrealist also supports introspection with GraphQL. This means that you can query the database and Surrealist will automatically infer the type of the data you are querying. For example, if you query the `user` table for all records, Surrealist will automatically infer the type of the data to be `user`.
 
-<Image
-  alt="Surrealist GraphQL type inference"
-  src={ImageTypeInference}
-/>
+<img src="@assets/img/image/surrealist/graphql-type-inference.png" alt="Surrealist GraphQL type inference" />
 
 ## Learn more
 

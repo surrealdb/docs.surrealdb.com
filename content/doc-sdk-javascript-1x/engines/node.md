@@ -5,21 +5,9 @@ title: JavaScript | SDK | Engines | Node
 description: The SurrealDB SDK for JavaScript using the Node.js engine.
 ---
 
-import Image from "@components/Image.astro";
-
-import LightNodejs from "@img/icon/light/nodejs.png";
-import DarkNodejs from "@img/icon/dark/nodejs.png";
 
 <div class="flag-title">
-	<Image
-		alt="Node.js"
-		width={42}
-		height={42}
-		src={{
-			light: LightNodejs,
-			dark: DarkNodejs,
-		}}
-	/>
+	<img src="@assets/img/icon/light/nodejs.png" darkSrc="@assets/img/icon/dark/nodejs.png" alt="Node.js" style="width: 42px; height: 42px" />
 	# Node.js engine
 </div>
 
@@ -38,26 +26,24 @@ Before installing the Node.js engine, you need to install the JavaScript SDK usi
 
 After installing the SDK, install the Node.js engine using the following command:
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
-<Tabs groupId="installation">
-  <TabItem value="npm" label="npm" default>
+<tabs synckey="installation">
+  <tabitem label="npm">
     ```bash
     npm install --save @surrealdb/node
     ```
-  </TabItem>
-  <TabItem value="yarn" label="yarn">
+  </tabitem>
+  <tabitem label="yarn">
     ```bash
     yarn add @surrealdb/node
     ```
-  </TabItem>
-  <TabItem value="pnpm" label="pnpm">
+  </tabitem>
+  <tabitem label="pnpm">
     ```bash
     pnpm install @surrealdb/node
     ```
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Configuration
 

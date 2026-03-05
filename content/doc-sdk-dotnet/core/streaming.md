@@ -5,7 +5,6 @@ title: Realtime data streaming | .NET | SDK | Concepts
 description: The SurrealDB SDK for .NET allows you to create live queries that listen for changes in the database and automatically update your application when changes occur.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Realtime data streaming
 
@@ -63,7 +62,7 @@ db.ListenLive<T>(queryUuid)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>queryUuid</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The UUID of the live query to consume.
@@ -187,7 +186,7 @@ await db.LiveQuery<T>(sql)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>sql</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Specifies the SurrealQL statements.
@@ -196,7 +195,7 @@ await db.LiveQuery<T>(sql)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -235,7 +234,7 @@ Returns an enumerator that iterates asynchronously through the collection of res
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -285,7 +284,7 @@ Returns an enumerator that iterates asynchronously through the collection of cre
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -322,7 +321,7 @@ Returns an enumerator that iterates asynchronously through the collection of upd
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -359,7 +358,7 @@ Returns an enumerator that iterates asynchronously through the collection of del
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -400,7 +399,7 @@ await liveQuery.KillAsync(cancellationToken)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -443,7 +442,7 @@ await db.LiveRawQuery<T>(sql, params)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>sql</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Specifies the SurrealQL statements.
@@ -452,7 +451,7 @@ await db.LiveRawQuery<T>(sql, params)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>params</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Assigns variables which can be used in the query.
@@ -461,7 +460,7 @@ await db.LiveRawQuery<T>(sql, params)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -499,7 +498,7 @@ await db.LiveTable<T>(table, diff)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>table</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The table name to listen for changes for.
@@ -508,7 +507,7 @@ await db.LiveTable<T>(table, diff)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>diff</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 If set to true, live notifications will include an array of JSON Patch objects, rather than the entire record for each notification.
@@ -517,7 +516,7 @@ await db.LiveTable<T>(table, diff)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -555,7 +554,7 @@ await db.Kill(queryUuid)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>queryUuid</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The UUID of the live query you wish to kill.
@@ -564,7 +563,7 @@ await db.Kill(queryUuid)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.

@@ -6,7 +6,6 @@ description: SurrealDB uses two types called None and Null to represent two diff
 
 ---
 
-import Since from "@components/shared/Since.astro";
 
 # None and null
 
@@ -46,7 +45,6 @@ SELECT * FROM person;
 ```
 
 
-
 ```surql title="Output"
 [
   { id: person:one },
@@ -75,7 +73,6 @@ CREATE person SET children = null;
 ```
 
 
-
 ```surql title="Output"
 [
   { 
@@ -95,7 +92,7 @@ If you are working with data and need to represent a value which is empty, use `
 
 ## NONE as a datatype
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 Since SurrealDB 3.0, NONE has been usable as a datatype of its own. This allows syntax like the following to be used without returning a parsing error.
 

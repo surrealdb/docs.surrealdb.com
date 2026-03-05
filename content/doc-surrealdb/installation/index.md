@@ -5,19 +5,6 @@ title: Installation
 description: In this section, you will explore the robust security features and best practices that SurrealDB offers to protect your data and ensure the integrity of your applications.
 ---
 
-import { Icon } from "astro-icon/components";
-import Version from '@components/Version.astro';
-import IconBox from '@components/boxes/IconBox.astro';
-import Boxes from '@src/components/boxes/Boxes.astro';
-
-import AppleLightLogo from "@img/icon/light/apple.png";
-import AppleDarkLogo from "@img/icon/dark/apple.png";
-
-import WindowsLightLogo from "@img/icon/light/windows.png";
-import WindowsDarkLogo from "@img/icon/dark/windows.png";
-
-import LinuxLightLogo from "@img/icon/light/linux.png";
-import LinuxDarkLogo from "@img/icon/dark/linux.png";
 
 # Installation
 
@@ -25,7 +12,7 @@ One of the most popular ways to get started with SurrealDB is to install and run
 
 Whether you are installing SurrealDB on your local machine for development purposes, or spinning up a production database, this section will guide you through the installation process, ensuring that you have all the necessary dependencies and configurations in place to start using SurrealDB effectively.
 
-While the current stable version of SurrealDB is <a href='/releases'> <Version /> </a>, we currently support all [released versions](/releases) from `1.0.0` onwards.
+While the current stable version of SurrealDB is <a href='/releases'> <version /> </a>, we currently support all [released versions](/releases) from `1.0.0` onwards.
 
 ## Installation Steps
 

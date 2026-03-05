@@ -5,7 +5,6 @@ title: Golang Data Types | SDKs | Integration
 description: The Golang SDK translates all datatypes native to SurrealQL into either datatypes native to Golang, or a custom implementation. This document describes all datatypes, and links to their respective documentation.
 ---
 
-import Table from "@components/shared/Table.astro";
 
 # Data Types
 

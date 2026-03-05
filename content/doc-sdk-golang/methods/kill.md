@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Kill
 description: This method kills a running live query by it's UUID.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Kill()` {#kill}
 
@@ -28,7 +27,7 @@ db.Kill(queryUuid string)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>queryUuid</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The UUID of the live query you wish to kill.

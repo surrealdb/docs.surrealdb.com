@@ -5,7 +5,6 @@ title: JavaScript | SDK | Methods | authenticate
 description: The SurrealDB SDK for JavaScript enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.authenticate()` {#authenticate}
 
@@ -27,7 +26,7 @@ db.authenticate(token: string)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>token</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The JWT authentication token.

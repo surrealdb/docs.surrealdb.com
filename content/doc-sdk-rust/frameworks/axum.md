@@ -5,14 +5,12 @@ title: Rust | SDKs | Integration
 description: The SDK for Rust allows SurrealDB to be used as the storage backend for an Axum web server
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # SurrealDB with Axum
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 The following tutorial will set up a server with SurrealDB and [Axum](https://docs.rs/axum/latest/axum/) that has a few endpoints:
 
@@ -634,9 +632,9 @@ Now that you have a running Axum server with SurrealDB as the backend, here are 
 * Using the [`AUTHENTICATE`](/docs/surrealql/statements/define/access/record#example-failing-authentication) clause inside the `DEFINE ACCESS` statement. This will result in increased performance thanks to only being executed once, compared to permissions checks which are executed for each query.
 * Adding some interesting behaviour to the database such as [changefeeds](/docs/surrealql/statements/define/table#example-usage) or [events](/docs/surrealql/statements/define/event).
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 The following tutorial will set up a server with SurrealDB and [Axum](https://docs.rs/axum/latest/axum/) that has a few endpoints:
 
@@ -1238,6 +1236,6 @@ Now that you have a running Axum server with SurrealDB as the backend, here are 
 * Using the [`AUTHENTICATE`](/docs/surrealql/statements/define/access/record#example-failing-authentication) clause inside the `DEFINE ACCESS` statement. This will result in increased performance thanks to only being executed once, compared to permissions checks which are executed for each query.
 * Adding some interesting behaviour to the database such as [changefeeds](/docs/surrealql/statements/define/table#example-usage) or [events](/docs/surrealql/statements/define/event).
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

@@ -6,11 +6,10 @@ description: SurrealDB allows a bucket to be declared locally or globally to wor
 
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Files
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 Files are accessed by a path, which is prefixed with an `f` to differentiate it from a regular string.
 

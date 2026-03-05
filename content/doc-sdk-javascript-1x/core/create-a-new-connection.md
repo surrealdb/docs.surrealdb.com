@@ -5,9 +5,6 @@ title: JavaScript | SDK | Create a new connection
 description: The SurrealDB SDK for JavaScript enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
-import Label from "@components/shared/Label.astro";
 
 # Create a new connection
 
@@ -57,8 +54,8 @@ This means that the `.use()` method is not required if you specify the [namespac
 
 You can specify your connection protocol either as `http`, `https`, `ws`, or `wss`. Since SurrealDB also supports RPC over WebSocket, by default, it is specified with a `/rpc` suffix. 
 
-<Tabs groupId="connection-options">
-<TabItem value="local" label="Local endpoint" default>
+<tabs synckey="connection-options">
+<tabitem label="Local endpoint">
   ```ts
   // Connect to a local endpoint with http protocol
 await db.connect('http://127.0.0.1:8000/rpc');
@@ -66,8 +63,8 @@ await db.connect('http://127.0.0.1:8000/rpc');
  // Connect to a local endpoint with ws protocol
 await db.connect('ws://127.0.0.1:8000/rpc');
 ```
-</TabItem>
-<TabItem value="remote" label="Remote endpoint">
+</tabitem>
+<tabitem label="Remote endpoint">
   ```ts
   // Connect to a remote endpoint with http protocol
 await db.connect('https://cloud.surrealdb.com/rpc');
@@ -75,8 +72,8 @@ await db.connect('https://cloud.surrealdb.com/rpc');
  // Connect to a remote endpoint with ws protocol
 await db.connect('wss://cloud.surrealdb.com/rpc');
 ```
-</TabItem>
-<TabItem value="ns-db" label="Namespace and database">
+</tabitem>
+<tabitem label="Namespace and database">
 ```ts
 // Specify a namespace and database pair to use with https protocol
 await db.connect('https://cloud.surrealdb.com/rpc', {
@@ -90,8 +87,8 @@ await db.connect('wss://cloud.surrealdb.com/rpc', {
 	database: 'docs',
 });
 ```
-</TabItem>
-<TabItem value="token" label="Token">
+</tabitem>
+<tabitem label="Token">
 ```ts
 // Authenticate with an existing token
 // The .authenticate() function is used under the hood.
@@ -99,8 +96,8 @@ await db.connect('https://cloud.surrealdb.com/rpc', {
 	auth: '.....',
 });
 ```
-</TabItem>
-<TabItem value="credentials" label="Credentials">
+</tabitem>
+<tabitem label="Credentials">
 ```ts
 // Authenticate using a pair of credentials
 await db.connect('https://cloud.surrealdb.com/rpc', {
@@ -110,8 +107,8 @@ await db.connect('https://cloud.surrealdb.com/rpc', {
 	},
 });
 ```
-</TabItem>
-<TabItem value="custom" label="Custom logic">
+</tabitem>
+<tabitem label="Custom logic">
 ```ts
 // Use advanced custom logic to prepare the connection to the database
 await db.connect('https://cloud.surrealdb.com/rpc', {
@@ -127,8 +124,8 @@ await db.connect('https://cloud.surrealdb.com/rpc', {
 	},
 });
 ```
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 ### Effect of connection protocol on token & session duration
 

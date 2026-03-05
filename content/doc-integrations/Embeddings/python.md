@@ -5,20 +5,18 @@ title: Embeddings models for Python
 description: This section contains information about different embedding models you can use with SurrealDB.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # 🐍 Embeddings
 
 SurrealDB offers comprehensive support for vector embeddings, enabling powerful semantic search and machine learning capabilities across your data. Through integrations with leading embedding providers, you can easily store, index and query high-dimensional vectors alongside your regular data.
 
-<Tabs>
-<TabItem label="LangChain">
+<tabs>
+<tabitem label="LangChain">
 
 More details and providers in [LangChain Embedding models](https://python.langchain.com/docs/integrations/text_embedding/) documentation.
 
-<Tabs>
-<TabItem label="Ollama">
+<tabs>
+<tabitem label="Ollama">
 
 ## Ollama
 
@@ -33,9 +31,9 @@ vector_store = SurrealDBVectorStore(
 
 More [Ollama embedding models](https://ollama.com/search?c=embedding) in their documentation.
 
-</TabItem>
+</tabitem>
 
-<TabItem label="OpenAI">
+<tabitem label="OpenAI">
 
 ## OpenAI
 
@@ -49,9 +47,9 @@ vector_store = SurrealDBVectorStore(
     conn
 )
 ```
-</TabItem>
+</tabitem>
 
-<TabItem label="Mistral">
+<tabitem label="Mistral">
 
 ## Mistral
 
@@ -65,9 +63,9 @@ vector_store = SurrealDBVectorStore(
     conn
 )
 ```
-</TabItem>
+</tabitem>
 
-<TabItem label="SentenceTransformer">
+<tabitem label="SentenceTransformer">
 
 ## SentenceTransformer
 
@@ -83,9 +81,9 @@ vector_store = SurrealDBVectorStore(
 ```
 
 More [SentenceTransformer models](https://www.sbert.net/docs/sentence_transformer/pretrained_models.html) in their documentation.
-</TabItem>
+</tabitem>
 
-<TabItem label="AWS Bedrock">
+<tabitem label="AWS Bedrock">
 
 ## AWS Bedrock
 
@@ -97,9 +95,9 @@ vector_store = SurrealDBVectorStore(
     conn
 )
 ```
-</TabItem>
+</tabitem>
 
-<TabItem label="Gemini">
+<tabitem label="Gemini">
 
 ## Gemini
 
@@ -113,9 +111,9 @@ vector_store = SurrealDBVectorStore(
     conn
 )
 ```
-</TabItem>
+</tabitem>
 
-</Tabs> {/* LangChain tabs */}
+</tabs> 
 
 <br />
 
@@ -140,12 +138,12 @@ top_match = results[0][0]
 
 Find an example in [Minimal LangChain chatbot example with vector and graph](/blog/minimal-langchain-chatbot-example-with-vector-and-graph).
 
-</TabItem>
+</tabitem>
 
-<TabItem label="Vanilla">
+<tabitem label="Vanilla">
 
-<Tabs>
-<TabItem label="Ollama">
+<tabs>
+<tabitem label="Ollama">
 
 ## Ollama
 
@@ -158,9 +156,9 @@ conn.create("documents", { "content": text, "embedding": embedding })
 
 More [Ollama embedding models](https://ollama.com/search?c=embedding) in their documentation.
 
-</TabItem>
+</tabitem>
 
-<TabItem label="OpenAI">
+<tabitem label="OpenAI">
 
 ## OpenAI
 
@@ -179,9 +177,9 @@ conn.create("documents", { "content": text, "embedding": response.data[0].embedd
 
 More info in [OpenAI embeddings](https://platform.openai.com/docs/guides/embeddings?lang=python) documentation.
 
-</TabItem>
+</tabitem>
 
-<TabItem label="Sentence Transformers">
+<tabitem label="Sentence Transformers">
 
 ## Sentence Transformers
 
@@ -195,7 +193,7 @@ conn.create("documents", { "content": text, "embedding": embedding })
 
 More [SentenceTransformer models](https://www.sbert.net/docs/sentence_transformer/pretrained_models.html) in their documentation.
 
-</TabItem>
+</tabitem>
 
 To query the vector store using similarity search:
 
@@ -218,11 +216,11 @@ res = conn.query(
 
 This requires an index the be created beforehand. Refer to the [vector search cheat sheet](/docs/surrealdb/models/vector#vector-search-cheat-sheet).
 
-</Tabs>
-</TabItem>
+</tabs>
+</tabitem>
 
 
-</Tabs>
+</tabs>
 
 <br />
 

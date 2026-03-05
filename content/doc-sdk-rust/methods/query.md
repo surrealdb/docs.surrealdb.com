@@ -5,14 +5,12 @@ title: Query Method in Rust | Rust SDK | Integration | SurrealDB
 description: The .query() method for the SurrealDB Rust SDK runs one or more SurrealQL statements against the database.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # `query()`
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 Runs one or more SurrealQL statements against the database.
 
@@ -272,9 +270,9 @@ async fn main() -> surrealdb::Result<()> {
 
 * [.query() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.query)
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 Runs one or more SurrealQL statements against the database.
 
@@ -535,6 +533,6 @@ async fn main() -> surrealdb::Result<()> {
 
 * [.query() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.query)
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

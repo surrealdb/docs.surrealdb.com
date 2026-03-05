@@ -5,7 +5,6 @@ title: Golang | SDK | Methods | Version
 description: The Golang SDK for SurrealDB enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Version()` {#version}
 
@@ -28,7 +27,7 @@ db.Version()
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.

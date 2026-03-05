@@ -6,8 +6,6 @@ description: Futures are values which are only computed when the data is selecte
 
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # Futures
 
@@ -20,31 +18,31 @@ Futures are values which are only computed when the data is selected and returne
 
 Any value or expression can be used inside a future. This value will be dynamically computed on every access to the record.
 
-<Tabs>
-<TabItem label="Legacy future type">
+<tabs>
+<tabitem label="Legacy future type">
 
 ```surql
 CREATE person SET accessed_date = <future> { time::now() };
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem label="With COMPUTED clause">
+<tabitem label="With COMPUTED clause">
 
 ```surql
 -- Only used inside a DEFINE FIELD statement
 DEFINE FIELD accessed_date ON person COMPUTED time::now();
 ```
 
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 ## Futures inside schema definitions
 
 A future can be added to a schema definition as well.
 
-<Tabs>
-<TabItem label="Legacy future type">
+<tabs>
+<tabitem label="Legacy future type">
 
 ```surql
 DEFINE FIELD accessed_at ON TABLE user VALUE <future> { time::now() };
@@ -57,9 +55,9 @@ SLEEP 1s;
 SELECT * FROM ONLY user:one;
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem label="With COMPUTED clause">
+<tabitem label="With COMPUTED clause">
 
 ```surql
 DEFINE FIELD accessed_at ON TABLE user COMPUTED time::now();
@@ -72,9 +70,9 @@ SLEEP 1s;
 SELECT * FROM ONLY user:one;
 ```
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 This differs from a `VALUE` clause which is only calculated when it is modified (created or updated), but is not recalculated during a `SELECT` query which does not modify a record.
 
@@ -93,8 +91,8 @@ SELECT * FROM ONLY user:one;
 
 If the value of a future is the result of a statement, it must be wrapped in parentheses.
 
-<Tabs>
-<TabItem label="Legacy future type">
+<tabs>
+<tabitem label="Legacy future type">
 
 ```surql
 DEFINE FIELD random_movie
@@ -102,8 +100,8 @@ DEFINE FIELD random_movie
     VALUE <future> { (SELECT * FROM ONLY movie ORDER BY RAND() LIMIT 1) };
 ```
 
-</TabItem>
-<TabItem label="With COMPUTED clause">
+</tabitem>
+<tabitem label="With COMPUTED clause">
 
 ```surql
 -- No need for parentheses
@@ -112,8 +110,8 @@ DEFINE FIELD random_movie
     COMPUTED SELECT * FROM ONLY movie ORDER BY RAND() LIMIT 1;
 ```
 
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 If your statement is wrapped in parentheses, you need to access the fields using the $parent variable.
 

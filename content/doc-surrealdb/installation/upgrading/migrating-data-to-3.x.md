@@ -5,11 +5,6 @@ title: Upgrading from 2.x to 3.x | Upgrading | Installation
 description: This guide will help you upgrade your current SurrealDB installation to the latest `3.x` release.
 ---
 
-import Image from "@components/Image.astro";
-import Table from "@components/shared/Table.astro";
-import SurrealistMigrationDiagnostics from "@img/image/dark/migration-diagnostics.png";
-import SurrealistMigrationReport from "@img/image/dark/surrealist-migration-report.png";
-import SurrealistDeployInstance from "@img/image/dark/surrealist-deploy-instance.png";
 
 # Upgrading from `2.x` to `3.x` 
 
@@ -22,23 +17,11 @@ Surrealist provides a built-in migration diagnostics tool that can be used to au
 >[!NOTE]
 >The migration diagnostics tool is only available for SurrealDB version `2.6.1` and above.
 
-<Image
-alt="Surrealist migration diagnostics"
-src={{
-	light: SurrealistMigrationDiagnostics,
-	dark: SurrealistMigrationDiagnostics,
-}}
-/>
+<img src="@assets/img/image/dark/migration-diagnostics.png" alt="Surrealist migration diagnostics" />
 
 Select your `2.x` database and click on the **Migration** option in the sidebar. This will open the migration diagnostics tool. First you'll need to start the checks by clicking on the **Start Checks** button. This will return a migration report with a list of actions you need to take to migrate your data (If any).
 
-<Image
-alt="Surrealist migration report"
-src={{
-	light: SurrealistMigrationReport,
-	dark: SurrealistMigrationReport,
-}}
-/>
+<img src="@assets/img/image/dark/surrealist-migration-report.png" alt="Surrealist migration report" />
 
 After resolving the issue, click on the **Mark as resolved** button to mark the issue as resolved. This will remove the issue from the migration report.
 
@@ -88,13 +71,7 @@ Next, in the Surrealist overview page, click on **Deploy instance** select the a
 
 At checkout, you will be prompted to enter your payment details (if you don't have a payment method on file) and indicate that the instance is used to migrate to SurrealDB `3.0`. This will let us know to give you migration credits on your account. 
 
-<Image
-alt="Surrealist deploy instance"
-src={{
-	light: SurrealistDeployInstance,
-	dark: SurrealistDeployInstance,
-}}
-/>
+<img src="@assets/img/image/dark/surrealist-deploy-instance.png" alt="Surrealist deploy instance" />
 
 ## Severity Levels
 
@@ -165,7 +142,7 @@ DEFINE FIELD full_name ON person COMPUTED name.first + ' ' + name.last;
 
 **Complete mapping table**:
 
-<Table>
+<table>
     <thead>
         <tr>
             <th scope="col">New Function Name</th>
@@ -418,7 +395,7 @@ DEFINE FIELD full_name ON person COMPUTED name.first + ' ' + name.last;
             <td scope="row" data-label="Previous name"><code>type::thing</code></td>
         </tr>
     </tbody>
-</Table>
+</table>
 
 Learn more about the database functions in the [SurrealQL functions](/docs/surrealql/functions/database) documentation.
 

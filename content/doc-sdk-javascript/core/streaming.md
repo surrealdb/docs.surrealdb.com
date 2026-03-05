@@ -5,7 +5,6 @@ title: JavaScript | SDK | Real-Time data streaming
 description: The SurrealDB SDK for JavaScript allows you to create live queries that listen for changes in the database and automatically update your application when changes occur.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Real-Time data streaming
 
@@ -54,7 +53,7 @@ async db.live<T>(table, callback, diff)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>table</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name to listen for changes for
@@ -63,7 +62,7 @@ async db.live<T>(table, callback, diff)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>callback</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 A callback function that processes live notifications. Consult the [Live Actions](#live-actions) for a list of all possible values being returned.
@@ -72,7 +71,7 @@ async db.live<T>(table, callback, diff)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>diff</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 If set to true, live notifications will include an array of JSON Patch objects, rather than the entire record for each notification.
@@ -119,7 +118,7 @@ async db.subscribeLive<T>(queryUuid, callback)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>queryUuid</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The UUID of a running live query
@@ -128,7 +127,7 @@ async db.subscribeLive<T>(queryUuid, callback)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>callback</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 A callback function that processes live notifications. Consult the [Live Actions](#live-actions) for a list of all possible values being returned.
@@ -174,7 +173,7 @@ async db.kill(queryUuid)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>queryUuid</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The UUID of the live query you wish to kill

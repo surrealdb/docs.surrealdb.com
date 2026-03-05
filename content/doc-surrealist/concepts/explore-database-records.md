@@ -5,19 +5,13 @@ title: Surrealist | Exploring database records
 description: Surrealist is a user interface for interacting with your SurrealDB database visually. It enables you to seamlessly connect to any SurrealDB instance, allowing you to execute queries, explore your tables, design your schemas, and much more.
 ---
 
-import Image from "@components/Image.astro";
-import ImageExplorer from "@img/image/surrealist/explorer.png";
-import ImageImport from "@img/image/surrealist/import.png";
 
 # Exploring database records
 
 The second view you can find in Surrealist is the Explorer view, which lists out tables and allows you to browse through all records. This view is especially useful when you want to effortlessly explore your data, compare records, or edit their contents.
 
 
-<Image
-  alt="Surrealist explorer view"
-  src={ImageExplorer}
-/>
+<img src="@assets/img/image/surrealist/explorer.png" alt="Surrealist explorer view" />
 
 ### Tables panel
 
@@ -51,10 +45,7 @@ Once you have selected the file, you will be prompted to enter a table name. Thi
 
 Surrealist will automatically convert the rows from your CSV file into records in the new table. The importer also handles SurrealQL compatible data like objects, arrays, and dates. 
 
-<Image
-  alt="Surrealist import view"
-  src={ImageImport}
-/>
+<img src="@assets/img/image/surrealist/import.png" alt="Surrealist import view" />
 
 Here's a more detailed breakdown: 
 1. Locate the Importer: Open Surrealist and navigate to the Explorer view, then find the "Import database" option.

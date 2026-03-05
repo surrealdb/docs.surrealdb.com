@@ -5,45 +5,30 @@ title: ALTER DATABASE statement | SurrealQL
 description: The ALTER statement can be used to change authentication access and behaviour, global parameters, table configurations, table events, schema definitions, and indexes.
 ---
 
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 # `ALTER DATABASE` statement
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 The `ALTER DATABASE` statement can be used to modify the database. `ALTER DATABASE` is used on the current database, which is why a `IF EXISTS` clause does not exist.
 
 ## Statement syntax
 
-<Tabs syncKey="alter-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="alter-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 ALTER DATABASE COMPACT
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
-
-export const alterAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "ALTER DATABASE" },
-      { type: "Terminal", text: "COMPACT" },
-    ]}
-  ]
-};
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
 
-<RailroadDiagram ast={alterAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"ALTER DATABASE"},{"type":"Terminal","text":"COMPACT"}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## COMPACT
 

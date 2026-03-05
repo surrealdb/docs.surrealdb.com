@@ -5,7 +5,6 @@ title: Math functions | SurrealQL
 description: These functions can be used when analysing numeric data and numeric collections.
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Math functions
 
@@ -301,7 +300,7 @@ RETURN math::abs(-13.746189);
 
 ## `math::acos`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::acos` function returns the arccosine (inverse cosine) of a number, which must be in the range -1 to 1. The result is expressed in radians.
 
@@ -328,7 +327,7 @@ RETURN math::acos(0.5);
 
 ## `math::acot`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::acot` function returns the arccotangent (inverse cotangent) of a number. The result is expressed in radians.
 
@@ -353,7 +352,7 @@ RETURN math::acot(1);
 
 ## `math::asin`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::asin` function returns the arcsine (inverse sine) of a number, which must be in the range -1 to 1. The result is expressed in radians.
 
@@ -380,7 +379,7 @@ RETURN math::asin(0.5);
 
 ## `math::atan`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::atan` function returns the arctangent (inverse tangent) of a number. The result is expressed in radians.
 
@@ -456,7 +455,7 @@ RETURN math::ceil(13.146572);
 
 ## `math::clamp`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::clamp` function constrains a number within the specified range, defined by a minimum and a maximum value. If the number is less than the minimum, it returns the minimum. If it is greater than the maximum, it returns the maximum.
 
@@ -482,7 +481,7 @@ RETURN math::clamp(1, 5, 10);
 
 ## `math::cos`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::cos` function returns the cosine of a number, which is assumed to be in radians. The result is a value between -1 and 1.
 
@@ -508,7 +507,7 @@ RETURN math::cos(1);
 
 ## `math::cot`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::cot` function returns the cotangent of a number, which is assumed to be in radians. The cotangent is the reciprocal of the tangent function.
 
@@ -534,7 +533,7 @@ RETURN math::cot(1);
 
 ## `math::deg2rad`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::deg2rad` function converts an angle from degrees to radians.
 
@@ -899,7 +898,7 @@ RETURN math::interquartile([ 1, 40, 60, 10, 2, 901 ]);
 
 ## `math::lerp`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::lerp` function performs a linear interpolation between two numbers based on a given fraction. The fraction will usually be between 0 and 1, where 0 returns `$num_1` and 1 returns `$num_2`.
 
@@ -939,7 +938,7 @@ RETURN math::lerp(0, 10, 2);
 
 ## `math::lerpangle`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::lerpangle` function interpolates between two angles (`$num_1` and `$num_2`) by the given fraction. This is useful for smoothly transitioning between angles.
 
@@ -965,7 +964,7 @@ RETURN math::lerpangle(0, 180, 0.5);
 
 ## `math::ln`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::ln` function returns the natural logarithm (base e) of a number.
 
@@ -1039,7 +1038,7 @@ RETURN math::ln_2;
 
 ## `math::log`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::log` function returns the logarithm of a number with a specified base.
 
@@ -1065,7 +1064,7 @@ RETURN math::log(100, 10);
 
 ## `math::log10`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::log10` function returns the base-10 logarithm of a number.
 
@@ -1140,7 +1139,7 @@ RETURN math::log10_e;
 
 ## `math::log2`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::log2` function returns the base-2 logarithm of a number.
 
@@ -1536,7 +1535,7 @@ RETURN math::product([ 26.164, 13.746189, 23, 16.4, 41.42 ]);
 
 ## `math::rad2deg`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::rad2deg` function converts an angle from radians to degrees.
 
@@ -1586,7 +1585,7 @@ RETURN math::round(13.53124);
 
 ## `math::sign`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::sign` function returns the sign of a number, indicating whether the number is positive, negative, or zero.
 It returns 1 for positive numbers, -1 for negative numbers, and 0 for zero.
@@ -1613,7 +1612,7 @@ RETURN math::sign(-42);
 
 ## `math::sin`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::sin` function returns the sine of a number, which is assumed to be in radians.
 
@@ -1849,7 +1848,7 @@ math::sum([0, NONE, 10dec, 10.7, NULL].map(|$num| $num ?? 0));
 
 ## `math::tan`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `math::tan` function returns the tangent of a number, which is assumed to be in radians.
 

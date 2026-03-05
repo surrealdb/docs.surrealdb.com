@@ -5,9 +5,6 @@ title: Frameworks | Overview
 description: This section contains information about the different frameworks that can be used to integrate with SurrealDB.
 ---
 
-import Boxes from "@components/boxes/Boxes.astro";
-import IconBox from "@components/boxes/IconBox.astro";
-import Version from '@components/Version.astro';
 
 # Frameworks
 SurrealDB seamlessly integrates with popular AI and data frameworks, enabling you to leverage SurrealDB's powerful features like vector search, graph relationships, and structured data storage. These integrations make it easy to build sophisticated applications combining LLMs, agents, data pipelines and more - all while using familiar tools and frameworks.

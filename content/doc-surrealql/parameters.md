@@ -5,10 +5,6 @@ title: Parameters | SurrealQL
 description: Parameters can be used like variables to store a value which can then be used in a subsequent query.
 ---
 
-import Since from '@components/shared/Since.astro'
-import Label from "@components/shared/Label.astro";
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # Parameters
 
@@ -134,8 +130,8 @@ RETURN $my_name;
 
 Before SurrealDB 3.0, the `=` on its own was used as syntactic sugar for a `LET` statement. This has since been deprecated in order to make it clearer that parameters can be redeclared, but not modified.
 
-<Tabs>
-  <TabItem label="Before 3.X" default>
+<tabs>
+  <tabitem label="Before 3.X">
 ```surql
 LET $my_name = "Alucard";
 $my_name = "Sypha";
@@ -145,8 +141,8 @@ RETURN $my_name;
 ```surql title="Output"
 'Sypha'
 ```
-</TabItem>
-  <TabItem label="Since 3.X">
+</tabitem>
+  <tabitem label="Since 3.X">
 ```surql
 LET $my_name = "Alucard";
 $my_name = "Sypha";
@@ -161,8 +157,8 @@ RETURN $my_name;
   | ^^^^^^^^^^^^^^^^^^^ replace with `let $my_name = ..`
 '
 ```
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 If the parameter is redefined inside another scope, the original value will be shadowed. Shadowing refers to when a value is temporarily obstructed by a new value of the same name until the new scope has completed.
 
@@ -617,7 +613,7 @@ DEFINE EVENT email ON TABLE user WHEN $before.email != $after.email THEN (
 
 ## Improvements to parameters and expressions in statements
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 Parameters and expressions have traditionally only been available in a limited fashion in SurrealQL statements. As of the alpha versions of SurrealDB 3.0, work is undergoing to allow parameters and expressions to be used in many places that were not possible before.
 

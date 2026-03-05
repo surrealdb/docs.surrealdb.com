@@ -5,10 +5,6 @@ title: Golang | SDK | Methods | SignUp
 description: This method signs up to a specific authentication scope / access method.
 ---
 
-import Label from "@components/shared/Label.astro";
-import Since from "@components/shared/Since.astro";
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # `.SignUp()` {#signup}
 
@@ -31,7 +27,7 @@ await db.SignUp(credentials)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>credentials</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Credentials to sign up as a scoped user.
@@ -42,8 +38,8 @@ await db.SignUp(credentials)
 
 ### Example usage
 
-<Tabs groupId="signup-example">
-<TabItem value="V2" label="V2.x">
+<tabs synckey="signup-example">
+<tabitem label="V2.x">
 
 ```go
 // Sign in to authentication `db` using the root user
@@ -62,8 +58,8 @@ await db.SignUp(credentials)
 	}
 ```
 
-</TabItem>
-<TabItem value="V1" label="V1.x">
+</tabitem>
+<tabitem label="V1.x">
 
 ```go
 // Sign in to authentication `db` using the root user
@@ -82,7 +78,7 @@ await db.SignUp(credentials)
 	}
 ```
 
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 You can invalidate the authentication for the current connection using the [`Invalidate()` method](/docs/sdk/dotnet/methods/invalidate).

@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | Surreal
 description: The Surreal class is the main entry point for connecting to and interacting with a SurrealDB instance.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `Surreal` {#surreal}
 
@@ -36,7 +35,7 @@ new Surreal(options?)
     </thead>
     <tbody>
         <tr>
-            <td><code>options</code> <Label label="optional" /></td>
+            <td><code>options</code> <label label="optional" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/types/#driveroptions">DriverOptions</a></code></td>
             <td>Driver-wide configuration options for customizing engines, codecs, and implementations.</td>
         </tr>
@@ -136,12 +135,12 @@ db.connect(url, opts?)
     </thead>
     <tbody>
         <tr>
-            <td><code>url</code> <Label label="required" /></td>
+            <td><code>url</code> <label label="required" /></td>
             <td><code>string | URL</code></td>
             <td>The endpoint URL to connect to (e.g., <code>"ws://localhost:8000"</code>, <code>"http://localhost:8000/rpc"</code>).</td>
         </tr>
         <tr>
-            <td><code>opts</code> <Label label="optional" /></td>
+            <td><code>opts</code> <label label="optional" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/types/#connectoptions">ConnectOptions</a></code></td>
             <td>Connection-specific options such as namespace, database, and authentication.</td>
         </tr>
@@ -265,7 +264,7 @@ db.isFeatureSupported(feature)
     </thead>
     <tbody>
         <tr>
-            <td><code>feature</code> <Label label="required" /></td>
+            <td><code>feature</code> <label label="required" /></td>
             <td><code>Feature</code></td>
             <td>A feature from the <code>Features</code> object (e.g. <code>Features.LiveQueries</code>, <code>Features.Api</code>).</td>
         </tr>
@@ -368,7 +367,7 @@ db.export(options?)
     </thead>
     <tbody>
         <tr>
-            <td><code>options</code> <Label label="optional" /></td>
+            <td><code>options</code> <label label="optional" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/types/#sqlexportoptions">SqlExportOptions</a></code></td>
             <td>Options to customize what gets exported.</td>
         </tr>
@@ -418,7 +417,7 @@ db.import(input)
     </thead>
     <tbody>
         <tr>
-            <td><code>input</code> <Label label="required" /></td>
+            <td><code>input</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>The SQL string to import into the database.</td>
         </tr>
@@ -535,12 +534,12 @@ db.subscribe(event, listener)
     </thead>
     <tbody>
         <tr>
-            <td><code>event</code> <Label label="required" /></td>
+            <td><code>event</code> <label label="required" /></td>
             <td><code>keyof <a href="/docs/2.x/sdk/javascript/api/types/#surrealevents">SurrealEvents</a></code></td>
             <td>The event name to subscribe to.</td>
         </tr>
         <tr>
-            <td><code>listener</code> <Label label="required" /></td>
+            <td><code>listener</code> <label label="required" /></td>
             <td><code>Function</code></td>
             <td>Callback function invoked when the event is emitted.</td>
         </tr>

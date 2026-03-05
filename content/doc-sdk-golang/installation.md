@@ -13,18 +13,16 @@ In this section, you will learn how to install the Golang SDK in your project.
 
 First, install the [SDK from pkg.go.dev](https://pkg.go.dev/github.com/surrealdb/surrealdb.go) using the `go get` command:
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
-<Tabs groupId="golang-package-manager">
-  <TabItem value="golang-cli" label="go get" default>
+<tabs synckey="golang-package-manager">
+  <tabitem label="go get">
 
 ```bash
 go get github.com/surrealdb/surrealdb.go
   ```
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 <br />
 

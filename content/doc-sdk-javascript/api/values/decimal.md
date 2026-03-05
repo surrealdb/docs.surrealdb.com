@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | Decimal
 description: Arbitrary precision decimal numbers for financial and scientific calculations.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `Decimal` {#decimal}
 
@@ -56,7 +55,7 @@ new Decimal([int, frac, scale]) // From tuple
     </thead>
     <tbody>
         <tr>
-            <td><code>value</code> <Label label="required" /></td>
+            <td><code>value</code> <label label="required" /></td>
             <td><code>Decimal | string | number | bigint | [bigint, bigint, number]</code></td>
             <td>Value to create decimal from.</td>
         </tr>
@@ -187,7 +186,7 @@ decimal.plus(other)
     </thead>
     <tbody>
         <tr>
-            <td><code>other</code> <Label label="required" /></td>
+            <td><code>other</code> <label label="required" /></td>
             <td><code>Decimal | string | number</code></td>
             <td>Value to add.</td>
         </tr>

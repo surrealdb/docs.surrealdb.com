@@ -5,17 +5,11 @@ title: Quick Start | Rust SDK | Integration | SurrealDB
 description: The SurrealDB SDK for Rust enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
-import Image from "@components/Image.astro";
-import LightLogo from "@img/icon/light/rust.png";
-import DarkLogo from "@img/icon/dark/rust.png";
-import Label from "@components/shared/Label.astro";
 
 # Quick start
 
-<Tabs>
-<TabItem label="3.x">
+<tabs>
+<tabitem label="3.x">
 
 First, create a new project using `cargo new` and add the following dependencies:
 
@@ -491,9 +485,9 @@ but couldn't coerce value: Expected `string` but found `9`
 
 For more on web frameworks using the Rust SDK, see the pages on [Actix](/docs/sdk/rust/frameworks/actix), [Axum](/docs/sdk/rust/frameworks/axum), and [Rocket](/docs/sdk/rust/frameworks/rocket).
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 First, create a new project using `cargo new` and add the following dependencies:
 
@@ -887,6 +881,6 @@ Found 9 for param $x, but expected a string
 
 For more on web frameworks using the Rust SDK, see the pages on [Actix](/docs/sdk/rust/frameworks/actix), [Axum](/docs/sdk/rust/frameworks/axum), and [Rocket](/docs/sdk/rust/frameworks/rocket).
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

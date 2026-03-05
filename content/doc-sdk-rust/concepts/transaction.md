@@ -5,12 +5,10 @@ title: Manual Transactions in Rust | Rust SDK | SurrealDB
 description: Manual transactions can be used via the Rust SDK in the same manner as regular SurrealQL queries
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 # Manual transactions
 
@@ -145,9 +143,9 @@ async fn main() -> surrealdb::Result<()> {
 }
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 # Manual transactions
 
@@ -266,6 +264,6 @@ async fn main() -> surrealdb::Result<()> {
 }
 ```
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
