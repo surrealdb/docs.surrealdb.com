@@ -18,7 +18,7 @@ export function getEntryReferenceFromURL(urlPathname: string): CollectionName {
 }
 
 export function getCollectionPartsFromURL(urlPathname: string, sliceIndex: number = 3): string[] {
-    const parts: string[] = urlPathname.split("/").slice(sliceIndex);
+    const parts: string[] = urlPathname.split("/").slice(sliceIndex).filter(Boolean);
 
     if (parts.length === 0) {
         return [...parts, "index"];

@@ -71,6 +71,13 @@ function buildLevel(
         const groupEntry = entries.find((e) => e.slug === groupPath);
         const children = buildLevel(entries, categories, baseUrl, groupPath);
 
+        if (groupEntry && !prefix) {
+            children.unshift({
+                label: "Introduction",
+                href: `${baseUrl}/${groupPath}`,
+            });
+        }
+
         items.push({
             item: {
                 label: meta.sidebar_label ?? groupPath,
