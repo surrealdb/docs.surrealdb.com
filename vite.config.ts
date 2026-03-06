@@ -34,7 +34,7 @@ function resolveMarkdownPath(basePath: string): string {
     return `${basePath}.md`;
 }
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig({
     base: "/docs/",
     plugins: [
         vike(),
@@ -115,4 +115,4 @@ export default defineConfig(({ mode }) => ({
         port: 4321,
         host: true,
     },
-}));
+});
