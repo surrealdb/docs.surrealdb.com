@@ -56,7 +56,7 @@ export default defineConfig({
             trailingSlash: {
                 "/": true,
             },
-            outFile: "dist/client/sitemap.xml",
+            outFile: "../client/sitemap.xml",
             lastmod: async (url) => {
                 const filePath =
                     resolveContentPath(url) ??
