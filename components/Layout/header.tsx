@@ -256,7 +256,7 @@ export function Header({ opened, onToggle }: NavigationProps) {
                     ))}
                 </Group>
                 <Group
-                    flex={1}
+                    flex={{ md: 1 }}
                     justify="flex-end"
                 >
                     <ClientOnly
