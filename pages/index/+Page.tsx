@@ -10,14 +10,27 @@ import {
     brandRust,
     Icon,
     iconArrowUpRight,
+    pictoBadgeAccess,
     pictoCloud,
+    pictoDocument,
+    pictoEmbeddingg,
+    pictoFullTextSearch,
+    pictoGeospatial,
+    pictoGraph,
     pictoIntegrations,
+    pictoKey,
     pictoML,
+    pictoPadlockClosed,
     pictoQL,
+    pictoSDKs,
+    pictoSidekick,
     pictoSurrealDB,
+    pictoSurrealism,
     pictoSurrealist,
+    pictoTimeSeries,
     pictoTutorials,
     pictoUniversity,
+    pictoVectorSearch,
 } from "@surrealdb/ui";
 import classes from "./style.module.scss";
 
@@ -87,6 +100,123 @@ const SDKS: SdkItem[] = [
     { label: "Java", href: "/docs/sdk/java/", icon: brandJava },
     { label: "PHP", href: "/docs/sdk/php/", icon: brandPHP },
     { label: ".NET", href: "/docs/sdk/dotnet/", icon: brandDotNet },
+];
+
+const DATA_MODELS: ProductItem[] = [
+    {
+        title: "Document",
+        description:
+            "A flexible way to store data, allowing for nested structures and relationships to be stored within a single document.",
+        href: "/docs/surrealdb/models/document",
+        icon: pictoDocument,
+    },
+    {
+        title: "Graph",
+        description:
+            "Store data as nodes and edges to query connected datasets like social networks, recommendation engines, or fraud detection graphs.",
+        href: "/docs/surrealdb/models/graph",
+        icon: pictoGraph,
+    },
+    {
+        title: "Vector",
+        description:
+            "Store and query high-dimensional vectors generated from LLM models for AI applications.",
+        href: "/docs/surrealdb/models/vector",
+        icon: pictoVectorSearch,
+    },
+    {
+        title: "Full-Text Search",
+        description:
+            "Index and retrieve text-based data based on tokenized and modified text, rather than exact, literal matches.",
+        href: "/docs/surrealdb/models/full-text-search",
+        icon: pictoFullTextSearch,
+    },
+    {
+        title: "Time Series",
+        description:
+            "Optimized querying and managing time-stamped data over periods of time or via aggregated table views.",
+        href: "/docs/surrealdb/models/time-series",
+        icon: pictoTimeSeries,
+    },
+    {
+        title: "Geospatial",
+        description:
+            "Store and query data related to the Earth's surface using objects including points, lines, polygons, and more.",
+        href: "/docs/surrealdb/models/geospatial",
+        icon: pictoGeospatial,
+    },
+];
+
+const INTEGRATIONS: ProductItem[] = [
+    {
+        title: "Data Management",
+        description:
+            "SurrealDB integrates with Airbyte, Fivetran, and more to help you manage your data.",
+        href: "/docs/integrations/data-management",
+        icon: pictoIntegrations,
+    },
+    {
+        title: "Embeddings",
+        description:
+            "SurrealDB provides a number of different embeddings features that can be used to manage your data.",
+        href: "/docs/integrations/embeddings",
+        icon: pictoEmbeddingg,
+    },
+    {
+        title: "Frameworks",
+        description:
+            "SurrealDB integrates with a number of different frameworks to help you build your applications.",
+        href: "/docs/integrations/frameworks",
+        icon: pictoSDKs,
+    },
+];
+
+const AUTHENTICATION: ProductItem[] = [
+    {
+        title: "System Access",
+        description:
+            "System access is used to authenticate and authorize system users to access the SurrealDB server.",
+        href: "/docs/surrealdb/security/authentication",
+        icon: pictoPadlockClosed,
+    },
+    {
+        title: "Record Access",
+        description:
+            "Record access is used to authenticate and authorize record users to access the SurrealDB database.",
+        href: "/docs/surrealql/statements/define/access/record",
+        icon: pictoBadgeAccess,
+    },
+    {
+        title: "Token Access",
+        description:
+            "Token access is used to authenticate and authorize users to access the SurrealDB database via a token.",
+        href: "/docs/surrealql/statements/define/access/jwt",
+        icon: pictoKey,
+    },
+];
+
+const EDUCATION: ProductItem[] = [
+    {
+        title: "SurrealDB University",
+        description:
+            "Watch videos, live streams, and expert talks to quickly learn key SurrealDB concepts and insights.",
+        href: "/learn",
+        icon: pictoUniversity,
+    },
+    {
+        title: "Aeon's Surreal Renaissance",
+        description:
+            "Learn SurrealDB through an engaging, story-driven experience that feels like watching a movie.",
+        href: "/learn",
+        icon: pictoSurrealism,
+    },
+    {
+        title: "Surreal Sidekick",
+        description:
+            "Surreal Sidekick is your go-to AI assistant for all things SurrealDB related.",
+        href: "/docs/surrealdb",
+        icon: pictoSidekick,
+    },
 ];
 
 const RESOURCES: ResourceItem[] = [
@@ -208,7 +338,7 @@ function ResourceCard({ title, description, href, icon }: ResourceItem) {
 export default function Page() {
     return (
         <Stack
-            gap="xl"
+            gap={60}
             pb="xl"
         >
             <Box className={classes.hero}>
@@ -269,6 +399,82 @@ export default function Page() {
                         <SdkCard
                             key={sdk.href}
                             {...sdk}
+                        />
+                    ))}
+                </SimpleGrid>
+            </Box>
+
+            <Box component="section">
+                <Title
+                    order={2}
+                    fz="xl"
+                    c="bright"
+                    mb="md"
+                >
+                    Data Models
+                </Title>
+                <SimpleGrid cols={{ base: 1, sm: 3 }}>
+                    {DATA_MODELS.map((item) => (
+                        <ProductCard
+                            key={item.href}
+                            {...item}
+                        />
+                    ))}
+                </SimpleGrid>
+            </Box>
+
+            <Box component="section">
+                <Title
+                    order={2}
+                    fz="xl"
+                    c="bright"
+                    mb="md"
+                >
+                    Integrations
+                </Title>
+                <SimpleGrid cols={{ base: 1, sm: 3 }}>
+                    {INTEGRATIONS.map((item) => (
+                        <ProductCard
+                            key={item.href}
+                            {...item}
+                        />
+                    ))}
+                </SimpleGrid>
+            </Box>
+
+            <Box component="section">
+                <Title
+                    order={2}
+                    fz="xl"
+                    c="bright"
+                    mb="md"
+                >
+                    Authentication
+                </Title>
+                <SimpleGrid cols={{ base: 1, sm: 3 }}>
+                    {AUTHENTICATION.map((item) => (
+                        <ProductCard
+                            key={item.href}
+                            {...item}
+                        />
+                    ))}
+                </SimpleGrid>
+            </Box>
+
+            <Box component="section">
+                <Title
+                    order={2}
+                    fz="xl"
+                    c="bright"
+                    mb="md"
+                >
+                    Education
+                </Title>
+                <SimpleGrid cols={{ base: 1, sm: 3 }}>
+                    {EDUCATION.map((item) => (
+                        <ProductCard
+                            key={item.href}
+                            {...item}
                         />
                     ))}
                 </SimpleGrid>
