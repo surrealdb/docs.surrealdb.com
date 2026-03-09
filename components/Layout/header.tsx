@@ -12,11 +12,10 @@ import {
     Flex,
     Group,
     Image,
+    Loader,
     NavLink as MantineNavLink,
     Menu,
     Stack,
-    useComputedColorScheme,
-    useMantineColorScheme,
 } from "@mantine/core";
 import {
     brandDotNet,
@@ -27,13 +26,13 @@ import {
     brandPython,
     brandRust,
     Icon,
-    iconCheck,
     iconChevronDown,
-    iconMoon,
-    iconSun,
     pictoTutorials,
     pictoUniversity,
+    ThemedImage,
 } from "@surrealdb/ui";
+import { ClientOnly } from "vike-react/ClientOnly";
+import { ColorSchemeToggle } from "../ColorSchemeToggle";
 import classes from "./style.module.scss";
 
 export interface NavigationProps {
@@ -192,13 +191,6 @@ function NavDropdown({ label, items }: NavMenuGroup) {
 }
 
 export function Header({ opened, onToggle }: NavigationProps) {
-    const { colorScheme, setColorScheme } = useMantineColorScheme();
-    const computedScheme = useComputedColorScheme();
-
-    const isDark = computedScheme === "dark";
-    const logo = isDark ? LogoDark : LogoLight;
-    const docsLogo = isDark ? DocsDark : DocsLight;
-
     return (
         <Box
             component="header"
@@ -214,10 +206,10 @@ export function Header({ opened, onToggle }: NavigationProps) {
             >
                 <Group flex={1}>
                     <Anchor href="/">
-                        <Image
-                            src={logo}
-                            alt="SurrealDB"
-                            height={24}
+                        <ThemedImage
+                            src={LogoLight}
+                            darkSrc={LogoDark}
+                            h={24}
                         />
                     </Anchor>
                     <Divider
@@ -235,10 +227,10 @@ export function Header({ opened, onToggle }: NavigationProps) {
                         underline="never"
                         aria-label="SurrealDB Docs home"
                     >
-                        <Image
-                            src={docsLogo}
-                            alt="SurrealDB Docs"
-                            height={24}
+                        <ThemedImage
+                            src={DocsLight}
+                            darkSrc={DocsDark}
+                            h={24}
                         />
                     </Anchor>
                 </Group>
@@ -267,53 +259,15 @@ export function Header({ opened, onToggle }: NavigationProps) {
                     flex={1}
                     justify="flex-end"
                 >
-                    <Menu
-                        trigger="hover"
-                        transitionProps={{ transition: "scale-y" }}
-                    >
-                        <Menu.Target>
+                    <ClientOnly
+                        fallback={
                             <ActionIcon aria-label="Toggle color scheme">
-                                <Icon path={isDark ? iconMoon : iconSun} />
+                                <Loader size="xs" />
                             </ActionIcon>
-                        </Menu.Target>
-                        <Menu.Dropdown miw={150}>
-                            <Menu.Label>Color scheme</Menu.Label>
-                            <Menu.Item
-                                onClick={() => setColorScheme("auto")}
-                                leftSection={
-                                    <Icon
-                                        path={colorScheme === "auto" ? iconCheck : ""}
-                                        size="xs"
-                                    />
-                                }
-                            >
-                                System
-                            </Menu.Item>
-                            <Menu.Item
-                                onClick={() => setColorScheme("light")}
-                                leftSection={
-                                    <Icon
-                                        path={colorScheme === "light" ? iconCheck : ""}
-                                        size="sm"
-                                    />
-                                }
-                            >
-                                Light
-                            </Menu.Item>
-                            <Menu.Item
-                                onClick={() => setColorScheme("dark")}
-                                leftSection={
-                                    <Icon
-                                        path={colorScheme === "dark" ? iconCheck : ""}
-                                        size="sm"
-                                    />
-                                }
-                            >
-                                Dark
-                            </Menu.Item>
-                        </Menu.Dropdown>
-                    </Menu>
-
+                        }
+                    >
+                        <ColorSchemeToggle />
+                    </ClientOnly>
                     <Button
                         component="a"
                         href={SIGN_IN_URL}
