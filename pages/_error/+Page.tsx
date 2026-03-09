@@ -32,7 +32,7 @@ export default function Page() {
     return (
         <Flex
             direction={{ base: "column", sm: "row" }}
-            align="center"
+            align={{ base: "flex-start", md: "center" }}
             justify="center"
             gap={{ base: "md", sm: 48 }}
             h="100%"
