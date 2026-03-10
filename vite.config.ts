@@ -53,16 +53,9 @@ export default defineConfig({
                 { match: /.*/, priority: 0.75 },
             ],
             exclude: ["/404", "/500"],
-            trailingSlash: [
-                {
-                    match: "/",
-                    trailingSlash: true,
-                },
-                {
-                    match: /^(\/sdk|\/integrations|\/surrealdb|\/cloud|\/surrealml|\/surrealist|\/surrealql)\/.*$/,
-                    trailingSlash: true,
-                },
-            ],
+            trailingSlash: (url) => {
+                return url === "/";
+            },
             outFile: "../client/sitemap.xml",
             lastmod: async (url) => {
                 const filePath =
