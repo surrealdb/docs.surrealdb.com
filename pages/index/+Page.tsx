@@ -23,7 +23,6 @@ import {
     pictoPadlockClosed,
     pictoQL,
     pictoSDKs,
-    pictoSidekick,
     pictoSurrealDB,
     pictoSurrealism,
     pictoSurrealist,
