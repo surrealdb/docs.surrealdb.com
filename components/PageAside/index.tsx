@@ -16,12 +16,13 @@ export function PageAside({ headings }: PageAsideProps) {
             gap="lg"
             p="md"
             maw="260px"
+            mah="stretch"
             pos="sticky"
             top="0"
             right="2rem"
-            display={headings.length > 0 ? "block" : "none"}
             aria-hidden={headings.length === 0}
             visibleFrom="lg"
+            hidden={headings.length === 0}
         >
             <Text
                 c="bright"
@@ -30,7 +31,11 @@ export function PageAside({ headings }: PageAsideProps) {
             >
                 On this page
             </Text>
-            <List listStyleType="none">
+            <List
+                listStyleType="none"
+                flex={1}
+                style={{ overflowY: "auto" }}
+            >
                 {headings.map((heading) => (
                     <ListItem
                         key={heading.id}
