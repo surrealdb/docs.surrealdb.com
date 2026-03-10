@@ -211,11 +211,10 @@ const EDUCATION: ProductItem[] = [
         icon: pictoSurrealism,
     },
     {
-        title: "Surreal Sidekick",
-        description:
-            "Surreal Sidekick is your go-to AI assistant for all things SurrealDB related.",
-        href: "/docs/surrealdb",
-        icon: pictoSidekick,
+        title: "Movie Database Tutorial",
+        description: "Learn how to build a movie database with SurrealDB and Surrealist.",
+        href: "/learn/movies",
+        icon: pictoTutorials,
     },
 ];
 
