@@ -5,7 +5,6 @@ title: Deploy on Google GKE | Deployment
 description: How to set up a SurrealDB cluster backed by TiKV on Google Kubernetes Engine.
 ---
 
-
 <div class="flag-title">
 	<img src="@assets/img/icon/light/google.png" darkSrc="@assets/img/icon/dark/google.png" alt="Google Kubernetes Engine" style="width: 42px; height: 42px" />
 	# Deploy on Google Kubernetes Engine (GKE)

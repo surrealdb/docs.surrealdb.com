@@ -81,7 +81,6 @@ export function LabCard({ item, isDark }: LabCardProps) {
             >
                 <Box className={classes.image}>
                     <Image
-                        className="blend"
                         src={categoryImage}
                         alt=""
                     />

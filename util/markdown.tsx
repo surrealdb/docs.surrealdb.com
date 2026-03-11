@@ -1,5 +1,5 @@
 import { extractHeadings } from "@lib/markdown";
-import { parseMarkdown } from "@surrealdb/ui";
+import { parseMarkdown, SurrealistMini } from "@surrealdb/ui";
 import { resolveAstImages } from "./image-urls";
 
 export function resolveMarkdown(markdown: string) {
@@ -13,4 +13,10 @@ export function resolveMarkdown(markdown: string) {
     const headings = extractHeadings(ast);
 
     return { ast, headings };
+}
+
+export function registerMarkdownComponents() {
+    return {
+        SurrealistMini: ({ query }: { query: string }) => <SurrealistMini config={{ query }} />,
+    };
 }

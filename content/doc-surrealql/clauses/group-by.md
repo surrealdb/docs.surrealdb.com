@@ -45,7 +45,7 @@ Explanation:
 
 This query will return a result set where each row represents a unique combination of `product_id` and `region`, along with the total sales amount for that combination. This is useful for understanding how different products are performing in different regions.
 
-<surrealistmini resultMode="single"
+<SurrealistMini resultMode="single"
 	setup="
 INSERT INTO rams [
     { gender: "M", age: 20, country: "Japan" },

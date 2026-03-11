@@ -246,7 +246,6 @@ function ProductCard({ title, description, href, icon }: ProductItem) {
         >
             <Paper className={classes.productCard}>
                 <Image
-                    className="blend"
                     src={icon}
                     w={36}
                     h={36}
@@ -304,7 +303,6 @@ function ResourceCard({ title, description, href, icon }: ResourceItem) {
         >
             <Paper className={classes.resourceCard}>
                 <Image
-                    className="blend"
                     src={icon}
                     w={32}
                     h={32}

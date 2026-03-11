@@ -2,6 +2,7 @@ import DocsDark from "@assets/img/logo/dark/docs.svg";
 import LogoDark from "@assets/img/logo/dark/surrealdb.svg";
 import DocsLight from "@assets/img/logo/light/docs.svg";
 import LogoLight from "@assets/img/logo/light/surrealdb.svg";
+// import { ThemedImage } from "@components/Image";
 import {
     ActionIcon,
     Anchor,
@@ -165,12 +166,14 @@ function NavDropdown({ label, items }: NavMenuGroup) {
                     </Flex>
                 </Anchor>
             </Menu.Target>
-            <Menu.Dropdown>
+            <Menu.Dropdown bdrs="xs">
                 {items.map((item) => (
                     <Menu.Item
                         key={item.href}
                         component="a"
                         href={item.href}
+                        bdrs="xs"
+                        p="sm"
                         leftSection={
                             item.icon ? (
                                 <Image

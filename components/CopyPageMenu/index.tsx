@@ -75,10 +75,11 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
             </Menu.Target>
             <Menu.Dropdown>
                 <Menu.Item
+                    bdrs="xs"
                     leftSection={
                         <Icon
                             path={iconCopy}
-                            size="sm"
+                            size="md"
                             c="bright"
                         />
                     }
@@ -100,17 +101,18 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                     </Stack>
                 </Menu.Item>
                 <Menu.Item
+                    bdrs="xs"
                     leftSection={
                         <Icon
                             path={iconChatGPT}
-                            size="sm"
+                            size="md"
                             c="bright"
                         />
                     }
                     rightSection={
                         <Icon
                             path={iconArrowUpRight}
-                            size="xs"
+                            size="sm"
                             c="dimmed"
                         />
                     }
@@ -132,17 +134,18 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                     </Stack>
                 </Menu.Item>
                 <Menu.Item
+                    bdrs="xs"
                     leftSection={
                         <Icon
                             path={iconClaude}
-                            size="sm"
+                            size="md"
                             c="bright"
                         />
                     }
                     rightSection={
                         <Icon
                             path={iconArrowUpRight}
-                            size="xs"
+                            size="sm"
                             c="dimmed"
                         />
                     }

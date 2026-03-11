@@ -1,5 +1,6 @@
 import { Box } from "@mantine/core";
 import { RenderMarkdown } from "@surrealdb/ui";
+import { registerMarkdownComponents } from "@util/markdown";
 import { useData } from "vike-react/useData";
 import type { SurrealDBPageData } from "./+data";
 
@@ -7,7 +8,11 @@ export default function Page() {
     const { ast } = useData<SurrealDBPageData>();
     return (
         <Box className="flag-markdown">
-            <RenderMarkdown ast={ast} />
+            <RenderMarkdown
+                ast={ast}
+                rendererProps={{ jsx: "render" }}
+                components={{ ...registerMarkdownComponents() }}
+            />
         </Box>
     );
 }

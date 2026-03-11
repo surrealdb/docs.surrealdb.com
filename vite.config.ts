@@ -93,6 +93,9 @@ export default defineConfig({
             },
         }),
     ],
+    resolve: {
+        dedupe: ["react", "react-dom", "@mantine/core", "@mantine/hooks"],
+    },
     build: {
         sourcemap: true,
         minify: true,

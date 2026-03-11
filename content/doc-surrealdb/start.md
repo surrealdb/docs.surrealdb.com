@@ -28,12 +28,13 @@ The following example demonstrates how to create a record in the `category` tabl
 
 <br /> 
 
-<surrealistmini resultMode="single"
-	query="
+<SurrealistMini resultMode="single"
+	query={`
 		CREATE category SET
 			name = 'Technology',
 			created_at = time::now();
-	"} />
+	`} 
+/>
 
 After executing this statement, the `category` record is created in the database, and a randomly generated unique id known as a [Record ID](/docs/surrealql/datamodel/ids) is assigned to it. This ID represents the primary key of our record, and can be used to reference the record in future queries.
 
@@ -41,9 +42,9 @@ When creating records, you can also explicitly set the record ID. This can be us
 
 <br />
 
-<surrealistmini 
+<SurrealistMini 
 	resultMode="single"
-	query="
+	query={`
 		CREATE person:john SET
 			name.first = 'John',
 			name.last = 'Adams',
@@ -51,13 +52,13 @@ When creating records, you can also explicitly set the record ID. This can be us
 			age = 29,
 			admin = true,
 			signup_at = time::now();
-	" />
+	`} />
 
 One of the many powerful features of SurrealDB is the ability to write subqueries, which in the following example is used to populate the `category` field of the `article` record with the ID of the `Technology` category.
 
 <br />
 
-<surrealistmini resultMode="single"
+<SurrealistMini resultMode="single"
 	setup="
 		CREATE category SET name = 'Technology', created_at = time::now();
 		CREATE person:john SET
@@ -68,14 +69,14 @@ One of the many powerful features of SurrealDB is the ability to write subquerie
 			admin = true,
 			signup_at = time::now();
 	"
-	query="
+	query={`
 		CREATE article SET
 			created_at = time::now(),
 			author = person:john,
 			title = 'Lorem ipsum dolor',
 			text = 'Donec eleifend, nunc vitae commodo accumsan, mauris est fringilla.',
 			category = SELECT VALUE id FROM ONLY category WHERE name = 'Technology' LIMIT 1;
-	" />
+	`} />
 
 ### Querying data with SELECT
 
@@ -85,7 +86,7 @@ For example, in addition to selecting records from a single table, you can also 
 
 <br />
 
-<surrealistmini 
+<SurrealistMini 
 	setup="
 		CREATE category SET name = 'Technology', created_at = time::now();
 		CREATE person:john SET
@@ -102,7 +103,7 @@ For example, in addition to selecting records from a single table, you can also 
 			text = 'Donec eleifend, nunc vitae commodo accumsan, mauris est fringilla.',
 			category = SELECT VALUE id FROM ONLY category WHERE name = 'Technology' LIMIT 1;
 	"
-	query="
+	query={`
 		-- Select all records from a table
 		SELECT * FROM article;
 
@@ -111,7 +112,7 @@ For example, in addition to selecting records from a single table, you can also 
 
 		-- Selecting specific records
 		SELECT * FROM person:john;
-	" 
+	`}
 />
 
 The [SELECT statement](/docs/surrealql/statements/select) offers a variety of different features, such as the ability to filter on fields, fetch and resolve record id contents, and the ability to access data directly from Record IDs without the need of JOINs or complex queries.
@@ -160,7 +161,7 @@ Records can be updated using the [UPDATE](/docs/surrealql/statements/update) sta
 
 Much like the `SELECT` statement, you can pass both table names and individual record IDs to the `UPDATE` statement. This allows you to update specific records, or update multiple records at once.
 
-<surrealistmini resultMode="single"
+<SurrealistMini resultMode="single"
 	setup="
 		CREATE category SET name = 'Technology', created_at = time::now();
 		CREATE person:john SET
@@ -187,7 +188,7 @@ The `UPDATE` statement offers a variety of features to further filter down recor
 
 <br />
 
-<surrealistmini resultMode="single"
+<SurrealistMini resultMode="single"
 	setup="
 		CREATE category SET name = 'Technology', created_at = time::now();
 		CREATE person:john SET
@@ -221,7 +222,7 @@ The following example demonstrates the use of the `RETURN` clause, which instruc
 
 <br />
 
-<surrealistmini resultMode="single"
+<SurrealistMini resultMode="single"
 	setup="
 		CREATE category SET name = 'Technology', created_at = time::now();
 		CREATE person:john SET
