@@ -252,8 +252,6 @@ function titleFromFolder(folder: string) {
     switch (folder.toLowerCase()) {
         case 'surrealdb':
             return 'SurrealDB';
-        case 'surrealql':
-            return 'SurrealQL';
         case 'surrealml':
             return 'SurrealML';
         case 'surrealist':

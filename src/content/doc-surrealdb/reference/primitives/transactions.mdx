@@ -1,0 +1,227 @@
+---
+sidebar_position: 7
+sidebar_label: Transactions
+title: Transactions | SurrealQL
+description: Each statement within SurrealDB is run within its own transaction, or within client defined transactions that can contain multiple statements.
+---
+
+# Transactions
+
+Each statement within SurrealDB is run within its own transaction by default. If a set of changes need to be made together, then groups of statements can be run together as a single transaction. If all of the statements within a transaction succeed, and the transaction is successful, then all of the data modifications made during the transaction are committed and become a permanent part of the database. If a transaction encounters errors and must be cancelled or rolled back, then any data modification made within the transaction is rolled back, and will not become a permanent part of the database.
+
+## Starting a transaction
+
+The `BEGIN` or `BEGIN TRANSACTION` statement starts a transaction in which multiple statements can be run together.
+
+```surql title="Starting a transaction"
+BEGIN [ TRANSACTION ];
+```
+
+The following query shows example usage of this statement.
+
+```surql title="Example usage of BEGIN TRANSACTION"
+/**[test]
+
+[[test.results]]
+value = "[{ balance: 135605.16f, id: account:one }]"
+
+[[test.results]]
+value = "[{ balance: 91031.31f, id: account:two }]"
+
+[[test.results]]
+value = "[{ balance: 135905.16f, id: account:one }]"
+
+[[test.results]]
+value = "[{ balance: 90731.31f, id: account:two }]"
+
+*/
+
+-- Start a new database transaction. Transactions are a way to ensure multiple operations
+-- either all succeed or all fail, maintaining data integrity.
+BEGIN TRANSACTION;
+
+-- Create a new account with the ID 'one' and set its initial balance to 135605.16
+CREATE account:one SET balance = 135605.16;
+
+-- Create another new account with the ID 'two' and set its initial balance to 91031.31
+CREATE account:two SET balance = 91031.31;
+
+-- Update the balance of account 'one' by adding 300.00 to the current balance.
+-- This could represent a deposit or other form of credit on the balance property.
+UPDATE account:one SET balance += 300.00;
+
+-- Update the balance of account 'two' by subtracting 300.00 from the current balance.
+-- This could represent a withdrawal or other form of debit on the balance property.
+UPDATE account:two SET balance -= 300.00;
+
+-- Finalize the transaction. This will apply the changes to the database. If there was an error
+-- during any of the previous steps within the transaction, all changes would be rolled back and
+-- the database would remain in its initial state.
+COMMIT TRANSACTION;
+```
+
+## Committing a transaction
+
+The [COMMIT](/docs/surrealql/statements/commit) statement is used to commit a set of statements within a transaction, ensuring that all data modifications become a permanent part of the database.
+
+```surql title="Committing a transaction"
+COMMIT [ TRANSACTION ];
+```
+
+The following query shows example usage of this statement.
+
+```surql title="Example usage of COMMIT TRANSACTION"
+/**[test]
+
+[[test.results]]
+value = "[{ balance: 135605.16f, id: account:one }]"
+
+[[test.results]]
+value = "[{ balance: 91031.31f, id: account:two }]"
+
+[[test.results]]
+value = "[{ balance: 135905.16f, id: account:one }]"
+
+[[test.results]]
+value = "[{ balance: 90731.31f, id: account:two }]"
+
+*/
+
+BEGIN TRANSACTION;
+
+-- Setup accounts
+CREATE account:one SET balance = 135605.16;
+CREATE account:two SET balance = 91031.31;
+
+-- Move money
+UPDATE account:one SET balance += 300.00;
+UPDATE account:two SET balance -= 300.00;
+
+-- Finalise all changes
+COMMIT TRANSACTION;
+```
+
+## Cancelling a transaction
+
+The [CANCEL](/docs/surrealql/statements/cancel) statement can be used to cancel a set of statements within a transaction, reverting or rolling back any data modification made within the transaction as a whole.
+
+```surql title="Cancelling a transaction"
+CANCEL [ TRANSACTION ];
+```
+
+The following query shows example usage of this statement.
+
+```surql title="Example usage of CANCEL TRANSACTION"
+/**[test]
+
+[[test.results]]
+error = "'Thrown error: The query was not executed due to a cancelled transaction'"
+
+[[test.results]]
+error = "'Thrown error: The query was not executed due to a cancelled transaction'"
+
+[[test.results]]
+error = "'Thrown error: The query was not executed due to a cancelled transaction'"
+
+[[test.results]]
+error = "'Thrown error: The query was not executed due to a cancelled transaction'"
+
+*/
+
+BEGIN TRANSACTION;
+
+-- Setup accounts
+CREATE account:one SET balance = 135605.16;
+CREATE account:two SET balance = 91031.31;
+
+-- Move money
+UPDATE account:one SET balance += 300.00;
+UPDATE account:two SET balance -= 300.00;
+
+-- Rollback all changes
+CANCEL TRANSACTION;
+```
+
+## THROW to conditionally cancel a transaction
+
+While transactions are automatically rolled back if an error occurs in any of its statements, [THROW](/docs/surrealql/statements/throw) can also be used to explicitly break out of a transaction at any point. `THROW` can be followed by any value which serves as the error message, usually a string.
+
+```surql
+BEGIN TRANSACTION;
+
+CREATE account:one SET dollars =  100;
+CREATE account:two SET dollars =  100;
+
+LET $transfer_amount = 150;
+UPDATE account:one SET dollars -= $transfer_amount;
+UPDATE account:two SET dollars += $transfer_amount;
+IF account:one.dollars < 0 {
+    THROW "Insufficient funds, would have $" + <string>account:one.dollars + " after transfer"
+};
+COMMIT TRANSACTION;
+SELECT * FROM account;
+```
+
+```surql title="Output when $transfer_amount set to 150"
+'An error occurred: Insufficient funds, would have $-50 after transfer'
+```
+
+```surql title="Output when $transfer_amount set to 50"
+[
+	{
+		dollars: 50,
+		id: account:one
+	},
+	{
+		dollars: 150,
+		id: account:two
+	}
+]
+```
+
+## Using transactions to test code for errors
+
+As failed transactions automatically roll back any changes made, a transaction with a final `THROW` statement can be used as a confirmation that no errors have taken place inside a group of queries.
+
+Take the following example that creates a unique index and then inserts some records to make sure that the database logic is functioning as expected. However, as names are not necessarily unique, the index soon gives an error and cancels the transaction before `THROW` can be reached.
+
+```surql
+BEGIN TRANSACTION;
+DEFINE INDEX unique_name ON TABLE person FIELDS name UNIQUE;
+
+INSERT INTO person [
+    { name: 'Agatha Christie', born: d'1890-09-15' },
+    { name: 'Billy Billerson', born: d'1979-09-11' },
+	-- Pretend there are is 10,000 more objects here
+    { name: 'Agatha Christie', born: d'1955-05-15' },
+];
+
+THROW "Reached the end";
+COMMIT TRANSACTION;
+```
+
+The output is not the expected 'An error occurred: Reached the end' message, showing that not all queries were successful.
+
+```surql title="Output"
+"Database index `unique_name` already contains 'Agatha Christie', with record `person:qs4bpvl96sf9x40b3567`"
+```
+
+If the index is redefined to be less strict, the statetements will work and the expected output will be reached, confirming that no errors occurred during the test.
+
+```surql
+BEGIN TRANSACTION;
+DEFINE INDEX OVERWRITE unique_person ON TABLE person FIELDS name, born UNIQUE;
+
+INSERT INTO person [
+    { name: 'Agatha Christie', born: d'1890-09-15' },
+    { name: 'Billy Billerson', born: d'1979-09-11' },
+    { name: 'Agatha Christie', born: d'1955-05-15' },
+];
+
+THROW "Reached the end";
+COMMIT TRANSACTION;
+```
+
+```surql title="Expected output"
+'An error occurred: Reached the end'
+```

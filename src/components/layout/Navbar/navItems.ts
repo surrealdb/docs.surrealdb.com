@@ -46,7 +46,6 @@ export type NavItem = {
 
 export const navItems: NavItem[] = [
     { label: 'SurrealDB', href: '/docs/surrealdb' },
-    { label: 'SurrealQL', href: '/docs/surrealql' },
     { label: 'Surrealist UI', href: '/docs/surrealist' },
     { label: 'Cloud', href: '/docs/cloud' },
     { label: 'Extensions', href: '/docs/surrealdb/extensions' },

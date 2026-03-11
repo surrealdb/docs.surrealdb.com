@@ -39,7 +39,7 @@ DEFINE TABLE IF NOT EXISTS creator SCHEMAFULL
         FOR update, delete WHERE id = $auth.id AND $access = "creator_access";
 
 DEFINE FIELD IF NOT EXISTS email ON TABLE creator TYPE string
-    ASSERT string::is::email($value);
+    ASSERT string::is_email($value);
 DEFINE FIELD IF NOT EXISTS first_name ON TABLE creator TYPE string;
 DEFINE FIELD IF NOT EXISTS last_name ON TABLE creator TYPE string;
 DEFINE FIELD IF NOT EXISTS password ON TABLE creator TYPE string 
@@ -65,7 +65,7 @@ DEFINE TABLE IF NOT EXISTS member SCHEMAFULL
         FOR update, delete WHERE (id = $auth.id AND $access = "member_access") OR (created_by = $auth AND $access = "creator_access");
         
 DEFINE FIELD IF NOT EXISTS email ON TABLE member TYPE string
-    ASSERT string::is::email($value);
+    ASSERT string::is_email($value);
 DEFINE FIELD IF NOT EXISTS first_name ON TABLE member TYPE string;
 DEFINE FIELD IF NOT EXISTS last_name ON TABLE member TYPE string;
 DEFINE FIELD IF NOT EXISTS password ON TABLE member TYPE string 
@@ -152,7 +152,7 @@ DEFINE TABLE invitation SCHEMAFULL
             OR ($access = 'invitation_accept' AND id = $auth.id);
 
 DEFINE FIELD creator ON invitation TYPE record<creator> VALUE $auth READONLY;
-DEFINE FIELD email ON invitation TYPE string ASSERT string::is::email($value);
+DEFINE FIELD email ON invitation TYPE string ASSERT string::is_email($value);
 DEFINE FIELD invite_token ON invitation TYPE string;
 DEFINE FIELD resource ON invitation TYPE record<resource>;
 DEFINE FIELD expires_at ON invitation TYPE datetime;
