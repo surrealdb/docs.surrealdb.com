@@ -17,7 +17,8 @@ The SurrealDB SDK for Java enables you to interact with SurrealDB from client or
 > The SDK requires Java JDK version `8` or greater, and is available as a [Maven package](https://mvnrepository.com/artifact/com.surrealdb/surrealdb).
 
 > [!NOTE]
-> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <version />, ensuring compatibility with the latest version.
+> The latest version of the SDK is <Version sdk="java" />.
+> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <Version sdk="surrealdb" />, ensuring compatibility with the latest version.
 
 > [!WARNING]
 > This API is not yet fully stabilized and may be subject to change until the SDK reaches `1.0.0`.

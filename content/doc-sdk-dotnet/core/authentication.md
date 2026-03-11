@@ -16,7 +16,7 @@ In your SurrealDB database, you can create authentication login using the [`DEFI
 The access method used will inform the input for `Access` in the `.SignUp()` and `.SignIn()` methods.
 
 > [!IMPORTANT]
-> If you are not on Version <version /> of SurrealDB, you will use the `Scope` property instead of `Access`.
+> If you are not on Version <Version /> of SurrealDB, you will use the `Scope` property instead of `Access`.
 
 <table>
 	<thead>

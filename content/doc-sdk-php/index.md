@@ -17,7 +17,7 @@ The SurrealDB SDK for PHP enables you to interact with SurrealDB from server-sid
 > The SDK requires PHP version `8.2` or greater, and is available as a [Composer package](https://packagist.org/packages/surrealdb/surrealdb.php).
 
 > [!NOTE]
-> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <version />, ensuring compatibility with the latest version.
+> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <Version prefix="v" sdk="php" />, ensuring compatibility with the latest version.
 
 To contribute to the SDK code, submit an Issue or Pull Request in the [surrealdb.php](https://github.com/surrealdb/surrealdb.php) repository. To contribute to this documentation, submit an Issue or Pull Request in the [docs.surrealdb.com](https://github.com/surrealdb/docs.surrealdb.com) repository.
 

@@ -17,7 +17,8 @@ The SurrealDB SDK for Rust enables you to interact with SurrealDB from client-si
 > The SDK requires Rust version `1.89` or greater, and is available as a [crate](https://crates.io/crates/surrealdb).
 
 > [!NOTE]
-> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <version />, ensuring compatibility with the latest version.
+> The latest version of the SDK is <Version sdk="rust" />.
+> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <Version />, ensuring compatibility with the latest version.
 
 To contribute to the SDK code, submit an Issue or Pull Request in the [Rust SDK](https://github.com/surrealdb/surrealdb/tree/main/surrealdb) repository. To contribute to this documentation, submit an Issue or Pull Request in the [docs.surrealdb.com](https://github.com/surrealdb/docs.surrealdb.com) repository.
 

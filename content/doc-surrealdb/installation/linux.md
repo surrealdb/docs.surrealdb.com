@@ -23,7 +23,7 @@ curl -sSf https://install.surrealdb.com | sh
 
 ### Updating SurrealDB
 
-To ensure that you are using the latest stable version (<version />), update SurrealDB using the following command.
+To ensure that you are using the latest stable version (<Version />), update SurrealDB using the following command.
 
 ```bash
 curl -sSf https://install.surrealdb.com | sh

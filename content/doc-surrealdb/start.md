@@ -342,34 +342,34 @@ When you start the database, you must specify which storage engine to use. This 
 <tabs synckey="node-package-manager">
   <tabitem label="In-Memory">
     ```bash
-	# Implicitly show memory as the storage backend
-    surreal start memory
+# Implicitly show memory as the storage backend
+surreal start memory
 
-	# Same as above: memory is the default
-	surreal start
+# Same as above: memory is the default
+surreal start
     ```
   </tabitem>
   <tabitem label="Single node on-disk SurrealKV (beta)">
     ```bash
-	# Without versioning (temporal queries)
-    surreal start --user root --pass secret surrealkv://mydb
+# Without versioning (temporal queries)
+surreal start --user root --pass secret surrealkv://mydb
 
-	# With versioning (since 3.0)
-	surreal start --user root --pass secret "surrealkv://mydb?versioned=true"
+# With versioning (since 3.0)
+surreal start --user root --pass secret "surrealkv://mydb?versioned=true"
 
-	# With versioning (previous versions)
-	surreal start --user root --pass secret surrealkv+versioned://mydb
+# With versioning (previous versions)
+surreal start --user root --pass secret surrealkv+versioned://mydb
     ```
   </tabitem>
   <tabitem label="Single node on-disk RocksDB">
     ```bash
-    surreal start --user root --pass secret rocksdb://mydb
+surreal start --user root --pass secret rocksdb://mydb
     ```
   </tabitem>
   <tabitem label="Multi-node scalable cluster">
 
     ```bash
-   surreal start tikv://127.0.0.1:2379
+surreal start tikv://127.0.0.1:2379
     ```
   </tabitem>
 </tabs>

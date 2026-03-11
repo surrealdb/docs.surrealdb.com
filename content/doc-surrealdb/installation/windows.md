@@ -23,7 +23,7 @@ iwr https://windows.surrealdb.com -useb | iex
 
 ### Updating SurrealDB
 
-To ensure that you are using the latest stable version (<version />), update SurrealDB using the following command.
+To ensure that you are using the latest stable version (<Version />), update SurrealDB using the following command.
 
 ```bash
 surreal upgrade
@@ -89,7 +89,7 @@ choco install surreal
 
 ### Updating SurrealDB
 
-To ensure that you are using the latest stable version (<version />), update SurrealDB using the following command.
+To ensure that you are using the latest stable version (<Version />), update SurrealDB using the following command.
 
 ```bash
 choco update surreal
@@ -105,7 +105,7 @@ scoop install surrealdb
 
 ### Updating SurrealDB
 
-To ensure that you are using the latest stable version (<version />), update SurrealDB using the following command.
+To ensure that you are using the latest stable version (<Version />), update SurrealDB using the following command.
 
 ```bash
 scoop update surrealdb

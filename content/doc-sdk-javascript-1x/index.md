@@ -17,7 +17,8 @@ The SurrealDB SDK for JavaScript and TypeScript allows you to interact with Surr
 > The SDK is available as a [NPM](https://npmjs.com/package/surrealdb) and a [JSR](https://jsr.io/@surrealdb/surrealdb) package, with full support for TypeScript types.
 
 > [!NOTE]
-> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <version />, ensuring compatibility with the latest version.
+> The latest version of the SDK is <Version sdk="javascript" />.
+> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <Version />, ensuring compatibility with the latest version.
 
 To contribute to the SDK code, submit an Issue or Pull Request in the [surrealdb.js](https://github.com/surrealdb/surrealdb.js) repository. To contribute to this documentation, submit an Issue or Pull Request in the [docs.surrealdb.com](https://github.com/surrealdb/docs.surrealdb.com) repository.
 

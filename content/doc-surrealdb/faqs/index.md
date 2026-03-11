@@ -8,7 +8,7 @@ description: The purpose of this document is to provide you with a comprehensive
 
 # Frequently Asked Questions
 
-View some of the frequently asked questions regarding SurrealDB, SurrealQL, and SurrealKV. Questions which are frequently asked across our GitHub, Discord and other social platforms will be added here from time-to-time. SurrealDB is currently in version <version />.
+View some of the frequently asked questions regarding SurrealDB, SurrealQL, and SurrealKV. Questions which are frequently asked across our GitHub, Discord and other social platforms will be added here from time-to-time. SurrealDB is currently in version <Version />.
 
 ## Where can I find the latest features?
 

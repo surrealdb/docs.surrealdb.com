@@ -17,7 +17,8 @@ The SurrealDB SDK for Python enables you to interact with SurrealDB from server-
 > The SDK requires Python version `3.10` or greater, and is available as a [PyPI package](https://pypi.org/project/surrealdb/).
 
 > [!NOTE]
-> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <version />, ensuring compatibility with the latest version.
+> The latest version of the SDK is <Version sdk="python" />.
+> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <Version />, ensuring compatibility with the latest version.
 
 To contribute to the SDK code, submit an Issue or Pull Request in the [surrealdb.py](https://github.com/surrealdb/surrealdb.py) repository. To contribute to this documentation, submit an Issue or Pull Request in the [SurrealDB documentation](https://github.com/surrealdb/docs.surrealdb.com) repository.
 
