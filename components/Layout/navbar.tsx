@@ -41,7 +41,6 @@ function SidebarNavLink({ item }: { item: SidebarItem }) {
                 className={classes.navItem}
                 label={item.label}
                 href={appendSlash(item.href)}
-                variant="light"
                 childrenOffset={16}
                 opened={expanded}
                 aria-expanded={expanded}
@@ -103,9 +102,11 @@ function SidebarSection({ item }: { item: SidebarItem }) {
 
 export function Navbar({ sidebar, ...props }: NavbarProps) {
     return (
-        <Box
+        <Stack
             pt="xs"
             pb="sm"
+            mah="calc(100vh - 56px - 1rem)"
+            gap={0}
             {...props}
         >
             <Box px="lg">
@@ -115,6 +116,8 @@ export function Navbar({ sidebar, ...props }: NavbarProps) {
                 gap={0}
                 component="nav"
                 px="lg"
+                flex={1}
+                style={{ overflowY: "auto" }}
             >
                 {sidebar?.map((item) =>
                     item.children?.length ? (
@@ -130,6 +133,6 @@ export function Navbar({ sidebar, ...props }: NavbarProps) {
                     ),
                 )}
             </Stack>
-        </Box>
+        </Stack>
     );
 }

@@ -199,12 +199,11 @@ export function Header({ opened, onToggle }: NavigationProps) {
             component="header"
             aria-label="Main navigation"
             h="56px"
-            px={1}
         >
             <Group
                 align="center"
                 h="100%"
-                px={{ base: "md", lg: "xl" }}
+                px="lg"
                 gap="md"
             >
                 <Group flex={1}>

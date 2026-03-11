@@ -17,8 +17,9 @@ export function ColorSchemeToggle() {
             </Menu.Target>
             <Menu.Dropdown miw={150}>
                 <Menu.Label>Color scheme</Menu.Label>
-                {/* <Menu.Item
+                <Menu.Item
                     onClick={() => setColorScheme("auto")}
+                    bdrs="xs"
                     leftSection={
                         <Icon
                             path={colorScheme === "auto" ? iconCheck : ""}
@@ -27,9 +28,10 @@ export function ColorSchemeToggle() {
                     }
                 >
                     System
-                </Menu.Item> */}
+                </Menu.Item>
                 <Menu.Item
                     onClick={() => setColorScheme("light")}
+                    bdrs="xs"
                     leftSection={
                         <Icon
                             path={colorScheme === "light" ? iconCheck : ""}
@@ -41,6 +43,7 @@ export function ColorSchemeToggle() {
                 </Menu.Item>
                 <Menu.Item
                     onClick={() => setColorScheme("dark")}
+                    bdrs="xs"
                     leftSection={
                         <Icon
                             path={colorScheme === "dark" ? iconCheck : ""}

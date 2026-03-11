@@ -7,13 +7,13 @@ export function FullWidthLayout({ children }: { children: React.ReactNode }) {
     return (
         <Stack
             className={classes.fullWidthLayout}
-            h="100vh"
             gap={0}
         >
             <Header />
             <Container
                 component="main"
                 size="lg"
+                flex={1}
             >
                 {children}
             </Container>
