@@ -209,7 +209,7 @@ export function Header({ opened, onToggle }: NavigationProps) {
                 <Group flex={1}>
                     <Anchor href="/">
                         <ThemedImage
-                            src={LogoLight}
+                            lightSrc={LogoLight}
                             darkSrc={LogoDark}
                             h={24}
                         />
@@ -230,7 +230,7 @@ export function Header({ opened, onToggle }: NavigationProps) {
                         aria-label="SurrealDB Docs home"
                     >
                         <ThemedImage
-                            src={DocsLight}
+                            lightSrc={DocsLight}
                             darkSrc={DocsDark}
                             h={24}
                         />

@@ -1,3 +1,4 @@
+import { Version } from "@components/Version";
 import { extractHeadings } from "@lib/markdown";
 import { parseMarkdown, SurrealistMini } from "@surrealdb/ui";
 import { resolveAstImages } from "./image-urls";
@@ -18,5 +19,6 @@ export function resolveMarkdown(markdown: string) {
 export function registerMarkdownComponents() {
     return {
         SurrealistMini: ({ query }: { query: string }) => <SurrealistMini config={{ query }} />,
+        Version: (props: { sdk?: string; prefix?: string }) => <Version {...props} />,
     };
 }

@@ -7,7 +7,7 @@ export default {
     description: DEFAULT_META_DESCRIPTION,
     extends: [vikeReact],
     prerender: true,
-    passToClient: ["llms"],
+    passToClient: ["llms", "sdkVersions"],
     meta: {
         Page: {
             env: { client: true, server: true },
