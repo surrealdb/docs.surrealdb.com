@@ -35,8 +35,9 @@ export default function Page() {
             align={{ base: "flex-start", md: "center" }}
             justify="center"
             gap={{ base: "md", sm: 48 }}
-            h="100%"
+            h="calc(100vh - 56px - 67px)"
             p="xl"
+            flex={1}
         >
             <Box className={classes.code}>{code}</Box>
             <Stack
