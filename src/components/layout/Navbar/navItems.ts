@@ -48,7 +48,6 @@ export const navItems: NavItem[] = [
     { label: 'SurrealDB', href: '/docs/surrealdb' },
     { label: 'Surrealist UI', href: '/docs/surrealist' },
     { label: 'Cloud', href: '/docs/cloud' },
-    { label: 'Extensions', href: '/docs/surrealdb/extensions' },
     {
         label: 'SDKs',
         href: [
