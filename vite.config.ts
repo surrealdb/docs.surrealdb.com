@@ -1,31 +1,13 @@
 import { existsSync } from "node:fs";
-import { microfrontends } from "@vercel/microfrontends/experimental/vite";
 import react from "@vitejs/plugin-react";
 import vike from "vike/plugin";
 import { getLastModFromGit, getLastModFromGithub, vikeSitemap } from "vike-sitemap-generator";
-import type { Plugin } from "vite";
 import { defineConfig, loadEnv } from "vite";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { docs, sdks } from "./src/content/config";
 
-// Workaround for @vercel/microfrontends setting assetsDir with a "./" prefix,
-// which Rollup rejects as a relative path pattern.
-function fixAssetDir(): Plugin {
-    return {
-        name: "fix-microfrontends-asset-dir",
-        config(config) {
-            if (config.build?.assetsDir?.startsWith("./")) {
-                return {
-                    build: { assetsDir: config.build.assetsDir.slice(2) },
-                };
-            }
-        },
-    };
-}
-
 // TODO replace with content collection API
-
 function resolveContentPath(url: string): string | undefined {
     const segments = url.split("/").filter(Boolean);
     const first = segments[0];
@@ -72,10 +54,6 @@ export default defineConfig(({ mode }) => {
             nodePolyfills({
                 include: ["buffer"],
             }),
-            microfrontends({
-                basePath: "/docs",
-            }),
-            fixAssetDir(),
             vikeSitemap({
                 baseUrl: "https://surrealdb.com/docs/",
                 outFile: "../client/sitemap.xml",
