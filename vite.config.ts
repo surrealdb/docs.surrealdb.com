@@ -45,7 +45,7 @@ export default defineConfig(({ mode }) => {
     };
 
     return {
-        // base: "/docs",
+        base: "/docs",
         plugins: [
             vike(),
             react(),
