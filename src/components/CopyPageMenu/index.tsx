@@ -1,0 +1,172 @@
+import { Button, Menu, Stack, Text } from "@mantine/core";
+import {
+    Icon,
+    iconArrowUpRight,
+    iconChatGPT,
+    iconChevronDown,
+    iconClaude,
+    iconCopy,
+} from "@surrealdb/ui";
+import { useCallback } from "react";
+import { usePageContext } from "vike-react/usePageContext";
+import type { LLMChatURLs } from "~/utils/llms";
+
+// import classes from "./style.module.scss";
+
+const RAW_BASE_URL =
+    "https://raw.githubusercontent.com/surrealdb/docs.surrealdb.com/main/src/content";
+
+export interface CopyPageMenuProps {
+    contentPath: string;
+}
+
+export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
+    const { llms } = usePageContext() as unknown as { llms: LLMChatURLs };
+
+    const handleCopyMarkdown = useCallback(async () => {
+        try {
+            const url = `${RAW_BASE_URL}/${contentPath}`;
+            const response = await fetch(url);
+            const body = await response.text();
+
+            navigator.clipboard.writeText(body);
+        } catch (error) {
+            console.error(error);
+        }
+    }, [contentPath]);
+
+    const handleOpenChatGPT = () => {
+        const { chatGpt } = llms ?? ({} as LLMChatURLs);
+        window.open(chatGpt, "_blank", "noopener,noreferrer");
+    };
+
+    const handleOpenClaude = () => {
+        const { claude } = llms ?? ({} as LLMChatURLs);
+        window.open(claude, "_blank", "noopener,noreferrer");
+    };
+
+    return (
+        <Menu
+            shadow="md"
+            width={280}
+            position="bottom-end"
+            withinPortal
+            trigger="click-hover"
+        >
+            <Menu.Target>
+                <Button
+                    size="xs"
+                    bdrs={4}
+                    leftSection={
+                        <Icon
+                            path={iconCopy}
+                            size="sm"
+                        />
+                    }
+                    rightSection={
+                        <Icon
+                            path={iconChevronDown}
+                            size="xs"
+                        />
+                    }
+                >
+                    Copy page
+                </Button>
+            </Menu.Target>
+            <Menu.Dropdown>
+                <Menu.Item
+                    bdrs="xs"
+                    leftSection={
+                        <Icon
+                            path={iconCopy}
+                            size="md"
+                            c="bright"
+                        />
+                    }
+                    onClick={handleCopyMarkdown}
+                >
+                    <Stack gap={0}>
+                        <Text
+                            fz="sm"
+                            fw={500}
+                        >
+                            Copy as Markdown
+                        </Text>
+                        <Text
+                            fz="xs"
+                            c="dimmed"
+                        >
+                            Copy page content for LLMs
+                        </Text>
+                    </Stack>
+                </Menu.Item>
+                <Menu.Item
+                    bdrs="xs"
+                    leftSection={
+                        <Icon
+                            path={iconChatGPT}
+                            size="md"
+                            c="bright"
+                        />
+                    }
+                    rightSection={
+                        <Icon
+                            path={iconArrowUpRight}
+                            size="sm"
+                            c="dimmed"
+                        />
+                    }
+                    onClick={handleOpenChatGPT}
+                >
+                    <Stack gap={0}>
+                        <Text
+                            fz="sm"
+                            fw={500}
+                        >
+                            Open in ChatGPT
+                        </Text>
+                        <Text
+                            fz="xs"
+                            c="dimmed"
+                        >
+                            Ask questions about this page
+                        </Text>
+                    </Stack>
+                </Menu.Item>
+                <Menu.Item
+                    bdrs="xs"
+                    leftSection={
+                        <Icon
+                            path={iconClaude}
+                            size="md"
+                            c="bright"
+                        />
+                    }
+                    rightSection={
+                        <Icon
+                            path={iconArrowUpRight}
+                            size="sm"
+                            c="dimmed"
+                        />
+                    }
+                    onClick={handleOpenClaude}
+                >
+                    <Stack gap={0}>
+                        <Text
+                            fz="sm"
+                            fw={500}
+                        >
+                            Open in Claude
+                        </Text>
+                        <Text
+                            fz="xs"
+                            c="dimmed"
+                        >
+                            Ask questions about this page
+                        </Text>
+                    </Stack>
+                </Menu.Item>
+            </Menu.Dropdown>
+        </Menu>
+    );
+}

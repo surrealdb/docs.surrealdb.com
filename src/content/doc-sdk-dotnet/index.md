@@ -1,0 +1,56 @@
+---
+sidebar_position: 1
+sidebar_label: Overview
+title: .NET | SDK | Overview
+description: The SurrealDB SDK for .NET provides a number of methods for interacting with your SurrealDB database.
+---
+
+
+<div class="flag-title">
+	<img src="~/assets/img/icon/light/dotnet.png" darkSrc="~/assets/img/icon/dark/dotnet.png" alt=".NET" style="width: 42px; height: 42px" />
+	# .NET SDK
+</div>
+
+The SurrealDB SDK for C# and .NET enables you to interact with SurrealDB from server-side applications, systems, and APIs, allowing you to integrate SurrealDB into your website or application backend, and serve dynamic content to your users. You can use the .NET SDK to interact with your SurrealDB database instances, or to run SurrealDB as an embedded database within your C# application, with functionality for executing queries, managing data, running database functions, authenticating to the database, building user signup and authentication functionality, and subscribing to data changes with live queries. When connecting to remote database instances, connections automatically reconnect when terminated.
+
+> [!IMPORTANT]
+> The SDK requires either .NET version `6.0` or greater or .NET Standard `2.1` or higher.
+> The SDK is available as a [NuGet package](https://www.nuget.org/packages/SurrealDb.Net).
+
+> [!NOTE]
+> The latest version of the SDK is <Version sdk=".net" />.
+> The SDK works seamlessly with SurrealDB versions `v2.0.0` to <Version />, ensuring compatibility with the latest version.
+
+> [!WARNING]
+> This API is not yet fully stabilized and may be subject to change until the SDK reaches `1.0.0`.
+
+To contribute to the SDK code, submit an Issue or Pull Request in the [surrealdb.net](https://github.com/surrealdb/surrealdb.net) repository. To contribute to this documentation, submit an Issue or Pull Request in the [docs.surrealdb.com](https://github.com/surrealdb/docs.surrealdb.com) repository.
+
+## Example projects
+
+You can find example repositories that demonstrate how to integrate SurrealDB in a number of different environments:
+
+<Boxes>
+    <IconBox
+        title="Console App"
+        description="A simple Console app example using the .NET SDK for SurrealDB."
+        href="https://github.com/surrealdb/surrealdb.net/tree/main/SurrealDb.Examples.Console"
+    />
+
+    <IconBox
+        title="Minimal APIs"
+        description="A simple ASP.NET API example project using Minimal APIs."
+        href="https://github.com/surrealdb/surrealdb.net/tree/main/SurrealDb.Examples.MinimalApis"
+    />
+
+    <IconBox
+        title="Blazor Server"
+        description="A Blazor Server app example querying data and consuming Live Query from a remote database."
+        href="https://github.com/surrealdb/surrealdb.net/tree/main/SurrealDb.Examples.Blazor.Server"
+    />
+</Boxes>
+
+## Sources
+
+- [GitHub repository](https://github.com/surrealdb/surrealdb.net)
+- [NuGet package](https://nuget.org/packages/surrealdb.net)

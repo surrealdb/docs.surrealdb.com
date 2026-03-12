@@ -1,0 +1,44 @@
+---
+sidebar_position: 3
+sidebar_label: SurrealQL via CLI
+title: SurrealQL via CLI | SurrealQL
+description: In this section, you will explore SurrealQL queries using the SurrealDB CLI. The SurrealDB CLI provides a powerful command-line interface for writing, executing, and visualizing SurrealQL queries in real-time.
+---
+
+# SurrealQL via CLI
+
+In this section, you will explore writing [SurrealQL](/docs/surrealql) queries using the SurrealDB CLI. To get started, you will need to install the SurrealDB CLI on your local machine. You can do this by following the instructions in the [installation section](/docs/surrealdb/cli).
+
+The CLI provides allows you to write, execute, and visualize [SurrealQL](/docs/surrealql) queries in real-time.
+
+## Getting started
+
+After installing the SurrealDB CLI, you can start writing SurrealQL queries by running the [`surreal start`](/docs/surrealdb/cli/start) command in your terminal. You can also add the `--help` flag to view the available options and commands.
+
+To start a SurrealDB server, run the surreal start command, using the options below. This example serves the database at the default location (http://localhost:8000), with a username and password.
+
+```bash
+surreal start --user root --pass secret
+```
+
+The server is actively running, and should be left alone until you want to stop hosting the SurrealDB server.
+
+<img src="~/assets/img/terminal-start.png" alt="Terminal start" />
+
+## Running queries
+
+To run a SurrealQL query, open up a new terminal window and run the [`surreal sql`](/docs/surrealdb/cli/sql) command. You will now be connected to the server and able to follow up with a query. For example, to run a simple `SELECT` query, you can run the following command:
+
+```bash title="Start a SurrealDB Shell with local endpoint"
+surreal sql --endpoint http://localhost:8000 --ns test --db test
+```
+
+```bash title="Start a SurrealDB Shell with memory endpoint"
+## Run query in memory
+surreal sql --endpoint memory --ns test --db test
+```
+<img src="~/assets/img/terminal-sql.png" alt="Terminal SQL" />
+
+## Learn more
+
+Learn more about the available commands and options in the [SurrealDB CLI documentation](/docs/surrealdb/cli).

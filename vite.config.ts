@@ -3,9 +3,10 @@ import react from "@vitejs/plugin-react";
 import vike from "vike/plugin";
 import { getLastModFromGit, getLastModFromGithub, vikeSitemap } from "vike-sitemap-generator";
 import { defineConfig } from "vite";
-import { nodePolyfills } from "vite-plugin-node-polyfills";
 import tsconfigPaths from "vite-tsconfig-paths";
-import { docs, sdks } from "./content/config";
+import { docs, sdks } from "./src/content/config";
+
+// TODO replace with content collection API
 
 function resolveContentPath(url: string): string | undefined {
     const segments = url.split("/").filter(Boolean);
@@ -35,16 +36,14 @@ function resolveMarkdownPath(basePath: string): string {
 }
 
 export default defineConfig({
-    base: "/docs/",
     plugins: [
         vike(),
         react(),
-        nodePolyfills({
-            include: ["buffer"],
-        }),
         tsconfigPaths(),
         vikeSitemap({
             baseUrl: "https://surrealdb.com/docs/",
+            outFile: "../client/sitemap.xml",
+            exclude: ["/404", "/500"],
             priority: [
                 { match: "/", priority: 1 },
                 { match: /^surrealdb\/.*$/, priority: 0.9 },
@@ -52,11 +51,9 @@ export default defineConfig({
                 { match: /^labs$/, priority: 0.5 },
                 { match: /.*/, priority: 0.75 },
             ],
-            exclude: ["/404", "/500"],
             trailingSlash: (url) => {
                 return url === "/";
             },
-            outFile: "../client/sitemap.xml",
             lastmod: async (url) => {
                 const filePath =
                     resolveContentPath(url) ??

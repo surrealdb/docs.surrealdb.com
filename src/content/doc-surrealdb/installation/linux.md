@@ -1,0 +1,80 @@
+---
+sidebar_position: 3
+sidebar_label: Install on Linux
+title: Install on Linux
+description: Use this tutorial to install SurrealDB on Linux or Unix operating systems using the SurrealDB install script.
+---
+
+
+<div class="flag-title">
+	<img src="~/assets/img/icon/light/linux.png" darkSrc="~/assets/img/icon/dark/linux.png" alt="Linux" style="width: 42px; height: 42px" />
+	# Install on Linux
+</div>
+
+Use this tutorial to install SurrealDB on Linux or Unix operating systems using the SurrealDB [install script](https://github.com/surrealdb/install.surrealdb.com). Both the SurrealDB database server and the SurrealDB [command-line tool](/docs/surrealdb/cli) are packaged and distributed as a single executable file which is easy to install and uninstall.
+
+## Installing SurrealDB using the install script
+
+To get started, you can use the SurrealDB [install script](https://github.com/surrealdb/install.surrealdb.com). This script securely downloads the latest version for the platform and CPU type. It attempts to install SurrealDB into the `/usr/local/bin` folder, falling back to a user-specified folder if necessary.
+
+```bash
+curl -sSf https://install.surrealdb.com | sh
+```
+
+### Updating SurrealDB
+
+To ensure that you are using the latest stable version (<Version />), update SurrealDB using the following command.
+
+```bash
+curl -sSf https://install.surrealdb.com | sh
+```
+
+### Confirming the installation
+
+Once installed, you can run the SurrealDB command-line tool by using the `surreal` command. To check whether the install was successful run the following command in your terminal.
+
+```bash
+surreal help
+```
+
+The result should look similar to the output below, confirming that the SurrealDB command-line tool was installed successfully.
+
+```text
+.d8888b.                                             888 8888888b.  888888b.
+d88P  Y88b                                            888 888  'Y88b 888  '88b
+Y88b.                                                 888 888    888 888  .88P
+ 'Y888b.   888  888 888d888 888d888  .d88b.   8888b.  888 888    888 8888888K.
+	'Y88b. 888  888 888P'   888P'   d8P  Y8b     '88b 888 888    888 888  'Y88b
+	  '888 888  888 888     888     88888888 .d888888 888 888    888 888    888
+Y88b  d88P Y88b 888 888     888     Y8b.     888  888 888 888  .d88P 888   d88P
+ 'Y8888P'   'Y88888 888     888      'Y8888  'Y888888 888 8888888P'  8888888P'
+
+
+SurrealDB command-line interface and server
+
+To get started using SurrealDB, and for guides on connecting to and building applications
+on top of SurrealDB, check out the SurrealDB documentation (https://surrealdb.com/docs).
+
+If you have questions or ideas, join the SurrealDB community (https://discord.gg/surrealdb).
+
+If you find a bug, submit an issue on Github (https://github.com/surrealdb/surrealdb/issues).
+
+We would love it if you could star the repository (https://github.com/surrealdb/surrealdb).
+
+----------
+
+USAGE:
+	surreal [SUBCOMMAND]
+
+OPTIONS:
+	-h, --help    Print help information
+
+SUBCOMMANDS:
+	start      Start the database server
+	import     Import a SQL script into an existing database
+	export     Export an existing database into a SQL script
+	version    Output the command-line tool version information
+	sql        Start an SQL REPL in your terminal with pipe support
+	help       Print this message or the help of the given subcommand(s)
+
+```

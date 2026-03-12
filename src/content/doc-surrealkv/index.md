@@ -1,0 +1,38 @@
+---
+sidebar_position: 1
+sidebar_label: Introduction
+title: SurrealKV | Introduction
+description: SurrealKV is A low-level, versioned, embedded, ACID-compliant, key-value datastore for SurrealDB
+no_page_headings: true
+---
+
+
+<div class="flag-title">
+	<img src="~/assets/img/icon/light/kv.png" darkSrc="~/assets/img/icon/dark/kv.png" alt="SurrealKV" style="width: 42px" />
+	# SurrealKV
+</div>
+
+> [!IMPORTANT]
+> Although included in SurrealDB since `2.0`, the storage engine itself is considered beta, and may require additional development and testing before it is ready for production use.
+
+SurrealKV is an embedded ACID-compliant key-value storage engine with built-in versioning, that allows for historical or temporal querying. It is built entirely in Rust - like the rest of SurrealDB.
+
+Since SurrealKV supports historical/temporal querying, you can use the [VERSION](/docs/surrealql/statements/select#the-version-clause) clause when selecting or creating data to access historical data. Learn more in the SurrealQL documentation.
+
+
+## Key Features
+
+SurrealKV offers several key features that makes it a powerful and versatile database storage engine:
+
+- **Embedded Database**: SurrealKV is available for embedded environments.
+
+- **Built-in Versioning**: Start SurrealKV [in versioned mode](/docs/surrealdb/cli/start#surrealkv-beta) to track and access historical versions of your data.
+
+- **Compaction**: Efficient storage management through compaction.
+
+- **Durability Guaranteed**: Persistent storage with protection against system failures.
+
+## When do I use SurrealKV?
+
+While SurrealKV is particularly well-suited for certain use cases, it can differ in terms of performance and limitations from RocksDB. The next article will list the benefits and limitations of SurrealKV.
+

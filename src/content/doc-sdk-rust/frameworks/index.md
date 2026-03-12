@@ -1,0 +1,49 @@
+---
+sidebar_position: 1
+sidebar_label: Crates
+title: Rust | SDKs | Integration
+description: The SurrealDB SDK for Rust enables simple and advanced querying of a remote or embedded database.
+---
+
+
+<div class="flag-title">
+	<img src="~/assets/img/icon/light/rust.png" alt="Rust" style="width: 42px; height: 42px" />
+	# Frameworks
+</div>
+
+The following pages each contain a tutorial that walks through the setting up of a web server (for Actix, Axum, and Rocket) or a UI (for Egui) that uses SurrealDB as its storage backend.
+
+<Boxes>
+    <IconBox
+        title="Actix"
+        href="/docs/sdk/rust/frameworks/actix"
+        icon={{
+                light: LightActixLogo,
+                dark: DarkActixLogo,
+        }}
+    />
+    <IconBox
+        title="Axum"
+        href="/docs/sdk/rust/frameworks/axum"
+        icon={{
+                light: LightAxumLogo,
+                dark: DarkAxumLogo,
+        }}
+    />
+    <IconBox
+        title="Egui"
+        href="/docs/sdk/rust/frameworks/egui"
+        icon={{
+                light: LightRerunLogo,
+                dark: DarkRerunLogo,
+        }}
+    />
+    <IconBox
+        title="Rocket"
+        href="/docs/sdk/rust/frameworks/rocket"
+        icon={{
+                light: LightRocketLogo,
+                dark: DarkRocketLogo,
+        }}
+    />
+</Boxes>
