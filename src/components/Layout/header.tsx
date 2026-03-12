@@ -62,62 +62,62 @@ function isMenuGroup(entry: NavEntry): entry is NavMenuGroup {
 }
 
 export const NAV_LINKS: NavEntry[] = [
-    { label: "SurrealDB", href: "/docs/surrealdb/" },
-    { label: "SurrealQL", href: "/docs/surrealql/" },
-    { label: "Surrealist", href: "/docs/surrealist/" },
-    { label: "Cloud", href: "/docs/cloud/" },
-    { label: "Surrealism", href: "/docs/surrealml/" },
+    { label: "SurrealDB", href: "/surrealdb/" },
+    { label: "SurrealQL", href: "/surrealql/" },
+    { label: "Surrealist", href: "/surrealist/" },
+    { label: "Cloud", href: "/cloud/" },
+    { label: "Surrealism", href: "/surrealml/" },
     {
         label: "SDKs",
         items: [
             {
                 label: "JavaScript",
-                href: "/docs/sdk/javascript/",
+                href: "/sdk/javascript/",
                 icon: brandJavaScript,
             },
-            { label: "Python", href: "/docs/sdk/python/", icon: brandPython },
-            { label: "Rust", href: "/docs/sdk/rust/", icon: brandRust },
-            { label: "Go", href: "/docs/sdk/golang/", icon: brandGo },
-            { label: "Java", href: "/docs/sdk/java/", icon: brandJava },
-            { label: "PHP", href: "/docs/sdk/php/", icon: brandPHP },
-            { label: ".NET", href: "/docs/sdk/dotnet/", icon: brandDotNet },
+            { label: "Python", href: "/sdk/python/", icon: brandPython },
+            { label: "Rust", href: "/sdk/rust/", icon: brandRust },
+            { label: "Go", href: "/sdk/golang/", icon: brandGo },
+            { label: "Java", href: "/sdk/java/", icon: brandJava },
+            { label: "PHP", href: "/sdk/php/", icon: brandPHP },
+            { label: ".NET", href: "/sdk/dotnet/", icon: brandDotNet },
         ],
     },
-    { label: "Integrations", href: "/docs/integrations/" },
+    { label: "Integrations", href: "/integrations/" },
     {
         label: "Examples",
         items: [
-            { label: "Define a Schema", href: "/docs/tutorials/define-a-schema/" },
+            { label: "Define a Schema", href: "/tutorials/define-a-schema/" },
             {
                 label: "Using GitHub Actions",
-                href: "/docs/tutorials/using-github-actions/",
+                href: "/tutorials/using-github-actions/",
             },
             {
                 label: "Integrate Auth0",
-                href: "/docs/tutorials/integrate-auth0-as-authentication-provider/",
+                href: "/tutorials/integrate-auth0-as-authentication-provider/",
             },
             {
                 label: "Integrate AWS Cognito",
-                href: "/docs/tutorials/integrate-aws-cognito-as-authentication-provider/",
+                href: "/tutorials/integrate-aws-cognito-as-authentication-provider/",
             },
             {
                 label: "SurrealDB over HTTP via Postman",
-                href: "/docs/tutorials/working-with-surrealdb-over-http-via-postman/",
+                href: "/tutorials/working-with-surrealdb-over-http-via-postman/",
             },
             {
                 label: "Connect via Ngrok Tunnel",
-                href: "/docs/tutorials/connect-to-surrealdb-via-ngrok-tunnel/",
+                href: "/tutorials/connect-to-surrealdb-via-ngrok-tunnel/",
             },
             {
                 label: "Realtime Presence App",
-                href: "/docs/tutorials/build-a-realtime-presence-web-application-using-surrealdb-live-queries/",
+                href: "/tutorials/build-a-realtime-presence-web-application-using-surrealdb-live-queries/",
             },
         ],
     },
     {
         label: "Education",
         items: [
-            { label: "Tutorials", href: "/docs/tutorials/", icon: pictoTutorials },
+            { label: "Tutorials", href: "/tutorials/", icon: pictoTutorials },
             { label: "SurrealDB University", href: "/learn", icon: pictoUniversity },
         ],
     },
@@ -225,7 +225,7 @@ export function Header({ opened, onToggle }: NavigationProps) {
                     />
                     <Anchor
                         display="flex"
-                        href="/docs/"
+                        href="/"
                         underline="never"
                         aria-label="SurrealDB Docs home"
                     >

@@ -1,8 +1,10 @@
 import { existsSync } from "node:fs";
+import { microfrontends } from "@vercel/microfrontends/experimental/vite";
 import react from "@vitejs/plugin-react";
 import vike from "vike/plugin";
 import { getLastModFromGit, getLastModFromGithub, vikeSitemap } from "vike-sitemap-generator";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
+import { nodePolyfills } from "vite-plugin-node-polyfills";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { docs, sdks } from "./src/content/config";
 
@@ -35,84 +37,100 @@ function resolveMarkdownPath(basePath: string): string {
     return `${basePath}.md`;
 }
 
-export default defineConfig({
-    plugins: [
-        vike(),
-        react(),
-        tsconfigPaths(),
-        vikeSitemap({
-            baseUrl: "https://surrealdb.com/docs/",
-            outFile: "../client/sitemap.xml",
-            exclude: ["/404", "/500"],
-            priority: [
-                { match: "/", priority: 1 },
-                { match: /^surrealdb\/.*$/, priority: 0.9 },
-                { match: /^sdk\/.*$/, priority: 0.8 },
-                { match: /^labs$/, priority: 0.5 },
-                { match: /.*/, priority: 0.75 },
-            ],
-            trailingSlash: (url) => {
-                return url === "/";
-            },
-            lastmod: async (url) => {
-                const filePath =
-                    resolveContentPath(url) ??
-                    (url === "/" ? "pages/index/+Page.tsx" : `pages${url}/+Page.tsx`);
+export default defineConfig(({ mode }) => {
+    const env = loadEnv(mode, process.cwd(), "");
 
-                const token = process.env.GITHUB_TOKEN;
+    // Required for microfrontends to work
+    process.env = {
+        ...process.env,
+        ...env,
+    };
 
-                try {
-                    if (!token) {
-                        throw new Error("GH_TOKEN environment variable is not set");
+    return {
+        // base: "/docs",
+        plugins: [
+            vike(),
+            react(),
+            tsconfigPaths(),
+            // TODO Remove this with the new content collection API
+            nodePolyfills({
+                include: ["buffer"],
+            }),
+            microfrontends(),
+            vikeSitemap({
+                baseUrl: "https://surrealdb.com/docs/",
+                outFile: "../client/sitemap.xml",
+                exclude: ["/404", "/500"],
+                priority: [
+                    { match: "/", priority: 1 },
+                    { match: /^surrealdb\/.*$/, priority: 0.9 },
+                    { match: /^sdk\/.*$/, priority: 0.8 },
+                    { match: /^labs$/, priority: 0.5 },
+                    { match: /.*/, priority: 0.75 },
+                ],
+                trailingSlash: (url) => {
+                    return url === "/";
+                },
+                lastmod: async (url) => {
+                    const filePath =
+                        resolveContentPath(url) ??
+                        (url === "/" ? "pages/index/+Page.tsx" : `pages${url}/+Page.tsx`);
+
+                    const token = process.env.GITHUB_TOKEN;
+
+                    try {
+                        if (!token) {
+                            throw new Error("GH_TOKEN environment variable is not set");
+                        }
+
+                        return await getLastModFromGithub({
+                            filePath,
+                            repo: "surrealdb/docs.surrealdb.com",
+                            token,
+                        });
+                    } catch (_error: unknown) {
+                        return await getLastModFromGit({ filePath });
+                    }
+                },
+                images: (url) => {
+                    if (url === "/") {
+                        return [
+                            {
+                                loc: "https://surrealdb.com/docs/thumbnail.jpg",
+                                title: "SurrealDB Documentation",
+                                caption: "SurrealDB Documentation",
+                            },
+                        ];
                     }
 
-                    return await getLastModFromGithub({
-                        filePath,
-                        repo: "surrealdb/docs.surrealdb.com",
-                        token,
-                    });
-                } catch (_error: unknown) {
-                    return await getLastModFromGit({ filePath });
-                }
-            },
-            images: (url) => {
-                if (url === "/") {
-                    return [
-                        {
-                            loc: "https://surrealdb.com/docs/thumbnail.jpg",
-                            title: "SurrealDB Documentation",
-                            caption: "SurrealDB Documentation",
-                        },
-                    ];
-                }
-
-                return undefined;
-            },
-        }),
-    ],
-    resolve: {
-        dedupe: ["react", "react-dom", "@mantine/core", "@mantine/hooks"],
-    },
-    build: {
-        sourcemap: true,
-        minify: true,
-        cssMinify: true,
-    },
-    ssr: {
-        noExternal: ["@surrealdb/ui"],
-    },
-    css: {
-        modules: {
-            localsConvention: "dashesOnly",
+                    return undefined;
+                },
+            }),
+        ],
+        resolve: {
+            dedupe: ["react", "react-dom", "@mantine/core", "@mantine/hooks"],
         },
-        preprocessorOptions: {
-            scss: {
-                additionalData: "@use '@surrealdb/ui/mixins' as *;",
+        build: {
+            sourcemap: true,
+            minify: true,
+            cssMinify: true,
+        },
+        ssr: {
+            noExternal: ["@surrealdb/ui"],
+        },
+        css: {
+            modules: {
+                localsConvention: "dashesOnly",
+            },
+            preprocessorOptions: {
+                scss: {
+                    additionalData: "@use '@surrealdb/ui/mixins' as *;",
+                },
             },
         },
-    },
-    server: {
-        port: 4321,
-        host: true,
-    },
+        server: {
+            port: 4321,
+            host: true,
+        },
+    };
 });

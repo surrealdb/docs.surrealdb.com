@@ -82,6 +82,7 @@ for (const [filePath, raw] of Object.entries(modules)) {
             body: content,
         });
     } catch (error) {
+        console.error(error);
         throw new Error(`Failed to process content file: ${filePath}\nFailure: ${error}`);
     }
 }
