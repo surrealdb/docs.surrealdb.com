@@ -1,3 +1,5 @@
+# SurrealDB Documentation
+
 Generated with [vike.dev/new](https://vike.dev/new) ([version 581](https://www.npmjs.com/package/create-vike/v/0.0.581)) using this command:
 
 ```sh
