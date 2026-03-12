@@ -72,7 +72,9 @@ export default defineConfig(({ mode }) => {
             nodePolyfills({
                 include: ["buffer"],
             }),
-            microfrontends(),
+            microfrontends({
+                basePath: "/docs",
+            }),
             fixAssetDir(),
             vikeSitemap({
                 baseUrl: "https://surrealdb.com/docs/",
