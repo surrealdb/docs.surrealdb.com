@@ -1,6 +1,6 @@
 import { abstractDoc, contentSlug } from "../config";
 
 export const Content = {
-	schema: abstractDoc,
-	slug: contentSlug,
+    schema: abstractDoc,
+    slug: contentSlug,
 };
