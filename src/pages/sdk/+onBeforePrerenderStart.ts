@@ -1,10 +1,10 @@
+import { getCollection } from "vike-content-collection";
 import { sdks } from "~/content/config";
-import { getCollectionFilePaths } from "~/lib/content";
 
 export default function onBeforeRenderStart() {
-    return sdks.flatMap((sdk) =>
-        getCollectionFilePaths(`doc-sdk-${sdk}`)
-            .map((route) => `/sdk/${sdk}/${route}`)
-            .concat([`/sdk/${sdk}`]),
-    );
+	return sdks.flatMap((sdk) =>
+		getCollection(`doc-sdk-${sdk}`)
+			.map((entry) => `/sdk/${sdk}/${entry.slug}`)
+			.concat([`/sdk/${sdk}`]),
+	);
 }

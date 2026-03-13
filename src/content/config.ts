@@ -1,6 +1,14 @@
 import { enum as _enum, boolean, literal, number, object, strictObject, string } from "zod";
 
-const abstractDoc = strictObject({
+export function contentSlug({ filePath }: { filePath: string }): string {
+    const match = filePath.match(/\/content\/[^/]+\/(.+)\.\w+$/);
+    if (!match) return "index";
+    let slug = match[1];
+    if (slug.endsWith("/index")) slug = slug.slice(0, -6);
+    return slug;
+}
+
+export const abstractDoc = strictObject({
     title: string().optional(),
     description: string().optional(),
     sidebar_position: number().optional(),
@@ -38,7 +46,7 @@ export const labLanguages = [
     "SurrealQL",
 ] as const;
 
-const labCollection = strictObject({
+export const labCollection = strictObject({
     title: string(),
     url: string().optional(),
     category: _enum(labCategories),
@@ -73,18 +81,6 @@ export const docs = [
 ] as const;
 
 export const sdks = ["dotnet", "golang", "java", "javascript", "php", "python", "rust"] as const;
-
-export const schema = {
-    ...docs.reduce<Docs>((prev, curr) => {
-        prev[`doc-${curr}`] = abstractDoc;
-        return prev;
-    }, {} as Docs),
-    ...sdks.reduce<Sdks>((prev, curr) => {
-        prev[`doc-sdk-${curr}`] = abstractDoc;
-        return prev;
-    }, {} as Sdks),
-    "labs-items": labCollection,
-};
 
 export const urlForCollection = {
     ...docs.reduce<Record<DocKey, Doc>>(

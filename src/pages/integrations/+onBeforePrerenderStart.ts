@@ -1,7 +1,7 @@
-import { getCollectionFilePaths } from "~/lib/content";
+import { getCollection } from "vike-content-collection";
 
 export default function onBeforeRenderStart() {
-    return getCollectionFilePaths("doc-integrations")
-        .map((path) => `/integrations/${path}`)
-        .concat(["/integrations"]);
+	return getCollection("doc-integrations").map((entry) =>
+		entry.slug === "index" ? "/integrations" : `/integrations/${entry.slug}`,
+	);
 }

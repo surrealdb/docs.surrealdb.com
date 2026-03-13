@@ -11,7 +11,7 @@ export default function Page() {
             <RenderMarkdown
                 ast={ast}
                 rendererProps={{ jsx: "render" }}
-                components={{ ...registerMarkdownComponents() }}
+                components={registerMarkdownComponents()}
             />
         </Box>
     );

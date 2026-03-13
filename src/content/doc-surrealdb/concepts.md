@@ -96,7 +96,7 @@ An example of output for the `INFO FOR ROOT` statement is as follows.
 
 Let's go ahead and list info about the SurrealDB instance and also about the current namespace from the [`demo dataset`](/docs/surrealql/demo).
 
-<SurrealistMini url='https://app.surrealdb.com/mini?query=INFO%20FOR%20ROOT%3B%0A%0AINFO%20FOR%20NAMESPACE%3B%0A--%20or%0A--%20INFO%20FOR%20NS%3B%0A%0A%0A%0A%0A%0A&dataset=surreal-deal-store&orientation=horizontal' />
+<SurrealistMini url="https://app.surrealdb.com/mini?query=INFO%20FOR%20ROOT%3B%0A%0AINFO%20FOR%20NAMESPACE%3B%0A--%20or%0A--%20INFO%20FOR%20NS%3B%0A%0A%0A%0A%0A%0A&dataset=surreal-deal-store&orientation=horizontal" />
 
 
 Next, we can create our own namespace called `acme` using [`DEFINE NAMESPACE`](/docs/surrealql/statements/define/namespace) and list the namespaces in the SurrealDB instance.

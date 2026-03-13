@@ -1,7 +1,7 @@
-import { getCollectionFilePaths } from "~/lib/content";
+import { getCollection } from "vike-content-collection";
 
 export default function onBeforeRenderStart() {
-    return getCollectionFilePaths("doc-surrealkv").map((path) =>
-        path === "index" ? "/surrealkv" : `/surrealkv/${path}`,
-    );
+	return getCollection("doc-surrealkv").map((entry) =>
+		entry.slug === "index" ? "/surrealkv" : `/surrealkv/${entry.slug}`,
+	);
 }

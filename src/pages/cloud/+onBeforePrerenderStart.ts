@@ -1,7 +1,7 @@
-import { getCollectionFilePaths } from "~/lib/content";
+import { getCollection } from "vike-content-collection";
 
 export default function onBeforeRenderStart() {
-    return getCollectionFilePaths("doc-cloud").map((path) =>
-        path === "index" ? "/cloud" : `/cloud/${path}`,
-    );
+	return getCollection("doc-cloud").map((entry) =>
+		entry.slug === "index" ? "/cloud" : `/cloud/${entry.slug}`,
+	);
 }

@@ -1,7 +1,7 @@
-import { getCollectionFilePaths } from "~/lib/content";
+import { getCollection } from "vike-content-collection";
 
 export default function onBeforeRenderStart() {
-    return getCollectionFilePaths("doc-surrealql").map((path) =>
-        path === "index" ? "/surrealql" : `/surrealql/${path}`,
-    );
+	return getCollection("doc-surrealql").map((entry) =>
+		entry.slug === "index" ? "/surrealql" : `/surrealql/${entry.slug}`,
+	);
 }

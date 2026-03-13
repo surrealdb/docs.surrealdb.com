@@ -18,7 +18,9 @@ export function resolveMarkdown(markdown: string) {
 
 export function registerMarkdownComponents() {
     return {
-        SurrealistMini: ({ query }: { query: string }) => <SurrealistMini config={{ query }} />,
+        SurrealistMini: ({ query, url }: { query?: string; url?: string }) => {
+            return <SurrealistMini config={{ query, url }} />;
+        },
         Version: (props: { sdk?: string; prefix?: string }) => <Version {...props} />,
     };
 }

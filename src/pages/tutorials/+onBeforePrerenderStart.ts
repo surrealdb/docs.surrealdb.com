@@ -1,7 +1,7 @@
-import { getCollectionFilePaths } from "~/lib/content";
+import { getCollection } from "vike-content-collection";
 
 export default function onBeforeRenderStart() {
-    return getCollectionFilePaths("doc-tutorials").map((path) =>
-        path === "index" ? "/tutorials" : `/tutorials/${path}`,
-    );
+	return getCollection("doc-tutorials").map((entry) =>
+		entry.slug === "index" ? "/tutorials" : `/tutorials/${entry.slug}`,
+	);
 }
