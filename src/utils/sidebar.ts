@@ -9,10 +9,14 @@ export type SidebarItem = {
     children?: SidebarItem[];
 };
 
-export function getSidebarItemsFromCollection(collection: string): SidebarItem[] {
+export function getSidebarItemsFromCollection(
+    collection: string,
+    baseUrlOverride?: string,
+): SidebarItem[] {
     const entries = getCollection(collection);
     const categories = getCategories(collection);
-    const baseUrl = `/docs/${urlForCollection[collection as keyof typeof urlForCollection]}`;
+    const baseUrl =
+        baseUrlOverride ?? `/docs/${urlForCollection[collection as keyof typeof urlForCollection]}`;
 
     return buildLevel(entries, categories, baseUrl, "");
 }

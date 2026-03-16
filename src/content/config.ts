@@ -114,3 +114,36 @@ export type Sdks = Record<SdkKey, typeof abstractDoc>;
 export type LabCategory = (typeof labCategories)[number];
 export type LabTopic = (typeof labTopics)[number];
 export type LabLanguage = (typeof labLanguages)[number];
+
+export type SdkVersion = "latest" | string;
+
+export interface SdkVersionConfig {
+    latest: string;
+    versions: string[];
+}
+
+export const versionedSdks: Partial<Record<Sdk, SdkVersionConfig>> = {
+    javascript: { latest: "2.x", versions: ["1.x"] },
+    python: { latest: "2.x", versions: ["1.x"] },
+    java: { latest: "2.x", versions: ["1.x"] },
+};
+
+export function getVersionLabel(sdk: Sdk, version: SdkVersion): string {
+    const config = versionedSdks[sdk];
+    if (!config) return "Latest";
+    if (version === "latest") return `Latest (${config.latest})`;
+    return version;
+}
+
+export function getCollectionIdForVersion(sdk: Sdk, version: SdkVersion): string {
+    const config = versionedSdks[sdk];
+    if (version === "latest" || version === config?.latest) return `doc-sdk-${sdk}`;
+    const suffix = version.replace(".", "");
+    return `doc-sdk-${sdk}-${suffix}`;
+}
+
+export function getVersionUrl(sdk: Sdk, version: SdkVersion, relativePath = ""): string {
+    const path = relativePath ? `/${relativePath}` : "";
+    if (version === "latest") return `/docs/sdk/${sdk}${path}`;
+    return `/docs/${version}/sdk/${sdk}${path}`;
+}

@@ -20,6 +20,7 @@ export interface DefaultLayoutProps {
     contentPath: string;
     lastUpdated?: string;
     showToc?: boolean;
+    versionSelector?: React.ReactNode;
 }
 
 export function DefaultLayout({
@@ -28,6 +29,7 @@ export function DefaultLayout({
     headings,
     contentPath,
     showToc = true,
+    versionSelector,
 }: DefaultLayoutProps) {
     const [menuOpened, { toggle: toggleMenu, close: closeMenu }] = useDisclosure();
     const [sidebarOpened, { toggle: toggleSidebar, close: closeSidebar }] = useDisclosure();
@@ -41,6 +43,7 @@ export function DefaultLayout({
             <Navbar
                 sidebar={sidebar}
                 visibleFrom="lg"
+                versionSelector={versionSelector}
             />
             <Drawer
                 opened={menuOpened}
@@ -58,7 +61,10 @@ export function DefaultLayout({
                 hiddenFrom="lg"
                 withCloseButton={false}
             >
-                <Navbar sidebar={sidebar} />
+                <Navbar
+                    sidebar={sidebar}
+                    versionSelector={versionSelector}
+                />
             </Drawer>
             <Group
                 justify="center"

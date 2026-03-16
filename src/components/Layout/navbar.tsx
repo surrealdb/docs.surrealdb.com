@@ -6,6 +6,7 @@ import classes from "./style.module.scss";
 
 export interface NavbarProps extends BoxProps {
     sidebar: SidebarItem[];
+    versionSelector?: React.ReactNode;
 }
 
 function appendSlash(href: string) {
@@ -100,7 +101,7 @@ function SidebarSection({ item }: { item: SidebarItem }) {
     );
 }
 
-export function Navbar({ sidebar, ...props }: NavbarProps) {
+export function Navbar({ sidebar, versionSelector, ...props }: NavbarProps) {
     return (
         <Stack
             pt="xs"
@@ -112,6 +113,15 @@ export function Navbar({ sidebar, ...props }: NavbarProps) {
             <Box px="lg">
                 <SearchDocs />
             </Box>
+            {versionSelector && (
+                <Box
+                    px="lg"
+                    mt="sm"
+                    mb="xl"
+                >
+                    {versionSelector}
+                </Box>
+            )}
             <Stack
                 gap={0}
                 component="nav"

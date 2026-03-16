@@ -2,7 +2,7 @@ import { render } from "vike/abort";
 import type { PageContext } from "vike/types";
 import { getCollectionEntry } from "vike-content-collection";
 import { useConfig } from "vike-react/useConfig";
-import type { Sdk } from "~/content/config";
+import { getCollectionIdForVersion, getVersionUrl, type Sdk } from "~/content/config";
 import { getCollectionPartsFromURL } from "~/utils/collection";
 import { resolveMarkdown } from "~/utils/markdown";
 import { getSidebarItemsFromCollection } from "~/utils/sidebar";
@@ -11,9 +11,10 @@ export default async function data(context: PageContext) {
     // biome-ignore lint/correctness/useHookAtTopLevel: <ignore>
     const config = useConfig();
     const sdk = context.routeParams.sdk as Sdk;
-    const id = `doc-sdk-${sdk}` as const;
+    const version = context.routeParams.sdkVersion;
+    const id = getCollectionIdForVersion(sdk, version);
 
-    const parts = getCollectionPartsFromURL(context.urlPathname);
+    const parts = getCollectionPartsFromURL(context.urlPathname, 4);
     const entry = getCollectionEntry(id, parts.join("/"));
 
     if (!entry) {
@@ -29,7 +30,8 @@ export default async function data(context: PageContext) {
     }
 
     const { ast, headings } = resolveMarkdown(entry.content);
-    const sidebar = getSidebarItemsFromCollection(id);
+    const sidebarBaseUrl = getVersionUrl(sdk, version);
+    const sidebar = getSidebarItemsFromCollection(id, sidebarBaseUrl);
     const contentPath = entry.filePath.replace(/.*\/content\//, "");
 
     return {
@@ -38,8 +40,8 @@ export default async function data(context: PageContext) {
         sidebar,
         contentPath,
         sdk,
-        sdkVersion: "latest" as const,
+        sdkVersion: version,
     };
 }
 
-export type SDKPageData = Awaited<ReturnType<typeof data>>;
+export type VersionedSDKPageData = Awaited<ReturnType<typeof data>>;
