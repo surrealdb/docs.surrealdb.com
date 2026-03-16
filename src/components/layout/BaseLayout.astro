@@ -7,6 +7,10 @@ import PreviewImage from '@assets/img/social-preview.jpg';
 import Icon from '@img/icon/icon.svg';
 import Navbar from '@src/components/layout/Navbar/Navbar.astro';
 import {
+    isVersionedSdkJavaPath,
+    toVersionedPath as toVersionedSdkJavaPath,
+} from '@src/util/sdkJavaVersion';
+import {
     isVersionedSdkJsPath,
     toVersionedPath as toVersionedSdkJsPath,
 } from '@src/util/sdkJsVersion';
@@ -43,10 +47,12 @@ const url = new URL(
     `${import.meta.env.SITE}${Astro.url.pathname}`
 ).href.replace(/\/$/, '');
 
-// SEO: Add noindex for versioned SurrealQL and SDK JS routes
+// SEO: Add noindex for versioned SurrealQL, SDK JS, and SDK Java routes
 const isVersionedSurrealQL = isVersionedSurrealQLPath(Astro.url.pathname);
 const isVersionedSdkJs = isVersionedSdkJsPath(Astro.url.pathname);
-const isVersionedPage = isVersionedSurrealQL || isVersionedSdkJs;
+const isVersionedSdkJava = isVersionedSdkJavaPath(Astro.url.pathname);
+const isVersionedPage =
+    isVersionedSurrealQL || isVersionedSdkJs || isVersionedSdkJava;
 const canonicalUrl = isVersionedSurrealQL
     ? new URL(
           toVersionedPath(Astro.url.pathname, 'latest'),
@@ -57,9 +63,14 @@ const canonicalUrl = isVersionedSurrealQL
             toVersionedSdkJsPath(Astro.url.pathname, 'latest'),
             import.meta.env.SITE
         ).href.replace(/\/$/, '')
-      : Astro.url.pathname === '/docs'
-        ? 'https://surrealdb.com/docs/'
-        : url;
+      : isVersionedSdkJava
+        ? new URL(
+              toVersionedSdkJavaPath(Astro.url.pathname, 'latest'),
+              import.meta.env.SITE
+          ).href.replace(/\/$/, '')
+        : Astro.url.pathname === '/docs'
+          ? 'https://surrealdb.com/docs/'
+          : url;
 ---
 
 <!doctype html>
@@ -71,7 +82,7 @@ const canonicalUrl = isVersionedSurrealQL
         <meta name="referrer" content="origin-when-cross-origin" />
         <meta name="viewport" content="viewport-fit=cover, width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=5" />
         
-        {/* SEO: noindex for versioned routes (SurrealQL + SDK JS) */}
+        {/* SEO: noindex for versioned routes (SurrealQL + SDK JS + SDK Java) */}
         {isVersionedPage && (
             <meta name="robots" content="noindex, follow" />
         )}
@@ -464,6 +475,130 @@ const canonicalUrl = isVersionedSurrealQL
                 }
 
                 const observer = new MutationObserver(() => { rewriteSdkJsLinks(); });
+                observer.observe(document.body, { childList: true, subtree: true });
+            })();
+        </script>
+
+        {/* SDK Java version persistence script */}
+        <script>
+            (function() {
+                const STORAGE_KEY = 'sdkJavaPreferredVersion';
+                const SDK_JAVA_VERSIONS = ['latest', '2.x', '1.x'];
+
+                function getPreferredVersion(): string {
+                    const pathname = window.location.pathname;
+                    const versionMatch = pathname.match(/^\/docs\/(1\.x|2\.x)\/sdk\/java/);
+                    if (versionMatch) {
+                        return versionMatch[1];
+                    }
+                    const stored = localStorage.getItem(STORAGE_KEY);
+                    if (stored && SDK_JAVA_VERSIONS.includes(stored)) {
+                        return stored;
+                    }
+                    return 'latest';
+                }
+
+                function toVersionedPath(pathname: string, version: string): string {
+                    if (version === 'latest') {
+                        return pathname.replace(/^\/docs\/(?:1\.x|2\.x)\/sdk\/java/, '/docs/sdk/java');
+                    }
+                    let relativePath = '';
+                    const versionedMatch = pathname.match(/^\/docs\/(?:1\.x|2\.x)\/sdk\/java(.*)$/);
+                    if (versionedMatch) {
+                        relativePath = versionedMatch[1] || '';
+                    } else {
+                        const latestMatch = pathname.match(/^\/docs\/sdk\/java(.*)$/);
+                        if (latestMatch) {
+                            relativePath = latestMatch[1] || '';
+                        }
+                    }
+                    return `/docs/${version}/sdk/java${relativePath === '' ? '' : relativePath}`;
+                }
+
+                function isSdkJavaPath(pathname: string): boolean {
+                    return pathname.startsWith('/docs/sdk/java') ||
+                           pathname.startsWith('/docs/1.x/sdk/java') ||
+                           pathname.startsWith('/docs/2.x/sdk/java');
+                }
+
+                function rewriteSdkJavaLinks() {
+                    const preferredVersion = getPreferredVersion();
+                    if (preferredVersion === 'latest') return;
+
+                    const links = document.querySelectorAll<HTMLAnchorElement>('a[href]');
+                    links.forEach((link) => {
+                        try {
+                            const href = link.getAttribute('href');
+                            if (!href) return;
+
+                            let pathname: string;
+                            if (href.startsWith('http://') || href.startsWith('https://')) {
+                                pathname = new URL(href).pathname;
+                            } else if (href.startsWith('/')) {
+                                pathname = href.split('?')[0].split('#')[0];
+                            } else {
+                                pathname = new URL(href, window.location.origin).pathname;
+                            }
+
+                            if (
+                                isSdkJavaPath(pathname) &&
+                                !link.hasAttribute('data-version-override')
+                            ) {
+                                const versionedPath = toVersionedPath(pathname, preferredVersion);
+                                if (href.startsWith('http://') || href.startsWith('https://')) {
+                                    const url = new URL(href);
+                                    url.pathname = versionedPath;
+                                    link.href = url.href;
+                                } else if (href.startsWith('/')) {
+                                    const [, ...rest] = href.split('?');
+                                    const queryAndHash = rest.join('?');
+                                    link.href = versionedPath + (queryAndHash ? '?' + queryAndHash : '');
+                                }
+                            }
+                        } catch (e) {
+                            console.debug('[SDK Java Version] Error rewriting link:', e);
+                        }
+                    });
+                }
+
+                function interceptSdkJavaLinkClicks() {
+                    document.addEventListener('click', (e) => {
+                        const target = (e.target as HTMLElement).closest('a');
+                        if (!target || !target.href) return;
+                        if (target.hasAttribute('data-version-override')) return;
+
+                        try {
+                            const url = new URL(target.href);
+                            if (isSdkJavaPath(url.pathname)) {
+                                const preferredVersion = getPreferredVersion();
+                                const currentVersion = url.pathname.match(/^\/docs\/(1\.x|2\.x)\/sdk\/java/)
+                                    ? url.pathname.match(/^\/docs\/(1\.x|2\.x)\/sdk\/java/)?.[1]
+                                    : 'latest';
+
+                                if (currentVersion !== preferredVersion && preferredVersion !== 'latest') {
+                                    const versionedPath = toVersionedPath(url.pathname, preferredVersion);
+                                    url.pathname = versionedPath;
+                                    e.preventDefault();
+                                    window.location.href = url.href;
+                                }
+                            }
+                        } catch (e) {
+                            console.debug('[SDK Java Version] Error intercepting click:', e);
+                        }
+                    }, true);
+                }
+
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', () => {
+                        rewriteSdkJavaLinks();
+                        interceptSdkJavaLinkClicks();
+                    });
+                } else {
+                    rewriteSdkJavaLinks();
+                    interceptSdkJavaLinkClicks();
+                }
+
+                const observer = new MutationObserver(() => { rewriteSdkJavaLinks(); });
                 observer.observe(document.body, { childList: true, subtree: true });
             })();
         </script>
