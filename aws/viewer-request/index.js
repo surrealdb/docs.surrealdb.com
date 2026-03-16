@@ -1,4 +1,4 @@
-const validDocs = ['surrealdb', 'surrealml', 'surrealist', 'surrealkv', 'surrealism', 'surrealql', 'sdk', 'tutorials', 'cloud', 'integrations', 'labs'];
+const validDocs = ['surrealdb', 'surrealml', 'surrealist', 'surrealism', 'surrealql', 'sdk', 'tutorials', 'cloud', 'integrations', 'labs'];
 const versions = ['nightly', '1.0.x', '1.0.0', '1.1.x', '1.1.0', '1.2.x', '1.2.0', '1.3.x', '1.3.0', '2.x'];
 const prefixes = {
 	'/docs/integration/libraries/': '/docs/sdk/',
@@ -66,6 +66,11 @@ const redirects = {
 	'/docs/surrealdb/reference-guide/full_text_search': '/docs/surrealdb/models/full-text-search',
 	'/docs/surrealdb/reference-guide/security-best-practices': '/docs/surrealdb/security/security-best-practices',
 	'/docs/surrealdb/reference-guide/security_best_practices': '/docs/surrealdb/security/security-best-practices',
+	'/docs/sdk/java/core': '/docs/sdk/java/concepts/connecting-to-surrealdb',
+	'/docs/sdk/java/core/create-a-new-connection': '/docs/sdk/java/concepts/connecting-to-surrealdb',
+	'/docs/sdk/java/core/handling-authentication': '/docs/sdk/java/concepts/authentication',
+	'/docs/sdk/java/data-types': '/docs/sdk/java/concepts/value-types',
+	'/docs/sdk/java/api-documentation': '/docs/sdk/java/api/core/surreal',
 };
 function compute(input) {
 	let path = input.toLowerCase();
@@ -87,9 +92,13 @@ function compute(input) {
 		if (path.endsWith('/')) path = path.slice(0, -1);
 		return { path };
 	}
-	// Allow versioned SDK JS routes (1.x and 2.x)
-	if (path.startsWith('/docs/1.x/sdk/javascript') ||
-	    path.startsWith('/docs/2.x/sdk/javascript')) {
+	// Allow versioned SDK routes (1.x and 2.x)
+	if (path.startsWith('/docs/1.x/sdk/java') ||
+		path.startsWith('/docs/2.x/sdk/java') ||
+		path.startsWith('/docs/1.x/sdk/javascript') ||
+		path.startsWith('/docs/2.x/sdk/javascript') ||
+		path.startsWith('/docs/1.x/sdk/python') ||
+		path.startsWith('/docs/2.x/sdk/python')) {
 		if (path.endsWith('/')) path = path.slice(0, -1);
 		return { path };
 	}
@@ -133,7 +142,9 @@ function compute(input) {
 	if (path.startsWith('/docs/')) {
 		// Skip validation for versioned routes (they are valid)
 		if (!path.startsWith('/docs/2.x/surrealql') && !path.startsWith('/docs/3.x/surrealql') &&
-		    !path.startsWith('/docs/1.x/sdk/javascript') && !path.startsWith('/docs/2.x/sdk/javascript')) {
+		    !path.startsWith('/docs/1.x/sdk/java') && !path.startsWith('/docs/2.x/sdk/java') &&
+		    !path.startsWith('/docs/1.x/sdk/javascript') && !path.startsWith('/docs/2.x/sdk/javascript') &&
+		    !path.startsWith('/docs/1.x/sdk/python') && !path.startsWith('/docs/2.x/sdk/python')) {
 			const doc = path.split('/')[2];
 			if (!validDocs.includes(doc)) {
 				path = `/docs/surrealdb/${path.slice(6)}`;

@@ -46,6 +46,9 @@ async fn main() {
 The `SurrealValue` trait can be implemented manually via three methods: one to indicate the matching SurrealDB type, a second to convert into a SurrealDB Value, and a third to convert out of a SurrealDB Value.
 
 ```rust
+use surrealdb::engine::any::connect;
+use surrealdb_types::{Datetime, Error, Kind, SurrealValue, Value};
+
 #[derive(Debug)]
 struct MyOwnDateTime(i64);
 
@@ -58,13 +61,13 @@ impl SurrealValue for MyOwnDateTime {
         Value::Datetime(Datetime::from_timestamp(self.0, 0).unwrap())
     }
 
-    fn from_value(value: surrealdb_types::Value) -> anyhow::Result<Self>
+    fn from_value(value: surrealdb_types::Value) -> Result<Self, surrealdb_types::Error>
     where
         Self: Sized,
     {
         match value {
             Value::Datetime(n) => Ok(MyOwnDateTime(n.timestamp_millis())),
-            _ => Err(anyhow!("No good")),
+            _ => Err(Error::thrown("No good".to_string())),
         }
     }
 }
@@ -73,7 +76,7 @@ impl SurrealValue for MyOwnDateTime {
 async fn main() {
     let db = connect("memory").await.unwrap();
 
-    db.use_ns("ns").use_db("db").await.unwrap();
+    db.use_ns("main").use_db("main").await.unwrap();
 
     println!(
         "{:?}",
@@ -92,7 +95,7 @@ An example of successful and unsuccessful conversions into the usercreated `MyOw
 async fn main() {
     let db = connect("memory").await.unwrap();
 
-    db.use_ns("ns").use_db("db").await.unwrap();
+    db.use_ns("main").use_db("main").await.unwrap();
 
     println!(
         "{:?}\n",
@@ -187,8 +190,11 @@ fn kind_of() -> surrealdb_types::Kind {
 The following example shows the `kind!` macro used for a Rust enum that manually implements `SurrealValue`, along with examples of its use from the Rust side to the SurrealDB side, and vice versa.
 
 ```rust
+use surrealdb::engine::any::connect;
+use surrealdb_types::{Datetime, Error, Object, SurrealValue, ToSql, Value, kind};
+
 #[derive(SurrealValue)]
-struct Error {
+struct MyError {
     at: Datetime,
     reason: String,
 }
@@ -196,7 +202,7 @@ struct Error {
 enum Response {
     Good,
     GoodWithNotification(String),
-    Error(Error),
+    Error(MyError),
 }
 
 impl SurrealValue for Response {
@@ -223,15 +229,17 @@ impl SurrealValue for Response {
         Value::Object(obj)
     }
 
-    fn from_value(value: Value) -> anyhow::Result<Self>
+    fn from_value(value: Value) -> Result<Self, Error>
     where
         Self: Sized,
     {
         let Value::Object(o) = value else {
-            return Err(anyhow!("Should have been an object"));
+            return Err(Error::thrown("Should have been an object".to_string()));
         };
         let Some(Value::String(status)) = o.get("status") else {
-            return Err(anyhow!("Error trying to get 'status' field"));
+            return Err(Error::thrown(
+                "Error trying to get 'status' field".to_string(),
+            ));
         };
         match status.as_str() {
             "Good" => Ok(Response::Good),
@@ -240,17 +248,19 @@ impl SurrealValue for Response {
             }
             "Error" => {
                 let Some(Value::Datetime(at)) = o.get("at") else {
-                    return Err(anyhow!("Error trying to get 'at' field"));
+                    return Err(Error::thrown("Error trying to get 'at' field".to_string()));
                 };
                 let Some(Value::String(reason)) = o.get("reason") else {
-                    return Err(anyhow!("Error trying to get 'reason' field"));
+                    return Err(Error::thrown(
+                        "Error trying to get 'reason' field".to_string(),
+                    ));
                 };
-                Ok(Response::Error(Error {
+                Ok(Response::Error(MyError {
                     at: at.clone(),
                     reason: reason.clone(),
                 }))
             }
-            _ => Err(anyhow!("No status field for some reason")),
+            _ => Err(Error::thrown("No status field for some reason".to_string())),
         }
     }
 
@@ -258,13 +268,6 @@ impl SurrealValue for Response {
         value.is_kind(&Self::kind_of())
     }
 }
-
-use surrealdb::engine::any::connect;
-use surrealdb_types::{
-    Datetime, Object, SurrealValue, ToSql, Value,
-    anyhow::{self, anyhow},
-    kind,
-};
 
 #[tokio::main]
 async fn main() {
@@ -311,7 +314,7 @@ async fn main() {
     // and then print the result
     let good = Response::Good;
     let good_but = Response::GoodWithNotification("Keep it up!".into());
-    let error = Response::Error(Error {
+    let error = Response::Error(MyError {
         at: Datetime::now(),
         reason: "Error: can't think of interesting error message".into(),
     });
@@ -464,7 +467,7 @@ A `Value` can be converted into a `serde_json::Value` using the `.into_json_valu
 
 ```rust
 use surrealdb::engine::any::connect;
-use surrealdb_types::Value;
+use surrealdb_types::{SurrealValue, Value};
 
 #[tokio::main]
 async fn main() {
@@ -481,7 +484,7 @@ async fn main() {
     // Object(Object({"age": Number(Int(21)), "id": RecordId(RecordId { table: "person", key: String("one") })}))
     println!("{value:?}");
     // Object {"age": Number(21), "id": String("person:one")}
-    println!("{:?}", value.into_json_value());
+    println!("{:?}", value.clone().into_json_value());
 
     // Round trip
     value.into_json_value().into_value();
@@ -558,7 +561,7 @@ async fn main() {
 }
 ```
 
-```bash title="Output"
+```title="Output"
 Regular deserialization from DB result: { num: 10, other_num: 20 }
 Deserialization using DB result plus default value: { num: 5, other_num: 20 }
 ```
@@ -633,7 +636,7 @@ fn main() {
 }
 ```
 
-```bash title = "Output"
+```title = "Output"
 Before attribute: { Debug: 'User1' }
 After uppercase: { DEBUG: 'User1' }
 After lowercase: { debug: 'User1' }
@@ -665,7 +668,7 @@ fn main() {
 }
 ```
 
-```bash title="Output"
+```title="Output"
 Without tuple attribute: 555
 With tuple attribute: [555]
 ```
@@ -704,7 +707,7 @@ fn main() {
 ```
 
 
-```bash title="Output"
+```title="Output"
 Before untagged: { Debug: 'User1' }
 After untagged: 'User1'
 ```
@@ -738,7 +741,7 @@ fn main() {
 }
 ```
 
-```bash title="Output"
+```title="Output"
 Before tag: { Debug: {  } }
 After tag: { log_level: 'Debug' }
 ```
@@ -772,7 +775,7 @@ fn main() {
 }
 ```
 
-```bash title="Output"
+```title="Output"
 Before content: { Debug: 'User1' }
 After content: { log_level: 'Debug', user: 'User1' }
 ```
@@ -812,7 +815,7 @@ fn main() {
 }
 ```
 
-```bash title="Output"
+```title="Output"
 With only untagged: 'Off'
 With untagged plus substitute value: NONE
 ```
@@ -822,7 +825,7 @@ With untagged plus substitute value: NONE
 Here are some more examples from the SurrealDB source code showing how the `surreal` attribute can be used.
 
 ```rust
-use surrealdb_types::SurrealValue;
+use surrealdb_types::{SurrealValue, Value};
 
 #[derive(SurrealValue, Debug, PartialEq)]
 #[surreal(untagged)]

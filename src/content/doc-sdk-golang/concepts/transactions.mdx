@@ -1,0 +1,154 @@
+---
+sidebar_position: 9
+sidebar_label: Transactions
+title: Golang | SDK | Transactions
+description: The Go SDK supports interactive transactions that let you execute statements one at a time and conditionally commit or cancel.
+---
+
+# Transactions
+
+Interactive transactions let you group multiple operations into an atomic unit. Unlike text-based transactions (`BEGIN TRANSACTION; ... COMMIT;` — see the [query builder](/docs/sdk/golang/concepts/query-builder#building-text-based-transactions) for composing those), interactive transactions allow you to execute statements one at a time, inspect results, and conditionally decide whether to commit or cancel.
+
+Transactions require a WebSocket connection (`ws://` or `wss://`) and SurrealDB v3 or later.
+
+## API References
+
+<table>
+	<thead>
+		<tr>
+			<th scope="col">Method</th>
+			<th scope="col">Description</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/sdk/golang/api/core/db#begin"><code>db.Begin(ctx)</code></a></td>
+			<td scope="row" data-label="Description">Starts a transaction on the default session</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/sdk/golang/api/core/session#begin"><code>session.Begin(ctx)</code></a></td>
+			<td scope="row" data-label="Description">Starts a transaction within a session</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/sdk/golang/api/core/transaction#commit"><code>tx.Commit(ctx)</code></a></td>
+			<td scope="row" data-label="Description">Commits the transaction, applying all changes</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/sdk/golang/api/core/transaction#cancel"><code>tx.Cancel(ctx)</code></a></td>
+			<td scope="row" data-label="Description">Cancels the transaction, discarding all changes</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/sdk/golang/api/core/transaction#id"><code>tx.ID()</code></a></td>
+			<td scope="row" data-label="Description">Returns the transaction's UUID</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/sdk/golang/api/core/transaction#isclosed"><code>tx.IsClosed()</code></a></td>
+			<td scope="row" data-label="Description">Returns whether the transaction has been committed or canceled</td>
+		</tr>
+	</tbody>
+</table>
+
+## Starting a transaction
+
+Call [`.Begin()`](/docs/sdk/golang/api/core/db#begin) on a [`*DB`](/docs/sdk/golang/api/core/db) or [`*Session`](/docs/sdk/golang/api/core/session) to start a transaction. The transaction inherits the authentication and namespace context from the connection or session that started it.
+
+```go
+tx, err := db.Begin(ctx)
+if err != nil {
+	log.Fatal(err)
+}
+defer tx.Cancel(ctx)
+```
+
+> [!NOTE]
+> Always use `defer tx.Cancel(ctx)` immediately after `.Begin()`. If the transaction has already been committed, [`.Cancel()`](/docs/sdk/golang/api/core/transaction#cancel) returns [`ErrTransactionClosed`](/docs/sdk/golang/api/errors#sentinel-errors) but does not cause any harm.
+
+## Executing operations within a transaction
+
+Transactions satisfy the [`sendable`](/docs/sdk/golang/api/types#sendable) constraint, so all generic functions like [`Query`](/docs/sdk/golang/api/core/db#query), [`Select`](/docs/sdk/golang/api/core/db#select), [`Create`](/docs/sdk/golang/api/core/db#create), [`Update`](/docs/sdk/golang/api/core/db#update), and [`Delete`](/docs/sdk/golang/api/core/db#delete) accept a [`*Transaction`](/docs/sdk/golang/api/core/transaction).
+
+```go
+tx, err := db.Begin(ctx)
+if err != nil {
+	log.Fatal(err)
+}
+defer tx.Cancel(ctx)
+
+_, err = surrealdb.Create[any](ctx, tx, models.Table("accounts"), map[string]any{
+	"name":    "Alice",
+	"balance": 1000,
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+_, err = surrealdb.Create[any](ctx, tx, models.Table("accounts"), map[string]any{
+	"name":    "Bob",
+	"balance": 500,
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+if err := tx.Commit(ctx); err != nil {
+	log.Fatal(err)
+}
+```
+
+Changes made within a transaction are not visible to other connections or sessions until the transaction is committed.
+
+## Conditional commit or cancel
+
+Because interactive transactions let you inspect results between operations, you can decide whether to commit based on runtime conditions.
+
+```go
+tx, err := db.Begin(ctx)
+if err != nil {
+	log.Fatal(err)
+}
+defer tx.Cancel(ctx)
+
+results, err := surrealdb.Query[[]map[string]any](ctx, tx,
+	"SELECT * FROM accounts WHERE name = 'Alice'",
+	nil,
+)
+if err != nil {
+	log.Fatal(err)
+}
+
+balance, ok := (*results)[0].Result[0]["balance"].(float64)
+if !ok || balance < 100 {
+	fmt.Println("Insufficient balance, canceling")
+	return
+}
+
+_, err = surrealdb.Query[[]any](ctx, tx,
+	"UPDATE accounts SET balance -= 100 WHERE name = 'Alice'; UPDATE accounts SET balance += 100 WHERE name = 'Bob';",
+	nil,
+)
+if err != nil {
+	log.Fatal(err)
+}
+
+if err := tx.Commit(ctx); err != nil {
+	log.Fatal(err)
+}
+```
+
+## Transaction limitations
+
+Transactions do not support session state changes. The following operations are not available on a [`*Transaction`](/docs/sdk/golang/api/core/transaction):
+
+- [`.SignIn()`](/docs/sdk/golang/api/core/db#signin), [`.SignUp()`](/docs/sdk/golang/api/core/db#signup), [`.Authenticate()`](/docs/sdk/golang/api/core/db#authenticate), [`.Invalidate()`](/docs/sdk/golang/api/core/db#invalidate)
+- [`.Use()`](/docs/sdk/golang/api/core/db#use)
+- [`.Let()`](/docs/sdk/golang/api/core/db#let), [`.Unset()`](/docs/sdk/golang/api/core/db#unset)
+- [Live queries](/docs/sdk/golang/concepts/live-queries) ([`Live`](/docs/sdk/golang/api/core/db#live), [`Kill`](/docs/sdk/golang/api/core/db#kill))
+
+The namespace, database, authentication, and variables are inherited from the `*DB` or `*Session` that started the transaction.
+
+## Learn more
+
+- [Transaction API reference](/docs/sdk/golang/api/core/transaction) for complete method signatures
+- [Multiple sessions](/docs/sdk/golang/concepts/multiple-sessions) for session-scoped transactions
+- [Error handling](/docs/sdk/golang/concepts/error-handling) for transaction error types
+- [SurrealQL transactions](/docs/surrealql/statements/begin) for text-based transaction syntax
