@@ -4,34 +4,36 @@ import { type Root, visit } from "@surrealdb/ui";
 import { slug } from "github-slugger";
 
 export interface HeadingData {
-    id: string;
-    text: string;
-    depth: 1 | 2 | 3 | 4 | 5 | 6;
+	id: string;
+	text: string;
+	depth: 1 | 2 | 3 | 4 | 5 | 6;
 }
 
 export function extractHeadings(ast: Root): HeadingData[] {
-    const headings: HeadingData[] = [];
+	const headings: HeadingData[] = [];
 
-    visit(ast, "heading", ({ children, depth }) => {
-        const parts: string[] = [];
+	visit(ast, "heading", ({ children, depth }) => {
+		if (depth !== 2 && depth !== 3) return;
 
-        for (const child of children) {
-            if (child.type === "text") {
-                parts.push(child.value);
-            } else if (child.type === "inlineCode") {
-                parts.push(child.value);
-            }
-        }
+		const parts: string[] = [];
 
-        const text = parts.join("");
-        const id = slug(text);
+		for (const child of children) {
+			if (child.type === "text") {
+				parts.push(child.value);
+			} else if (child.type === "inlineCode") {
+				parts.push(child.value);
+			}
+		}
 
-        headings.push({
-            id,
-            text,
-            depth,
-        });
-    });
+		const text = parts.join("");
+		const id = slug(text);
 
-    return headings;
+		headings.push({
+			id,
+			text,
+			depth,
+		});
+	});
+
+	return headings;
 }
