@@ -1,3 +1,6 @@
+import { writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import react from "@vitejs/plugin-react";
 import vike from "vike/plugin";
 import { getCollectionEntry, vikeContentCollectionPlugin } from "vike-content-collection";
@@ -10,21 +13,28 @@ import { docs, sdks, versionedSdks } from "./src/content/config";
 
 const versionedSdkPattern = /^(\d+\.x)\/sdk\/(\w+)/;
 
-// Workaround: @brillout/vite-plugin-server-entry's configResolved hook
-// skips applying user config in Vite 7 (config.build.ssr is false with
-// the Environment API), so vike-photon's disableAutoImport never takes
-// effect. We force it after config resolution.
+// Workaround: @brillout/vite-plugin-server-entry writes an auto-importer
+// file during the SSR build with a relative import to dist/server/entry.mjs.
+// Photon's esbuild post-build step then fails resolving that path.
+// vike-photon sets disableAutoImport but a Vite 7 bug prevents it from
+// taking effect. We reset the file after the SSR build writes it.
 function fixServerEntryAutoImport(): Plugin {
+    const require = createRequire(import.meta.url);
+    let autoImporterPath: string | null = null;
+    try {
+        const runtimeIndex = require.resolve("@brillout/vite-plugin-server-entry/runtime");
+        autoImporterPath = join(dirname(runtimeIndex), "autoImporter.js");
+    } catch {}
+
     return {
         name: "fix-server-entry-auto-import",
-        configResolved: {
+        apply: "build",
+        generateBundle: {
             order: "post",
-            handler(config) {
-                const internal = (config as unknown as Record<string, unknown>)
-                    ._vitePluginServerEntry as { disableAutoImport: boolean } | undefined;
-                if (internal) {
-                    internal.disableAutoImport = true;
-                }
+            handler() {
+                if (!autoImporterPath) return;
+                if (this.environment?.name !== "ssr") return;
+                writeFileSync(autoImporterPath, "export const status = 'UNSET';\n");
             },
         },
     };
