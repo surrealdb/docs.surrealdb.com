@@ -105,6 +105,18 @@ export default defineConfig(({ mode }) => {
             noExternal: ["@surrealdb/ui", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
             external: ["vike-content-collection"],
         },
+        environments: {
+            vercel_node: {
+                resolve: {
+                    noExternal: [
+                        "@surrealdb/ui",
+                        "@mantine/core",
+                        "@mantine/hooks",
+                        "@mantine/spotlight",
+                    ],
+                },
+            },
+        },
         css: {
             modules: {
                 localsConvention: "dashesOnly",
