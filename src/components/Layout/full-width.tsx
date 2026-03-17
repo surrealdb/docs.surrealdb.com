@@ -1,15 +1,30 @@
-import { Container, Stack } from "@mantine/core";
+import { Container, Drawer, Stack } from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
 import { Footer } from "~/components/Footer";
-import { Header } from "./header";
+import { Header, MobileNav } from "./header";
 import classes from "./style.module.scss";
 
 export function FullWidthLayout({ children }: { children: React.ReactNode }) {
+    const [menuOpened, { toggle: toggleMenu, close: closeMenu }] = useDisclosure();
+
     return (
         <Stack
             className={classes.fullWidthLayout}
             gap={0}
         >
-            <Header />
+            <Header
+                opened={menuOpened}
+                onToggle={toggleMenu}
+            />
+            <Drawer
+                opened={menuOpened}
+                onClose={closeMenu}
+                size="325px"
+                hiddenFrom="lg"
+                withCloseButton={false}
+            >
+                <MobileNav />
+            </Drawer>
             <Container
                 component="main"
                 size="lg"
