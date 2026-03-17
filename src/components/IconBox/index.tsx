@@ -1,0 +1,147 @@
+import { Anchor, Badge, Box, Group, Image, Stack, Text } from "@mantine/core";
+import type { ReactNode } from "react";
+import { getImageUrl } from "~/utils/image-urls";
+import classes from "./style.module.scss";
+
+type StatusString =
+    | "future"
+    | "in development"
+    | "coming soon"
+    | "beta"
+    | "complete"
+    | "available"
+    | `planned ${string}`;
+
+interface IconBoxProps {
+    title?: string;
+    subtitle?: string;
+    description?: string;
+    status?: StatusString;
+    href?: string;
+    icon?: { light: string; dark: string } | string;
+    children?: ReactNode;
+}
+
+const STATUS_COLORS: Record<string, string> = {
+    complete: "green",
+    available: "green",
+    beta: "yellow",
+    "coming soon": "orange",
+    "in development": "orange",
+    future: "gray",
+};
+
+function getStatusColor(status: string): string {
+    return STATUS_COLORS[status] ?? (status.startsWith("planned") ? "blue" : "gray");
+}
+
+export function IconBox({
+    title,
+    subtitle,
+    description,
+    status,
+    href,
+    icon,
+    children,
+}: IconBoxProps) {
+    const onlyIcon = icon && !title && !description && !status;
+
+    const lightSrc = typeof icon === "string" ? icon : icon?.light;
+    const darkSrc = typeof icon === "string" ? undefined : icon?.dark;
+
+    const resolvedLightSrc = lightSrc ? (getImageUrl(lightSrc) ?? lightSrc) : undefined;
+    const resolvedDarkSrc = darkSrc ? (getImageUrl(darkSrc) ?? darkSrc) : undefined;
+
+    const content = (
+        <>
+            <Group
+                justify="space-between"
+                align="center"
+                wrap="nowrap"
+            >
+                <Group
+                    gap="md"
+                    align="center"
+                    wrap="nowrap"
+                >
+                    {resolvedLightSrc && (
+                        <Box className={classes.iconWrapper}>
+                            <Image
+                                src={resolvedLightSrc}
+                                alt={title ?? "Icon"}
+                                w={32}
+                                miw={32}
+                                className={classes.lightIcon}
+                                data-only-icon={onlyIcon || undefined}
+                            />
+                            {resolvedDarkSrc && (
+                                <Image
+                                    src={resolvedDarkSrc}
+                                    alt={title ?? "Icon"}
+                                    w={32}
+                                    miw={32}
+                                    className={classes.darkIcon}
+                                    data-only-icon={onlyIcon || undefined}
+                                />
+                            )}
+                        </Box>
+                    )}
+                    {(title || subtitle) && (
+                        <Stack gap={0}>
+                            {title && (
+                                <Text
+                                    fw={500}
+                                    lh="1.5"
+                                    fz="lg"
+                                >
+                                    {title}
+                                </Text>
+                            )}
+                            {subtitle && (
+                                <Text
+                                    fz="sm"
+                                    c="dimmed"
+                                >
+                                    {subtitle}
+                                </Text>
+                            )}
+                        </Stack>
+                    )}
+                </Group>
+                {status && (
+                    <Badge
+                        variant="light"
+                        color={getStatusColor(status)}
+                        size="sm"
+                        className={classes.status}
+                    >
+                        {status}
+                    </Badge>
+                )}
+            </Group>
+            {description && (
+                <Text
+                    mt="md"
+                    c="dimmed"
+                    className={classes.description}
+                >
+                    {description}
+                </Text>
+            )}
+            {children}
+        </>
+    );
+
+    const Component = href ? Anchor : Box;
+
+    return (
+        <Component
+            {...(href ? { href, underline: "never" as const } : {})}
+            className={classes.iconBox}
+            data-only-icon={onlyIcon || undefined}
+            data-has-href={!!href || undefined}
+        >
+            {content}
+        </Component>
+    );
+}

@@ -1,7 +1,7 @@
 import { Box } from "@mantine/core";
 import { RenderMarkdown } from "@surrealdb/ui";
 import { useData } from "vike-react/useData";
-import { registerMarkdownComponents } from "~/utils/markdown";
+import { getMarkdownScope, registerMarkdownComponents } from "~/utils/markdown";
 import type { SurrealDBPageData } from "./+data";
 
 export default function Page() {
@@ -12,6 +12,7 @@ export default function Page() {
                 ast={ast}
                 rendererProps={{ jsx: "render" }}
                 components={registerMarkdownComponents()}
+                scope={getMarkdownScope()}
             />
         </Box>
     );
