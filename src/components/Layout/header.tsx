@@ -22,6 +22,7 @@ import {
     brandPHP,
     brandPython,
     brandRust,
+    clsx,
     Icon,
     iconChevronDown,
     pictoTutorials,
@@ -29,6 +30,7 @@ import {
     ThemedImage,
 } from "@surrealdb/ui";
 import { ClientOnly } from "vike-react/ClientOnly";
+import { usePageContext } from "vike-react/usePageContext";
 import DocsDark from "~/assets/img/logo/dark/docs.svg";
 import LogoDark from "~/assets/img/logo/dark/surrealdb.svg";
 import DocsLight from "~/assets/img/logo/light/docs.svg";
@@ -123,7 +125,29 @@ export const NAV_LINKS: NavEntry[] = [
     },
 ];
 
+function normalizeHref(href: string) {
+    const stripped = href.replace(/^\/docs\//, "/");
+    return stripped.endsWith("/") ? stripped.slice(0, -1) : stripped;
+}
+
+function useIsNavActive(entry: NavEntry) {
+    const { urlPathname } = usePageContext();
+    const pathname = urlPathname.endsWith("/") ? urlPathname.slice(0, -1) : urlPathname;
+
+    if (isMenuGroup(entry)) {
+        return entry.items.some((item) => {
+            const href = normalizeHref(item.href);
+            return pathname === href || pathname.startsWith(`${href}/`);
+        });
+    }
+
+    const href = normalizeHref(entry.href);
+    return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 function NavLink({ label, href }: NavItem) {
+    const active = useIsNavActive({ label, href });
+
     return (
         <Anchor
             href={href}
@@ -131,6 +155,8 @@ function NavLink({ label, href }: NavItem) {
             fw={500}
             underline="never"
             className={classes.navLink}
+            data-active={active || undefined}
+            aria-current={active ? "page" : undefined}
         >
             {label}
         </Anchor>
@@ -138,6 +164,8 @@ function NavLink({ label, href }: NavItem) {
 }
 
 function NavDropdown({ label, items }: NavMenuGroup) {
+    const active = useIsNavActive({ label, items });
+
     return (
         <Menu
             shadow="md"
@@ -152,7 +180,8 @@ function NavDropdown({ label, items }: NavMenuGroup) {
                     fz="sm"
                     fw={500}
                     underline="never"
-                    className={classes.navLink}
+                    className={clsx(classes.navLink, active && classes.navLinkActive)}
+                    aria-current={active ? "page" : undefined}
                 >
                     <Flex
                         align="center"
@@ -240,9 +269,9 @@ export function Header({ opened, onToggle }: NavigationProps) {
                     component="ul"
                     align="center"
                     gap="xl"
-                    style={{ listStyle: "none", margin: 0, padding: 0 }}
                     visibleFrom="lg"
                     mx="auto"
+                    className={classes.navList}
                 >
                     {NAV_LINKS.map((entry) => (
                         <Box
