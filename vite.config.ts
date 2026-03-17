@@ -6,7 +6,7 @@ import vike from "vike/plugin";
 import { getCollectionEntry, vikeContentCollectionPlugin } from "vike-content-collection";
 import { getLastModFromGit, vikeSitemap } from "vike-sitemap-generator";
 import type { Plugin } from "vite";
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig } from "vite";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { docs, sdks, versionedSdks } from "./src/content/config";
@@ -19,149 +19,154 @@ const versionedSdkPattern = /^(\d+\.x)\/sdk\/(\w+)/;
 // vike-photon sets disableAutoImport but a Vite 7 bug prevents it from
 // taking effect. We reset the file after the SSR build writes it.
 function fixServerEntryAutoImport(): Plugin {
-    const require = createRequire(import.meta.url);
-    let autoImporterPath: string | null = null;
-    try {
-        const runtimeIndex = require.resolve("@brillout/vite-plugin-server-entry/runtime");
-        autoImporterPath = join(dirname(runtimeIndex), "autoImporter.js");
-    } catch {}
+	const require = createRequire(import.meta.url);
+	let autoImporterPath: string | null = null;
+	try {
+		const runtimeIndex = require.resolve("@brillout/vite-plugin-server-entry/runtime");
+		autoImporterPath = join(dirname(runtimeIndex), "autoImporter.js");
+	} catch { }
 
-    return {
-        name: "fix-server-entry-auto-import",
-        apply: "build",
-        generateBundle: {
-            order: "post",
-            handler() {
-                if (!autoImporterPath) return;
-                if (this.environment?.name !== "ssr") return;
-                writeFileSync(autoImporterPath, "export const status = 'UNSET';\n");
-            },
-        },
-    };
+	return {
+		name: "fix-server-entry-auto-import",
+		apply: "build",
+		generateBundle: {
+			order: "post",
+			handler() {
+				if (!autoImporterPath) return;
+				if (this.environment?.name !== "ssr") return;
+				writeFileSync(autoImporterPath, "export const status = 'UNSET';\n");
+			},
+		},
+	};
 }
 
 function findCollectionEntry(url: string) {
-    const segments = url.split("/").filter(Boolean);
-    const first = segments[0];
+	const segments = url.split("/").filter(Boolean);
+	const first = segments[0];
 
-    const versionedMatch = url.match(versionedSdkPattern);
-    if (versionedMatch) {
-        const version = versionedMatch[1];
-        const sdkName = versionedMatch[2];
-        const config = versionedSdks[sdkName as keyof typeof versionedSdks];
-        const isLatest = config && version === config.latest;
-        const collectionId = isLatest
-            ? `doc-sdk-${sdkName}`
-            : `doc-sdk-${sdkName}-${version.replace(".", "")}`;
-        const slug = segments.slice(3).join("/") || "index";
-        return getCollectionEntry(collectionId, slug);
-    }
+	const versionedMatch = url.match(versionedSdkPattern);
+	if (versionedMatch) {
+		const version = versionedMatch[1];
+		const sdkName = versionedMatch[2];
+		const config = versionedSdks[sdkName as keyof typeof versionedSdks];
+		const isLatest = config && version === config.latest;
+		const collectionId = isLatest
+			? `doc-sdk-${sdkName}`
+			: `doc-sdk-${sdkName}-${version.replace(".", "")}`;
+		const slug = segments.slice(3).join("/") || "index";
+		return getCollectionEntry(collectionId, slug);
+	}
 
-    if (first === "sdk" && segments.length >= 2) {
-        const sdkName = segments[1];
-        if (!(sdks as readonly string[]).includes(sdkName)) return undefined;
-        const slug = segments.slice(2).join("/") || "index";
-        return getCollectionEntry(`doc-sdk-${sdkName}`, slug);
-    }
+	if (first === "sdk" && segments.length >= 2) {
+		const sdkName = segments[1];
+		if (!(sdks as readonly string[]).includes(sdkName)) return undefined;
+		const slug = segments.slice(2).join("/") || "index";
+		return getCollectionEntry(`doc-sdk-${sdkName}`, slug);
+	}
 
-    if (first && (docs as readonly string[]).includes(first)) {
-        const slug = segments.slice(1).join("/") || "index";
-        return getCollectionEntry(`doc-${first}`, slug);
-    }
+	if (first && (docs as readonly string[]).includes(first)) {
+		const slug = segments.slice(1).join("/") || "index";
+		return getCollectionEntry(`doc-${first}`, slug);
+	}
 
-    return undefined;
+	return undefined;
 }
 
-export default defineConfig(({ mode }) => {
-    const env = loadEnv(mode, process.cwd(), "");
-    return {
-        base: "/docs/",
-        plugins: [
-            vike(),
-            react(),
-            nodePolyfills({
-                include: ["buffer"],
-            }),
-            tsconfigPaths(),
-            vikeContentCollectionPlugin({
-                contentDir: "src/content",
-                lastModified: true,
-                drafts: {
-                    field: "draft",
-                    includeDrafts: false,
-                },
-            }),
-            fixServerEntryAutoImport(),
-            vikeSitemap({
-                baseUrl: "https://surrealdb.com/docs/",
-                priority: [
-                    { match: "/", priority: 1 },
-                    { match: /^surrealdb\/.*$/, priority: 0.9 },
-                    { match: /^sdk\/.*$/, priority: 0.8 },
-                    { match: /^labs$/, priority: 0.5 },
-                    { match: /.*/, priority: 0.75 },
-                ],
-                exclude: ["/404", "/500"],
-                trailingSlash: (url) => {
-                    return url === "/";
-                },
-                outFile: "../client/sitemap.xml",
-                lastmod: async (url) => {
-                    const entry = findCollectionEntry(url);
+export default defineConfig({
+	base: "/docs/",
+	plugins: [
+		vike(),
+		react(),
+		nodePolyfills({
+			include: ["buffer"],
+		}),
+		tsconfigPaths(),
+		vikeContentCollectionPlugin({
+			contentDir: "src/content",
+			lastModified: true,
+			drafts: {
+				field: "draft",
+				includeDrafts: false,
+			},
+		}),
+		fixServerEntryAutoImport(),
+		vikeSitemap({
+			baseUrl: "https://surrealdb.com/docs",
+			outDir: "./.vercel/output/static",
+			outFile: "sitemap.xml",
+			robots: true,
+			priority: (url, { urls }) => {
+				if (url === "/") return 1.0;
 
-                    if (entry?.lastModified) {
-                        return entry.lastModified.toISOString();
-                    }
+				const hasChildren = urls.some((u) => u !== url && u.startsWith(`${url}/`));
 
-                    const filePath =
-                        url === "/" ? "pages/index/+Page.tsx" : `pages${url}/+Page.tsx`;
+				if (/^\/surrealdb(\/|$)/.test(url)) return hasChildren ? 0.9 : 0.8;
+				if (/^\/surrealql(\/|$)/.test(url)) return hasChildren ? 0.9 : 0.8;
+				if (/^\/sdk\//.test(url)) return hasChildren ? 0.8 : 0.7;
+				if (/^\/\d+\.x\/sdk\//.test(url)) return 0.4;
 
-                    process.env = {
-                        ...process.env,
-                        ...env,
-                    };
+				return hasChildren ? 0.7 : 0.6;
+			},
+			changefreq: [
+				{ match: "/", changefreq: "weekly" },
+				{ match: /^\/surrealdb/, changefreq: "weekly" },
+				{ match: /^\/surrealql/, changefreq: "weekly" },
+				{ match: /^\/sdk\//, changefreq: "monthly" },
+				{ match: /^\/cloud/, changefreq: "monthly" },
+				{ match: /^\/\d+\.x\//, changefreq: "yearly" },
+			],
+			exclude: [/^\/404$/, /^\/500$/],
+			trailingSlash: false,
+			lastmod: async (url) => {
+				const entry = findCollectionEntry(url);
 
-                    return getLastModFromGit({ filePath });
-                },
-            }),
-        ],
-        resolve: {
-            dedupe: ["react", "react-dom", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
-        },
-        build: {
-            sourcemap: true,
-            minify: true,
-            cssMinify: true,
-        },
-        ssr: {
-            noExternal: ["@surrealdb/ui", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
-            external: ["vike-content-collection"],
-        },
-        environments: {
-            vercel_node: {
-                resolve: {
-                    noExternal: [
-                        "@surrealdb/ui",
-                        "@mantine/core",
-                        "@mantine/hooks",
-                        "@mantine/spotlight",
-                    ],
-                },
-            },
-        },
-        css: {
-            modules: {
-                localsConvention: "dashesOnly",
-            },
-            preprocessorOptions: {
-                scss: {
-                    additionalData: "@use '@surrealdb/ui/mixins' as *;",
-                },
-            },
-        },
-        server: {
-            port: 4321,
-            host: true,
-        },
-    };
+				if (entry?.lastModified) {
+					return entry.lastModified.toISOString().split("T")[0];
+				}
+
+				const filePath =
+					url === "/" ? "src/pages/index/+Page.tsx" : `src/pages${url}/+Page.tsx`;
+
+				return getLastModFromGit({ filePath });
+			},
+		}),
+	],
+	resolve: {
+		dedupe: ["react", "react-dom", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
+	},
+	build: {
+		sourcemap: true,
+		minify: true,
+		cssMinify: true,
+	},
+	ssr: {
+		noExternal: ["@surrealdb/ui", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
+		external: ["vike-content-collection"],
+	},
+	environments: {
+		vercel_node: {
+			resolve: {
+				noExternal: [
+					"@surrealdb/ui",
+					"@mantine/core",
+					"@mantine/hooks",
+					"@mantine/spotlight",
+				],
+			},
+		},
+	},
+	css: {
+		modules: {
+			localsConvention: "dashesOnly" as const,
+		},
+		preprocessorOptions: {
+			scss: {
+				additionalData: "@use '@surrealdb/ui/mixins' as *;",
+			},
+		},
+	},
+	server: {
+		port: 4321,
+		host: true,
+	},
 });
