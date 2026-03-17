@@ -1,4 +1,4 @@
-import { abstractDoc, contentSlug } from "~/content/config";
+import { abstractDoc, contentSlug } from "../../../config";
 
 export const Content = {
     schema: abstractDoc,
