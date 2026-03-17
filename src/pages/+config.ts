@@ -18,7 +18,4 @@ export default {
             env: { server: true },
         },
     },
-    isr: {
-        expiration: 60 * 60 * 24,
-    },
 } satisfies Config;
