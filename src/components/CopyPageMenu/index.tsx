@@ -1,17 +1,13 @@
 import { Button, Menu, Stack, Text } from "@mantine/core";
-import {
-    Icon,
-    iconArrowUpRight,
-    iconChatGPT,
-    iconChevronDown,
-    iconClaude,
-    iconCopy,
-} from "@surrealdb/ui";
+import { Icon, iconArrowUpRight, iconChevronDown, iconCopy } from "@surrealdb/ui";
 import { useCallback } from "react";
 import { usePageContext } from "vike-react/usePageContext";
 import type { LLMChatURLs } from "~/utils/llms";
 
 // import classes from "./style.module.scss";
+
+const iconChatGPT = "";
+const iconClaude = "";
 
 const RAW_BASE_URL =
     "https://raw.githubusercontent.com/surrealdb/docs.surrealdb.com/main/src/content";

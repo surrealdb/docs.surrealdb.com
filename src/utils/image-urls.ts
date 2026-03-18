@@ -1,5 +1,68 @@
-import { type AnyNode, type Root, visit } from "@surrealdb/ui";
+import {
+    type AnyNode,
+    brandApple,
+    brandAWS,
+    brandDocker,
+    brandDotNet,
+    brandGo,
+    brandGoogleCloud,
+    brandJava,
+    brandJavaScript,
+    brandKubernetes,
+    brandLinux,
+    brandMicrosoftAzure,
+    brandNodeJs,
+    brandPHP,
+    brandPython,
+    brandReact,
+    brandRust,
+    brandSolidJS,
+    brandWebAssembly,
+    brandWindows,
+    pictoCloud,
+    pictoGQL,
+    pictoIntegrations,
+    pictoKV,
+    pictoML,
+    pictoQL,
+    pictoSurrealDB,
+    pictoSurrealist,
+    pictoTutorials,
+    type Root,
+    visit,
+} from "@surrealdb/ui";
 import { getImageUrl as getBundledImageUrl } from "~/lib/images";
+
+const UI_ASSETS: Record<string, string> = {
+    brandApple,
+    brandAWS,
+    brandDocker,
+    brandDotNet,
+    brandGo,
+    brandGoogleCloud,
+    brandJava,
+    brandJavaScript,
+    brandKubernetes,
+    brandLinux,
+    brandMicrosoftAzure,
+    brandNodeJs,
+    brandPHP,
+    brandPython,
+    brandReact,
+    brandRust,
+    brandSolidJS,
+    brandWebAssembly,
+    brandWindows,
+    pictoCloud,
+    pictoGQL,
+    pictoIntegrations,
+    pictoKV,
+    pictoML,
+    pictoQL,
+    pictoSurrealDB,
+    pictoSurrealist,
+    pictoTutorials,
+};
 
 /**
  * Get the URL for an image, handling brandsafe CDN URLs and bundled images.
@@ -52,11 +115,19 @@ export function getImageUrl(
     return imageId;
 }
 
+const UI_PREFIX = "@ui/";
+
 export function resolveAstImages(ast: Root | AnyNode) {
     visit(ast, "image", (node) => {
-        node.src = getImageUrl(node.src) ?? node.src;
-        if (node.darkSrc) {
-            node.darkSrc = getImageUrl(node.darkSrc) ?? node.darkSrc;
+        if (node.src.startsWith(UI_PREFIX)) {
+            const key = node.src.slice(UI_PREFIX.length);
+            node.src = UI_ASSETS[key] ?? node.src;
+            node.darkSrc = undefined;
+        } else {
+            node.src = getImageUrl(node.src) ?? node.src;
+            if (node.darkSrc) {
+                node.darkSrc = getImageUrl(node.darkSrc) ?? node.darkSrc;
+            }
         }
     });
 }
