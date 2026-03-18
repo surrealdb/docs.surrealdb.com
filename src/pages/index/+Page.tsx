@@ -337,7 +337,10 @@ export default function Page() {
             gap={60}
             pb="xl"
         >
-            <Box className={classes.hero}>
+            <Box
+                className={classes.hero}
+                component="main"
+            >
                 <Title
                     order={1}
                     fz={36}
