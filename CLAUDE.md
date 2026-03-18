@@ -38,7 +38,7 @@ All user-facing text must use British English spelling (`-ise`, `-our`, `-re`, `
 ## References
 
 - [Mantine](https://mantine.dev/llms.txt)
-- [Vike](https://vike.dev/llms.txt)
+- [Vike](https://vike.dev/)
 - [Vite](https://vite.dev/llms.txt)
 - [Auth0](https://auth0.com/llms.txt)
 - [vike-content-collection](https://raw.githubusercontent.com/welpie21/vike-content-collection/refs/heads/main/llms-full.txt)
