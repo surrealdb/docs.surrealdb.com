@@ -135,11 +135,11 @@ export function getVersionLabel(sdk: Sdk, version: SdkVersion): string {
     return version;
 }
 
-export function getCollectionIdForVersion(sdk: Sdk, version: SdkVersion): string {
+export function getCollectionIdForVersion(sdk: Sdk, version: SdkVersion) {
     const config = versionedSdks[sdk];
-    if (version === "latest" || version === config?.latest) return `doc-sdk-${sdk}`;
+    if (version === "latest" || version === config?.latest) return `doc-sdk-${sdk}` as const;
     const suffix = version.replace(".", "");
-    return `doc-sdk-${sdk}-${suffix}`;
+    return `doc-sdk-${sdk}-${suffix}` as const;
 }
 
 export function getVersionUrl(sdk: Sdk, version: SdkVersion, relativePath = ""): string {

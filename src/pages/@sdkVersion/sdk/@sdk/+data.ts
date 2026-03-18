@@ -22,11 +22,11 @@ export default async function data(context: PageContext) {
     }
 
     if (entry.metadata.title) {
-        config({ title: entry.metadata.title });
+        config({ title: entry.metadata.title as string });
     }
 
     if (entry.metadata.description) {
-        config({ description: entry.metadata.description });
+        config({ description: entry.metadata.description as string });
     }
 
     const { ast, headings } = resolveMarkdown(entry.content);
