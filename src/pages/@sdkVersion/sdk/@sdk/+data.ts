@@ -5,6 +5,7 @@ import { useConfig } from "vike-react/useConfig";
 import { getCollectionIdForVersion, getVersionUrl, type Sdk } from "~/content/config";
 import { getCollectionPartsFromURL } from "~/utils/collection";
 import { resolveMarkdown } from "~/utils/markdown";
+import { getSuffixedMetaTitle } from "~/utils/meta";
 import { getSidebarItemsFromCollection } from "~/utils/sidebar";
 
 export default async function data(context: PageContext) {
@@ -22,7 +23,7 @@ export default async function data(context: PageContext) {
     }
 
     if (entry.metadata.title) {
-        config({ title: entry.metadata.title as string });
+        config({ title: getSuffixedMetaTitle(entry.metadata.title as string) });
     }
 
     if (entry.metadata.description) {

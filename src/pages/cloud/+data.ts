@@ -4,6 +4,7 @@ import { getCollectionEntry } from "vike-content-collection";
 import { useConfig } from "vike-react/useConfig";
 import { getCollectionPartsFromURL } from "~/utils/collection";
 import { resolveMarkdown } from "~/utils/markdown";
+import { getSuffixedMetaTitle } from "~/utils/meta";
 import { getSidebarItemsFromCollection } from "~/utils/sidebar";
 
 export default async function data(context: PageContext) {
@@ -19,7 +20,7 @@ export default async function data(context: PageContext) {
     }
 
     if (entry.metadata.title) {
-        config({ title: entry.metadata.title });
+        config({ title: getSuffixedMetaTitle(entry.metadata.title) });
     }
 
     if (entry.metadata.description) {
