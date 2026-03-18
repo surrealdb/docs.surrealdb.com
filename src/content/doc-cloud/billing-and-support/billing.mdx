@@ -5,10 +5,6 @@ title: Billing | SurrealDB Cloud
 description: Overview of SurrealDB Cloud and how to get started with it.
 ---
 
-import Image from "@components/Image.astro";
-
-import UpdateBillingLight from '@img/image/cloud/update-billing.png';
-import UpdateBillingDark from '@img/image/cloud/update-billing.png';
 
 # Billing
 

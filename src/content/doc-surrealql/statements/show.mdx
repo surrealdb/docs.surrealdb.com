@@ -11,9 +11,6 @@ Change Feeds allows you to retrieve and sync changes from SurrealDB to external 
 
 The `SHOW` statement can be used to replay changes made to a table.
 
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 ## Requirements
 
@@ -21,8 +18,8 @@ import TabItem from '@components/Tabs/TabItem.astro'
 
 ### Statement syntax
 
-<Tabs syncKey="show-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="show-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 SHOW CHANGES FOR TABLE @tablename
@@ -30,30 +27,14 @@ SHOW CHANGES FOR TABLE @tablename
 	[ LIMIT @number ]
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const showAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "SHOW" },
-      { type: "Terminal", text: "CHANGES" },
-      { type: "Terminal", text: "FOR" },
-      { type: "Terminal", text: "TABLE" },
-      { type: "NonTerminal", text: "@tablename" },
-      { type: "Terminal", text: "SINCE" },
-      { type: "Choice", index: 1, children: [ { type: "NonTerminal", text: "@timestamp" }, { type: "NonTerminal", text: "@versionstamp" } ] },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "LIMIT" }, { type: "NonTerminal", text: "@number" } ] } }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={showAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"SHOW"},{"type":"Terminal","text":"CHANGES"},{"type":"Terminal","text":"FOR"},{"type":"Terminal","text":"TABLE"},{"type":"NonTerminal","text":"@tablename"},{"type":"Terminal","text":"SINCE"},{"type":"Choice","index":1,"children":[{"type":"NonTerminal","text":"@timestamp"},{"type":"NonTerminal","text":"@versionstamp"}]},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"LIMIT"},{"type":"NonTerminal","text":"@number"}]}}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example usage
 

@@ -223,7 +223,6 @@ Key capabilities that map well to Feast's needs:
 </table>
 
 
-
 ### Going further
 
 - **HNSW tune-ups** – adjust `EF`/`M` parameters in the `DEFINE INDEX …` line to trade search speed vs. recall.

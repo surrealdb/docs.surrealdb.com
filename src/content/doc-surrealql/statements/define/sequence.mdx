@@ -4,14 +4,10 @@ sidebar_label: DEFINE SEQUENCE
 title: DEFINE SEQUENCE statement | SurrealQL
 description: A DEFINE SEQUENCE statement defines a distributed generator of monotonically increasing numeric sequences.
 ---
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 # `DEFINE SEQUENCE` statement
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 A sequence is used to generate reliable, monotonically increasing numeric sequences in both single-node and clustered SurrealDB deployments (multiple compute nodes backed by TiKV). It uses a batch-allocation strategy to minimise coordination while guaranteeing global uniqueness.
 
@@ -28,36 +24,21 @@ The sequence implementation avoids contention by having each node reserve a rang
 
 ## Statement syntax
 
-<Tabs syncKey="define-sequence-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="define-sequence-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 DEFINE SEQUENCE [ OVERWRITE | IF NOT EXISTS ] @name [ BATCH @batch ] [ START @start ] [ TIMEOUT @duration ]
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const defineSequenceAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "DEFINE" },
-      { type: "Terminal", text: "SEQUENCE" },
-      { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Terminal", text: "OVERWRITE" }, { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "NOT" }, { type: "Terminal", text: "EXISTS" } ] } ] } },
-      { type: "NonTerminal", text: "@name" },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "BATCH" }, { type: "NonTerminal", text: "@batch" } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "START" }, { type: "NonTerminal", text: "@start" } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "TIMEOUT" }, { type: "NonTerminal", text: "@duration" } ] } }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={defineSequenceAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DEFINE"},{"type":"Terminal","text":"SEQUENCE"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"OVERWRITE"},{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}]}},{"type":"NonTerminal","text":"@name"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"BATCH"},{"type":"NonTerminal","text":"@batch"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"START"},{"type":"NonTerminal","text":"@start"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"TIMEOUT"},{"type":"NonTerminal","text":"@duration"}]}}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Examples
 

@@ -5,14 +5,12 @@ title: Fetching Records in Rust | Rust SDK | SurrealDB
 description: All the fields of a SurrealDB linked record can be fetched and deserialized into a Rust type
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # Fetching records
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 Start a running database using the following command:
 
@@ -200,9 +198,9 @@ Here is the final output:
 Students = [StudentClasses { id: RecordId { table: "student", key: String("jane") }, name: "Jane Doe", classes: [DanceClass { id: RecordId { table: "dance", key: String("dc101") }, name: "Introduction to Dancing", created_at: Datetime(2025-11-06T02:15:05.116807Z) }], created_at: Datetime(2025-11-06T02:15:05.117644Z) }]
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 Start a running database using the following command:
 
@@ -406,6 +404,6 @@ Here is the final output:
 Students = [StudentClasses { id: RecordId { table: "student", key: String("jane") }, name: "Jane Doe", classes: [DanceClass { id: RecordId { table: "dance", key: String("dc101") }, name: "Introduction to Dancing", created_at: Datetime(2025-11-06T02:15:05.116807Z) }], created_at: Datetime(2025-11-06T02:15:05.117644Z) }]
 ```
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

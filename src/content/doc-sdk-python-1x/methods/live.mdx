@@ -4,7 +4,6 @@ sidebar_label: live
 title: Python | SDK | Methods | live
 description: The SurrealDB SDK for Python enables you to listen for changes to records in a table.
 ---
-import Label from "@components/shared/Label.astro";
 
 # `.live()`
 
@@ -26,7 +25,7 @@ db.live(table, diff)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>table</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name to listen for changes for
@@ -35,7 +34,7 @@ db.live(table, diff)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>diff</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 If set to true, live notifications will include an array of JSON Patch objects, rather than the entire record for each notification.

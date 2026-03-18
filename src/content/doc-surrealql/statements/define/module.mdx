@@ -4,16 +4,11 @@ sidebar_label: DEFINE MODULE
 title: DEFINE MODULE statement | SurrealQL
 description: Just like in other databases, SurrealDB uses indexes to help optimize query performance. An index can consist of one or more fields in a table and can enforce a uniqueness constraint.
 ---
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
-
 
 
 # `DEFINE MODULE` statement
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 A `DEFINE MODULE` statement is used to define a module via which [Surrealism](/docs/surrealdb/extensions) extensions functions can be called.
 
@@ -22,37 +17,21 @@ A `DEFINE MODULE` statement is used to define a module via which [Surrealism](/d
 
 ## Statement syntax
 
-<Tabs syncKey="define-module-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="define-module-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 DEFINE MODULE [ OVERWRITE | IF NOT EXISTS ] @mod::@sub AS @file_name
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
-
-export const defineModuleAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "DEFINE" },
-      { type: "Terminal", text: "MODULE" },
-      { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Terminal", text: "OVERWRITE" }, { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "NOT" }, { type: "Terminal", text: "EXISTS" } ] } ] } },
-      { type: "NonTerminal", text: "@mod::@sub" },
-      { type: "Terminal", text: "AS" },
-      { type: "NonTerminal", text: "@file_name" },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "COMMENT" }, { type: "NonTerminal", text: "@string" } ] } }
-    ]}
-  ]
-};
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
 
-<RailroadDiagram ast={defineModuleAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DEFINE"},{"type":"Terminal","text":"MODULE"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"OVERWRITE"},{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}]}},{"type":"NonTerminal","text":"@mod::@sub"},{"type":"Terminal","text":"AS"},{"type":"NonTerminal","text":"@file_name"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"COMMENT"},{"type":"NonTerminal","text":"@string"}]}}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example
 

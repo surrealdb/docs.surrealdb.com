@@ -5,7 +5,6 @@ title: Python | SDK | Set parameters
 description: In this section, you will learn how to set parameters in the SurrealDB Python SDK.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Set parameters
 
@@ -53,7 +52,7 @@ db.let(key, value)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>key</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Specifies the name of the variable.
@@ -62,7 +61,7 @@ db.let(key, value)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>value</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Assigns the value to the variable name.
@@ -108,7 +107,7 @@ db.unset(key)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>key</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Specifies the name of the variable.

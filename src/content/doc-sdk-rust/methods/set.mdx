@@ -5,15 +5,12 @@ title: Set Method in Rust | Rust SDK | Integration | SurrealDB
 description: The .set() method for the SurrealDB Rust SDK assigns a value as a parameter for this connection.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
-import Label from "@components/shared/Label.astro";
 
 # `set()`
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 Assigns a value as a parameter for this connection.
 
@@ -110,9 +107,9 @@ async fn main() -> surrealdb::Result<()> {
 
 * [.set() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.set)
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 Assigns a value as a parameter for this connection.
 
@@ -209,6 +206,6 @@ async fn main() -> surrealdb::Result<()> {
 
 * [.set() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.set)
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

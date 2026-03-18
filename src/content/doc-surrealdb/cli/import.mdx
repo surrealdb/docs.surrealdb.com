@@ -5,7 +5,6 @@ title: Import command | CLI tool
 description: A command that imports a file in SurrealQL format into a local or remote SurrealDB database server.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Import command
 
@@ -27,7 +26,7 @@ The import command imports a SurrealQL script file into a local or remote Surrea
         <tr>
             <td>
                 `-e` / `--endpoint` / `--conn`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
                 Sets the url of the database server to connect to. Defaults to http://127.0.0.1:8000 if not specified
@@ -36,7 +35,7 @@ The import command imports a SurrealQL script file into a local or remote Surrea
         <tr>
             <td>
                 `-u` / `--user`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets master username for the database
@@ -45,7 +44,7 @@ The import command imports a SurrealQL script file into a local or remote Surrea
         <tr>
             <td>
                 `-p` / `--pass`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets master password for the database
@@ -54,7 +53,7 @@ The import command imports a SurrealQL script file into a local or remote Surrea
         <tr>
             <td>
                 `-t` / `--token`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
                 Sets the authentication token to use when connecting to the server. Connect to SurrealDB using a JWT instead of user credentials
@@ -63,7 +62,7 @@ The import command imports a SurrealQL script file into a local or remote Surrea
         <tr>
             <td>
                 `--ns`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets the desired namespace in which to import data
@@ -72,7 +71,7 @@ The import command imports a SurrealQL script file into a local or remote Surrea
         <tr>
             <td>
                 `--db`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets the desired database into which to import data
@@ -94,7 +93,7 @@ The import command imports a SurrealQL script file into a local or remote Surrea
         <tr>
             <td>
                 `file`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
             Sets the path to the file to import

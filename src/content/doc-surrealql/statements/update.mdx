@@ -4,10 +4,6 @@ sidebar_label: UPDATE
 title: UPDATE statement | SurrealQL
 description: The UPDATE statement can be used to update records in the database. If they already exist, they will be updated. If they do not exist, no records will be updated.
 ---
-import Since from '@components/shared/Since.astro'
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
-import RailroadDiagram from "@components/RailroadDiagram.astro";
 
 # `UPDATE` statement
 
@@ -21,8 +17,8 @@ The `UPDATE` statement can be used to update existing records in the database. I
 
 ### Statement syntax
 
-<Tabs syncKey="update-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="update-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 UPDATE [ ONLY ] @targets
@@ -39,42 +35,14 @@ UPDATE [ ONLY ] @targets
 ;
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const updateAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    {
-      type: "Sequence",
-      children: [
-        { type: "Terminal", text: "UPDATE" },
-        { type: "Optional", child: { type: "Terminal", text: "ONLY" } },
-        { type: "NonTerminal", text: "@targets" },
-        { type: "Optional", child: { type: "Choice", index: 1, children: [
-          { type: "Sequence", children: [ { type: "Terminal", text: "CONTENT" }, { type: "NonTerminal", text: "@value" } ] },
-          { type: "Sequence", children: [ { type: "Terminal", text: "MERGE" }, { type: "NonTerminal", text: "@value" } ] },
-          { type: "Sequence", children: [ { type: "Terminal", text: "PATCH" }, { type: "NonTerminal", text: "@value" } ] },
-          { type: "Sequence", children: [ { type: "Terminal", text: "REPLACE" }, { type: "NonTerminal", text: "@value" } ] },
-          { type: "Sequence", children: [ { type: "Choice", index: 1, children: [ { type: "Terminal", text: "SET" }, { type: "Terminal", text: "UNSET" } ] }, { type: "NonTerminal", text: "@field (=|,) @value ..." } ] }
-        ] } },
-        { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "WHERE" }, { type: "NonTerminal", text: "@condition" } ] } },
-        { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "RETURN" }, { type: "Choice", index: 1, children: [
-          { type: "Terminal", text: "NONE" }, { type: "Terminal", text: "BEFORE" }, { type: "Terminal", text: "AFTER" }, { type: "Terminal", text: "DIFF" }, { type: "NonTerminal", text: "@statement_param, ..." }, { type: "Sequence", children: [ { type: "Terminal", text: "VALUE" }, { type: "NonTerminal", text: "@statement_param" } ] }
-        ] } ] } },
-        { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "TIMEOUT" }, { type: "NonTerminal", text: "@duration" } ] } },
-        { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "EXPLAIN" }, { type: "Optional", child: { type: "Terminal", text: "FULL" } } ] } },
-        { type: "Terminal", text: ";" },
-      ]
-    }
-  ]
-};
 
-<RailroadDiagram ast={updateAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"UPDATE"},{"type":"Optional","child":{"type":"Terminal","text":"ONLY"}},{"type":"NonTerminal","text":"@targets"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"CONTENT"},{"type":"NonTerminal","text":"@value"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"MERGE"},{"type":"NonTerminal","text":"@value"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"PATCH"},{"type":"NonTerminal","text":"@value"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"REPLACE"},{"type":"NonTerminal","text":"@value"}]},{"type":"Sequence","children":[{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"SET"},{"type":"Terminal","text":"UNSET"}]},{"type":"NonTerminal","text":"@field (=|,) @value ..."}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"WHERE"},{"type":"NonTerminal","text":"@condition"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"RETURN"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"NONE"},{"type":"Terminal","text":"BEFORE"},{"type":"Terminal","text":"AFTER"},{"type":"Terminal","text":"DIFF"},{"type":"NonTerminal","text":"@statement_param, ..."},{"type":"Sequence","children":[{"type":"Terminal","text":"VALUE"},{"type":"NonTerminal","text":"@statement_param"}]}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"TIMEOUT"},{"type":"NonTerminal","text":"@duration"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"EXPLAIN"},{"type":"Optional","child":{"type":"Terminal","text":"FULL"}}]}},{"type":"Terminal","text":";"}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 > [!NOTE]
 > `@target` refers to either record output including an `id` field, or a [record ID](/docs/surrealql/datamodel/ids) on its own.
@@ -339,8 +307,8 @@ CREATE person:gladys SET age = 90;
 UPDATE person:gladys CONTENT { age: 70 };
 ```
 
-<Tabs groupId="content">
-<TabItem value="Before" label="Output before 2.1.0" >
+<tabs synckey="content">
+<tabitem label="Output before 2.1.0">
 
 ```surql
 -------- Query --------
@@ -355,9 +323,9 @@ UPDATE person:gladys CONTENT { age: 70 };
 -------- Query --------
 'Found changed value for field `created`, with record `person:gladys`, but field is readonly'
 ```
-</TabItem>
+</tabitem>
 
-<TabItem value="After" label="Output after 2.1.0" >
+<tabitem label="Output after 2.1.0">
 
 ```surql
 -------- Query --------
@@ -378,8 +346,8 @@ UPDATE person:gladys CONTENT { age: 70 };
 	}
 ]
 ```
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 ## REPLACE clause
 

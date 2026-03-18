@@ -6,13 +6,12 @@ description: SurrealQL allows you to describe data with specific data types. The
 
 ---
 
-import Table from '@components/shared/Table.astro'
 
 # Data types
 
 SurrealQL allows you to describe data with specific data types. These data types are used to validate data and to generate the appropriate database schema.
 
-<Table>
+<table>
     <thead>
         <tr>
             <th scope="col" class="w-40">Type</th>
@@ -220,7 +219,7 @@ SurrealQL allows you to describe data with specific data types. These data types
             </td>
         </tr>
     </tbody>
-</Table>
+</table>
 
 ## Examples
 

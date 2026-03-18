@@ -5,11 +5,10 @@ title: Sequence functions | SurrealQL
 description: Functions to work with sequences.
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Sequence functions
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 These functions can be used to work with [sequences](/docs/surrealql/statements/define/sequence).
 

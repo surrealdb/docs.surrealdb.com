@@ -5,10 +5,6 @@ title: DEFINE PARAM statement | SurrealQL
 description: The DEFINE PARAM statement allows you to define global (database-wide) parameters that are available to every client.
 ---
 
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 # `DEFINE PARAM` statement
 
@@ -21,8 +17,8 @@ The `DEFINE PARAM` statement allows you to define global (database-wide) paramet
 
 ## Statement syntax
 
-<Tabs syncKey="define-param-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="define-param-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 DEFINE PARAM [ OVERWRITE | IF NOT EXISTS ] $@name 
@@ -31,31 +27,14 @@ DEFINE PARAM [ OVERWRITE | IF NOT EXISTS ] $@name
     [ PERMISSIONS [ NONE | FULL | WHERE @condition ] ]
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const defineParamAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "DEFINE" },
-      { type: "Terminal", text: "PARAM" },
-      { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Terminal", text: "OVERWRITE" }, { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "NOT" }, { type: "Terminal", text: "EXISTS" } ] } ] } },
-      { type: "Terminal", text: "$" },
-      { type: "NonTerminal", text: "@name" },
-      { type: "Terminal", text: "VALUE" },
-      { type: "NonTerminal", text: "@value" },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "COMMENT" }, { type: "NonTerminal", text: "@string" } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "PERMISSIONS" }, { type: "Choice", index: 1, children: [ { type: "Terminal", text: "NONE" }, { type: "Terminal", text: "FULL" }, { type: "Sequence", children: [ { type: "Terminal", text: "WHERE" }, { type: "NonTerminal", text: "@condition" } ] } ] } ] } }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={defineParamAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DEFINE"},{"type":"Terminal","text":"PARAM"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"OVERWRITE"},{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}]}},{"type":"Terminal","text":"$"},{"type":"NonTerminal","text":"@name"},{"type":"Terminal","text":"VALUE"},{"type":"NonTerminal","text":"@value"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"COMMENT"},{"type":"NonTerminal","text":"@string"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"PERMISSIONS"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"NONE"},{"type":"Terminal","text":"FULL"},{"type":"Sequence","children":[{"type":"Terminal","text":"WHERE"},{"type":"NonTerminal","text":"@condition"}]}]}]}}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example usage
 Below shows how you can create a parameter using the `DEFINE PARAM` statement.
@@ -80,7 +59,6 @@ RETURN http::get($endpointBase + "/products");
 ## Using `IF NOT EXISTS` clause
 
 
-
 The `IF NOT EXISTS` clause can be used to define a param only if it does not already exist. You should use the `IF NOT EXISTS` clause when defining a param in SurrealDB if you want to ensure that the param is only created if it does not already exist. If the param already exists, the `DEFINE PARAM` statement will return an error.
 
 It's particularly useful when you want to safely attempt to define a param without manually checking its existence first.
@@ -101,7 +79,7 @@ DEFINE PARAM IF NOT EXISTS $example VALUE 123;
 
 ## Using `OVERWRITE` clause
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `OVERWRITE` clause can be used to define a param and overwrite an existing one if it already exists. You should use the `OVERWRITE` clause when you want to modify an existing param definition. If the param already exists, the `DEFINE PARAM` statement will overwrite the existing param definition with the new one.
 

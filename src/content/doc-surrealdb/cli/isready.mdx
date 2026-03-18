@@ -4,7 +4,6 @@ sidebar_label: Isready command
 title: Isready command | CLI tool
 description: A command that determines whether a SurrealDB server has started and is able to accept connections.
 ---
-import Label from "@components/shared/Label.astro";
 
 # Isready command
 
@@ -26,7 +25,7 @@ The isready command attempts to connect to a remote SurrealDB server to detect i
         <tr>
             <td colspan="2">
                 `-e` / `--endpoint` / `--conn `
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
         Sets the url of the database server to connect to

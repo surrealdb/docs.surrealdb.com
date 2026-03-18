@@ -5,15 +5,13 @@ title: Embeddings models for Rust
 description: This section contains information about different embedding models you can use with SurrealDB.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # 🦀 Embeddings
 
 SurrealDB offers comprehensive support for vector embeddings, enabling powerful semantic search and machine learning capabilities across your data. Through integrations with leading embedding providers, you can easily store, index and query high-dimensional vectors alongside your regular data.
 
-<Tabs>
-<TabItem label="Mistral">
+<tabs>
+<tabitem label="Mistral">
 
 ## Mistral
 
@@ -33,8 +31,8 @@ println!("{:?}", result);
 
 Find a full example in [Semantic search in Rust with SurrealDB and Mistral AI](/blog/semantic-search-in-rust-with-surrealdb-and-mistral-ai#generate-mistral-ai-embeddings).
 
-</TabItem>
-<TabItem label="Ollama">
+</tabitem>
+<tabitem label="Ollama">
 
 ## Ollama
 
@@ -58,8 +56,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-</TabItem>
-<TabItem label="SentenceTransformer">
+</tabitem>
+<tabitem label="SentenceTransformer">
 
 ## SentenceTransformer
 
@@ -97,5 +95,5 @@ fn main() -> anyhow::Result<()> {
 }
 ```
 
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>

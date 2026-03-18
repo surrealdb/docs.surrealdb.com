@@ -4,10 +4,7 @@ sidebar_label: Encoding functions
 title: Encoding functions | SurrealQL
 description: These functions can be used to encode and decode data in base64. It is particularly used when that data needs to be stored and transferred over media that are designed to deal with text. This encoding and decoding helps to ensure that the data remains intact without modification during transport.
 ---
-import Since from '@components/shared/Since.astro'
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # Encoding functions
 
@@ -46,23 +43,23 @@ These functions can be used to encode and decode data into other formats, such a
 
 The `encoding::base64::encode()` function encodes a bytes to base64 with optionally padded output.
 
-<Tabs>
+<tabs>
 
-<TabItem label="API DEFINITION (before 2.3.0)">
+<tabitem label="API DEFINITION (before 2.3.0)">
 ```surql
 encoding::base64::encode(bytes) -> string
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem label="API DEFINITION (after 2.3.0)">
+<tabitem label="API DEFINITION (after 2.3.0)">
 ```surql
 encoding::base64::encode(bytes, $pad_output: option<bool>) -> string
 ```
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 The following example shows this function, and its output, when used in a [`RETURN`](/docs/surrealql/statements/return) statement:
 
@@ -182,7 +179,7 @@ RETURN encoding::base64::decode("aGVsbG8") = <bytes>"hello";
 
 ## `encoding::cbor::decode()`
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 The `encoding::cbor::decode()` function decodes bytes in valid CBOR format into a SurrealQL value.
 
@@ -215,7 +212,7 @@ encoding::cbor::decode($some_bytes);
 
 ## `encoding::cbor::encode()`
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 The `encoding::cbor::encode()` function encodes any SurrealQL value into bytes in CBOR format.
 

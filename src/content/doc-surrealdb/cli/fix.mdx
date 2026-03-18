@@ -5,7 +5,6 @@ title: Fix command | CLI tool
 description: A command to convert SurrealDB version 1.x data into a usable format for versions 2.0 and above.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Fix command
 
@@ -27,7 +26,7 @@ The fix command converts SurrealDB version 1.x data into a format that can be us
         <tr>
             <td>
                 `-e` / `--log`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
             Sets the logging level during the command

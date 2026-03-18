@@ -5,8 +5,6 @@ title: Authentication | PHP SDK | Integration | SurrealDB
 description: Learn how to authenticate users and secure the database with the SurrealDB PHP SDK.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # Authentication
 
@@ -69,8 +67,8 @@ $db->signup([
 
 To signin with credentials, you can use the [`signin`](/docs/sdk/php/methods/signin) method.
 
-<Tabs groupId="php-signin">
-  <TabItem value="root" label="Root" default>
+<tabs synckey="php-signin">
+  <tabitem label="Root">
 		Root authentication gives you access to all namespaces and databases within the SurrealDB instance.
 		```php
 		$token = $db->signin([
@@ -78,8 +76,8 @@ To signin with credentials, you can use the [`signin`](/docs/sdk/php/methods/sig
 			"password" => "secret"
 		]);
 		```
-	</TabItem>
-	<TabItem value="namespace" label="Namespace">
+	</tabitem>
+	<tabitem label="Namespace">
 		Namespace authentication gives you access to all databases within a particular namespace.
 		```php
 		$token = $db->signin([
@@ -88,8 +86,8 @@ To signin with credentials, you can use the [`signin`](/docs/sdk/php/methods/sig
 			"namespace" => "surrealdb"
 		]);
 		```
-	</TabItem>
-	<TabItem value="database" label="Database">
+	</tabitem>
+	<tabitem label="Database">
 		Database authentication gives you access to all data within a single database.
 		```php
 		$token = $db->signin([
@@ -99,8 +97,8 @@ To signin with credentials, you can use the [`signin`](/docs/sdk/php/methods/sig
 			"database" => "surrealdb"
 		]);
 		```
-	</TabItem>
-	<TabItem value="scope" label="Scope">
+	</tabitem>
+	<tabitem label="Scope">
 		Authenticate using a specific [Scope](/docs/surrealql/statements/define/scope) within a database.
 		```php
 		$token = $db->signin([
@@ -111,8 +109,8 @@ To signin with credentials, you can use the [`signin`](/docs/sdk/php/methods/sig
 			"scope" => "user"
 		]);
 		```
-	</TabItem>
-		<TabItem value="access" label="Access">
+	</tabitem>
+		<tabitem label="Access">
 		Authenticate using a specific [access method](/docs/surrealql/statements/define/access) within a database.
 		```php
 		$token = $db->signin([
@@ -123,8 +121,8 @@ To signin with credentials, you can use the [`signin`](/docs/sdk/php/methods/sig
 			"access" => "user"
 		]);
 		```
-	</TabItem>
-</Tabs>
+	</tabitem>
+</tabs>
 
 ## Signin with auth token
 

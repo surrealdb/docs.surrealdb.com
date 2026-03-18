@@ -5,15 +5,12 @@ title: Select Method in Rust | Rust SDK | Integration | SurrealDB
 description: The .select() method for the SurrealDB Rust SDK selects all or specific records from the database.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
-import Label from "@components/shared/Label.astro";
 
 # `select()`
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 Selects all records in a table, or a specific record, from the database.
 
@@ -104,9 +101,9 @@ SELECT * FROM $resource;
 
 * [.select() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.select)
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 Selects all records in a table, or a specific record, from the database.
 
@@ -196,6 +193,6 @@ SELECT * FROM $resource;
 
 * [.select() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.select)
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

@@ -4,10 +4,6 @@ sidebar_label: DEFINE ANALYZER
 title: DEFINE ANALYZER statement | SurrealQL
 description: In the context of a database, an analyzer plays a crucial role in text processing and searching. It is defined by its name, a set of tokenizers, and a collection of filters.
 ---
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 # `DEFINE ANALYZER` statement
 
@@ -24,37 +20,21 @@ The output of an analyzer can be experimented with by using the [`search::analyz
 
 ## Statement syntax
 
-<Tabs syncKey="define-analyzer-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="define-analyzer-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 DEFINE ANALYZER [ OVERWRITE | IF NOT EXISTS ] @name [ FUNCTION @function ] [ TOKENIZERS @tokenizers ] [ FILTERS @filters ] [ COMMENT @string ]
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const defineAnalyzerAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "DEFINE" },
-      { type: "Terminal", text: "ANALYZER" },
-      { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Terminal", text: "OVERWRITE" }, { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "NOT" }, { type: "Terminal", text: "EXISTS" } ] } ] } },
-      { type: "NonTerminal", text: "@name" },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "FUNCTION" }, { type: "NonTerminal", text: "@function" } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "TOKENIZERS" }, { type: "NonTerminal", text: "@tokenizers" } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "FILTERS" }, { type: "NonTerminal", text: "@filters" } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "COMMENT" }, { type: "NonTerminal", text: "@string" } ] } }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={defineAnalyzerAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DEFINE"},{"type":"Terminal","text":"ANALYZER"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"OVERWRITE"},{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}]}},{"type":"NonTerminal","text":"@name"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"FUNCTION"},{"type":"NonTerminal","text":"@function"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"TOKENIZERS"},{"type":"NonTerminal","text":"@tokenizers"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"FILTERS"},{"type":"NonTerminal","text":"@filters"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"COMMENT"},{"type":"NonTerminal","text":"@string"}]}}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## The `FUNCTION` clause
 
@@ -239,7 +219,6 @@ search::analyze("example_edgengram", "apple banana");
 ]
 ```
 
-{/* Add Since here once next version out */}
 
 ### `mapper(path)`
 
@@ -487,7 +466,6 @@ RETURN [
 ## Using `IF NOT EXISTS` clause
 
 
-
 The `IF NOT EXISTS` clause can be used to define an analyzer only if it does not already exist. You should use the `IF NOT EXISTS` clause when defining an analyzer in SurrealDB if you want to ensure that the analyzer is only created if it does not already exist. If the analyzer already exists, the `DEFINE ANALYZER` statement will return an error.
 
 It's particularly useful when you want to safely attempt to define a analyzer without manually checking its existence first.
@@ -501,7 +479,7 @@ DEFINE ANALYZER IF NOT EXISTS example TOKENIZERS blank;
 
 ## Using `OVERWRITE` clause
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `OVERWRITE` clause can be used to create an analyzer and overwrite an existing one if it already exists. You should use the `OVERWRITE` clause when you want to modify an existing analyzer definition. If the analyzer already exists, the `DEFINE ANALYZER` statement will overwrite the existing analyzer definition with the new one.
 

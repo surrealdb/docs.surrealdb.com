@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | BoundQuery
 description: Parameterized query class for safe query composition.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `BoundQuery<R>` {#boundquery}
 
@@ -45,12 +44,12 @@ new BoundQuery(query, bindings?) // From string and bindings
     </thead>
     <tbody>
         <tr>
-            <td><code>query</code> <Label label="optional" /></td>
+            <td><code>query</code> <label label="optional" /></td>
             <td><code>string | BoundQuery</code></td>
             <td>Query string or existing BoundQuery to clone.</td>
         </tr>
         <tr>
-            <td><code>bindings</code> <Label label="optional" /></td>
+            <td><code>bindings</code> <label label="optional" /></td>
             <td><code>Record&lt;string, unknown&gt;</code></td>
             <td>Parameter bindings.</td>
         </tr>
@@ -135,7 +134,7 @@ query.append`template ${value}`
             <td>Query to append.</td>
         </tr>
         <tr>
-            <td><code>bindings</code> <Label label="optional" /></td>
+            <td><code>bindings</code> <label label="optional" /></td>
             <td><code>Record&lt;string, unknown&gt;</code></td>
             <td>Bindings for the appended query.</td>
         </tr>
@@ -186,12 +185,12 @@ query.bind(key, value)
     </thead>
     <tbody>
         <tr>
-            <td><code>key</code> <Label label="required" /></td>
+            <td><code>key</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>Parameter name (without $ prefix).</td>
         </tr>
         <tr>
-            <td><code>value</code> <Label label="required" /></td>
+            <td><code>value</code> <label label="required" /></td>
             <td><code>unknown</code></td>
             <td>Parameter value.</td>
         </tr>

@@ -4,8 +4,6 @@ sidebar_label: Langchain
 title: Langchain
 description: Use SurrealDB native vector indexes as a drop-in **Vector Store** for LangChain.
 ---
-import VidMp4 from "@assets/video/langchain-vectorstore.mp4";
-import VidWebm from "@assets/video/langchain-vectorstore.webm";
 
 # Langchain
 
@@ -17,19 +15,6 @@ For LangChain applications, which often juggle diverse data types for tasks like
 
 In this guide, we'll walk through how to use SurrealDB as a vector store for LangChain.
 
-
-{/* Commented out until our LangChain vector store supports both algorithms. At the moment it only supports M-Tree */}
-
-{/*
-SurrealDB is a multi-model database that ships two built-in vector-search algorithms:
-
-| Algorithm | Kind | When to use |
-|-----------|------|-------------|
-| **HNSW**  | Approx. ANN, in-memory or on-disk | Low-latency semantic search / RAG |
-| **M-Tree**| Exact metric tree, on-disk       | Smaller datasets where recall = 100 % matters |
-
-You expose either one with a single `DEFINE INDEX … HNSW|MTREE` statement in SurrealQL
-*/}
 
 <video class="w-full" width="630" height="300" controls>
     <source src={VidMp4} type="video/mp4" />

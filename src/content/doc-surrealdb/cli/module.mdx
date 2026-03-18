@@ -4,12 +4,10 @@ sidebar_label: Module command
 title: Module command | CLI tool
 description: A command used to compile, manage and execute Surrealism plugin modules.
 ---
-import Since from '@components/shared/Since.astro'
-import Label from "@components/shared/Label.astro";
 
 # Module command
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 The module command is used to compile, manage and execute [Surrealism extension modules](/docs/surrealdb/extensions) on the command line.
 
@@ -94,6 +92,5 @@ Logging:
       --log-file-rotation <LOG_FILE_ROTATION>  The log file rotation interval [env: SURREAL_LOG_FILE_ROTATION=] [default: daily] [possible
                                                values: daily, hourly, never]
 ```
-
 
 

@@ -5,7 +5,6 @@ title: JavaScript | SDK | Methods | insert
 description: The SurrealDB SDK for JavaScript enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.insert()` {#insert}
 
@@ -27,7 +26,7 @@ db.insert<T,U>(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or [`RecordId`](/docs/1.x/sdk/javascript/data-types#recordid) to insert to.
@@ -36,7 +35,7 @@ db.insert<T,U>(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Either a single document/record or an array of documents/records to insert

@@ -9,36 +9,24 @@ description: The CONTINUE statement can be used to skip an iteration of a loop, 
 
 The CONTINUE statement can be used to skip an iteration of a loop, like within the [FOR statement](/docs/surrealql/statements/for).
 
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 ### Statement syntax
 
-<Tabs syncKey="continue-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="continue-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 CONTINUE
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const continueAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "CONTINUE" }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={continueAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"CONTINUE"}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example usage
 

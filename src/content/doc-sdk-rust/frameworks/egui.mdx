@@ -5,14 +5,12 @@ title: Rust | SDKs | Integration
 description: The SDK for Rust allows SurrealDB to be used as the storage backend for an Egui visual app
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # SurrealDB with Egui
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 The following tutorial will set up a small app with Egui that uses SurrealDB as its database.
 
@@ -859,9 +857,9 @@ Now that you have a running Egui app with SurrealDB as the backend, here are som
 
 * Compiling to WASM (and even deploying to a website). Egui can be compiled to WASM, and SurrealDB can use IndexedDB as [one of its backends](/docs/surrealdb/cli/start#positional-argument).
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 The following tutorial will set up a small app with Egui that uses SurrealDB as its database.
 
@@ -1704,6 +1702,6 @@ Now that you have a running Egui app with SurrealDB as the backend, here are som
 
 * Compiling to WASM (and even deploying to a website). Egui can be compiled to WASM, and SurrealDB can use IndexedDB as [one of its backends](/docs/surrealdb/cli/start#positional-argument).
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

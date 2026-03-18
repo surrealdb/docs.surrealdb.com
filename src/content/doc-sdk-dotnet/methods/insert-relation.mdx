@@ -5,7 +5,6 @@ title: .NET | SDK | Methods | InsertRelation
 description: The .NET SDK for SurrealDB enables you to insert a relation between two records.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.InsertRelation<T>()` {#insert_relation}
 
@@ -28,7 +27,7 @@ await db.InsertRelation<T>(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>table</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Optionally pass along a table to insert into.
@@ -37,7 +36,7 @@ await db.InsertRelation<T>(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Either a single document/record or an array of documents/records to insert
@@ -46,7 +45,7 @@ await db.InsertRelation<T>(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.

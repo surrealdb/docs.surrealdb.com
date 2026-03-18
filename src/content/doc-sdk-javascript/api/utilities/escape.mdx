@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | Escape Functions
 description: Functions for escaping identifiers and values in SurrealQL queries.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Escape Functions {#escape}
 
@@ -47,7 +46,7 @@ function escapeIdent(name: string): string
     </thead>
     <tbody>
         <tr>
-            <td><code>name</code> <Label label="required" /></td>
+            <td><code>name</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>The identifier to escape.</td>
         </tr>
@@ -117,7 +116,7 @@ function escapeRid(value: string | number): string
     </thead>
     <tbody>
         <tr>
-            <td><code>value</code> <Label label="required" /></td>
+            <td><code>value</code> <label label="required" /></td>
             <td><code>string | number</code></td>
             <td>The record ID component to escape.</td>
         </tr>
@@ -162,7 +161,7 @@ function escapeValue(value: unknown): string
     </thead>
     <tbody>
         <tr>
-            <td><code>value</code> <Label label="required" /></td>
+            <td><code>value</code> <label label="required" /></td>
             <td><code>unknown</code></td>
             <td>The value to escape.</td>
         </tr>

@@ -5,7 +5,6 @@ title: JavaScript | SDK | Methods | insertRelation
 description: The SurrealDB SDK for JavaScript enables you to insert a relation between two records.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.insertRelation()` {#insertRelation}
 
@@ -27,7 +26,7 @@ db.insertRelation<T>(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>table</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Optionally pass along a table to insert into.
@@ -36,7 +35,7 @@ db.insertRelation<T>(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Either a single document/record or an array of documents/records to insert

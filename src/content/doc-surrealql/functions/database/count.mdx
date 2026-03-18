@@ -5,7 +5,6 @@ title: Count function | SurrealQL
 description: This function can be used when counting field values and expressions.
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Count function
 
@@ -188,7 +187,7 @@ GROUP BY country;
 
 ## Using a `COUNT` index with `count()`
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 A `COUNT` index can be defined to speed up `count()` when used with a `GROUP ALL` clause. This allows `count()` to access a single stored value when it is called instead of iterating over the entire table.
 

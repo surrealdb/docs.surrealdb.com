@@ -5,11 +5,10 @@ title: Surrealism plugins
 description: Surrealism is a plugin feature that allows users to write code that can then be accessed inside a SurrealDB instance.
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Surrealism extensions
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 > [!NOTE]
 > Surrealism is currently in active development and is not yet stable. We are looking forward to any and all feedback on the plugin system, either via raising an issue or PR on the [SurrealDB repo](https://github.com/surrealdb/surrealdb), or anywhere else in the SurrealDB community such as our [Discord server](https://discord.gg/surrealdb).

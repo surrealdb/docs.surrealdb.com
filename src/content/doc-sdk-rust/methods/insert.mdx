@@ -5,14 +5,12 @@ title: Insert Method in Rust | Rust SDK | Integration | SurrealDB
 description: The .insert() method for the SurrealDB Rust SDK inserts a record or records into a table.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # `insert()`
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 ```rust title="Method Syntax"
 db.insert(resource).content(data);
@@ -258,9 +256,9 @@ SELECT ->founded->company FROM person;
 
 * [.insert() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.insert)
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 ```rust title="Method Syntax"
 db.insert(resource).content(data);
@@ -569,6 +567,6 @@ SELECT ->founded->company FROM person;
 
 * [.insert() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.insert)
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

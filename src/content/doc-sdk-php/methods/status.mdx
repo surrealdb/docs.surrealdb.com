@@ -5,7 +5,6 @@ title: Status Method in PHP | PHP SDK | Integration | SurrealDB
 description: The status method in the SurrealDB PHP SDK retrieves the current status of a remote database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->status()` {#status}
 

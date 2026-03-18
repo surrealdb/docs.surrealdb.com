@@ -5,7 +5,6 @@ title: .NET | SDK | Methods | Run
 description: The .NET SDK for SurrealDB enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Run()` {#run}
 
@@ -28,7 +27,7 @@ await db.Run(name, version, args)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>name</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The name of the [SurrealQL function](/docs/surrealql/functions/database).
@@ -37,7 +36,7 @@ await db.Run(name, version, args)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>version</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The version of the [SurrealQL function](/docs/surrealql/functions/database).
@@ -46,7 +45,7 @@ await db.Run(name, version, args)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>args</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The arguments used by the [SurrealQL function](/docs/surrealql/functions/database).
@@ -55,7 +54,7 @@ await db.Run(name, version, args)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.

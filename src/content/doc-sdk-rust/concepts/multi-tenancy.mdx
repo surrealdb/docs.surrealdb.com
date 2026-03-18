@@ -5,9 +5,8 @@ title: Multi-tenancy in the Rust SDK
 description: Multi-tenancy was introduced in SurrealDB 3.0, allowing multiple connections to be used simultaneously in the Rust SDK.
 ---
 
-import Since from "@components/shared/Since.astro";
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 # Multi-tenancy
 

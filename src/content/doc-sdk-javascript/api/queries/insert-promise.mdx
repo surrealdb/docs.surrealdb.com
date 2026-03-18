@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | InsertPromise
 description: InsertPromise provides chainable methods for configuring INSERT operations.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `InsertPromise<T, J>` {#insertpromise}
 
@@ -89,7 +88,7 @@ insertPromise.output(fields)
     </thead>
     <tbody>
         <tr>
-            <td><code>fields</code> <Label label="required" /></td>
+            <td><code>fields</code> <label label="required" /></td>
             <td><code>Output</code></td>
             <td><code>"NONE"</code>, <code>"AFTER"</code>, or specific field list.</td>
         </tr>
@@ -134,7 +133,7 @@ insertPromise.timeout(duration)
     </thead>
     <tbody>
         <tr>
-            <td><code>duration</code> <Label label="required" /></td>
+            <td><code>duration</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/duration">Duration</a></code></td>
             <td>Maximum time to wait.</td>
         </tr>
@@ -165,7 +164,7 @@ insertPromise.version(timestamp)
     </thead>
     <tbody>
         <tr>
-            <td><code>timestamp</code> <Label label="required" /></td>
+            <td><code>timestamp</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/datetime">DateTime</a></code></td>
             <td>The version timestamp.</td>
         </tr>

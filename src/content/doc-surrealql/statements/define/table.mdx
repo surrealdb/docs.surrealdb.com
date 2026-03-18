@@ -4,10 +4,6 @@ sidebar_label: DEFINE TABLE
 title: DEFINE TABLE statement | SurrealQL
 description: The DEFINE TABLE statement allows you to declare your table by name, enabling you to apply strict controls to a table's schema and access permissions.
 ---
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 # `DEFINE TABLE` statement
 
@@ -23,8 +19,8 @@ The `DEFINE TABLE` statement allows you to declare your table by name, enabling 
 
 ## Statement syntax
 
-<Tabs syncKey="define-table-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="define-table-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 DEFINE TABLE [ OVERWRITE | IF NOT EXISTS ] @name
@@ -46,66 +42,14 @@ DEFINE TABLE [ OVERWRITE | IF NOT EXISTS ] @name
     [ COMMENT @string ]
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const defineTableAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "DEFINE" },
-      { type: "Terminal", text: "TABLE" },
-      { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Terminal", text: "OVERWRITE" }, { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "NOT" }, { type: "Terminal", text: "EXISTS" } ] } ] } },
-      { type: "NonTerminal", text: "@name" },
-      { type: "Optional", child: { type: "Terminal", text: "DROP" } },
-      { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Terminal", text: "SCHEMAFULL" }, { type: "Terminal", text: "SCHEMALESS" } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [
-        { type: "Terminal", text: "TYPE" },
-        { type: "Choice", index: 1, children: [
-          { type: "Terminal", text: "ANY" },
-          { type: "Terminal", text: "NORMAL" },
-          { type: "Sequence", children: [
-            { type: "Terminal", text: "RELATION" },
-            { type: "Optional", child: { type: "Sequence", children: [ { type: "Choice", index: 1, children: [ { type: "Terminal", text: "IN" }, { type: "Terminal", text: "FROM" } ] }, { type: "NonTerminal", text: "@table" } ] } },
-            { type: "Optional", child: { type: "Sequence", children: [ { type: "Choice", index: 1, children: [ { type: "Terminal", text: "OUT" }, { type: "Terminal", text: "TO" } ] }, { type: "NonTerminal", text: "@table" } ] } },
-            { type: "Optional", child: { type: "Terminal", text: "ENFORCED" } }
-          ] }
-        ] }
-      ] } },
-      { type: "Optional", child: { type: "Sequence", children: [
-        { type: "Terminal", text: "AS" }, { type: "Terminal", text: "SELECT" }, { type: "NonTerminal", text: "@projections" },
-        { type: "Terminal", text: "FROM" }, { type: "NonTerminal", text: "@tables" },
-        { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "WHERE" }, { type: "NonTerminal", text: "@condition" } ] } },
-        { type: "Optional", child: { type: "Sequence", children: [
-          { type: "Terminal", text: "GROUP" },
-          { type: "Choice", index: 1, children: [
-            { type: "Sequence", children: [ { type: "Terminal", text: "BY" }, { type: "NonTerminal", text: "@groups" } ] },
-            { type: "Terminal", text: "ALL" }
-          ] }
-        ] } }
-      ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "CHANGEFEED" }, { type: "NonTerminal", text: "@duration" }, { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "INCLUDE" }, { type: "Terminal", text: "ORIGINAL" } ] } } ] } },
-      { type: "Optional", child: { type: "Sequence", children: [
-        { type: "Terminal", text: "PERMISSIONS" },
-        { type: "Choice", index: 1, children: [
-          { type: "Terminal", text: "NONE" },
-          { type: "Terminal", text: "FULL" },
-          { type: "Sequence", children: [ { type: "Terminal", text: "FOR" }, { type: "Terminal", text: "select" }, { type: "NonTerminal", text: "@expression" } ] },
-          { type: "Sequence", children: [ { type: "Terminal", text: "FOR" }, { type: "Terminal", text: "create" }, { type: "NonTerminal", text: "@expression" } ] },
-          { type: "Sequence", children: [ { type: "Terminal", text: "FOR" }, { type: "Terminal", text: "update" }, { type: "NonTerminal", text: "@expression" } ] },
-          { type: "Sequence", children: [ { type: "Terminal", text: "FOR" }, { type: "Terminal", text: "delete" }, { type: "NonTerminal", text: "@expression" } ] }
-        ] }
-      ] } },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "COMMENT" }, { type: "NonTerminal", text: "@string" } ] } }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={defineTableAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DEFINE"},{"type":"Terminal","text":"TABLE"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"OVERWRITE"},{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}]}},{"type":"NonTerminal","text":"@name"},{"type":"Optional","child":{"type":"Terminal","text":"DROP"}},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"SCHEMAFULL"},{"type":"Terminal","text":"SCHEMALESS"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"TYPE"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"ANY"},{"type":"Terminal","text":"NORMAL"},{"type":"Sequence","children":[{"type":"Terminal","text":"RELATION"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"IN"},{"type":"Terminal","text":"FROM"}]},{"type":"NonTerminal","text":"@table"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"OUT"},{"type":"Terminal","text":"TO"}]},{"type":"NonTerminal","text":"@table"}]}},{"type":"Optional","child":{"type":"Terminal","text":"ENFORCED"}}]}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"AS"},{"type":"Terminal","text":"SELECT"},{"type":"NonTerminal","text":"@projections"},{"type":"Terminal","text":"FROM"},{"type":"NonTerminal","text":"@tables"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"WHERE"},{"type":"NonTerminal","text":"@condition"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"GROUP"},{"type":"Choice","index":1,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"BY"},{"type":"NonTerminal","text":"@groups"}]},{"type":"Terminal","text":"ALL"}]}]}}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"CHANGEFEED"},{"type":"NonTerminal","text":"@duration"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"INCLUDE"},{"type":"Terminal","text":"ORIGINAL"}]}}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"PERMISSIONS"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"NONE"},{"type":"Terminal","text":"FULL"},{"type":"Sequence","children":[{"type":"Terminal","text":"FOR"},{"type":"Terminal","text":"select"},{"type":"NonTerminal","text":"@expression"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"FOR"},{"type":"Terminal","text":"create"},{"type":"NonTerminal","text":"@expression"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"FOR"},{"type":"Terminal","text":"update"},{"type":"NonTerminal","text":"@expression"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"FOR"},{"type":"Terminal","text":"delete"},{"type":"NonTerminal","text":"@expression"}]}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"COMMENT"},{"type":"NonTerminal","text":"@string"}]}}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example usage
 
@@ -517,7 +461,6 @@ DEFINE TABLE post SCHEMALESS
 ## Using `IF NOT EXISTS` clause
 
 
-
 The `IF NOT EXISTS` clause can be used to define a table only if it does not already exist. You should use the `IF NOT EXISTS` clause when defining a table in SurrealDB if you want to ensure that the table is only created if it does not already exist. If the table already exists, the `DEFINE TABLE` statement will return an error.
 
 It's particularly useful when you want to safely attempt to define a table without manually checking its existence first.
@@ -538,7 +481,7 @@ DEFINE TABLE IF NOT EXISTS reading;
 
 ## Using `OVERWRITE` clause
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `OVERWRITE` clause can be used to define a table and overwrite an existing one if it already exists. You should use the `OVERWRITE` clause when you want to modify an existing table definition. If the table already exists, the `DEFINE TABLE` statement will overwrite the existing table definition with the new one.
 
@@ -556,7 +499,7 @@ DEFINE TABLE OVERWRITE example;
 
 ## Table with specialized `TYPE`-clause
 
-<Since v="v1.4.0" />
+<since v="v1.4.0" />
 
 When defining a table in SurrealDB, you can specify the type of data that can be stored in the table. This can be done using the `TYPE` clause, followed by either `ANY`, `NORMAL`, or `RELATION`.
 
@@ -617,7 +560,7 @@ DEFINE TABLE assigned_to SCHEMAFULL TYPE RELATION IN tag OUT sticky
 
 ## Using ENFORCED to ensure that related records exist
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 As relations are represented by standalone tables, they can be constructed before any linked records exist.
 
@@ -705,7 +648,7 @@ RELATE city:one->road_to->city:three SET
 
 ## Inserting data from undefined fields on a `SCHEMAFULL` table
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 Previously, an insert into a `SCHEMAFULL` table would work even if extra data was present. The query below shows this behaviour, in which the data inside `unneeded_data` is simply filtered out.
 

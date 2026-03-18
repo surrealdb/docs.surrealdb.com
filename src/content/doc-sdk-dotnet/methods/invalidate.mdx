@@ -5,7 +5,6 @@ title: .NET | SDK | Methods | Invalidate
 description: The .NET SDK for SurrealDB enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Invalidate()` {#invalidate}
 
@@ -28,7 +27,7 @@ await db.Invalidate()
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Properties">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.

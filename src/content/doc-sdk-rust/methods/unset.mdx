@@ -5,14 +5,12 @@ title: Unset Method in Rust | Rust SDK | Integration | SurrealDB
 description: The .unset() method for the SurrealDB Rust SDK removes a parameter from the connection.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # `unset()`
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 Removes a parameter from this connection.
 
@@ -68,9 +66,9 @@ async fn main() -> surrealdb::Result<()> {
 
 * [.unset() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.unset)
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 Removes a parameter from this connection.
 
@@ -126,6 +124,6 @@ async fn main() -> surrealdb::Result<()> {
 
 * [.unset() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.unset)
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

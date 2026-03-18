@@ -5,8 +5,6 @@ title: GraphQL via Bruno | GraphQL
 description: In this section, you will explore querying SurrealDB using Bruno.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # GraphQL via Bruno
 
@@ -14,18 +12,18 @@ import TabItem from "@components/Tabs/TabItem.astro";
 
 Before you can start making queries, you need to start SurrealDB. You can do this by starting a new instance of SurrealDB with the [`surreal start`](/docs/surrealdb/cli/start) command, docker, Surrealist.
 
-<Tabs groupId="start-surreal">
-<TabItem value="cli" label="CLI">
+<tabs synckey="start-surreal">
+<tabitem label="CLI">
 ```bash
 surreal start --log debug --user root --password secret
 ```
-</TabItem>
-<TabItem value="docker" label="Docker">
+</tabitem>
+<tabitem label="Docker">
 ```bash
 docker run --rm --pull always -p 8000:8000 surrealdb/surrealdb:nightly start -u root -p secret
 ```
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 ## Create a new Bruno collection
 

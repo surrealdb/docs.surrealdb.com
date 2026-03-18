@@ -5,14 +5,12 @@ title: Update Method in Rust | Rust SDK | Integration | SurrealDB
 description: The .update() method for the SurrealDB Rust SDK updates all or specific records in the database.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # `update()`
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 Update all or specific records in the database.
 
@@ -347,9 +345,9 @@ UPDATE $resource PATCH $data;
 
 * [.update() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.update)
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 Update all or specific records in the database.
 
@@ -684,6 +682,6 @@ UPDATE $resource PATCH $data;
 
 * [.update() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.update)
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

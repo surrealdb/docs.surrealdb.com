@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | expr
 description: Type-safe expression builder for constructing SurrealQL conditions.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `expr()` {#expr}
 
@@ -45,7 +44,7 @@ function expr(expression: ExprLike): BoundQuery
     </thead>
     <tbody>
         <tr>
-            <td><code>expression</code> <Label label="required" /></td>
+            <td><code>expression</code> <label label="required" /></td>
             <td><code>ExprLike</code></td>
             <td>An expression created using operator functions.</td>
         </tr>

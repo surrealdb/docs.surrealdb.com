@@ -4,10 +4,6 @@ sidebar_label: DEFINE NAMESPACE
 title: DEFINE NAMESPACE statement | SurrealQL
 description: The DEFINE NAMESPACE statement can be used to setup namespaces, which can contain multiple databases.
 ---
-import Since from '@components/shared/Since.astro'
-import RailroadDiagram from '@components/RailroadDiagram.astro'
-import Tabs from '@components/Tabs/Tabs.astro'
-import TabItem from '@components/Tabs/TabItem.astro'
 
 # `DEFINE NAMESPACE` statement
 
@@ -21,34 +17,21 @@ Let's say that you're using SurrealDB to create a multi-tenant SaaS application.
 
 ## Statement syntax
 
-<Tabs syncKey="define-namespace-statement">
-  <TabItem label="SurrealQL Syntax">
+<tabs synckey="define-namespace-statement">
+  <tabitem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
 DEFINE NAMESPACE [ OVERWRITE | IF NOT EXISTS ] @name [ COMMENT @string ]
 ```
 
-  </TabItem>
-  <TabItem label="Railroad Diagram">
+  </tabitem>
+  <tabitem label="Railroad Diagram">
 
-export const defineNamespaceAst = {
-  type: "Diagram",
-  padding: [10, 20, 10, 20],
-  children: [
-    { type: "Sequence", children: [
-      { type: "Terminal", text: "DEFINE" },
-      { type: "Terminal", text: "NAMESPACE" },
-      { type: "Optional", child: { type: "Choice", index: 1, children: [ { type: "Terminal", text: "OVERWRITE" }, { type: "Sequence", children: [ { type: "Terminal", text: "IF" }, { type: "Terminal", text: "NOT" }, { type: "Terminal", text: "EXISTS" } ] } ] } },
-      { type: "NonTerminal", text: "@name" },
-      { type: "Optional", child: { type: "Sequence", children: [ { type: "Terminal", text: "COMMENT" }, { type: "NonTerminal", text: "@string" } ] } }
-    ]}
-  ]
-};
 
-<RailroadDiagram ast={defineNamespaceAst} className="my-6" />
+<railroaddiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DEFINE"},{"type":"Terminal","text":"NAMESPACE"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"OVERWRITE"},{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}]}},{"type":"NonTerminal","text":"@name"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"COMMENT"},{"type":"NonTerminal","text":"@string"}]}}]}]}' />
 
-  </TabItem>
-</Tabs>
+  </tabitem>
+</tabs>
 
 ## Example usage
 Below shows how you can create a namespace using the `DEFINE NAMESPACE` statement.
@@ -66,7 +49,6 @@ DEFINE NAMESPACE abcum;
 ```
 
 ## Using `IF NOT EXISTS` clause
-
 
 
 The `IF NOT EXISTS` clause can be used to define a namespace only if it does not already exist. You should use the `IF NOT EXISTS` clause when defining a namespace in SurrealDB if you want to ensure that the namespace is only created if it does not already exist. If the namespace already exists, the `DEFINE NAMESPACE` statement will return an error.
@@ -89,7 +71,7 @@ DEFINE NAMESPACE IF NOT EXISTS example;
 
 ## Using `OVERWRITE` clause
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `OVERWRITE` clause can be used to define a namespace and overwrite an existing one if it already exists. You should use the `OVERWRITE` clause when you want to modify an existing namespace definition. If the namespace already exists, the `DEFINE NAMESPACE` statement will overwrite the existing namespace definition with the new one.
 

@@ -5,7 +5,6 @@ title: Authentication | Security
 description: There are multiple forms of authentication built into SurrealDB, supporting server-side and client-side authentication.
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Authentication
 
@@ -119,7 +118,7 @@ curl -X POST \
 
 ## Record users
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 Record users represent users that are defined as a record in a database instead of through the `DEFINE USER` statement. Since these users exist as regular database records, they can have associated fields containing any information required for authentication and authorization.
 
@@ -265,7 +264,7 @@ curl -X POST \
 
 ## Sessions
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 Whenever authentication is performed with any kind of user against SurrealDB, a session is established between the client and the SurrealDB server with which the connection was established. These sessions exist only in memory on the server for the duration of the connection, whether it is a single request through the [HTTP REST API](/docs/surrealdb/integration/http) or through multiple requests in the same connection using the [WebSocket API](/docs/surrealdb/integration/rpc) and any of the [SDKs](/docs/surrealdb/integration/sdks) that leverage it.
 

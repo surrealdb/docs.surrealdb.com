@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | DateTime
 description: Datetime values with nanosecond precision for time-based operations.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `DateTime` {#datetime}
 
@@ -44,7 +43,7 @@ new DateTime([seconds, nanoseconds]) // From tuple
     </thead>
     <tbody>
         <tr>
-            <td><code>value</code> <Label label="optional" /></td>
+            <td><code>value</code> <label label="optional" /></td>
             <td><code>DateTime | Date | string | number | bigint | [bigint, bigint]</code></td>
             <td>Value to create datetime from. If omitted, uses current time.</td>
         </tr>
@@ -120,7 +119,7 @@ DateTime.parse(str)
     </thead>
     <tbody>
         <tr>
-            <td><code>str</code> <Label label="required" /></td>
+            <td><code>str</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>ISO 8601 formatted string.</td>
         </tr>
@@ -298,7 +297,7 @@ datetime.plus(duration)
     </thead>
     <tbody>
         <tr>
-            <td><code>duration</code> <Label label="required" /></td>
+            <td><code>duration</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/duration">Duration</a></code></td>
             <td>Duration to add.</td>
         </tr>
@@ -339,7 +338,7 @@ datetime.minus(duration)
     </thead>
     <tbody>
         <tr>
-            <td><code>duration</code> <Label label="required" /></td>
+            <td><code>duration</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/duration">Duration</a></code></td>
             <td>Duration to subtract.</td>
         </tr>

@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | RunPromise
 description: RunPromise provides methods for executing SurrealDB functions and SurrealML models.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `RunPromise<T, J>` {#runpromise}
 

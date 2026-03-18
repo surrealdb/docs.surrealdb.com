@@ -5,10 +5,6 @@ title:  Using SurrealDB as a Graph Database | Data Models
 description: In this guide you will learn how to “think” in a graph database model and show how SurrealDB helps you implement these concepts seamlessly.
 ---
 
-import Image from "@components/Image.astro";
-import LightLogo from "@img/icon/light/neo4j.png";
-import DarkLogo from "@img/icon/dark/neo4j.png";
-
 
 # Using SurrealDB as a Graph Database
 

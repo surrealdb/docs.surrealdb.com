@@ -6,11 +6,10 @@ description: Record references allow you to link records together, enabling you 
 
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Record references
 
-<Since v="v2.2.0" />
+<since v="v2.2.0" />
 
 ## Basic concepts
 

@@ -5,14 +5,12 @@ title: Flexible Typing in Rust | Rust SDK | SurrealDB
 description: The Rust SDK for SurrealDB offers methods for working with types without deserialization
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # Flexible typing
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 Most examples in the Rust SDK feature strict types like the following that can be serialized and deserialized as needed.
 
@@ -263,9 +261,9 @@ Output:
 [{ age: 15, id: student:n89ugobw4iaw7gw3lh9b, weekly_allowance: 20.5f }]
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 Most examples in the Rust SDK feature strict types like the following that can be serialized and deserialized as needed.
 
@@ -501,6 +499,6 @@ Output:
 { age: 15, id: student:gp6g0p7t23musi3ms77d, weekly_allowance: 20.5f }
 ```
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

@@ -5,7 +5,6 @@ title: QueryRaw Method in PHP | PHP SDK | Integration | SurrealDB
 description: The queryRaw method in the SurrealDB PHP SDK allows you to execute raw SQL queries and return the raw RPC response.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->queryRaw()` {#queryRaw}
 
@@ -30,7 +29,7 @@ $db->queryRaw($query, $params);
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>$query</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>string</code>
@@ -42,7 +41,7 @@ $db->queryRaw($query, $params);
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>$params</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>associative array</code>

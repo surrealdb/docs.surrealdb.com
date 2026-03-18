@@ -4,7 +4,6 @@ sidebar_label: Validate command
 title: Validate command | CLI tool
 description: A command to confirm whether one or more SurrealQL files are valid or not.
 ---
-import Label from "@components/shared/Label.astro";
 
 # Validate command
 

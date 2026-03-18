@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | Duration
 description: Time duration values with support for multiple units and nanosecond precision.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `Duration` {#duration}
 
@@ -41,7 +40,7 @@ new Duration([seconds, nanoseconds]) // From tuple
     </thead>
     <tbody>
         <tr>
-            <td><code>value</code> <Label label="required" /></td>
+            <td><code>value</code> <label label="required" /></td>
             <td><code>Duration | string | [bigint, bigint]</code></td>
             <td>Value to create duration from.</td>
         </tr>
@@ -144,7 +143,7 @@ Duration.parse(str)
     </thead>
     <tbody>
         <tr>
-            <td><code>str</code> <Label label="required" /></td>
+            <td><code>str</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>Duration string (e.g., <code>"5h30m"</code>).</td>
         </tr>
@@ -265,7 +264,7 @@ duration.plus(other)
     </thead>
     <tbody>
         <tr>
-            <td><code>other</code> <Label label="required" /></td>
+            <td><code>other</code> <label label="required" /></td>
             <td><code>Duration</code></td>
             <td>Duration to add.</td>
         </tr>

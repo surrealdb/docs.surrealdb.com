@@ -5,10 +5,6 @@ title: .NET | SDK | Methods | SignIn
 description: The .NET SDK for SurrealDB enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
-import Since from "@components/shared/Since.astro";
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # `.SignIn()` {#signin}
 
@@ -31,7 +27,7 @@ await db.SignIn(credentials)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>credentials</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Variables used in a signin query.
@@ -40,7 +36,7 @@ await db.SignIn(credentials)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -51,17 +47,17 @@ await db.SignIn(credentials)
 
 ### Example usage
 
-<Tabs groupId="signin-example">
-<TabItem value="root" label="Root user">
+<tabs synckey="signin-example">
+<tabitem label="Root user">
 
 ```csharp
 // Sign in as root user
 await db.SignIn(new RootAuth { Username = "root", Password = "secret" });
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem value="namespace" label="Namespace user">
+<tabitem label="Namespace user">
 
 ```csharp
 // Sign in using namespace auth
@@ -75,9 +71,9 @@ await db.SignIn(
 );
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem value="database" label="Database user">
+<tabitem label="Database user">
 
 ```csharp
 // Sign in using database auth
@@ -92,9 +88,9 @@ await db.SignIn(
 );
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem value="record" label="Record Access">
+<tabitem label="Record Access">
 
 ```csharp
 // Sign in with Record Access
@@ -117,9 +113,9 @@ public class AuthParams : ScopeAuth
 }
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem value="scope" label="Scopes">
+<tabitem label="Scopes">
 
 ```csharp
 // Sign in as a scoped user
@@ -142,7 +138,7 @@ public class AuthParams : ScopeAuth
 }
 ```
 
-</TabItem>
-</Tabs>
+</tabitem>
+</tabs>
 
 You can invalidate the authentication for the current connection using the [`Invalidate()` method](/docs/sdk/dotnet/methods/invalidate).

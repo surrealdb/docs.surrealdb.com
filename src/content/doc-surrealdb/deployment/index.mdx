@@ -5,30 +5,6 @@ title: Deployment
 description: Getting started with SurrealDB is quick and easy. Follow these tutorials for deploying SurrealDB in different environments.
 ---
 
-import Image from "@components/Image.astro";
-import Boxes from "@components/boxes/Boxes.astro";
-import IconBox from "@components/boxes/IconBox.astro";
-
-import LightFly from "@img/icon/light/fly.png";
-import LightHeroku from "@img/icon/light/heroku.png";
-import LightRailway from "@img/icon/light/railway.png";
-import LightDigitalOcean from "@img/icon/light/digitalocean.png";
-import LightKubernetes from "@img/icon/light/kubernetes.png";
-import LightGoogle from "@img/icon/light/google.png";
-import LightAmazon from "@img/icon/light/amazon.png";
-import LightAzure from "@img/icon/light/azure.png";
-
-import LightCloud from '@img/image/cloud/surrealcloud.png';
-import DarkCloud from '@img/image/cloud/surrealcloud.png';
-
-import DarkFly from "@img/icon/dark/fly.png";
-import DarkHeroku from "@img/icon/dark/heroku.png";
-import DarkRailway from "@img/icon/dark/railway.png";
-import DarkDigitalOcean from "@img/icon/dark/digitalocean.png";
-import DarkKubernetes from "@img/icon/dark/kubernetes.png";
-import DarkGoogle from "@img/icon/dark/google.png";
-import DarkAmazon from "@img/icon/dark/amazon.png";
-import DarkAzure from "@img/icon/dark/azure.png";
 
 # Deployment
 

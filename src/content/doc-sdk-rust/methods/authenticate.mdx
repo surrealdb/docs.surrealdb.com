@@ -5,14 +5,12 @@ title: Authenticate Method in Rust | Rust SDK | Integration | SurrealDB
 description: The .authenticate() method for the SurrealDB Rust SDK authenticates the current connection with a JWT token.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # `authenticate()`
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 Authenticates the current connection with a JWT token.
 
@@ -121,9 +119,9 @@ async fn main() -> surrealdb::Result<()> {
 }
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 Authenticates the current connection with a JWT token.
 
@@ -224,6 +222,6 @@ async fn main() -> surrealdb::Result<()> {
 
 * [.authenticate() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.authenticate)
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>

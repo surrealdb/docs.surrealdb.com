@@ -8,7 +8,6 @@ description: Setting scope access allows SurrealDB to operate as a web database.
 > [!WARNING]
 > This statement was deprecated in favour of `DEFINE ACCESS ... TYPE RECORD` in SurrealDB versions 2.x, and has been removed as of SurrealDB 3.0. Learn more in the [DEFINE ACCESS](/docs/surrealql/statements/define/access).
 
-import Since from '@components/shared/Since.astro'
 
 # `DEFINE SCOPE` statement
 
@@ -37,7 +36,6 @@ DEFINE SCOPE account SESSION 24h
 ```
 
 ## Using `IF NOT EXISTS` clause
-
 
 
 The `IF NOT EXISTS` clause can be used to define a scope only if it does not already exist. If the scope already exists, the `DEFINE SCOPE` statement will return an error.

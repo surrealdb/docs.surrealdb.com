@@ -5,14 +5,12 @@ title: Delete Method in Rust | Rust SDK | Integration | SurrealDB
 description: The .delete() method for the SurrealDB Rust SDK deletes all or specific records from the database.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # `delete()`
 
-<Tabs>
+<tabs>
 
-<TabItem label="3.x">
+<tabitem label="3.x">
 
 Deletes all records in a table, or a specific record, from the database.
 
@@ -76,9 +74,9 @@ async fn main() -> surrealdb::Result<()> {
 }
 ```
 
-</TabItem>
+</tabitem>
 
-<TabItem label="2.x">
+<tabitem label="2.x">
 
 Deletes all records in a table, or a specific record, from the database.
 
@@ -143,9 +141,9 @@ async fn main() -> surrealdb::Result<()> {
 }
 ```
 
-</TabItem>
+</tabitem>
 
-</Tabs>
+</tabs>
 
 ### Translated query
 
