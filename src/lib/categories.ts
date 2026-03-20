@@ -1,30 +1,36 @@
-// export type CategoryMeta = {
-//     sidebar_label: string;
-//     sidebar_position: number;
-// };
+export type CategoryMeta = {
+    sidebar_label: string;
+    sidebar_position: number;
+};
 
-// const categoryModules = import.meta.glob("../content/**/_category_.json", {
-//     import: "default",
-//     eager: true,
-// }) as Record<string, CategoryMeta>;
+let categoryIndex: Map<string, Map<string, CategoryMeta>> | undefined;
 
-// const categoryIndex = new Map<string, Map<string, CategoryMeta>>();
+function loadCategoryIndex(): Map<string, Map<string, CategoryMeta>> {
+    const categoryModules = import.meta.glob("../content/**/_category_.json", {
+        import: "default",
+        eager: true,
+    }) as Record<string, CategoryMeta>;
 
-// for (const [filePath, data] of Object.entries(categoryModules)) {
-//     const m = filePath.match(/\/content\/([^/]+)\/(.+)\/_category_\.json$/);
-//     if (!m) continue;
+    const index = new Map<string, Map<string, CategoryMeta>>();
 
-//     const collection = m[1];
-//     const dirPath = m[2];
+    for (const [filePath, data] of Object.entries(categoryModules)) {
+        const m = filePath.match(/\/content\/([^/]+)\/(.+)\/_category_\.json$/);
+        if (!m) continue;
 
-//     if (!categoryIndex.has(collection)) {
-//         categoryIndex.set(collection, new Map());
-//     }
+        const collection = m[1];
+        const dirPath = m[2];
 
-//     const collectionCategories = categoryIndex.get(collection);
-//     collectionCategories?.set(dirPath, data);
-// }
+        if (!index.has(collection)) {
+            index.set(collection, new Map());
+        }
 
-// export function getCategories(collection: string): Map<string, CategoryMeta> {
-//     return categoryIndex.get(collection) ?? new Map();
-// }
+        index.get(collection)?.set(dirPath, data);
+    }
+
+    return index;
+}
+
+export function getCategories(collection: string): Map<string, CategoryMeta> {
+    categoryIndex ??= loadCategoryIndex();
+    return categoryIndex.get(collection) ?? new Map();
+}
