@@ -16,9 +16,12 @@ export default {
             env: { client: true, server: true },
         },
         data: {
-            env: { server: true },
+            env: { server: true, client: false },
         },
         sitemap: {
+            env: { server: true, client: false },
+        },
+        Content: {
             env: { server: true, client: false },
         },
     },
