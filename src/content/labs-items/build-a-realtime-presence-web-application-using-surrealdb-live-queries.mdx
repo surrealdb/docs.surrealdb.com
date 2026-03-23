@@ -1,6 +1,6 @@
 ---
 title: "Build a realtime presence web application using SurrealDB Live Queries"
-url: /docs/tutorials/build-a-realtime-presence-web-application-using-surrealdb-live-queries
+url: /docs/surrealdb/tutorials/build-a-realtime-presence-web-application-using-surrealdb-live-queries
 category: Documentation
 author:
   name: David Bottiau
