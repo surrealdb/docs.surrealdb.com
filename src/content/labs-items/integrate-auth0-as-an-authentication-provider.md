@@ -1,6 +1,6 @@
 ---
-title: "Integrate Auth0 as an Authentication Provider"
-url: /docs/tutorials/integrate-auth0-as-authentication-provider
+title: "Integrate Auth0 as an authentication provider"
+url: /docs/surrealdb/tutorials/integrate-auth0-as-authentication-provider
 category: Documentation
 topics:
   - Security
