@@ -63,7 +63,7 @@ export default defineConfig({
         fixServerEntryAutoImport(),
         vikeSitemap({
             baseUrl: "https://surrealdb.com/docs",
-            outDir: "./.vercel/output/static",
+            outDir: "./.vercel/output/static/docs",
             outFile: "sitemap.xml",
             robots: true,
             priority: (url, { urls }) => {
@@ -82,9 +82,9 @@ export default defineConfig({
                 { match: "/", changefreq: "weekly" },
                 { match: /^\/surrealdb/, changefreq: "weekly" },
                 { match: /^\/surrealql/, changefreq: "weekly" },
-                { match: /^\/sdk\//, changefreq: "monthly" },
-                { match: /^\/cloud/, changefreq: "monthly" },
-                { match: /^\/\d+\.x\//, changefreq: "yearly" },
+                { match: /^\/sdk\//, changefreq: "weekly" },
+                { match: /^\/cloud/, changefreq: "weekly" },
+                { match: /^\/\d+\.x\//, changefreq: "weekly" },
             ],
             exclude: [/^\/404$/, /^\/500$/],
             trailingSlash: false,
