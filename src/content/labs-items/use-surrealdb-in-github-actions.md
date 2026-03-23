@@ -1,6 +1,6 @@
 ---
 title: "Use SurrealDB in GitHub Actions"
-url: /docs/tutorials/using-github-actions
+url: /docs/surrealdb/tutorials/using-github-actions
 category: Documentation
 topics:
   - Examples

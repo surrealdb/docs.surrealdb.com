@@ -52,7 +52,6 @@ const redirects = {
 	'/docs/surrealdb/surrealql/functions/vector': '/docs/surrealdb/surrealql/functions/database/vector',
 	'/docs/intro': '/docs/surrealdb',
 	'/docs/surrealdb/intro': '/docs/surrealdb',
-	'/docs/surrealdb/tutorials': '/docs/tutorials',
 	'/docs/surrealdb/surrealql': '/docs/surrealql',
 	'/docs/surrealdb/installation/upgrading/beta': '/docs/installation/upgrading/migrating-data-to-2x',
 	'/docs/surrealdb/deployment/heroku': '/docs/surrealdb/deployment',
