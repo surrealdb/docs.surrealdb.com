@@ -19,7 +19,7 @@ export default {
             env: { server: true, client: false },
         },
         sitemap: {
-            env: { server: true, client: false },
+            env: { config: true, server: true, client: false },
         },
         Content: {
             env: { server: true, client: false },
