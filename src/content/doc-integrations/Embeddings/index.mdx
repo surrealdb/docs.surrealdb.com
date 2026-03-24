@@ -5,14 +5,6 @@ title: Embeddings | Overview
 description: This section contains information about different LLM models you can use with SurrealDB.
 ---
 
-import Boxes from '@src/components/boxes/Boxes.astro';
-import IconBox from '@components/boxes/IconBox.astro';
-
-import LightPython from '@img/icon/light/python.png';
-import LightRust from '@img/icon/light/rust.png';
-
-import DarkPython from '@img/icon/dark/python.png';
-import DarkRust from '@img/icon/dark/rust.png';
 
 # Embeddings
 

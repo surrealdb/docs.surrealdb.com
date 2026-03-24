@@ -5,7 +5,6 @@ title: JavaScript | SDK | Methods | merge
 description: The SurrealDB SDK for JavaScript enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.merge()` {#merge}
 
@@ -30,7 +29,7 @@ db.merge<T,U>(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or the specific [`RecordId`](/docs/1.x/sdk/javascript/data-types#recordid) to merge.
@@ -39,7 +38,7 @@ db.merge<T,U>(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The document / record data to merge.

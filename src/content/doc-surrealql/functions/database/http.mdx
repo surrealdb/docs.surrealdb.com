@@ -4,7 +4,6 @@ sidebar_label: HTTP functions
 title: HTTP functions | SurrealQL
 description: These functions can be used when opening and submitting remote web requests, and webhooks.
 ---
-import Since from '@components/shared/Since.astro';
 
 # HTTP functions
 
@@ -48,7 +47,7 @@ These functions can be used when opening and submitting remote web requests, and
 
 ## Before you begin
 
-<Since v="v2.2.0" />
+<since v="v2.2.0" />
 
 From version `2.2` of SurrealDB, the HTTP functions have been improved to provide a more consistent and user-friendly experience. These improvements include:
 

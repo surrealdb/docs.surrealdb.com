@@ -5,11 +5,6 @@ title: Java | SDK | Handle authentication
 description: SurrealDB supports a number of methods for authenticating users and securing the database.
 ---
 
-import Label from "@components/shared/Label.astro";
-import Since from "@components/shared/Since.astro";
-import Version from '@components/Version.astro';
-import Tabs from "@components/Tabs/Tabs.astro";
-import TabItem from "@components/Tabs/TabItem.astro";
 
 # Handle authentication
 

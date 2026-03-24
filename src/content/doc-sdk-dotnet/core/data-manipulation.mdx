@@ -5,7 +5,6 @@ title: Data Manipulation | .NET | SDK | Concepts
 description: SurrealDB supports a number of methods for interacting with the database and performing CRUD operations.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Data Manipulation
 
@@ -79,7 +78,7 @@ await db.Select<T>(resource)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The table name or a [`RecordId`](/docs/sdk/dotnet/data-types#recordid) to select.
@@ -88,7 +87,7 @@ await db.Select<T>(resource)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -134,7 +133,7 @@ await db.Create<T>(resource, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or a [`RecordId`](/docs/sdk/dotnet/data-types#recordid) to create.
@@ -143,7 +142,7 @@ await db.Create<T>(resource, data)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The document / record data to insert.
@@ -152,7 +151,7 @@ await db.Create<T>(resource, data)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -207,7 +206,7 @@ await db.Insert<T>(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>table</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Optionally pass along a table to insert into.
@@ -216,7 +215,7 @@ await db.Insert<T>(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Either a single document/record or an array of documents/records to insert
@@ -225,7 +224,7 @@ await db.Insert<T>(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -279,7 +278,7 @@ await db.InsertRelation<T>(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>table</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Optionally pass along a table to insert into.
@@ -288,7 +287,7 @@ await db.InsertRelation<T>(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Either a single document/record or an array of documents/records to insert
@@ -297,7 +296,7 @@ await db.InsertRelation<T>(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -346,7 +345,7 @@ await db.Update<T>(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or the specific [`RecordId`](/docs/sdk/dotnet/data-types#recordid) to update.
@@ -355,7 +354,7 @@ await db.Update<T>(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The document / record data to update.
@@ -364,7 +363,7 @@ await db.Update<T>(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -426,7 +425,7 @@ await db.Upsert<T>(data)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The document / record data to insert.
@@ -435,7 +434,7 @@ await db.Upsert<T>(data)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -491,7 +490,7 @@ await db.Merge<T>(resource, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or the specific [`RecordId`](/docs/sdk/dotnet/data-types#recordid) to merge.
@@ -500,7 +499,7 @@ await db.Merge<T>(resource, data)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The data with which to modify the records.
@@ -509,7 +508,7 @@ await db.Merge<T>(resource, data)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -589,7 +588,7 @@ await db.Patch<T>(resource, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or the specific [`RecordId`](/docs/sdk/dotnet/data-types#recordid) to patch.
@@ -598,7 +597,7 @@ await db.Patch<T>(resource, data)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The JSON Patch data with which to patch the records.
@@ -607,7 +606,7 @@ await db.Patch<T>(resource, data)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -649,7 +648,7 @@ await db.Delete(resource)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or a [`RecordId`](/docs/sdk/dotnet/data-types#recordid) to delete.
@@ -658,7 +657,7 @@ await db.Delete(resource)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.

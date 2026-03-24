@@ -5,7 +5,6 @@ title: JavaScript | SDK | Methods | kill
 description: The SurrealDB SDK for JavaScript enables you to kill a running live query.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.kill()` {#kill}
 
@@ -27,7 +26,7 @@ db.kill(queryUuid)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>queryUuid</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The UUID of the live query you wish to kill

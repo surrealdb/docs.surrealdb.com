@@ -5,7 +5,6 @@ title: Record functions | SurrealQL
 description: These functions can be used to retrieve specific metadata from a SurrealDB Record ID.
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Record functions
 
@@ -144,7 +143,7 @@ RETURN record::tb(person:tobie);
 
 ## `record::is_edge`
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 The `record::is_edge` function checks to see if the value passed in is a graph edge.
 
@@ -175,7 +174,7 @@ record::is_edge("likes:first_like");
 
 ## Method chaining
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 Method chaining allows functions to be called using the `.` dot operator on a value of a certain type instead of the full path of the function followed by the value.
 

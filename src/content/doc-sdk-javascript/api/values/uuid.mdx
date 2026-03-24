@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | Uuid
 description: Universally unique identifiers for generating unique IDs.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `Uuid` {#uuid}
 
@@ -41,7 +40,7 @@ new Uuid(bytes) // From binary representation
     </thead>
     <tbody>
         <tr>
-            <td><code>value</code> <Label label="required" /></td>
+            <td><code>value</code> <label label="required" /></td>
             <td><code>Uuid | string | ArrayBuffer | Uint8Array</code></td>
             <td>Value to create UUID from.</td>
         </tr>
@@ -137,7 +136,7 @@ Uuid.parse(str)
     </thead>
     <tbody>
         <tr>
-            <td><code>str</code> <Label label="required" /></td>
+            <td><code>str</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>UUID string in standard format.</td>
         </tr>

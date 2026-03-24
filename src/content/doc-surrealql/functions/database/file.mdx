@@ -5,7 +5,6 @@ title: File functions | SurrealQL
 description: These functions can be used to work with files.
 ---
 
-import Since from '@components/shared/Since.astro';
 
 # File functions
 
@@ -74,7 +73,7 @@ These functions can be used to work with files.
   </tbody>
 </table>
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 ## `file::bucket`
 

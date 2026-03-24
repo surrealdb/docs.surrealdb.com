@@ -4,7 +4,6 @@ sidebar_label: subscribeLive
 title: JavaScript | SDK | Methods | subscribeLive
 description: The SurrealDB SDK for JavaScript enables you to listen for changes to records in a table.
 ---
-import Label from "@components/shared/Label.astro";
 
 
 # `.subscribeLive()` {#subscribeLive}
@@ -27,7 +26,7 @@ db.subscribeLive<T>(queryUuid, callback)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>queryUuid</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The UUID of a running live query
@@ -36,7 +35,7 @@ db.subscribeLive<T>(queryUuid, callback)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>callback</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 A callback function that processes live notifications. Consult the [Live Actions](#live-actions) for a list of all possible values being returned.

@@ -5,7 +5,6 @@ title: Built-in functions | Embedded scripting functions | SurrealQL
 description: Besides basic JavaScript utilities and classes for SurrealQL types, there are a handful of utilities built into the embedded scripting functions.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Built-in functions
 
@@ -52,7 +51,7 @@ Full fledged fetch implementation closely matching the [official specification](
         <tr>
             <td colspan="2">
                 <code>resource</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2">
                 Accepts either a url in a string, or a URL or Request object.
@@ -112,7 +111,7 @@ Run SurrealQL subqueries from within the embedded scripting functions.
         <tr>
             <td colspan="2">
                 <code>surql</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2">
                 Accepts a single SurrealQL query, which is limited to a CRUD operation.
@@ -163,7 +162,7 @@ Retrieve values for SurrealQL variables from within the embedded scripting funct
         <tr>
             <td colspan="2">
                 <code>variable</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2">
                 Accepts the path to a variable

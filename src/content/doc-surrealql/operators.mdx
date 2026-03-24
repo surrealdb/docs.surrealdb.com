@@ -5,14 +5,12 @@ title: Operators | SurrealQL
 description: A variety of operators in SurrealQL allow for complex manipulation of data, and advanced logic.
 ---
 
-import Since from '@components/shared/Since.astro'
-import Table from '@components/shared/Table.astro'
 
 # Operators
 
 A variety of operators in SurrealQL allow for complex manipulation of data, and advanced logic.
 
-<Table>
+<table>
 	<thead>
 		<tr>
 			<th scope="col" class="w-48">Operator</th>
@@ -507,7 +505,7 @@ A variety of operators in SurrealQL allow for complex manipulation of data, and 
 			</td>
 		</tr>
 	</tbody>
-</Table>
+</table>
 
 ## `&&` or `AND` {#and}
 
@@ -1253,7 +1251,7 @@ SELECT * FROM (-0.118092, 51.509865) INSIDE {
 true
 ```
 
-<Since v="v2.1.0" />
+<since v="v2.1.0" />
 
 This operator can also be used to check for the existence of a key inside an [object](/docs/surrealql/datamodel/objects). To do so, precede `IN` with the field name as a string.
 
@@ -1494,7 +1492,7 @@ ORDER BY score DESC;
 ]
 ```
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 ### `AND`, `OR`, and numeric operators inside `@@`
 
@@ -1547,7 +1545,6 @@ SELECT * FROM document WHERE text @@ "personal" OR text @@ "nice weather today";
 ## `KNN`
 
 
-
 K-Nearest Neighbors (KNN) is a fundamental algorithm used for classifying or regressing based on the closest data points in the feature space, with its performance and scalability critical in applications involving large datasets.
 
 In practice, the efficiency and scalability of the KNN algorithm are crucial, especially when dealing with large datasets. Different implementations of KNN are tailored to optimize these aspects without compromising the accuracy of the results.
@@ -1584,7 +1581,6 @@ SELECT id FROM pts WHERE point <|2,EUCLIDEAN|> [2,3,4,5];
 ### HNSW Method
 
 
-
 Recommended for very large datasets where speed is essential and some loss of accuracy is acceptable.
 
 ```syntax title="SurrealQL Syntax"
@@ -1616,7 +1612,7 @@ SELECT id FROM pts WHERE point <|10,40|> [2,3,4,5];
 
 ## Using the `ANY`/`ALL` operators for string indexes
 
-<Since v="v2.4.0" />
+<since v="v2.4.0" />
 
 An index defined on a string value can be used via the operators `CONTAINSANY`, `ALLINSIDE`, or `ANYINSIDE`. The operator `CONTAINS`, however, will not use a defined index as `CONTAINS` is used for substring matches between strings themselves as opposed to an index lookup.
 
@@ -1665,7 +1661,7 @@ SELECT * FROM account WHERE name CONTAINSANY ["Billy McConnell"] EXPLAIN FULL;
 
 To determine which operator is executed first, a concept called "binding power" is used. Operators with greater binding power will operate directly on their neighbours before those with lower binding power. The following is a list of all operator types from greatest to lowest binding power.
 
-<Table>
+<table>
 	<thead>
 		<tr>
 			<th scope="col" class="w-40">Operator name</th>
@@ -1762,7 +1758,7 @@ To determine which operator is executed first, a concept called "binding power" 
 			</td>
 		</tr>
 	</tbody>
-</Table>
+</table>
 
 ## Examples of binding power
 

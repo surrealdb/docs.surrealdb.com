@@ -5,7 +5,6 @@ title: Capabilities | Security
 description: SurrealDB is secure by default and is suitable for all database use cases. It offers powerful features like scripting, functions or network access from within your SurrealQL queries.
 ---
 
-import Since from "@components/shared/Since.astro";
 
 # Capabilities
 
@@ -314,7 +313,7 @@ It is **strongly recommended** that you deny by default by defining specific `--
 
 ## Arbitrary queries
 
-<Since v="v2.2.0" />
+<since v="v2.2.0" />
 
 The `--allow-arbitrary-query` and `--deny-arbitrary-query` allows database administrators to allow or deny arbitrary quering by either guest, record or system users, or a combination of those. This capability settings affects the following:  [/sql endpoint](/docs/surrealdb/integration/http#sql), [/key endpoints](/docs/surrealdb/integration/http#get-table), [/graphql endpoint](/docs/surrealdb/integration/http#graphql) and [RPC methods](/docs/surrealdb/integration/rpc) `use`, `select`, `create`, `update`, `merge`, `patch`, `delete`, `relate`, `insert`, `insert_relation`, `query` and `graphql`.
 

@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | Table
 description: Type-safe table references for query operations.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `Table<T>` {#table}
 
@@ -44,7 +43,7 @@ new Table<RecordType>(name)
     </thead>
     <tbody>
         <tr>
-            <td><code>name</code> <Label label="required" /></td>
+            <td><code>name</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>The table name.</td>
         </tr>

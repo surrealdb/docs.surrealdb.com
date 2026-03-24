@@ -5,7 +5,6 @@ title: Python | SDK | Methods | insert_relation
 description: The SurrealDB SDK for Python enables you to insert a relation between two records.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.insert_relation()`
 
@@ -27,7 +26,7 @@ db.insert_relation(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>table</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name to insert to.
@@ -36,7 +35,7 @@ db.insert_relation(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Either a single document/record or an array of documents/records to insert

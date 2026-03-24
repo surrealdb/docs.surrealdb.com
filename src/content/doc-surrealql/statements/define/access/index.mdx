@@ -5,11 +5,10 @@ title: DEFINE ACCESS statement | SurrealQL
 description: Defining an access method allows SurrealDB to grant access to resources using different kinds of credentials.
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # `DEFINE ACCESS` statement
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 Defining an access method allows SurrealDB to grant access to resources using different kinds of credentials.
 

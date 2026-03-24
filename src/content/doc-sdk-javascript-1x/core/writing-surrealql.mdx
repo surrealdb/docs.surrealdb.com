@@ -4,7 +4,6 @@ sidebar_label: Run SurrealQL queries
 title: JavaScript | SDK | Run SurrealQL queries
 description: SurrealDB supports a number of methods for interacting with the database and performing CRUD operations.
 ---
-import Label from "@components/shared/Label.astro";
 
 # Run SurrealQL queries
 
@@ -49,7 +48,7 @@ async db.query<T>(query, vars)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>query</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Specifies the SurrealQL statements.
@@ -58,7 +57,7 @@ async db.query<T>(query, vars)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>vars</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Assigns variables which can be used in the query.

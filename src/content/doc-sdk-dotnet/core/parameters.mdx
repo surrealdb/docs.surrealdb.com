@@ -5,7 +5,6 @@ title: Set parameters | .NET | SDK | Concepts
 description: In this section, you will learn how to set parameters in the .NET SDK for SurrealDB.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Set parameters
 
@@ -55,7 +54,7 @@ await db.Set(key, val)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>key</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Specifies the name of the variable.
@@ -64,7 +63,7 @@ await db.Set(key, val)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>value</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Assigns the value to the variable name.
@@ -73,7 +72,7 @@ await db.Set(key, val)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.
@@ -118,7 +117,7 @@ await db.Unset(key)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>key</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 Specifies the SurrealQL statements.
@@ -127,7 +126,7 @@ await db.Unset(key)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.

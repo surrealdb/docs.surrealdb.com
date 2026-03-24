@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | SurrealQueryable
 description: The SurrealQueryable class provides all query execution methods for interacting with SurrealDB.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `SurrealQueryable` {#surrealqueryable}
 
@@ -68,12 +67,12 @@ db.query<R>(boundQuery)
     </thead>
     <tbody>
         <tr>
-            <td><code>query</code> <Label label="required" /></td>
+            <td><code>query</code> <label label="required" /></td>
             <td><code>string | <a href="/docs/2.x/sdk/javascript/api/utilities/bound-query">BoundQuery</a></code></td>
             <td>The SurrealQL query string or BoundQuery instance.</td>
         </tr>
         <tr>
-            <td><code>bindings</code> <Label label="optional" /></td>
+            <td><code>bindings</code> <label label="optional" /></td>
             <td><code>Record&lt;string, unknown&gt;</code></td>
             <td>Variables to bind in the query (when using string query).</td>
         </tr>
@@ -137,17 +136,17 @@ db.select<T>(table)
     </thead>
     <tbody>
         <tr>
-            <td><code>recordId</code> <Label label="required" /></td>
+            <td><code>recordId</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/record-id">RecordId</a></code></td>
             <td>A specific record ID to select.</td>
         </tr>
         <tr>
-            <td><code>range</code> <Label label="required" /></td>
+            <td><code>range</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/record-id">RecordIdRange</a></code></td>
             <td>A range of record IDs to select.</td>
         </tr>
         <tr>
-            <td><code>table</code> <Label label="required" /></td>
+            <td><code>table</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/table">Table</a></code></td>
             <td>A table to select all records from.</td>
         </tr>
@@ -194,12 +193,12 @@ db.create<T>(table)
     </thead>
     <tbody>
         <tr>
-            <td><code>recordId</code> <Label label="required" /></td>
+            <td><code>recordId</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/record-id">RecordId</a></code></td>
             <td>The record ID for the new record.</td>
         </tr>
         <tr>
-            <td><code>table</code> <Label label="required" /></td>
+            <td><code>table</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/table">Table</a></code></td>
             <td>The table to create a record in (auto-generated ID).</td>
         </tr>
@@ -241,12 +240,12 @@ db.insert<T>(table, data)
     </thead>
     <tbody>
         <tr>
-            <td><code>table</code> <Label label="optional" /></td>
+            <td><code>table</code> <label label="optional" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/table">Table</a></code></td>
             <td>The table to insert records into.</td>
         </tr>
         <tr>
-            <td><code>data</code> <Label label="required" /></td>
+            <td><code>data</code> <label label="required" /></td>
             <td><code>T | T[]</code></td>
             <td>One or more records to insert.</td>
         </tr>
@@ -301,17 +300,17 @@ db.update<T>(table)
     </thead>
     <tbody>
         <tr>
-            <td><code>recordId</code> <Label label="required" /></td>
+            <td><code>recordId</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/record-id">RecordId</a></code></td>
             <td>A specific record ID to update.</td>
         </tr>
         <tr>
-            <td><code>range</code> <Label label="required" /></td>
+            <td><code>range</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/record-id">RecordIdRange</a></code></td>
             <td>A range of record IDs to update.</td>
         </tr>
         <tr>
-            <td><code>table</code> <Label label="required" /></td>
+            <td><code>table</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/table">Table</a></code></td>
             <td>A table to update all records in.</td>
         </tr>
@@ -363,17 +362,17 @@ db.upsert<T>(table)
     </thead>
     <tbody>
         <tr>
-            <td><code>recordId</code> <Label label="required" /></td>
+            <td><code>recordId</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/record-id">RecordId</a></code></td>
             <td>A specific record ID to upsert.</td>
         </tr>
         <tr>
-            <td><code>range</code> <Label label="required" /></td>
+            <td><code>range</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/record-id">RecordIdRange</a></code></td>
             <td>A range of record IDs to upsert.</td>
         </tr>
         <tr>
-            <td><code>table</code> <Label label="required" /></td>
+            <td><code>table</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/table">Table</a></code></td>
             <td>A table to upsert all records in.</td>
         </tr>
@@ -410,17 +409,17 @@ db.delete<T>(table)
     </thead>
     <tbody>
         <tr>
-            <td><code>recordId</code> <Label label="required" /></td>
+            <td><code>recordId</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/record-id">RecordId</a></code></td>
             <td>A specific record ID to delete.</td>
         </tr>
         <tr>
-            <td><code>range</code> <Label label="required" /></td>
+            <td><code>range</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/record-id">RecordIdRange</a></code></td>
             <td>A range of record IDs to delete.</td>
         </tr>
         <tr>
-            <td><code>table</code> <Label label="required" /></td>
+            <td><code>table</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/table">Table</a></code></td>
             <td>A table to delete all records from.</td>
         </tr>
@@ -460,22 +459,22 @@ db.relate<T>(from[], edge, to[], data?)
     </thead>
     <tbody>
         <tr>
-            <td><code>from</code> <Label label="required" /></td>
+            <td><code>from</code> <label label="required" /></td>
             <td><code>RecordId | RecordId[]</code></td>
             <td>The source record(s) for the relationship.</td>
         </tr>
         <tr>
-            <td><code>edge</code> <Label label="required" /></td>
+            <td><code>edge</code> <label label="required" /></td>
             <td><code>Table | RecordId</code></td>
             <td>The edge table or specific edge record ID.</td>
         </tr>
         <tr>
-            <td><code>to</code> <Label label="required" /></td>
+            <td><code>to</code> <label label="required" /></td>
             <td><code>RecordId | RecordId[]</code></td>
             <td>The target record(s) for the relationship.</td>
         </tr>
         <tr>
-            <td><code>data</code> <Label label="optional" /></td>
+            <td><code>data</code> <label label="optional" /></td>
             <td><code>Partial&lt;T&gt;</code></td>
             <td>Optional data to store on the edge record.</td>
         </tr>
@@ -523,7 +522,7 @@ db.live<T>(what)
     </thead>
     <tbody>
         <tr>
-            <td><code>what</code> <Label label="required" /></td>
+            <td><code>what</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/types/#liveresource">LiveResource</a></code></td>
             <td>The table, record ID, or range to subscribe to.</td>
         </tr>
@@ -564,7 +563,7 @@ db.liveOf(id)
     </thead>
     <tbody>
         <tr>
-            <td><code>id</code> <Label label="required" /></td>
+            <td><code>id</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/uuid">Uuid</a></code></td>
             <td>The UUID of the existing live query.</td>
         </tr>
@@ -600,17 +599,17 @@ db.run<T>(name, version, args?)
     </thead>
     <tbody>
         <tr>
-            <td><code>name</code> <Label label="required" /></td>
+            <td><code>name</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>The full name of the function to run (e.g., <code>"fn::calculate"</code>).</td>
         </tr>
         <tr>
-            <td><code>version</code> <Label label="optional" /></td>
+            <td><code>version</code> <label label="optional" /></td>
             <td><code>string</code></td>
             <td>The version of a SurrealML model to use.</td>
         </tr>
         <tr>
-            <td><code>args</code> <Label label="optional" /></td>
+            <td><code>args</code> <label label="optional" /></td>
             <td><code>unknown[]</code></td>
             <td>Arguments to pass to the function.</td>
         </tr>

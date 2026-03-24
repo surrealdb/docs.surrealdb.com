@@ -4,7 +4,6 @@ sidebar_label: Vector functions
 title: Vector functions | SurrealQL
 description: A collection of essential vector operations that provide foundational functionality for numerical computation, machine learning, and data analysis.
 ---
-import Since from '@components/shared/Since.astro'
 
 # Vector functions
 
@@ -325,7 +324,7 @@ RETURN vector::project([1, 2, 3], [4, 5, 6]);
 
 ## `vector::scale`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `vector::scale` function multiplies each item in a vector by a number.
 

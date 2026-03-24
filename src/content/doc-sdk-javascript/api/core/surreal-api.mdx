@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | SurrealApi
 description: The SurrealApi class provides methods for invoking user-defined API endpoints in SurrealDB.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `SurrealApi` {#surrealapi}
 
@@ -102,12 +101,12 @@ api.header(name, value)
     </thead>
     <tbody>
         <tr>
-            <td><code>name</code> <Label label="required" /></td>
+            <td><code>name</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>The name of the header to configure.</td>
         </tr>
         <tr>
-            <td><code>value</code> <Label label="required" /></td>
+            <td><code>value</code> <label label="required" /></td>
             <td><code>string | null</code></td>
             <td>The value to set, or <code>null</code> to remove the header.</td>
         </tr>
@@ -153,12 +152,12 @@ api.invoke<Req, Res>(path, request?)
     </thead>
     <tbody>
         <tr>
-            <td><code>path</code> <Label label="required" /></td>
+            <td><code>path</code> <label label="required" /></td>
             <td><code>string</code></td>
             <td>The API path to invoke.</td>
         </tr>
         <tr>
-            <td><code>request</code> <Label label="optional" /></td>
+            <td><code>request</code> <label label="optional" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/types/#apirequest">ApiRequest</a>&lt;Req&gt;</code></td>
             <td>The request configuration object.</td>
         </tr>
@@ -197,7 +196,7 @@ api.get(path)
     </thead>
     <tbody>
         <tr>
-            <td><code>path</code> <Label label="required" /></td>
+            <td><code>path</code> <label label="required" /></td>
             <td><code>P extends ValidPaths&lt;TPaths, "get"&gt;</code></td>
             <td>The API path to invoke.</td>
         </tr>
@@ -236,12 +235,12 @@ api.post(path, body?)
     </thead>
     <tbody>
         <tr>
-            <td><code>path</code> <Label label="required" /></td>
+            <td><code>path</code> <label label="required" /></td>
             <td><code>P extends ValidPaths&lt;TPaths, "post"&gt;</code></td>
             <td>The API path to invoke.</td>
         </tr>
         <tr>
-            <td><code>body</code> <Label label="optional" /></td>
+            <td><code>body</code> <label label="optional" /></td>
             <td><code>RequestBody&lt;TPaths, P, "post"&gt;</code></td>
             <td>The request body to send.</td>
         </tr>
@@ -278,12 +277,12 @@ api.put(path, body?)
     </thead>
     <tbody>
         <tr>
-            <td><code>path</code> <Label label="required" /></td>
+            <td><code>path</code> <label label="required" /></td>
             <td><code>P extends ValidPaths&lt;TPaths, "put"&gt;</code></td>
             <td>The API path to invoke.</td>
         </tr>
         <tr>
-            <td><code>body</code> <Label label="optional" /></td>
+            <td><code>body</code> <label label="optional" /></td>
             <td><code>RequestBody&lt;TPaths, P, "put"&gt;</code></td>
             <td>The request body to send.</td>
         </tr>
@@ -320,12 +319,12 @@ api.delete(path, body?)
     </thead>
     <tbody>
         <tr>
-            <td><code>path</code> <Label label="required" /></td>
+            <td><code>path</code> <label label="required" /></td>
             <td><code>P extends ValidPaths&lt;TPaths, "delete"&gt;</code></td>
             <td>The API path to invoke.</td>
         </tr>
         <tr>
-            <td><code>body</code> <Label label="optional" /></td>
+            <td><code>body</code> <label label="optional" /></td>
             <td><code>RequestBody&lt;TPaths, P, "delete"&gt;</code></td>
             <td>Optional request body.</td>
         </tr>
@@ -359,12 +358,12 @@ api.patch(path, body?)
     </thead>
     <tbody>
         <tr>
-            <td><code>path</code> <Label label="required" /></td>
+            <td><code>path</code> <label label="required" /></td>
             <td><code>P extends ValidPaths&lt;TPaths, "patch"&gt;</code></td>
             <td>The API path to invoke.</td>
         </tr>
         <tr>
-            <td><code>body</code> <Label label="optional" /></td>
+            <td><code>body</code> <label label="optional" /></td>
             <td><code>RequestBody&lt;TPaths, P, "patch"&gt;</code></td>
             <td>The partial updates to apply.</td>
         </tr>
@@ -400,12 +399,12 @@ api.trace(path, body?)
     </thead>
     <tbody>
         <tr>
-            <td><code>path</code> <Label label="required" /></td>
+            <td><code>path</code> <label label="required" /></td>
             <td><code>P extends ValidPaths&lt;TPaths, "trace"&gt;</code></td>
             <td>The API path to invoke.</td>
         </tr>
         <tr>
-            <td><code>body</code> <Label label="optional" /></td>
+            <td><code>body</code> <label label="optional" /></td>
             <td><code>RequestBody&lt;TPaths, P, "trace"&gt;</code></td>
             <td>Optional request body.</td>
         </tr>

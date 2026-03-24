@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | SelectPromise
 description: SelectPromise provides chainable methods for configuring SELECT queries.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `SelectPromise<T, I, J>` {#selectpromise}
 
@@ -42,7 +41,7 @@ selectPromise.fields(...fields)
     </thead>
     <tbody>
         <tr>
-            <td><code>fields</code> <Label label="required" /></td>
+            <td><code>fields</code> <label label="required" /></td>
             <td><code>Field&lt;I&gt;[]</code></td>
             <td>Field names to select.</td>
         </tr>
@@ -91,7 +90,7 @@ selectPromise.value(field)
     </thead>
     <tbody>
         <tr>
-            <td><code>field</code> <Label label="required" /></td>
+            <td><code>field</code> <label label="required" /></td>
             <td><code>Field&lt;I&gt;</code></td>
             <td>The field name to extract.</td>
         </tr>
@@ -132,7 +131,7 @@ selectPromise.where(condition)
     </thead>
     <tbody>
         <tr>
-            <td><code>condition</code> <Label label="required" /></td>
+            <td><code>condition</code> <label label="required" /></td>
             <td><code>ExprLike</code></td>
             <td>The condition expression (string or <a href="/docs/2.x/sdk/javascript/api/utilities/expr">Expression</a> object).</td>
         </tr>
@@ -188,7 +187,7 @@ selectPromise.fetch(...fields)
     </thead>
     <tbody>
         <tr>
-            <td><code>fields</code> <Label label="required" /></td>
+            <td><code>fields</code> <label label="required" /></td>
             <td><code>string[]</code></td>
             <td>Field names representing relations to fetch.</td>
         </tr>
@@ -237,7 +236,7 @@ selectPromise.start(offset)
     </thead>
     <tbody>
         <tr>
-            <td><code>offset</code> <Label label="required" /></td>
+            <td><code>offset</code> <label label="required" /></td>
             <td><code>number</code></td>
             <td>Number of records to skip.</td>
         </tr>
@@ -279,7 +278,7 @@ selectPromise.limit(count)
     </thead>
     <tbody>
         <tr>
-            <td><code>count</code> <Label label="required" /></td>
+            <td><code>count</code> <label label="required" /></td>
             <td><code>number</code></td>
             <td>Maximum number of records to return.</td>
         </tr>
@@ -318,7 +317,7 @@ selectPromise.timeout(duration)
     </thead>
     <tbody>
         <tr>
-            <td><code>duration</code> <Label label="required" /></td>
+            <td><code>duration</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/duration">Duration</a></code></td>
             <td>Maximum time to wait for query completion.</td>
         </tr>
@@ -356,7 +355,7 @@ selectPromise.version(timestamp)
     </thead>
     <tbody>
         <tr>
-            <td><code>timestamp</code> <Label label="required" /></td>
+            <td><code>timestamp</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/datetime">DateTime</a></code></td>
             <td>The timestamp to query at.</td>
         </tr>

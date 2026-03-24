@@ -5,7 +5,6 @@ title: Merge Method in PHP | PHP SDK | Integration | SurrealDB
 description: The ->merge() method for the SurrealDB SDK for PHP merges record data with the specified data.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->merge()` {#merge}
 
@@ -31,7 +30,7 @@ $db->merge($thing, $data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>string</code>, <code>RecordId</code> or <code>StringRecordId</code>
@@ -43,7 +42,7 @@ $db->merge($thing, $data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>mixed</code>
