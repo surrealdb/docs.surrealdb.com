@@ -18,7 +18,6 @@ import {
     pictoGraph,
     pictoIntegrations,
     pictoKey,
-    pictoML,
     pictoPadlockClosed,
     pictoQL,
     pictoSDKs,
@@ -83,11 +82,11 @@ const PRODUCTS: ProductItem[] = [
         icon: pictoCloud,
     },
     {
-        title: "SurrealML",
+        title: "Extensions",
         description:
-            "Integrate machine learning models directly into your database for intelligent data processing.",
-        href: "/docs/surrealml/",
-        icon: pictoML,
+            "Extend SurrealDB with custom modules written in Rust that can be accessed from SurrealQL.",
+        href: "/docs/surrealdb/extensions/",
+        icon: pictoSurrealism,
     },
 ];
 
