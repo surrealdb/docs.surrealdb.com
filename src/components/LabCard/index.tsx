@@ -44,7 +44,7 @@ const CATEGORY_IMAGES: Record<LabCategory, { dark: string; light: string }> = {
 };
 
 function getAuthorAvatarUrl(slug: string): string {
-    return new URL(`../../assets/img/labs-authors/${slug}.jpg`, import.meta.url).href;
+    return new URL(`../../assets/img/labs-authors/${slug}.avif`, import.meta.url).href;
 }
 
 export function LabCard({ item, isDark }: LabCardProps) {
