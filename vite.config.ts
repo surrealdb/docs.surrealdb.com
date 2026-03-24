@@ -60,8 +60,6 @@ export default defineConfig({
         }),
         vikeSitemap({
             baseUrl: "https://surrealdb.com/docs",
-            // outDir: "./.vercel/output/static",
-            // outFile: "sitemap.xml",
             robots: true,
             priority: (url, { urls }) => {
                 if (url === "/") return 1.0;
@@ -106,12 +104,6 @@ export default defineConfig({
         sourcemap: true,
         minify: true,
         cssMinify: true,
-        rollupOptions: {
-            external: [
-                "vite-plugin-node-polyfills/shims/process",
-                "vite-plugin-node-polyfills/shims/global",
-            ],
-        },
     },
     ssr: {
         noExternal: ["@surrealdb/ui", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
