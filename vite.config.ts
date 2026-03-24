@@ -5,8 +5,6 @@ import { getLastModFromGit, vikeSitemap } from "vike-sitemap-generator";
 import { defineConfig } from "vite";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 import tsconfigPaths from "vite-tsconfig-paths";
-import { fixServerEntryAutoImport } from "./plugins/fix-server-entry-auto-import";
-import { vercelBasePathPlugin } from "./plugins/vercel.base-path-plugin";
 import { docs, sdks, versionedSdks } from "./src/content/config";
 
 const versionedSdkPattern = /^(\d+\.x)\/sdk\/(\w+)/;
@@ -43,8 +41,10 @@ function findCollectionEntry(url: string) {
     return undefined;
 }
 
+const isProduction = process.env.VERCEL === "1" && process.env.VERCEL_ENV === "production";
+
 export default defineConfig({
-    base: "/docs/",
+    base: isProduction ? "/docs/" : "/",
     plugins: [
         vike(),
         react(),
@@ -60,11 +60,10 @@ export default defineConfig({
                 includeDrafts: false,
             },
         }),
-        fixServerEntryAutoImport(),
         vikeSitemap({
             baseUrl: "https://surrealdb.com/docs",
-            outDir: "./.vercel/output/static/docs",
-            outFile: "sitemap.xml",
+            // outDir: "./.vercel/output/static",
+            // outFile: "sitemap.xml",
             robots: true,
             priority: (url, { urls }) => {
                 if (url === "/") return 1.0;
@@ -101,7 +100,6 @@ export default defineConfig({
                 return getLastModFromGit({ filePath });
             },
         }),
-        vercelBasePathPlugin(),
     ],
     resolve: {
         dedupe: ["react", "react-dom", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
@@ -115,18 +113,18 @@ export default defineConfig({
         noExternal: ["@surrealdb/ui", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
         external: ["vike-content-collection"],
     },
-    environments: {
-        vercel_node: {
-            resolve: {
-                noExternal: [
-                    "@surrealdb/ui",
-                    "@mantine/core",
-                    "@mantine/hooks",
-                    "@mantine/spotlight",
-                ],
-            },
-        },
-    },
+    // environments: {
+    //     vercel_node: {
+    //         resolve: {
+    //             noExternal: [
+    //                 "@surrealdb/ui",
+    //                 "@mantine/core",
+    //                 "@mantine/hooks",
+    //                 "@mantine/spotlight",
+    //             ],
+    //         },
+    //     },
+    // },
     css: {
         modules: {
             localsConvention: "dashesOnly" as const,

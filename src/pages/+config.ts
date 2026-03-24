@@ -1,6 +1,6 @@
 import type { Config } from "vike/types";
 import vikeContentCollectionConfig from "vike-content-collection/config";
-import vikePhoton from "vike-photon/config";
+// import vikePhoton from "vike-photon/config";
 import vikeReact from "vike-react/config";
 import vikeSitemapConfig from "vike-sitemap-generator/config";
 import { DEFAULT_META_DESCRIPTION, DEFAULT_META_TITLE } from "~/utils/meta";
@@ -8,7 +8,7 @@ import { DEFAULT_META_DESCRIPTION, DEFAULT_META_TITLE } from "~/utils/meta";
 export default {
     title: DEFAULT_META_TITLE,
     description: DEFAULT_META_DESCRIPTION,
-    extends: [vikeReact, vikeContentCollectionConfig, vikePhoton, vikeSitemapConfig],
+    extends: [vikeReact, vikeContentCollectionConfig, vikeSitemapConfig],
     prerender: true,
     passToClient: ["llms", "sdkVersions"],
     meta: {
