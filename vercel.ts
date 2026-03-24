@@ -14,4 +14,16 @@ export const config: VercelConfig = {
             destination: "/$1",
         },
     ],
+    headers: [
+        // Cache Vite build assets for 1 year
+        {
+            source: "/assets/(.*)",
+            headers: [
+                {
+                    key: "Cache-Control",
+                    value: "public, max-age=31536000, immutable",
+                },
+            ],
+        },
+    ]
 };
