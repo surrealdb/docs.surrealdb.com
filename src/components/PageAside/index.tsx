@@ -36,9 +36,9 @@ export function PageAside({ headings }: PageAsideProps) {
                 flex={1}
                 style={{ overflowY: "auto" }}
             >
-                {headings.map((heading) => (
+                {headings.map((heading, index) => (
                     <ListItem
-                        key={heading.id}
+                        key={`toc-item-${heading.id}-${index}`}
                         pl={`${(heading.depth - minDepth) * 16}px`}
                     >
                         <Anchor href={`#${heading.id}`}>{heading.text}</Anchor>
