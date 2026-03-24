@@ -106,23 +106,17 @@ export default defineConfig({
         sourcemap: true,
         minify: true,
         cssMinify: true,
+        rollupOptions: {
+            external: [
+                "vite-plugin-node-polyfills/shims/process",
+                "vite-plugin-node-polyfills/shims/global",
+            ],
+        },
     },
     ssr: {
         noExternal: ["@surrealdb/ui", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
         external: ["vike-content-collection"],
     },
-    // environments: {
-    //     vercel_node: {
-    //         resolve: {
-    //             noExternal: [
-    //                 "@surrealdb/ui",
-    //                 "@mantine/core",
-    //                 "@mantine/hooks",
-    //                 "@mantine/spotlight",
-    //             ],
-    //         },
-    //     },
-    // },
     css: {
         modules: {
             localsConvention: "dashesOnly" as const,
