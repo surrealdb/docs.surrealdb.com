@@ -68,7 +68,7 @@ export const NAV_LINKS: NavEntry[] = [
     { label: "SurrealQL", href: "/docs/surrealql/" },
     { label: "Surrealist", href: "/docs/surrealist/" },
     { label: "Cloud", href: "/docs/cloud/" },
-    { label: "Surrealism", href: "/docs/surrealml/" },
+    { label: "Extensions", href: "/docs/surrealdb/extensions" },
     {
         label: "SDKs",
         items: [
