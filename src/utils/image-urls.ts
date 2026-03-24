@@ -103,8 +103,8 @@ export function getImageUrl(
     }
 
     // Handle @assets paths
-    if (imageId.startsWith("@assets")) {
-        return imageId.replace("@assets", "/assets");
+    if (imageId.startsWith("~/assets/img")) {
+        return imageId.replace("~/assets/img", "/assets/img");
     }
 
     // Handle brandsafe CDN IDs (20 character alphanumeric strings)

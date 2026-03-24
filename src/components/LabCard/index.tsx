@@ -1,16 +1,16 @@
 import { Anchor, Box, Flex, Image, Paper, Text, Title } from "@mantine/core";
 import { pictoSurrealDB } from "@surrealdb/ui";
 import placeholderAvatar from "~/assets/img/labs-authors/placeholder.avif";
-import catDemosLight from "~/assets/img/labs-categories/demos.light.avif";
 import catDemosDark from "~/assets/img/labs-categories/demos.avif";
-import catIntegrationsLight from "~/assets/img/labs-categories/integrations.light.avif";
+import catDemosLight from "~/assets/img/labs-categories/demos.light.avif";
 import catIntegrationsDark from "~/assets/img/labs-categories/integrations.avif";
-import catLibrariesLight from "~/assets/img/labs-categories/libraries.light.avif";
+import catIntegrationsLight from "~/assets/img/labs-categories/integrations.light.avif";
 import catLibrariesDark from "~/assets/img/labs-categories/libraries.avif";
-import catTutorialsLight from "~/assets/img/labs-categories/tutorials.light.avif";
+import catLibrariesLight from "~/assets/img/labs-categories/libraries.light.avif";
 import catTutorialsDark from "~/assets/img/labs-categories/tutorials.avif";
-import catVideosLight from "~/assets/img/labs-categories/videos.light.avif";
+import catTutorialsLight from "~/assets/img/labs-categories/tutorials.light.avif";
 import catVideosDark from "~/assets/img/labs-categories/videos.avif";
+import catVideosLight from "~/assets/img/labs-categories/videos.light.avif";
 import type { LabCategory } from "~/content/config";
 import classes from "./style.module.scss";
 
