@@ -41,10 +41,8 @@ function findCollectionEntry(url: string) {
     return undefined;
 }
 
-const isProduction = process.env.VERCEL === "1" && process.env.VERCEL_ENV === "production";
-
 export default defineConfig({
-    base: isProduction ? "/docs/" : "/",
+    base: "/docs",
     plugins: [
         vike(),
         react(),
