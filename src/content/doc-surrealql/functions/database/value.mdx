@@ -5,7 +5,6 @@ title: Value functions | SurrealQL
 description: This module contains several miscellaneous functions that can be used with values of any type.
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Value functions
 
@@ -36,7 +35,7 @@ This module contains several miscellaneous functions that can be used with value
 
 ## `.chain()`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `.chain()` method passes a value into a [closure](/docs/surrealql/datamodel/closures) through which an operation can be performed to return any value.
 
@@ -83,7 +82,7 @@ For a similar function that allows using a closure on each item in an array inst
 
 ## `value::diff`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `value::diff` function returns an object that shows the [JSON Patch](https://jsonpatch.com/) operation(s) required for the first value to equal the second one.
 
@@ -163,7 +162,7 @@ value = "[{ op: 'change', path: '/company', value: '@@ -2,8 +2,10 @@
 
 ## `value::patch`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `value::patch` function applies an array of JSON Patch operations to a value.
 

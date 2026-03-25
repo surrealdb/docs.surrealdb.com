@@ -5,7 +5,6 @@ title: Update Method in PHP | PHP SDK | Integration | SurrealDB
 description: The ->update() method for the SurrealDB SDK for Rust updates all or specific records in the database if they exist.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->update()` {#update}
 
@@ -31,7 +30,7 @@ $db->update($thing, $data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>string</code>, <code>RecordId</code> or <code>StringRecordId</code>
@@ -43,7 +42,7 @@ $db->update($thing, $data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>mixed</code>

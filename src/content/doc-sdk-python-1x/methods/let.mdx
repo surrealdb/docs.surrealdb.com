@@ -5,7 +5,6 @@ title: Python | SDK | Methods | let
 description: The SurrealDB SDK for Python enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.let()`
 
@@ -27,7 +26,7 @@ db.let(key, value)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>key</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Specifies the name of the variable.
@@ -36,7 +35,7 @@ db.let(key, value)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>value</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Assigns the value to the variable name.

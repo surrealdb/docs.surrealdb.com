@@ -5,7 +5,6 @@ title: .NET | SDK | Methods | Update
 description: The .NET SDK for SurrealDB enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.Update<T>()` {#update}
 
@@ -31,7 +30,7 @@ await db.Update<T>(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or the specific [`RecordId`](/docs/sdk/dotnet/data-types#recordid) to update.
@@ -40,7 +39,7 @@ await db.Update<T>(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The document / record data to update.
@@ -49,7 +48,7 @@ await db.Update<T>(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>cancellationToken</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The cancellationToken enables graceful cancellation of asynchronous operations.

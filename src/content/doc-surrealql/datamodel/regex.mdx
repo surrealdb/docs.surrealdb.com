@@ -6,11 +6,10 @@ description: The regex type can
 
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Regex
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 A `regex` can be created by casting from a string.
 

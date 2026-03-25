@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | SurrealTransaction
 description: The SurrealTransaction class provides atomic transaction support for executing multiple queries.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `SurrealTransaction` {#surrealtransaction}
 

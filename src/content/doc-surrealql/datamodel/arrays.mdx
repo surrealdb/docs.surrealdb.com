@@ -6,7 +6,6 @@ description: Records in SurrealDB can store arrays of values, including arrays w
 
 ---
 
-import Since from "@components/shared/Since.astro";
 
 # Arrays
 
@@ -218,7 +217,7 @@ value = "[{ first_mayor: 'Papa Smurf', name: 'Smurfville', population: 55 }]"
 ]
 ```
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 ## Filtering and mapping with array functions
 
@@ -336,7 +335,7 @@ value = "[{ coordinates: (98, 65.7), item: 0, name: 'Some city' }, { coordinates
 
 ## Adding arrays
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 An array can be added to another array, resulting in a single array consisting of the items of the first followed by those of the second. This is identical to the `array::concat()` function.
 

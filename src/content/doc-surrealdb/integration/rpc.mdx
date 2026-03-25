@@ -5,8 +5,6 @@ title: RPC Protocol | Integration
 description: The RPC protocol allows for easy bidirectional communication with SurrealDB.
 ---
 
-import Since from '@components/shared/Since.astro'
-import Label from "@components/shared/Label.astro";
 
 # RPC Protocol
 
@@ -165,7 +163,7 @@ authenticate [ token ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>token</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The token that authenticates the user
@@ -214,7 +212,7 @@ create [ thing, data ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The thing (Table or Record ID) to create. Passing just a table will result in a randomly generated ID
@@ -223,7 +221,7 @@ create [ thing, data ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The content of the record
@@ -280,7 +278,7 @@ delete [ thing ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>record_id</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The record_id (Table or Record ID) to delete
@@ -364,7 +362,7 @@ insert [ thing, data ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The table to insert in to
@@ -373,7 +371,7 @@ insert [ thing, data ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             One or multiple record(s)
@@ -468,7 +466,7 @@ insert_relation [ table, data ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>table</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The name of the relation table to insert into. If `null` or `none`, the table is determined from the `id` field in the `data`.
@@ -477,7 +475,7 @@ insert_relation [ table, data ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>data</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             An object containing the data for the new relation record, including `in`, `out`, and any additional fields.
@@ -676,7 +674,7 @@ invalidate
 
 <br />
 
-## `let` <Label label="websocket only" />
+## `let` <label label="websocket only" />
 
 This method stores a variable on the current connection.
 
@@ -696,7 +694,7 @@ let [ name, value ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>name</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The name for the variable without a prefixed $ character
@@ -705,7 +703,7 @@ let [ name, value ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>value</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The value for the variable
@@ -732,7 +730,7 @@ let [ name, value ]
 
 <br />
 
-## `live` <Label label="websocket only" />
+## `live` <label label="websocket only" />
 
 This methods initiates a live query for a specified table name.
 
@@ -755,7 +753,7 @@ live[ table ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>table</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table to initiate a live query for
@@ -764,7 +762,7 @@ live[ table ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>diff</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 If set to true, live notifications will contain an array of [JSON Patches](https://jsonpatch.com) instead of the entire record
@@ -830,7 +828,7 @@ merge [ thing, data ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The thing (Table or Record ID) to merge into
@@ -839,7 +837,7 @@ merge [ thing, data ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The content of the record
@@ -905,7 +903,7 @@ patch [ thing, patches, diff ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The thing (Table or Record ID) to patch
@@ -914,7 +912,7 @@ patch [ thing, patches, diff ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>patches</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             An array of patches following the [JSON Patch specification](https://jsonpatch.com)
@@ -923,7 +921,7 @@ patch [ thing, patches, diff ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>diff</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             A boolean representing if just a diff should be returned.
@@ -1013,7 +1011,7 @@ query [ sql, vars ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>sql</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The query to execute against SurrealDB
@@ -1022,7 +1020,7 @@ query [ sql, vars ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>vars</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 A set of variables used by the query
@@ -1094,7 +1092,7 @@ relate [ in, relation, out, data? ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>in</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The record to relate to
@@ -1103,7 +1101,7 @@ relate [ in, relation, out, data? ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>relation</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The relation table
@@ -1112,7 +1110,7 @@ relate [ in, relation, out, data? ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>out</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The record to relate from
@@ -1121,7 +1119,7 @@ relate [ in, relation, out, data? ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The content of the record
@@ -1229,7 +1227,7 @@ run [ func_name, version?, args? ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>func_name</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The name of the function or model to execute. Prefix with `fn::` for custom functions or `ml::` for machine learning models.
@@ -1238,7 +1236,7 @@ run [ func_name, version?, args? ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>version</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The version of the function or model to execute.
@@ -1247,7 +1245,7 @@ run [ func_name, version?, args? ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>args</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The arguments to pass to the function or model.
@@ -1334,7 +1332,7 @@ select [ thing ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The thing (Table or Record ID) to select
@@ -1388,7 +1386,7 @@ signin [ NS, DB, AC, ... ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>NS</code>
-                <Label label="required"></Label>
+                <label label="required"></label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The namespace to sign in to. Only required for `DB & RECORD` authentication
@@ -1397,7 +1395,7 @@ signin [ NS, DB, AC, ... ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>DB</code>
-                <Label label="required"></Label>
+                <label label="required"></label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The database to sign in to. Only required for `RECORD` authentication
@@ -1406,7 +1404,7 @@ signin [ NS, DB, AC, ... ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>AC</code>
-                <Label label="required"></Label>
+                <label label="required"></label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Specifies the access method. Only required for `RECORD` authentication
@@ -1415,7 +1413,7 @@ signin [ NS, DB, AC, ... ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>user</code>
-                <Label label="required">REQUIRED FOR ROOT, NS & DB</Label>
+                <label label="required">REQUIRED FOR ROOT, NS & DB</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             	The username of the database user. Only required for `ROOT, NS & DB` authentication
@@ -1424,7 +1422,7 @@ signin [ NS, DB, AC, ... ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>pass</code>
-                <Label label="required">REQUIRED FOR ROOT, NS & DB</Label>
+                <label label="required">REQUIRED FOR ROOT, NS & DB</label>
             </td>
             <td colspan="2" scope="row" data-label="Description">
             	The password of the database user. Only required for `ROOT, NS & DB` authentication
@@ -1513,7 +1511,7 @@ signup [ NS, DB, AC, ... ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Specifies the namespace of the record access method
@@ -1522,7 +1520,7 @@ signup [ NS, DB, AC, ... ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Specifies the database of the record access method
@@ -1531,7 +1529,7 @@ signup [ NS, DB, AC, ... ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>AC</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Specifies the access method
@@ -1540,7 +1538,7 @@ signup [ NS, DB, AC, ... ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>...</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Specifies any variables used by the SIGNUP query of the record access method
@@ -1576,7 +1574,7 @@ signup [ NS, DB, AC, ... ]
 
 <br />
 
-## `unset` <Label label="websocket only" />
+## `unset` <label label="websocket only" />
 
 This method removes a variable from the current connection.
 
@@ -1596,7 +1594,7 @@ unset [ name ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>name</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The name of the variable without a prefixed $ character
@@ -1646,7 +1644,7 @@ update [ thing, data ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The thing (Table or Record ID) to update
@@ -1655,7 +1653,7 @@ update [ thing, data ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The content of the record
@@ -1708,7 +1706,7 @@ upsert [ thing, data ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The thing (Table or Record ID) to upsert
@@ -1717,7 +1715,7 @@ upsert [ thing, data ]
         <tr>
             <td colspan="2" scope="row" data-label="Parameter">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             The content of the record
@@ -1774,7 +1772,7 @@ use [ ns, db ]
         <tr>
             <td colspan="2" scope="row" data-label="Function">
                 <code>NS</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries
@@ -1783,7 +1781,7 @@ use [ ns, db ]
         <tr>
             <td colspan="2" scope="row" data-label="Function">
                 <code>DB</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries

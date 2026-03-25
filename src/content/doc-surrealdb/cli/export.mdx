@@ -5,7 +5,6 @@ title: Export command | CLI tool
 description: A command to export data from a SurrealDB database server into a SurrealQL file format.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Export command
 
@@ -33,7 +32,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
         <tr>
             <td>
                 `-e` / `--endpoint` / `--conn`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
             Sets the url of the database server to connect to. Defaults to http://127.0.0.1:8000 if not specified
@@ -42,7 +41,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
         <tr>
             <td>
                 `-u` / `--user`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets master username for the database
@@ -51,7 +50,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
         <tr>
             <td>
                 `-p` / `--pass`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets master password for the database
@@ -60,7 +59,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
         <tr>
             <td>
                 `-t` / `--token`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
                 Sets the authentication token to use when connecting to the server. Connect to SurrealDB using a JWT instead of user credentials
@@ -69,7 +68,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
         <tr>
             <td>
                 `--ns`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets the desired namespace in which to export data
@@ -78,7 +77,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
         <tr>
             <td>
                 `--db`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets the desired database into which to export data
@@ -100,7 +99,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
         <tr>
             <td>
                 `--only`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether only specific resources should be exported. When provided, only the resources specified will be exported.
@@ -109,7 +108,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
         <tr>
             <td>
                 `--users`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether system users should be exported [possible values: true, false].
@@ -118,7 +117,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
         <tr>
             <td>
                 `--accesses`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether access methods (Record or JWT) should be exported [possible values: true, false]
@@ -127,7 +126,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
         <tr>
             <td>
                 `--params`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether databases parameters should be exported [possible values: true, false]
@@ -136,7 +135,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
         <tr>
             <td>
                 `--functions`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether functions should be exported [possible values: true, false]
@@ -145,7 +144,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
         <tr>
             <td>
                 `--analyzers`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether analyzers should be exported [possible values: true, false]
@@ -154,7 +153,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
         <tr>
             <td>
                 `--tables [tables]`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether tables should be exported, optionally providing a list of tables
@@ -163,7 +162,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
         <tr>
             <td>
                 `--versions`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether SurrealKV versioned records should be exported [possible values: true, false]
@@ -172,7 +171,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
         <tr>
             <td>
                 `--records`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Whether records should be exported [possible values: true, false]
@@ -181,7 +180,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
                 <tr>
             <td>
                 `-l` / `--log`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 The logging level for the command-line tool [default: info] [possible values: none, full, error, warn, info, debug, trace]
@@ -203,7 +202,7 @@ surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
         <tr>
             <td>
                 `file`
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td>
                 Sets the path to the file which should be exported. If not provided, export data will be printed to stdout (and can thus be redirected using `>`).

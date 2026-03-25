@@ -4,8 +4,6 @@ sidebar_label: Version command
 title: Version command | CLI tool
 description: A command to output the current version of the SurrealDB binary along with the machine architecture.
 ---
-import Since from '@components/shared/Since.astro'
-import Label from "@components/shared/Label.astro";
 
 # Version command
 
@@ -27,7 +25,7 @@ The version command outputs the current version of the installed command-line to
         <tr>
             <td colspan="2">
                 `-e` / `--endpoint`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
             Remote database server url to connect to [aliases: conn]
@@ -64,7 +62,7 @@ Output:
 
 ### Check version with CLI flags
 
-<Since v="v1.2.0" />
+<since v="v1.2.0" />
 
 ```bash
 surreal -V

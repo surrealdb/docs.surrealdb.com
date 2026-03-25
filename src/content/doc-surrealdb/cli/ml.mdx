@@ -5,7 +5,6 @@ title: ML | CLI tool
 description: The ML command can be used to import and export machine learning models.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 > [!NOTE: Before you begin]
 > Make sure you’ve [installed SurrealDB](/docs/surrealdb/installation) — it should only take a second!
@@ -70,7 +69,7 @@ The ML export command is used to export an existing machine learning model from 
         <tr>
             <td colspan="2">
                 `-e,--endpoint/--conn`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
             Sets the url of the database server to connect to
@@ -79,7 +78,7 @@ The ML export command is used to export an existing machine learning model from 
         <tr>
             <td colspan="2">
                 `-u / --user`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets master username for the database
@@ -88,7 +87,7 @@ The ML export command is used to export an existing machine learning model from 
         <tr>
             <td colspan="2">
                 `-p / --pass`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets master password for the database
@@ -97,7 +96,7 @@ The ML export command is used to export an existing machine learning model from 
         <tr>
             <td colspan="2">
                 `-t` / `--token`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
                 Sets the authentication token to use when connecting to the server. Connect to SurrealDB using a JWT instead of user credentials
@@ -106,7 +105,7 @@ The ML export command is used to export an existing machine learning model from 
         <tr>
             <td colspan="2">
                 `--ns`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets the desired namespace in which to import data
@@ -115,7 +114,7 @@ The ML export command is used to export an existing machine learning model from 
         <tr>
             <td colspan="2">
                 `--db`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets the desired database into which to import data
@@ -124,7 +123,7 @@ The ML export command is used to export an existing machine learning model from 
         <tr>
             <td colspan="2">
                 `--name`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Represents the name of the model that you want to export
@@ -133,7 +132,7 @@ The ML export command is used to export an existing machine learning model from 
         <tr>
             <td colspan="2">
                 `--version`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Represents the version of the model that you want to export
@@ -155,7 +154,7 @@ The ML export command is used to export an existing machine learning model from 
         <tr>
             <td colspan="2">
                 `file`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
             Sets the path to the file which should be exported
@@ -225,7 +224,6 @@ Logging:
 <br />
 
 
-
 ## Import command
 
 The ML import command is used to import a new machine learning model into SurrealDB.
@@ -243,7 +241,7 @@ The ML import command is used to import a new machine learning model into Surrea
         <tr>
             <td colspan="2">
                 `-e, --endpoint / --conn`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
             Sets the url of the database server to connect to
@@ -252,7 +250,7 @@ The ML import command is used to import a new machine learning model into Surrea
         <tr>
             <td colspan="2">
                 `-u / --user`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets master username for the database
@@ -261,7 +259,7 @@ The ML import command is used to import a new machine learning model into Surrea
         <tr>
             <td colspan="2">
                 `-p / --pass`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets master password for the database
@@ -270,7 +268,7 @@ The ML import command is used to import a new machine learning model into Surrea
         <tr>
             <td colspan="2">
                 `--ns`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets the desired namespace in which to import data
@@ -279,7 +277,7 @@ The ML import command is used to import a new machine learning model into Surrea
         <tr>
             <td colspan="2">
                 `-t` / `--token`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
                 Sets the authentication token to use when connecting to the server. Connect to SurrealDB using a JWT instead of user credentials
@@ -288,7 +286,7 @@ The ML import command is used to import a new machine learning model into Surrea
         <tr>
             <td colspan="2">
                 `--db`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets the desired database into which to import data
@@ -310,7 +308,7 @@ The ML import command is used to import a new machine learning model into Surrea
         <tr>
             <td colspan="2">
                 `file`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
             Sets the path to the file which should be imported

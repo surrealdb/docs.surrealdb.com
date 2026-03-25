@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | equals
 description: Deep equality comparison for SurrealDB values and JavaScript types.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `equals()` {#equals}
 
@@ -35,12 +34,12 @@ function equals(a: unknown, b: unknown): boolean
     </thead>
     <tbody>
         <tr>
-            <td><code>a</code> <Label label="required" /></td>
+            <td><code>a</code> <label label="required" /></td>
             <td><code>unknown</code></td>
             <td>First value to compare.</td>
         </tr>
         <tr>
-            <td><code>b</code> <Label label="required" /></td>
+            <td><code>b</code> <label label="required" /></td>
             <td><code>unknown</code></td>
             <td>Second value to compare.</td>
         </tr>

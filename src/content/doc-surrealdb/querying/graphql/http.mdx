@@ -5,8 +5,6 @@ title: GraphQL via HTTP | GraphQL
 description: In this section, you will explore querying SurrealDB using the GraphQL HTTP endpoint. The HTTP API is designed to be simple and intuitive, with any interface that provides a consistent way to interact with the database.
 ---
 
-import Since from '@components/shared/Since.astro';
-import Label from "@components/shared/Label.astro";
 
 # GraphQL via HTTP
 
@@ -54,7 +52,7 @@ curl -X POST -u "root:secret" -H "Surreal-NS: main" -H "Surreal-DB: main" -H "Ac
 
 ## `POST /graphql`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 To use the GraphQL API, you can send a `POST` request to the `/graphql` endpoint with a JSON body containing the GraphQL query via Postman or any other HTTP client. For example, to query the `person` table for all records, you can send the following request:
 
@@ -81,7 +79,7 @@ The GraphQL endpoint enables use of GraphQL queries to interact with your data.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Authorization</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
             Sets the root, namespace, database, or record authentication data
@@ -90,7 +88,7 @@ The GraphQL endpoint enables use of GraphQL queries to interact with your data.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>Accept</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the desired content-type of the response
@@ -99,7 +97,7 @@ The GraphQL endpoint enables use of GraphQL queries to interact with your data.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>surreal-ns</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Namespace for queries
@@ -108,7 +106,7 @@ The GraphQL endpoint enables use of GraphQL queries to interact with your data.
         <tr>
             <td colspan="2" scope="row" data-label="Header">
                 <code>surreal-db</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Sets the selected Database for queries

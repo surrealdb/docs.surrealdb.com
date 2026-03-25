@@ -5,7 +5,6 @@ title: JavaScript | SDK | Data manipulation
 description: SurrealDB supports a number of methods for interacting with the database and performing CRUD operations.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Data manipulation
 
@@ -74,7 +73,7 @@ async db.select<T>(thing)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or a [`RecordId`](/docs/1.x/sdk/javascript/data-types#recordid) to select.
@@ -127,7 +126,7 @@ async db.create<T>(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or a [`RecordId`](/docs/1.x/sdk/javascript/data-types#recordid) to create.
@@ -136,7 +135,7 @@ async db.create<T>(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The document / record data to create.
@@ -209,7 +208,7 @@ async db.insert<T>(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>table</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Optionally pass along a table to insert into.
@@ -218,7 +217,7 @@ async db.insert<T>(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Either a single document/record or an array of documents/records to insert
@@ -304,7 +303,7 @@ async db.insert_relation<T>(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>table</code>
-                <Label label="optional" />
+                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Optionally pass along a table to insert into.
@@ -313,7 +312,7 @@ async db.insert_relation<T>(table, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Either a single document/record or an array of documents/records to insert
@@ -382,7 +381,7 @@ async db.update<T>(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or the specific [`RecordId`](/docs/1.x/sdk/javascript/data-types#recordid) to update.
@@ -391,7 +390,7 @@ async db.update<T>(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The document / record data to update.
@@ -464,7 +463,7 @@ async db.merge<T>(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or the specific [`RecordId`](/docs/1.x/sdk/javascript/data-types#recordid) to merge.
@@ -473,7 +472,7 @@ async db.merge<T>(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The document / record data to merge.
@@ -548,7 +547,7 @@ async db.patch(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or the specific [`RecordId`](/docs/1.x/sdk/javascript/data-types#recordid) to patch.
@@ -557,7 +556,7 @@ async db.patch(thing, data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The JSON Patch data with which to patch the records.
@@ -610,7 +609,7 @@ async db.delete<T>(thing)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or a [`RecordId`](/docs/1.x/sdk/javascript/data-types#recordid) to delete.

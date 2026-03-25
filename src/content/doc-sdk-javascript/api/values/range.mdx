@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | Range
 description: Generic range values for numeric, datetime, and other ordered types.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `Range<Beg, End>` {#range}
 
@@ -44,12 +43,12 @@ new Range(begin, end)
     </thead>
     <tbody>
         <tr>
-            <td><code>begin</code> <Label label="required" /></td>
+            <td><code>begin</code> <label label="required" /></td>
             <td><code>Bound&lt;Beg&gt;</code></td>
             <td>The beginning bound (can be inclusive or exclusive).</td>
         </tr>
         <tr>
-            <td><code>end</code> <Label label="required" /></td>
+            <td><code>end</code> <label label="required" /></td>
             <td><code>Bound&lt;End&gt;</code></td>
             <td>The ending bound (can be inclusive or exclusive).</td>
         </tr>

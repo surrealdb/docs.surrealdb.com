@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | UpdatePromise
 description: UpdatePromise provides chainable methods for configuring UPDATE operations.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `UpdatePromise<T, I, J>` {#updatepromise}
 
@@ -42,7 +41,7 @@ updatePromise.content(data)
     </thead>
     <tbody>
         <tr>
-            <td><code>data</code> <Label label="required" /></td>
+            <td><code>data</code> <label label="required" /></td>
             <td><code>Values&lt;I&gt;</code></td>
             <td>Complete replacement data (excluding id field).</td>
         </tr>
@@ -85,7 +84,7 @@ updatePromise.merge(data)
     </thead>
     <tbody>
         <tr>
-            <td><code>data</code> <Label label="required" /></td>
+            <td><code>data</code> <label label="required" /></td>
             <td><code>Partial&lt;Values&lt;I&gt;&gt;</code></td>
             <td>Partial data to merge (only specified fields are updated).</td>
         </tr>
@@ -133,7 +132,7 @@ updatePromise.replace(data)
     </thead>
     <tbody>
         <tr>
-            <td><code>data</code> <Label label="required" /></td>
+            <td><code>data</code> <label label="required" /></td>
             <td><code>Values&lt;I&gt;</code></td>
             <td>Fields to replace.</td>
         </tr>
@@ -171,7 +170,7 @@ updatePromise.patch(operations)
     </thead>
     <tbody>
         <tr>
-            <td><code>operations</code> <Label label="required" /></td>
+            <td><code>operations</code> <label label="required" /></td>
             <td><code>PatchOperation[]</code></td>
             <td>JSON Patch operations to apply.</td>
         </tr>
@@ -212,7 +211,7 @@ updatePromise.where(condition)
     </thead>
     <tbody>
         <tr>
-            <td><code>condition</code> <Label label="required" /></td>
+            <td><code>condition</code> <label label="required" /></td>
             <td><code>ExprLike</code></td>
             <td>The condition expression (string or <a href="/docs/2.x/sdk/javascript/api/utilities/expr">Expression</a> object).</td>
         </tr>
@@ -261,7 +260,7 @@ updatePromise.output(fields)
     </thead>
     <tbody>
         <tr>
-            <td><code>fields</code> <Label label="required" /></td>
+            <td><code>fields</code> <label label="required" /></td>
             <td><code>Output</code></td>
             <td><code>"NONE"</code>, <code>"BEFORE"</code>, <code>"AFTER"</code>, <code>"DIFF"</code>, or field list.</td>
         </tr>
@@ -315,7 +314,7 @@ updatePromise.timeout(duration)
     </thead>
     <tbody>
         <tr>
-            <td><code>duration</code> <Label label="required" /></td>
+            <td><code>duration</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/duration">Duration</a></code></td>
             <td>Maximum time to wait.</td>
         </tr>
@@ -346,7 +345,7 @@ updatePromise.version(timestamp)
     </thead>
     <tbody>
         <tr>
-            <td><code>timestamp</code> <Label label="required" /></td>
+            <td><code>timestamp</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/datetime">DateTime</a></code></td>
             <td>The version timestamp.</td>
         </tr>

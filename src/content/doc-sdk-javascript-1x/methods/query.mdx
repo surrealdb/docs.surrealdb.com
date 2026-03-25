@@ -5,7 +5,6 @@ title: JavaScript | SDK | Methods | query
 description: The SurrealDB SDK for JavaScript enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.query()` {#query}
 
@@ -27,7 +26,7 @@ db.query<T>(query, vars)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>query</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Specifies the SurrealQL statements.
@@ -36,7 +35,7 @@ db.query<T>(query, vars)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>vars</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Assigns variables which can be used in the query.

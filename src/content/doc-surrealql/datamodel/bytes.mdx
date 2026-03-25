@@ -6,7 +6,6 @@ description: A value that represents the bytes used ubiquitously in computer har
 
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Bytes
 
@@ -29,7 +28,7 @@ b"4920616D20736F6D65206279746573"
 
 ## Conversion from other types
 
-<Since v="v2.3.0" />
+<since v="v2.3.0" />
 
 Since SurrealDB 2.3.0, conversions can be performed between bytes, strings, and arrays.
 
@@ -62,7 +61,7 @@ value = "[72, 111, 98, 98, 105, 116, 115]""
 
 ## Byte strings
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 A string preceded by a `b` prefix can be turned into bytes as long as the string represents a hexidecimal value.
 

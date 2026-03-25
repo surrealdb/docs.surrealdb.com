@@ -5,7 +5,6 @@ title: Unset Method in PHP | PHP SDK | Integration | SurrealDB
 description: The ->unset() method for the SurrealDB SDK for PHP removes a parameter from the connection.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->unset()` {#unset}
 
@@ -28,7 +27,7 @@ $db->unset($key)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>key</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>string</code>

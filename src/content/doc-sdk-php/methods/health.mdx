@@ -5,7 +5,6 @@ title: Health Method in PHP | PHP SDK | Integration | SurrealDB
 description: Check the storage layer health of a local or remote database using the health method with the SurrealDB PHP SDK.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->health()` {#health}
 

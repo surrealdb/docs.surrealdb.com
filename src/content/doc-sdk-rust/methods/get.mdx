@@ -5,11 +5,10 @@ title: Get Method in Rust | Rust SDK | Integration | SurrealDB
 description: The .get() method for the SurrealDB Rust SDK retrieves the value at a certain field or index.
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # `get()`
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 The `.get()` method for the `Value` struct retrieves the value at a certain field for an object, or a certain index for an array. The method takes a `&str` or a `usize` as an argument.
 

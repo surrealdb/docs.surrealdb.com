@@ -5,7 +5,6 @@ title: Meta functions | SurrealQL
 description: These functions can be used to retrieve specific metadata from a SurrealDB Record ID.
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Meta functions
 

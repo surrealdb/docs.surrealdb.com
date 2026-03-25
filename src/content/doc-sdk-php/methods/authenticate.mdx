@@ -5,7 +5,6 @@ title: Authenticate Method in PHP | PHP SDK | Integration | SurrealDB
 description: Authenticate the current connection with a JWT token using the authenticate method in the SurrealDB PHP SDK.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->authenticate()` {#authenticate}
 
@@ -28,7 +27,7 @@ $db->authenticate($token)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>token</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>string</code>

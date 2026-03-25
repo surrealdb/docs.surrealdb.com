@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | CreatePromise
 description: CreatePromise provides chainable methods for configuring CREATE operations.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `CreatePromise<T, I, J>` {#createpromise}
 
@@ -42,7 +41,7 @@ createPromise.content(data)
     </thead>
     <tbody>
         <tr>
-            <td><code>data</code> <Label label="required" /></td>
+            <td><code>data</code> <label label="required" /></td>
             <td><code>Values&lt;I&gt;</code></td>
             <td>The record data (excluding id field).</td>
         </tr>
@@ -93,7 +92,7 @@ createPromise.patch(operations)
     </thead>
     <tbody>
         <tr>
-            <td><code>operations</code> <Label label="required" /></td>
+            <td><code>operations</code> <label label="required" /></td>
             <td><code>Values&lt;I&gt;</code></td>
             <td>JSON Patch operations to apply.</td>
         </tr>
@@ -134,7 +133,7 @@ createPromise.output(fields)
     </thead>
     <tbody>
         <tr>
-            <td><code>fields</code> <Label label="required" /></td>
+            <td><code>fields</code> <label label="required" /></td>
             <td><code>Output</code></td>
             <td>Output specification: <code>"NONE"</code>, <code>"BEFORE"</code>, <code>"AFTER"</code>, <code>"DIFF"</code>, or field list.</td>
         </tr>
@@ -188,7 +187,7 @@ createPromise.timeout(duration)
     </thead>
     <tbody>
         <tr>
-            <td><code>duration</code> <Label label="required" /></td>
+            <td><code>duration</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/duration">Duration</a></code></td>
             <td>Maximum time to wait for operation completion.</td>
         </tr>
@@ -227,7 +226,7 @@ createPromise.version(timestamp)
     </thead>
     <tbody>
         <tr>
-            <td><code>timestamp</code> <Label label="required" /></td>
+            <td><code>timestamp</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/datetime">DateTime</a></code></td>
             <td>The version timestamp.</td>
         </tr>

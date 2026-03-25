@@ -5,7 +5,6 @@ title: .NET | SDK | Methods | ListenLive
 description: The .NET SDK for SurrealDB enables you to listen for changes to records in a table.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.ListenLive<T>()` {#listen-live}
 
@@ -27,7 +26,7 @@ db.ListenLive<T>(queryUuid)
         <tr>
             <td colspan="2" scope="col" scope="row" data-label="Arguments">
                 <code>queryUuid</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="col" scope="row" data-label="Description">
                 The UUID of the live query to consume.
