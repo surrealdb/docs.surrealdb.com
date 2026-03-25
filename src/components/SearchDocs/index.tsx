@@ -1,8 +1,8 @@
 import { Flex, Kbd, Text, UnstyledButton, type UnstyledButtonProps } from "@mantine/core";
 import { useDebouncedCallback, useOs } from "@mantine/hooks";
 import { Spotlight, type SpotlightActionData, spotlight } from "@mantine/spotlight";
-import { Icon, iconSearch } from "@surrealdb/ui";
-import { type ChangeEventHandler, useCallback, useRef, useState } from "react";
+import { clsx, Icon, iconSearch } from "@surrealdb/ui";
+import { type ChangeEventHandler, useCallback, useEffect, useRef, useState } from "react";
 import { searchDocs } from "~/utils/search";
 import classes from "./style.module.scss";
 
@@ -10,18 +10,24 @@ export function SearchDocs(props: UnstyledButtonProps) {
     const os = useOs();
     const [actions, setActions] = useState<SpotlightActionData[]>([]);
     const [search, setSearch] = useState("");
+    const [loading, setLoading] = useState(false);
     const controllerRef = useRef<AbortController | null>(null);
 
     const debouncedSearch = useDebouncedCallback(async (value: string) => {
         controllerRef.current?.abort();
+        controllerRef.current = null;
 
         if (!value) {
             setActions([]);
+            setLoading(false);
             return;
         }
 
         const controller = new AbortController();
         controllerRef.current = controller;
+        setLoading(true);
+
+        await new Promise((resolve) => setTimeout(resolve, 10_000));
 
         try {
             const results = await searchDocs(value, controller.signal);
@@ -39,11 +45,13 @@ export function SearchDocs(props: UnstyledButtonProps) {
                 })),
             );
         } catch (error) {
-            if (error instanceof DOMException && error.name === "AbortError") {
-                return;
+            if (!(error instanceof DOMException && error.name === "AbortError")) {
+                throw error;
             }
-
-            throw error;
+        } finally {
+            if (controllerRef.current === controller) {
+                setLoading(false);
+            }
         }
     }, 300);
 
@@ -54,6 +62,13 @@ export function SearchDocs(props: UnstyledButtonProps) {
             debouncedSearch(value);
         },
         [debouncedSearch],
+    );
+
+    useEffect(
+        () => () => {
+            controllerRef.current?.abort();
+        },
+        [],
     );
 
     return (
@@ -95,11 +110,12 @@ export function SearchDocs(props: UnstyledButtonProps) {
             </UnstyledButton>
             <Spotlight
                 actions={search.length > 0 ? actions : []}
-                nothingFound="No results found"
+                nothingFound={loading ? "Searching…" : "No results found"}
                 shortcut="mod+K"
                 scrollable
                 maxHeight={400}
                 classNames={{
+                    content: clsx(classes.content, loading && classes.contentLoading),
                     actionsList: classes.searchInput,
                 }}
                 searchProps={{
