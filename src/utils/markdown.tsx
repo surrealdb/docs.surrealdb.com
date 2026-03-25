@@ -1,4 +1,4 @@
-import { parseMarkdown, SurrealistMini } from "@surrealdb/ui";
+import { parseMarkdown, RailroadDiagram, SurrealistMini } from "@surrealdb/ui";
 import { Boxes } from "~/components/Boxes";
 import { ContentTabItem, ContentTabs } from "~/components/ContentTabs";
 import { IconBox } from "~/components/IconBox";
@@ -26,6 +26,12 @@ export function registerMarkdownComponents() {
         Boxes,
         Tabs: ContentTabs,
         TabItem: ContentTabItem,
+        RailroadDiagram: (props: { ast: string }) => (
+            <RailroadDiagram
+                {...props}
+                ast={JSON.parse(props.ast)}
+            />
+        ),
     };
 }
 
