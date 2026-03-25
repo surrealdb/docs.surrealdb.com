@@ -5,7 +5,6 @@ title: Query Method in PHP | PHP SDK | Integration | SurrealDB
 description: The ->query() method for the SurrealDB SDK for PHP runs a set of SurrealQL statements against the database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->query()` {#query}
 
@@ -28,7 +27,7 @@ $db->query($query, $vars)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>$query</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>string</code>
@@ -40,7 +39,7 @@ $db->query($query, $vars)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>$vars</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>associative array</code>

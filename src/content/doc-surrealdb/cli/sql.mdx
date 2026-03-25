@@ -4,8 +4,6 @@ sidebar_label: SQL command
 title: SQL command | CLI tool
 description: A command that starts a command-line REPL to make SurrealQL to a local or remote SurrealDB database server.
 ---
-import Since from '@components/shared/Since.astro'
-import Label from "@components/shared/Label.astro";
 
 # SQL command
 
@@ -27,7 +25,7 @@ The SQL command starts a REPL for running or piping SurrealQL queries to a local
         <tr>
             <td colspan="2">
                 `-e` / `--endpoint` / `--conn`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
             Sets the url of the database server to connect to
@@ -36,7 +34,7 @@ The SQL command starts a REPL for running or piping SurrealQL queries to a local
         <tr>
             <td colspan="2">
                 `-u` / `--user`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets master username for the database
@@ -45,7 +43,7 @@ The SQL command starts a REPL for running or piping SurrealQL queries to a local
         <tr>
             <td colspan="2">
                 `-p` / `--pass`
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td>
                 Sets master password for the database
@@ -54,7 +52,7 @@ The SQL command starts a REPL for running or piping SurrealQL queries to a local
         <tr>
             <td colspan="2">
                 `--allow-experimental`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
                 Enable experimental capabilities
@@ -63,7 +61,7 @@ The SQL command starts a REPL for running or piping SurrealQL queries to a local
         <tr>
             <td colspan="2">
                 `--ns`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
                 Sets the desired namespace in which to import data
@@ -72,7 +70,7 @@ The SQL command starts a REPL for running or piping SurrealQL queries to a local
         <tr>
             <td colspan="2">
                 `--db`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
                 Sets the desired database into which to import data
@@ -81,7 +79,7 @@ The SQL command starts a REPL for running or piping SurrealQL queries to a local
         <tr>
             <td colspan="2">
                 `--auth-level`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
                 The authentication level to use when connecting to the server.
@@ -90,7 +88,7 @@ The SQL command starts a REPL for running or piping SurrealQL queries to a local
         <tr>
             <td colspan="2">
                 `-t` / `--token`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
                 Sets the authentication token to use when connecting to the server. Connect to SurrealDB using a JWT instead of user credentials
@@ -99,7 +97,7 @@ The SQL command starts a REPL for running or piping SurrealQL queries to a local
         <tr>
             <td colspan="2">
                 `--pretty`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
                 Sets whether database responses should be pretty printed
@@ -108,7 +106,7 @@ The SQL command starts a REPL for running or piping SurrealQL queries to a local
         <tr>
             <td colspan="2">
                 `--json`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
                 Sets whether to emit results in JSON
@@ -117,7 +115,7 @@ The SQL command starts a REPL for running or piping SurrealQL queries to a local
         <tr>
             <td colspan="2">
                 `--multi`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
                 Sets whether omitting semicolon causes a newline 
@@ -126,7 +124,7 @@ The SQL command starts a REPL for running or piping SurrealQL queries to a local
         <tr>
             <td colspan="2">
                 `-h` / `--help`
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td>
                 Prints help
@@ -148,7 +146,7 @@ For more on the environment variables available for CLI commands or SurrealDB in
 
 ## `--auth-level` option
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `--auth-level` option sets the authentication level to use when connecting to the database. The option has three possible values: `root`, `namespace`, and `database`. The `root` value is the highest level of authentication, while the `namespace` and `database` values are used for authenticating as users defined on a specific namespace or database. 
 
@@ -174,7 +172,7 @@ surreal sql --endpoint http://localhost:8000 --namespace test --database test --
 
 ## `--token` option
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `--token` option sets the authentication token to use when connecting to the server. This option allows you to connect to SurrealDB using a JWT instead of user credentials. The token is used to authenticate the user and provide access to the database server which means it cannot be provided at the same time as `--username`, `--password` or `--auth-level`.
 
@@ -184,7 +182,7 @@ surreal sql --endpoint http://localhost:8000 --namespace test --database test --
 
 ## Experimental capabilities
 
-<Since v="v2.2.1" />
+<since v="v2.2.1" />
 
 > [!NOTE]
 > The experimental capability is completely hidden in the CLI help command, and `--allow-all` will not enable the experimental capabilities by default.
@@ -217,7 +215,7 @@ The current experimental targets are `files` and `surrealism`.
 
 ### Default namespace and database
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 As the `surreal start` command defaults to defining a namespace and database by the name `main` upon starting up, the `surreal sql` command also connects to these two by default. As such, a command like `surreal sql --user root --pass secret` or even just `surreal sql` (for an instance with authentication disabled) is all that is needed to connect and begin using an instance via the CLI.
 

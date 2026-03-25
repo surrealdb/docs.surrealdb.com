@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | Query
 description: Query class for executing raw SurrealQL with streaming and batch processing support.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `Query<R, J>` {#query}
 
@@ -43,7 +42,7 @@ query.collect<T>(...queryIndexes?)
     </thead>
     <tbody>
         <tr>
-            <td><code>queryIndexes</code> <Label label="optional" /></td>
+            <td><code>queryIndexes</code> <label label="optional" /></td>
             <td><code>number[]</code></td>
             <td>Specific query indexes to collect. If omitted, collects all.</td>
         </tr>

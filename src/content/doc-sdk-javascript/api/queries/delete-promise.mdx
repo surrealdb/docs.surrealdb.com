@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | DeletePromise
 description: DeletePromise provides chainable methods for configuring DELETE operations.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `DeletePromise<T, J>` {#deletepromise}
 
@@ -41,7 +40,7 @@ deletePromise.output(fields)
     </thead>
     <tbody>
         <tr>
-            <td><code>fields</code> <Label label="required" /></td>
+            <td><code>fields</code> <label label="required" /></td>
             <td><code>Output</code></td>
             <td><code>"NONE"</code>, <code>"BEFORE"</code>, or specific field list.</td>
         </tr>
@@ -92,7 +91,7 @@ deletePromise.timeout(duration)
     </thead>
     <tbody>
         <tr>
-            <td><code>duration</code> <Label label="required" /></td>
+            <td><code>duration</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/duration">Duration</a></code></td>
             <td>Maximum time to wait.</td>
         </tr>
@@ -130,7 +129,7 @@ deletePromise.version(timestamp)
     </thead>
     <tbody>
         <tr>
-            <td><code>timestamp</code> <Label label="required" /></td>
+            <td><code>timestamp</code> <label label="required" /></td>
             <td><code><a href="/docs/2.x/sdk/javascript/api/values/datetime">DateTime</a></code></td>
             <td>The version timestamp.</td>
         </tr>

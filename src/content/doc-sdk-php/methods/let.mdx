@@ -5,7 +5,6 @@ title: Let Method in PHP | PHP SDK | Integration | SurrealDB
 description: Assign parameters to a query using the let method in the SurrealDB PHP SDK.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->let()` {#let}
 
@@ -28,7 +27,7 @@ $db->let($name, $value)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>name</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>string</code>
@@ -40,7 +39,7 @@ $db->let($name, $value)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>value</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>mixed</code>

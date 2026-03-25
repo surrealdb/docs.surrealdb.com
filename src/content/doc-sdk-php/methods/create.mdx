@@ -5,7 +5,6 @@ title: Create Method in PHP | PHP SDK | Integration | SurrealDB
 description: Create a record in the database using the create method with the SurrealDB PHP SDK.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->create()` {#create}
 
@@ -28,7 +27,7 @@ $db->create($thing, $data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>string</code>, <code>RecordId</code> or <code>StringRecordId</code>
@@ -40,7 +39,7 @@ $db->create($thing, $data)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>mixed</code>

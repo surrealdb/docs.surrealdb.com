@@ -5,7 +5,6 @@ title: Select Method in PHP | PHP SDK | Integration | SurrealDB
 description: The ->select() method for the SurrealDB SDK for PHP selects all or specific records from the database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->select()` {#select}
 
@@ -28,7 +27,7 @@ $db->select($thing)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>string</code>, <code>RecordId</code> or <code>StringRecordId</code>

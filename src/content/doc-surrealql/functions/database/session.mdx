@@ -4,7 +4,6 @@ sidebar_label: Session functions
 title: Session functions | SurrealQL
 description: These functions return information about the current SurrealDB session.
 ---
-import Since from '@components/shared/Since.astro'
 
 # Session functions
 
@@ -55,7 +54,7 @@ These functions return information about the current SurrealDB session.
 
 ## `session::ac`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 > [!NOTE]
 > This function was known as `session::sc` in versions of SurrrealDB before 2.0. The behaviour has not changed.
@@ -163,7 +162,7 @@ RETURN session::origin();
 
 ## `session::rd`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 The `session::rd` function returns the current user's record authentication.
 

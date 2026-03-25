@@ -4,11 +4,10 @@ sidebar_label: Closures
 title: Closures | SurrealQL
 description: Anonymous functions in SurrealDB allow you to define small, reusable pieces of logic that can be used throughout your queries.
 ---
-import Since from '@components/shared/Since.astro'
 
 # Anonymous functions (closures)
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 ```syntax title="SurrealQL Syntax"
 LET $parameter = |@parameters| @expression;
@@ -191,7 +190,7 @@ SELECT VALUE fn::test_create($this) FROM ["Alice", "Bob", "Charlie"];
 
 ## Capturing parameters
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 The original implementation of closures did not allow them to capture parameters (variables) in their scope. Strictly speaking, this made them simple anonymous functions as closures did not "enclose" anything.
 

@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | UpsertPromise
 description: UpsertPromise provides chainable methods for configuring UPSERT operations (insert or replace).
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `UpsertPromise<T, I, J>` {#upsertpromise}
 
@@ -45,7 +44,7 @@ upsertPromise.content(data)
     </thead>
     <tbody>
         <tr>
-            <td><code>data</code> <Label label="required" /></td>
+            <td><code>data</code> <label label="required" /></td>
             <td><code>Values&lt;I&gt;</code></td>
             <td>Complete record data (excluding id field).</td>
         </tr>
@@ -88,7 +87,7 @@ upsertPromise.merge(data)
     </thead>
     <tbody>
         <tr>
-            <td><code>data</code> <Label label="required" /></td>
+            <td><code>data</code> <label label="required" /></td>
             <td><code>Partial&lt;Values&lt;I&gt;&gt;</code></td>
             <td>Partial data to merge.</td>
         </tr>
@@ -130,7 +129,7 @@ upsertPromise.replace(data)
     </thead>
     <tbody>
         <tr>
-            <td><code>data</code> <Label label="required" /></td>
+            <td><code>data</code> <label label="required" /></td>
             <td><code>Values&lt;I&gt;</code></td>
             <td>Fields to replace.</td>
         </tr>
@@ -161,7 +160,7 @@ upsertPromise.patch(operations)
     </thead>
     <tbody>
         <tr>
-            <td><code>operations</code> <Label label="required" /></td>
+            <td><code>operations</code> <label label="required" /></td>
             <td><code>PatchOperation[]</code></td>
             <td>JSON Patch operations.</td>
         </tr>
@@ -192,7 +191,7 @@ upsertPromise.where(condition)
     </thead>
     <tbody>
         <tr>
-            <td><code>condition</code> <Label label="required" /></td>
+            <td><code>condition</code> <label label="required" /></td>
             <td><code>ExprLike</code></td>
             <td>The condition expression (string or <a href="/docs/2.x/sdk/javascript/api/utilities/expr">Expression</a> object).</td>
         </tr>
@@ -223,7 +222,7 @@ upsertPromise.output(fields)
     </thead>
     <tbody>
         <tr>
-            <td><code>fields</code> <Label label="required" /></td>
+            <td><code>fields</code> <label label="required" /></td>
             <td><code>Output</code></td>
             <td><code>"NONE"</code>, <code>"BEFORE"</code>, <code>"AFTER"</code>, <code>"DIFF"</code>, or field list.</td>
         </tr>

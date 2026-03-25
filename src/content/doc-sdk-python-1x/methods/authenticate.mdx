@@ -5,7 +5,6 @@ title: Python | SDK | Methods | authenticate
 description: The SurrealDB SDK for Python enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.authenticate()`
 
@@ -27,7 +26,7 @@ db.authenticate(token)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>token</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The JWT authentication token.

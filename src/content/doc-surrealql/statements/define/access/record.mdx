@@ -5,11 +5,10 @@ title: DEFINE ACCESS ... TYPE RECORD statement | SurrealQL
 description: A record access method allows accessing SurrealDB as a record user.
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # `DEFINE ACCESS ... TYPE RECORD`
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 A record access method allows accessing SurrealDB as a [record user](/docs/surrealdb/security/authentication#record-users).
 

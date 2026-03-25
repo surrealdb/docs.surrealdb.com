@@ -5,7 +5,6 @@ title: DEFINE ACCESS ... TYPE BEARER statement | SurrealQL
 description: A bearer access method allows accessing SurrealDB using a bearer key.
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # `DEFINE ACCESS ... TYPE BEARER`
 

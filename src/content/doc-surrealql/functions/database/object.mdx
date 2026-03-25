@@ -5,7 +5,6 @@ title: Object functions | SurrealQL
 description: These functions can be used when working with, and manipulating data objects.
 ---
 
-import Since from '@components/shared/Since.astro'
 
 # Object functions
 
@@ -89,7 +88,7 @@ RETURN object::entries({
 
 ## `object::extend`
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 The `object::extend` function extends an object with the fields and values of another one, essentially adding the two together.
 
@@ -170,7 +169,7 @@ RETURN object::from_entries([
 
 ## `object::is_empty`
 
-<Since v="v2.2.0" />
+<since v="v2.2.0" />
 
 The `object::is_empty` function checks whether the object contains values.
 
@@ -308,7 +307,7 @@ RETURN object::len({
 
 ## `object::remove`
 
-<Since v="v3.0.0" />
+<since v="v3.0.0" />
 
 The `object::remove` function removes one or more fields from an object.
 
@@ -378,7 +377,7 @@ RETURN object::values({
 
 ## Method chaining
 
-<Since v="v2.0.0" />
+<since v="v2.0.0" />
 
 Method chaining allows functions to be called using the `.` dot operator on a value of a certain type instead of the full path of the function followed by the value.
 

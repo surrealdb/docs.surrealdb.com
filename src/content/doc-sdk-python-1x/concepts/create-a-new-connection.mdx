@@ -5,9 +5,6 @@ title: Python | SDK | Create a new connection
 description: The SurrealDB SDK for Python enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Tabs from "@components/Tabs/Tabs.astro"
-import TabItem from "@components/Tabs/TabItem.astro"
-import Label from "@components/shared/Label.astro"
 
 # Create a new connection
 

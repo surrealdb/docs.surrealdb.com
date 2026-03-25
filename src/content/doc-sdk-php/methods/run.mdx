@@ -5,7 +5,6 @@ title: Run Method in PHP | PHP SDK | Integration | SurrealDB
 description: The run method in the SurrealDB PHP SDK allows you to execute a defined SurrealQL function on the remote database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->run()` {#run}
 
@@ -29,7 +28,7 @@ $db->run($function, $version, $params);
 		<tr>
 			<td colspan="2" scope="row" data-label="Arguments">
 				<code>$function</code>
-				<Label label="required" />
+				<label label="required" />
 			</td>
 			<td colspan="2" scope="row" data-label="Description">
 				<code>string</code>
@@ -41,7 +40,7 @@ $db->run($function, $version, $params);
 		<tr>
 			<td colspan="2" scope="row" data-label="Arguments">
 				<code>$version</code>
-				<Label label="optional" />
+				<label label="optional" />
 			</td>
 			<td colspan="2" scope="row" data-label="Type">
 				`string` or `null`
@@ -53,7 +52,7 @@ $db->run($function, $version, $params);
 		<tr>
 			<td colspan="2" scope="row" data-label="Arguments">
 				<code>$params</code>
-				<Label label="optional" />
+				<label label="optional" />
 			</td>
 			<td colspan="2" scope="row" data-label="Type">
 				`array` or `null`

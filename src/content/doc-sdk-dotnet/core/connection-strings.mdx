@@ -5,7 +5,6 @@ title: Connection Strings | .NET | SDK | Concepts
 description: The .NET SDK for SurrealDB supports the familiar concept of ConnectionString.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # Connection Strings
 
@@ -28,7 +27,7 @@ In general, it is known as a best practice to:
         <tr>
             <td scope="row" data-label="Keys">
                 <code>Endpoint</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The database endpoint to connect to. <br />
@@ -42,7 +41,7 @@ In general, it is known as a best practice to:
         <tr>
             <td scope="row" data-label="Keys">
                 <code>Namespace</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Switches to a specific namespace.
@@ -54,7 +53,7 @@ In general, it is known as a best practice to:
         <tr>
             <td scope="row" data-label="Keys">
                 <code>Database</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Switches to a specific database.
@@ -66,7 +65,7 @@ In general, it is known as a best practice to:
         <tr>
             <td scope="row" data-label="Keys">
                 <code>Username</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Username used to have root access.
@@ -78,7 +77,7 @@ In general, it is known as a best practice to:
         <tr>
             <td scope="row" data-label="Keys">
                 <code>Password</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Password used to have root access.
@@ -90,7 +89,7 @@ In general, it is known as a best practice to:
         <tr>
             <td scope="row" data-label="Keys">
                 <code>Token</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Token (JWT) used to have user access.
@@ -100,7 +99,7 @@ In general, it is known as a best practice to:
         <tr>
             <td scope="row" data-label="Keys">
                 <code>NamingPolicy</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Naming policy used to interact with the database. <br />
@@ -111,7 +110,7 @@ In general, it is known as a best practice to:
         <tr>
             <td scope="row" data-label="Keys">
                <code>AuthLevel</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Auth level when connecting to the SurrealDB instance. <br />

@@ -5,7 +5,6 @@ title: JavaScript | SDK | Methods | unset
 description: The SurrealDB SDK for JavaScript enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.unset()` {#unset}
 
@@ -27,7 +26,7 @@ db.unset(key: string)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>key</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 Specifies the name of the variable.

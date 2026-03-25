@@ -5,7 +5,6 @@ title: Export Method in PHP | PHP SDK | Integration | SurrealDB
 description: Export data from a local or remote database using the export method with the SurrealDB PHP SDK.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->export()` {#export}
 
@@ -33,7 +32,7 @@ $db->export($username, $password);
 		<tr>
 			<td colspan="2" scope="row" data-label="Arguments">
 				<code>username</code>
-				<Label label="required" />
+				<label label="required" />
 			</td>
 			<td colspan="2" scope="row" data-label="Type">
 				`string`
@@ -45,7 +44,7 @@ $db->export($username, $password);
 		<tr>
 			<td colspan="2" scope="row" data-label="Arguments">
 				<code>password</code>
-				<Label label="required" />
+				<label label="required" />
 			</td>
 			<td colspan="2" scope="row" data-label="Type">
 				`string`

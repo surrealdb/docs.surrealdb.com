@@ -5,7 +5,6 @@ title: JavaScript | SDK | Methods | delete
 description: The SurrealDB SDK for JavaScript enables simple and advanced querying of a remote or embedded database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `.delete()` {#delete}
 
@@ -27,7 +26,7 @@ db.delete<T,U>(thing)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
                 The table name or a [`RecordId`](/docs/1.x/sdk/javascript/data-types#recordid) to delete.

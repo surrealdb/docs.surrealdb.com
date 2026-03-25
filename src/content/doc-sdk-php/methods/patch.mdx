@@ -5,7 +5,6 @@ title: Patch Method in PHP | PHP SDK | Integration | SurrealDB
 description: The ->patch() method for the SurrealDB SDK for PHP applies JSON patch changes to records in the database.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `->patch()` {#patch}
 
@@ -32,7 +31,7 @@ $db->patch($thing, $data, $diff)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>thing</code>
-                <Label label="required" />
+                <label label="required" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>string</code>, <code>RecordId</code> or <code>StringRecordId</code>
@@ -44,7 +43,7 @@ $db->patch($thing, $data, $diff)
         <tr>
             <td colspan="2" scope="row" data-label="Arguments">
                 <code>data</code>
-               <Label label="optional" />
+               <label label="optional" />
             </td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>associative array</code>
@@ -56,7 +55,7 @@ $db->patch($thing, $data, $diff)
 		<tr>
 			<td colspan="2" scope="row" data-label="Arguments">
 				<code>diff</code>
-			   <Label label="optional" />
+			   <label label="optional" />
 			</td>
 			<td colspan="2" scope="row" data-label="Type">
 				<code>boolean</code>

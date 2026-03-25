@@ -5,7 +5,6 @@ title: JavaScript | SDK | API Reference | surql
 description: Tagged template for composing parameterized SurrealQL queries.
 ---
 
-import Label from "@components/shared/Label.astro";
 
 # `surql` {#surql}
 
@@ -38,12 +37,12 @@ function surql(
     </thead>
     <tbody>
         <tr>
-            <td><code>strings</code> <Label label="required" /></td>
+            <td><code>strings</code> <label label="required" /></td>
             <td><code>TemplateStringsArray</code></td>
             <td>Template string segments.</td>
         </tr>
         <tr>
-            <td><code>values</code> <Label label="required" /></td>
+            <td><code>values</code> <label label="required" /></td>
             <td><code>unknown[]</code></td>
             <td>Interpolated values (automatically bound as parameters).</td>
         </tr>
