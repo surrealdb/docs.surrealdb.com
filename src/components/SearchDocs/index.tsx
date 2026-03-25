@@ -27,8 +27,6 @@ export function SearchDocs(props: UnstyledButtonProps) {
         controllerRef.current = controller;
         setLoading(true);
 
-        await new Promise((resolve) => setTimeout(resolve, 10_000));
-
         try {
             const results = await searchDocs(value, controller.signal);
 
