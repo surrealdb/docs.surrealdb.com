@@ -25,8 +25,6 @@ import {
     clsx,
     Icon,
     iconChevronDown,
-    pictoTutorials,
-    pictoUniversity,
     ThemedImage,
 } from "@surrealdb/ui";
 import { ClientOnly } from "vike-react/ClientOnly";
@@ -86,43 +84,9 @@ export const NAV_LINKS: NavEntry[] = [
         ],
     },
     { label: "Integrations", href: "/docs/integrations/" },
-    {
-        label: "Examples",
-        items: [
-            { label: "Define a Schema", href: "/docs/tutorials/define-a-schema/" },
-            {
-                label: "Using GitHub Actions",
-                href: "/docs/tutorials/using-github-actions/",
-            },
-            {
-                label: "Integrate Auth0",
-                href: "/docs/tutorials/integrate-auth0-as-authentication-provider/",
-            },
-            {
-                label: "Integrate AWS Cognito",
-                href: "/docs/tutorials/integrate-aws-cognito-as-authentication-provider/",
-            },
-            {
-                label: "SurrealDB over HTTP via Postman",
-                href: "/docs/tutorials/working-with-surrealdb-over-http-via-postman/",
-            },
-            {
-                label: "Connect via Ngrok Tunnel",
-                href: "/docs/tutorials/connect-to-surrealdb-via-ngrok-tunnel/",
-            },
-            {
-                label: "Realtime Presence App",
-                href: "/docs/tutorials/build-a-realtime-presence-web-application-using-surrealdb-live-queries/",
-            },
-        ],
-    },
-    {
-        label: "Education",
-        items: [
-            { label: "Tutorials", href: "/docs/tutorials/", icon: pictoTutorials },
-            { label: "SurrealDB University", href: "/learn", icon: pictoUniversity },
-        ],
-    },
+    { label: "Tutorials", href: "/docs/tutorials" },
+    { label: "University", href: "/learn"},
+    { label: "Labs", href: "/docs/labs/" },
 ];
 
 function normalizeHref(href: string) {
