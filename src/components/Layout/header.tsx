@@ -25,8 +25,6 @@ import {
     clsx,
     Icon,
     iconChevronDown,
-    pictoTutorials,
-    pictoUniversity,
     ThemedImage,
 } from "@surrealdb/ui";
 import { ClientOnly } from "vike-react/ClientOnly";
