@@ -85,7 +85,7 @@ export const NAV_LINKS: NavEntry[] = [
     },
     { label: "Integrations", href: "/docs/integrations/" },
     { label: "Tutorials", href: "/docs/tutorials" },
-    { label: "University", href: "/learn"},
+    { label: "University", href: "/learn" },
     { label: "Labs", href: "/docs/labs/" },
 ];
 
