@@ -1,39 +1,59 @@
-import { Flex, Text, UnstyledButton, type UnstyledButtonProps } from "@mantine/core";
-import { useThrottledCallback } from "@mantine/hooks";
+import { Flex, Kbd, Text, UnstyledButton, type UnstyledButtonProps } from "@mantine/core";
+import { useDebouncedCallback, useOs } from "@mantine/hooks";
 import { Spotlight, type SpotlightActionData, spotlight } from "@mantine/spotlight";
 import { Icon, iconSearch } from "@surrealdb/ui";
-import { type ChangeEventHandler, useCallback, useState } from "react";
+import { type ChangeEventHandler, useCallback, useRef, useState } from "react";
 import { searchDocs } from "~/utils/search";
 import classes from "./style.module.scss";
 
 export function SearchDocs(props: UnstyledButtonProps) {
+    const os = useOs();
     const [actions, setActions] = useState<SpotlightActionData[]>([]);
     const [search, setSearch] = useState("");
+    const controllerRef = useRef<AbortController | null>(null);
 
-    const throttledSearch = useThrottledCallback(async (value: string) => {
-        const results = await searchDocs(value);
+    const debouncedSearch = useDebouncedCallback(async (value: string) => {
+        controllerRef.current?.abort();
 
-        setActions(
-            results.map((result) => ({
-                id: result.url,
-                label: result.title,
-                description: result.description,
-                component: "a",
-                href: result.url,
-                onClick: () => {
-                    window.location.href = result.url;
-                },
-            })),
-        );
-    }, 500);
+        if (!value) {
+            setActions([]);
+            return;
+        }
+
+        const controller = new AbortController();
+        controllerRef.current = controller;
+
+        try {
+            const results = await searchDocs(value, controller.signal);
+
+            setActions(
+                results.map((result) => ({
+                    id: result.url,
+                    label: result.title,
+                    description: result.description,
+                    component: "a",
+                    href: result.url,
+                    onClick: () => {
+                        window.location.href = result.url;
+                    },
+                })),
+            );
+        } catch (error) {
+            if (error instanceof DOMException && error.name === "AbortError") {
+                return;
+            }
+
+            throw error;
+        }
+    }, 300);
 
     const handleSearch = useCallback<ChangeEventHandler<HTMLInputElement>>(
         (event) => {
             const value = event.currentTarget.value;
             setSearch(value);
-            throttledSearch(value);
+            debouncedSearch(value);
         },
-        [throttledSearch],
+        [debouncedSearch],
     );
 
     return (
@@ -59,15 +79,24 @@ export function SearchDocs(props: UnstyledButtonProps) {
                     <Text
                         fz="sm"
                         c="dimmed"
+                        flex={1}
                     >
                         Search the docs
                     </Text>
+                    {os !== "undetermined" && (
+                        <Kbd
+                            fz="xs"
+                            className={classes.shortcut}
+                        >
+                            {os === "macos" ? "⌘" : "Ctrl"} K
+                        </Kbd>
+                    )}
                 </Flex>
             </UnstyledButton>
             <Spotlight
                 actions={search.length > 0 ? actions : []}
                 nothingFound="No results found"
-                shortcut="mod+/"
+                shortcut="mod+K"
                 scrollable
                 maxHeight={400}
                 classNames={{

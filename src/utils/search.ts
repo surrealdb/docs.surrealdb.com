@@ -7,13 +7,13 @@ export interface Doc {
     hostname: string;
 }
 
-export async function searchDocs(keywords: string): Promise<Doc[]> {
+export async function searchDocs(keywords: string, signal?: AbortSignal): Promise<Doc[]> {
     const params = new URLSearchParams({
         hostname: getHostname(),
         query: keywords,
     });
 
-    return await fetch(`/api/docs/search?${params}`)
+    return await fetch(`/api/docs/search?${params}`, { signal })
         .then((res) => res.json())
         .then((data) => data ?? []);
 }
