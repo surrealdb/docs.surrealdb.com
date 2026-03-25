@@ -13,7 +13,7 @@ export async function searchDocs(keywords: string): Promise<Doc[]> {
         query: keywords,
     });
 
-    return await fetch(`https://surrealdb.com/api/docs/search?${params}`)
+    return await fetch(`/api/docs/search?${params}`)
         .then((res) => res.json())
         .then((data) => data ?? []);
 }
