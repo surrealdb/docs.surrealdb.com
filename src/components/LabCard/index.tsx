@@ -1,16 +1,16 @@
 import { Anchor, Box, Flex, Image, Paper, Text, Title } from "@mantine/core";
 import { pictoSurrealDB } from "@surrealdb/ui";
-import placeholderAvatar from "~/assets/img/labs-authors/placeholder.png";
-import catDemosLight from "~/assets/img/labs-categories/demos.light.png";
-import catDemosDark from "~/assets/img/labs-categories/demos.png";
-import catIntegrationsLight from "~/assets/img/labs-categories/integrations.light.png";
-import catIntegrationsDark from "~/assets/img/labs-categories/integrations.png";
-import catLibrariesLight from "~/assets/img/labs-categories/libraries.light.png";
-import catLibrariesDark from "~/assets/img/labs-categories/libraries.png";
-import catTutorialsLight from "~/assets/img/labs-categories/tutorials.light.png";
-import catTutorialsDark from "~/assets/img/labs-categories/tutorials.png";
-import catVideosLight from "~/assets/img/labs-categories/videos.light.png";
-import catVideosDark from "~/assets/img/labs-categories/videos.png";
+import placeholderAvatar from "~/assets/img/labs-authors/placeholder.avif";
+import catDemosDark from "~/assets/img/labs-categories/demos.avif";
+import catDemosLight from "~/assets/img/labs-categories/demos.light.avif";
+import catIntegrationsDark from "~/assets/img/labs-categories/integrations.avif";
+import catIntegrationsLight from "~/assets/img/labs-categories/integrations.light.avif";
+import catLibrariesDark from "~/assets/img/labs-categories/libraries.avif";
+import catLibrariesLight from "~/assets/img/labs-categories/libraries.light.avif";
+import catTutorialsDark from "~/assets/img/labs-categories/tutorials.avif";
+import catTutorialsLight from "~/assets/img/labs-categories/tutorials.light.avif";
+import catVideosDark from "~/assets/img/labs-categories/videos.avif";
+import catVideosLight from "~/assets/img/labs-categories/videos.light.avif";
 import type { LabCategory } from "~/content/config";
 import classes from "./style.module.scss";
 
@@ -44,7 +44,7 @@ const CATEGORY_IMAGES: Record<LabCategory, { dark: string; light: string }> = {
 };
 
 function getAuthorAvatarUrl(slug: string): string {
-    return new URL(`../../assets/img/labs-authors/${slug}.jpg`, import.meta.url).href;
+    return new URL(`../../assets/img/labs-authors/${slug}.avif`, import.meta.url).href;
 }
 
 export function LabCard({ item, isDark }: LabCardProps) {

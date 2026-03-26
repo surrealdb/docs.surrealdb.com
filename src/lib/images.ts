@@ -1,6 +1,6 @@
 // Import all images at build time from assets directory
 const imageModules = import.meta.glob<{ default: string }>(
-    "../assets/img/**/*.{png,jpg,jpeg,webp}",
+    "../assets/img/**/*.{png,jpg,jpeg,webp,avif}",
     {
         eager: true,
     },
@@ -15,9 +15,9 @@ for (const [path, module] of Object.entries(imageModules)) {
     // Extract parts from path: "../assets/img/pages/events/webinar/2026-02-04.png"
     const relativePath = path.replace(/^\.\.\/assets\//, "");
     const filename = path.split("/").pop() || "";
-    const slug = filename.replace(/\.(png|jpg|jpeg|webp)$/i, "");
+    const slug = filename.replace(/\.(png|jpg|jpeg|webp|avif)$/i, "");
 
-    // Map by full @assets path: "~/assets/img/pages/events/webinar/2026-02-04.png"
+    // Map by full @assets path: "~/assets/img/pages/events/webinar/2026-02-04.avif"
     const assetsPath = `~/assets/${relativePath}`;
     imageMap[assetsPath] = url;
 
@@ -48,7 +48,7 @@ for (const [path, module] of Object.entries(imageModules)) {
 /**
  * Get the URL for an image by various path formats.
  * Supports:
- * - @assets paths: "~/assets/img/pages/events/webinar/2026-02-04.png"
+ * - @assets paths: "~/assets/img/pages/events/webinar/2026-02-04.avif"
  * - /assets paths: "/assets/img/pages/events/webinar/2026-02-04.png"
  * - Relative paths: "img/pages/events/webinar/2026-02-04.png"
  * - Filenames (for ambassadors/headshots): "abhishek-das.png"
@@ -71,8 +71,8 @@ export function getImageUrl(imagePath: string | undefined): string | undefined {
     }
 
     // Try converting @assets to /assets and check
-    if (imagePath.startsWith("@assets")) {
-        const publicPath = imagePath.replace("@assets", "/assets");
+    if (imagePath.startsWith("~/assets")) {
+        const publicPath = imagePath.replace("~/assets", "/assets");
         if (imageMap[publicPath]) {
             return imageMap[publicPath];
         }
@@ -80,7 +80,7 @@ export function getImageUrl(imagePath: string | undefined): string | undefined {
 
     // Try converting /assets to @assets and check
     if (imagePath.startsWith("/assets")) {
-        const assetsPath = imagePath.replace("/assets", "@assets");
+        const assetsPath = imagePath.replace("/assets", "~/assets");
         if (imageMap[assetsPath]) {
             return imageMap[assetsPath];
         }

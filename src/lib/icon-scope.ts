@@ -77,7 +77,7 @@ export function getIconScope(): Record<string, string> {
     const scope: Record<string, string> = {};
 
     for (const [name, theme, filename] of ICON_ENTRIES) {
-        const path = `${ICON_BASE}/${theme}/${filename}.png`;
+        const path = `${ICON_BASE}/${theme}/${filename}.avif`;
         scope[name] = getImageUrl(path) ?? path;
     }
 
