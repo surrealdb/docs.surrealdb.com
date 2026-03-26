@@ -36,10 +36,10 @@ config.
 
 There are two kinds of collections:
 
-| Kind | Schema | Collections |
-| ---- | ------------- | ---------------------------------------------------------------- |
-| Docs | `abstractDoc` | `doc-surrealdb`, `doc-cloud`, `doc-surrealist`, `doc-surrealml`, `doc-surrealkv`, `doc-surrealql`, `doc-integrations`, `doc-tutorials`, `doc-sdk-*` |
-| Labs | `labCollection` | `labs-items` |
+| Kind | Schema          | Collections                                                                                                                        |
+| ---- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Docs | `abstractDoc`   | `doc-surrealdb`, `doc-cloud`, `doc-surrealist`, `doc-surrealkv`, `doc-surrealql`, `doc-integrations`, `doc-tutorials`, `doc-sdk-*` |
+| Labs | `labCollection` | `labs-items`                                                                                                                       |
 
 Every `+Content.ts` follows the same pattern:
 
