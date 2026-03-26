@@ -30,7 +30,7 @@ export function Head() {
                 rel="icon"
                 href={FavIcon}
             />
-            <ColorSchemeScript defaultColorScheme="auto" />
+            <ColorSchemeScript defaultColorScheme="dark" />
             <meta
                 name="robots"
                 content="index, follow"

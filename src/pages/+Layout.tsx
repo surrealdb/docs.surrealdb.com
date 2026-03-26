@@ -1,35 +1,15 @@
 // https://vike.dev/Layout
 
-import {
-    Box,
-    MantineProvider,
-    type MantineThemeOverride,
-    useComputedColorScheme,
-} from "@mantine/core";
+import { MantineProvider, type MantineThemeOverride } from "@mantine/core";
 import { MANTINE_THEME } from "@surrealdb/ui";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
     return (
         <MantineProvider
             theme={MANTINE_THEME as MantineThemeOverride}
-            defaultColorScheme="auto"
+            defaultColorScheme="dark"
         >
-            <FixColorScheme>{children}</FixColorScheme>
-        </MantineProvider>
-    );
-}
-
-function FixColorScheme({ children }: { children: React.ReactNode }) {
-    const scheme = useComputedColorScheme();
-    return (
-        <>
-            <Box
-                display="none"
-                aria-hidden={true}
-            >
-                {scheme}
-            </Box>
             {children}
-        </>
+        </MantineProvider>
     );
 }
