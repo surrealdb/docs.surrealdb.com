@@ -1,9 +1,8 @@
 import { ActionIcon, Box, Container, Drawer, Flex, Group } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { Icon, iconSidebar } from "@surrealdb/ui";
+import { type Heading, Icon, iconSidebar } from "@surrealdb/ui";
 import { PageContentActions } from "~/components/ContentActions";
 import { PageAside } from "~/components/PageAside";
-import type { HeadingData } from "~/lib/markdown";
 import type { SidebarItem } from "~/utils/sidebar";
 import { PageBreadcrumbs } from "../Breadcrumbs";
 import { CopyPageMenu } from "../CopyPageMenu";
@@ -16,7 +15,7 @@ import classes from "./style.module.scss";
 export interface DefaultLayoutProps {
     children: React.ReactNode;
     sidebar: SidebarItem[];
-    headings: HeadingData[];
+    headings: Heading[];
     contentPath: string;
     lastUpdated?: string;
     showToc?: boolean;

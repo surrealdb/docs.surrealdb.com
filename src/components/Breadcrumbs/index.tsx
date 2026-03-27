@@ -1,4 +1,4 @@
-import { Anchor, Breadcrumbs } from "@mantine/core";
+import { Anchor, Breadcrumbs, Text } from "@mantine/core";
 import { usePageContext } from "vike-react/usePageContext";
 import { findBreadcrumbTrail, type SidebarItem } from "~/utils/sidebar";
 
@@ -8,12 +8,22 @@ export interface PageBreadcrumbsProps {
 
 export function PageBreadcrumbs({ sidebar }: PageBreadcrumbsProps) {
     const { urlPathname } = usePageContext();
-    const trail = findBreadcrumbTrail(sidebar, urlPathname)?.slice(0, -1);
+    const trail = findBreadcrumbTrail(sidebar, urlPathname);
 
     if (!trail?.length) return null;
 
     return (
-        <Breadcrumbs fz="sm">
+        <Breadcrumbs
+            fz="sm"
+            separator={
+                <Text
+                    c="slate"
+                    fw={600}
+                >
+                    /
+                </Text>
+            }
+        >
             {trail.map((item) => {
                 return (
                     <Anchor

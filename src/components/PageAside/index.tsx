@@ -1,12 +1,11 @@
 import { Anchor, Box, Flex, Stack, Text } from "@mantine/core";
-import { Icon, iconText } from "@surrealdb/ui";
+import { type Heading, Icon, iconText } from "@surrealdb/ui";
 import { useEffect, useState } from "react";
-import type { HeadingData } from "~/lib/markdown";
 import classes from "./style.module.scss";
 export const GITHUB_BASE = "https://github.com/surrealdb/docs.surrealdb.com/edit/main/src/content/";
 export const GITHUB_ISSUES = "https://github.com/surrealdb/docs.surrealdb.com/issues/new";
 
-function useActiveHeading(headings: HeadingData[]): string | null {
+function useActiveHeading(headings: Heading[]): string | null {
     const [activeId, setActiveId] = useState<string | null>(null);
 
     useEffect(() => {
@@ -14,9 +13,6 @@ function useActiveHeading(headings: HeadingData[]): string | null {
 
         function onScroll() {
             let currentId: string | null = null;
-
-            console.log("----");
-            console.log(headings);
 
             for (const heading of headings) {
                 const el = document.getElementById(heading.id);
@@ -39,15 +35,12 @@ function useActiveHeading(headings: HeadingData[]): string | null {
 }
 
 export interface PageAsideProps {
-    headings: HeadingData[];
+    headings: Heading[];
 }
 
 export function PageAside({ headings }: PageAsideProps) {
     const minDepth = Math.min(...headings.map((h) => h.depth));
     const activeId = useActiveHeading(headings);
-
-    console.log(headings);
-    console.log(activeId);
 
     return (
         <Stack
