@@ -1,6 +1,8 @@
 import { ActionIcon, Box, Container, Divider, Drawer, Flex, Group } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { type Heading, Icon, iconSidebar } from "@surrealdb/ui";
+import { useEffect, useRef } from "react";
+import { usePageContext } from "vike-react/usePageContext";
 import { PageContentActions } from "~/components/ContentActions";
 import { PageAside } from "~/components/PageAside";
 import type { SidebarItem } from "~/utils/sidebar";
@@ -32,6 +34,13 @@ export function DefaultLayout({
 }: DefaultLayoutProps) {
     const [menuOpened, { toggle: toggleMenu, close: closeMenu }] = useDisclosure();
     const [sidebarOpened, { toggle: toggleSidebar, close: closeSidebar }] = useDisclosure();
+    const contentRef = useRef<HTMLDivElement>(null);
+    const { urlPathname } = usePageContext();
+
+    // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on route change
+    useEffect(() => {
+        contentRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    }, [urlPathname]);
 
     return (
         <div className={classes.layout}>
@@ -66,6 +75,7 @@ export function DefaultLayout({
                 />
             </Drawer>
             <Group
+                ref={contentRef}
                 justify="center"
                 align="flex-start"
             >
