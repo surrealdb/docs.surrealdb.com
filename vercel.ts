@@ -10,9 +10,13 @@ export const config: VercelConfig = {
             destination: "/",
         },
         {
+        source: "/docs/surrealql/demo",
+        destination: "/docs/surrealdb/demo"
+        },
+        {
             source: "/docs/(.*)",
             destination: "/$1",
-        },
+        }
     ],
     headers: [
         // Cache Vite build assets for 1 year
