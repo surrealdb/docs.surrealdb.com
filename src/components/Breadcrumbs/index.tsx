@@ -15,6 +15,7 @@ export function PageBreadcrumbs({ sidebar }: PageBreadcrumbsProps) {
     return (
         <Breadcrumbs
             fz="sm"
+            id="top"
             separator={
                 <Text
                     c="slate"

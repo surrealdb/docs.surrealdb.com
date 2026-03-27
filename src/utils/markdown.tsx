@@ -10,6 +10,8 @@ export function resolveMarkdown(markdown: string) {
     const ast = parseMarkdown(markdown);
     const headings = extractHeaders(ast);
 
+    console.log(ast, headings);
+
     resolveAstImages(ast);
 
     return { ast, headings };

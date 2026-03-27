@@ -58,22 +58,24 @@ export function PageAside({ headings }: PageAsideProps) {
             hidden={headings.length === 0}
             style={{ flexShrink: 0 }}
         >
-            <Flex
-                align="center"
-                gap={8}
-            >
-                <Icon
-                    path={iconText}
-                    size="sm"
-                    color="bright"
-                />
-                <Text
-                    c="bright"
-                    fw={700}
+            <Anchor href="#top">
+                <Flex
+                    align="center"
+                    gap={8}
                 >
-                    On this page
-                </Text>
-            </Flex>
+                    <Icon
+                        path={iconText}
+                        size="sm"
+                        color="bright"
+                    />
+                    <Text
+                        c="bright"
+                        fw={700}
+                    >
+                        On this page
+                    </Text>
+                </Flex>
+            </Anchor>
             <Box
                 component="ul"
                 className={classes.tocList}
