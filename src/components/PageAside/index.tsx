@@ -46,15 +46,17 @@ export function PageAside({ headings }: PageAsideProps) {
         <Stack
             component="aside"
             gap="lg"
-            p="md"
-            maw="260px"
+            px="md"
+            pb="md"
+            w={275}
             mah="stretch"
             pos="sticky"
             top="0"
             right="2rem"
             aria-hidden={headings.length === 0}
-            visibleFrom="lg"
+            visibleFrom="md"
             hidden={headings.length === 0}
+            style={{ flexShrink: 0 }}
         >
             <Flex
                 align="center"

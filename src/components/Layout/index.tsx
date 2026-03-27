@@ -80,44 +80,58 @@ export function DefaultLayout({
                 align="flex-start"
             >
                 <Container
-                    size={660}
+                    size="md"
+                    p="xl"
                     flex={1}
+                    miw={0}
                     h="100%"
                 >
-                    <Flex
-                        align="center"
-                        gap="sm"
+                    <Group
+                        wrap="nowrap"
+                        align="start"
+                        gap="2xl"
+                        miw={0}
                     >
-                        <ActionIcon
-                            variant="subtle"
-                            color="gray"
-                            hiddenFrom="lg"
-                            onClick={toggleSidebar}
-                            aria-label="Toggle sidebar"
-                        >
-                            <Icon path={iconSidebar} />
-                        </ActionIcon>
                         <Box
                             flex={1}
                             miw={0}
-                            className={classes.breadcrumbScroll}
                         >
-                            <PageBreadcrumbs sidebar={sidebar} />
+                            <Flex
+                                align="center"
+                                gap="sm"
+                            >
+                                <ActionIcon
+                                    variant="subtle"
+                                    color="gray"
+                                    hiddenFrom="lg"
+                                    onClick={toggleSidebar}
+                                    aria-label="Toggle sidebar"
+                                >
+                                    <Icon path={iconSidebar} />
+                                </ActionIcon>
+                                <Box
+                                    flex={1}
+                                    miw={0}
+                                    className={classes.breadcrumbScroll}
+                                >
+                                    <PageBreadcrumbs sidebar={sidebar} />
+                                </Box>
+                                <CopyPageMenu contentPath={contentPath} />
+                            </Flex>
+                            <Box
+                                component="main"
+                                flex={1}
+                            >
+                                {children}
+                            </Box>
+                            <Divider my="3xl" />
+                            <PageContentActions contentPath={contentPath} />
+                            <PageNavigation sidebar={sidebar} />
+                            <Footer />
                         </Box>
-                        <CopyPageMenu contentPath={contentPath} />
-                    </Flex>
-                    <Box
-                        component="main"
-                        flex={1}
-                    >
-                        {children}
-                    </Box>
-                    <Divider my="3xl" />
-                    <PageContentActions contentPath={contentPath} />
-                    <PageNavigation sidebar={sidebar} />
-                    <Footer />
+                        {showToc && <PageAside headings={headings} />}
+                    </Group>
                 </Container>
-                {showToc && <PageAside headings={headings} />}
             </Group>
         </div>
     );
