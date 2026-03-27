@@ -1,24 +1,30 @@
-import { Button, Menu, Stack, Text } from "@mantine/core";
-import { Icon, iconArrowUpRight, iconChevronDown, iconCopy } from "@surrealdb/ui";
+import { Button, Menu, Stack, Text, ThemeIcon } from "@mantine/core";
+import {
+    Icon,
+    iconArrowUpRight,
+    iconChatGPT,
+    iconChevronDown,
+    iconClaude,
+    iconCopy,
+    useStable,
+} from "@surrealdb/ui";
 import { useCallback } from "react";
-import { usePageContext } from "vike-react/usePageContext";
-import type { LLMChatURLs } from "~/utils/llms";
-
-// import classes from "./style.module.scss";
-
-const iconChatGPT = "";
-const iconClaude = "";
 
 const RAW_BASE_URL =
     "https://raw.githubusercontent.com/surrealdb/docs.surrealdb.com/main/src/content";
+
+const LLM_PREFIXES = {
+    chatGpt: "https://chatgpt.com/?hints=search&q=",
+    claude: "https://claude.ai/new?q=",
+};
+
+type LLM = keyof typeof LLM_PREFIXES;
 
 export interface CopyPageMenuProps {
     contentPath: string;
 }
 
 export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
-    const { llms } = usePageContext() as unknown as { llms: LLMChatURLs };
-
     const handleCopyMarkdown = useCallback(async () => {
         try {
             const url = `${RAW_BASE_URL}/${contentPath}`;
@@ -31,15 +37,13 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
         }
     }, [contentPath]);
 
-    const handleOpenChatGPT = () => {
-        const { chatGpt } = llms ?? ({} as LLMChatURLs);
-        window.open(chatGpt, "_blank", "noopener,noreferrer");
-    };
+    const handleOpenLLM = useStable((llm: LLM) => {
+        const prompt = encodeURIComponent(
+            `Read from ${location.href} so I can ask questions about it.`,
+        );
 
-    const handleOpenClaude = () => {
-        const { claude } = llms ?? ({} as LLMChatURLs);
-        window.open(claude, "_blank", "noopener,noreferrer");
-    };
+        window.open(`${LLM_PREFIXES[llm]}${prompt}`, "_blank", "noopener,noreferrer");
+    });
 
     return (
         <Menu
@@ -52,7 +56,6 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
             <Menu.Target>
                 <Button
                     size="xs"
-                    bdrs={4}
                     leftSection={
                         <Icon
                             path={iconCopy}
@@ -73,11 +76,9 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                 <Menu.Item
                     bdrs="xs"
                     leftSection={
-                        <Icon
-                            path={iconCopy}
-                            size="md"
-                            c="bright"
-                        />
+                        <ThemeIcon>
+                            <Icon path={iconCopy} />
+                        </ThemeIcon>
                     }
                     onClick={handleCopyMarkdown}
                 >
@@ -90,7 +91,7 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                         </Text>
                         <Text
                             fz="xs"
-                            c="dimmed"
+                            opacity={0.6}
                         >
                             Copy page content for LLMs
                         </Text>
@@ -99,20 +100,17 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                 <Menu.Item
                     bdrs="xs"
                     leftSection={
-                        <Icon
-                            path={iconChatGPT}
-                            size="md"
-                            c="bright"
-                        />
+                        <ThemeIcon>
+                            <Icon path={iconChatGPT} />
+                        </ThemeIcon>
                     }
                     rightSection={
                         <Icon
                             path={iconArrowUpRight}
                             size="sm"
-                            c="dimmed"
                         />
                     }
-                    onClick={handleOpenChatGPT}
+                    onClick={() => handleOpenLLM("chatGpt")}
                 >
                     <Stack gap={0}>
                         <Text
@@ -123,7 +121,7 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                         </Text>
                         <Text
                             fz="xs"
-                            c="dimmed"
+                            opacity={0.6}
                         >
                             Ask questions about this page
                         </Text>
@@ -132,20 +130,17 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                 <Menu.Item
                     bdrs="xs"
                     leftSection={
-                        <Icon
-                            path={iconClaude}
-                            size="md"
-                            c="bright"
-                        />
+                        <ThemeIcon>
+                            <Icon path={iconClaude} />
+                        </ThemeIcon>
                     }
                     rightSection={
                         <Icon
                             path={iconArrowUpRight}
                             size="sm"
-                            c="dimmed"
                         />
                     }
-                    onClick={handleOpenClaude}
+                    onClick={() => handleOpenLLM("claude")}
                 >
                     <Stack gap={0}>
                         <Text
@@ -156,7 +151,7 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                         </Text>
                         <Text
                             fz="xs"
-                            c="dimmed"
+                            opacity={0.6}
                         >
                             Ask questions about this page
                         </Text>
