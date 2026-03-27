@@ -44,7 +44,7 @@ export function FeedbackModal({ sentiment, opened, onClose }: FeedbackModalProps
     }, [sentiment, reasons, comment, handleClose]);
 
     const options = sentiment === "helpful" ? HELPFUL_OPTIONS : NOT_HELPFUL_OPTIONS;
-    const title = sentiment === "helpful" ? "What did you like?" : "What went wrong?";
+    const title = sentiment === "helpful" ? "What did you like?" : "What could be improved?";
 
     return (
         <Modal
@@ -66,8 +66,12 @@ export function FeedbackModal({ sentiment, opened, onClose }: FeedbackModalProps
                             <Chip
                                 key={option}
                                 value={option}
-                                variant="outline"
                                 size="sm"
+                                styles={{
+                                    label: {
+                                        backgroundColor: "var(--mantine-color-obsidian-light)",
+                                    },
+                                }}
                             >
                                 {option}
                             </Chip>
@@ -87,13 +91,13 @@ export function FeedbackModal({ sentiment, opened, onClose }: FeedbackModalProps
                     justify="flex-end"
                     gap="sm"
                 >
+                    <Button onClick={handleClose}>Cancel</Button>
                     <Button
-                        variant="default"
-                        onClick={handleClose}
+                        onClick={handleSubmit}
+                        variant="gradient"
                     >
-                        Cancel
+                        Submit
                     </Button>
-                    <Button onClick={handleSubmit}>Submit</Button>
                 </Group>
             </Stack>
         </Modal>
