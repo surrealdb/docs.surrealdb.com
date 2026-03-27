@@ -6,7 +6,7 @@ export const config: VercelConfig = {
     redirects: [
         {
             source: "/docs/surrealql/demo",
-            destination: "/docs/surrealdb/demo"
+            destination: "/docs/surrealdb/demo",
         },
     ],
     rewrites: [
@@ -18,7 +18,7 @@ export const config: VercelConfig = {
         {
             source: "/docs/(.*)",
             destination: "/$1",
-        }
+        },
     ],
     headers: [
         // Cache Vite build assets for 1 year

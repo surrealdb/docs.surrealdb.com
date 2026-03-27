@@ -23,7 +23,7 @@ export function PageNavigation({ sidebar }: PageNavigationProps) {
     return (
         <Box
             className={classes.pageNavigation}
-            mt="xl"
+            mt="2xl"
         >
             {prev ? (
                 <Anchor
@@ -39,17 +39,19 @@ export function PageNavigation({ sidebar }: PageNavigationProps) {
                             path={iconChevronLeft}
                             size="sm"
                         />
-                        <Box>
+                        <Box lh="xs">
                             <Text
                                 fz="xs"
-                                c="dimmed"
+                                opacity={0.6}
+                                inherit
                             >
                                 Previous
                             </Text>
                             <Text
-                                fz="md"
+                                fz="lg"
                                 fw={500}
                                 c="bright"
+                                inherit
                             >
                                 {prev.label}
                             </Text>
@@ -71,17 +73,19 @@ export function PageNavigation({ sidebar }: PageNavigationProps) {
                         justify="flex-end"
                         gap="md"
                     >
-                        <Box>
+                        <Box lh="xs">
                             <Text
                                 fz="xs"
-                                c="dimmed"
+                                opacity={0.6}
+                                inherit
                             >
                                 Next
                             </Text>
                             <Text
-                                fz="md"
+                                fz="lg"
                                 fw={500}
                                 c="bright"
+                                inherit
                             >
                                 {next.label}
                             </Text>

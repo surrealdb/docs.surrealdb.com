@@ -1,17 +1,18 @@
-import { parseMarkdown, RailroadDiagram, SurrealistMini } from "@surrealdb/ui";
+import { extractHeaders, parseMarkdown, RailroadDiagram, SurrealistMini } from "@surrealdb/ui";
 import { Boxes } from "~/components/Boxes";
 import { ContentTabItem, ContentTabs } from "~/components/ContentTabs";
 import { IconBox } from "~/components/IconBox";
 import { Version } from "~/components/Version";
 import { getIconScope } from "~/lib/icon-scope";
-import { extractHeadings } from "~/lib/markdown";
 import { resolveAstImages } from "./image-urls";
 
 export function resolveMarkdown(markdown: string) {
     const ast = parseMarkdown(markdown);
+    const headings = extractHeaders(ast);
+
+    console.log(ast, headings);
 
     resolveAstImages(ast);
-    const headings = extractHeadings(ast);
 
     return { ast, headings };
 }

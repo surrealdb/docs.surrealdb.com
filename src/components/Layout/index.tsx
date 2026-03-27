@@ -1,22 +1,23 @@
-import { ActionIcon, Box, Container, Drawer, Flex, Group, Stack } from "@mantine/core";
+import { ActionIcon, Box, Container, Divider, Drawer, Flex, Group } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { Icon, iconSidebar } from "@surrealdb/ui";
+import { type Heading, Icon, iconSidebar } from "@surrealdb/ui";
+import { useEffect, useRef } from "react";
+import { usePageContext } from "vike-react/usePageContext";
 import { PageContentActions } from "~/components/ContentActions";
 import { PageAside } from "~/components/PageAside";
-import type { HeadingData } from "~/lib/markdown";
 import type { SidebarItem } from "~/utils/sidebar";
 import { PageBreadcrumbs } from "../Breadcrumbs";
 import { CopyPageMenu } from "../CopyPageMenu";
 import { Footer } from "../Footer";
 import { Header, MobileNav } from "./header";
-import { Navbar } from "./navbar";
 import { PageNavigation } from "./page-navigation";
+import { Sidebar } from "./sidebar";
 import classes from "./style.module.scss";
 
 export interface DefaultLayoutProps {
     children: React.ReactNode;
     sidebar: SidebarItem[];
-    headings: HeadingData[];
+    headings: Heading[];
     contentPath: string;
     lastUpdated?: string;
     showToc?: boolean;
@@ -33,6 +34,13 @@ export function DefaultLayout({
 }: DefaultLayoutProps) {
     const [menuOpened, { toggle: toggleMenu, close: closeMenu }] = useDisclosure();
     const [sidebarOpened, { toggle: toggleSidebar, close: closeSidebar }] = useDisclosure();
+    const contentRef = useRef<HTMLDivElement>(null);
+    const { urlPathname } = usePageContext();
+
+    // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on route change
+    useEffect(() => {
+        contentRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    }, [urlPathname]);
 
     return (
         <div className={classes.layout}>
@@ -40,8 +48,8 @@ export function DefaultLayout({
                 opened={menuOpened}
                 onToggle={toggleMenu}
             />
-            <Navbar
-                sidebar={sidebar}
+            <Sidebar
+                items={sidebar}
                 visibleFrom="lg"
                 versionSelector={versionSelector}
             />
@@ -61,55 +69,69 @@ export function DefaultLayout({
                 hiddenFrom="lg"
                 withCloseButton={false}
             >
-                <Navbar
-                    sidebar={sidebar}
+                <Sidebar
+                    items={sidebar}
                     versionSelector={versionSelector}
                 />
             </Drawer>
             <Group
+                ref={contentRef}
                 justify="center"
                 align="flex-start"
             >
                 <Container
-                    component={Stack}
-                    size="sm"
+                    size="md"
+                    p="xl"
                     flex={1}
+                    miw={0}
                     h="100%"
                 >
-                    <Flex
-                        align="center"
-                        gap="sm"
-                        mb={32}
+                    <Group
+                        wrap="nowrap"
+                        align="start"
+                        gap="2xl"
+                        miw={0}
                     >
-                        <ActionIcon
-                            variant="subtle"
-                            color="gray"
-                            hiddenFrom="lg"
-                            onClick={toggleSidebar}
-                            aria-label="Toggle sidebar"
-                        >
-                            <Icon path={iconSidebar} />
-                        </ActionIcon>
                         <Box
                             flex={1}
                             miw={0}
-                            className={classes.breadcrumbScroll}
                         >
-                            <PageBreadcrumbs sidebar={sidebar} />
+                            <Flex
+                                align="center"
+                                gap="sm"
+                            >
+                                <ActionIcon
+                                    variant="subtle"
+                                    color="gray"
+                                    hiddenFrom="lg"
+                                    onClick={toggleSidebar}
+                                    aria-label="Toggle sidebar"
+                                >
+                                    <Icon path={iconSidebar} />
+                                </ActionIcon>
+                                <Box
+                                    flex={1}
+                                    miw={0}
+                                    className={classes.breadcrumbScroll}
+                                >
+                                    <PageBreadcrumbs sidebar={sidebar} />
+                                </Box>
+                                <CopyPageMenu contentPath={contentPath} />
+                            </Flex>
+                            <Box
+                                component="main"
+                                flex={1}
+                            >
+                                {children}
+                            </Box>
+                            <Divider my="3xl" />
+                            <PageContentActions contentPath={contentPath} />
+                            <PageNavigation sidebar={sidebar} />
+                            <Footer />
                         </Box>
-                        <CopyPageMenu contentPath={contentPath} />
-                    </Flex>
-                    <Box
-                        component="main"
-                        flex={1}
-                    >
-                        {children}
-                    </Box>
-                    <PageContentActions contentPath={contentPath} />
-                    <PageNavigation sidebar={sidebar} />
-                    <Footer />
+                        {showToc && <PageAside headings={headings} />}
+                    </Group>
                 </Container>
-                {showToc && <PageAside headings={headings} />}
             </Group>
         </div>
     );
