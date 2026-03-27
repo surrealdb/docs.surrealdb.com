@@ -1,4 +1,4 @@
-import { ActionIcon, Box, Container, Drawer, Flex, Group, Stack } from "@mantine/core";
+import { ActionIcon, Box, Container, Drawer, Flex, Group } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { Icon, iconSidebar } from "@surrealdb/ui";
 import { PageContentActions } from "~/components/ContentActions";
@@ -71,7 +71,6 @@ export function DefaultLayout({
                 align="flex-start"
             >
                 <Container
-                    component={Stack}
                     size={660}
                     flex={1}
                     h="100%"
@@ -79,7 +78,6 @@ export function DefaultLayout({
                     <Flex
                         align="center"
                         gap="sm"
-                        mb={32}
                     >
                         <ActionIcon
                             variant="subtle"

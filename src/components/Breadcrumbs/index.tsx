@@ -1,5 +1,4 @@
 import { Anchor, Breadcrumbs } from "@mantine/core";
-import { Icon, iconChevronRight, iconHome } from "@surrealdb/ui";
 import { usePageContext } from "vike-react/usePageContext";
 import { findBreadcrumbTrail, type SidebarItem } from "~/utils/sidebar";
 
@@ -9,55 +8,21 @@ export interface PageBreadcrumbsProps {
 
 export function PageBreadcrumbs({ sidebar }: PageBreadcrumbsProps) {
     const { urlPathname } = usePageContext();
-    const trail = findBreadcrumbTrail(sidebar, urlPathname);
+    const trail = findBreadcrumbTrail(sidebar, urlPathname)?.slice(0, -1);
 
     if (!trail?.length) return null;
 
     return (
-        <Breadcrumbs
-            separator={
-                <Icon
-                    path={iconChevronRight}
-                    size="sm"
-                />
-            }
-            fz="sm"
-        >
-            <Anchor
-                href="/"
-                c="dimmed"
-                display="flex"
-                aria-label="Home"
-            >
-                <Icon
-                    path={iconHome}
-                    size="md"
-                />
-            </Anchor>
-            {trail.map((item, index) => {
-                const isLast = index === trail.length - 1;
-
-                if (isLast) {
-                    return (
-                        <Anchor
-                            key={item.href}
-                            href={item.href}
-                            c="bright"
-                            fz="md"
-                            fw={500}
-                            aria-current="page"
-                        >
-                            {item.label}
-                        </Anchor>
-                    );
-                }
-
+        <Breadcrumbs fz="sm">
+            {trail.map((item) => {
                 return (
                     <Anchor
                         key={item.href}
                         href={item.href}
-                        c="dimmed"
+                        variant="vibrant"
                         fz="md"
+                        lh="unset"
+                        fw={600}
                     >
                         {item.label}
                     </Anchor>
