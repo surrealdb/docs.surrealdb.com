@@ -9,8 +9,8 @@ import { PageBreadcrumbs } from "../Breadcrumbs";
 import { CopyPageMenu } from "../CopyPageMenu";
 import { Footer } from "../Footer";
 import { Header, MobileNav } from "./header";
-import { Navbar } from "./navbar";
 import { PageNavigation } from "./page-navigation";
+import { Sidebar } from "./sidebar";
 import classes from "./style.module.scss";
 
 export interface DefaultLayoutProps {
@@ -40,8 +40,8 @@ export function DefaultLayout({
                 opened={menuOpened}
                 onToggle={toggleMenu}
             />
-            <Navbar
-                sidebar={sidebar}
+            <Sidebar
+                items={sidebar}
                 visibleFrom="lg"
                 versionSelector={versionSelector}
             />
@@ -61,8 +61,8 @@ export function DefaultLayout({
                 hiddenFrom="lg"
                 withCloseButton={false}
             >
-                <Navbar
-                    sidebar={sidebar}
+                <Sidebar
+                    items={sidebar}
                     versionSelector={versionSelector}
                 />
             </Drawer>

@@ -242,6 +242,7 @@ function ProductCard({ title, description, href, icon }: ProductItem) {
         <Anchor
             href={href}
             underline="never"
+            variant="glow"
         >
             <Paper className={classes.productCard}>
                 <Image

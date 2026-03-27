@@ -28,11 +28,6 @@ import { SearchDocs } from "~/components/SearchDocs";
 import type { SidebarItem } from "~/utils/sidebar";
 import classes from "./style.module.scss";
 
-export interface NavbarProps extends BoxProps {
-    sidebar: SidebarItem[];
-    versionSelector?: React.ReactNode;
-}
-
 function appendSlash(href: string) {
     return href.endsWith("/") ? href : `${href}/`;
 }
@@ -149,17 +144,14 @@ function getSectionIcon(label: string): string {
 
 function SidebarSection({ item }: { item: SidebarItem }) {
     return (
-        <Box
-            component="section"
-            mt="lg"
-        >
+        <Box component="section">
             <Group
                 align="center"
                 gap="sm"
                 mt="lg"
                 mb="sm"
                 px="sm"
-                c="slate.1"
+                className={classes.sidebarSectionHeader}
             >
                 <Icon
                     path={getSectionIcon(item.label)}
@@ -185,7 +177,12 @@ function SidebarSection({ item }: { item: SidebarItem }) {
     );
 }
 
-export function Navbar({ sidebar, versionSelector, ...props }: NavbarProps) {
+export interface SidebarProps extends BoxProps {
+    items: SidebarItem[];
+    versionSelector?: React.ReactNode;
+}
+
+export function Sidebar({ items, versionSelector, ...props }: SidebarProps) {
     return (
         <Stack
             pt="xs"
@@ -207,13 +204,13 @@ export function Navbar({ sidebar, versionSelector, ...props }: NavbarProps) {
                 </Box>
             )}
             <Stack
-                gap={0}
+                gap="lg"
                 component="nav"
                 px="lg"
                 flex={1}
                 style={{ overflowY: "auto" }}
             >
-                {sidebar?.map((item) =>
+                {items?.map((item) =>
                     item.children?.length ? (
                         <SidebarSection
                             key={item.href}

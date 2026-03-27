@@ -6,10 +6,6 @@ import classes from "./style.module.scss";
 export const GITHUB_BASE = "https://github.com/surrealdb/docs.surrealdb.com/edit/main/src/content/";
 export const GITHUB_ISSUES = "https://github.com/surrealdb/docs.surrealdb.com/issues/new";
 
-export interface PageAsideProps {
-    headings: HeadingData[];
-}
-
 function useActiveHeading(headings: HeadingData[]): string | null {
     const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -18,13 +14,19 @@ function useActiveHeading(headings: HeadingData[]): string | null {
 
         function onScroll() {
             let currentId: string | null = null;
+
+            console.log("----");
+            console.log(headings);
+
             for (const heading of headings) {
                 const el = document.getElementById(heading.id);
+
                 if (!el) continue;
                 if (el.getBoundingClientRect().top <= 120) {
                     currentId = heading.id;
                 }
             }
+
             setActiveId(currentId ?? headings[0]?.id ?? null);
         }
 
@@ -36,9 +38,16 @@ function useActiveHeading(headings: HeadingData[]): string | null {
     return activeId;
 }
 
+export interface PageAsideProps {
+    headings: HeadingData[];
+}
+
 export function PageAside({ headings }: PageAsideProps) {
     const minDepth = Math.min(...headings.map((h) => h.depth));
     const activeId = useActiveHeading(headings);
+
+    console.log(headings);
+    console.log(activeId);
 
     return (
         <Stack
