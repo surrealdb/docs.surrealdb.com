@@ -1,4 +1,4 @@
-import { Flex, Kbd, Text, UnstyledButton, type UnstyledButtonProps } from "@mantine/core";
+import { Flex, Kbd, Loader, Text, UnstyledButton, type UnstyledButtonProps } from "@mantine/core";
 import { useHotkeys, useOs, useThrottledCallback } from "@mantine/hooks";
 import { Spotlight, type SpotlightActionData, spotlight } from "@mantine/spotlight";
 import { Icon, iconSearch } from "@surrealdb/ui";
@@ -8,26 +8,33 @@ import classes from "./style.module.scss";
 
 export function SearchDocs(props: UnstyledButtonProps) {
     const [actions, setActions] = useState<SpotlightActionData[]>([]);
+    const [loading, setLoading] = useState(false);
     const [search, setSearch] = useState("");
     const os = useOs();
 
     useHotkeys([["mod+K", () => spotlight.open()]]);
 
     const throttledSearch = useThrottledCallback(async (value: string) => {
-        const results = await searchDocs(value);
+        setLoading(true);
 
-        setActions(
-            results.map((result) => ({
-                id: result.url,
-                label: result.title,
-                description: result.description,
-                component: "a",
-                href: result.url,
-                onClick: () => {
-                    window.location.href = result.url;
-                },
-            })),
-        );
+        try {
+            const results = await searchDocs(value);
+
+            setActions(
+                results.map((result) => ({
+                    id: result.url,
+                    label: result.title,
+                    description: result.description,
+                    component: "a",
+                    href: result.url,
+                    onClick: () => {
+                        window.location.href = result.url;
+                    },
+                })),
+            );
+        } finally {
+            setLoading(false);
+        }
     }, 500);
 
     const handleSearch = useCallback<ChangeEventHandler<HTMLInputElement>>(
@@ -87,9 +94,13 @@ export function SearchDocs(props: UnstyledButtonProps) {
                 }}
                 searchProps={{
                     placeholder: "Search the docs",
+                    leftSection: loading ? <Loader size="xs" /> : <Icon path={iconSearch} />,
                     autoFocus: true,
                     onChange: handleSearch,
                     value: search,
+                    style: {
+                        borderBottom: "1px solid var(--mantine-color-obsidian-7)",
+                    },
                 }}
             />
         </>
