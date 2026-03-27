@@ -3,15 +3,17 @@ import type { VercelConfig } from "@vercel/config/v1";
 export const config: VercelConfig = {
     cleanUrls: true,
     trailingSlash: false,
+    redirects: [
+        {
+            source: "/docs/surrealql/demo",
+            destination: "/docs/surrealdb/demo"
+        },
+    ],
     rewrites: [
         // Redirect /docs to the root
         {
             source: "/docs",
             destination: "/",
-        },
-        {
-        source: "/docs/surrealql/demo",
-        destination: "/docs/surrealdb/demo"
         },
         {
             source: "/docs/(.*)",
