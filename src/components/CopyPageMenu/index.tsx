@@ -1,14 +1,16 @@
-import { Button, Menu, Stack, Text, ThemeIcon } from "@mantine/core";
+import { Button, Loader, Menu, Stack, Text, ThemeIcon } from "@mantine/core";
+import { useClipboard } from "@mantine/hooks";
 import {
     Icon,
     iconArrowUpRight,
     iconChatGPT,
+    iconCheck,
     iconChevronDown,
     iconClaude,
     iconCopy,
     useStable,
 } from "@surrealdb/ui";
-import { useCallback } from "react";
+import { useMemo, useState } from "react";
 
 const RAW_BASE_URL =
     "https://raw.githubusercontent.com/surrealdb/docs.surrealdb.com/main/src/content";
@@ -25,17 +27,24 @@ export interface CopyPageMenuProps {
 }
 
 export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
-    const handleCopyMarkdown = useCallback(async () => {
+    const { copy, copied } = useClipboard();
+    const [isFetching, setIsFetching] = useState(false);
+
+    const handleCopyMarkdown = useStable(async () => {
+        setIsFetching(true);
+
         try {
             const url = `${RAW_BASE_URL}/${contentPath}`;
             const response = await fetch(url);
             const body = await response.text();
 
-            navigator.clipboard.writeText(body);
+            copy(body);
         } catch (error) {
             console.error(error);
+        } finally {
+            setIsFetching(false);
         }
-    }, [contentPath]);
+    });
 
     const handleOpenLLM = useStable((llm: LLM) => {
         const prompt = encodeURIComponent(
@@ -44,6 +53,28 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
 
         window.open(`${LLM_PREFIXES[llm]}${prompt}`, "_blank", "noopener,noreferrer");
     });
+
+    const leftSection = useMemo(() => {
+        if (isFetching) {
+            return <Loader size={12} />;
+        }
+
+        if (copied) {
+            return (
+                <Icon
+                    path={iconCheck}
+                    size="sm"
+                />
+            );
+        }
+
+        return (
+            <Icon
+                path={iconCopy}
+                size="sm"
+            />
+        );
+    }, [isFetching, copied]);
 
     return (
         <Menu
@@ -56,12 +87,7 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
             <Menu.Target>
                 <Button
                     size="xs"
-                    leftSection={
-                        <Icon
-                            path={iconCopy}
-                            size="sm"
-                        />
-                    }
+                    leftSection={leftSection}
                     rightSection={
                         <Icon
                             path={iconChevronDown}
