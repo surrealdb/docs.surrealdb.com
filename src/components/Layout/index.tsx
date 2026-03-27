@@ -1,4 +1,4 @@
-import { ActionIcon, Box, Container, Drawer, Flex, Group } from "@mantine/core";
+import { ActionIcon, Box, Container, Divider, Drawer, Flex, Group } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { type Heading, Icon, iconSidebar } from "@surrealdb/ui";
 import { PageContentActions } from "~/components/ContentActions";
@@ -102,6 +102,7 @@ export function DefaultLayout({
                     >
                         {children}
                     </Box>
+                    <Divider my="3xl" />
                     <PageContentActions contentPath={contentPath} />
                     <PageNavigation sidebar={sidebar} />
                     <Footer />
