@@ -1,5 +1,5 @@
-import { Flex, Text, UnstyledButton, type UnstyledButtonProps } from "@mantine/core";
-import { useThrottledCallback } from "@mantine/hooks";
+import { Flex, Kbd, Text, UnstyledButton, type UnstyledButtonProps } from "@mantine/core";
+import { useHotkeys, useOs, useThrottledCallback } from "@mantine/hooks";
 import { Spotlight, type SpotlightActionData, spotlight } from "@mantine/spotlight";
 import { Icon, iconSearch } from "@surrealdb/ui";
 import { type ChangeEventHandler, useCallback, useState } from "react";
@@ -9,6 +9,9 @@ import classes from "./style.module.scss";
 export function SearchDocs(props: UnstyledButtonProps) {
     const [actions, setActions] = useState<SpotlightActionData[]>([]);
     const [search, setSearch] = useState("");
+    const os = useOs();
+
+    useHotkeys([["mod+K", () => spotlight.open()]]);
 
     const throttledSearch = useThrottledCallback(async (value: string) => {
         const results = await searchDocs(value);
@@ -36,6 +39,8 @@ export function SearchDocs(props: UnstyledButtonProps) {
         [throttledSearch],
     );
 
+    const modKey = os === "macos" ? "⌘" : "Ctrl";
+
     return (
         <>
             <UnstyledButton
@@ -62,12 +67,19 @@ export function SearchDocs(props: UnstyledButtonProps) {
                     >
                         Search the docs
                     </Text>
+                    <Flex
+                        align="center"
+                        gap={4}
+                        ml="auto"
+                    >
+                        <Kbd size="xs">{modKey}</Kbd>
+                        <Kbd size="xs">K</Kbd>
+                    </Flex>
                 </Flex>
             </UnstyledButton>
             <Spotlight
                 actions={search.length > 0 ? actions : []}
                 nothingFound="No results found"
-                shortcut="mod+/"
                 scrollable
                 maxHeight={400}
                 classNames={{
