@@ -2,7 +2,7 @@ import { Flex, Kbd, Loader, Text, UnstyledButton, type UnstyledButtonProps } fro
 import { useDebouncedCallback, useHotkeys, useOs } from "@mantine/hooks";
 import { Spotlight, type SpotlightActionData, spotlight } from "@mantine/spotlight";
 import { Icon, iconSearch } from "@surrealdb/ui";
-import { type ChangeEventHandler, useCallback, useState } from "react";
+import { type ChangeEventHandler, useCallback, useEffect, useRef, useState } from "react";
 import { searchDocs } from "~/utils/search";
 import classes from "./style.module.scss";
 
@@ -10,6 +10,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
     const [actions, setActions] = useState<SpotlightActionData[]>([]);
     const [loading, setLoading] = useState(false);
     const [search, setSearch] = useState("");
+    const abortController = useRef<AbortController | null>(null);
     const os = useOs();
 
     useHotkeys([["mod+K", () => spotlight.open()]]);
@@ -17,8 +18,13 @@ export function SearchDocs(props: UnstyledButtonProps) {
     const executeSearch = useDebouncedCallback(async (value: string) => {
         setLoading(true);
 
+        const controller = new AbortController();
+
         try {
-            const results = await searchDocs(value);
+            abortController.current?.abort();
+            abortController.current = controller;
+
+            const results = await searchDocs(value, abortController.current.signal);
 
             setActions(
                 results.map((result) => ({
@@ -32,8 +38,14 @@ export function SearchDocs(props: UnstyledButtonProps) {
                     },
                 })),
             );
+        } catch (error) {
+            if (!(error instanceof DOMException && error.name === "AbortError")) {
+                throw error;
+            }
         } finally {
-            setLoading(false);
+            if (abortController.current === controller) {
+                setLoading(false);
+            }
         }
     }, 500);
 
@@ -45,6 +57,12 @@ export function SearchDocs(props: UnstyledButtonProps) {
         },
         [executeSearch],
     );
+
+    useEffect(() => {
+        return () => {
+            abortController.current?.abort();
+        };
+    }, []);
 
     const modKey = os === "macos" ? "⌘" : "Ctrl";
 
