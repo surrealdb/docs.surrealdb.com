@@ -1,5 +1,5 @@
 import { Flex, Kbd, Loader, Text, UnstyledButton, type UnstyledButtonProps } from "@mantine/core";
-import { useHotkeys, useOs, useThrottledCallback } from "@mantine/hooks";
+import { useDebouncedCallback, useHotkeys, useOs } from "@mantine/hooks";
 import { Spotlight, type SpotlightActionData, spotlight } from "@mantine/spotlight";
 import { Icon, iconSearch } from "@surrealdb/ui";
 import { type ChangeEventHandler, useCallback, useState } from "react";
@@ -14,7 +14,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
 
     useHotkeys([["mod+K", () => spotlight.open()]]);
 
-    const throttledSearch = useThrottledCallback(async (value: string) => {
+    const executeSearch = useDebouncedCallback(async (value: string) => {
         setLoading(true);
 
         try {
@@ -41,9 +41,9 @@ export function SearchDocs(props: UnstyledButtonProps) {
         (event) => {
             const value = event.currentTarget.value;
             setSearch(value);
-            throttledSearch(value);
+            executeSearch(value);
         },
-        [throttledSearch],
+        [executeSearch],
     );
 
     const modKey = os === "macos" ? "⌘" : "Ctrl";
@@ -86,11 +86,11 @@ export function SearchDocs(props: UnstyledButtonProps) {
             </UnstyledButton>
             <Spotlight
                 actions={search.length > 0 ? actions : []}
-                nothingFound="No results found"
-                scrollable
-                maxHeight={400}
+                nothingFound={search.length > 0 ? "No results found" : undefined}
+                highlightQuery
                 classNames={{
-                    actionsList: classes.searchInput,
+                    inner: classes.searchScreen,
+                    actionsList: classes.searchList,
                 }}
                 searchProps={{
                     placeholder: "Search the docs",
@@ -98,8 +98,10 @@ export function SearchDocs(props: UnstyledButtonProps) {
                     autoFocus: true,
                     onChange: handleSearch,
                     value: search,
-                    style: {
-                        borderBottom: "1px solid var(--mantine-color-obsidian-7)",
+                    className: classes.searchInput,
+                    rightSection: <Kbd>Esc</Kbd>,
+                    mod: {
+                        expanded: actions.length > 0 && search.length > 0,
                     },
                 }}
             />
