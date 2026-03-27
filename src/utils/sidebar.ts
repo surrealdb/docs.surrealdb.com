@@ -18,7 +18,7 @@ export function getSidebarItemsFromCollection(
     const baseUrl =
         baseUrlOverride ?? `/docs/${urlForCollection[collection as keyof typeof urlForCollection]}`;
 
-    return buildLevel(entries, categories, baseUrl, "");
+    return wrapRootLeafItems(buildLevel(entries, categories, baseUrl, ""));
 }
 
 function buildLevel(
@@ -92,6 +92,30 @@ function buildLevel(
     items.sort((a, b) => a.position - b.position);
 
     return items.map(({ item }) => item);
+}
+
+function wrapRootLeafItems(items: SidebarItem[]): SidebarItem[] {
+    const leaves: SidebarItem[] = [];
+    const sections: SidebarItem[] = [];
+
+    for (const item of items) {
+        if (item.children?.length) {
+            sections.push(item);
+        } else {
+            leaves.push(item);
+        }
+    }
+
+    if (leaves.length === 0) return items;
+
+    return [
+        {
+            label: "Overview",
+            href: leaves[0].href,
+            children: leaves,
+        },
+        ...sections,
+    ];
 }
 
 function appendSlash(href: string) {

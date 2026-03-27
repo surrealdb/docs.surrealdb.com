@@ -72,7 +72,7 @@ export function DefaultLayout({
             >
                 <Container
                     component={Stack}
-                    size="sm"
+                    size={660}
                     flex={1}
                     h="100%"
                 >
