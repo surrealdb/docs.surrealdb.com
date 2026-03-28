@@ -1,11 +1,11 @@
 import { parseMarkdown, RailroadDiagram, SurrealistMini, visit } from "@surrealdb/ui";
+import Slugger from "github-slugger";
 import type { Root } from "mdast";
 import { Boxes } from "~/components/Boxes";
 import { ContentTabItem, ContentTabs } from "~/components/ContentTabs";
 import { IconBox } from "~/components/IconBox";
 import { Version } from "~/components/Version";
 import { getIconScope } from "~/lib/icon-scope";
-import Slugger from "github-slugger";
 import { resolveAstImages } from "./image-urls";
 
 interface HeadingData {

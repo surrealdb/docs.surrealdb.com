@@ -1,4 +1,4 @@
-import { readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const CONTENT_DIR = "src/content";
@@ -66,5 +66,5 @@ for (const [collection, prefix] of Object.entries(URL_PREFIX)) {
 }
 
 mkdirSync("generated", { recursive: true });
-writeFileSync(OUTPUT_FILE, JSON.stringify([...paths].sort(), null, 2) + "\n");
+writeFileSync(OUTPUT_FILE, `${JSON.stringify([...paths].sort(), null, 2)}\n`);
 console.log(`Generated ${paths.size} valid paths → ${OUTPUT_FILE}`);
