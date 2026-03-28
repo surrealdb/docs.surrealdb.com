@@ -6,10 +6,10 @@ import valid from "./generated/valid-paths.json";
 
 // The base URL for the docs project
 const BASE = "https://surrealdb.com/docs";
-// Static assets and internal routes that should never be redirected
-const PASSTHROUGH = ["/assets/", "/_", "/favicon", "/llms"];
 // Set for O(1) exact lookups, sorted array for prefix scanning
 const PATHS = new Set(valid);
+// Prefixes that should never be redirected (checked after /docs prefix is stripped)
+const PASSTHROUGH = ["/assets/", "/_", "/favicon", "/llms"];
 
 // Redirects unknown docs paths to the nearest valid page. For any
 // request that doesn't match a known content page, it first checks
@@ -28,8 +28,8 @@ const PATHS = new Set(valid);
 
 export default function middleware(request: Request) {
     const url = new URL(request.url);
-    // Remove trailing slash from pathname
-    let pathname = url.pathname.replace(/\/$/, "") || "/";
+    // Normalize: strip /docs prefix and trailing slash
+    let pathname = url.pathname.replace(/^\/docs(?=\/|$)/, "").replace(/\/$/, "") || "/";
     // Known page — let the request through to the app
     if (PATHS.has(pathname)) return;
     // Static asset or internal route — skip redirect logic
@@ -53,5 +53,5 @@ export default function middleware(request: Request) {
 }
 
 export const config = {
-    matcher: "/((?!assets/|_next/|favicon).*)",
+    matcher: "/((?!assets/|_next/|_astro/|favicon|llms).*)",
 };
