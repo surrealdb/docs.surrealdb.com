@@ -36,11 +36,6 @@ import LogoLight from "~/assets/img/logo/light/surrealdb.svg";
 import { ColorSchemeToggle } from "../ColorSchemeToggle";
 import classes from "./style.module.scss";
 
-export interface NavigationProps {
-    opened?: boolean;
-    onToggle?: () => void;
-}
-
 const SIGN_IN_URL =
     "https://app.surrealdb.com/signin?_gl=1*6c6cw1*FPAU*MjUyNzg4NDQ3LjE3NzA3MzU0OTI.*_ga*MTUwNTkxNTcyNS4xNzcwNzM1NDky*_ga_J1NWM32T1V*czE3NzE4NDcxMTMkbzQ2JGcxJHQxNzcxODQ3MjAwJGo1NiRsMCRoNjUwODcxODU5*_fplc*dEpHdFVZdTN2eEolMkJBWkNUY1R5NUhKbmJySSUyRk56eEN6ZHlEcU52cTJzbUV0dXpOcmZhSU5MeXZFdW90bFdPZWRpbE4yTzA1dmZ1MiUyRlc5RnM3djhEZ2NVeGZhdmoyNW1rcFFsSmhwUXJzR1BoR2ZIWUdsMXYyZ0tJSXFmOW93JTNEJTNE";
 
@@ -85,7 +80,7 @@ export const NAV_LINKS: NavEntry[] = [
     },
     { label: "Integrations", href: "/docs/integrations/" },
     { label: "Tutorials", href: "/docs/tutorials" },
-    { label: "University", href: "/learn" },
+    // { label: "University", href: "/learn" },
     { label: "Labs", href: "/docs/labs/" },
 ];
 
@@ -186,7 +181,12 @@ function NavDropdown({ label, items }: NavMenuGroup) {
     );
 }
 
-export function Header({ opened, onToggle }: NavigationProps) {
+export interface HeaderProps {
+    opened?: boolean;
+    onToggle?: () => void;
+}
+
+export function Header({ opened, onToggle }: HeaderProps) {
     return (
         <Box
             component="header"

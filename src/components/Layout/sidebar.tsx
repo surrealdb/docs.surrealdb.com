@@ -1,13 +1,32 @@
-import { Box, type BoxProps, NavLink, Stack, Text } from "@mantine/core";
+import { Box, type BoxProps, Group, NavLink, Stack, Text } from "@mantine/core";
+import {
+    Icon,
+    iconAlert,
+    iconAPI,
+    iconAuthKeyhole,
+    iconBook,
+    iconBraces,
+    iconChart,
+    iconCloud,
+    iconCog,
+    iconCombined,
+    iconConsole,
+    iconDatabase,
+    iconDownload,
+    iconFunction,
+    iconHelp,
+    iconHome,
+    iconInfo,
+    iconList,
+    iconPlus,
+    iconQuery,
+    iconServer,
+    iconTransfer,
+} from "@surrealdb/ui";
 import { usePageContext } from "vike-react/usePageContext";
 import { SearchDocs } from "~/components/SearchDocs";
 import type { SidebarItem } from "~/utils/sidebar";
 import classes from "./style.module.scss";
-
-export interface NavbarProps extends BoxProps {
-    sidebar: SidebarItem[];
-    versionSelector?: React.ReactNode;
-}
 
 function appendSlash(href: string) {
     return href.endsWith("/") ? href : `${href}/`;
@@ -47,6 +66,7 @@ function SidebarNavLink({ item }: { item: SidebarItem }) {
                 aria-expanded={expanded}
                 aria-current={active ? "page" : undefined}
                 active={active}
+                variant="light"
                 py="xs"
             >
                 {item.children.map((child) => (
@@ -72,36 +92,97 @@ function SidebarNavLink({ item }: { item: SidebarItem }) {
     );
 }
 
+const SECTION_ICONS: [string, string][] = [
+    ["overview", iconHome],
+    ["get started", iconHome],
+    ["install", iconDownload],
+    ["query", iconQuery],
+    ["data model", iconDatabase],
+    ["data management", iconDatabase],
+    ["function", iconFunction],
+    ["method", iconFunction],
+    ["statement", iconList],
+    ["clause", iconList],
+    ["cli", iconConsole],
+    ["serving", iconConsole],
+    ["deploy", iconServer],
+    ["embed", iconCombined],
+    ["extension", iconPlus],
+    ["security", iconAuthKeyhole],
+    ["access", iconAPI],
+    ["reference", iconBook],
+    ["faq", iconHelp],
+    ["migrat", iconTransfer],
+    ["concept", iconInfo],
+    ["api", iconAPI],
+    ["framework", iconCombined],
+    ["engine", iconCog],
+    ["connect", iconCloud],
+    ["operat", iconCog],
+    ["billing", iconCog],
+    ["support", iconHelp],
+    ["tool", iconCog],
+    ["monitor", iconChart],
+    ["advanced", iconBook],
+    ["tutorial", iconBook],
+    ["integrat", iconCombined],
+    ["error", iconAlert],
+    ["type", iconBraces],
+    ["value", iconBraces],
+    ["core", iconBraces],
+    ["utilit", iconCog],
+    ["language", iconConsole],
+];
+
+function getSectionIcon(label: string): string {
+    const lower = label.toLowerCase();
+    for (const [key, icon] of SECTION_ICONS) {
+        if (lower.includes(key)) return icon;
+    }
+    return iconBook;
+}
+
 function SidebarSection({ item }: { item: SidebarItem }) {
     return (
-        <Box
-            component="section"
-            mt="lg"
-        >
-            <Text
-                className={classes.sectionTitle}
-                component="h3"
-                tt="uppercase"
-                fz="md"
-                fw={700}
+        <Box component="section">
+            <Group
+                align="center"
+                gap="sm"
                 mt="lg"
-                mb="xs"
+                mb="sm"
                 px="sm"
-                c="bright"
+                className={classes.sidebarSectionHeader}
             >
-                {item.label}
-            </Text>
-            {item.children?.map((child) => (
-                <SidebarNavLink
-                    key={child.href}
-                    item={child}
+                <Icon
+                    path={getSectionIcon(item.label)}
+                    size="sm"
                 />
-            ))}
+                <Text
+                    component="h3"
+                    fz="md"
+                    fw="bold"
+                >
+                    {item.label}
+                </Text>
+            </Group>
+            <Stack gap="xs">
+                {item.children?.map((child) => (
+                    <SidebarNavLink
+                        key={child.href}
+                        item={child}
+                    />
+                ))}
+            </Stack>
         </Box>
     );
 }
 
-export function Navbar({ sidebar, versionSelector, ...props }: NavbarProps) {
+export interface SidebarProps extends BoxProps {
+    items: SidebarItem[];
+    versionSelector?: React.ReactNode;
+}
+
+export function Sidebar({ items, versionSelector, ...props }: SidebarProps) {
     return (
         <Stack
             pt="xs"
@@ -123,13 +204,13 @@ export function Navbar({ sidebar, versionSelector, ...props }: NavbarProps) {
                 </Box>
             )}
             <Stack
-                gap={0}
+                gap="lg"
                 component="nav"
                 px="lg"
                 flex={1}
                 style={{ overflowY: "auto" }}
             >
-                {sidebar?.map((item) =>
+                {items?.map((item) =>
                     item.children?.length ? (
                         <SidebarSection
                             key={item.href}
