@@ -37,7 +37,7 @@ export default function middleware(request: Request) {
     // Check if a valid child page exists under this path
     const child = valid.find((p) => p.startsWith(`${pathname}/`));
     if (child) {
-        return Response.redirect(`${BASE}${child}`, 301);
+        return Response.redirect(`${BASE}${child}`, 302);
     }
     // Walk up the path tree to the nearest valid parent
     while (pathname.includes("/")) {
@@ -45,11 +45,11 @@ export default function middleware(request: Request) {
         pathname = pathname.substring(0, pathname.lastIndexOf("/")) || "/";
         // If the parent exists, redirect to it
         if (PATHS.has(pathname)) {
-            return Response.redirect(`${BASE}${pathname === "/" ? "" : pathname}`, 301);
+            return Response.redirect(`${BASE}${pathname === "/" ? "" : pathname}`, 302);
         }
     }
     // Nothing matched — redirect to the docs root
-    return Response.redirect(BASE, 301);
+    return Response.redirect(BASE, 302);
 }
 
 export const config = {
