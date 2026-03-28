@@ -11,10 +11,10 @@ const PATHS = new Set(valid);
 // Prefixes that should never be redirected (checked after /docs prefix is stripped)
 const PASSTHROUGH = ["/assets/", "/_", "/favicon", "/llms"];
 
-// Redirects unknown docs paths to the nearest valid page. For any
-// request that doesn't match a known content page, it first checks
-// for a valid child (e.g. /sdk/javascript/engines → engines/node),
-// then walks up the path tree to find the nearest valid parent
+// Redirects unknown paths to the nearest valid page. For any request
+// that doesn't match a known content page, it first checks for a 
+// valid child (e.g. /sdk/javascript/engines → engines/node), then 
+// walks up the path tree to find the nearest valid parent
 // (e.g. /sdk/javascript/methods/create → /sdk/javascript). This
 // eliminates the need for individual redirect rules when docs
 // pages are removed or restructured.
