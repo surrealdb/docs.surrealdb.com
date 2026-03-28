@@ -1,6 +1,5 @@
 import type { TypedCollectionEntry } from "vike-content-collection";
 import { getCollection } from "vike-content-collection";
-import { urlForCollection } from "~/content/config";
 import { type CategoryMeta, getCategories } from "~/lib/categories";
 
 export type SidebarItem = {
@@ -13,12 +12,13 @@ export function getSidebarItemsFromCollection(
     collection: string,
     baseUrlOverride?: string,
 ): SidebarItem[] {
-    const entries = getCollection(collection);
-    const categories = getCategories(collection);
-    const baseUrl =
-        baseUrlOverride ?? `/docs/${urlForCollection[collection as keyof typeof urlForCollection]}`;
+    // const entries = getCollection(collection);
+    // const categories = getCategories(collection);
+    // const baseUrl =
+    //     baseUrlOverride ?? `/docs/${urlForCollection[collection as keyof typeof urlForCollection]}`;
 
-    return wrapRootLeafItems(buildLevel(entries, categories, baseUrl, ""));
+    // return wrapRootLeafItems(buildLevel(entries, categories, baseUrl, ""));
+    return [];
 }
 
 function buildLevel(

@@ -11,14 +11,13 @@ import catTutorialsLight from "~/assets/img/labs-categories/tutorials.light.png"
 import catTutorialsDark from "~/assets/img/labs-categories/tutorials.png";
 import catVideosLight from "~/assets/img/labs-categories/videos.light.png";
 import catVideosDark from "~/assets/img/labs-categories/videos.png";
-import type { LabCategory } from "~/content/config";
 import classes from "./style.module.scss";
 
 export interface LabCardItem {
     slug: string;
     title: string;
     url?: string;
-    category: LabCategory;
+    category: string;
     author:
         | "surrealdb"
         | {
@@ -35,7 +34,7 @@ export interface LabCardProps {
     isDark: boolean;
 }
 
-const CATEGORY_IMAGES: Record<LabCategory, { dark: string; light: string }> = {
+const CATEGORY_IMAGES: Record<string, { dark: string; light: string }> = {
     "Code repositories": { dark: catLibrariesDark, light: catLibrariesLight },
     Videos: { dark: catVideosDark, light: catVideosLight },
     Blogposts: { dark: catTutorialsDark, light: catTutorialsLight },

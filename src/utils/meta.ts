@@ -1,4 +1,3 @@
-import { versionedSdks } from "~/content/config";
 import { findBreadcrumbTrail, type SidebarItem } from "~/utils/sidebar";
 
 export const DEFAULT_META_TITLE =
@@ -19,16 +18,16 @@ export function getSuffixedMetaTitle(title: string) {
  * match the "latest" version are canonicalised to the unversioned path.
  */
 export function buildCanonicalUrl(urlPathname: string): string {
-    const match = urlPathname.match(VERSIONED_SDK_PATTERN);
+    // const match = urlPathname.match(VERSIONED_SDK_PATTERN);
 
-    if (match) {
-        const [, version, sdkName, rest = ""] = match;
-        const config = versionedSdks[sdkName as keyof typeof versionedSdks];
+    // if (match) {
+    //     const [, version, sdkName, rest = ""] = match;
+    //     const config = versionedSdks[sdkName as keyof typeof versionedSdks];
 
-        if (config && version === config.latest) {
-            return `${BASE_URL}/sdk/${sdkName}${rest}`;
-        }
-    }
+    //     if (config && version === config.latest) {
+    //         return `${BASE_URL}/sdk/${sdkName}${rest}`;
+    //     }
+    // }
 
     return `${BASE_URL}${urlPathname}`;
 }

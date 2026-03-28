@@ -1,44 +1,9 @@
 import react from "@vitejs/plugin-react";
 import vike from "vike/plugin";
-import { getCollectionEntry, vikeContentCollectionPlugin } from "vike-content-collection";
-import { getLastModFromGit, vikeSitemap } from "vike-sitemap-generator";
+import { vikeContentCollectionPlugin } from "vike-content-collection";
+import { vikeSitemap } from "vike-sitemap-generator";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
-import { docs, sdks, versionedSdks } from "./src/content/config";
-
-const versionedSdkPattern = /^(\d+\.x)\/sdk\/(\w+)/;
-
-function findCollectionEntry(url: string) {
-    const segments = url.split("/").filter(Boolean);
-    const first = segments[0];
-
-    const versionedMatch = url.match(versionedSdkPattern);
-    if (versionedMatch) {
-        const version = versionedMatch[1];
-        const sdkName = versionedMatch[2];
-        const config = versionedSdks[sdkName as keyof typeof versionedSdks];
-        const isLatest = config && version === config.latest;
-        const collectionId = isLatest
-            ? `doc-sdk-${sdkName}`
-            : `doc-sdk-${sdkName}-${version.replace(".", "")}`;
-        const slug = segments.slice(3).join("/") || "index";
-        return getCollectionEntry(collectionId, slug);
-    }
-
-    if (first === "sdk" && segments.length >= 2) {
-        const sdkName = segments[1];
-        if (!(sdks as readonly string[]).includes(sdkName)) return undefined;
-        const slug = segments.slice(2).join("/") || "index";
-        return getCollectionEntry(`doc-sdk-${sdkName}`, slug);
-    }
-
-    if (first && (docs as readonly string[]).includes(first)) {
-        const slug = segments.slice(1).join("/") || "index";
-        return getCollectionEntry(`doc-${first}`, slug);
-    }
-
-    return undefined;
-}
 
 export default defineConfig({
     base: "/docs",
@@ -79,18 +44,18 @@ export default defineConfig({
             ],
             exclude: [/^\/404$/, /^\/500$/],
             trailingSlash: false,
-            lastmod: async (url) => {
-                const entry = findCollectionEntry(url);
+            // lastmod: async (url) => {
+            //     const entry = findCollectionEntry(url);
 
-                if (entry?.lastModified) {
-                    return entry.lastModified.toISOString().split("T")[0];
-                }
+            //     if (entry?.lastModified) {
+            //         return entry.lastModified.toISOString().split("T")[0];
+            //     }
 
-                const filePath =
-                    url === "/" ? "src/pages/index/+Page.tsx" : `src/pages${url}/+Page.tsx`;
+            //     const filePath =
+            //         url === "/" ? "src/pages/index/+Page.tsx" : `src/pages${url}/+Page.tsx`;
 
-                return getLastModFromGit({ filePath });
-            },
+            //     return getLastModFromGit({ filePath });
+            // },
         }),
     ],
     resolve: {
