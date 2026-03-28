@@ -10,6 +10,7 @@ This document outlines the new structure for the SurrealDB docs.
 - The first level under each content collection is a section, represented by a folder within the collection
 - Sections contain pages, which sometimes point to their original location in the old docs, other times are new pages
 - Entries ending with [P] are custom pages that do not represent a content collection
+- Collections ending with [V] are versioned collections. They will contain a "latest" structure of the collection, as well as snapshots of previous versions of the collection. Versioning will generally only be applied to reference collections.
 
 ## Structure
 
@@ -359,7 +360,7 @@ This document outlines the new structure for the SurrealDB docs.
     * SurrealDB Labs [P]
         * (Same as current)
 * Reference
-    * Query language [C]
+    * Query language [C] [V]
         * Language primitives
             * Statements → NEW
             * Operators → doc-surrealql/operators.md
@@ -515,13 +516,14 @@ This document outlines the new structure for the SurrealDB docs.
 			* Environment Variables → doc-surrealdb/cli/env.md
 		* Formatter
 			* Overview → doc-surrealdb/formatter/index.md
-    * Rust SDK [C] - TODO
-    * JavaScript SDK [C] - TODO
-    * Python SDK [C] - TODO
-    * GoLang SDK [C] - TODO
-    * Java SDK [C] - TODO
-    * .NET SDK [C] - TODO
-    * PHP SDK [C] - TODO
+    * Rust SDK [C] [V] - TODO
+    * JavaScript SDK [C] [V] - TODO
+    * Python SDK [C] [V] - TODO
+    * GoLang SDK [C] [V] - TODO
+    * Java SDK [C] [V] - TODO
+    * .NET SDK [C] [V] - TODO
+    * PHP SDK [C] [V] - TODO
+	* Ruby SDK [C] [V] - TODO
     * REST API [C]
 		* Overview
 			* Integration Overview → doc-surrealdb/integration/index.md
