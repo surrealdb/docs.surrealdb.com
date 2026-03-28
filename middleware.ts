@@ -8,17 +8,8 @@ import valid from "./generated/valid-paths.json";
 const BASE = "https://surrealdb.com/docs";
 // Set for O(1) exact lookups, sorted array for prefix scanning
 const PATHS = new Set(valid);
-// Prefixes that should never be redirected (with and without /docs base)
-const PASSTHROUGH = [
-    "/assets/",
-    "/docs/assets/",
-    "/_",
-    "/docs/_",
-    "/favicon",
-    "/docs/favicon",
-    "/llms",
-    "/docs/llms",
-];
+// Prefixes that should never be redirected (checked after /docs prefix is stripped)
+const PASSTHROUGH = ["/assets/", "/_", "/favicon", "/llms"];
 
 // Redirects unknown docs paths to the nearest valid page. For any
 // request that doesn't match a known content page, it first checks
