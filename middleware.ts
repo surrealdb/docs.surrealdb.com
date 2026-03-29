@@ -41,7 +41,7 @@ export default function middleware(request: Request) {
         return Response.redirect(`${BASE}${child}`, 302);
     }
     // Walk up the path tree to the nearest valid parent
-    while (pathname.includes("/")) {
+    while (pathname !== "/") {
         // Strip the last segment and check if the parent exists
         pathname = pathname.substring(0, pathname.lastIndexOf("/")) || "/";
         // If the parent exists, redirect to it
