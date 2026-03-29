@@ -12,8 +12,8 @@ const PATHS = new Set(valid);
 const PASSTHROUGH = ["/assets/", "/_", "/favicon", "/llms"];
 
 // Redirects unknown paths to the nearest valid page. For any request
-// that doesn't match a known content page, it first checks for a 
-// valid child (e.g. /sdk/javascript/engines → engines/node), then 
+// that doesn't match a known content page, it first checks for a
+// valid child (e.g. /sdk/javascript/engines → engines/node), then
 // walks up the path tree to find the nearest valid parent
 // (e.g. /sdk/javascript/methods/create → /sdk/javascript). This
 // eliminates the need for individual redirect rules when docs
@@ -34,7 +34,8 @@ export default function middleware(request: Request) {
     if (PATHS.has(pathname)) return;
     // Static asset, internal route, or file request — skip redirect logic
     if (PASSTHROUGH.some((p) => pathname.startsWith(p))) return;
-    if (pathname.includes(".")) return;
+    // Skip Vike pageContext requests (used for client-side navigation)
+    if (pathname.endsWith(".pageContext.json")) return;
     // Check if a valid child page exists under this path
     const child = valid.find((p) => p.startsWith(`${pathname}/`));
     if (child) {
