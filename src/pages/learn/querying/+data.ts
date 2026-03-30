@@ -4,5 +4,3 @@ import { resolveDataFromCollection } from "~/utils/data";
 export default async function data(context: PageContext) {
     return resolveDataFromCollection(context, "learn/querying");
 }
-
-export type PageData = Awaited<ReturnType<typeof data>>;
