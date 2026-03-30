@@ -1,9 +1,12 @@
+import { loadEnvFile } from "node:process";
 import react from "@vitejs/plugin-react";
 import vike from "vike/plugin";
 import { vikeContentCollectionPlugin } from "vike-content-collection";
 import { vikeSitemap } from "vike-sitemap-generator";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
+
+loadEnvFile(".env.shared");
 
 export default defineConfig({
     base: "/docs",
