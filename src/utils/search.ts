@@ -1,3 +1,5 @@
+import { applyPathFallback } from "./path";
+
 export interface Doc {
     url: string;
     title: string;
@@ -7,13 +9,15 @@ export interface Doc {
     hostname: string;
 }
 
-export async function searchDocs(keywords: string): Promise<Doc[]> {
+export async function searchDocs(keywords: string, signal: AbortSignal): Promise<Doc[]> {
     const params = new URLSearchParams({
         hostname: getHostname(),
         query: keywords,
     });
 
-    return await fetch(`/api/docs/search?${params}`)
+    const endpoint = applyPathFallback(`/api/docs/search?${params}`);
+
+    return await fetch(endpoint, { signal })
         .then((res) => res.json())
         .then((data) => data ?? []);
 }
