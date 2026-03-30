@@ -5,7 +5,7 @@ import { type CollectionMap, getCollectionEntry } from "vike-content-collection"
 import { useConfig } from "vike-react/useConfig";
 import { resolveMarkdown } from "./markdown";
 import { getSuffixedMetaTitle } from "./meta";
-import type { NavSection } from "./sidebar";
+import { buildNavigation, type NavSection } from "./navigation";
 
 export interface PageData {
     ast: Root;
@@ -35,8 +35,6 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         throw render(404, "Not Found");
     }
 
-    console.log(entry);
-
     const title = entry.metadata.title ? getSuffixedMetaTitle(entry.metadata.title) : undefined;
     const description = entry.metadata.description ?? undefined;
 
@@ -45,7 +43,7 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         description,
     });
 
-    const navigation: NavSection[] = [];
+    const navigation = buildNavigation(id);
     const { ast, headings } = resolveMarkdown(entry.content);
     const contentPath = entry.filePath.replace(/.*\/content\//, "");
 

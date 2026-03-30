@@ -14,7 +14,7 @@ import {
     Menu,
     Stack,
 } from "@mantine/core";
-import { clsx, Icon, iconChevronDown, ThemedImage } from "@surrealdb/ui";
+import { Icon, iconChevronDown, ThemedImage } from "@surrealdb/ui";
 import { ClientOnly } from "vike-react/ClientOnly";
 import { usePageContext } from "vike-react/usePageContext";
 import DocsDark from "~/assets/img/logo/dark/docs.svg";
@@ -94,12 +94,12 @@ export const NAV_LINKS: NavEntry[] = [
 ];
 
 function normalizeHref(href: string) {
-    return href.endsWith("/") ? href.slice(0, -1) : href;
+    return href.replace(/^\/docs/, "").replace(/\/$/, "") || "/";
 }
 
 function useIsNavActive(entry: NavEntry) {
     const { urlPathname } = usePageContext();
-    const pathname = urlPathname.endsWith("/") ? urlPathname.slice(0, -1) : urlPathname;
+    const pathname = normalizeHref(urlPathname);
 
     if (isMenuGroup(entry)) {
         return entry.items.some((item) => {
@@ -147,7 +147,8 @@ function NavDropdown({ label, items }: NavMenuGroup) {
                     fz="sm"
                     fw={500}
                     underline="never"
-                    className={clsx(classes.navLink, active && classes.navLinkActive)}
+                    className={classes.navLink}
+                    data-active={active || undefined}
                     aria-current={active ? "page" : undefined}
                 >
                     <Flex

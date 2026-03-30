@@ -1,71 +1,38 @@
 import { Box, type BoxProps, Group, NavLink, Stack, Text } from "@mantine/core";
-import {
-    Icon,
-    iconAlert,
-    iconAPI,
-    iconAuthKeyhole,
-    iconBook,
-    iconBraces,
-    iconChart,
-    iconCloud,
-    iconCog,
-    iconCombined,
-    iconConsole,
-    iconDatabase,
-    iconDownload,
-    iconFunction,
-    iconHelp,
-    iconHome,
-    iconInfo,
-    iconList,
-    iconPlus,
-    iconQuery,
-    iconServer,
-    iconTransfer,
-} from "@surrealdb/ui";
+import { Icon } from "@surrealdb/ui";
 import { usePageContext } from "vike-react/usePageContext";
 import { SearchDocs } from "~/components/SearchDocs";
+import { SECTION_ICONS } from "~/utils/icons";
+import type { NavLink as NavLinkItem, NavSection } from "~/utils/navigation";
 import classes from "./style.module.scss";
 
-interface SidebarItem {
-    label: string;
-    href: string;
-    children?: SidebarItem[];
+function normalize(href: string) {
+    return href.replace(/\/$/, "");
 }
 
-function appendSlash(href: string) {
-    return href.endsWith("/") ? href : `${href}/`;
-}
+function hasActiveDescendant(urlPathname: string, links: NavLinkItem[]): boolean {
+    const pathname = normalize(urlPathname);
 
-function stripDocsPrefix(href: string) {
-    return href.replace("/docs/", "/");
-}
-
-function hasActiveDescendant(urlPathname: string, items: SidebarItem[]): boolean {
-    for (const item of items) {
-        const href = stripDocsPrefix(item.href);
-        if (appendSlash(urlPathname) === appendSlash(href)) return true;
-        if (item.children?.length && hasActiveDescendant(urlPathname, item.children)) return true;
+    for (const link of links) {
+        if (pathname === normalize(link.path)) return true;
+        if (link.children?.length && hasActiveDescendant(urlPathname, link.children)) return true;
     }
+
     return false;
 }
 
-function SidebarNavLink({ item }: { item: SidebarItem }) {
+function SidebarNavLink({ link }: { link: NavLinkItem }) {
     const { urlPathname } = usePageContext();
-    const href = stripDocsPrefix(item.href);
+    const active = normalize(urlPathname) === normalize(link.path);
 
-    const active = appendSlash(urlPathname) === appendSlash(href);
-
-    if (item.children?.length) {
-        const expanded =
-            appendSlash(urlPathname) === appendSlash(href) ||
-            hasActiveDescendant(urlPathname, item.children);
+    if (link.children?.length) {
+        const expanded = active || hasActiveDescendant(urlPathname, link.children);
 
         return (
             <NavLink
                 className={classes.navItem}
-                label={item.label}
-                href={appendSlash(item.href)}
+                label={link.title}
+                href={`/docs${link.path}`}
                 childrenOffset={16}
                 opened={expanded}
                 aria-expanded={expanded}
@@ -74,10 +41,10 @@ function SidebarNavLink({ item }: { item: SidebarItem }) {
                 variant="light"
                 py="xs"
             >
-                {item.children.map((child) => (
+                {link.children.map((child) => (
                     <SidebarNavLink
-                        key={child.href}
-                        item={child}
+                        key={child.path}
+                        link={child}
                     />
                 ))}
             </NavLink>
@@ -87,8 +54,8 @@ function SidebarNavLink({ item }: { item: SidebarItem }) {
     return (
         <NavLink
             className={classes.navItem}
-            label={item.label}
-            href={item.href}
+            label={link.title}
+            href={`/docs${link.path}`}
             variant="light"
             aria-current={active ? "page" : undefined}
             active={active}
@@ -97,57 +64,9 @@ function SidebarNavLink({ item }: { item: SidebarItem }) {
     );
 }
 
-const SECTION_ICONS: [string, string][] = [
-    ["overview", iconHome],
-    ["get started", iconHome],
-    ["install", iconDownload],
-    ["query", iconQuery],
-    ["data model", iconDatabase],
-    ["data management", iconDatabase],
-    ["function", iconFunction],
-    ["method", iconFunction],
-    ["statement", iconList],
-    ["clause", iconList],
-    ["cli", iconConsole],
-    ["serving", iconConsole],
-    ["deploy", iconServer],
-    ["embed", iconCombined],
-    ["extension", iconPlus],
-    ["security", iconAuthKeyhole],
-    ["access", iconAPI],
-    ["reference", iconBook],
-    ["faq", iconHelp],
-    ["migrat", iconTransfer],
-    ["concept", iconInfo],
-    ["api", iconAPI],
-    ["framework", iconCombined],
-    ["engine", iconCog],
-    ["connect", iconCloud],
-    ["operat", iconCog],
-    ["billing", iconCog],
-    ["support", iconHelp],
-    ["tool", iconCog],
-    ["monitor", iconChart],
-    ["advanced", iconBook],
-    ["tutorial", iconBook],
-    ["integrat", iconCombined],
-    ["error", iconAlert],
-    ["type", iconBraces],
-    ["value", iconBraces],
-    ["core", iconBraces],
-    ["utilit", iconCog],
-    ["language", iconConsole],
-];
+function SidebarSection({ section }: { section: NavSection }) {
+    const icon = section.icon && SECTION_ICONS.get(section.icon);
 
-function getSectionIcon(label: string): string {
-    const lower = label.toLowerCase();
-    for (const [key, icon] of SECTION_ICONS) {
-        if (lower.includes(key)) return icon;
-    }
-    return iconBook;
-}
-
-function SidebarSection({ item }: { item: SidebarItem }) {
     return (
         <Box component="section">
             <Group
@@ -158,23 +77,25 @@ function SidebarSection({ item }: { item: SidebarItem }) {
                 px="sm"
                 className={classes.sidebarSectionHeader}
             >
-                <Icon
-                    path={getSectionIcon(item.label)}
-                    size="sm"
-                />
+                {icon && (
+                    <Icon
+                        path={icon}
+                        size="sm"
+                    />
+                )}
                 <Text
                     component="h3"
                     fz="md"
                     fw="bold"
                 >
-                    {item.label}
+                    {section.title}
                 </Text>
             </Group>
             <Stack gap="xs">
-                {item.children?.map((child) => (
+                {section.links.map((link) => (
                     <SidebarNavLink
-                        key={child.href}
-                        item={child}
+                        key={link.path}
+                        link={link}
                     />
                 ))}
             </Stack>
@@ -183,11 +104,11 @@ function SidebarSection({ item }: { item: SidebarItem }) {
 }
 
 export interface SidebarProps extends BoxProps {
-    items: SidebarItem[];
+    navigation: NavSection[];
     versionSelector?: React.ReactNode;
 }
 
-export function Sidebar({ items, versionSelector, ...props }: SidebarProps) {
+export function Sidebar({ navigation, versionSelector, ...props }: SidebarProps) {
     return (
         <Stack
             pt="xs"
@@ -215,19 +136,12 @@ export function Sidebar({ items, versionSelector, ...props }: SidebarProps) {
                 flex={1}
                 style={{ overflowY: "auto" }}
             >
-                {items?.map((item) =>
-                    item.children?.length ? (
-                        <SidebarSection
-                            key={item.href}
-                            item={item}
-                        />
-                    ) : (
-                        <SidebarNavLink
-                            key={item.href}
-                            item={item}
-                        />
-                    ),
-                )}
+                {navigation.map((section) => (
+                    <SidebarSection
+                        key={section.title}
+                        section={section}
+                    />
+                ))}
             </Stack>
         </Stack>
     );

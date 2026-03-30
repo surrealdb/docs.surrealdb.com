@@ -54,7 +54,7 @@ export function DefaultLayout({
                 onToggle={toggleMenu}
             />
             <Sidebar
-                items={data.navigation}
+                navigation={data.navigation}
                 visibleFrom="lg"
                 versionSelector={versionSelector}
             />
@@ -75,7 +75,7 @@ export function DefaultLayout({
                 withCloseButton={false}
             >
                 <Sidebar
-                    items={data.navigation}
+                    navigation={data.navigation}
                     versionSelector={versionSelector}
                 />
             </Drawer>
