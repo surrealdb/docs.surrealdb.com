@@ -25,8 +25,13 @@ import {
 } from "@surrealdb/ui";
 import { usePageContext } from "vike-react/usePageContext";
 import { SearchDocs } from "~/components/SearchDocs";
-import type { SidebarItem } from "~/utils/sidebar";
 import classes from "./style.module.scss";
+
+interface SidebarItem {
+    label: string;
+    href: string;
+    children?: SidebarItem[];
+}
 
 function appendSlash(href: string) {
     return href.endsWith("/") ? href : `${href}/`;

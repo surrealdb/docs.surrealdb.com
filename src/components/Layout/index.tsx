@@ -54,7 +54,7 @@ export function DefaultLayout({
                 onToggle={toggleMenu}
             />
             <Sidebar
-                items={data.sidebar}
+                items={data.navigation}
                 visibleFrom="lg"
                 versionSelector={versionSelector}
             />
@@ -75,7 +75,7 @@ export function DefaultLayout({
                 withCloseButton={false}
             >
                 <Sidebar
-                    items={data.sidebar}
+                    items={data.navigation}
                     versionSelector={versionSelector}
                 />
             </Drawer>
@@ -165,7 +165,7 @@ export function DefaultLayout({
                             </Box>
                             <Divider my="3xl" />
                             <PageContentActions contentPath={data.contentPath} />
-                            <PageNavigation sidebar={data.sidebar} />
+                            <PageNavigation navigation={data.navigation} />
                             <Footer />
                         </Box>
                         {showToc && <PageAside headings={data.headings} />}

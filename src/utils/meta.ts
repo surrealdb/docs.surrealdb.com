@@ -1,4 +1,4 @@
-import { findBreadcrumbTrail, type SidebarItem } from "~/utils/sidebar";
+import type { NavSection } from "~/utils/sidebar";
 
 export const DEFAULT_META_TITLE =
     "SurrealDB | The ultimate multi-model database for tomorrow's applications";
@@ -36,13 +36,8 @@ export function buildCanonicalUrl(urlPathname: string): string {
  * Builds a BreadcrumbList JSON-LD object from sidebar data.
  * Returns `null` when no breadcrumb trail can be determined.
  */
-export function buildBreadcrumbJsonLd(
-    sidebar: SidebarItem[],
-    urlPathname: string,
-): Record<string, unknown> | null {
-    const trail = findBreadcrumbTrail(sidebar, urlPathname);
-
-    if (!trail?.length) return null;
+export function buildBreadcrumbJsonLd(navigation: NavSection[]): Record<string, unknown> | null {
+    if (navigation?.length) return null;
 
     return {
         "@context": "https://schema.org",
@@ -54,7 +49,7 @@ export function buildBreadcrumbJsonLd(
                 name: "Docs",
                 item: BASE_URL,
             },
-            ...trail.map((item, index) => ({
+            ...navigation.map((item, index) => ({
                 "@type": "ListItem",
                 position: index + 2,
                 name: item.label,
