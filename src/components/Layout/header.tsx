@@ -14,19 +14,7 @@ import {
     Menu,
     Stack,
 } from "@mantine/core";
-import {
-    brandDotNet,
-    brandGo,
-    brandJava,
-    brandJavaScript,
-    brandPHP,
-    brandPython,
-    brandRust,
-    clsx,
-    Icon,
-    iconChevronDown,
-    ThemedImage,
-} from "@surrealdb/ui";
+import { clsx, Icon, iconChevronDown, ThemedImage } from "@surrealdb/ui";
 import { ClientOnly } from "vike-react/ClientOnly";
 import { usePageContext } from "vike-react/usePageContext";
 import DocsDark from "~/assets/img/logo/dark/docs.svg";
@@ -57,36 +45,56 @@ function isMenuGroup(entry: NavEntry): entry is NavMenuGroup {
 }
 
 export const NAV_LINKS: NavEntry[] = [
-    { label: "SurrealDB", href: "/docs/surrealdb/" },
-    { label: "SurrealQL", href: "/docs/surrealql/" },
-    { label: "Surrealist", href: "/docs/surrealist/" },
-    { label: "Cloud", href: "/docs/cloud/" },
-    { label: "Extensions", href: "/docs/surrealdb/extensions" },
+    { label: "Home", href: "/docs/" },
+    { label: "Start", href: "/docs/start" },
     {
-        label: "SDKs",
+        label: "Learn",
         items: [
-            {
-                label: "JavaScript",
-                href: "/docs/sdk/javascript/",
-                icon: brandJavaScript,
-            },
-            { label: "Python", href: "/docs/sdk/python/", icon: brandPython },
-            { label: "Rust", href: "/docs/sdk/rust/", icon: brandRust },
-            { label: "Go", href: "/docs/sdk/golang/", icon: brandGo },
-            { label: "Java", href: "/docs/sdk/java/", icon: brandJava },
-            { label: "PHP", href: "/docs/sdk/php/", icon: brandPHP },
-            { label: ".NET", href: "/docs/sdk/dotnet/", icon: brandDotNet },
+            { label: "Querying", href: "/docs/learn/querying" },
+            { label: "Schema Management", href: "/docs/learn/schema-management" },
+            { label: "Data Models", href: "/docs/learn/data-models" },
+            { label: "Security", href: "/docs/learn/security" },
+            { label: "Extensions", href: "/docs/learn/extensions" },
         ],
     },
-    { label: "Integrations", href: "/docs/integrations/" },
-    { label: "Tutorials", href: "/docs/tutorials" },
-    // { label: "University", href: "/learn" },
-    { label: "Labs", href: "/docs/labs/" },
+    {
+        label: "Build",
+        items: [
+            { label: "Deployment", href: "/docs/build/deployment" },
+            { label: "Migrating", href: "/docs/build/migrating" },
+            { label: "Embedding", href: "/docs/build/embedding" },
+            { label: "AI Agents", href: "/docs/build/ai-agents" },
+            { label: "Integrations", href: "/docs/build/integrations" },
+        ],
+    },
+    {
+        label: "Manage",
+        items: [
+            { label: "SurrealDB Cloud", href: "/docs/manage/cloud" },
+            { label: "Self-hosted", href: "/docs/manage/self-hosted" },
+            { label: "Enterprise Edition", href: "/docs/manage/enterprise" },
+        ],
+    },
+    {
+        label: "Explore",
+        items: [
+            { label: "Surrealist UI", href: "/docs/explore/surrealist" },
+            { label: "ML Models", href: "/docs/explore/ml-models" },
+            { label: "Tutorials & Demos", href: "/docs/explore/tutorials" },
+        ],
+    },
+    {
+        label: "Reference",
+        items: [
+            { label: "Query Language", href: "/docs/reference/query-language" },
+            { label: "CLI Tools", href: "/docs/reference/cli" },
+            { label: "REST API", href: "/docs/reference/rest-api" },
+        ],
+    },
 ];
 
 function normalizeHref(href: string) {
-    const stripped = href.replace(/^\/docs\//, "/");
-    return stripped.endsWith("/") ? stripped.slice(0, -1) : stripped;
+    return href.endsWith("/") ? href.slice(0, -1) : href;
 }
 
 function useIsNavActive(entry: NavEntry) {

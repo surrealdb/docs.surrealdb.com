@@ -7,7 +7,7 @@ export const DEFAULT_META_DESCRIPTION =
 
 export const BASE_URL = "https://surrealdb.com/docs";
 
-const VERSIONED_SDK_PATTERN = /^\/(\d+\.x)\/sdk\/(\w+)(\/.*)?$/;
+const _VERSIONED_SDK_PATTERN = /^\/(\d+\.x)\/sdk\/(\w+)(\/.*)?$/;
 
 export function getSuffixedMetaTitle(title: string) {
     return `${title} | SurrealDB Docs`;

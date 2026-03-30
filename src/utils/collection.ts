@@ -1,9 +1,11 @@
-export function getCollectionPartsFromURL(urlPathname: string, sliceIndex = 3): string[] {
-    const parts: string[] = urlPathname.split("/").slice(sliceIndex).filter(Boolean);
+import { number, strictObject, string } from "zod";
 
-    if (parts.length === 0) {
-        return [...parts, "index"];
-    }
-
-    return parts;
-}
+/**
+ * The schema for a page in a content collection.
+ */
+export const pageSchema = strictObject({
+    title: string().optional(),
+    description: string().optional(),
+    position: number().optional(),
+    icon: string().optional(),
+});

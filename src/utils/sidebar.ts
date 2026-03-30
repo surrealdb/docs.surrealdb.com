@@ -1,6 +1,4 @@
 import type { TypedCollectionEntry } from "vike-content-collection";
-import { getCollection } from "vike-content-collection";
-import { type CategoryMeta, getCategories } from "~/lib/categories";
 
 export type SidebarItem = {
     label: string;
@@ -9,8 +7,8 @@ export type SidebarItem = {
 };
 
 export function getSidebarItemsFromCollection(
-    collection: string,
-    baseUrlOverride?: string,
+    _collection: string,
+    _baseUrlOverride?: string,
 ): SidebarItem[] {
     // const entries = getCollection(collection);
     // const categories = getCategories(collection);
@@ -21,9 +19,9 @@ export function getSidebarItemsFromCollection(
     return [];
 }
 
-function buildLevel(
+function _buildLevel(
     entries: TypedCollectionEntry<Record<string, unknown>>[],
-    categories: Map<string, CategoryMeta>,
+    categories: Map<string, unknown>,
     baseUrl: string,
     prefix: string,
 ): SidebarItem[] {
@@ -53,7 +51,7 @@ function buildLevel(
 
         if (groupPaths.has(slug)) continue;
 
-        const href = slug === "index" ? baseUrl : `${baseUrl}/${slug}`;
+        const href = slug === "" ? baseUrl : `${baseUrl}/${slug}`;
         const meta = entry.metadata as Record<string, string | number | undefined>;
 
         items.push({
@@ -70,7 +68,7 @@ function buildLevel(
         if (!meta) continue;
 
         const groupEntry = entries.find((e) => e.slug === groupPath);
-        const children = buildLevel(entries, categories, baseUrl, groupPath);
+        const children = _buildLevel(entries, categories, baseUrl, groupPath);
 
         if (groupEntry && !prefix) {
             children.unshift({
@@ -79,14 +77,14 @@ function buildLevel(
             });
         }
 
-        items.push({
-            item: {
-                label: meta.sidebar_label ?? groupPath,
-                href: groupEntry ? `${baseUrl}/${groupPath}` : (children[0]?.href ?? baseUrl),
-                children: children.length > 0 ? children : undefined,
-            },
-            position: meta.sidebar_position ?? 0,
-        });
+        // items.push({
+        //     item: {
+        //         label: meta.sidebar_label ?? groupPath,
+        //         href: groupEntry ? `${baseUrl}/${groupPath}` : (children[0]?.href ?? baseUrl),
+        //         children: children.length > 0 ? children : undefined,
+        //     },
+        //     position: meta.sidebar_position ?? 0,
+        // });
     }
 
     items.sort((a, b) => a.position - b.position);
@@ -94,7 +92,7 @@ function buildLevel(
     return items.map(({ item }) => item);
 }
 
-function wrapRootLeafItems(items: SidebarItem[]): SidebarItem[] {
+function _wrapRootLeafItems(items: SidebarItem[]): SidebarItem[] {
     const leaves: SidebarItem[] = [];
     const sections: SidebarItem[] = [];
 
