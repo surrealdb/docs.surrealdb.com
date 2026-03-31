@@ -1,5 +1,3 @@
-import { getEntriesFromFs } from "@photonjs/vercel/utils";
-import vercel from "@photonjs/vercel/vite";
 import react from "@vitejs/plugin-react";
 import vike from "vike/plugin";
 import { getCollectionEntry, vikeContentCollectionPlugin } from "vike-content-collection";
@@ -7,8 +5,6 @@ import { getLastModFromGit, vikeSitemap } from "vike-sitemap-generator";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { docs, sdks, versionedSdks } from "./src/content/config";
-
-const apiEntries = await getEntriesFromFs("endpoints/api", { destination: "api" });
 
 const versionedSdkPattern = /^(\d+\.x)\/sdk\/(\w+)/;
 
@@ -48,7 +44,6 @@ export default defineConfig({
     base: "/docs",
     plugins: [
         vike(),
-        ...vercel({ entries: apiEntries }),
         react(),
         tsconfigPaths(),
         vikeContentCollectionPlugin({
