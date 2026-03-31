@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { handleSearch, MAX_QUERY_LENGTH } from "./handler";
+import { handleSearch, MAX_QUERY_LENGTH } from "../search/handler";
 
 const CORS_HEADERS: Record<string, string> = {
     "Access-Control-Allow-Origin": "*",

@@ -1,7 +1,10 @@
+import { mkdir, writeFile } from "node:fs/promises";
 import react from "@vitejs/plugin-react";
+import { build as esbuild } from "esbuild";
 import vike from "vike/plugin";
 import { getCollectionEntry, vikeContentCollectionPlugin } from "vike-content-collection";
 import { getLastModFromGit, vikeSitemap } from "vike-sitemap-generator";
+import type { Plugin } from "vite";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { docs, sdks, versionedSdks } from "./src/content/config";
@@ -40,6 +43,47 @@ function findCollectionEntry(url: string) {
     return undefined;
 }
 
+function searchApiFunction(): Plugin {
+    let isSsr = false;
+    return {
+        name: "search-api-function",
+        apply: "build",
+        configResolved(config) {
+            isSsr = !!config.build.ssr;
+        },
+        async closeBundle() {
+            if (!isSsr) return;
+
+            const funcDir = ".vercel/output/functions/api/search.func";
+            await mkdir(funcDir, { recursive: true });
+
+            await esbuild({
+                entryPoints: ["api/search.ts"],
+                bundle: true,
+                platform: "node",
+                target: "node20",
+                format: "esm",
+                outfile: `${funcDir}/index.mjs`,
+            });
+
+            await writeFile(
+                `${funcDir}/.vc-config.json`,
+                JSON.stringify(
+                    {
+                        runtime: "nodejs20.x",
+                        handler: "index.mjs",
+                        launcherType: "Nodejs",
+                    },
+                    null,
+                    4,
+                ),
+            );
+
+            console.log("[search-api] Bundled → .vercel/output/functions/api/search.func/");
+        },
+    };
+}
+
 export default defineConfig({
     base: "/docs",
     plugins: [
@@ -54,6 +98,7 @@ export default defineConfig({
                 includeDrafts: false,
             },
         }),
+        searchApiFunction(),
         vikeSitemap({
             baseUrl: "https://surrealdb.com/docs",
             robots: true,
