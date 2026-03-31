@@ -1,4 +1,4 @@
-import type { SearchResult, SearchResultItem } from "../../search/types";
+import type { SearchResult, SearchResultItem } from "@surrealdb/docs-search-common";
 import { applyPathFallback } from "./path";
 
 export type { SearchResult, SearchResultItem };

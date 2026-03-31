@@ -1,4 +1,4 @@
-import { handleSearch, MAX_QUERY_LENGTH } from "../search/handler";
+import { handleSearch, MAX_QUERY_LENGTH } from "@surrealdb/docs-search-common";
 
 const PORT = Number(process.env.SEARCH_PORT ?? 4322);
 

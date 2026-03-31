@@ -1,8 +1,8 @@
 import { RecordId, type Surreal } from "surrealdb";
+import { connectDb } from "../src/db";
+import { buildEmbedText, embedBatch } from "../src/embed";
+import type { CrawledEntry, CrawledPage, CrawledSection } from "../src/types";
 import { crawl } from "./crawler";
-import { connectDb } from "./db";
-import { buildEmbedText, embedBatch } from "./embed";
-import type { CrawledEntry, CrawledPage, CrawledSection } from "./types";
 
 const EMBED_BATCH_SIZE = 64;
 const UPSERT_CONCURRENCY = 8;

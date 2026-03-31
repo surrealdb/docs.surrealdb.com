@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { connectDb } from "../search/db";
+import { connectDb } from "../src/db";
 
-const SCHEMA_PATH = join(import.meta.dirname, "../search/schema.surql");
+const SCHEMA_PATH = join(import.meta.dirname, "../schema.surql");
 
 async function main() {
     const schema = await readFile(SCHEMA_PATH, "utf-8");
