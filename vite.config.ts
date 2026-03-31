@@ -44,43 +44,43 @@ function findCollectionEntry(url: string) {
 }
 
 function searchApiFunction(): Plugin {
-    let isSsr = false;
     return {
         name: "search-api-function",
         apply: "build",
-        configResolved(config) {
-            isSsr = !!config.build.ssr;
+        closeBundle: {
+            order: "post",
+            async handler() {
+                if (this.environment?.name !== "vercel_node") return;
+
+                const funcDir = ".vercel/output/functions/api/search.func";
+                await mkdir(funcDir, { recursive: true });
+
+                await esbuild({
+                    entryPoints: ["search/api.ts"],
+                    bundle: true,
+                    platform: "node",
+                    target: "node20",
+                    format: "esm",
+                    outfile: `${funcDir}/index.mjs`,
+                });
+
+                await writeFile(
+                    `${funcDir}/.vc-config.json`,
+                    JSON.stringify(
+                        {
+                            runtime: "nodejs20.x",
+                            handler: "index.mjs",
+                            launcherType: "Nodejs",
+                        },
+                        null,
+                        4,
+                    ),
+                );
+
+                console.log("[search-api] Bundled → .vercel/output/functions/api/search.func/");
+            },
         },
-        async closeBundle() {
-            if (!isSsr) return;
-
-            const funcDir = ".vercel/output/functions/api/search.func";
-            await mkdir(funcDir, { recursive: true });
-
-            await esbuild({
-                entryPoints: ["search/api.ts"],
-                bundle: true,
-                platform: "node",
-                target: "node20",
-                format: "esm",
-                outfile: `${funcDir}/index.mjs`,
-            });
-
-            await writeFile(
-                `${funcDir}/.vc-config.json`,
-                JSON.stringify(
-                    {
-                        runtime: "nodejs20.x",
-                        handler: "index.mjs",
-                        launcherType: "Nodejs",
-                    },
-                    null,
-                    4,
-                ),
-            );
-
-            console.log("[search-api] Bundled → .vercel/output/functions/api/search.func/");
-        },
+        sharedDuringBuild: true,
     };
 }
 
