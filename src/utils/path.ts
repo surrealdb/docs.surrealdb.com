@@ -1,7 +1,4 @@
+const SEARCH_HOST = import.meta.env.VITE_SEARCH_HOST || "https://surrealdb.com";
 export function applyPathFallback(path: string) {
-    if (location && location.hostname === "localhost") {
-        return `https://surrealdb.com${path}`;
-    }
-
-    return path;
+    return `${SEARCH_HOST}${path}`;
 }

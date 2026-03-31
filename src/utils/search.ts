@@ -1,35 +1,14 @@
+import type { SearchResult, SearchResultItem } from "../../search/types";
 import { applyPathFallback } from "./path";
 
-export interface Doc {
-    url: string;
-    title: string;
-    description: string;
-    content: string[];
-    score: number;
-    hostname: string;
-}
+export type { SearchResult, SearchResultItem };
 
-export async function searchDocs(keywords: string, signal: AbortSignal): Promise<Doc[]> {
-    const params = new URLSearchParams({
-        hostname: getHostname(),
-        query: keywords,
-    });
+export async function searchDocs(query: string, signal: AbortSignal): Promise<SearchResult[]> {
+    const params = new URLSearchParams({ q: query });
+    const endpoint = applyPathFallback(`/docs/api/search?${params}`);
 
-    const endpoint = applyPathFallback(`/api/docs/search?${params}`);
+    const res = await fetch(endpoint, { signal });
+    const data = await res.json();
 
-    return await fetch(endpoint, { signal })
-        .then((res) => res.json())
-        .then((data) => data ?? []);
-}
-
-function getHostname() {
-    const mapped: Record<string, string> = {
-        "surrealdb.com": "main--surrealdb-docs.netlify.app",
-        "www.surrealdb.com": "main--surrealdb-docs.netlify.app",
-        "docs.surrealdb.com": "main--surrealdb-docs.netlify.app",
-        "surrealdb-docs.netlify.app": "main--surrealdb-docs.netlify.app",
-        localhost: "main--surrealdb-docs.netlify.app",
-    };
-
-    return mapped[location.hostname] || location.hostname;
+    return data?.results ?? [];
 }

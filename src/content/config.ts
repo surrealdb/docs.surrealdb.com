@@ -111,6 +111,13 @@ export type Sdk = (typeof sdks)[number];
 export type SdkKey = `doc-sdk-${Sdk}`;
 export type Sdks = Record<SdkKey, typeof abstractDoc>;
 
+export type DocCollection = DocKey | SdkKey;
+
+export const docCollections: DocCollection[] = [
+    ...docs.map((d) => `doc-${d}` as DocKey),
+    ...sdks.map((s) => `doc-sdk-${s}` as SdkKey),
+];
+
 export type LabCategory = (typeof labCategories)[number];
 export type LabTopic = (typeof labTopics)[number];
 export type LabLanguage = (typeof labLanguages)[number];
