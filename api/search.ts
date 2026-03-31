@@ -1,6 +1,121 @@
-import { getDb } from "./db";
-import { embed } from "./embed";
-import type { RawSearchHit, SearchResult, SearchResultItem } from "./types";
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { SignJWT } from "jose";
+import OpenAI from "openai";
+import { Surreal } from "surrealdb";
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface RawSearchHit {
+    kind: "page" | "section";
+    url: string;
+    title: string;
+    breadcrumb: string;
+    description?: string;
+    content?: string;
+    score: number;
+    page_path: string;
+}
+
+interface SearchResultItem {
+    kind: "page" | "section";
+    url: string;
+    title: string;
+    breadcrumb: string;
+    description?: string;
+    content?: string;
+    score: number;
+}
+
+interface SearchResult extends SearchResultItem {
+    more: SearchResultItem[];
+}
+
+// ─── Database ────────────────────────────────────────────────────────────────
+
+async function createJwtToken(
+    namespace: string,
+    database: string,
+    accessName: string,
+    accessKey: string,
+): Promise<string> {
+    const secret = new TextEncoder().encode(accessKey);
+    return new SignJWT({
+        NS: namespace,
+        DB: database,
+        AC: accessName,
+        RL: ["Viewer"],
+    })
+        .setProtectedHeader({ alg: "HS512" })
+        .setIssuedAt()
+        .setExpirationTime("5m")
+        .sign(secret);
+}
+
+async function connectDb(): Promise<Surreal> {
+    const endpoint = process.env.SURREAL_ENDPOINT ?? "ws://localhost:8000";
+    const namespace = process.env.SURREAL_NAMESPACE ?? "main";
+    const database = process.env.SURREAL_DATABASE ?? "main";
+
+    const db = new Surreal();
+
+    const accessName = process.env.SURREAL_ACCESS_NAME;
+    const accessKey = process.env.SURREAL_ACCESS_KEY;
+
+    if (accessName && accessKey) {
+        const token = await createJwtToken(namespace, database, accessName, accessKey);
+
+        await db.connect(endpoint, {
+            versionCheck: false,
+            namespace,
+            database,
+            authentication: token,
+        });
+    } else {
+        const username = process.env.SURREAL_USERNAME ?? "root";
+        const password = process.env.SURREAL_PASSWORD ?? "root";
+
+        await db.connect(endpoint, { namespace, database });
+        await db.signin({ username, password });
+    }
+
+    return db;
+}
+
+let singletonPromise: Promise<Surreal> | null = null;
+
+function getDb(): Promise<Surreal> {
+    if (!singletonPromise) {
+        singletonPromise = connectDb().catch((err) => {
+            singletonPromise = null;
+            throw err;
+        });
+    }
+    return singletonPromise;
+}
+
+// ─── Embeddings ──────────────────────────────────────────────────────────────
+
+const EMBED_MODEL = "text-embedding-3-small";
+
+let openai: OpenAI | null = null;
+
+function getOpenAI(): OpenAI {
+    if (!openai) {
+        openai = new OpenAI();
+    }
+    return openai;
+}
+
+async function embed(text: string): Promise<number[]> {
+    const res = await getOpenAI().embeddings.create({
+        model: EMBED_MODEL,
+        input: text,
+    });
+
+    return res.data[0].embedding;
+}
+
+// ─── Search ──────────────────────────────────────────────────────────────────
 
 export const MAX_QUERY_LENGTH = 500;
 
@@ -228,4 +343,48 @@ export async function handleSearch(query: string): Promise<SearchResult[]> {
 
     const boosted = boostResults(hits, query);
     return groupByPage(boosted, query);
+}
+
+// ─── HTTP Handler ────────────────────────────────────────────────────────────
+
+const CORS_HEADERS: Record<string, string> = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+};
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+    if (req.method === "OPTIONS") {
+        res.writeHead(204, CORS_HEADERS);
+        return res.end();
+    }
+
+    if (req.method !== "GET") {
+        return res.status(405).json({ success: false, error: "Method not allowed" });
+    }
+
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+    const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
+
+    if (!query) {
+        return res.status(400).json({ success: false, error: "`q` parameter is required" });
+    }
+
+    if (query.length > MAX_QUERY_LENGTH) {
+        return res.status(400).json({
+            success: false,
+            error: `Query must be at most ${MAX_QUERY_LENGTH} characters`,
+        });
+    }
+
+    try {
+        const results = await handleSearch(query);
+        return res.status(200).json({ success: true, results });
+    } catch (err) {
+        console.error("[SEARCH] Error:", err);
+        return res.status(500).json({ success: false, error: "Internal server error" });
+    }
 }
