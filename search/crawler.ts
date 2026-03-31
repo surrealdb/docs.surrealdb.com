@@ -5,50 +5,25 @@ import { type AnyNode, type BlockNode, parseMarkdown, type Root, visit } from "@
 import matter from "gray-matter";
 import {
     abstractDoc,
-    type DocKey,
-    docs,
-    type SdkKey,
-    sdks,
+    type DocCollection,
+    docCollections,
     urlForCollection,
+    versionedSdks,
 } from "../src/content/config";
 import type { CrawledEntry, CrawledPage, CrawledSection } from "./types";
 
 const CONTENT_DIR = join(import.meta.dirname, "../src/content");
-
-type DocCollection = DocKey | SdkKey;
 
 interface CategoryMeta {
     sidebar_label: string;
     sidebar_position: number;
 }
 
-const COLLECTION_LABELS: Record<string, string> = {
-    "doc-surrealdb": "SurrealDB",
-    "doc-cloud": "Cloud",
-    "doc-surrealist": "Surrealist",
-    "doc-surrealml": "SurrealML",
-    "doc-surrealkv": "SurrealKV",
-    "doc-surrealql": "SurrealQL",
-    "doc-integrations": "Integrations",
-    "doc-tutorials": "Tutorials",
-    "doc-sdk-dotnet": ".NET SDK",
-    "doc-sdk-golang": "Go SDK",
-    "doc-sdk-java": "Java SDK",
-    "doc-sdk-javascript": "JavaScript SDK",
-    "doc-sdk-php": "PHP SDK",
-    "doc-sdk-python": "Python SDK",
-    "doc-sdk-rust": "Rust SDK",
-};
-
-const VERSIONED_SDK_COLLECTIONS = new Set([
-    "doc-sdk-java-1x",
-    "doc-sdk-javascript-1x",
-    "doc-sdk-python-1x",
-]);
-
-const DOC_COLLECTIONS = docs.map((d) => `doc-${d}` as DocCollection);
-const SDK_COLLECTIONS = sdks.map((s) => `doc-sdk-${s}` as DocCollection);
-const ALL_COLLECTIONS = [...DOC_COLLECTIONS, ...SDK_COLLECTIONS];
+const VERSIONED_COLLECTION_IDS = new Set(
+    Object.entries(versionedSdks).flatMap(([sdk, config]) =>
+        config ? config.versions.map((v) => `doc-sdk-${sdk}-${v.replace(".", "")}`) : [],
+    ),
+);
 
 async function* walkMarkdown(dir: string): AsyncGenerator<string> {
     const entries = await readdir(dir, { withFileTypes: true });
@@ -66,6 +41,13 @@ async function* walkMarkdown(dir: string): AsyncGenerator<string> {
 
 async function loadCategoryMap(collectionDir: string): Promise<Map<string, CategoryMeta>> {
     const categories = new Map<string, CategoryMeta>();
+
+    try {
+        const raw = await readFile(join(collectionDir, "_category_.json"), "utf-8");
+        categories.set("", JSON.parse(raw) as CategoryMeta);
+    } catch {
+        // no root _category_.json
+    }
 
     async function scan(dir: string) {
         const entries = await readdir(dir, { withFileTypes: true });
@@ -175,7 +157,8 @@ function buildBreadcrumb(
     categories: Map<string, CategoryMeta>,
     pageLabel: string,
 ): string {
-    const parts: string[] = [COLLECTION_LABELS[collection] ?? collection];
+    const rootLabel = categories.get("")?.sidebar_label ?? collection;
+    const parts: string[] = [rootLabel];
 
     const slugParts = slug.split("/").filter(Boolean);
 
@@ -244,8 +227,8 @@ function contentHash(...parts: string[]): string {
 }
 
 export async function* crawl(): AsyncGenerator<CrawledEntry> {
-    for (const collection of ALL_COLLECTIONS) {
-        if (VERSIONED_SDK_COLLECTIONS.has(collection)) continue;
+    for (const collection of docCollections) {
+        if (VERSIONED_COLLECTION_IDS.has(collection)) continue;
 
         const collectionDir = join(CONTENT_DIR, collection);
 
