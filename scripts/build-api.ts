@@ -18,7 +18,7 @@ await build({
     entryPoints: ["search/api.ts"],
     bundle: true,
     platform: "node",
-    target: "node20",
+    target: "node22",
     format: "esm",
     outfile: resolve(FUNC_DIR, "index.mjs"),
     banner: {
@@ -32,7 +32,7 @@ writeFileSync(
     resolve(FUNC_DIR, ".vc-config.json"),
     JSON.stringify(
         {
-            runtime: "nodejs20.x",
+            runtime: "nodejs22.x",
             handler: "index.mjs",
             launcherType: "Nodejs",
         },
