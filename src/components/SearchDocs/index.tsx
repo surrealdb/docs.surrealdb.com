@@ -1,10 +1,34 @@
 import { Flex, Kbd, Loader, Text, UnstyledButton, type UnstyledButtonProps } from "@mantine/core";
 import { useDebouncedCallback, useHotkeys, useOs } from "@mantine/hooks";
-import { Spotlight, type SpotlightActionData, spotlight } from "@mantine/spotlight";
+import {
+    Spotlight,
+    type SpotlightActionData,
+    type SpotlightFilterFunction,
+    spotlight,
+} from "@mantine/spotlight";
 import { Icon, iconSearch } from "@surrealdb/ui";
 import { type ChangeEventHandler, useCallback, useEffect, useRef, useState } from "react";
-import { searchDocs } from "~/utils/search";
+import { type SearchResult, searchDocs } from "~/utils/search";
+import { SearchResultCard } from "./SearchResult";
 import classes from "./style.module.scss";
+
+function mapResultsToActions(results: SearchResult[], query: string): SpotlightActionData[] {
+    return results.map((result, index) => ({
+        id: `result-${index}`,
+        label: String(result.title ?? ""),
+        onClick: () => {
+            window.location.href = String(result.url ?? "/");
+        },
+        children: (
+            <SearchResultCard
+                result={result}
+                query={query}
+            />
+        ),
+    }));
+}
+
+const noFilter: SpotlightFilterFunction = (_query, actions) => actions;
 
 export function SearchDocs(props: UnstyledButtonProps) {
     const [actions, setActions] = useState<SpotlightActionData[]>([]);
@@ -16,6 +40,12 @@ export function SearchDocs(props: UnstyledButtonProps) {
     useHotkeys([["mod+K", () => spotlight.open()]]);
 
     const executeSearch = useDebouncedCallback(async (value: string) => {
+        if (!value.trim()) {
+            setActions([]);
+            setLoading(false);
+            return;
+        }
+
         setLoading(true);
 
         const controller = new AbortController();
@@ -24,20 +54,9 @@ export function SearchDocs(props: UnstyledButtonProps) {
             abortController.current?.abort();
             abortController.current = controller;
 
-            const results = await searchDocs(value, abortController.current.signal);
+            const results = await searchDocs(value, controller.signal);
 
-            setActions(
-                results.map((result) => ({
-                    id: result.url,
-                    label: result.title,
-                    description: result.description,
-                    component: "a",
-                    href: result.url,
-                    onClick: () => {
-                        window.location.href = result.url;
-                    },
-                })),
-            );
+            setActions(mapResultsToActions(results, value));
         } catch (error) {
             if (!(error instanceof DOMException && error.name === "AbortError")) {
                 throw error;
@@ -47,7 +66,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
                 setLoading(false);
             }
         }
-    }, 500);
+    }, 250);
 
     const handleSearch = useCallback<ChangeEventHandler<HTMLInputElement>>(
         (event) => {
@@ -65,6 +84,8 @@ export function SearchDocs(props: UnstyledButtonProps) {
     }, []);
 
     const modKey = os === "macos" ? "⌘" : "Ctrl";
+    const hasQuery = search.trim().length > 0;
+    const nothingFound = hasQuery && !loading ? "No results found" : undefined;
 
     return (
         <>
@@ -103,9 +124,11 @@ export function SearchDocs(props: UnstyledButtonProps) {
                 </Flex>
             </UnstyledButton>
             <Spotlight
-                actions={search.length > 0 ? actions : []}
-                nothingFound={search.length > 0 ? "No results found" : undefined}
-                highlightQuery
+                actions={hasQuery ? actions : []}
+                nothingFound={nothingFound}
+                filter={noFilter}
+                scrollable
+                maxHeight={500}
                 classNames={{
                     inner: classes.searchScreen,
                     actionsList: classes.searchList,
@@ -119,7 +142,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
                     className: classes.searchInput,
                     rightSection: <Kbd>Esc</Kbd>,
                     mod: {
-                        expanded: actions.length > 0 && search.length > 0,
+                        expanded: actions.length > 0 && hasQuery,
                     },
                 }}
             />

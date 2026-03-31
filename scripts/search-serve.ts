@@ -1,0 +1,52 @@
+import { handleSearch } from "../search/handler";
+
+const PORT = Number(process.env.SEARCH_PORT ?? 4322);
+
+const CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+};
+
+const server = Bun.serve({
+    port: PORT,
+    async fetch(req) {
+        const url = new URL(req.url);
+
+        if (req.method === "OPTIONS") {
+            return new Response(null, { status: 204, headers: CORS_HEADERS });
+        }
+
+        if (url.pathname !== "/docs/api/search") {
+            return new Response("Not Found", { status: 404, headers: CORS_HEADERS });
+        }
+
+        if (req.method !== "GET") {
+            return new Response("Method Not Allowed", { status: 405, headers: CORS_HEADERS });
+        }
+
+        const query = url.searchParams.get("q");
+
+        if (!query) {
+            return Response.json(
+                { success: false, error: "`q` parameter is required" },
+                { status: 400, headers: CORS_HEADERS },
+            );
+        }
+
+        try {
+            const results = await handleSearch(query);
+            return Response.json({ success: true, results }, { headers: CORS_HEADERS });
+        } catch (err) {
+            console.error("[SEARCH] Error:", err);
+            return Response.json(
+                { success: false, error: "Internal server error" },
+                { status: 500, headers: CORS_HEADERS },
+            );
+        }
+    },
+});
+
+console.log(
+    `[SEARCH] Local search server running on http://localhost:${server.port}/docs/api/search`,
+);
