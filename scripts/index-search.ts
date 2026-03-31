@@ -1,4 +1,4 @@
-import { runIndexer } from "../search/indexer";
+import { runIndexer } from "../search/scripts/indexer";
 
 const isProduction = process.env.VERCEL_ENV === "production";
 const isVercel = !!process.env.VERCEL;

@@ -59,3 +59,15 @@ export async function connectDb(options: ConnectOptions = {}): Promise<Surreal> 
 
     return db;
 }
+
+let singletonPromise: Promise<Surreal> | null = null;
+
+export function getDb(): Promise<Surreal> {
+    if (!singletonPromise) {
+        singletonPromise = connectDb().catch((err) => {
+            singletonPromise = null;
+            throw err;
+        });
+    }
+    return singletonPromise;
+}

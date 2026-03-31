@@ -9,10 +9,10 @@ import {
     docCollections,
     urlForCollection,
     versionedSdks,
-} from "../src/content/config";
-import type { CrawledEntry, CrawledPage, CrawledSection } from "./types";
+} from "../../src/content/config";
+import type { CrawledEntry, CrawledPage, CrawledSection } from "../src/types";
 
-const CONTENT_DIR = join(import.meta.dirname, "../src/content");
+const CONTENT_DIR = join(import.meta.dirname, "../../src/content");
 
 interface CategoryMeta {
     sidebar_label: string;
