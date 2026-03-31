@@ -9,12 +9,6 @@ interface SearchResultProps {
     query: string;
 }
 
-function truncateSnippet(content: string | undefined, maxLength = 140): string {
-    if (!content) return "";
-    if (content.length <= maxLength) return content;
-    return `${content.slice(0, maxLength).trimEnd()}...`;
-}
-
 function ResultBreadcrumb({ breadcrumb }: { breadcrumb: string }) {
     const parts = breadcrumb.split(" > ").filter(Boolean);
 
@@ -49,7 +43,7 @@ function ResultBreadcrumb({ breadcrumb }: { breadcrumb: string }) {
 function ResultEntry({ item, query }: { item: SearchResultItem; query: string }) {
     const isSection = item.kind === "section";
     const title = String(item.title ?? "");
-    const snippet = truncateSnippet(typeof item.content === "string" ? item.content : "");
+    const snippet = typeof item.content === "string" ? item.content : "";
 
     return (
         <Group
@@ -65,7 +59,7 @@ function ResultEntry({ item, query }: { item: SearchResultItem; query: string })
             </Box>
             <Stack
                 gap={2}
-                style={{ flex: 1, minWidth: 0 }}
+                className={classes.resultContent}
             >
                 <Text
                     fz="sm"

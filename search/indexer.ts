@@ -1,65 +1,15 @@
-import { SignJWT } from "jose";
-import { RecordId, Surreal } from "surrealdb";
+import { RecordId, type Surreal } from "surrealdb";
 import { crawl } from "./crawler";
-import { buildEmbedText, embed } from "./embed";
+import { connectDb } from "./db";
+import { buildEmbedText, embedBatch } from "./embed";
 import type { CrawledEntry, CrawledPage, CrawledSection } from "./types";
+
+const EMBED_BATCH_SIZE = 64;
+const UPSERT_CONCURRENCY = 8;
 
 interface HashRow {
     id: RecordId;
     content_hash: string;
-}
-
-async function createJwtToken(
-    namespace: string,
-    database: string,
-    accessName: string,
-    accessKey: string,
-): Promise<string> {
-    const secret = new TextEncoder().encode(accessKey);
-    return new SignJWT({
-        NS: namespace,
-        DB: database,
-        AC: accessName,
-        RL: ["Viewer"],
-    })
-        .setProtectedHeader({ alg: "HS512" })
-        .setIssuedAt()
-        .setExpirationTime("5m")
-        .sign(secret);
-}
-
-async function connectDb(): Promise<Surreal> {
-    const endpoint = process.env.SURREAL_ENDPOINT ?? "ws://localhost:8000";
-    const namespace = process.env.SURREAL_NAMESPACE ?? "main";
-    const database = process.env.SURREAL_DATABASE ?? "main";
-
-    const db = new Surreal();
-
-    db.subscribe("connected", () => console.log("[DB] Connected"));
-    db.subscribe("disconnected", () => console.log("[DB] Disconnected"));
-    db.subscribe("error", (e) => console.error("[DB] Error", e));
-
-    const accessName = process.env.SURREAL_ACCESS_NAME;
-    const accessKey = process.env.SURREAL_ACCESS_KEY;
-
-    if (accessName && accessKey) {
-        const token = await createJwtToken(namespace, database, accessName, accessKey);
-
-        await db.connect(endpoint, {
-            versionCheck: false,
-            namespace,
-            database,
-            authentication: token,
-        });
-    } else {
-        const username = process.env.SURREAL_USERNAME ?? "root";
-        const password = process.env.SURREAL_PASSWORD ?? "root";
-
-        await db.connect(endpoint, { namespace, database });
-        await db.signin({ username, password });
-    }
-
-    return db;
 }
 
 interface ExistingRecord {
@@ -163,14 +113,36 @@ async function upsertSection(db: Surreal, entry: CrawledSection, embedding: numb
         .collect();
 }
 
-async function deleteStaleRecords(db: Surreal, staleRids: RecordId[]) {
-    for (const rid of staleRids) {
-        await db.query("DELETE $rid;", { rid }).collect();
+async function deleteStaleRecords(db: Surreal, table: string, staleRids: RecordId[]) {
+    if (staleRids.length === 0) return;
+
+    await db
+        .query(`DELETE FROM type::table($table) WHERE id IN $ids;`, {
+            table,
+            ids: staleRids,
+        })
+        .collect();
+}
+
+async function runConcurrent<T>(
+    items: T[],
+    concurrency: number,
+    fn: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+    let next = 0;
+
+    async function worker() {
+        while (next < items.length) {
+            const idx = next++;
+            await fn(items[idx], idx);
+        }
     }
+
+    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
 }
 
 export async function runIndexer() {
-    const db = await connectDb();
+    const db = await connectDb({ logging: true });
 
     console.log("[IX] Fetching existing content hashes...");
     const existingRecords = await fetchExistingRecords(db);
@@ -206,20 +178,33 @@ export async function runIndexer() {
 
     console.log(`[CW] Crawl complete. ${changed.length} entries to embed and upsert.`);
 
-    for (let i = 0; i < changed.length; i++) {
-        const entry = changed[i];
-        const text = buildEmbedText(entry);
-        const embedding = await embed(text);
+    const texts = changed.map(buildEmbedText);
 
-        if (entry.kind === "page") {
-            await upsertPage(db, entry, embedding);
-            stats.pagesUpdated++;
-        } else {
-            await upsertSection(db, entry, embedding);
-            stats.sectionsUpdated++;
-        }
+    for (let batchStart = 0; batchStart < changed.length; batchStart += EMBED_BATCH_SIZE) {
+        const batchEnd = Math.min(batchStart + EMBED_BATCH_SIZE, changed.length);
+        const batchTexts = texts.slice(batchStart, batchEnd);
+        const batchEntries = changed.slice(batchStart, batchEnd);
 
-        console.log(`[IX] ${i + 1}/${changed.length} ${entry.kind} ${entry.id}`);
+        console.log(`[EM] Embedding batch ${batchStart + 1}..${batchEnd} of ${changed.length}`);
+        const embeddings = await embedBatch(batchTexts);
+
+        const pairs = batchEntries.map((entry, i) => ({
+            entry,
+            embedding: embeddings[i],
+        }));
+
+        await runConcurrent(pairs, UPSERT_CONCURRENCY, async ({ entry, embedding }, localIdx) => {
+            if (entry.kind === "page") {
+                await upsertPage(db, entry, embedding);
+                stats.pagesUpdated++;
+            } else {
+                await upsertSection(db, entry, embedding);
+                stats.sectionsUpdated++;
+            }
+
+            const globalIdx = batchStart + localIdx + 1;
+            console.log(`[IX] ${globalIdx}/${changed.length} ${entry.kind} ${entry.id}`);
+        });
     }
 
     const stalePages: RecordId[] = [];
@@ -236,13 +221,13 @@ export async function runIndexer() {
     }
 
     if (stalePages.length > 0) {
-        await deleteStaleRecords(db, stalePages);
+        await deleteStaleRecords(db, "page", stalePages);
         stats.pagesDeleted = stalePages.length;
         console.log(`[IX] Deleted ${stalePages.length} stale page(s)`);
     }
 
     if (staleSections.length > 0) {
-        await deleteStaleRecords(db, staleSections);
+        await deleteStaleRecords(db, "section", staleSections);
         stats.sectionsDeleted = staleSections.length;
         console.log(`[IX] Deleted ${staleSections.length} stale section(s)`);
     }

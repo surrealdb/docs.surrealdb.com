@@ -1,60 +1,8 @@
-import { SignJWT } from "jose";
-import { Surreal } from "surrealdb";
+import { getDb } from "./db";
 import { embed } from "./embed";
 import type { RawSearchHit, SearchResult, SearchResultItem } from "./types";
 
-let db: Surreal | null = null;
-
-async function createJwtToken(
-    namespace: string,
-    database: string,
-    accessName: string,
-    accessKey: string,
-): Promise<string> {
-    const secret = new TextEncoder().encode(accessKey);
-    return new SignJWT({
-        NS: namespace,
-        DB: database,
-        AC: accessName,
-        RL: ["Viewer"],
-    })
-        .setProtectedHeader({ alg: "HS512" })
-        .setIssuedAt()
-        .setExpirationTime("5m")
-        .sign(secret);
-}
-
-async function getDb(): Promise<Surreal> {
-    if (db) return db;
-
-    const endpoint = process.env.SURREAL_ENDPOINT ?? "ws://localhost:8000";
-    const namespace = process.env.SURREAL_NAMESPACE ?? "main";
-    const database = process.env.SURREAL_DATABASE ?? "main";
-
-    db = new Surreal();
-
-    const accessName = process.env.SURREAL_ACCESS_NAME;
-    const accessKey = process.env.SURREAL_ACCESS_KEY;
-
-    if (accessName && accessKey) {
-        const token = await createJwtToken(namespace, database, accessName, accessKey);
-
-        await db.connect(endpoint, {
-            versionCheck: false,
-            namespace,
-            database,
-            authentication: token,
-        });
-    } else {
-        const username = process.env.SURREAL_USERNAME ?? "root";
-        const password = process.env.SURREAL_PASSWORD ?? "root";
-
-        await db.connect(endpoint, { namespace, database });
-        await db.signin({ username, password });
-    }
-
-    return db;
-}
+export const MAX_QUERY_LENGTH = 500;
 
 const SEARCH_SQL = /* surql */ `
     LET $page_vs = (
@@ -172,7 +120,7 @@ function boostResults(hits: RawSearchHit[], query: string): RawSearchHit[] {
     const q = normalise(query);
     const qTokens = tokenise(query);
 
-    for (const hit of hits) {
+    const boosted = hits.map((hit) => {
         const t = normalise(hit.title || "");
         let boost = 1.0;
 
@@ -188,16 +136,18 @@ function boostResults(hits: RawSearchHit[], query: string): RawSearchHit[] {
             boost *= 1.1;
         }
 
-        hit.score *= boost;
-    }
+        return { ...hit, score: hit.score * boost };
+    });
 
-    return hits.sort((a, b) => b.score - a.score);
+    return boosted.sort((a, b) => b.score - a.score);
 }
 
-function extractSnippet(content: string | undefined, query: string, maxLen = 200): string {
+const SNIPPET_MAX_LENGTH = 140;
+
+function extractSnippet(content: string | undefined, query: string): string {
     if (!content) return "";
     const text = content.replace(/\s+/g, " ").trim();
-    if (text.length <= maxLen) return text;
+    if (text.length <= SNIPPET_MAX_LENGTH) return text;
 
     const lower = text.toLowerCase();
     const terms = tokenise(query);
@@ -211,14 +161,14 @@ function extractSnippet(content: string | undefined, query: string, maxLen = 200
         }
     }
 
-    if (bestPos === -1) return `${text.slice(0, maxLen)}...`;
+    if (bestPos === -1) return `${text.slice(0, SNIPPET_MAX_LENGTH)}...`;
 
-    const half = Math.floor(maxLen / 2);
+    const half = Math.floor(SNIPPET_MAX_LENGTH / 2);
     let start = Math.max(0, bestPos - half);
-    const end = Math.min(text.length, start + maxLen);
+    const end = Math.min(text.length, start + SNIPPET_MAX_LENGTH);
 
     if (end === text.length) {
-        start = Math.max(0, end - maxLen);
+        start = Math.max(0, end - SNIPPET_MAX_LENGTH);
     }
 
     const snippet = text.slice(start, end);

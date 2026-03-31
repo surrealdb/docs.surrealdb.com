@@ -2,7 +2,6 @@ import OpenAI from "openai";
 import type { CrawledEntry } from "./types";
 
 const MODEL = "text-embedding-3-small";
-const CACHE_MAX = 128;
 
 let client: OpenAI | null = null;
 
@@ -13,26 +12,25 @@ function getClient(): OpenAI {
     return client;
 }
 
-const cache = new Map<string, number[]>();
-
 export async function embed(text: string): Promise<number[]> {
-    const cached = cache.get(text);
-    if (cached) return cached;
-
     const res = await getClient().embeddings.create({
         model: MODEL,
         input: text,
     });
 
-    const vec = res.data[0].embedding;
+    return res.data[0].embedding;
+}
 
-    if (cache.size >= CACHE_MAX) {
-        const oldest = cache.keys().next().value;
-        if (oldest !== undefined) cache.delete(oldest);
-    }
-    cache.set(text, vec);
+export async function embedBatch(texts: string[]): Promise<number[][]> {
+    if (texts.length === 0) return [];
+    if (texts.length === 1) return [await embed(texts[0])];
 
-    return vec;
+    const res = await getClient().embeddings.create({
+        model: MODEL,
+        input: texts,
+    });
+
+    return res.data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
 }
 
 export function buildEmbedText(entry: CrawledEntry): string {

@@ -1,8 +1,8 @@
-import { handleSearch } from "../search/handler";
+import { handleSearch, MAX_QUERY_LENGTH } from "../search/handler";
 
 const PORT = Number(process.env.SEARCH_PORT ?? 4322);
 
-const CORS_HEADERS = {
+const CORS_HEADERS: Record<string, string> = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
@@ -25,11 +25,18 @@ const server = Bun.serve({
             return new Response("Method Not Allowed", { status: 405, headers: CORS_HEADERS });
         }
 
-        const query = url.searchParams.get("q");
+        const query = url.searchParams.get("q")?.trim();
 
         if (!query) {
             return Response.json(
                 { success: false, error: "`q` parameter is required" },
+                { status: 400, headers: CORS_HEADERS },
+            );
+        }
+
+        if (query.length > MAX_QUERY_LENGTH) {
+            return Response.json(
+                { success: false, error: `Query must be at most ${MAX_QUERY_LENGTH} characters` },
                 { status: 400, headers: CORS_HEADERS },
             );
         }
