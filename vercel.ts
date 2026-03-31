@@ -3,6 +3,11 @@ import type { VercelConfig } from "@vercel/config/v1";
 export const config: VercelConfig = {
     cleanUrls: true,
     trailingSlash: false,
+    functions: {
+        "api/search.ts": {
+            includeFiles: "search/**",
+        },
+    },
     rewrites: [
         // Redirect /docs to the root
         {
