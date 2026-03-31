@@ -58,7 +58,7 @@ function searchApiFunction(): Plugin {
             await mkdir(funcDir, { recursive: true });
 
             await esbuild({
-                entryPoints: ["api/search.ts"],
+                entryPoints: ["search/api.ts"],
                 bundle: true,
                 platform: "node",
                 target: "node20",
