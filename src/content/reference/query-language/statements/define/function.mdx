@@ -1,7 +1,347 @@
 ---
 position: 10
 title: "DEFINE FUNCTION"
-description: ""
+description: "The DEFINE FUNCTION statement allows you to define custom functions that can be reused throughout a database."
 ---
 
-> Original: doc-surrealql/statements/define/function.md
+# `DEFINE FUNCTION` statement
+
+The `DEFINE FUNCTION` statement allows you to define custom functions that can be reused throughout a database. When using the `DEFINE FUNCTION` statement, you can define a function that takes one or more arguments and returns a value. You can then call this function in other SurrealQL statements.
+
+Functions can be used to encapsulate logic that you want to reuse in multiple queries. They can also be used to simplify complex queries by breaking them down into smaller, more manageable pieces. The are particularly useful when you have a complex query that you need to run multiple times with different arguments.
+
+## Requirements
+
+- You must be authenticated as a root owner or editor, namespace owner or editor, or database owner or editor before you can use the `DEFINE FUNCTION` statement.
+- [You must select your namespace and database](/docs/surrealql/statements/use) before you can use the `DEFINE FUNCTION` statement.
+
+## Statement syntax
+
+```syntax title="SurrealQL Syntax"
+DEFINE FUNCTION [ OVERWRITE | IF NOT EXISTS ] fn::@name
+  ( [ @argument: @type ... ] ) [ -> @type ] {
+	[ @query ... ]
+	[ RETURN @returned ]
+} [ COMMENT @string ] [ PERMISSIONS [ NONE | FULL | WHERE @condition]]
+```
+
+## Example usage
+Below shows how you can define a custom function using the `DEFINE FUNCTION` statement, and how to call it.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "'Hello, Tobie!'"
+
+*/
+
+-- It is necessary to prefix the name of your function with "fn::"
+-- This indicates that it's a custom function
+DEFINE FUNCTION fn::greet($name: string) {
+	"Hello, " + $name + "!"
+};
+
+-- Returns: "Hello, Tobie!"
+RETURN fn::greet("Tobie");
+```
+To showcase a slightly more complex custom function, this will check if a relation between two nodes exists:
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+*/
+
+-- Define a function that checks if a relation exists between two nodes
+DEFINE FUNCTION fn::relation_exists(
+	$in: record,
+	$tb: string,
+	$out: record
+) {
+	-- Check if a relation exists between the two nodes.
+	LET $results = SELECT VALUE id FROM type::table($tb) WHERE in = $in AND out = $out;
+	-- Return true if a relation exists, false otherwise
+    RETURN array::len($results) > 0;
+};
+```
+
+## Optional arguments
+If one or more ending arguments have the `option<T>` type, they can be omitted when you run the invoke the function.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ optional_present: true, required_present: true }"
+
+[[test.results]]
+value = "{ optional_present: false, required_present: true }"
+
+*/
+
+DEFINE FUNCTION fn::last_option($required: number, $optional: option<number>) {
+	RETURN {
+		required_present: type::is_number($required),
+		optional_present: type::is_number($optional),
+	}
+};
+
+RETURN fn::last_option(1, 2);
+-- { required_present: true, optional_present: true }
+
+RETURN fn::last_option(1);
+-- { required_present: true, optional_present: false };
+```
+
+## Adding a return value
+
+Optionally, the return value of a function can be specified.
+
+For a function that is infallible, a return value is mostly for the sake of readability.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+*/
+
+
+DEFINE FUNCTION fn::greet($name: string) -> string {
+	"Hello, " + $name + "!"
+};
+```
+
+For a function that is not infallible, specifying a return value can be used to customise error output.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+error = "Expected `number` but found `'one'`"
+
+[[test.results]]
+error = "Couldn't coerce return value from function `fn::combine_any`: Expected `number` but found `'onetwo'`"
+
+*/
+
+// Arguments must be of type 'number'
+DEFINE FUNCTION fn::combine($one: number, $two: number) -> number {
+  $one + $two
+};
+
+// Accepts any value but expects the return type 'number'
+DEFINE FUNCTION fn::combine_any($one: any, $two: any) -> number {
+  $one + $two
+};
+
+fn::combine("one", "two");
+fn::combine_any("one", "two");
+```
+
+While both of these return an error, the output of the second function happens only at the point that it attempts to return the combined arguments to the function.
+
+```surql title="Output"
+-------- Query 1 --------
+"Expected `number` but found `'one'`"
+
+-------- Query 2 --------
+"Couldn't coerce return value from function `fn::combine_any`: Expected `number` but found `'onetwo'`"
+```
+
+The return value of a function can even be a [literal type](/docs/surrealql/datamodel/literals). The following function returns such a type by either returning an object of a certain structure, or a string. In this case this output is used in case an application prefers to return an error as a simple string instead of [throwing](/docs/surrealql/statements/throw) an error or returning a NONE value.
+
+```surql
+DEFINE FUNCTION fn::age_and_name($user_num: int) -> { age: int, name: string } | string {
+    LET $user = type::record("user", $user_num);
+    IF $user.exists() {
+        $user.{ name, age }
+    } ELSE {
+        { "Couldn't find user number " + <string>$user_num + "!" }        
+    }
+};
+
+CREATE user:1 SET name = "Billy", age = 15;
+
+fn::age_and_name(1);
+fn::age_and_name(2);
+```
+
+```surql title="Output"
+-------- Query 1 --------
+
+{ age: 15, name: 'Billy' }
+
+-------- Query 2 --------
+
+"Couldn't find user number 2!"
+```
+
+## Recursive functions
+
+A function is able to call itself, making it a recursive function. One example of a recursive function is the one below which creates a relation between each and every record passed in.
+
+Consider a situation in which seven person records exist. First, `person:1` will need to be related to the rest of the `person` records, after which there are no more relations to create for it. Following this, the relations for `person:2` and all the other records except for `person:1` will need to be created, and so on.
+
+This can be done in a recursive function by creating all the relations between the first record and the remaining records, after which the function calls itself by passing in all the records except the first. This continues until the function receives less than two records, in which case it ceases calling itself by doing nothing, thereby ending the recursion.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: person:1 }, { id: person:2 }, { id: person:3 }, { id: person:4 }, { id: person:5 }, { id: person:6 }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ "->to": { "->?": [person:3, person:4, person:6, person:5, person:2] }, id: person:1 }, { "->to": { "->?": [person:6, person:3, person:5, person:4] }, id: person:2 }, { "->to": { "->?": [person:6, person:5, person:4] }, id: person:3 }, { "->to": { "->?": [person:5, person:6] }, id: person:4 }, { "->to": { "->?": [person:6] }, id: person:5 }, { "->to": { "->?": [] }, id: person:6 }]"
+
+*/
+
+DEFINE FUNCTION fn::relate_all($records: array<record>) {
+  IF $records.len() < 2 {
+      -- Don't do anything, ending the recursion
+  }  ELSE {
+      LET $first = $records[0];
+      LET $remainder = $records[1..];
+      FOR $counterpart IN $remainder {
+          RELATE $first->to->$counterpart;
+      };
+      fn::relate_all($remainder);
+  }
+};
+
+CREATE |person:1..8|;
+
+fn::relate_all(SELECT VALUE id FROM person);
+
+SELECT id, ->to->? FROM person;
+```
+
+The last query [can be viewed graphically](/blog/whats-new-in-surrealist-3-2#graph-visualisation) inside Surrealist, leading to an output showing a seven-pointed star.
+
+<img src="~/assets/img/image/recursive_star.png" alt="An image of a seven-pointed star created visually by relating seven records to each other and displayed inside Surrealist's graph view." />
+
+## Permissions
+
+You can set the permissions for a custom function using the `PERMISSIONS` clause. The `PERMISSIONS` clause is mostly used to restrict who can access a function and what data they can access. It can be set to `NONE`, `FULL`, or `WHERE @condition`.
+
+- `FULL`: When Full permissions are granted [record](/docs/surrealdb/security/authentication#record-users) users have access to the function. This is the default permission when not specified.
+- `NONE`: When this permission is granted, [record](/docs/surrealdb/security/authentication#record-users) users have no access to the defined function.
+- `WHERE @condition`: Permissions are granted to the function based on the specified condition.
+
+
+> [!NOTE]
+> The examples below use the [`Surreal Deal Store`](/docs/surrealdb/demo#surreal-deal-store---there-is-a-lot-in-store-for-you-recommended) dataset.
+
+### Using the `FULL` permission
+
+The `FULL` permission grants all users access to the function. The following example defines a function that fetches all products from the `product` table and grants the function full permissions to access the data to all users.
+
+<SurrealistMini url="https://app.surrealdb.com/mini?query=--+Define+a+function+to+fetch+all+products.+All+users+can+access+this+function%0ADEFINE+FUNCTION+fn%3A%3AfetchAllProducts%28%29+%7B%0A%09RETURN+%28SELECT+*+FROM+product+LIMIT+10%29%3B%0A%7D+PERMISSIONS+FULL%3B%0A%0A--+Returns%3A+The+first+10+products+in+the+product+table%0ARETURN+fn%3A%3AfetchAllProducts%28%29%3B&dataset=surreal-deal-store&orientation=horizontal" />
+
+### Using the `NONE` permission
+
+The `NONE` permission denies all [record](/docs/surrealdb/security/authentication#record-users) users access to the function. The following example defines a function that fetches all products from the `product` table
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[]"
+
+*/
+
+-- Define a function that fetches all expiration years from the payment_details table and denies access to all none-admin users
+DEFINE FUNCTION fn::fetchAllPaymentDetails() {
+	SELECT stored_cards.expiry_year FROM payment_details LIMIT 5
+} PERMISSIONS NONE;
+
+RETURN fn::fetchAllPaymentDetails();
+```
+
+### Using the `WHERE` clause
+
+The `WHERE` clause allows you to specify a condition that determines the permissions granted to the function. The condition must evaluate to a boolean value. If the condition evaluates to `true`, the function is granted permissions. If the condition evaluates to `false`, the function is not granted permissions.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+*/
+
+-- Define a function that fetches all products with the condition that only admin users can access it
+DEFINE FUNCTION fn::fetchAllProducts() {
+	 SELECT * FROM product LIMIT 10
+} PERMISSIONS WHERE $auth.admin = true;
+```
+
+## Using `IF NOT EXISTS` clause
+
+
+The `IF NOT EXISTS` clause can be used to define a function only if it does not already exist. You should use the `IF NOT EXISTS` clause when defining a function in SurrealDB if you want to ensure that the function is only created if it does not already exist. If the function already exists, the `DEFINE FUNCTION` statement will return an error.
+
+It's particularly useful when you want to safely attempt to define a function without manually checking its existence first.
+
+On the other hand, you should not use the `IF NOT EXISTS` clause when you want to ensure that the function definition is updated regardless of whether it already exists. In such cases, you might prefer using the `OVERWRITE` clause, which allows you to define a function and overwrite an existing one if it already exists, ensuring that the latest version of the function definition is always in use
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+*/
+
+-- Create a FUNCTION if it does not already exist
+DEFINE FUNCTION IF NOT EXISTS fn::example() {};
+```
+
+## Using `OVERWRITE` clause
+
+<since v="v2.0.0" />
+
+The `OVERWRITE` clause can be used to define a function and overwrite an existing one if it already exists. You should use the `OVERWRITE` clause when you want to modify an existing user definition. If the user already exists, the `DEFINE FUNCTION` statement will overwrite the existing definition with the new one.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+*/
+
+-- Create a FUNCTION and overwrite if it already exists
+DEFINE FUNCTION OVERWRITE fn::example() {};
+```
+
+## Functions as custom middleware
+
+<since v="v3.0.0" />
+
+A `DEFINE FUNCTION` statement can be used to define a function for use as custom middleware. For more details on defining a custom function in this manner, see the [`DEFINE API`](/docs/surrealql/statements/define/api#custom-middleware) page.
