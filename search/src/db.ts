@@ -1,24 +1,4 @@
-import { SignJWT } from "jose";
 import { Surreal } from "surrealdb";
-
-async function createJwtToken(
-    namespace: string,
-    database: string,
-    accessName: string,
-    accessKey: string,
-): Promise<string> {
-    const secret = new TextEncoder().encode(accessKey);
-    return new SignJWT({
-        NS: namespace,
-        DB: database,
-        AC: accessName,
-        RL: ["Viewer"],
-    })
-        .setProtectedHeader({ alg: "HS512" })
-        .setIssuedAt()
-        .setExpirationTime("5m")
-        .sign(secret);
-}
 
 interface ConnectOptions {
     logging?: boolean;
@@ -37,25 +17,14 @@ export async function connectDb(options: ConnectOptions = {}): Promise<Surreal> 
         db.subscribe("error", (e) => console.error("[DB] Error", e));
     }
 
-    const accessName = process.env.SURREAL_ACCESS_NAME;
-    const accessKey = process.env.SURREAL_ACCESS_KEY;
+    const username = process.env.SURREAL_USERNAME ?? "root";
+    const password = process.env.SURREAL_PASSWORD ?? "root";
 
-    if (accessName && accessKey) {
-        const token = await createJwtToken(namespace, database, accessName, accessKey);
-
-        await db.connect(endpoint, {
-            versionCheck: false,
-            namespace,
-            database,
-            authentication: token,
-        });
-    } else {
-        const username = process.env.SURREAL_USERNAME ?? "root";
-        const password = process.env.SURREAL_PASSWORD ?? "root";
-
-        await db.connect(endpoint, { namespace, database });
-        await db.signin({ username, password });
-    }
+    await db.connect(endpoint, {
+        namespace,
+        database,
+        authentication: () => ({ username, password }),
+    });
 
     return db;
 }
