@@ -1,3 +1,9 @@
+// Applies the search schema (schema.surql) to SurrealDB.
+// Run this once to set up tables, indexes, and the analyzer,
+// or re-run after schema changes.
+//
+// Usage: bun run search:schema
+
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { connectDb } from "../src/db";
