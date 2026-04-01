@@ -224,28 +224,56 @@ const CORE_COLLECTIONS = new Set([
 ]);
 
 /**
- * Patterns that indicate the user is comparing two concepts.
- * When detected, results mentioning BOTH terms get a boost
- * so that "difference between MERGE and UPDATE" surfaces pages
- * discussing both rather than pages about only one.
+ * Detects whether the user is comparing two concepts and
+ * extracts both terms. When detected, results mentioning BOTH
+ * terms get a boost so that "difference between MERGE and
+ * UPDATE" surfaces pages discussing both rather than pages
+ * about only one.
+ *
+ * Uses indexOf-based splitting instead of regex capture groups
+ * to avoid polynomial backtracking (ReDoS) on adversarial
+ * input — greedy/lazy `.+?` overlapping with `\s+` separators
+ * causes exponential search in the regex engine.
  */
-const COMPARISON_PATTERNS = [
-    /^(?:difference|differences)\s+between\s+(.+?)\s+and\s+(.+)$/i,
-    /^(.+?)\s+vs\.?\s+(.+)$/i,
-    /^(.+?)\s+versus\s+(.+)$/i,
-    /^(.+?)\s+compared\s+to\s+(.+)$/i,
-    /^comparing\s+(.+?)\s+(?:and|with|to)\s+(.+)$/i,
-];
-
 function extractComparisonTerms(query: string): [string, string] | null {
-    const q = query.trim();
-    for (const pattern of COMPARISON_PATTERNS) {
-        const match = q.match(pattern);
-        if (match) {
-            return [match[1].trim().toLowerCase(), match[2].trim().toLowerCase()];
-        }
+    const q = query.trim().toLowerCase().replace(/\s+/g, " ");
+
+    if (q.startsWith("difference between ") || q.startsWith("differences between ")) {
+        const after = q.slice(q.indexOf(" between ") + 9);
+        return splitOnLast(after, " and ");
     }
+
+    if (q.startsWith("comparing ")) {
+        const after = q.slice("comparing ".length);
+        for (const sep of [" and ", " with ", " to "]) {
+            const pair = splitOnFirst(after, sep);
+            if (pair) return pair;
+        }
+        return null;
+    }
+
+    for (const sep of [" vs. ", " vs ", " versus ", " compared to "]) {
+        const pair = splitOnFirst(q, sep);
+        if (pair) return pair;
+    }
+
     return null;
+}
+
+function splitOnFirst(text: string, sep: string): [string, string] | null {
+    const idx = text.indexOf(sep);
+    if (idx <= 0) return null;
+    const a = text.slice(0, idx).trim();
+    const b = text.slice(idx + sep.length).trim();
+    return a && b ? [a, b] : null;
+}
+
+function splitOnLast(text: string, sep: string): [string, string] | null {
+    const idx = text.lastIndexOf(sep);
+    if (idx <= 0) return null;
+    const a = text.slice(0, idx).trim();
+    const b = text.slice(idx + sep.length).trim();
+    return a && b ? [a, b] : null;
 }
 
 function boostResults(hits: RawSearchHit[], query: string): RawSearchHit[] {
@@ -457,12 +485,29 @@ function stripQuestionPrefix(query: string): string {
     const q = query.trim();
     for (const pattern of QUESTION_PREFIXES) {
         const stripped = q.replace(pattern, "");
-        // Only strip if the remainder is still meaningful (>= 3 chars)
         if (stripped !== q && stripped.length >= 3) {
             return stripped;
         }
     }
     return q;
+}
+
+/**
+ * Normalises a raw search query into a canonical form suitable
+ * for use as a CDN cache key. Two queries that normalise to the
+ * same string will produce identical search results, so the API
+ * layer can redirect non-canonical queries to the canonical URL
+ * and let the CDN serve a cached response.
+ *
+ * Steps: trim → lowercase → collapse whitespace → strip trailing
+ * punctuation → strip question prefixes ("how to X" → "X").
+ */
+export function normaliseQuery(raw: string): string {
+    let q = raw.trim().toLowerCase();
+    q = q.replace(/\s+/g, " ");
+    q = q.replace(/[?.!]+$/, "");
+    q = stripQuestionPrefix(q);
+    return q.trim();
 }
 
 // ──────────────────────────────────────────────────────────
