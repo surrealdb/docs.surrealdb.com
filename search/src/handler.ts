@@ -505,7 +505,13 @@ function stripQuestionPrefix(query: string): string {
 export function normaliseQuery(raw: string): string {
     let q = raw.trim().toLowerCase();
     q = q.replace(/\s+/g, " ");
-    q = q.replace(/[?.!]+$/, "");
+
+    let end = q.length;
+    while (end > 0 && (q[end - 1] === "?" || q[end - 1] === "." || q[end - 1] === "!")) {
+        end--;
+    }
+    q = q.slice(0, end);
+
     q = stripQuestionPrefix(q);
     return q.trim();
 }
