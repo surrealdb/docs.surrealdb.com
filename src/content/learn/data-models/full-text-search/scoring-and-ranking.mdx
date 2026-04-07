@@ -1,7 +1,183 @@
 ---
 position: 4
-title: "Scoring & ranking"
-description: ""
+title: Scoring and ranking
+description: Query with the MATCHES operator, combine BM25 and HIGHLIGHTS on indexes, and use search::score and search::highlight with numbered match clauses.
 ---
 
-New page
+# Scoring and ranking
+
+After you have [defined analyzers](/docs/learn/data-models/full-text-search/analyzers-and-tokenizers) and attached [search indexes](/docs/learn/data-models/full-text-search/search-indexes), you can run full-text queries.
+
+## Querying
+
+Once an index that uses a full-text analyzer is in place, it is now possible to use the `@@` operator (the `MATCHES` operator).
+
+- **Ranking / Scoring**: Once matches are found, an FTS engine ranks them to show the most relevant results first. Algorithms such as BM25 or TF-IDF look at how often terms appear in a document, or whether those terms appear in the title vs. the body, etc.
+
+- **Highlighting** : A good search experience shows where in the text the matches occur, often by wrapping matched terms in HTML tags or otherwise emphasising them.
+
+```surql
+DEFINE ANALYZER my_analyzer
+  TOKENIZERS class
+  FILTERS lowercase, ascii;
+
+-- Two statements as full-text indexes must be defined on only one field
+DEFINE INDEX body_index
+  ON TABLE article
+  FIELDS body
+  FULLTEXT ANALYZER my_analyzer;
+
+DEFINE INDEX title_index
+  ON TABLE article
+  FIELDS title
+  FULLTEXT ANALYZER my_analyzer;
+
+CREATE article SET
+  title = "Machine Learning!",
+  body = "Machine learning, or ML, is all the rage these days. Developers are...";
+
+CREATE article SET
+  title = "History of machines",
+  body = "The earliest 'machine' used by our ancestors was a simple sharpened stone tool. It was...";
+
+SELECT body, title
+FROM article
+WHERE body @@ "machine" OR title @@ "machine";
+```
+
+```surql title="Output"
+[
+	{
+		body: 'Machine learning, or ML, is all the rage these days. Developers are...',
+		title: 'Machine Learning!'
+	},
+	{
+		body: "The earliest 'machine' used by our ancestors was a simple sharpened stone tool. It was...",
+		title: 'History of machines'
+	}
+]
+```
+
+To use highlighting and best match scoring on searches, the `BM25` and `HIGHLIGHTS` clauses can be added to the `DEFINE INDEX` statement. These enable you use the [`search::highlight`](/docs/reference/query-language/functions/database-functions/search#searchhighlight) and [`search::score`](/docs/reference/query-language/functions/database-functions/search#searchscore) functions.
+
+Inside a query, the `@@` operator takes a number that is matched with the same number passed into one of these functions. In the example below, the `WHERE text @0@ "night"` part of the query will match with `search::highlight("->", "<-", 0)` and `search::score(0) AS text_score`, while `title @1@ "hound"` will match with `search::score(1) AS title_score`.
+
+```surql
+DEFINE ANALYZER my_analyzer
+  TOKENIZERS class, blank
+  FILTERS lowercase, ascii;
+
+DEFINE INDEX text_index
+  ON TABLE article
+  FIELDS text
+  FULLTEXT ANALYZER my_analyzer BM25 HIGHLIGHTS;
+
+DEFINE INDEX title_index
+  ON TABLE article
+  FIELDS title
+  FULLTEXT ANALYZER my_analyzer BM25 HIGHLIGHTS;
+
+INSERT INTO article (title, text) VALUES
+    ("A Study in Scarlet", "IN the year 1878 I took my degree of Doctor of Medicine of the University of London, and proceeded to Netley to go through the course prescribed for surgeons in the army."),
+    ("A Study in Scarlet", "Having completed my studies there, I was duly attached to the Fifth Northumberland Fusiliers as Assistant Surgeon."),
+    ("The Sign of the Four", "SHERLOCK HOLMES took his bottle from the corner of the mantel-piece and his hypodermic syringe from its neat morocco case."),
+    ("The Hound of the Baskervilles", "MR. SHERLOCK HOLMES, who was usually very late in the mornings, save upon those not infrequent occasions when he was up all night, was seated at the breakfast table."),
+    ("The Hound of the Baskervilles", "I stood upon the hearth-rug and picked up the stick which our visitor had left behind him the night before.");
+
+SELECT
+  text,
+  title,
+  search::highlight("->", "<-", 0) AS title,
+  search::score(0) AS text_score,
+  search::score(1) AS title_score
+FROM article
+WHERE
+  text @0@ "night"
+  OR title @1@ "hound";
+```
+
+```surql title="Output"
+[
+	{
+		text: 'MR. SHERLOCK HOLMES, who was usually very late in the mornings, save upon those not infrequent occasions when he was up all night, was seated at the breakfast table.',
+		text_score: 0.30209195613861084f,
+		title: 'MR. SHERLOCK HOLMES, who was usually very late in the mornings, save upon those not infrequent occasions when he was up all ->night<-, was seated at the breakfast table.',
+		title_score: 0.32491400837898254f
+	},
+	{
+		text: 'I stood upon the hearth-rug and picked up the stick which our visitor had left behind him the night before.',
+		text_score: 0.35619309544563293f,
+		title: 'I stood upon the hearth-rug and picked up the stick which our visitor had left behind him the ->night<- before.',
+		title_score: 0.32491400837898254f
+	}
+]
+```
+
+The `AND` and `OR` clauses can be used inside the `@@` as well. This allows a single string to be compared against instead of needing to specify individual parts of the string.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "[{ id: document:1, text: 'It is rare that I find myself penning a personal note in my chronicles.' }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: document:1, text: 'It is rare that I find myself penning a personal note in my chronicles.' }]"
+
+[[test.results]]
+value = "[{ id: document:1, text: 'It is rare that I find myself penning a personal note in my chronicles.' }]"
+
+[[test.results]]
+value = "[{ id: document:1, text: 'It is rare that I find myself penning a personal note in my chronicles.' }]"
+
+[[test.results]]
+value = "[{ id: document:1, text: 'It is rare that I find myself penning a personal note in my chronicles.' }]"
+
+[[test.results]]
+value = "[{ id: document:1, text: 'It is rare that I find myself penning a personal note in my chronicles.' }]"
+
+*/
+
+CREATE document:1 SET
+  text = "It is rare that I find myself penning a personal note in my chronicles.";
+
+DEFINE ANALYZER simple
+  TOKENIZERS blank,class
+  FILTERS lowercase;
+
+DEFINE INDEX some_index
+  ON document
+  FIELDS text
+  FULLTEXT ANALYZER simple;
+
+-- @AND@ and @OR@: can use the entire string
+SELECT *
+FROM document
+WHERE text @AND@ "personal rare";
+
+SELECT *
+FROM document
+WHERE text @OR@ "personal nice weather today";
+
+-- Separate AND and OR outside of matches operator:
+-- Must specify parts of string to check for match
+SELECT *
+FROM document
+WHERE text @@ "personal" AND text @@ "rare";
+
+SELECT *
+FROM document
+WHERE text @@ "personal note";
+
+SELECT *
+FROM document
+WHERE text @@ "personal" OR text @@ "nice weather today";
+```
+
+In addition to full-text search capabilities, SurrealDB has a number of other ways of working with text such as string similarity, regex matching, and functions that order text in different ways. See [Other ways to work with text](/docs/learn/data-models/full-text-search/other-ways-to-work-with-text).
