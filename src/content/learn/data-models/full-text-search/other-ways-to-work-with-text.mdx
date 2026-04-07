@@ -1,0 +1,212 @@
+---
+position: 5
+title: Other ways to work with text
+description: Compare and sort text with COLLATE and NUMERIC, use contains and fuzzy string metrics, regex matching, and how these complement full-text search and hybrid retrieval.
+---
+
+# Other ways to work with text
+
+Besides [full-text search](/docs/learn/data-models/full-text-search/overview), SurrealDB offers many tools for comparing, ordering, and matching strings: sorting with `COLLATE` / `NUMERIC`, substring checks, distance and similarity scores, regex, and ad-hoc string helpers. This page summarises those options so you can pick the right tool next to your FTS indexes and analyzers.
+
+### Comparing and sorting text
+
+#### In SELECT queries
+
+The following example shows a few records created from an array of strings in an order that is sorted to the human eye: lowest to highest numbers, then A to Z.
+
+```surql
+FOR $word IN ['1', '2', '11', 'Ábaco', 'kitty', 'Zoo'] {
+	CREATE data SET val = $word;
+};
+```
+
+Inside a `SELECT` query, an `ORDER BY` clause can be used to order the output by one or more field names. For the above data, an ordered `SELECT` query looks like this.
+
+```surql
+SELECT VALUE val FROM data ORDER BY val;
+```
+
+However, in the case of strings, sorting is done by Unicode ordering which often leads to output that seems out of order to the human eye. The output of the above query shows the following:
+
+```surql title="Output"
+[ '1', '11', '2', 'Zoo', 'kitty', 'Ábaco' ]
+```
+
+This is because:
+
+* '11' is ordered before '2', because the first character in the string '2' is greater than the first character in the string '1'.
+* 'Zoo' is ordered before 'kitty', because the first character in the string 'Zoo' is 'Z', number 0059 in the [list of Unicode characters](https://en.wikipedia.org/wiki/List_of_Unicode_characters#Basic_Latin). A lowercase 'k' is 0076 on the list and thus "greater", while the 'Á', registered as the "Latin Capital letter A with acute", is 0129 on the list.
+
+To sort strings in a more natural manner to the human eye, the keywords [`NUMERIC` and `COLLATE` (or both) can be used](/docs/reference/query-language/statements/select#sort-records-using-the-order-by-clause). `NUMERIC` will instruct strings that parse into numbers to be treated as such.
+
+```surql
+SELECT VALUE val FROM data ORDER BY val NUMERIC;
+-- Output:
+['1', '2', '11', 'Zoo', 'kitty', 'Ábaco']
+```
+
+`COLLATE` instructs unicode strings to sort by alphabetic order, rather than Unicode order.
+
+```surql
+SELECT VALUE val FROM data ORDER BY val COLLATE;
+-- Output:
+['1', '11', '2', 'Ábaco', 'kitty', 'Zoo']
+```
+
+And for the data in this example, `COLLATE NUMERIC` is likely what will be desired.
+
+```surql
+SELECT VALUE val FROM data ORDER BY val COLLATE NUMERIC;
+-- Output:
+['1', '2', '11', 'Ábaco', 'kitty', 'Zoo']
+```
+
+#### Sorting functions
+
+The functions [`array::sort_natural()`, `array::sort_lexical()`, and `array::sort_lexical_natural()`](/docs/reference/query-language/functions/database-functions/array) can be used on ad-hoc data to return the same output as the `COLLATE` and `NUMERIC` clauses in a [`SELECT` statement](/docs/reference/query-language/statements/select).
+
+### Contains functions and operators
+
+The most basic way to see if one string is contained inside another is to use the `IN` operator, or the [`string::contains()` function](/docs/reference/query-language/functions/database-functions/string#stringcontains).
+
+```surql
+-- false
+"Umple" IN "Rumplestiltskin";
+string::contains("Rumplestiltskin", "Umple");
+-- Same function using method syntax
+"Rumplestiltskin".contains("Umple");
+
+-- true
+"umple" IN "Rumplestiltskin";
+string::contains("Rumplestiltskin", "umple");
+"Rumplestiltskin".contains("umple");
+```
+
+SurrealDB has a number of [operators](/docs/reference/query-language/language-primitives/operators) to determine if all or some of the values of one array are contained in another, such as `CONTAINSALL` and `CONTAINSANY`, or `ALLINSIDE` and `ANYINSIDE`. The queries with `CONTAINS` and `INSIDE` perform the same operation, just in the opposite order.
+
+```surql
+-- If 1,2,3 contains each item in 1,2...
+[1,2,3] CONTAINSALL [1,2];
+-- then each item in 1,2 is inside 1,2,3
+[1,2] ALLINSIDE [1,2,3];
+```
+
+Because strings are essentially arrays of characters, these operators work with strings as well. Both of these queries will return `true`:
+
+```surql
+"Rumplestiltskin" CONTAINSALL ["umple", "kin"];
+"kin" ALLINSIDE "Rumplestiltskin";
+["kin", "someotherstring"] ANYINSIDE "Rumplestiltskin";
+```
+
+### Equality and fuzzy equality
+
+SurrealDB offers quite a few algorithms inside the [string functions module](/docs/reference/query-language/functions/database-functions/string) for distance or similarity comparison. They are:
+
+* `string::distance::damerau_levenshtein()`
+* `string::distance::normalized_damerau_levenshtein()`
+* `string::distance::hamming()`
+* `string::distance::levenshtein()`
+* `string::distance::normalized_levenshtein()`
+* `string::distance::osa_distance()`
+
+* `string::similarity::jaro()`
+* `string::similarity::jaro_winkler()`
+
+Which of these functions to choose depends on your personal use case.
+
+For example, fuzzy similarity and distance scores are not a measure of absolute equality and ordered similarity scores should only be used in comparisons against the same string. Take the following queries for example which return the score for the string "United" and "Unite":
+
+```surql
+-- return 131 and 111
+string::similarity::fuzzy("United Kingdom", "United");
+string::similarity::fuzzy("United Kingdom", "Unite");
+
+-- also return 131 and 111
+string::similarity::fuzzy("United", "United");
+string::similarity::fuzzy("United", "Unite");
+```
+
+While the word "Unite" is clearly closer to the word "United" than it is to "United Kingdom", the algorithm used for this function only considers how much of the second string is found in the first string.
+
+However, the `string::similarity::jaro()` function returns an output that approaches 1 if two strings are equal, making it a more apt solution when the first and second string may be entirely different. Using the same input strings as above shows that "Unite" is clearly the most similar of the strings that are not outright equal to "United".
+
+```surql
+-- 0.8095238095238096f
+string::similarity::jaro("United Kingdom", "United");
+-- 0.7857142857142857f
+string::similarity::jaro("United Kingdom", "Unite");
+-- 1
+string::similarity::jaro("United", "United");
+-- 0.9444444444444445f
+string::similarity::jaro("United", "Unite");
+```
+
+Another example of the large difference between algorithms is the Hamming distance algorithm, which only compares strings of equal length.
+
+```surql
+-- Error: strings have different length
+string::distance::hamming("United Kingdom", "United");
+-- Returns 0
+string::distance::hamming("United", "United");
+-- Returns 1
+string::distance::hamming("United", "Unitéd");
+-- Returns 6
+string::distance::hamming("United", "uNITED");
+```
+
+### Regex matching
+
+The `string::matches()` function can be used to perform regex matching on a string.
+
+```surql
+-- true
+string::matches("Cat", "[HC]at");
+-- Also true
+string::matches("Hat", "[HC]at");
+```
+
+### Other string functions
+
+SurrealDB has a large number of [string functions](/docs/reference/query-language/functions/database-functions/string) that can be used manually to refine string searching, such as `string::lowercase()`, `string::starts_with()`, and `string::ends_with()`.
+
+```surql
+SELECT 
+    $this AS word, 
+    $this.lowercase() = "sleek" AS is_sleek
+FROM ["sleek", "SLEEK", "Sleek", "sleeek"];
+```
+
+```surql title="Output"
+[
+	{
+		is_sleek: true,
+		word: 'sleek'
+	},
+	{
+		is_sleek: true,
+		word: 'SLEEK'
+	},
+	{
+		is_sleek: true,
+		word: 'Sleek'
+	},
+	{
+		is_sleek: false,
+		word: 'sleeek'
+	}
+]
+```
+
+## Combining full-text and vector search
+
+SurrealDB has functions that combine full-text and vector search results. For more on that pattern, see [Hybrid search](/docs/learn/data-models/vector-search/hybrid-search) in the vector search section.
+
+## Resources
+
+- [`DEFINE INDEX`](/docs/reference/query-language/statements/define/indexes)
+- [`DEFINE ANALYZER`](/docs/reference/query-language/statements/define/analyzer)
+- [Search functions](/docs/reference/query-language/functions/database-functions/search)
+- [SurrealDB search functions](/docs/reference/query-language/functions/database-functions/search)
+- [SurrealDB operators](/docs/reference/query-language/language-primitives/operators)
+- Blog post: [Create a Search Engine with SurrealDB full-text Search](/blog/create-a-search-engine-with-surrealdb-full-text-search)
