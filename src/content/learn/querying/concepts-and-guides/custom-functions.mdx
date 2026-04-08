@@ -1,7 +1,131 @@
 ---
 position: 6
 title: Custom functions
-description: ""
+description: "Learn how to define and call database functions with fn::, optional arguments, and permissions."
 ---
 
-New page
+# Custom functions
+
+[`DEFINE FUNCTION`](/docs/reference/query-language/statements/define/function) registers reusable SurrealQL under a name beginning with the `fn::` prefix. You need appropriate access (root / namespace / database owner or editor), and you must [`USE`](/docs/reference/query-language/statements/use) the right namespace and database first. For more clauses and edge cases, see the reference documentation.
+
+## Define and call
+
+Custom functions are always named with the `fn::` prefix.
+
+```surql
+-- Simple function: build a string from an argument
+DEFINE FUNCTION fn::greet($name: string) {
+	"Hello, " + $name + "!"
+};
+
+RETURN fn::greet("Tobie");
+```
+
+```surql
+-- More than one parameter; body can use LET, subqueries, RETURN, and so on
+DEFINE FUNCTION fn::relation_exists($in: record, $tb: string, $out: record) {
+	LET $results = SELECT VALUE id FROM type::table($tb) WHERE in = $in AND out = $out;
+	RETURN array::len($results) > 0;
+};
+```
+
+## Optional trailing arguments
+
+If the last parameters use `option<T>`, callers may omit them.
+
+```surql
+DEFINE FUNCTION fn::last_option($required: number, $optional: option<number>) {
+	RETURN {
+		required_present: type::is_number($required),
+		optional_present: type::is_number($optional),
+	};
+};
+
+RETURN fn::last_option(1, 2);  -- both set
+RETURN fn::last_option(1);      -- optional omitted
+```
+
+## Annotated return types
+
+Adding `-> type` is recommended for extra type safety, as well as readability. Though the first example can clearly only return a `number` due to its two arguments being of the same type, it is easier for a casual reader to know what sort of value is being returned.
+
+```surql
+DEFINE FUNCTION fn::combine($one: number, $two: number) -> number {
+	$one + $two
+};
+
+-- Accept any input; coercion to the return type happens when returning
+DEFINE FUNCTION fn::combine_any($one: any, $two: any) -> number {
+	$one + $two
+};
+```
+
+You can also return [literal union types](/docs/reference/query-language/language-primitives/data-types/literals) for structured data or a fallback string instead of [throwing](/docs/reference/query-language/statements/throw):
+
+```surql
+DEFINE FUNCTION fn::age_and_name($user_num: int) -> { age: int, name: string } | string {
+	LET $user = type::record("user", $user_num);
+	IF $user.exists() {
+		$user.{ name, age }
+	} ELSE {
+		"Couldn't find user number " + <string>$user_num + "!"
+	}
+};
+```
+
+## Recursion
+
+Though not a commonly used pattern in SurrealQL, a function may call itself. Below, each step relates the first record in a list to all the rest, then recurses on the tail until fewer than two records remain.
+
+```surql
+DEFINE FUNCTION fn::relate_all($records: array<record>) {
+	IF $records.len() < 2 {
+		-- stop recursion
+	} ELSE {
+		LET $first = $records[0];
+		LET $remainder = $records[1..];
+		FOR $counterpart IN $remainder {
+			RELATE $first->to->$counterpart;
+		};
+		fn::relate_all($remainder);
+	}
+};
+
+CREATE |person:1..8|;
+fn::relate_all(SELECT VALUE id FROM person);
+SELECT id, ->to->? FROM person;
+```
+
+## Permissions
+
+`PERMISSIONS` controls whether [record users](/docs/learn/security/authentication/authentication#record-users) may invoke the function: `FULL` (typical default), `NONE`, or `WHERE` with a boolean expression (often involving `$auth`).
+
+```surql
+-- PERMISSIONS NONE: record users cannot call this (admins / root still can, depending on setup)
+DEFINE FUNCTION fn::fetchAllPaymentDetails() {
+	SELECT stored_cards.expiry_year FROM payment_details LIMIT 5
+} PERMISSIONS NONE;
+```
+
+```surql
+-- PERMISSIONS WHERE: only when the expression is true (here, admin flag on $auth)
+DEFINE FUNCTION fn::fetchAllProducts() {
+	SELECT * FROM product LIMIT 10
+} PERMISSIONS WHERE $auth.admin = true;
+```
+
+## Creating or replacing a definition
+
+Clauses like `IF NOT EXISTS` and `OVERWRITE' can be used when defining a function.
+
+```surql
+-- IF NOT EXISTS: only define when no function with this name exists yet (no-op if it does)
+DEFINE FUNCTION IF NOT EXISTS fn::example() {};
+
+-- OVERWRITE: replace an existing definition with this one
+DEFINE FUNCTION OVERWRITE fn::example() {};
+```
+
+## Functions as API middleware
+
+Handlers for [`DEFINE API`](/docs/reference/query-language/statements/define/api) middleware are ordinary `fn::` functions with a specific signature. See [custom middleware](/docs/reference/query-language/statements/define/api#custom-middleware) and the learn page on [middleware](/docs/learn/querying/custom-apis/middleware) for more details.
