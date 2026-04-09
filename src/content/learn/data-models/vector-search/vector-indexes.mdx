@@ -1,7 +1,113 @@
 ---
-position: 2
-title: "Vector Indexes"
-description: ""
+position: 4
+title: Vector indexes
+description: Choose brute force or HNSW vector indexes, tune DIMENSION and distance metrics, and use the query cheat sheet with vector::distance::knn().
 ---
 
-New page
+# Vector indexes
+
+When it comes to search, you can always use brute force.
+
+In SurrealDB, you can use the [brute force approach](/docs/reference/query-language/statements/define/indexes#brute-force-method) to search through your vector embeddings and data.
+
+Brute force search compares a query vector against all vectors in the dataset to find the closest match. As this is a brute-force approach, you do not create an index for this approach.
+
+The brute force approach for finding the nearest neighbour is generally preferred in the following use cases:
+
+- Small datasets / limited query vectors: For applications with small datasets, the overhead of building and maintaining an index might outweigh its benefits. In such cases, the brute force approach is optimal.
+- Guaranteed accuracy: Since the brute force method compares the query vector against every vector in the dataset, it guarantees finding the exact nearest vectors based on the chosen distance metric (like Euclidean, Manhattan, etc.).
+- Benchmarking models: The brute force approach can be used as a reference to help benchmark the performance of other approximate alternatives like HNSW.
+
+While brute force can give you exact results, it's computationally expensive for large datasets.
+
+In most cases, you do not need a 100% exact match, and you can give it up for faster, high-dimensional searches to find the approximate nearest neighbour to a query vector.
+
+This is where Vector indexes come in.
+
+In SurrealDB, you can perform a vector search using a [Hierarchical Navigable Small World](https://en.wikipedia.org/wiki/Hierarchical_navigable_small_world) (HNSW) index, a state-of-the-art algorithm for approximate nearest neighbour search in high-dimensional spaces. It is a [proximity graph-based index](/docs/reference/query-language/statements/define/indexes#hnsw-hierarchical-navigable-small-world) that offers a balance between search efficiency and accuracy.
+
+## Vector search cheat sheet
+
+- HNSW: efficient approximation for high dimensions or large datasets
+- Brute force: when you don’t define an index, or you want exact nearest neighbours, or when you provide a distance function to the query
+
+### HNSW index
+
+| Parameter     | Default   | Options                 | Description   |
+| ------------- | --------- | ----------------------- | ------------- |
+| DIMENSION     |           |                         | Size of the vector
+| DIST          | EUCLIDEAN | EUCLIDEAN, COSINE, MANHATTAN | Distance function
+| TYPE          | F64       | F64, F32, I64, I32, I16 | Vector type
+| EFC           | 150       |                         | EF construction
+| M             | 12        |                         | Max connections per element
+| M0            | 24        |                         | Max connections in the lowest layer
+| LM            | 0.40242960438184466f |              | Multiplier for level generation. This value is automatically calculated with a value considered as optimal.
+
+Examples:
+
+```surql
+-- User statement:
+DEFINE INDEX hnsw_idx ON pts FIELDS point HNSW DIMENSION 4;
+-- Defaults to:
+DEFINE INDEX hnsw_idx ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F64 EFC 150 M 12 M0 24 LM 0.40242960438184466f;
+-- Users are strongly suggested not to set an LM value, as
+-- it is computed based on other parameters. Only users
+-- completely versed in the field should manually set it
+```
+
+For more details, see the [`DEFINE INDEX` statement](/docs/reference/query-language/statements/define/indexes#hnsw-hierarchical-navigable-small-world) documentation.
+
+### Querying
+
+```surql
+DEFINE INDEX hnsw_idx ON pts FIELDS point HNSW DIMENSION 4;
+
+LET $vector = [2,3,4];
+SELECT
+    id,
+    vector::distance::knn() as dist  -- distance from $vector
+                                     -- knn reuses the value computed during
+                                     -- the query, in this case the euclidean
+                                     -- distance
+FROM pts
+WHERE point
+    <|2|>  -- return 2, in this case using the distance function defined in the
+           -- index: euclidean
+    $vector;
+```
+
+| Functions                                 |     |
+| ------------------------------------------------ | --- |
+| `vector::distance::knn()`                        | reuses the value computed during the query
+| `vector::distance::chebyshev(point, $vec)`    |
+| `vector::distance::euclidean(point, $vec)`    |
+| `vector::distance::hamming(point, $vec)`      |
+| `vector::distance::manhattan(point, $vec)`    |
+| `vector::distance::minkowski(point, $vec, 3)` | third param is [𝑝](#notes)
+| `vector::similarity::cosine(point, $vec)`     |
+| `vector::similarity::jaccard(point, $vec)`    |
+| `vector::similarity::pearson(point, $vec)`    |
+
+**WHERE statement**
+
+| Query                   | HNSW index |
+| ----------------------- | ---------- |
+| `<\|2\|>`               | uses distance function defined in index
+| `<\|2, EUCLIDEAN\|>`    | brute force method
+| `<\|2, COSINE\|>`       | brute force method
+| `<\|2, MANHATTAN\|>`    | brute force method
+| `<\|2, MINKOWSKI, 3\|>` | brute force method (third param is [𝑝](#notes))
+| `<\|2, CHEBYSHEV\|>`    | brute force method
+| `<\|2, HAMMING\|>`      | brute force method
+| `<\|2, 10\|>`           | second param is effort*
+
+*effort: Tells HNSW how far to go in trying to find the exact response. HNSW is approximate, and may miss some vectors.
+
+### Notes
+
+- Verify index utilization in queries using the [`EXPLAIN FULL` clause](/docs/reference/query-language/statements/select#the-explain-clause). E.g: `SELECT id FROM pts WHERE point <|10|> [2,3,4,5] EXPLAIN FULL;`
+- 𝑝 values: (more about 𝑝 in [Minkowski distance](https://en.wikipedia.org/wiki/Minkowski_distance))
+  - 2<sup>0</sup> = 1 → manhattan/diamond ◇
+  - 2<sup>1</sup> = 2 → euclidean/circle ○
+  - 2<sup>2</sup> = 4 → squircle ▢
+  - 2<sup>∞</sup> = ∞ → square □
