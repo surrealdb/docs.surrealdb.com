@@ -72,7 +72,7 @@ export const NAV_LINKS: NavEntry[] = [
         items: [
             { label: "SurrealDB Cloud", href: "/docs/manage/cloud" },
             { label: "Self-hosted", href: "/docs/manage/self-hosted" },
-            { label: "Enterprise Edition", href: "/docs/manage/enterprise" },
+            //{ label: "Enterprise Edition", href: "/docs/manage/enterprise" },
         ],
     },
     {

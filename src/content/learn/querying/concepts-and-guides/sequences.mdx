@@ -1,7 +1,83 @@
 ---
 position: 11
 title: Sequences
-description: ""
+description: "SurrealDB sequences for monotonic numeric identifiers, and how they differ from default randomly generated record IDs."
 ---
 
-New page
+# Sequences
+
+Sometimes you need a monotonic number: an order line, a ticket counter, or an audit sequence that always moves forward and never hands the same value to two different writers. Sequences are SurrealDB's answer to this: shared, durable generators that work on a single node or in a cluster without needing to construct the logic in application code.
+
+## When a sequence helps
+
+Reach for a sequence when:
+
+* You care about strictly increasing integers (or a predictable step) rather than opaque identifiers.
+* Multiple clients or nodes may allocate values at the same time, and collisions would be painful.
+* You are happy for the value to be numeric and database-owned, not derived from your domain model alone.
+
+If you only need a unique id and ordering is secondary, other patterns (record IDs, ULIDs, hashes) may be simpler. Sequences shine when order and uniqueness are both part of the contract.
+
+## Sequences vs. manual incrementing numbers
+
+Auto-incrementing numbers are quick to put together inside a SurrealQL query.
+
+```surql
+DEFINE FUNCTION fn::get_next() -> number {
+    UPSERT ONLY the:number SET val += 1 RETURN VALUE val    
+};
+
+fn::get_next(); -- 1
+fn::get_next(); -- 2
+fn::get_next(); -- 3
+fn::get_next(); -- 4
+```
+
+This produces a number that will always increase by 1, and is rolled back during a failed transaction. As such, if `fn::get_next()` returns the value 4, you can also be certain that values 1, 2, and 3 also exist.
+
+This works well on one server, but it gets awkward in distributed setups: everyone contends on the same record, and you pay for coordination on every allocation.
+
+SurrealDB sequences use a batch idea instead: each node reserves a range of values, hands them out locally, and only talks to shared storage when the range runs out. In practice that means less chatter under load and fewer surprises when you scale out.
+
+You declare a sequence with a name, then ask for the next value when you need it. Here is the shape of the workflow:
+
+```surql
+DEFINE SEQUENCE order_line;
+
+-- Later, whenever you need the next number:
+sequence::nextval('order_line');
+```
+
+Note that a sequence is never rolled back. Each number is guaranteed to be unique and a greater value than any of the ones before, but any sequences used in a failed transaction will simply not be used. This means that a sequence that returns the number 4 is only guaranteed to be the greatest number thus far, but not that the numbers 1, 2, or 3 have been used in any successful transactions.
+
+In other words, ordinary data changes can roll back with a transaction but sequence advances do not.
+
+The following sketch shows the behaviour in which the sequence moves forward even when a transaction aborts, but a counter field does not.
+
+```surql
+DEFINE SEQUENCE seq;
+CREATE my:counter SET val = 0;
+
+sequence::nextval('seq');  -- first value
+my:counter.val;            -- still 0 until we update it
+
+BEGIN TRANSACTION;
+sequence::nextval('seq');           -- second value (consumed)
+UPDATE my:counter SET val += 1;    -- counter becomes 1
+CANCEL TRANSACTION;                -- counter rolls back to 0
+
+sequence::nextval('seq');           -- third value: sequence did not roll back
+UPDATE my:counter SET val += 1;    -- counter is now 1
+```
+
+Design with that rule in mind: sequences are for identity and ordering, not for values that must stay in lock step unless you accept gaps.
+
+## Optional configurations: batch size, start, and timeout
+
+You can tune how big each reserved batch is, where counting starts, and how long the database should wait when acquiring a new batch. Larger batches mean fewer coordination trips; smaller batches mean less “wasted” headroom if a node stops. A timeout that is too tight can make allocation fail under pressure.
+
+## Where to read more
+
+* [`DEFINE SEQUENCE`](/docs/reference/query-language/statements/define/sequence) — full statement reference.
+* [Sequence functions](/docs/reference/query-language/functions/database-functions/sequence) — `sequence::next` / `sequence::nextval` and related usage.
+* [Transactions](/docs/learn/querying/concepts-and-guides/transactions) — how commits and rollbacks interact with ordinary writes.
