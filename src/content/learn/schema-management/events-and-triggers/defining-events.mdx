@@ -1,7 +1,322 @@
 ---
 position: 1
 title: Defining events
-description: ""
+description: "Running logic after creates, updates, and deletes with DEFINE EVENT."
 ---
 
-New page
+# Defining events
+
+Events let the database react to record changes: write an audit log, normalise related rows, or enqueue follow-up work. They run after the record change but inside the same transaction (unless you opt into async), and they see [$before and $after](/docs/reference/query-language/language-primitives/parameters#before-after) snapshots of the record.
+
+> [!NOTE]
+> Events are a side effect of normal writes. They are not fired during a bulk [import](/docs/reference/cli/surrealdb-cli/import).
+
+## Key ideas
+
+* `$event`: `"CREATE"`, `"UPDATE"`, or `"DELETE"`.
+* `$before` / `$after`: state immediately before and after the change.
+* `$value`: the record as seen by the event (after create/update, before delete).
+* `WHEN`: optional filter so the body runs only when something meaningful changed.
+* `THEN`: the SurrealQL block to execute.
+
+You need the usual database privileges and [`USE`](/docs/reference/query-language/statements/use) scope. Full syntax and async options are in [`DEFINE EVENT`](/docs/reference/query-language/statements/define/event); [Reactive patterns](/docs/learn/schema-management/events-and-triggers/reactive-patterns) covers ASYNC, RETRY, and MAXDEPTH.
+
+## Example usage
+
+-  Email Change Detection: Create an event that logs whenever a user's email is updated.
+
+In this example:
+- The `WHEN` clause checks if the email has changed.
+- The `THEN` clause records this change in a `log` table.
+
+```surql
+-- Create a new event whenever a user changes their email address
+-- One-statement event
+DEFINE EVENT OVERWRITE test ON TABLE user WHEN $before.email != $after.email THEN (
+    CREATE log SET 
+        user       = $value.id,
+        // Turn events like "CREATE" into string "email created"
+        action     = 'email' + ' ' + $event.lowercase() + 'd',
+        // `email` field may be NONE, log as '' if so
+        old_email  = $before.email ?? '',
+        new_email  = $after.email  ?? '',
+        at         = time::now()
+);
+UPSERT user:test SET email = 'old_email@test.com';
+UPSERT user:test SET email = 'new_email@test.com';
+DELETE user:test;
+SELECT * FROM log ORDER BY at ASC;
+```
+
+```surql title="Output"
+[
+	{
+		action: 'email created',
+		at: d'2025-11-25T02:59:41.003Z',
+		id: log:e3thw1l0q7xiapznar1f,
+		new_email: 'old_email@test.com',
+		old_email: '',
+		user: user:test
+	},
+	{
+		action: 'email updated',
+		at: d'2025-11-25T02:59:41.003Z',
+		id: log:uaarfyk191jgod06xobm,
+		new_email: 'new_email@test.com',
+		old_email: 'old_email@test.com',
+		user: user:test
+	},
+	{
+		action: 'email deleted',
+		at: d'2025-11-25T02:59:41.003Z',
+		id: log:mlkag8h1xotglpz9wt2i,
+		new_email: '',
+		old_email: 'new_email@test.com',
+		user: user:test
+	}
+]
+```
+
+### More complex logic:
+
+The following event executes multiple actions to both log a purchase and establish relationships between the customer and product.
+
+```surql
+DEFINE EVENT purchase_made ON TABLE purchase
+    WHEN $before == NONE
+    THEN {
+        LET $customer = (SELECT * FROM customer WHERE id = $after.customer);
+        LET $product = (SELECT * FROM product WHERE id = $after.product);
+
+        RELATE $customer->bought->$product CONTENT {
+            quantity: $after.quantity,
+            total: $after.total,
+            status: 'Pending',
+        };
+
+        CREATE log SET
+            customer_id = $after.customer,
+            product_id = $after.product,
+            action = 'purchase_created',
+            timestamp = time::now();
+    };
+```
+
+## Specific events
+
+You can trigger events based on specific events. You can use the variable $event to detect what type of event is triggered on the table.
+
+```surql
+-- CREATE event is triggered when a new record is inserted into the table.
+-- Here we are updating the status of the post to PUBLISHED
+-- when a new record is inserted into the publish_post table.
+DEFINE EVENT publish_post ON TABLE post
+    WHEN $event = "CREATE"
+    THEN (
+        UPDATE post SET status = "PUBLISHED" WHERE id = $after.post_id
+    );
+
+-- UPDATE event
+-- Here we are creating a notification when a user is updated.
+DEFINE EVENT user_updated ON TABLE user
+    WHEN $event = "UPDATE"
+    THEN (
+        CREATE notification SET message = "User updated", user_id = $after.id, created_at = time::now()
+    );
+
+-- DELETE event is triggered when a record is deleted from the table.
+-- Here we are creating a notification when a user is deleted.
+DEFINE EVENT user_deleted ON TABLE user
+    WHEN $event = "DELETE"
+    THEN (
+        CREATE notification SET message = "User deleted", user_id = $before.id, created_at = time::now()
+    );
+
+-- You can combine multiple events based on your use cases.
+-- Here we are creating a log when a user is created, updated or deleted.
+DEFINE EVENT user_event ON TABLE user
+    WHEN $event = "CREATE" OR $event = "UPDATE" OR $event = "DELETE"
+    THEN (
+        CREATE log SET
+            table = "user",
+            event = $event,
+            happened_at = time::now()
+    );
+```
+
+## Events and permissions
+
+Queries inside the event always execute without any permission checks, even when triggered by changes made by the currently authenticated user.
+
+Consider a CREATE query sent by a record user that has CREATE access to the `comment` table only:
+
+```surql
+CREATE comment SET
+    post = post:tomatosoup,
+    content = "So delicious!",
+    author = $auth.id;
+```
+
+Logic can be added to the event itself to modify the behaviour depending on a user's permissions or any other condition.
+
+```surql
+DEFINE EVENT on_comment_created ON TABLE comment
+    WHEN $event = "CREATE"
+    THEN {
+        -- Check if the post allows for adding comments.
+        -- User record doesn't have access to the `post` table.
+        IF $after.post.disable_comments {
+            THROW "Can't create a comment - Comments are disabled for this post";
+        };
+
+        -- Set the `approved` field on the new comment - automatically approve
+        -- comments made by the author of the post.
+        -- For security reasons, record users don't have any permissions for the `approved` field.
+        UPDATE $after.id SET
+            approved = $after.post.author == $after.author;
+    };
+```
+
+## Accessing `$input` in events
+
+The behaviour of events can be further refined via the `$input` parameter, which represents the record in question for the event.
+
+```surql
+-- Set CREATE in event to only trigger when record has `true` for `log_event`
+DEFINE EVENT something ON person WHEN $input.log_event = true THEN {
+    CREATE log SET at = time::now(), of = $input;
+};
+
+-- Set to `false`, does not trigger CREATE
+CREATE person:debug SET name = "Billy", log_event = false;
+-- Triggers CREATE
+CREATE person:real SET name = "Bobby", log_event = true;
+
+SELECT * FROM log;
+```
+
+Output:
+
+```surql
+[
+	{
+		at: d'2025-10-14T06:15:21.141Z',
+		id: log:svbr2qhjywml20mufb0o,
+		of: {
+			log_event: true,
+			name: 'Bobby'
+		}
+	}
+]
+```
+
+## Async events
+
+Events in SurrealDB are executed synchronously within the same transaction that triggers them. While this ensures consistency, it can lead to increased latency for write operations if the event logic is complex or resource intensive.
+
+To allow events to execute independently of the transaction that triggers them, the `ASYNC` clause can be used.
+
+### How async events are processed
+
+Async events are processed in an interval dependant on the environment variable `SURREAL_ASYNC_EVENT_PROCESSING_INTERVAL` (or `--async-event-interval` when starting the server) which is set to 5 seconds as the default. Lowering this will reduce the latency between a document change and its events, while leading to more frequent polls by the background worker.
+
+Some more notes on the characteristics of async events:
+
+* Atomicity: The event is enqueued within the same transaction as the document change. If the transaction fails, the event is never queued.
+* Consistency: Asynchronous events run in a separate transaction from the original change. They see the database state at the time they are executed.
+* Ordering: Events are generally processed in the order they were created, though parallel processing may occur within a single batch.
+
+The easiest way to demonstrate that async events do not occur in the same transaction is by causing one to [throw](/docs/reference/query-language/statements/throw) an error. As an error inside any part of a transaction will cause the transaction to fail and roll back, the following event which fails about 50% of the time would cause the `CREATE` statement that follows to fail if it were not async. As an async event, however, the events that follow the statement are each run in their own transaction
+
+```surql
+DEFINE TABLE did_not_throw;
+
+DEFINE EVENT may_throw ON person ASYNC THEN {
+  IF rand::bool() {
+      THROW "This message will never show";
+  } ELSE {
+    CREATE did_not_throw;  
+  }
+};
+
+CREATE |person:50|;
+count(SELECT * FROM did_not_throw);
+```
+
+### The `MAXDEPTH` clause
+
+The `MAXDEPTH` clause is used to set the maximum number of times that an async event can be triggered. The number following this can range from 0 to 16.
+
+The default for `MAXDEPTH` is 3, as events defined on other events that lead to record creation can quickly spiral out of control at greater levels.
+
+Taking the following contrived example:
+
+```surql
+DEFINE EVENT start ON start THEN {
+    CREATE cat;
+};
+
+DEFINE EVENT cat ON person ASYNC MAXDEPTH 4 THEN {
+  CREATE |cat:9|;  
+};
+
+DEFINE EVENT person ON cat ASYNC MAXDEPTH 4 THEN {
+  CREATE |person:9|;
+};
+
+CREATE start;
+
+count(SELECT VALUE id FROM person, cat);
+```
+
+While the `MAXDEPTH` in this case is only one greater than the default, the sheer number of records created results in the final `count()` score being 20503, compared to 2278 if the default is used.
+
+This is somewhat similar to recursive queries which can also quickly add up.
+
+```surql
+-- Create five people
+CREATE |person:1..=5|;
+-- Make each person friends with each of the four others
+UPDATE person SET friends = (SELECT VALUE id FROM person).complement([$this.id]);
+-- Count after five levels of depth is already 1024!
+count(person:1.{..5}.friends);
+```
+
+### The `RETRY` clause
+
+The `RETRY` clause is suitable for events that may fail but can succeed on successive attempts. 
+
+The example below shows two events that each have a 50% chance of failure and zero retries.
+
+```surql
+DEFINE EVENT one ON account ASYNC RETRY 0 THEN {
+    IF rand::bool() {
+        THROW "Failed!"
+    } ELSE {
+        CREATE it:worked SET very = "well";
+    }
+};
+
+DEFINE EVENT two ON account ASYNC RETRY 0 THEN {
+    IF rand::bool() {
+        THROW "Failed!"
+    } ELSE {
+        CREATE it:worked SET very = "well";
+    }
+};
+
+CREATE account;
+```
+
+Following up these events with a `SELECT * FROM it` will most likely lead to the following input.
+
+```surql
+[
+	{
+		id: it:worked,
+		very: 'well'
+	}
+]
+```
+
+However, with zero retries there is still a 25% chance that the query will only ever lead to the error `"The table 'it' does not exist"`.
