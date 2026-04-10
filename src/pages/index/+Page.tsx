@@ -54,141 +54,145 @@ interface ResourceItem {
 
 const PRODUCTS: ProductItem[] = [
     {
-        title: "SurrealDB",
+        title: "Getting started",
         description:
-            "Learn about SurrealDB's architecture, installation, configuration, and core concepts.",
-        href: "/docs/surrealdb/",
+            "Install SurrealDB, run your first queries, and work through core concepts with the guided introduction.",
+        href: "/docs/start",
         icon: pictoSurrealDB,
     },
     {
-        title: "SurrealQL",
+        title: "Query language",
         description:
-            "Explore the powerful query language for SurrealDB with statements, functions, operators, and data types.",
-        href: "/docs/surrealql/",
+            "SurrealQL statements, functions, operators, and data types for modelling and querying your data.",
+        href: "/docs/reference/query-language",
         icon: pictoQL,
     },
     {
         title: "Surrealist",
         description:
-            "Get started with the official IDE for SurrealDB, featuring a query editor, designer, and explorer.",
-        href: "/docs/surrealist/",
+            "The official app for writing queries, designing schemas, and exploring data in SurrealDB.",
+        href: "/docs/explore/surrealist",
         icon: pictoSurrealist,
     },
     {
         title: "Cloud",
         description:
-            "Deploy and manage SurrealDB instances in the cloud with automatic scaling and backups.",
-        href: "/docs/cloud/",
+            "Provision instances, adjust capacity, and manage backups for SurrealDB on SurrealDB Cloud.",
+        href: "/docs/build/deployment/surrealdb-cloud/what-is-surrealdb-cloud",
         icon: pictoCloud,
     },
     {
         title: "Extensions",
         description:
-            "Extend SurrealDB with custom modules written in Rust that can be accessed from SurrealQL.",
-        href: "/docs/surrealdb/extensions/",
+            "Add Rust modules and WASM plugins, and call them from SurrealQL for custom behaviour.",
+        href: "/docs/learn/extensions",
         icon: pictoSurrealism,
     },
 ];
 
 const SDKS: SdkItem[] = [
-    { label: "JavaScript", href: "/docs/sdk/javascript/", icon: brandJavaScript },
-    { label: "Python", href: "/docs/sdk/python/", icon: brandPython },
-    { label: "Rust", href: "/docs/sdk/rust/", icon: brandRust },
-    { label: "Go", href: "/docs/sdk/golang/", icon: brandGo },
-    { label: "Java", href: "/docs/sdk/java/", icon: brandJava },
-    { label: "PHP", href: "/docs/sdk/php/", icon: brandPHP },
-    { label: ".NET", href: "/docs/sdk/dotnet/", icon: brandDotNet },
+    {
+        label: "JavaScript",
+        href: "/docs/start/languages/javascript/overview",
+        icon: brandJavaScript,
+    },
+    { label: "Python", href: "/docs/start/languages/python", icon: brandPython },
+    { label: "Rust", href: "/docs/start/languages/rust/overview", icon: brandRust },
+    { label: "Go", href: "/docs/start/languages/golang", icon: brandGo },
+    { label: "Java", href: "/docs/start/languages/java", icon: brandJava },
+    { label: "PHP", href: "/docs/start/languages/php", icon: brandPHP },
+    { label: ".NET", href: "/docs/start/languages/dotnet", icon: brandDotNet },
 ];
 
 const DATA_MODELS: ProductItem[] = [
     {
         title: "Document",
         description:
-            "A flexible way to store data, allowing for nested structures and relationships to be stored within a single document.",
-        href: "/docs/surrealdb/models/document",
+            "Store nested records and relationships in flexible documents, with schema modes from schemaless to strict.",
+        href: "/docs/learn/data-models/document/overview",
         icon: pictoDocument,
     },
     {
         title: "Graph",
         description:
-            "Store data as nodes and edges to query connected datasets like social networks, recommendation engines, or fraud detection graphs.",
-        href: "/docs/surrealdb/models/graph",
+            "Model nodes and edges for social graphs, recommendations, fraud patterns, and graph traversals in SurrealQL.",
+        href: "/docs/learn/data-models/graph/overview",
         icon: pictoGraph,
     },
     {
         title: "Vector",
         description:
-            "Store and query high-dimensional vectors generated from LLM models for AI applications.",
-        href: "/docs/surrealdb/models/vector",
+            "Index and search embeddings for similarity, hybrid retrieval, and RAG-style AI workloads.",
+        href: "/docs/learn/data-models/vector-search/overview",
         icon: pictoVectorSearch,
     },
     {
         title: "Full-Text Search",
         description:
-            "Index and retrieve text-based data based on tokenized and modified text, rather than exact, literal matches.",
-        href: "/docs/surrealdb/models/full-text-search",
+            "Analyzers, tokenisers, and search indexes for relevance-ranked text queries beyond exact matches.",
+        href: "/docs/learn/data-models/full-text-search/overview",
         icon: pictoFullTextSearch,
     },
     {
         title: "Time Series",
         description:
-            "Optimized querying and managing time-stamped data over periods of time or via aggregated table views.",
-        href: "/docs/surrealdb/models/time-series",
+            "Time buckets, aggregations, and patterns for telemetry, IoT, and event streams over time.",
+        href: "/docs/learn/data-models/time-series/overview",
         icon: pictoTimeSeries,
     },
     {
         title: "Geospatial",
         description:
-            "Store and query data related to the Earth's surface using objects including points, lines, polygons, and more.",
-        href: "/docs/surrealdb/models/geospatial",
+            "Points, lines, polygons, and distance queries for mapping, routing, and location-aware applications.",
+        href: "/docs/learn/data-models/geospatial/overview",
         icon: pictoGeospatial,
     },
 ];
 
 const INTEGRATIONS: ProductItem[] = [
     {
-        title: "Data Management",
+        title: "Data management",
         description:
-            "SurrealDB integrates with Airbyte, Fivetran, and more to help you manage your data.",
-        href: "/docs/integrations/data-management",
+            "Move and sync data with ELT tools and automation platforms such as Airbyte, Fivetran, and n8n.",
+        href: "/docs/build/integrations/data-management/overview",
         icon: pictoIntegrations,
     },
     {
         title: "Embeddings",
         description:
-            "SurrealDB provides a number of different embeddings features that can be used to manage your data.",
-        href: "/docs/integrations/embeddings",
+            "Connect embedding and model providers to generate and store vectors alongside your records.",
+        href: "/docs/build/integrations/embeddings-providers/overview",
         icon: pictoEmbeddingg,
     },
     {
-        title: "Frameworks",
+        title: "AI frameworks",
         description:
-            "SurrealDB integrates with a number of different frameworks to help you build your applications.",
-        href: "/docs/integrations/frameworks",
+            "Wire SurrealDB into agent and LLM frameworks including LangChain, LlamaIndex, CrewAI, and more.",
+        href: "/docs/build/integrations/ai-frameworks/overview",
         icon: pictoSDKs,
     },
 ];
 
 const AUTHENTICATION: ProductItem[] = [
     {
-        title: "System Access",
+        title: "Authentication",
         description:
-            "System access is used to authenticate and authorize system users to access the SurrealDB server.",
-        href: "/docs/surrealdb/security/authentication",
+            "System users, record users, and access methods: how credentials map to roles and permissions.",
+        href: "/docs/learn/security/authentication/authentication",
         icon: pictoPadlockClosed,
     },
     {
-        title: "Record Access",
+        title: "Record access",
         description:
-            "Record access is used to authenticate and authorize record users to access the SurrealDB database.",
-        href: "/docs/surrealql/statements/define/access/record",
+            "Define ACCESS methods so application users sign up, sign in, and authenticate as records.",
+        href: "/docs/reference/query-language/statements/define/access/record",
         icon: pictoBadgeAccess,
     },
     {
-        title: "Token Access",
+        title: "Token access",
         description:
-            "Token access is used to authenticate and authorize users to access the SurrealDB database via a token.",
-        href: "/docs/surrealql/statements/define/access/jwt",
+            "JWT and bearer access for verifying tokens issued by SurrealDB or external identity providers.",
+        href: "/docs/reference/query-language/statements/define/access/jwt",
         icon: pictoKey,
     },
 ];
@@ -197,21 +201,22 @@ const EDUCATION: ProductItem[] = [
     {
         title: "SurrealDB University",
         description:
-            "Watch videos, live streams, and expert talks to quickly learn key SurrealDB concepts and insights.",
-        href: "/learn",
+            "Courses and video content to build practical SurrealDB skills from the ground up.",
+        href: "https://surrealdb.com/learn",
         icon: pictoUniversity,
     },
     {
         title: "Aeon's Surreal Renaissance",
         description:
-            "Learn SurrealDB through an engaging, story-driven experience that feels like watching a movie.",
-        href: "/learn",
+            "A narrative-led book that teaches SurrealDB and SurrealQL chapter by chapter.",
+        href: "https://surrealdb.com/learn/book",
         icon: pictoSurrealism,
     },
     {
-        title: "Movie Database Tutorial",
-        description: "Learn how to build a movie database with SurrealDB and Surrealist.",
-        href: "/learn/movies",
+        title: "Knowledge graph tutorial",
+        description:
+            "Step-by-step guide to modelling and querying a knowledge graph for AI use cases.",
+        href: "/docs/explore/tutorials/tutorials/how-to-build-a-knowledge-graph-for-ai",
         icon: pictoTutorials,
     },
 ];
@@ -219,21 +224,22 @@ const EDUCATION: ProductItem[] = [
 const RESOURCES: ResourceItem[] = [
     {
         title: "Integrations",
-        description: "Connect SurrealDB with your favorite tools and platforms.",
-        href: "/docs/integrations/",
+        description:
+            "AI frameworks, embeddings providers, agents, and data tooling wired to SurrealDB.",
+        href: "/docs/build/integrations",
         icon: pictoIntegrations,
     },
     {
         title: "Tutorials",
-        description: "Step-by-step guides to build real applications with SurrealDB.",
-        href: "/docs/tutorials/",
+        description: "Hands-on walkthroughs for authentication, agents, deployment, and more.",
+        href: "/docs/explore/tutorials",
         icon: pictoTutorials,
     },
     {
-        title: "SurrealDB University",
-        description: "Structured courses to master SurrealDB from beginner to advanced.",
-        href: "/learn",
-        icon: pictoUniversity,
+        title: "SurrealDB CLI",
+        description: "Install, configure, and operate SurrealDB from the command line.",
+        href: "/docs/reference/cli",
+        icon: pictoQL,
     },
 ];
 
@@ -355,8 +361,8 @@ export default function Page() {
                     maw={560}
                     mx="auto"
                 >
-                    Learn how to get up and running with SurrealDB through tutorials, APIs, and
-                    platform resources.
+                    SurrealQL, SDKs, deployment guides, and integrations—everything you need to
+                    build with SurrealDB.
                 </Text>
                 <SearchDocs
                     maw={500}
