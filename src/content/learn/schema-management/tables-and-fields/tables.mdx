@@ -1,7 +1,265 @@
 ---
 position: 1
 title: Tables
-description: ""
+description: "Declaring tables: schemaless vs schemafull, relations, views, changefeeds, and permissions."
 ---
 
-New page
+# Tables
+
+A table is the first structural unit most people define: it is a named home for records. Even a `SELECT` statement requires a table to be defined before it will work.
+
+```surql
+SELECT * FROM doesnt_exist; -- Error: "The table 'doesnt_exist' does not exist"
+DEFINE TABLE doesnt_exist;
+SELECT * FROM doesnt_exist;
+```
+
+As a convenience, the creation of a record in a non-strict database will [define the table](/docs/reference/query-language/statements/define/database#defining-a-strict-database) for you. The following example does not return any errors because the table definition will exist once `CREATE` is executed.
+
+```surql
+CREATE doesnt_exist;
+SELECT * FROM doesnt_exist;
+```
+
+`DEFINE TABLE` can also set high-level rules, such as whether new fields are allowed without a definition, whether rows are normal documents or graph edges, whether the table is a pre-computed view, and who may select / create / update / delete.
+
+Individual columns still use [`DEFINE FIELD`](/docs/reference/query-language/statements/define/field); the table statement does not replace that.
+
+You need appropriate auth (root, namespace, or database owner/editor) and an active [`USE`](/docs/reference/query-language/statements/use) for namespace and database. Full grammar and every clause live under [`DEFINE TABLE`](/docs/reference/query-language/statements/define/table) in the reference.
+
+## Defining a changefeed on a table
+
+The following expression shows how you can define a `CHANGEFEED` for a table. After creating, updating, and deleting records in the table as usual, using `SHOW CHANGES FOR` will show the changes that have taken place during this time.
+
+```surql
+-- Define the change feed and its duration
+-- Optionally, append INCLUDE ORIGINAL to include info
+-- on the current record before a change took place
+DEFINE TABLE reading CHANGEFEED 3d;
+
+-- Create some records in the reading table
+CREATE reading SET story = "Once upon a time";
+CREATE reading SET story = "there was a database";
+
+-- Replay changes to the reading table since a certain date
+-- Must be after the timestamp at which the changefeed began
+SHOW CHANGES FOR TABLE reading SINCE d"2025-09-07T01:23:52Z" LIMIT 10;
+
+-- Alternatively, show the changes for the table since a version number
+SHOW CHANGES FOR TABLE reading SINCE 0 LIMIT 10;
+```
+
+## Schemafull tables
+
+The following example demonstrates the `SCHEMAFULL` portion of the `DEFINE TABLE` statement. When a table is defined as schemafull, the database strictly enforces any schema definitions that are specified using the `DEFINE TABLE` statement. New fields can not be added to a `SCHEMAFULL` table unless they are defined via the [`DEFINE FIELD`](/docs/reference/query-language/statements/define/field) statement.
+
+```surql
+-- Create schemafull user table.
+DEFINE TABLE user SCHEMAFULL;
+
+-- Define some fields.
+DEFINE FIELD firstName ON TABLE user TYPE string;
+DEFINE FIELD lastName ON TABLE user TYPE string;
+DEFINE FIELD email ON TABLE user TYPE string
+  ASSERT string::is_email($value);
+
+-- Statement succeeds as all defined fields are present
+CREATE user CONTENT {
+    firstName: 'Tobie',
+    lastName: 'Hitchcock',
+    email: 'Tobie.Hitchcock@surrealdb.com'
+};
+```
+
+## Schemaless tables
+
+The following example demonstrates the `SCHEMALESS` portion of the `DEFINE TABLE` statement. This allows you to explicitly state that the specified table has no schema.
+
+```surql
+-- Create schemaless user table.
+DEFINE TABLE user SCHEMALESS;
+
+-- Define some fields.
+DEFINE FIELD firstName ON TABLE user TYPE string;
+DEFINE FIELD lastName ON TABLE user TYPE string;
+DEFINE FIELD email ON TABLE user TYPE string
+  ASSERT string::is_email($value);
+
+-- Statement succeeds even with extra `photoURI` field, as table is schemaless
+CREATE user:tobie SET 
+    firstName = 'Tobie', 
+    lastName = 'Hitchcock', 
+    email = 'Tobie.Hitchcock@surrealdb.com', 
+    photoURI = 'photo/yxCFi22Jw2.webp';
+
+-- Statement fails because `email` does not pass validation
+CREATE user:jaime SET 
+    firstName = 'Jamie', 
+    lastName = 'Hitchcock', 
+    email = 'Jamie.Hitchcock', 
+    photoURI = 'photo/yxCFi22Jw2.webp';
+```
+
+## `DROP` tables and pre-computed table views
+
+In SurrealDB, like in other databases, you can create views. The way you create views is using the `DEFINE TABLE` statement like you would for any other table, then adding the `AS` clause at the end with your `SELECT` query.
+
+`DROP` tables are useful in combination with events or foreign (view) tables, as you can compute a record and drop the input.
+
+```surql
+DEFINE TABLE review DROP;
+-- Define a table as a view which aggregates data from the review table
+DEFINE TABLE avg_product_review TYPE NORMAL AS
+SELECT
+	count() AS number_of_reviews,
+	math::mean(<float> rating) AS avg_review,
+	->product.id AS product_id,
+	->product.name AS product_name
+FROM review
+GROUP BY product_id, product_name;
+
+-- Query the projection
+SELECT * FROM avg_product_review;
+```
+
+## Defining permissions
+
+By default, the permissions on a table will be set to NONE unless otherwise specified.
+
+```surql
+CREATE some_table;
+DEFINE TABLE some_other_table;
+
+INFO FOR DB;
+```
+
+```surql title="Response"
+{
+	analyzers: {},
+	functions: {},
+	models: {},
+	params: {},
+	scopes: {},
+	tables: {
+		some_other_table: 'DEFINE TABLE some_other_table TYPE ANY SCHEMALESS PERMISSIONS NONE',
+		some_table: 'DEFINE TABLE some_table TYPE ANY SCHEMALESS PERMISSIONS NONE'
+	},
+	tokens: {},
+	users: {}
+}
+```
+
+The following shows how to set table level `PERMISSIONS` using the `DEFINE TABLE` statement. This allows you to set independent permissions for selecting, creating, updating, and deleting data.
+
+```surql
+-- Specify access permissions for the 'post' table
+DEFINE TABLE post SCHEMALESS
+	PERMISSIONS
+		FOR select
+			-- Published posts can be selected
+			WHERE published = true
+			-- A user can select all their own posts
+			OR user = $auth.id
+		FOR create, update
+			-- A user can create or update their own posts
+			WHERE user = $auth.id
+		FOR delete
+			-- A user can delete their own posts
+			WHERE user = $auth.id
+			-- Or an admin can delete any posts
+			OR $auth.admin = true
+;
+```
+
+## Table with specialized `TYPE` clause
+
+When defining a table in SurrealDB, you can specify the type of data that can be stored in the table. This can be done using the `TYPE` clause, followed by either `ANY`, `NORMAL`, or `RELATION`.
+
+With `TYPE ANY`, you can specify a table to store any type of data, whether it's a normal record or a relational record.
+
+With `TYPE NORMAL`, you can specify a table to only store "normal" records, and not relations. When a table is defined as `TYPE NORMAL`, it will not be able to store relations this can be useful when you want to restrict the type of data that can be stored in a table in schemafull mode.
+
+Finally, with `TYPE RELATION`, you can specify a table to only store relational type content. This can be useful when you want to restrict the type of data that can be stored in a table.
+
+```surql
+DEFINE TABLE person TYPE ANY;
+DEFINE TABLE person;
+```
+
+With `TYPE NORMAL`, you can specify a table to only store "normal" records, and not relations.
+
+```surql
+-- Since it's default, we can also omit the TYPE clause
+DEFINE TABLE person TYPE NORMAL;
+```
+
+With `TYPE RELATION`, you can specify a table to only store relational type content, and restrict what kind of relations can be stored.
+
+```surql
+-- Just a RELATION table, no constraints on the type of table
+DEFINE TABLE likes TYPE RELATION;
+
+-- Define a relation table, and constrain the type of relation which can be stored
+DEFINE TABLE likes TYPE RELATION FROM user TO post;
+-- OR use IN and OUT alternatively to FROM and TO
+DEFINE TABLE likes TYPE RELATION IN user OUT post;
+-- To allow a link to one of a possible set of record types, use the | operator
+DEFINE TABLE likes TYPE RELATION FROM user TO post|video;
+DEFINE TABLE likes TYPE RELATION IN user OUT post|video;
+```
+
+## Using ENFORCED to ensure that related records exist
+
+As relations are represented by standalone tables, they can be constructed before any linked records exist.
+
+```surql
+RELATE city:one->road_to->city:two SET
+    distance = 12.4,
+    slope = 5.4;
+```
+
+As such, a query on the relation will return nothing until the records it has been defined upon are created.
+
+```surql
+SELECT ->road_to->city FROM city;
+
+CREATE city:one, city:two;
+SELECT ->road_to->city FROM city;
+```
+
+```surql title="Output"
+-------- Query --------
+
+[]
+
+-------- Query --------
+
+[
+	{
+		"->road_to": {
+			"->city": [
+				city:two
+			]
+		}
+	},
+	{
+		"->road_to": {
+			"->city": []
+		}
+	}
+]
+```
+
+If this behaviour is not desirable, the `ENFORCED` clause can be used on a table of `TYPE RELATION` to disallow a `RELATE` statement from working unless it points to existing data.
+
+```surql
+DEFINE TABLE road_to TYPE RELATION IN city OUT city ENFORCED;
+
+RELATE city:one->road_to->city:three SET
+    distance = 5.5,
+    slope = 30.0;
+```
+
+```surql title="Output"
+"The record 'city:one' does not exist"
+```
