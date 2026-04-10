@@ -1,7 +1,95 @@
 ---
 position: 5
-title: "Location-based patterns"
-description: ""
+title: Location-based patterns
+description: Apply geospatial modelling in SurrealDB to store-of-interest search, delivery zones, asset tracking, and other location-first product features.
 ---
 
-New page
+# Location-based patterns
+
+Once you can store [geometry types](/docs/learn/data-models/geospatial/geometry-types) and run [spatial queries](/docs/learn/data-models/geospatial/spatial-queries) with [distance](/docs/learn/data-models/geospatial/distance-and-proximity) in mind, most product features follow a small set of patterns.
+
+## Store finder (“near me”)
+
+Store each site's coordinates as a `Point`, optionally with a category and opening hours. At query time, supply the user's location, compute distance or bounding-box filters, and sort by proximity. For dense datasets, consider geohash prefixes or spatial indexes (where supported) to avoid scanning the whole table.
+
+For example, consider records used to store millions of events by location. These can use array-based record IDs that start with a geohash, making it easy to query every record with exactly this hash and no need to use any further filtering.
+
+```surql
+DEFINE FUNCTION fn::create_geo_record($point: point) {
+    LET $hash = geo::hash::encode($point, 4);
+    CREATE ONLY event:[$hash, $point, rand::ulid()];
+};
+
+fn::create_geo_record((50.0, 50.1));
+fn::create_geo_record((50.1, 50.1));
+fn::create_geo_record((50.5, 50.1));
+
+SELECT * FROM event:['v0gt', NONE, NONE]..['v0gt', .., ..];
+```
+
+```surql title="Output: returns two of three above events"
+[
+	{
+		id: event:[
+			'v0gt',
+			(50f, 50.1f),
+			'01KNTYS85HQZ7T4D066MAVA3G9'
+		]
+	},
+	{
+		id: event:[
+			'v0gt',
+			(50.1f, 50.1f),
+			'01KNTYS85H8JHM3T9YKGMT2BV8'
+		]
+	}
+]
+```
+
+## Service areas and delivery zones
+
+Represent coverage as polygons (or multipolygons for islands). New customers or orders are classified with point-in-polygon tests.
+
+For a single zone record, store the boundary as a [polygon geometry](/docs/reference/query-language/language-primitives/data-types/geometries) and test whether a customer’s location falls inside it using [`CONTAINS`](/docs/reference/query-language/language-primitives/operators#contains) (polygon on the left, point on the right):
+
+```surql
+DEFINE TABLE service_area SCHEMAFULL;
+DEFINE FIELD name ON service_area TYPE string;
+DEFINE FIELD boundary ON service_area TYPE geometry<polygon>;
+
+CREATE service_area:greater_london SET
+	name = "Greater London",
+	boundary = {
+		type: "Polygon",
+		coordinates: [[
+			[-0.38314819, 51.37692386],
+			[0.1785278, 51.37692386],
+			[0.1785278, 51.61460570],
+			[-0.38314819, 51.61460570],
+			[-0.38314819, 51.37692386]
+		]]
+	};
+
+LET $customer = (-0.118092, 51.509865);
+SELECT name FROM service_area WHERE boundary CONTAINS $customer;
+```
+
+```surql title="Output"
+[
+	{
+		name: 'Greater London'
+	}
+]
+```
+
+A point outside the ring (for example further north) returns no records. For overlapping territories, you may return several matches and disambiguate with priority, postal rules, or extra fields on `service_area`.
+
+## Tracking and corridors
+
+For vehicles or assets reporting on a schedule, store recent positions as points with timestamps and use line strings or buffers when you care about adherence to a route corridor rather than a single snapshot.
+
+## Resources
+
+- [Geospatial data types](/docs/reference/query-language/language-primitives/data-types/geometries)
+- [Geo functions](/docs/reference/query-language/functions/database-functions/geo)
+- [SurrealDB University](/learn/book/chapter-10)
