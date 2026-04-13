@@ -1,3 +1,13 @@
+// Local development server for the search API.
+//
+// In production, search is handled by a Vercel serverless
+// function (api/search.ts). This script provides the same
+// endpoint locally so you can test search without deploying.
+//
+// Usage: bun run search:serve
+// Requires: a running SurrealDB instance with indexed content
+//           and OPENAI_API_KEY set (for query embedding).
+
 import { handleSearch, MAX_QUERY_LENGTH } from "@surrealdb/docs-search-common";
 
 const PORT = Number(process.env.SEARCH_PORT ?? 4322);

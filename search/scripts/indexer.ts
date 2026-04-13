@@ -1,10 +1,31 @@
+// ══════════════════════════════════════════════════════════
+// Incremental search indexer
+//
+// Runs after a docs build to sync the SurrealDB search index
+// with the current content. The process:
+//
+//   1. Fetch content hashes for all existing records
+//   2. Crawl all markdown files and compare hashes
+//   3. Embed and upsert only changed entries (saves OpenAI $)
+//   4. Delete records for pages/sections that no longer exist
+//
+// This makes repeated runs fast — only new or modified content
+// triggers an embedding API call.
+// ══════════════════════════════════════════════════════════
+
 import { RecordId, type Surreal } from "surrealdb";
 import { connectDb } from "../src/db";
 import { buildEmbedText, embedBatch } from "../src/embed";
 import type { CrawledEntry, CrawledPage, CrawledSection } from "../src/types";
 import { crawl } from "./crawler";
 
+// OpenAI's batch embedding endpoint accepts up to ~2048 texts,
+// but we chunk at 64 to keep individual requests manageable
+// and avoid timeouts.
 const EMBED_BATCH_SIZE = 64;
+
+// Number of concurrent UPSERT queries against SurrealDB.
+// Higher = faster indexing but more DB load.
 const UPSERT_CONCURRENCY = 8;
 
 interface HashRow {
@@ -17,6 +38,8 @@ interface ExistingRecord {
     rid: RecordId;
 }
 
+/** Loads the content_hash for every existing page and section so
+ *  we can detect which entries have changed and need re-embedding. */
 async function fetchExistingRecords(db: Surreal): Promise<Map<string, ExistingRecord>> {
     const records = new Map<string, ExistingRecord>();
 
@@ -113,6 +136,8 @@ async function upsertSection(db: Surreal, entry: CrawledSection, embedding: numb
         .collect();
 }
 
+/** Bulk-deletes records that no longer have corresponding
+ *  content files (e.g. a page was removed or renamed). */
 async function deleteStaleRecords(db: Surreal, table: string, staleRids: RecordId[]) {
     if (staleRids.length === 0) return;
 
@@ -124,6 +149,7 @@ async function deleteStaleRecords(db: Surreal, table: string, staleRids: RecordI
         .collect();
 }
 
+/** Simple concurrency limiter for parallel upserts. */
 async function runConcurrent<T>(
     items: T[],
     concurrency: number,
@@ -144,6 +170,7 @@ async function runConcurrent<T>(
 export async function runIndexer() {
     const db = await connectDb({ logging: true });
 
+    // Phase 1: Load existing records so we can skip unchanged content.
     console.log("[IX] Fetching existing content hashes...");
     const existingRecords = await fetchExistingRecords(db);
     console.log(`[IX] Found ${existingRecords.size} existing records`);
@@ -159,6 +186,7 @@ export async function runIndexer() {
         sectionsDeleted: 0,
     };
 
+    // Phase 2: Crawl all content and identify what changed.
     console.log("[CW] Crawling content...");
 
     for await (const entry of crawl()) {
@@ -167,6 +195,7 @@ export async function runIndexer() {
 
         const existing = existingRecords.get(rid);
 
+        // Content hash matches — skip re-embedding to save API cost.
         if (existing?.contentHash === entry.contentHash) {
             if (entry.kind === "page") stats.pagesUnchanged++;
             else stats.sectionsUnchanged++;
@@ -178,6 +207,7 @@ export async function runIndexer() {
 
     console.log(`[CW] Crawl complete. ${changed.length} entries to embed and upsert.`);
 
+    // Phase 3: Embed changed entries in batches, then upsert.
     const texts = changed.map(buildEmbedText);
 
     for (let batchStart = 0; batchStart < changed.length; batchStart += EMBED_BATCH_SIZE) {
@@ -207,6 +237,7 @@ export async function runIndexer() {
         });
     }
 
+    // Phase 4: Clean up records whose source files no longer exist.
     const stalePages: RecordId[] = [];
     const staleSections: RecordId[] = [];
 

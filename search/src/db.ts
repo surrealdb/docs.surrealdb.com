@@ -4,6 +4,11 @@ interface ConnectOptions {
     logging?: boolean;
 }
 
+/**
+ * Creates a fresh SurrealDB connection using environment variables.
+ * Used by both the search handler (query-time) and the indexer
+ * (index-time). Defaults to a local instance with root credentials.
+ */
 export async function connectDb(options: ConnectOptions = {}): Promise<Surreal> {
     const endpoint = process.env.SURREAL_ENDPOINT ?? "ws://localhost:8000";
     const namespace = process.env.SURREAL_NAMESPACE ?? "main";
@@ -29,6 +34,11 @@ export async function connectDb(options: ConnectOptions = {}): Promise<Surreal> 
     return db;
 }
 
+// Singleton connection for the search handler. The promise is
+// cached so concurrent requests share one connection rather
+// than opening a new WebSocket per query. If the initial
+// connection fails the promise is cleared so the next caller
+// retries.
 let singletonPromise: Promise<Surreal> | null = null;
 
 export function getDb(): Promise<Surreal> {

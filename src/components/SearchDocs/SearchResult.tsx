@@ -40,10 +40,15 @@ function ResultBreadcrumb({ breadcrumb }: { breadcrumb: string }) {
     );
 }
 
+function tokenizeQuery(query: string): string[] {
+    return query.split(/[\s\-_/]+/).filter((t) => t.length > 1);
+}
+
 function ResultEntry({ item, query }: { item: SearchResultItem; query: string }) {
     const isSection = item.kind === "section";
     const title = String(item.title ?? "");
     const snippet = typeof item.content === "string" ? item.content : "";
+    const highlightTokens = tokenizeQuery(query);
 
     return (
         <Group
@@ -61,18 +66,19 @@ function ResultEntry({ item, query }: { item: SearchResultItem; query: string })
                 gap={2}
                 className={classes.resultContent}
             >
-                <Text
+                <Highlight
                     fz="sm"
                     fw={500}
                     truncate
+                    highlight={highlightTokens}
                 >
                     {title}
-                </Text>
+                </Highlight>
                 {snippet && (
                     <Highlight
                         fz="xs"
                         c="dimmed"
-                        highlight={query}
+                        highlight={highlightTokens}
                         className={classes.resultSnippet}
                         lineClamp={2}
                     >

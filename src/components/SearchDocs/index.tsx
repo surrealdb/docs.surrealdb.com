@@ -8,7 +8,7 @@ import {
 } from "@mantine/spotlight";
 import { Icon, iconSearch } from "@surrealdb/ui";
 import { type ChangeEventHandler, useCallback, useEffect, useRef, useState } from "react";
-import { type SearchResult, searchDocs } from "~/utils/search";
+import { RateLimitError, SearchError, type SearchResult, searchDocs } from "~/utils/search";
 import { SearchResultCard } from "./SearchResult";
 import classes from "./style.module.scss";
 
@@ -34,19 +34,29 @@ export function SearchDocs(props: UnstyledButtonProps) {
     const [actions, setActions] = useState<SpotlightActionData[]>([]);
     const [loading, setLoading] = useState(false);
     const [search, setSearch] = useState("");
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [rateLimitRemaining, setRateLimitRemaining] = useState(0);
     const abortController = useRef<AbortController | null>(null);
     const os = useOs();
 
     useHotkeys([["mod+K", () => spotlight.open()]]);
 
+    useEffect(() => {
+        if (rateLimitRemaining <= 0) return;
+        const timer = setTimeout(() => setRateLimitRemaining((s) => s - 1), 1000);
+        return () => clearTimeout(timer);
+    }, [rateLimitRemaining]);
+
     const executeSearch = useDebouncedCallback(async (value: string) => {
         if (!value.trim()) {
             setActions([]);
+            setErrorMessage(null);
             setLoading(false);
             return;
         }
 
         setLoading(true);
+        setErrorMessage(null);
 
         const controller = new AbortController();
 
@@ -56,10 +66,21 @@ export function SearchDocs(props: UnstyledButtonProps) {
 
             const results = await searchDocs(value, controller.signal);
 
+            setRateLimitRemaining(0);
             setActions(mapResultsToActions(results, value));
         } catch (error) {
-            if (!(error instanceof DOMException && error.name === "AbortError")) {
-                throw error;
+            if (error instanceof DOMException && error.name === "AbortError") {
+                return;
+            }
+
+            setActions([]);
+
+            if (error instanceof RateLimitError) {
+                setRateLimitRemaining(error.retryAfterSeconds ?? 10);
+            } else if (error instanceof SearchError) {
+                setErrorMessage(error.message);
+            } else {
+                setErrorMessage("Something went wrong — please try again");
             }
         } finally {
             if (abortController.current === controller) {
@@ -85,7 +106,16 @@ export function SearchDocs(props: UnstyledButtonProps) {
 
     const modKey = os === "macos" ? "⌘" : "Ctrl";
     const hasQuery = search.trim().length > 0;
-    const nothingFound = hasQuery && !loading ? "No results found" : undefined;
+
+    let nothingFound: string | undefined;
+
+    if (rateLimitRemaining > 0) {
+        nothingFound = `Too many requests — try again in ${rateLimitRemaining}s`;
+    } else if (errorMessage) {
+        nothingFound = errorMessage;
+    } else if (hasQuery && !loading) {
+        nothingFound = "No results found";
+    }
 
     return (
         <>
