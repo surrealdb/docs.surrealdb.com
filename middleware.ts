@@ -9,7 +9,7 @@ const BASE = "https://surrealdb.com/docs";
 // Set for O(1) exact lookups, sorted array for prefix scanning
 const PATHS = new Set(valid);
 // Prefixes that should never be redirected (checked after /docs prefix is stripped)
-const PASSTHROUGH = ["/api/", "/assets/", "/_", "/favicon", "/llms"];
+const PASSTHROUGH = ["/api/", "/assets/", "/_", "/favicon", "/llms", "/sitemap.xml", "/robots.txt"];
 
 // Redirects unknown paths to the nearest valid page. For any request
 // that doesn't match a known content page, it first checks for a
@@ -27,33 +27,33 @@ const PASSTHROUGH = ["/api/", "/assets/", "/_", "/favicon", "/llms"];
 //    check for `/docs`
 
 export default function middleware(request: Request) {
-    const url = new URL(request.url);
-    // Normalize: strip /docs prefix and trailing slash
-    let pathname = url.pathname.replace(/^\/docs(?=\/|$)/, "").replace(/\/$/, "") || "/";
-    // Known page — let the request through to the app
-    if (PATHS.has(pathname)) return;
-    // Static asset, internal route, or file request — skip redirect logic
-    if (PASSTHROUGH.some((p) => pathname.startsWith(p))) return;
-    // Skip Vike pageContext requests (used for client-side navigation)
-    if (pathname.endsWith(".pageContext.json")) return;
-    // Check if a valid child page exists under this path
-    const child = valid.find((p) => p.startsWith(`${pathname}/`));
-    if (child) {
-        return Response.redirect(`${BASE}${child}`, 302);
-    }
-    // Walk up the path tree to the nearest valid parent
-    while (pathname !== "/") {
-        // Strip the last segment and check if the parent exists
-        pathname = pathname.substring(0, pathname.lastIndexOf("/")) || "/";
-        // If the parent exists, redirect to it
-        if (PATHS.has(pathname)) {
-            return Response.redirect(`${BASE}${pathname === "/" ? "" : pathname}`, 302);
-        }
-    }
-    // Nothing matched — redirect to the docs root
-    return Response.redirect(BASE, 302);
+	const url = new URL(request.url);
+	// Normalize: strip /docs prefix and trailing slash
+	let pathname = url.pathname.replace(/^\/docs(?=\/|$)/, "").replace(/\/$/, "") || "/";
+	// Known page — let the request through to the app
+	if (PATHS.has(pathname)) return;
+	// Static asset, internal route, or file request — skip redirect logic
+	if (PASSTHROUGH.some((p) => pathname.startsWith(p))) return;
+	// Skip Vike pageContext requests (used for client-side navigation)
+	if (pathname.endsWith(".pageContext.json")) return;
+	// Check if a valid child page exists under this path
+	const child = valid.find((p) => p.startsWith(`${pathname}/`));
+	if (child) {
+		return Response.redirect(`${BASE}${child}`, 302);
+	}
+	// Walk up the path tree to the nearest valid parent
+	while (pathname !== "/") {
+		// Strip the last segment and check if the parent exists
+		pathname = pathname.substring(0, pathname.lastIndexOf("/")) || "/";
+		// If the parent exists, redirect to it
+		if (PATHS.has(pathname)) {
+			return Response.redirect(`${BASE}${pathname === "/" ? "" : pathname}`, 302);
+		}
+	}
+	// Nothing matched — redirect to the docs root
+	return Response.redirect(BASE, 302);
 }
 
 export const config = {
-    matcher: "/((?!assets/|_next/|_astro/|favicon|llms).*)",
+	matcher: "/((?!assets/|_next/|_astro/|favicon|llms).*)",
 };
