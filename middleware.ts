@@ -9,7 +9,7 @@ const BASE = "https://surrealdb.com/docs";
 // Set for O(1) exact lookups, sorted array for prefix scanning
 const PATHS = new Set(valid);
 // Prefixes that should never be redirected (checked after /docs prefix is stripped)
-const PASSTHROUGH = ["/api/", "/assets/", "/_", "/favicon", "/llms"];
+const PASSTHROUGH = ["/api/", "/assets/", "/_", "/favicon", "/llms", "/sitemap.xml", "/robots.txt"];
 
 // Redirects unknown paths to the nearest valid page. For any request
 // that doesn't match a known content page, it first checks for a
@@ -55,5 +55,5 @@ export default function middleware(request: Request) {
 }
 
 export const config = {
-	matcher: "/((?!assets/|_next/|_astro/|favicon|llms|txt|xml).*)",
+	matcher: "/((?!assets/|_next/|_astro/|favicon|llms).*)",
 };
