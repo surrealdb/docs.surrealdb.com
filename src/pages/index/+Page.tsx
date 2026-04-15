@@ -1,4 +1,15 @@
-import { Anchor, Box, Image, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import {
+    Anchor,
+    Box,
+    Button,
+    Flex,
+    Image,
+    Paper,
+    SimpleGrid,
+    Stack,
+    Text,
+    Title,
+} from "@mantine/core";
 import {
     brandDotNet,
     brandGo,
@@ -9,7 +20,6 @@ import {
     brandRust,
     Icon,
     iconArrowUpRight,
-    pictoBadgeAccess,
     pictoCloud,
     pictoDocument,
     pictoEmbeddingg,
@@ -17,11 +27,9 @@ import {
     pictoGeospatial,
     pictoGraph,
     pictoIntegrations,
-    pictoKey,
     pictoPadlockClosed,
     pictoQL,
     pictoSDKs,
-    pictoSurrealDB,
     pictoSurrealism,
     pictoSurrealist,
     pictoTimeSeries,
@@ -45,51 +53,6 @@ interface SdkItem {
     icon: string;
 }
 
-interface ResourceItem {
-    title: string;
-    description: string;
-    href: string;
-    icon: string;
-}
-
-const PRODUCTS: ProductItem[] = [
-    {
-        title: "Getting started",
-        description:
-            "Install SurrealDB, run your first queries, and work through core concepts with the guided introduction.",
-        href: "/docs/start",
-        icon: pictoSurrealDB,
-    },
-    {
-        title: "Query language",
-        description:
-            "SurrealQL statements, functions, operators, and data types for modelling and querying your data.",
-        href: "/docs/reference/query-language",
-        icon: pictoQL,
-    },
-    {
-        title: "Surrealist",
-        description:
-            "The official app for writing queries, designing schemas, and exploring data in SurrealDB.",
-        href: "/docs/explore/surrealist",
-        icon: pictoSurrealist,
-    },
-    {
-        title: "Cloud",
-        description:
-            "Provision instances, adjust capacity, and manage backups for SurrealDB on SurrealDB Cloud.",
-        href: "/docs/build/deployment/surrealdb-cloud/what-is-surrealdb-cloud",
-        icon: pictoCloud,
-    },
-    {
-        title: "Extensions",
-        description:
-            "Add Rust modules and WASM plugins, and call them from SurrealQL for custom behaviour.",
-        href: "/docs/learn/extensions",
-        icon: pictoSurrealism,
-    },
-];
-
 const SDKS: SdkItem[] = [
     {
         label: "JavaScript",
@@ -102,6 +65,47 @@ const SDKS: SdkItem[] = [
     { label: "Java", href: "/docs/start/languages/java", icon: brandJava },
     { label: "PHP", href: "/docs/start/languages/php", icon: brandPHP },
     { label: ".NET", href: "/docs/start/languages/dotnet", icon: brandDotNet },
+];
+
+const PRODUCTS: ProductItem[] = [
+    {
+        title: "SurrealQL",
+        description:
+            "Statements, functions, operators, and data types for modelling and querying your data.",
+        href: "/docs/reference/query-language",
+        icon: pictoQL,
+    },
+    {
+        title: "Surrealist",
+        description: "The official app for writing queries, designing schemas, and exploring data.",
+        href: "/docs/explore/surrealist",
+        icon: pictoSurrealist,
+    },
+    {
+        title: "SurrealDB Cloud",
+        description: "Provision instances, adjust capacity, and manage backups on SurrealDB Cloud.",
+        href: "/docs/build/deployment/surrealdb-cloud/what-is-surrealdb-cloud",
+        icon: pictoCloud,
+    },
+    {
+        title: "Extensions",
+        description:
+            "Add Rust modules and WASM plugins, and call them from SurrealQL for custom behaviour.",
+        href: "/docs/learn/extensions",
+        icon: pictoSurrealism,
+    },
+    {
+        title: "Authentication",
+        description: "System users, record access, and token-based auth for securing your data.",
+        href: "/docs/learn/security/authentication/authentication",
+        icon: pictoPadlockClosed,
+    },
+    {
+        title: "CLI",
+        description: "Install, configure, and operate SurrealDB from the command line.",
+        href: "/docs/reference/cli",
+        icon: pictoQL,
+    },
 ];
 
 const DATA_MODELS: ProductItem[] = [
@@ -129,7 +133,7 @@ const DATA_MODELS: ProductItem[] = [
     {
         title: "Full-Text Search",
         description:
-            "Analyzers, tokenisers, and search indexes for relevance-ranked text queries beyond exact matches.",
+            "Analysers, tokenisers, and search indexes for relevance-ranked text queries beyond exact matches.",
         href: "/docs/learn/data-models/full-text-search/overview",
         icon: pictoFullTextSearch,
     },
@@ -151,11 +155,11 @@ const DATA_MODELS: ProductItem[] = [
 
 const INTEGRATIONS: ProductItem[] = [
     {
-        title: "Data management",
+        title: "AI frameworks",
         description:
-            "Move and sync data with ELT tools and automation platforms such as Airbyte, Fivetran, and n8n.",
-        href: "/docs/build/integrations/data-management/overview",
-        icon: pictoIntegrations,
+            "Wire SurrealDB into agent and LLM frameworks including LangChain, LlamaIndex, CrewAI, and more.",
+        href: "/docs/build/integrations/ai-frameworks/overview",
+        icon: pictoSDKs,
     },
     {
         title: "Embeddings",
@@ -165,39 +169,15 @@ const INTEGRATIONS: ProductItem[] = [
         icon: pictoEmbeddingg,
     },
     {
-        title: "AI frameworks",
+        title: "Data management",
         description:
-            "Wire SurrealDB into agent and LLM frameworks including LangChain, LlamaIndex, CrewAI, and more.",
-        href: "/docs/build/integrations/ai-frameworks/overview",
-        icon: pictoSDKs,
+            "Move and sync data with ELT tools and automation platforms such as Airbyte, Fivetran, and n8n.",
+        href: "/docs/build/integrations/data-management/overview",
+        icon: pictoIntegrations,
     },
 ];
 
-const AUTHENTICATION: ProductItem[] = [
-    {
-        title: "Authentication",
-        description:
-            "System users, record users, and access methods: how credentials map to roles and permissions.",
-        href: "/docs/learn/security/authentication/authentication",
-        icon: pictoPadlockClosed,
-    },
-    {
-        title: "Record access",
-        description:
-            "Define ACCESS methods so application users sign up, sign in, and authenticate as records.",
-        href: "/docs/reference/query-language/statements/define/access/record",
-        icon: pictoBadgeAccess,
-    },
-    {
-        title: "Token access",
-        description:
-            "JWT and bearer access for verifying tokens issued by SurrealDB or external identity providers.",
-        href: "/docs/reference/query-language/statements/define/access/jwt",
-        icon: pictoKey,
-    },
-];
-
-const EDUCATION: ProductItem[] = [
+const LEARN: ProductItem[] = [
     {
         title: "SurrealDB University",
         description:
@@ -219,27 +199,11 @@ const EDUCATION: ProductItem[] = [
         href: "/docs/explore/tutorials/tutorials/how-to-build-a-knowledge-graph-for-ai",
         icon: pictoTutorials,
     },
-];
-
-const RESOURCES: ResourceItem[] = [
-    {
-        title: "Integrations",
-        description:
-            "AI frameworks, embeddings providers, agents, and data tooling wired to SurrealDB.",
-        href: "/docs/build/integrations",
-        icon: pictoIntegrations,
-    },
     {
         title: "Tutorials",
         description: "Hands-on walkthroughs for authentication, agents, deployment, and more.",
         href: "/docs/explore/tutorials",
         icon: pictoTutorials,
-    },
-    {
-        title: "SurrealDB CLI",
-        description: "Install, configure, and operate SurrealDB from the command line.",
-        href: "/docs/reference/cli",
-        icon: pictoQL,
     },
 ];
 
@@ -251,88 +215,82 @@ function ProductCard({ title, description, href, icon }: ProductItem) {
             variant="glow"
         >
             <Paper className={classes.productCard}>
-                <Image
-                    src={icon}
-                    w={36}
-                    h={36}
+                <Icon
+                    path={iconArrowUpRight}
+                    size="sm"
+                    className={classes.productCardArrow}
                 />
-                <Box>
+                <Flex
+                    align="center"
+                    gap="sm"
+                >
+                    <Image
+                        src={icon}
+                        w={24}
+                        h={24}
+                    />
                     <Title
                         order={3}
-                        fz="lg"
+                        fz="md"
                         c="bright"
                     >
                         {title}
                     </Title>
-                    <Text
-                        fz="sm"
-                        c="dimmed"
-                    >
-                        {description}
-                    </Text>
-                </Box>
-            </Paper>
-        </Anchor>
-    );
-}
-
-function SdkCard({ label, href, icon }: SdkItem) {
-    return (
-        <Anchor
-            href={href}
-            underline="never"
-        >
-            <Paper className={classes.sdkCard}>
-                <Image
-                    src={icon}
-                    w={28}
-                    h={28}
-                    fit="contain"
-                />
+                </Flex>
                 <Text
                     fz="sm"
-                    c="bright"
-                    fw={500}
+                    c="dimmed"
                 >
-                    {label}
+                    {description}
                 </Text>
             </Paper>
         </Anchor>
     );
 }
 
-function ResourceCard({ title, description, href, icon }: ResourceItem) {
+function CompactLink({ title, href, icon }: { title: string; href: string; icon: string }) {
     return (
         <Anchor
             href={href}
             underline="never"
+            className={classes.compactLink}
         >
-            <Paper className={classes.resourceCard}>
-                <Image
-                    src={icon}
-                    w={32}
-                    h={32}
-                />
-                <Box flex={1}>
-                    <Text
-                        fz="md"
-                        c="bright"
-                        fw={600}
-                    >
-                        {title}
-                    </Text>
-                    <Text
-                        fz="sm"
-                        c="dimmed"
-                    >
-                        {description}
-                    </Text>
-                </Box>
-                <Icon
-                    path={iconArrowUpRight}
-                    size="sm"
-                />
-            </Paper>
+            <Image
+                src={icon}
+                w={20}
+                h={20}
+            />
+            <Text
+                fz="sm"
+                c="bright"
+                fw={500}
+            >
+                {title}
+            </Text>
+        </Anchor>
+    );
+}
+
+function SdkIcon({ label, href, icon }: SdkItem) {
+    return (
+        <Anchor
+            href={href}
+            underline="never"
+            className={classes.sdkIcon}
+        >
+            <Image
+                src={icon}
+                w={28}
+                h={28}
+                fit="contain"
+            />
+            <Text
+                fz="xs"
+                c="dimmed"
+                fw={500}
+            >
+                {label}
+            </Text>
         </Anchor>
     );
 }
@@ -344,31 +302,86 @@ export default function Page() {
             pb="xl"
         >
             <Box
-                className={classes.hero}
-                component="main"
+                component="section"
+                className={classes.heroSection}
+                mt="xl"
             >
-                <Title
-                    order={1}
-                    fz={36}
-                    c="bright"
+                <SimpleGrid
+                    cols={{ base: 1, lg: 2 }}
+                    spacing="xl"
                 >
-                    SurrealDB Documentation
-                </Title>
-                <Text
-                    fz="lg"
-                    c="dimmed"
-                    mt="sm"
-                    maw={560}
-                    mx="auto"
-                >
-                    SurrealQL, SDKs, deployment guides, and integrations—everything you need to
-                    build with SurrealDB.
-                </Text>
-                <SearchDocs
-                    maw={500}
-                    mx="auto"
-                    mt="xl"
-                />
+                    <Stack
+                        justify="center"
+                        gap="md"
+                        maw={450}
+                    >
+                        <Title
+                            order={1}
+                            fz={36}
+                            c="bright"
+                        >
+                            SurrealDB Documentation
+                        </Title>
+                        <Text
+                            fz="lg"
+                            c="dimmed"
+                            maw={560}
+                        >
+                            Query with SurrealQL, connect from any SDK, deploy anywhere, and build
+                            AI-powered applications — everything you need to get started with
+                            SurrealDB.
+                        </Text>
+                        <SearchDocs mt="sm" />
+                    </Stack>
+
+                    <Paper
+                        className={classes.gettingStarted}
+                        maw={400}
+                        ml={{ md: "auto" }}
+                    >
+                        <Stack gap="md">
+                            <Box>
+                                <Title
+                                    order={2}
+                                    fz="xl"
+                                    c="bright"
+                                >
+                                    Getting Started
+                                </Title>
+                                <Text
+                                    fz="sm"
+                                    c="dimmed"
+                                    mt={4}
+                                >
+                                    Set up and connect to SurrealDB in minutes
+                                </Text>
+                            </Box>
+                            <SimpleGrid
+                                cols={4}
+                                spacing="xs"
+                                mt="sm"
+                            >
+                                {SDKS.map((sdk) => (
+                                    <SdkIcon
+                                        key={sdk.href}
+                                        {...sdk}
+                                    />
+                                ))}
+                            </SimpleGrid>
+                            <Anchor
+                                href="/docs/start"
+                                underline="never"
+                            >
+                                <Button
+                                    variant="light"
+                                    fullWidth
+                                >
+                                    Start with SurrealDB
+                                </Button>
+                            </Anchor>
+                        </Stack>
+                    </Paper>
+                </SimpleGrid>
             </Box>
 
             <Box component="section">
@@ -381,124 +394,79 @@ export default function Page() {
                     Guides
                 </Title>
                 <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
-                    {PRODUCTS.map((product) => (
+                    {PRODUCTS.map((item) => (
                         <ProductCard
-                            key={product.href}
-                            {...product}
+                            key={item.href}
+                            {...item}
                         />
                     ))}
                 </SimpleGrid>
             </Box>
 
-            <Box component="section">
+            <Box
+                component="section"
+                className={classes.splitSection}
+            >
                 <Title
                     order={2}
                     fz="xl"
                     c="bright"
-                    mb="md"
-                >
-                    Client Libraries
-                </Title>
-                <SimpleGrid cols={{ base: 3, sm: 4, lg: 7 }}>
-                    {SDKS.map((sdk) => (
-                        <SdkCard
-                            key={sdk.href}
-                            {...sdk}
-                        />
-                    ))}
-                </SimpleGrid>
-            </Box>
-
-            <Box component="section">
-                <Title
-                    order={2}
-                    fz="xl"
-                    c="bright"
-                    mb="md"
                 >
                     Data Models
                 </Title>
-                <SimpleGrid cols={{ base: 1, sm: 3 }}>
+                <SimpleGrid cols={{ base: 2, sm: 3 }}>
                     {DATA_MODELS.map((item) => (
-                        <ProductCard
+                        <CompactLink
                             key={item.href}
-                            {...item}
+                            title={item.title}
+                            href={item.href}
+                            icon={item.icon}
                         />
                     ))}
                 </SimpleGrid>
             </Box>
 
-            <Box component="section">
+            <Box
+                component="section"
+                className={classes.splitSection}
+            >
                 <Title
                     order={2}
                     fz="xl"
                     c="bright"
-                    mb="md"
                 >
-                    Integrations
+                    AI & Integrations
                 </Title>
-                <SimpleGrid cols={{ base: 1, sm: 3 }}>
+                <SimpleGrid cols={{ base: 2, sm: 3 }}>
                     {INTEGRATIONS.map((item) => (
-                        <ProductCard
+                        <CompactLink
                             key={item.href}
-                            {...item}
+                            title={item.title}
+                            href={item.href}
+                            icon={item.icon}
                         />
                     ))}
                 </SimpleGrid>
             </Box>
 
-            <Box component="section">
+            <Box
+                component="section"
+                className={classes.splitSection}
+            >
                 <Title
                     order={2}
                     fz="xl"
                     c="bright"
-                    mb="md"
                 >
-                    Authentication
+                    Resources
                 </Title>
-                <SimpleGrid cols={{ base: 1, sm: 3 }}>
-                    {AUTHENTICATION.map((item) => (
-                        <ProductCard
+                <SimpleGrid cols={{ base: 2, sm: 3 }}>
+                    {LEARN.map((item) => (
+                        <CompactLink
                             key={item.href}
-                            {...item}
-                        />
-                    ))}
-                </SimpleGrid>
-            </Box>
-
-            <Box component="section">
-                <Title
-                    order={2}
-                    fz="xl"
-                    c="bright"
-                    mb="md"
-                >
-                    Education
-                </Title>
-                <SimpleGrid cols={{ base: 1, sm: 3 }}>
-                    {EDUCATION.map((item) => (
-                        <ProductCard
-                            key={item.href}
-                            {...item}
-                        />
-                    ))}
-                </SimpleGrid>
-            </Box>
-
-            <Box component="section">
-                <Title
-                    order={2}
-                    fz="xl"
-                    c="bright"
-                    mb="md"
-                >
-                    Additional Resources
-                </Title>
-                <SimpleGrid cols={{ base: 1, sm: 3 }}>
-                    {RESOURCES.map((resource) => (
-                        <ResourceCard
-                            key={resource.href}
-                            {...resource}
+                            title={item.title}
+                            href={item.href}
+                            icon={item.icon}
                         />
                     ))}
                 </SimpleGrid>
