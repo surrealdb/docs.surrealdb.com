@@ -108,9 +108,10 @@ function buildSection(folder: FolderNode, baseUrl: string): Positioned<NavSectio
  * Deeper folders become links with children. Ordering is driven
  * by the `position` field in `__category` entries and page frontmatter.
  */
-export function buildNavigation(id: string): NavSection[] {
+export function buildNavigation(id: string, baseUrl?: string): NavSection[] {
     const root = getCollectionTree(id) as FolderNode;
     const rootCategory = getCategoryEntry(root);
+    const base = baseUrl ?? id;
 
     const rootLinks: Positioned<NavLink>[] = [];
     const sections: Positioned<NavSection>[] = [];
@@ -119,7 +120,7 @@ export function buildNavigation(id: string): NavSection[] {
         rootLinks.push({
             value: {
                 title: root.entry.metadata.title ?? "",
-                path: join(id),
+                path: join(base),
             },
             position: root.entry.metadata.position ?? 0,
         });
@@ -129,14 +130,14 @@ export function buildNavigation(id: string): NavSection[] {
         if (child.name === "__category") continue;
 
         if (isFolder(child)) {
-            sections.push(buildSection(child, id));
+            sections.push(buildSection(child, base));
         } else {
             const { metadata, slug } = child.entry;
 
             rootLinks.push({
                 value: {
                     title: metadata.title ?? child.name,
-                    path: join(id, slug),
+                    path: join(base, slug),
                 },
                 position: metadata.position ?? 0,
             });
