@@ -1,6 +1,7 @@
-import { contentSlug, labCollection } from "../config";
+import { defineCollection } from "vike-content-collection";
+import { labSchema } from "~/utils/schema";
 
-export const Content = {
-    schema: labCollection,
-    slug: contentSlug,
-};
+export const Content = defineCollection({
+    schema: labSchema,
+    type: "content",
+});

@@ -1,0 +1,162 @@
+---
+position: 4
+title: IoT and telemetry patterns
+description: Model sensor readings with nested fields or complex record IDs, use range queries on array-based IDs, and attach metadata through record links.
+---
+
+# IoT and telemetry patterns
+
+## Modelling time series data in SurrealDB
+
+Let’s explore a practical example using IoT sensor data.
+
+### Modelling events
+
+The normal way of modelling data in SurrealDB would be as fields in a record, such as `coordinates` or `location`.
+
+```surql
+CREATE sensor:ARF8394AAA SET coordinates = (-2.2743, 51.1857);
+CREATE location:Longleat_House SET built = d'1580-01-01';
+
+CREATE sensor_readings CONTENT {
+    timestamp: time::now(),
+    location: location:Longleat_House,
+    sensor: sensor:ARF8394AAA,
+    temperature_celsius: 28.4,
+    humidity_percent: 55
+};
+```
+
+### Complex record IDs
+
+A more optimised way of working with the `sensor_readings` table in a time series context would however be using an array-based record ID, otherwise known as a complex record ID.
+
+```surql
+-- Array-based record IDs
+CREATE sensor_readings:[
+	location:Longleat_House,
+	sensor:ARF8394AAA,
+    time::now(),
+    28.4
+];
+```
+
+Storing the same information as a record or as part of the ID might look similar at first glance, but under the hood, it’s optimised for efficient range selection, through the magic of [range queries](/docs/reference/query-language/language-primitives/data-types/record-ids#record-ranges) on record IDs. As all values in SurrealDB can be [compared and sorted](/docs/reference/query-language/language-primitives/data-types/values#comparing-and-ordering-values), putting the most crucial information into the record ID itself allows you to query only a range of record IDs instead of a whole table.
+
+This effectively means fewer worries about selecting the right indexes or partitions since the ID field already does that naturally in your data as you scale with the performance of a key-value lookup regardless of size!
+
+```surql
+-- Select all the temperature readings from the start until now 
+-- from a specific sensor
+SELECT 
+    id[0] AS location,
+    id[2] AS at,
+    id[3] AS temperature_celsius
+FROM sensor_readings:[
+	location:Longleat_House,
+    sensor:ARF8394AAA,
+    time::now() - 1d
+]..=[
+    location:Longleat_House,
+    sensor:ARF8394AAA,
+	time::now(),
+];
+```
+
+```surql title="Output"
+[
+	{
+		at: d'2025-04-17T04:04:54.842Z',
+		location: location:Longleat_House,
+		temperature_celsius: 28.4f
+	}
+]
+```
+
+This is however not the only way of doing it, you can have the metadata in the ID and sensor data in the record itself, like in the example below. Now the record ID only contains the fields useful in a range query, while the remaining fields are kept in the record itself.
+
+```surql
+CREATE sensor_readings:[
+	location:Longleat_House,
+	sensor:ARF8394AAA,
+    time::now()
+] CONTENT {
+    temperature_celsius: 28.4,
+    humidity: 55
+};
+
+-- Select all the temperature readings from the start until now 
+-- from a specific sensor
+SELECT 
+    id[0] AS location,
+    id[2] AS at,
+    temperature_celsius
+FROM sensor_readings:[
+	location:Longleat_House,
+    sensor:ARF8394AAA,
+    time::now() - 1d
+]..=[
+    location:Longleat_House,
+    sensor:ARF8394AAA,
+	time::now(),
+];
+```
+
+```surql title="Output"
+[
+	{
+		at: d'2025-04-17T05:25:00.030Z',
+		location: location:Longleat_House,
+		temperature_celsius: 28.4f
+	}
+]
+```
+
+### Ids inside ids
+
+The last thing to note here is that we’ve actually been using record IDs inside our complex record IDs! This is known as a [record link](/docs/reference/query-language/language-primitives/record-links), which allows us to reduce the fields in our main time series table to only the necessary ones by offloading most of the metadata to connected tables.
+
+In our case we have:
+
+- `location:Longleat_House`, which refers to the `Longleat_House` ID in the `location` table. There we put all the metadata about the location itself such as [geo coordinates](/docs/reference/query-language/language-primitives/data-types/geometries).
+- `sensor:ARF8394AAA`, which refers to the `ARF8394AAA` ID on the `sensor` table. There we could put all the metadata about the sensor such as location, firmware, when it was bought and when it needs maintenance.
+
+It’s very easy and performant to get the connected data, since you don’t have to do any table scans for that either since it links directly to a specific record on a specific table! In the example below, with time for the sensor readings set exactly to the hour (`2024-08-13T05:00:00`), the record ID is easy to predict.
+
+```surql
+CREATE sensor:ARF8394AAA SET coordinates = (-2.2743, 51.1857);
+CREATE location:Longleat_House SET built = d'1580-01-01';
+
+-- location + sensor + easy to predict timestamp
+CREATE sensor_readings:[
+	location:Longleat_House,
+	sensor:ARF8394AAA,
+    d'2024-08-13T05:00:00Z'
+] CONTENT {
+    temperature_celsius: 28.4,
+    humidity: 55
+};
+
+-- Select all fields in the ID and the coordinates field from the sensor table
+SELECT id, id[1].coordinates AS sensor_coordinates
+FROM sensor_readings:[
+	location:Longleat_House,
+	sensor:ARF8394AAA,
+    d'2024-08-13T05:00:00Z'
+];
+```
+
+```surql title="Output"
+[
+	{
+		id: sensor_readings:[
+			location:Longleat_House,
+			sensor:ARF8394AAA,
+			d'2024-08-13T05:00:00Z'
+		],
+		sensor_coordinates: (-2.2743, 51.1857)
+	}
+]
+```
+
+For aggregations, materialised views, and retention-style patterns built on top of these events, see [Aggregation queries](/docs/learn/data-models/time-series/aggregation-queries).

@@ -1,5 +1,5 @@
 import { Box, Checkbox, Divider, Stack, Title } from "@mantine/core";
-import { labLanguages, labTopics } from "~/content/config";
+import { labLanguages, labTopics } from "~/utils/labs";
 import classes from "./style.module.scss";
 
 export interface FilterSidebarProps {

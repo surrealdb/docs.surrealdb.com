@@ -1,0 +1,154 @@
+---
+position: 3
+title: Aggregation queries
+description: Build downsampling with pre-computed table views, live queries, drop tables, and DEFINE EVENT for anomaly detection; compare SurrealDB to specialised TSDBs.
+---
+
+# Aggregation queries
+
+## Modelling metrics
+
+For doing metrics in SurrealDB you can choose one or combine:
+
+- **Pre-computed table views**
+- **Live Queries**
+- **Drop tables**
+- **Custom events**
+
+#### Pre-computed table views
+
+Our [pre-computed table views](/docs/reference/query-language/statements/define/table#pre-computed-table-views) are most similar to event-based, incrementally updating, materialised views. Practically, this means our downsampled metrics will always be up to date as it incrementally updates in near real-time when we add more records to the sensor_readings table.
+
+```surql
+-- Define a table view which aggregates data from the sensor_readings table
+DEFINE TABLE daily_measurements_by_location AS
+	SELECT
+    id[0] AS location,
+		time::day(id[2]) AS day,
+		math::mean(temperature_celsius) AS avg_temperature_celsius,
+		math::mean(humidity) AS avg_humidity_percent
+	FROM sensor_readings
+	GROUP BY id[0];
+
+SELECT * FROM daily_measurements_by_location;
+```
+
+```surql title="Output"
+[
+	{
+		avg_humidity_percent: 55dec,
+		avg_temperature_celsius: 28.4dec,
+		day: 13,
+		id: daily_measurements_by_location:[
+			location:Longleat_House
+		],
+		location: location:Longleat_House
+	}
+]
+```
+
+For real-time visualisation of our metrics we can then use [Live Queries](/docs/reference/query-language/statements/live-select) to stream real-time updates to our client, such as a BI dashboard or embedded analytics code.
+
+```surql
+LIVE SELECT * FROM daily_measurements_by_location;
+```
+
+#### Drop tables
+
+[Drop tables](/docs/reference/query-language/statements/define/table#example-usage) are pretty unique tables that drop all writes once they have been written. A view can be defined on a table whether it is a `DROP` table or not, but `DROP` is recommended if you have no reason to directly query the table that provides the data for the aggregated view.
+
+```surql
+-- Drop all writes to the sensor_readings table.
+-- We don't need every these readings and can view them
+-- via daily_measurements_by_location instead
+DEFINE TABLE sensor_readings DROP;
+```
+
+These tables can be very useful in a time series context if you want to capture very high-frequency data but only care about storing the aggregated downsampled metrics. They are typically used in combination with either the table views or custom events, such that the metrics are calculated then the underlying data is automatically dropped.
+
+When combining drop tables, table views and live queries, you have a very easy-to-set up, event-based and real-time solution from capturing events, creating metrics, dropping stale data and live selects for visualisation.
+
+#### Custom events
+
+If you have something even more bespoke in mind, you can even [create your own event triggers](/docs/reference/query-language/statements/define/event) based on when a record is created, updated or deleted. You can include any valid SurrealQL inside the event.
+
+For example, we can create a simple real-time anomaly detection and notification solution using just SurrealQL events and functions in 5 steps.
+
+1. Define an event to trigger when a record is added to the sensor_readings table.
+2. Get the desired time range you want to track.
+3. Calculate both the upper and lower threshold for an outlier, using the standard Q1 - 1.5 * IQR formula for the low outliers and Q3 + 1.5 * IQR formula for the high outliers.
+4. Check if the current temperature is a low or high outlier.
+5. Send an [http::post](/docs/reference/query-language/functions/database-functions/http#httppost) request with the outlier details.
+
+```surql
+-- Trigger the event on when a record is created
+DEFINE EVENT sensor_anomaly_notification ON sensor_readings WHEN $event = 'CREATE'
+THEN {
+    -- Get the desired time range you want to track
+    -- here we're grabing just the past hour
+    LET $location = $after[0];
+    LET $sensor = $after[1];
+    LET $temp_past_hour = (
+            SELECT VALUE temperature_celsius FROM sensor_readings:[
+                $location,
+                $sensor,
+                time::now() - 1h,
+                ]..=[
+                $location,
+                $sensor,
+                time::now()
+            ]);
+    -- Calculate both the upper and lower threshold for an outlier
+    -- using the standard Q1 - 1.5 * IQR formula for the low outliers
+    LET $low_outliers = (
+        RETURN math::percentile($temp_past_hour, 25) - 1.5 * math::interquartile($temp_past_hour)
+    );
+    -- Q3 + 1.5 * IQR formula for the high outliers
+    LET $high_outliers = (
+        RETURN math::percentile($temp_past_hour, 75) + 1.5 * math::interquartile($temp_past_hour)
+    );
+    
+    -- If a low outlier is found send a http post request
+    -- with the outlier details
+    IF $after.temperature_celsius < $low_outliers {
+        http::post('https://jsonplaceholder.typicode.com/posts', {
+            id: rand::ulid(),
+            outlier: $after,
+            message: 'Outlier Detected: low temperature'
+        });
+    };
+
+    -- If a high outlier is found send a http post request
+    -- with the outlier details
+    IF $after.temperature_celsius > $high_outliers {
+        http::post('https://jsonplaceholder.typicode.com/posts', {
+            id: rand::ulid(),
+            outlier: $after,
+            message: 'Outlier Detected: high temperature'
+        });
+    };
+};
+```
+
+### Async events
+
+If you need an event to execute in the background out of the main transaction in which they are called, you can use an [async event](/docs/reference/query-language/statements/define/event#async-events). This can be useful for events that take a certain amount of time to process. The tradeoff is that your read data will not be consistent until the event or events have finished processing. This is what is known as *eventual consistency*.
+
+## SurrealDB vs specialised time series databases
+
+There are many specialised time series databases out there, so where does SurrealDB fit in?
+
+The advantages SurrealDB has over specialised time series databases are:
+
+- That you can combine our time series functionality with the rest of our multi-model database features. For example, doing full-text search and vector search on your log data.
+- No need to learn another query language just for time series. SurrealDB has a unified query language for all its features.
+
+- Connect and enrich your metrics easily, instead of having them being siloed in a separate system. You can have all your data in one place with zero ETL for your various use cases. Whether you’re doing transactional, analytical, ML and AI applications, SurrealDB covers a lot of the use cases a modern application needs.
+
+The advantages specialised time series databases have over SurrealDB currently are:
+
+- More advanced time series features such as custom data retention policies and better data compression.
+
+Whether you pick SurrealDB for your time series use cases depends mostly on whether you are looking to lower your total system complexity or if you are looking for another specialised solution.
+
+For raw event storage and complex record ID patterns, see [IoT and telemetry patterns](/docs/learn/data-models/time-series/iot-and-telemetry-patterns).

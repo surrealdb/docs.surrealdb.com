@@ -1,0 +1,108 @@
+---
+position: 4
+title: File-backed
+description: "For the purposes of getting started with SurrealDB quickly, we will start a RocksDB database which persists data on the filesystem."
+---
+
+# Run a single-node, on-disk server
+
+A single node of SurrealDB can be run with data persisted to the filesystem. This configuration can be done using either RocksDB or SurrealKV as the backend.
+
+<Tabs>
+<TabItem label="RocksDB">
+
+## RocksDB
+
+```bash 
+surreal start rocksdb://mydatabase.db
+```
+
+The default logging level for the database server is `info`, resulting in any informational logs to be output to the standard output. To control the logging verbosity, specify the `--log` argument. The following command starts the database with `debug` level logging, resulting in more logs being output to the terminal. If extra verbosity is not needed, specify a lower level or simply remove the flag, which will default to the `info` level.
+
+```bash
+surreal start --log debug rocksdb://mydatabase.db
+```
+
+The SurrealDB server runs with authentication enabled by default. To disable it, the `--unauthenticated` flag can be passed in.
+
+```bash
+surreal start --unauthenticated rocksdb://mydatabase.db
+```
+
+However, for anything but simple testing, it is better to configure your initial root-level user by setting the `--user` and `--pass` command-line arguments. The following command starts the database with a top-level user named root with a password set to `secret`. The root user will be persisted in storage, which means you don't have to include the command line arguments next time you start SurrealDB.
+
+```bash
+surreal start --user root --pass secret rocksdb://mydatabase.db
+```
+
+In order to change the default port that SurrealDB uses for web connections and from database clients you can use the `--bind` argument. The following command starts the database on port `8080`.
+
+```bash
+surreal start --user root --pass secret --bind 0.0.0.0:8080 rocksdb://path/to/mydatabase
+```
+
+After running the above command, you should see the SurrealDB server start up successfully.
+
+```text
+surreal start --user root --pass secret --bind 0.0.0.0:8080 rocksdb://mydatabase.db
+2025-08-30T15:06:34.788739Z  INFO surreal::dbs: ✅🔒 Authentication is enabled 🔒✅
+2025-08-30T15:06:34.788821Z  INFO surrealdb::kvs::ds: Starting kvs store in file:mydatabase.db
+2025-08-30T15:06:34.788859Z  INFO surrealdb::kvs::ds: Started kvs store in file:mydatabase.db
+2025-08-30T15:06:34.789222Z  INFO surrealdb::kvs::ds: Initial credentials were provided and no existing root-level users were found: create the initial user 'root'.
+2025-08-30T15:06:35.205123Z  INFO surrealdb::node: Started node agent
+2025-08-30T15:06:35.205827Z  INFO surrealdb::net: Started web server on 0.0.0.0:8080
+```
+
+For details on the different commands available, visit the [CLI tool documentation](/docs/reference/cli/surrealdb-cli/overview).
+
+## Parameters on startup
+
+A number of parameters can be used on startup such as `sync` to set when to flush the database to the file system. For more details on these parameters, see [this page](/docs/reference/cli/surrealdb-cli/commands/start#supported-parameters-for-rocksdb) for the `start` command or [this page](/docs/reference/cli/surrealdb-cli/environment-variables#rocksdb-environment-variables) to set the same parameters using environment variables.
+
+</TabItem>
+
+<TabItem label="SurrealKV">
+
+## SurrealKV
+
+[SurrealKV](https://github.com/surrealdb/surrealkv) is an embedded storage engine developed in house by SurrealDB: a versioned key-value store built on an LSM (log-structured merge) tree, with optional time-travel reads when versioning is enabled in SurrealDB. It is implemented in Rust and ships with the main SurrealDB release so the storage layer can evolve with SurrealDB’s access patterns.
+
+> [!IMPORTANT]
+> SurrealKV is under active development. See [SurrealKV](https://github.com/surrealdb/surrealkv) release notes and SurrealDB release notes before relying on it for critical production workloads.
+
+## Key features
+
+At a high level, SurrealKV provides:
+
+- ACID transactions with snapshot isolation (multiversion concurrency control or MVCC) for concurrent readers and writers.
+- Durability options (immediate vs eventual flush semantics) aligned with how you configure sync behaviour.
+- Built-in versioning for historical / temporal queries in SurrealDB when you opt in. See [versioned startup](/docs/reference/cli/surrealdb-cli/commands/start#supported-parameters-for-surrealkv) and the [`VERSION` clause](/docs/reference/query-language/statements/select#the-version-clause) for details.
+- LSM structure: writes batch into memtables and flush to SSTables.
+- Value log (WiscKey-style): Allows large values to be stored separately with garbage collection.
+- Checkpoint and restore support in the engine for consistent snapshots (see upstream [SurrealKV](https://github.com/surrealdb/surrealkv) documentation).
+
+## Parameters on startup
+
+Parameters such as `versioned` and `sync` control versioning and durability. See [Supported parameters for SurrealKV](/docs/reference/cli/surrealdb-cli/commands/start#supported-parameters-for-surrealkv) and [SurrealKV environment variables](/docs/reference/cli/surrealdb-cli/environment-variables#surrealkv-environment-variables).
+
+# SurrealKV performance characteristics and trade-offs
+
+## Strengths
+
+- Sequential write path: LSM trees batch writes and flush to sorted runs, which maps well to SSDs and sequential I/O.
+- Concurrent reads: MVCC snapshots let readers proceed without blocking writers in the common case.
+- Scalability: Unlike SurrealKV's earlier designs, the LSM architecture is intended to support datasets larger than RAM by keeping the hot working set in memtables and caching while spilling cold data to SSTables on disk.
+
+## Limitations and operational notes
+
+- Compaction and space: Compaction reclaims space but uses extra I/O and temporary disk headroom while merges run.
+- Read amplification: Point lookups may touch several levels; very wide range scans can require more I/O than a single B-tree–style read—plan indexes and query shapes accordingly.
+- Platform notes: The SurrealKV library targets Unix-like desktop and server OSes; WebAssembly is not a supported target for the native engine (browser embeddings use IndexedDB via SurrealDB’s WASM stack, not SurrealKV on disk). Windows support exists with some filesystem caveats. See upstream [platform compatibility](https://github.com/surrealdb/surrealkv#platform-compatibility) notes for more details.
+
+## Performance implications
+
+SurrealKV tends to work well for write-heavy workloads, prefix-based access patterns, and time-series or versioned data where append-heavy writes and ordered keys are common. Point lookups are typically efficient, though they may involve checking multiple levels of on-disk data structures. Large range scans can require reading across multiple SSTables and levels, which may increase I/O without careful compaction and schema design. As with most LSM-based systems, performance can degrade in severely memory- or disk-constrained environments without tuning.
+
+</TabItem>
+
+</Tabs>

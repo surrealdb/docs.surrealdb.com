@@ -9,8 +9,8 @@ import { ColorSchemeScript } from "@mantine/core";
 import { FontLinks } from "@surrealdb/ui";
 import { usePageContext } from "vike-react/usePageContext";
 import FavIcon from "~/assets/img/favicon.svg";
+import type { PageData } from "~/utils/data";
 import { BASE_URL, buildBreadcrumbJsonLd, buildCanonicalUrl } from "~/utils/meta";
-import type { SidebarItem } from "~/utils/sidebar";
 
 const DEFAULT_OG_IMAGE = `${BASE_URL}/thumbnail.jpg`;
 
@@ -19,8 +19,8 @@ export function Head() {
     const { urlPathname } = pageContext;
     const canonicalUrl = buildCanonicalUrl(urlPathname);
 
-    const sidebar = (pageContext.data as { sidebar?: SidebarItem[] } | undefined)?.sidebar;
-    const breadcrumbJsonLd = sidebar ? buildBreadcrumbJsonLd(sidebar, urlPathname) : null;
+    const navigation = (pageContext.data as PageData)?.navigation ?? [];
+    const breadcrumbJsonLd = buildBreadcrumbJsonLd(navigation);
 
     return (
         <>

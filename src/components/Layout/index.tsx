@@ -1,12 +1,21 @@
-import { ActionIcon, Box, Container, Divider, Drawer, Flex, Group } from "@mantine/core";
+import {
+    ActionIcon,
+    Box,
+    Breadcrumbs,
+    Container,
+    Divider,
+    Drawer,
+    Group,
+    Text,
+    Title,
+} from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { type Heading, Icon, iconSidebar } from "@surrealdb/ui";
+import { Icon, iconSidebar } from "@surrealdb/ui";
 import { useEffect, useRef } from "react";
 import { usePageContext } from "vike-react/usePageContext";
 import { PageContentActions } from "~/components/ContentActions";
 import { PageAside } from "~/components/PageAside";
-import type { SidebarItem } from "~/utils/sidebar";
-import { PageBreadcrumbs } from "../Breadcrumbs";
+import type { PageData } from "~/utils/data";
 import { CopyPageMenu } from "../CopyPageMenu";
 import { Footer } from "../Footer";
 import { Header, MobileNav } from "./header";
@@ -15,10 +24,8 @@ import { Sidebar } from "./sidebar";
 import classes from "./style.module.scss";
 
 export interface DefaultLayoutProps {
+    data: PageData;
     children: React.ReactNode;
-    sidebar: SidebarItem[];
-    headings: Heading[];
-    contentPath: string;
     lastUpdated?: string;
     showToc?: boolean;
     versionSelector?: React.ReactNode;
@@ -26,9 +33,7 @@ export interface DefaultLayoutProps {
 
 export function DefaultLayout({
     children,
-    sidebar,
-    headings,
-    contentPath,
+    data,
     showToc = true,
     versionSelector,
 }: DefaultLayoutProps) {
@@ -49,7 +54,7 @@ export function DefaultLayout({
                 onToggle={toggleMenu}
             />
             <Sidebar
-                items={sidebar}
+                navigation={data.navigation}
                 visibleFrom="lg"
                 versionSelector={versionSelector}
             />
@@ -70,7 +75,7 @@ export function DefaultLayout({
                 withCloseButton={false}
             >
                 <Sidebar
-                    items={sidebar}
+                    navigation={data.navigation}
                     versionSelector={versionSelector}
                 />
             </Drawer>
@@ -96,7 +101,7 @@ export function DefaultLayout({
                             flex={1}
                             miw={0}
                         >
-                            <Flex
+                            <Group
                                 align="center"
                                 gap="sm"
                             >
@@ -114,22 +119,56 @@ export function DefaultLayout({
                                     miw={0}
                                     className={classes.breadcrumbScroll}
                                 >
-                                    <PageBreadcrumbs sidebar={sidebar} />
+                                    <Breadcrumbs
+                                        fz="sm"
+                                        id="top"
+                                        separator={
+                                            <Text
+                                                c="slate"
+                                                fw={600}
+                                            >
+                                                /
+                                            </Text>
+                                        }
+                                    >
+                                        {data.breadcrumbs.map((breadcrumb) => (
+                                            <Text
+                                                key={breadcrumb}
+                                                c="violet"
+                                                fz="md"
+                                                lh="unset"
+                                                fw={600}
+                                            >
+                                                {breadcrumb}
+                                            </Text>
+                                        ))}
+                                    </Breadcrumbs>
                                 </Box>
-                                <CopyPageMenu contentPath={contentPath} />
-                            </Flex>
+                            </Group>
+                            <Group id="top">
+                                <Title
+                                    order={1}
+                                    c="bright"
+                                    flex={1}
+                                >
+                                    {data.title}
+                                </Title>
+                                <CopyPageMenu contentPath={data.contentPath} />
+                            </Group>
+                            {data.description && <Text fz="lg">{data.description}</Text>}
                             <Box
+                                mt="xl"
                                 component="main"
                                 flex={1}
                             >
                                 {children}
                             </Box>
                             <Divider my="3xl" />
-                            <PageContentActions contentPath={contentPath} />
-                            <PageNavigation sidebar={sidebar} />
+                            <PageContentActions contentPath={data.contentPath} />
+                            <PageNavigation navigation={data.navigation} />
                             <Footer />
                         </Box>
-                        {showToc && <PageAside headings={headings} />}
+                        {showToc && <PageAside headings={data.headings} />}
                     </Group>
                 </Container>
             </Group>

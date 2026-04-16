@@ -15,7 +15,7 @@ import LabsDark from "~/assets/img/logo/dark/labs.svg";
 import LabsLight from "~/assets/img/logo/light/labs.svg";
 import { FilterSidebar } from "~/components/FilterSidebar";
 import { LabCard } from "~/components/LabCard";
-import { labLanguages, labTopics } from "~/content/config";
+import { labLanguages, labTopics } from "~/utils/labs";
 import type { LabsPageData } from "./+data";
 import classes from "./style.module.scss";
 

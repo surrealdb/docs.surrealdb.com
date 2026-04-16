@@ -1,0 +1,337 @@
+---
+position: 1
+title: Using SurrealDB as a time series database
+description: In this guide, you will learn how to “think” in a time-series database and show how SurrealDB helps you implement these concepts seamlessly.
+---
+
+# Using SurrealDB as a time series database (TSDB)
+
+A time series database is optimized for storing, querying, and managing time-stamped data. Rather than treating the timestamp as just another attribute, TSDBs place time at the forefront of data modeling, indexing, retention, and query optimization. The queries in time series workloads often include:
+
+* Finding or aggregating values over time windows (e.g., last 5 minutes, last 30 days).
+* Detecting patterns or anomalies (peaks, troughs, rolling averages).
+* Combining real-time and historical data for a holistic view of a system’s behavior.
+
+This guide will help you understand how to think like a time series database user, and how SurrealDB can accommodate these needs.
+
+## Core concepts of time series modeling
+
+- **Timestamp**: Every record includes at least one timestamp field, typically indicating when the data was created, measured, or observed.
+
+- **Measurement / Metrics**: Time series data often revolves around measurements, like temperature, CPU usage, stock prices. Each measurement can have multiple fields or tags.
+
+- **Tags (or Labels)**: Extra dimensions that categorize data. For instance, a sensor reading might have a `location` or a `device_id` tag. These tags help you filter or group data.
+
+- **Aggregations**: Because time series data can be massive (think thousands of data points per second), it’s common to store or generate aggregated values (e.g., hourly averages or daily sums) for faster analytics.
+
+- **Retention Policies**: Time series datasets can grow exponentially. Many TSDBs support retention policies that drop or downsample older data while keeping recent data at high granularity.
+
+- **Time Buckets**: It’s typical to group data into buckets (e.g., 1-minute, 5-minute, or 1-day intervals) for analytics.
+
+
+## Benefits of using time series databases
+
+- **Efficient Ingestion**: TSDBs are optimized for high write throughput, as time series data often arrives in large bursts or continuous streams.
+
+- **Fast Time-Based Queries**: Data structures are specialized for retrieving data over specific time windows or intervals.
+
+- **Built-In Aggregation and Downsampling**: Many TSDBs offer native functions to summarize data by minute, hour, or other intervals.
+
+- **Scalability**: Time partitioning or sharding strategies make it easier to handle large volumes of time series data.
+
+- **Retention Control**: You can automatically expire older data or keep only aggregated versions to save storage.
+
+
+## Modelling time series data in SurrealDB
+
+Now that we’ve established a common understanding of time series data, let’s explore a practical example using IoT sensor data.
+
+### Modelling events
+The normal way of modelling data in SurrealDB would be as fields in a record, such as `coordinates` or `location`.
+
+```surql
+CREATE sensor:ARF8394AAA SET coordinates = (-2.2743, 51.1857);
+CREATE location:Longleat_House SET built = d'1580-01-01';
+
+CREATE sensor_readings CONTENT {
+    timestamp: time::now(),
+    location: location:Longleat_House,
+    sensor: sensor:ARF8394AAA,
+    temperture_celsius: 28.4,
+    humidity_percent: 55
+};
+```
+
+### Complex record IDs
+
+A more optimised way of working with the `sensor_readings` table in a time series context would however be using an array-based record ID, otherwise known as a complex record ID.
+
+```surql
+-- Array-based record IDs
+CREATE sensor_readings:[
+	location:Longleat_House,
+	sensor:ARF8394AAA,
+    time::now(),
+    28.4
+];
+```
+
+Storing the same information as a record or as part of the ID might look similar at first glance, but under the hood, it’s optimised for efficient range selection, through the magic of [range queries](/docs/reference/query-language/language-primitives/data-types/record-ids#record-ranges) on record IDs. As all values in SurrealDB can be [compared and sorted](/docs/reference/query-language/language-primitives/data-types/values#comparing-and-ordering-values), putting the most crucial information into the record ID itself allows you to query only a range of record IDs instead of a whole table.
+
+This effectively means fewer worries about selecting the right indexes or partitions since the ID field already does that naturally in your data as you scale with the performance of a key-value lookup regardless of size!
+
+```surql
+-- Select all the temperature readings from the start until now 
+-- from a specific sensor
+SELECT 
+    id[0] AS location,
+    id[2] AS at,
+    id[3] AS temperature_celsius
+FROM sensor_readings:[
+	location:Longleat_House,
+    sensor:ARF8394AAA,
+    time::now() - 1d
+]..=[
+    location:Longleat_House,
+    sensor:ARF8394AAA,
+	time::now(),
+];
+```
+
+```surql title="Output"
+[
+	{
+		at: d'2025-04-17T04:04:54.842Z',
+		location: location:Longleat_House,
+		temperature_celsius: 28.4f
+	}
+]
+```
+
+This is however not the only way of doing it, you can have the metadata in the ID and sensor data in the record itself, like in the example below. Now the record ID only contains the fields useful in a range query, while the remaining fields are kept in the record itself.
+
+```surql
+CREATE sensor_readings:[
+	location:Longleat_House,
+	sensor:ARF8394AAA,
+    time::now()
+] CONTENT {
+    temperature_celsius: 28.4,
+    humidity: 55
+};
+
+-- Select all the temperature readings from the start until now 
+-- from a specific sensor
+SELECT 
+    id[0] AS location,
+    id[2] AS at,
+    temperature_celsius
+FROM sensor_readings:[
+	location:Longleat_House,
+    sensor:ARF8394AAA,
+    time::now() - 1d
+]..=[
+    location:Longleat_House,
+    sensor:ARF8394AAA,
+	time::now(),
+];
+```
+
+```surql title="Output"
+[
+	{
+		at: d'2025-04-17T05:25:00.030Z',
+		location: location:Longleat_House,
+		temperature_celsius: 28.4f
+	}
+]
+```
+
+### IDs inside IDs
+The last thing to note here is that we’ve actually been using record IDs inside our complex record IDs! This is known as a [record link](/docs/reference/query-language/language-primitives/record-links), which allows us to reduce the fields in our main time series table to only the necessary ones by offloading most of the metadata to connected tables.
+
+In our case we have:
+
+- `location:Longleat_House`, which refers to the `Longleat_House` ID in the `location` table. There we put all the metadata about the location itself such as [geo coordinates](/docs/reference/query-language/language-primitives/data-types/geometries).
+- `sensor:ARF8394AAA`, which refers to the `ARF8394AAA` ID on the `sensor` table. There we could put all the metadata about the sensor such as location, firmware, when it was bought and when it needs maintenance.
+
+It’s very easy and performant to get the connected data, since you don’t have to do any table scans for that either since it links directly to a specific record on a specific table! In the example below, with time for the sensor readings set exactly to the hour (`2024-08-13T05:00:00`), the record ID is easy to predict.
+
+```surql
+CREATE sensor:ARF8394AAA SET coordinates = (-2.2743, 51.1857);
+CREATE location:Longleat_House SET built = d'1580-01-01';
+
+-- location + sensor + easy to predict timestamp
+CREATE sensor_readings:[
+	location:Longleat_House,
+	sensor:ARF8394AAA,
+    d'2024-08-13T05:00:00Z'
+] CONTENT {
+    temperature_celsius: 28.4,
+    humidity: 55
+};
+
+-- Select all fields in the ID and the coordinates field from the sensor table
+SELECT id, id[1].coordinates AS sensor_coordinates
+FROM sensor_readings:[
+	location:Longleat_House,
+	sensor:ARF8394AAA,
+    d'2024-08-13T05:00:00Z'
+];
+```
+
+```surql title="Output"
+[
+	{
+		id: sensor_readings:[
+			location:Longleat_House,
+			sensor:ARF8394AAA,
+			d'2024-08-13T05:00:00Z'
+		],
+		sensor_coordinates: (-2.2743, 51.1857)
+	}
+]
+```
+
+Now that we’ve explored a bit how to store and query event data, let’s turn this data into metrics.
+
+### Modelling metrics
+For doing metrics in SurrealDB you can choose one or combine:
+
+- **Pre-computed table views**
+- **Live Queries**
+- **Drop tables**
+- **Custom events**
+
+#### Pre-computed table views
+Our [pre-computed table views](/docs/reference/query-language/statements/define/table#pre-computed-table-views) are most similar to event-based, incrementally updating, materialised views. Practically, this means our downsampled metrics will always be up to date as it incrementally updates in near real-time when we add more records to the sensor_readings table.
+
+```surql
+-- Define a table view which aggregates data from the sensor_readings table
+DEFINE TABLE daily_measurements_by_location AS
+	SELECT
+    id[0] AS location,
+		time::day(id[2]) AS day,
+		math::mean(temperature_celsius) AS avg_temperture_celsius,
+		math::mean(humidity) AS avg_humidity_percent
+	FROM sensor_readings
+	GROUP BY id[0];
+
+SELECT * FROM daily_measurements_by_location;
+```
+
+```surql title="Output"
+[
+	{
+		avg_humidity_percent: 55dec,
+		avg_temperture_celsius: 28.4dec,
+		day: 13,
+		id: daily_measurements_by_location:[
+			location:Longleat_House
+		],
+		location: location:Longleat_House
+	}
+]
+```
+
+For real-time visualisation of our metrics we can then use [Live Queries](/docs/reference/query-language/statements/live-select) to stream real-time updates to our client, such as a BI dashboard or embedded analytics code.
+
+```surql
+LIVE SELECT * FROM daily_measurements_by_location;
+```
+
+#### Drop tables
+
+[Drop tables](/docs/reference/query-language/statements/define/table#example-usage) are pretty unique tables that drop all writes once they have been written. A view can be defined on a table whether it is a `DROP` table or not, but `DROP` is recommended if you have no reason to directly query the table that provides the data for the aggregated view.
+
+```surql
+-- Drop all writes to the sensor_readings table.
+-- We don't need every these readings and can view them
+-- via daily_measurements_by_location instead
+DEFINE TABLE sensor_readings DROP;
+```
+
+These tables can be very useful in a time series context if you want to capture very high-frequency data but only care about storing the aggregated downsampled metrics. They are typically used in combination with either the table views or custom events, such that the metrics are calculated then the underlying data is automatically dropped.
+
+When combining drop tables, table views and live queries, you have a very easy-to-set up, event-based and real-time solution from capturing events, creating metrics, dropping stale data and live selects for visualisation.
+
+#### Custom events
+If you have something even more bespoke in mind, you can even [create your own event triggers](/docs/reference/query-language/statements/define/event) based on when a record is created, updated or deleted. You can include any valid SurrealQL inside the event.
+
+For example, we can create a simple real-time anomaly detection and notification solution using just SurrealQL events and functions in 5 steps.
+
+1. Define a event to trigger when a record is added to the sensor_readings table.
+2. Get the desired time range you want to track.
+3. Calculate both the upper and lower threshold for an outlier, using the standard Q1 - 1.5 * IQR formula for the low outliers and Q3 + 1.5 * IQR formula for the high outliers.
+4. Check if the current temperature is a low or high outlier.
+5. Send an [http::post](/docs/reference/query-language/functions/database-functions/http#httppost) request with the outlier details.
+
+```surql
+-- Trigger the event on when a record is created
+DEFINE EVENT sensor_anomaly_notification ON sensor_readings WHEN $event = 'CREATE'
+THEN {
+    -- Get the desired time range you want to track
+    -- here we're grabing just the past hour
+    LET $location = $after[0];
+    LET $sensor = $after[1];
+    LET $temp_past_hour = (
+            SELECT VALUE temperature_celsius FROM sensor_readings:[
+                $location,
+                $sensor,
+                time::now() - 1h,
+                ]..=[
+                $location,
+                $sensor,
+                time::now()
+            ]);
+    -- Calculate both the upper and lower threshold for an outlier
+    -- using the standard Q1 - 1.5 * IQR formula for the low outliers
+    LET $low_outliers = (
+        RETURN math::percentile($temp_past_hour, 25) - 1.5 * math::interquartile($temp_past_hour)
+    );
+    -- Q3 + 1.5 * IQR formula for the high outliers
+    LET $high_outliers = (
+        RETURN math::percentile($temp_past_hour, 75) + 1.5 * math::interquartile($temp_past_hour)
+    );
+    
+    -- If a low outlier is found send a http post request
+    -- with the outlier details
+    IF $after.temperature_celsius < $low_outliers {
+        http::post('https://jsonplaceholder.typicode.com/posts', {
+            id: rand::ulid(),
+            outlier: $after,
+            message: 'Outlier Detected: low temperature'
+        });
+    };
+
+    -- If a high outlier is found send a http post request
+    -- with the outlier details
+    IF $after.temperature_celsius > $high_outliers {
+        http::post('https://jsonplaceholder.typicode.com/posts', {
+            id: rand::ulid(),
+            outlier: $after,
+            message: 'Outlier Detected: high temperature'
+        });
+    };
+};
+```
+
+### Async events
+
+If you need an event to execute in the background out of the main transaction in which they are called, you can use an [async event](/docs/reference/query-language/statements/define/event#async-events). This can be useful for events that take a certain amount of time to process. The tradeoff is that your read data will not be consistent until the event or events have finished processing. This is what is known as *eventual consistency*.
+
+## SurrealDB vs specialised time series databases
+There are many specialised time series databases out there, so where does SurrealDB fit in?
+
+The advantages SurrealDB has over specialised time series databases are:
+
+- That you can combine our time series functionality with the rest of our multi-model database features. For example, doing full-text search and vector search on your log data.
+- No need to learn another query language just for time series. SurrealDB has a unified query language for all its features.
+
+- Connect and enrich your metrics easily, instead of having them being siloed in a separate system. You can have all your data in one place with zero ETL for your various use cases. Whether you’re doing transactional, analytical, ML and AI applications, SurrealDB covers a lot of the use cases a modern application needs.
+
+The advantages specialised time series databases have over SurrealDB currently are:
+
+- More advanced time series features such as custom data retention policies and better data compression.
+
+Whether you pick SurrealDB for your time series use cases depends mostly on whether you are looking to lower your total system complexity or if you are looking for another specialised solution.

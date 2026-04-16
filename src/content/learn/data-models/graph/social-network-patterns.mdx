@@ -1,0 +1,215 @@
+---
+position: 6
+title: Social network patterns
+description: Model follows, friendships, and interaction histories with graph edges, using weighted relations and counted edges to rank “strongest” ties in a toy social graph.
+---
+
+
+# Social network patterns
+
+Social products are a classic graph use case: **people** (or accounts) are nodes, and **follows**, **likes**, **friendships**, and **messages** are edges, often with timestamps or weights on the edge row.
+
+SurrealDB fits this well because edges are tables: you can store how strong a tie is, or derive strength from repeated interactions, without cramming that into either user profile.
+
+## Weight on the edge record
+
+These examples use a small `npc` population and random pairwise interactions. Each `knows` edge accumulates a `greeted` counter whenever two NPCs interact again.
+
+```surql
+-- Create 4 'npc' records
+CREATE |npc:1..5|;
+
+FOR $npc IN SELECT * FROM npc {
+    -- Give each npc 20 random interactions
+    FOR $_ IN 0..20 {
+      -- Looks for a random NPC, use array::complement to filter out self
+      LET $counterpart = rand::enum(array::complement((SELECT * FROM npc), [$npc]));
+      -- See if they have a relation yet
+      LET $existing = SELECT * FROM knows WHERE in = $npc.id AND out = $counterpart.id;
+      -- If relation exists, increase 'greeted' by one
+      IF !!$existing {
+        UPDATE $existing SET greeted += 1;
+      -- Otherwise create the relation and set 'greeted' to 1
+      } ELSE {
+        RELATE $npc->knows->$counterpart SET greeted = 1;
+      }  
+    };
+};
+
+SELECT 
+	id, 
+	->knows.{ like_strength: greeted, with: out } AS relations
+	FROM npc;
+```
+
+```surql title="Which NPC each NPC likes the most"
+[
+	{
+		id: npc:1,
+		relations: [
+			{
+				like_strength: 8,
+				with: npc:3
+			},
+			{
+				like_strength: 8,
+				with: npc:4
+			},
+			{
+				like_strength: 4,
+				with: npc:2
+			}
+		]
+	},
+	{
+		id: npc:2,
+		relations: [
+			{
+				like_strength: 10,
+				with: npc:1
+			},
+			{
+				like_strength: 4,
+				with: npc:3
+			},
+			{
+				like_strength: 6,
+				with: npc:4
+			}
+		]
+	},
+	{
+		id: npc:3,
+		relations: [
+			{
+				like_strength: 6,
+				with: npc:2
+			},
+			{
+				like_strength: 3,
+				with: npc:4
+			},
+			{
+				like_strength: 11,
+				with: npc:1
+			}
+		]
+	},
+	{
+		id: npc:4,
+		relations: [
+			{
+				like_strength: 7,
+				with: npc:1
+			},
+			{
+				like_strength: 6,
+				with: npc:3
+			},
+			{
+				like_strength: 7,
+				with: npc:2
+			}
+		]
+	}
+]
+```
+
+## Counting parallel edges instead
+
+If each interaction is its own edge row, **aggregate** to find the strongest ties:
+
+```surql
+-- Create 4 'npc' records
+CREATE |npc:1..5|;
+
+FOR $npc IN SELECT * FROM npc {
+    -- Give each npc 20 random interactions
+    FOR $_ IN 0..20 {
+      -- Looks for a random NPC, use array::complement to filter out self
+      LET $counterpart = rand::enum(array::complement((SELECT * FROM npc), [$npc]));
+      RELATE $npc->greeted->$counterpart;
+    };
+};
+
+SELECT 
+	count() AS like_strength, 
+	in AS npc, 
+	out AS counterpart
+FROM greeted
+GROUP BY npc, counterpart;
+```
+
+```surql title="Which NPC each NPC likes the most"
+[
+	{
+		counterpart: npc:2,
+		like_strength: 6,
+		npc: npc:1
+	},
+	{
+		counterpart: npc:3,
+		like_strength: 9,
+		npc: npc:1
+	},
+	{
+		counterpart: npc:4,
+		like_strength: 5,
+		npc: npc:1
+	},
+	{
+		counterpart: npc:1,
+		like_strength: 9,
+		npc: npc:2
+	},
+	{
+		counterpart: npc:3,
+		like_strength: 6,
+		npc: npc:2
+	},
+	{
+		counterpart: npc:4,
+		like_strength: 5,
+		npc: npc:2
+	},
+	{
+		counterpart: npc:1,
+		like_strength: 10,
+		npc: npc:3
+	},
+	{
+		counterpart: npc:2,
+		like_strength: 7,
+		npc: npc:3
+	},
+	{
+		counterpart: npc:4,
+		like_strength: 3,
+		npc: npc:3
+	},
+	{
+		counterpart: npc:1,
+		like_strength: 6,
+		npc: npc:4
+	},
+	{
+		counterpart: npc:2,
+		like_strength: 4,
+		npc: npc:4
+	},
+	{
+		counterpart: npc:3,
+		like_strength: 10,
+		npc: npc:4
+	}
+]
+```
+
+## Friendship and symmetric ties
+
+For mutual “friend” relations where direction should not matter, combine [unique indexes on sorted endpoints](/docs/learn/data-models/graph/creating-relations#unique-index-for-relations-between-equals) with [`<->` traversal](/docs/learn/data-models/graph/graph-traversal#querying-symmetric-between-equals-relations) so you query both orientations consistently.
+
+## Related guides
+
+* [Record links vs graph relations](/docs/learn/data-models/graph/record-links-vs-graph-relations), when edges win for interaction metadata and scoring.
+* [Graph traversal](/docs/learn/data-models/graph/graph-traversal), arrow syntax for multi-hop social feeds.

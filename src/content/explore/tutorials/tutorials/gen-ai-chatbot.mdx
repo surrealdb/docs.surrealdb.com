@@ -1,0 +1,715 @@
+---
+position: 3
+title: Make a GenAI chatbot
+description: "In this guide, you'll learn how to use LangChain Python components, Ollama, and SurrealDB to make a GenAI chatbot."
+---
+
+# Make a GenAI chatbot using GraphRAG with SurrealDB and LangChain
+
+## What is traditional RAG
+
+Retrieval-Augmented Generation (RAG) is an AI technique that enhances the capabilities of large language models (LLMs) by allowing them to retrieve relevant information from a knowledge base *before* generating a response. It uses vector similarity search to find the most relevant document chunks, which are then provided as additional context to the LLM, enabling the LLM to produce more accurate and grounded responses.
+
+## What is GraphRAG
+
+Graph RAG is an advanced technique. It leverages the structured, interconnected nature of knowledge graphs to provide the LLM with a richer, more contextualised understanding of the information, leading to more accurate, coherent, and less “hallucinated” responses.
+
+<Tabs>
+<TabItem label="Python">
+
+For the Python example we are going to use LangChain Python components, Ollama, and SurrealDB.
+
+## Flow overview
+
+0. Ingest data (categorised health symptoms and common treatments)
+1. Ask the user about their symptoms
+2. Find relevant documents in the DB by similarity
+3. Execute vector search in DB
+4. Invoke chain to find related common treatments
+5. Chain asks the LLM to generate graph query
+6. Chain executes the query
+7. Query graph
+8. Chain asks the LLM to summarise the results and generate an answer
+9. Respond to the user
+
+![Communication diagram for the GraphRAG solution and the flow listed above](d1h8hovg5t0c73ch7pvg)
+
+<br/>
+
+## First step: ingest the data
+
+For this example we have a YAML file with categorised symptoms and their common treatments.
+
+We want to store this in a vector store so we can query it using vector similarity search.
+
+We also want to represent the data relations in a graph store, so we can run graph queries to retrieve those relationships (e.g. treatments related to symptoms).
+
+```yaml
+- category: General Symptoms
+  symptoms:
+    - name: Fever
+      description: Elevated body temperature, usually above 100.4°F (38°C).
+      medical_practice: General Practice, Internal Medicine, Pediatrics
+      possible_treatments:
+        - Antipyretics (e.g., ibuprofen, acetaminophen)
+        - Rest
+        - Hydration
+        - Treating the underlying cause
+
+```
+
+<br />
+
+Let’s instantiate the following LangChain python components:
+
+- **Vector Store** ([SurrealDBVectorStore](https://python.langchain.com/docs/integrations/vectorstores/surrealdb/))
+- **Graph Store** (SurrealDBGraph)
+- **Embeddings** ([OllamaEmbeddings](https://python.langchain.com/docs/integrations/text_embedding/ollama/), or any other model from the [Embedding models](https://python.langchain.com/docs/integrations/text_embedding/))
+
+...and create a SurrealDB connection:
+
+```python
+# DB connection
+conn = Surreal(url)
+conn.signin({"username": user, "password": password})
+conn.use(ns, db)
+
+# Vector Store
+vector_store = SurrealDBVectorStore(
+    OllamaEmbeddings(model="llama3.2"),
+    conn
+)
+
+# Graph Store
+graph_store = SurrealDBGraph(conn)
+```
+
+Note that the `SurrealDBVectorStore` is instantiated with `OllamaEmbeddings`. This LLM model will be used when inserting documents to generate their embeddings vector.
+
+## Populating the vector store
+
+With the vector store instantiated, we are now ready to populate it.
+
+```python
+# Parsing the YAML into a Symptoms dataclass
+with open("./symptoms.yaml", "r") as f:
+    symptoms = yaml.safe_load(f)
+    assert isinstance(symptoms, list), "failed to load symptoms"
+    for category in symptoms:
+        parsed_category = Symptoms(category["category"], category["symptoms"])
+        for symptom in parsed_category.symptoms:
+            parsed_symptoms.append(symptom)
+            symptom_descriptions.append(
+                Document(
+                    page_content=symptom.description.strip(),
+                    metadata=asdict(symptom),
+                )
+            )
+
+# This calculates the embeddings and inserts the documents into the DB
+vector_store.add_documents(symptom_descriptions)
+
+```
+
+<br />
+
+## Stitching the graph together
+
+```python
+# Find nodes and edges (Treatment -> Treats -> Symptom)
+for idx, category_doc in enumerate(symptom_descriptions):
+    # Nodes
+    treatment_nodes = {}
+    symptom = parsed_symptoms[idx]
+    symptom_node = Node(id=symptom.name, type="Symptom", properties=asdict(symptom))
+    for x in symptom.possible_treatments:
+        treatment_nodes[x] = Node(id=x, type="Treatment", properties={"name": x})
+    nodes = list(treatment_nodes.values())
+    nodes.append(symptom_node)
+
+    # Edges
+    relationships = [
+        Relationship(source=treatment_nodes[x], target=symptom_node, type="Treats")
+        for x in symptom.possible_treatments
+    ]
+    graph_documents.append(
+        GraphDocument(nodes=nodes, relationships=relationships, source=category_doc)
+    )
+
+# Store the graph
+graph_store.add_graph_documents(graph_documents, include_source=True)
+
+```
+
+<br />
+
+## Data ready, let’s chat
+
+LangChain provides different [chat models](https://python.langchain.com/docs/integrations/chat/). We are going to use `ChatOllama` with `llama3.2` to generate a graph query and to explain the result in natural language.
+
+```python
+chat_model = ChatOllama(model="llama3.2", temperature=0)
+```
+
+To generate the graph query based on the user’s prompt, we need to instantiate a QA (Questioning and Answering) Chain component. In this case we are using `SurrealDBGraphQAChain`.
+
+But before querying the graph, we need to find the symptoms in our vector store by doing a similarity search based on the user’s prompt.
+
+```python
+query = click.prompt(
+    click.style("\\nWhat are your symptoms?", fg="green"), type=str
+)
+
+# -- Find relevant docs
+docs = vector_search(query, vector_store, k=3)
+symptoms = get_document_names(docs)
+
+# -- Query the graph
+chain = SurrealDBGraphQAChain.from_llm(
+    chat_model,
+    graph=graph_store,
+    verbose=verbose,
+    query_logger=query_logger,
+)
+ask(f"what medical practices can help with {symptoms}", chain)
+ask(f"what treatments can help with {symptoms}", chain)
+```
+
+<br />
+
+## Running
+
+Clone the [repository](https://github.com/surrealdb/langchain-surrealdb) and follow the instructions in the README of the [graph example](https://github.com/surrealdb/langchain-surrealdb/tree/main/examples/graph).
+
+Running the program will look like this:
+
+```
+What are your symptoms?: i have a runny nose and itchy eyes
+```
+
+<br />
+
+The script tries marginal relevance and similarity searches in the vector store to compare the results, which helps to choose the right one for your specific use case.
+
+```
+max_marginal_relevance_search:
+- Stuffy nose due to inflamed nasal passages or a dripping nose with mucus discharge.
+- An uncomfortable sensation that makes you want to scratch, often without visible skin changes.
+- Feeling lightheaded, unsteady, or experiencing a sensation that the room is spinning.
+
+similarity_search_with_score
+- [40%] Stuffy nose due to inflamed nasal passages or a dripping nose with mucus discharge.
+- [33%] Feeling lightheaded, unsteady, or experiencing a sensation that the room is spinning.
+- [32%] Pain, irritation, or scratchiness in the throat, often made worse by swallowing.
+```
+
+<br />
+
+Then, the QA chain will generate and run a graph query behind the scenes, and generate the responses.
+
+This script is asking our AI two questions based on the user's symptoms:
+
+- Question: what medical practices can help with Nasal Congestion/Runny Nose, Dizziness/Vertigo, Sore Throat
+- Question: what treatments can help with Nasal Congestion/Runny Nose, Dizziness/Vertigo, Sore Throat
+
+For the first question the QA chain component generated this graph query:
+
+```surql
+SELECT <-relation_Attends<-graph_Practice AS practice
+FROM graph_Symptom
+WHERE name IN
+    ["Nasal Congestion/Runny Nose", "Dizziness/Vertigo", "Sore Throat"];
+```
+
+<br />
+
+The result of this query - a Python list of dictionaries containing the medical practice names - are fed to the LLM to generate a nice human readable answer:
+
+```
+Here is a summary of the medical practices that can help with Nasal
+Congestion/Runny Nose, Dizziness/Vertigo, and Sore Throat:
+
+Several medical practices may be beneficial for individuals experiencing
+symptoms such as Nasal Congestion/Runny Nose, Dizziness/Vertigo, and Sore
+Throat. These include Neurology, ENT (Otolaryngology), General Practice, and
+Allergy & Immunology.
+
+Neurology specialists can provide guidance on managing conditions that affect
+the nervous system, which may be related to dizziness or vertigo.
+ENT (Otolaryngology) specialists focus on ear, nose, and throat issues, making
+them a good fit for addressing nasal congestion and runny nose symptoms.
+General Practice physicians offer comprehensive care for various health
+concerns, including those affecting the respiratory system.
+
+Allergy & Immunology specialists can help diagnose and treat allergies that may
+contribute to Nasal Congestion/Runny Nose, as well as provide immunological
+support for overall health.
+```
+
+<br />
+
+The query for the second question (What treatments can help with Nasal Congestion/Runny Nose, Dizziness/Vertigo, Sore Throat), looks like this:
+
+```surql
+SELECT <-relation_Treats<-graph_Treatment AS treatment
+FROM graph_Symptom
+WHERE name IN
+    ["Nasal Congestion/Runny Nose", "Dizziness/Vertigo", "Sore Throat"];
+```
+
+<br />
+
+The LLM will then produce the following output:
+
+```
+Here is a summary of the treatments that can help with Nasal Congestion/Runny
+Nose, Dizziness/Vertigo, and Sore Throat:
+
+
+The following treatments have been found to be effective in
+alleviating symptoms:
+
+- Vestibular rehabilitation
+- Hydration
+- Medications to reduce nausea or dizziness
+- Antihistamines (for allergies)
+- Decongestants (oral or nasal sprays)
+- Saline nasal rinses
+- Humidifiers
+- Throat lozenges/sprays
+- Treating underlying cause (e.g., cold, allergies)
+- Pain relievers (e.g., acetaminophen, ibuprofen)
+- Warm salt water gargles
+```
+
+<br />
+
+</TabItem>
+<TabItem label="Rust">
+
+A medical chatbot using SurrealDB and LangChain can be made in Rust thanks to a crate called [langchain_rust](https://docs.rs/langchain-rust/latest/langchain_rust/) which as of last year [includes support for SurrealDB as a vector store](https://github.com/Abraxas-365/langchain-rust/pull/32). This implementation doesn't (yet!) include [graph queries](/blog/make-a-genai-chatbot-using-graphrag-with-surrealdb-langchain#stitching-the-graph-together), but we can still use classic vector search to find recommendations for treatment for a patient.
+
+To start off, use a command like `cargo new medical_bot` to create a new Cargo project, go into the project directory and add the following under `[dependencies]`.
+
+```toml
+anyhow = "1.0.98"
+langchain-rust = { version = "4.6.0", features = ["surrealdb", "mistralai"] }
+serde = "1.0.219"
+serde_json = "1.0.140"
+serde_yaml = "0.9.34"
+surrealdb = { version = "3.0.4", features = ["kv-mem"] }
+tokio = "1.45.0"
+```
+
+The `langchain-rust` crate comes with OpenAI as a default, and includes a [large number of features](https://docs.rs/crate/langchain-rust/latest/features). We will add `mistralai` to show how easy it is to switch from one platform to another with only about two lines of different code.
+
+The original post assumes that we have a big YAML document with a number of symptoms along with their possible treatments, which is what the `serde_yaml` dependency will let us work with.
+
+```yaml
+- category: General Symptoms
+  symptoms:
+    - name: Fever
+      description: Elevated body temperature, usually above 100.4°F (38°C).
+      medical_practice: General Practice, Internal Medicine, Pediatrics
+      possible_treatments:
+        - Antipyretics (e.g., ibuprofen, acetaminophen)
+        - Rest
+        - Hydration
+        - Treating the underlying cause
+```
+
+To keep the logic simple, we will take only the `description` of each symptom and its `possible_treatments`, giving us two structs that look like this.
+
+```rust
+#[derive(Debug, Deserialize)]
+pub struct SymptomCategory {
+    pub symptoms: Vec<Symptom>
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Symptom {
+    pub description: String,
+    pub possible_treatments: Vec<String>,
+}
+```
+
+Then for each symptom, we will look through the possible treatments to create a document for each with text that looks like the following:
+
+* 'Elevated body temperature, usually above 100.4°F (38°C).' can be treated by 'Antipyretics (e.g., ibuprofen, acetaminophen)'
+* 'Elevated body temperature, usually above 100.4°F (38°C).' can be treated by 'Rest'
+* 'Elevated body temperature, usually above 100.4°F (38°C).' can be treated by 'Hydration'
+* 'Elevated body temperature, usually above 100.4°F (38°C).' can be treated by 'Treating the underlying cause'
+
+This needs to be turned into a [`Document`](https://docs.rs/langchain-rust/latest/langchain_rust/schemas/document/struct.Document.html) struct on the `langchain-rust` side, which looks like this.
+
+```rust
+pub struct Document {
+    pub page_content: String,
+    pub metadata: HashMap<String, Value>,
+    pub score: f64,
+}
+```
+
+The way to create a `Document` is via [`Document::new()`](https://docs.rs/langchain-rust/latest/langchain_rust/schemas/document/struct.Document.html#method.new) which takes a `String` for the `page_content`, followed by an optional `HashMap` for any metadata. The `score` will be 0.0 when inserting and is only used later on when a similarity search is performed to return a `Document`.
+
+For the `metadata`, we will add the other possible treatments so that any user will be able to first see a recommended treatment for a symptom, followed by all possible treatments for reference.
+
+The `Value` part of the `Document` struct is a [`serde_json`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html) `Value`, which is why we have `serde_json` inside our `Cargo.toml` as well.
+
+All in all, the logic to grab the `YAML` file and turn it ito a `Vec` of `Document`s looks like this.
+
+```rust
+fn get_docs() -> Result<Vec<Document>, Error> {
+    let yaml_str = std::fs::read_to_string("symptoms.yaml")?;
+    let categories: Vec<SymptomCategory> = serde_yaml::from_str(&yaml_str)?;
+
+    let symptoms = categories
+        .into_iter()
+        .flat_map(|cat| cat.symptoms)
+        .collect::<Vec<Symptom>>();
+    Ok(symptoms
+        .into_iter()
+        .flat_map(|symptom| {
+            let metadata = HashMap::from([
+                (
+                    "possible treatments".to_string(),
+                    Value::from(symptom.possible_treatments.clone()),
+                )
+            ]);
+            symptom
+                .possible_treatments
+                .into_iter()
+                .map(|treat| {
+                    Document::new(format!("'{}' can be treated by '{treat}'.", symptom.description.clone()))
+                        .with_metadata(metadata.clone())
+                })
+                .collect::<Vec<Document>>()
+        })
+        .collect::<Vec<Document>>())
+}
+```
+
+With this taken care of, it's time to do some setup inside `main()`. First we need to start running the database, which can be run in memory or via some other path such as an address to a [Surreal Cloud](/cloud) or a [locally running instance](/docs/reference/cli/surrealdb-cli/commands/start).
+
+```rust
+let database_url = std::env::var("DATABASE_URL").unwrap_or("memory".to_string());
+
+let db = surrealdb::engine::any::connect(database_url).await?;
+db.query("DEFINE NAMESPACE test; USE NAMESPACE test; DEFINE DATABASE test;")
+    .await?;
+
+//  Uncomment the following lines to authenticate if necessary
+//  .user(surrealdb::opt::auth::Root {
+//      username: "root".into(),
+//      password: "secret".into(),
+//  });
+
+db.use_ns("test").await?;
+db.use_db("test").await?;
+```
+
+The next step is to initialise an embedder from the `langchain-rust` crate. Here we have the choice of an `OpenAiEmbedder` or `MistralAIEmbedder` thanks to the added feature flag.
+
+After that comes a `StoreBuilder` struct used to initiate a SurrealDB `Store`, which takes an embedder, a database, and a number of dimensions - 1536 in this case for OpenAI. If using Mistral, the dimensions would be 1024.
+
+Note that we are wrapping this in an `Arc` so that the store can start adding the documents on startup inside a separate task without making the user wait to see any CLI output.
+
+At the very end is an `.initialize()` method which defines some tables and fields which will be used when doing similarity searches.
+
+```rust
+// Initialize Embedder
+let embedder = OpenAiEmbedder::default();
+// Embedding size is 1024 in this case
+// let embedder = MistralAIEmbedder::try_new()?;
+
+// Initialize the SurrealDB Vector Store
+let store = Arc::new(
+    StoreBuilder::new()
+        .embedder(embedder)
+        .db(db)
+        .vector_dimensions(1536)
+        .build()
+        .await
+        .map_err(|e| anyhow!(e.to_string()))?,
+);
+
+store
+    .initialize()
+    .await
+    .map_err(|e| anyhow!(e.to_string()))?;
+```
+
+Then we will clone the `Arc` to allow the `store` to be passed into a new blocking task to add the `Vec<Document>` returned by our `get_docs()` function. Inside this is a method called `add_documents()` which is a built-in method from the `rust-langchain` crate.
+
+```rust
+let arced = Arc::clone(&store);
+
+tokio::task::spawn_blocking(move || {
+    let docs = get_docs()?;
+    Handle::current()
+        .block_on(arced.add_documents(&docs, &VecStoreOptions::default()))
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok::<(), Error>(())
+});
+```
+
+While the store adds these documents in its own task, we will start a simple CLI that asks the user for a query, and then passes this into the built-in `.similarity_search()` method. This method allows us to specify the number of documents to return and a minimum similarity score, to which we will go with 2 and 0.6.
+
+The rest of the code just involves setting up a simple loop to handle user output, along with the results of the output of the `.similarity_search()` method.
+
+```rust
+    loop {
+        // Ask for user input
+        print!("Query> ");
+        stdout().flush()?;
+        let mut query = String::new();
+        stdin().read_line(&mut query)?;
+
+        let results = store
+            .similarity_search(
+                &query,
+                2,
+                &VecStoreOptions::default().with_score_threshold(0.6),
+            )
+            .await
+            .map_err(|e| anyhow!(e.to_string()))?;
+
+        if results.is_empty() {
+            println!("No results found.");
+        } else {
+            println!("Possible symptoms:");
+            results.iter().for_each(|r| {
+                println!("{}\n All possible treatments: ", r.page_content);
+                if let Some(Value::Array(array)) = r.metadata.get("possible treatments") {
+                    for val in array {
+                        if let Value::String(s) = val {
+                            println!("  {s}");
+                        }
+                    }
+                };
+                println!();
+            });
+        };
+    }
+```
+
+As the output shows, our bot is capable of returning meaningful results despite only having access to data from 236 lines of YAML!
+
+```
+Query> I've been exercising a lot outside and it's really hot.
+Possible symptoms:
+'Elevated body temperature, usually above 100.4°F (38°C).' can be treated by 'Hydration'.
+ All possible treatments: 
+  Antipyretics (e.g., ibuprofen, acetaminophen)
+  Rest
+  Hydration
+  Treating the underlying cause
+
+'Elevated body temperature, usually above 100.4°F (38°C).' can be treated by 'Rest'.
+ All possible treatments: 
+  Antipyretics (e.g., ibuprofen, acetaminophen)
+  Rest
+  Hydration
+  Treating the underlying cause
+```
+
+```
+Query> I get dizzy sometimes
+Possible symptoms:
+'Feeling lightheaded, unsteady, or experiencing a sensation that the room is spinning.' can be treated by 'Medications to reduce nausea or dizziness'.
+ All possible treatments: 
+  Addressing underlying cause (e.g., inner ear issues, low blood pressure)
+  Vestibular rehabilitation
+  Medications to reduce nausea or dizziness
+  Hydration
+
+'Feeling lightheaded, unsteady, or experiencing a sensation that the room is spinning.' can be treated by 'Addressing underlying cause (e.g., inner ear issues, low blood pressure)'.
+ All possible treatments: 
+  Addressing underlying cause (e.g., inner ear issues, low blood pressure)
+  Vestibular rehabilitation
+  Medications to reduce nausea or dizziness
+  Hydration
+```
+
+```
+Query> What should I do in life?
+Possible symptoms:
+'Feeling unusually drained, lacking energy, or experiencing persistent exhaustion.' can be treated by 'Lifestyle modifications (diet, exercise)'.
+ All possible treatments: 
+  Rest and adequate sleep
+  Lifestyle modifications (diet, exercise)
+  Addressing underlying medical conditions (e.g., anemia, thyroid disorders)
+  Stress management
+
+'Feeling unusually drained, lacking energy, or experiencing persistent exhaustion.' can be treated by 'Stress management'.
+ All possible treatments: 
+  Rest and adequate sleep
+  Lifestyle modifications (diet, exercise)
+  Addressing underlying medical conditions (e.g., anemia, thyroid disorders)
+  Stress management
+```
+
+Want to give it a try yourself? Save the content at [this link](https://github.com/surrealdb/langchain-surrealdb/blob/main/examples/graph/symptoms.yaml) to the filename `symptoms.yaml` and then copy the following code into your cargo project, then set the env var `OPENAI_API_KEY` or `MISTRAL_API_KEY` along with `cargo run`.
+
+You can also give a crate called [archiver](https://crates.io/crates/archiver) a try, which has its own command-line interface to use SurrealDB with Ollama via the same crate we used in this post.
+
+```rust
+// To run this example execute: `cargo run` in the folder. Be sure to have an OpenAPI key
+// set to the OPENAI_API_KEY env var
+// or MISTRAL_API_KEY if using Mistral
+
+use anyhow::{Error, anyhow};
+use langchain_rust::{
+    embedding::{MistralAIEmbedder, openai::openai_embedder::OpenAiEmbedder},
+    schemas::Document,
+    vectorstore::{VecStoreOptions, VectorStore, surrealdb::StoreBuilder},
+};
+use serde::Deserialize;
+use serde_json::Value;
+use std::{
+    collections::HashMap,
+    io::{Write, stdin, stdout},
+    sync::Arc,
+};
+use tokio::runtime::Handle;
+
+#[derive(Debug, Deserialize)]
+pub struct SymptomCategory {
+    pub category: String,
+    pub symptoms: Vec<Symptom>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Symptom {
+    pub name: String,
+    pub description: String,
+    pub possible_treatments: Vec<String>,
+}
+
+fn get_docs() -> Result<Vec<Document>, Error> {
+    let yaml_str = std::fs::read_to_string("symptoms.yaml")?;
+    let categories: Vec<SymptomCategory> = serde_yaml::from_str(&yaml_str)?;
+
+    let symptoms = categories
+        .into_iter()
+        .flat_map(|cat| cat.symptoms)
+        .collect::<Vec<Symptom>>();
+    Ok(symptoms
+        .into_iter()
+        .flat_map(|symptom| {
+            let metadata = HashMap::from([(
+                "possible treatments".to_string(),
+                Value::from(symptom.possible_treatments.clone()),
+            )]);
+            symptom
+                .possible_treatments
+                .into_iter()
+                .map(|treat| {
+                    Document::new(format!(
+                        "'{}' can be treated by '{treat}'.",
+                        symptom.description.clone()
+                    ))
+                    .with_metadata(metadata.clone())
+                })
+                .collect::<Vec<Document>>()
+        })
+        .collect::<Vec<Document>>())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    let database_url = std::env::var("DATABASE_URL").unwrap_or("memory".to_string());
+
+    let db = surrealdb::engine::any::connect(database_url).await?;
+    db.query("DEFINE NAMESPACE test; USE NAMESPACE test; DEFINE DATABASE test;")
+        .await?;
+
+    //  Uncomment the following lines to authenticate if necessary
+    //  .user(surrealdb::opt::auth::Root {
+    //      username: "root".into(),
+    //      password: "secret".into(),
+    //  });
+
+    db.use_ns("test").await?;
+    db.use_db("test").await?;
+
+    // Initialize Embedder
+    let embedder = OpenAiEmbedder::default();
+    // Embedding size is 1024 in this case
+    // let embedder = MistralAIEmbedder::try_new()?;
+
+    // Initialize the SurrealDB Vector Store
+    let store = Arc::new(
+        StoreBuilder::new()
+            .embedder(embedder)
+            .db(db)
+            .vector_dimensions(1536)
+            .build()
+            .await
+            .map_err(|e| anyhow!(e.to_string()))?,
+    );
+
+    // Intialize the tables in the database. This is required to be done only once.
+    store
+        .initialize()
+        .await
+        .map_err(|e| anyhow!(e.to_string()))?;
+
+    let arced = Arc::clone(&store);
+
+    tokio::task::spawn_blocking(move || {
+        let docs = get_docs()?;
+        Handle::current()
+            .block_on(arced.add_documents(&docs, &VecStoreOptions::default()))
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok::<(), Error>(())
+    });
+
+    loop {
+        // Ask for user input
+        print!("Query> ");
+        stdout().flush()?;
+        let mut query = String::new();
+        stdin().read_line(&mut query)?;
+
+        let results = store
+            .similarity_search(
+                &query,
+                2,
+                &VecStoreOptions::default().with_score_threshold(0.6),
+            )
+            .await
+            .map_err(|e| anyhow!(e.to_string()))?;
+
+        if results.is_empty() {
+            println!("No results found.");
+        } else {
+            println!("Possible symptoms:");
+            results.iter().for_each(|r| {
+                println!("{}\n All possible treatments: ", r.page_content);
+                if let Some(Value::Array(array)) = r.metadata.get("possible treatments") {
+                    for val in array {
+                        if let Value::String(s) = val {
+                            println!("  {s}");
+                        }
+                    }
+                };
+                println!();
+            });
+        };
+    }
+    Ok(())
+}
+```
+
+</TabItem>
+
+</Tabs>
+
+## Ready to build?
+
+Find all the code in the [repository examples](https://github.com/surrealdb/langchain-surrealdb/tree/main/examples/graph).
+
+Get started for free with [Surreal Cloud](https://app.surrealdb.com/signin).
+
+Any questions or thoughts about this or GraphRAG using SurrealDB? Feel free to [drop by our Discord](https://discord.gg/surrealdb) to get in touch.

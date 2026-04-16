@@ -33,6 +33,8 @@ import {
 } from "@surrealdb/ui";
 import { getImageUrl as getBundledImageUrl } from "~/lib/images";
 
+const UI_PREFIX = "@ui/";
+
 const UI_ASSETS: Record<string, string> = {
     brandApple,
     brandAWS,
@@ -91,6 +93,12 @@ export function getImageUrl(
     // If it's already a full URL, return it
     if (imageId.startsWith("http")) return imageId;
 
+    // Handle @ui/ prefixed asset references (e.g. "@ui/pictoML")
+    if (imageId.startsWith(UI_PREFIX)) {
+        const key = imageId.slice(UI_PREFIX.length);
+        return UI_ASSETS[key];
+    }
+
     // Try to get bundled image URL first
     const bundledUrl = getBundledImageUrl(imageId);
     if (bundledUrl) return bundledUrl;
@@ -114,8 +122,6 @@ export function getImageUrl(
 
     return imageId;
 }
-
-const UI_PREFIX = "@ui/";
 
 export function resolveAstImages(ast: Root | AnyNode) {
     visit(ast, "image", (node) => {

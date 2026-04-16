@@ -1,0 +1,135 @@
+---
+position: 2
+title: Middleware
+description: "Chaining custom functions before your API handler so you can share logic on DEFINE API routes."
+---
+
+# Middleware for custom APIs
+
+When you use [`DEFINE API`](/docs/reference/query-language/statements/define/api), the `THEN` block is the handler that decides the HTTP-shaped response. Middleware is everything you run before that handler, such as timeouts, logging, auth checks, or tweaks to the outgoing payload. SurrealDB runs built-in helpers from the [API functions](/docs/reference/query-language/functions/database-functions/api) package alongside your own `fn::` functions, in the order you list them.
+
+Custom middleware functions are ordinary [user-defined functions](/docs/reference/query-language/statements/define/function). Each one receives:
+
+* The current request object (conventionally `$req`).
+* A `next` closure that continues the chain and eventually runs `THEN` when no middleware remains.
+
+You can add extra parameters after those two;such  values are supplied when you attach the function to `DEFINE API` (for example passing in `time::now()` to return the time at which a request was processed).
+
+The function must return an object—that is the response object passed to the next middleware or returned to the client. Names like `$req` and `$next` are only conventions; what matters is the order of arguments and that you actually call `$next($req)` when you want the pipeline to proceed.
+
+## Starting from a handler with no middleware
+
+```surql
+DEFINE API "/custom_response"
+    FOR get
+        THEN {
+            {
+                status: 200,
+                body: {
+                    num: 1
+                }
+            };
+        };
+```
+
+Calling `api::invoke("/custom_response")` returns the body you would expect:
+
+```surql
+{
+	body: {
+		num: 1
+	},
+	context: {},
+	headers: {},
+	status: 200
+};
+```
+
+## Adding a function that adjusts the response
+
+This middleware calls `$next($req)` to obtain the handler's result, then bumps `body.num` by one before returning:
+
+```surql
+DEFINE FUNCTION fn::increment_num($req: object, $next: function) -> object {
+    LET $res = $next($req);
+    $res + { body: { num: $res.body.num + 1 } }
+};
+
+DEFINE API "/custom_response"
+    FOR get
+        MIDDLEWARE
+            fn::increment_num()
+        THEN {
+            {
+                status: 200,
+                body: {
+                    num: 1
+                }
+            };
+        };
+```
+
+Now `api::invoke("/custom_response")` yields `num: 2`, showing that the outer middleware has reshaped what the caller sees.
+
+```surql
+{
+	body: {
+		num: 2
+	},
+	context: {},
+	headers: {},
+	status: 200
+};
+```
+
+## Stacking two pieces of middleware
+
+Order matters when adding middleware, so be sure to list outer effects first if they should wrap everything that follows. Here a timer middleware adds a timestamp into `context`, and increment still adjusts the body:
+
+```surql
+DEFINE FUNCTION fn::start_timer($req: object, $next: function, $called_at: datetime) -> object {
+    LET $res = $next($req);
+    $res + { context: { called_at: $called_at }}
+};
+
+DEFINE FUNCTION fn::increment_num($req: object, $next: function) -> object {
+    LET $res = $next($req);
+    $res + { body: { num: $res.body.num + 1 } }
+};
+
+DEFINE API "/custom_response"
+    FOR get
+        MIDDLEWARE
+            fn::start_timer(time::now()),
+            fn::increment_num()
+        THEN {
+            {
+                status: 200,
+                body: {
+                    num: 1
+                }
+            };
+        };
+
+api::invoke("/custom_response");
+```
+
+Possible output:
+
+```surql
+{
+	body: {
+		num: 2
+	},
+	context: {
+		called_at: d'2026-01-16T01:49:44.115351Z'
+	},
+	headers: {},
+	status: 200
+};
+```
+
+## See also
+
+* [Managing APIs](/docs/learn/querying/custom-apis/managing-apis) — defining routes, path captures, and `$request`.
+* [Custom functions](/docs/learn/querying/concepts-and-guides/custom-functions) — patterns for `fn::` definitions used in middleware.

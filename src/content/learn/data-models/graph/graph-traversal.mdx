@@ -1,0 +1,276 @@
+---
+position: 3
+title: Graph traversal
+description: Use SurrealQL arrow syntax, bidirectional edges, traversals from record IDs, automatic flattening, graph paths in schema fields, and Surrealist’s Explorer to debug paths step by step.
+---
+
+
+# Graph traversal
+
+Graph queries in SurrealDB use SurrealQL’s `->` arrow syntax to walk relationships between records.
+
+## Basic forward and reverse traversals
+
+```surql
+SELECT ->wrote->post.* AS userPosts
+  FROM users:alice;
+```
+
+- `FROM users:alice` starts at that node.
+- `->wrote->posts.*` follows the `wrote` edge to posts and returns full post records as `userPosts`.
+
+Traverse in the reverse direction (for example, from a post to its authors):
+
+```surql
+SELECT <-wrote<-author AS authors
+  FROM post:helloworld;
+```
+
+`<-wrote<-author` means “follow any `wrote` edge **into** this post from an `author`”.
+
+## Chaining paths
+
+From comments, find authors and then all of their comments:
+
+```surql
+SELECT <-wrote<-user->wrote->comment FROM comment;
+```
+
+## Querying symmetric (“between equals”) relations
+
+For edges like `friends_with`, it may be unclear whether a `person` is on the `in` or `out` side. The `<->` operator traverses **both** directions on that edge table:
+
+```surql
+SELECT *, <->friends_with<->person AS friends FROM person;
+```
+
+Each row lists the other people in the relation, regardless of which side they were on:
+
+```surql
+[
+	{
+		friends: [
+			person:one,
+			person:two
+		],
+		id: person:one
+	},
+	{
+		friends: [
+			person:one,
+			person:two
+		],
+		id: person:two
+	}
+]
+```
+
+To drop the current record’s own id from the list, use [`array::complement()`](/docs/reference/query-language/functions/database-functions/array#arraycomplement):
+
+```surql
+SELECT 
+	*, 
+	array::complement(<->friends_with<->person, [id]) AS friends
+FROM person;
+```
+
+```surql title="Output"
+[
+	{
+		friends: [
+			person:two
+		],
+		id: person:one
+	},
+	{
+		friends: [
+			person:one
+		],
+		id: person:two
+	}
+]
+```
+
+For more on this pattern, see the [`RELATE` statement](/docs/reference/query-language/statements/relate#bidirectional-relation-querying) and [Chapter 7 of Aeon's Surreal Renaissance](/learn/book/chapter-07#bidirectional-querying-when-a-relationship-is-equal).
+
+## Traverse directly from a record id
+
+Traversal can start at one or more record IDs **without** wrapping everything in `SELECT`:
+
+```surql
+CREATE ONLY user:mcuserson SET name = "User McUserson";
+CREATE ONLY comment:one SET 
+    text = "I learned something new!", 
+    created_at = time::now();
+CREATE ONLY cat:pumpkin SET name = "Pumpkin";
+
+RELATE user:mcuserson->wrote->comment:one SET
+	location = "Arizona",
+	os = "Windows 11",
+	mood = "happy";
+
+RELATE user:mcuserson->likes->cat:pumpkin;
+```
+
+```surql
+-- Equivalent to:
+-- SELECT VALUE <-wrote<-user FROM ONLY comment:one;
+comment:one<-wrote<-user;
+
+-- Equivalent to:
+-- SELECT VALUE ->likes->cat FROM ONLY user:mcuserson;
+user:mcuserson->likes->cat;
+```
+
+```surql title="Output"
+-------- Query --------
+
+[user:mcuserson]
+
+-------- Query --------
+
+[cat:pumpkin]
+```
+
+To include fields when starting from an id, use destructuring:
+
+```surql
+-- Equivalent to:
+-- SELECT name, ->likes->cat AS cats FROM ONLY user:mcuserson;
+user:mcuserson.{ name, cats: ->likes->cat };
+```
+
+## Automatic flattening in graph queries
+
+When two lookups follow each other, or a filter follows a lookup, results can **flatten** in a way that mirrors the graph shape. This example builds a small org chart and walks up and down `works_for`:
+
+```surql
+CREATE 
+	// One president
+	person:president, 
+	// Two managers
+	person:manager1, person:manager2,
+	// Four employees
+	person:employee1, person:employee2, person:employee3, person:employee4;
+
+// Employees work two to a manager, managers work two to a president
+RELATE [person:manager1, person:manager2]->works_for->person:president;
+RELATE [person:employee1, person:employee2]->works_for->person:manager1;
+RELATE [person:employee3, person:employee4]->works_for->person:manager2;
+
+[person:employee1, person:employee2, person:employee3, person:employee4]
+    ->works_for->person
+    ->works_for->person
+    <-works_for<-person
+    <-works_for<-person;
+```
+
+The result is four arrays, each reflecting the up-and-down path through the president.
+
+You can approximate the same with nested `SELECT` / `map`, but nesting grows quickly:
+
+```surql
+[person:employee1, person:employee2, person:employee3, person:employee4]
+	// Each $p is a single record: an array<record>
+    .map(|$p| SELECT VALUE out FROM works_for WHERE in = $p.id)
+	// Each $p is an array, so now you have to map each item inside that
+    .map(|$p| $p.map(|$p| SELECT VALUE out FROM works_for WHERE in = $p.id))
+    // Now an array<array<array<record>>>
+    .map(|$p| $p.map(|$p| $p.map(|$p| SELECT VALUE in FROM works_for WHERE out = $p.id)))
+    // Now an array<array<array<array<record>>>>
+    .map(|$p| $p.map(|$p| $p.map(|$p| $p.map(|$p| SELECT VALUE in FROM works_for WHERE out = $p.id))));
+```
+
+Graph syntax keeps structure aligned with the traversal. Calling `flatten()` at each step produces a **flat** list of every record seen along the way instead:
+
+```surql
+[person:employee1, person:employee2, person:employee3, person:employee4]
+    .map(|$p| SELECT VALUE out FROM works_for WHERE in = $p.id).flatten()
+    .map(|$p| SELECT VALUE out FROM works_for WHERE in = $p.id).flatten()
+    .map(|$p| SELECT VALUE in FROM works_for WHERE out = $p.id).flatten()
+    .map(|$p| SELECT VALUE in FROM works_for WHERE out = $p.id).flatten();
+```
+
+Treat graph flattening as preserving the **shape** of the walk, not necessarily a single post-hoc array.
+
+## Graph paths in schema fields
+
+Paths are not limited to `SELECT`; they can appear in [`DEFINE FIELD`](/docs/reference/query-language/statements/define/field):
+
+```surql
+DEFINE FIELD employers ON TABLE person VALUE SELECT VALUE <-employs<-company FROM ONLY $this;
+
+CREATE person:1, person:2, company:1;
+RELATE company:1->employs->person:1;
+person:1.*;
+```
+
+A plain `VALUE` field is computed when the record is created or updated; if the `RELATE` runs later, the field can be stale until an `UPDATE`:
+
+```surql
+UPDATE person:1;
+```
+
+```surql title="Output"
+[
+	{
+		employers: [
+			company:1
+		],
+		id: person:1
+	}
+]
+```
+
+A [computed field](/docs/reference/query-language/statements/define/field#computed-fields) is recomputed on read:
+
+```surql
+DEFINE FIELD employers ON TABLE person COMPUTED <-employs<-company;
+
+CREATE person:1, person:2, company:1;
+RELATE company:1->employs->person:1;
+person:1.*;
+```
+
+```surql title="Output"
+{
+	employers: [
+		company:1
+	],
+	id: person:1
+}
+```
+
+## Using Surrealist Explorer to debug paths
+
+Surrealist’s [Explorer view](/docs/explore/surrealist/concepts/exploring-database-records) lets you step through records and relations one hop at a time, useful for building intuition for queries like `SELECT ->wrote->comment FROM user`.
+
+Example setup with two outgoing edges:
+
+```surql
+CREATE user:mcuserson SET name = "User McUserson";
+CREATE comment:one SET 
+    text = "I learned something new!", 
+    created_at = time::now();
+CREATE cat:pumpkin SET name = "Pumpkin";
+
+RELATE user:mcuserson->wrote->comment:one SET
+	location = "Arizona",
+	os = "Windows 11",
+	mood = "happy";
+
+RELATE user:mcuserson->likes->cat:pumpkin;
+```
+
+Walkthrough:
+
+* Open `user`, then `user:mcuserson`.
+* Open the **Relations** tab (outgoing `->`).
+* Follow `wrote` into its edge row, then `comment` to the comment row, matching `->wrote->comment`.
+
+Working backward in the Explorer is a good way to assemble a path while learning the syntax.
+
+## Further reading
+
+* [Recursive traversals](/docs/learn/data-models/graph/recursive-traversals) for `@.{n}` and nested recursive shapes.
+* [Idioms: recursive paths](/docs/reference/query-language/language-primitives/idioms#recursive-paths)

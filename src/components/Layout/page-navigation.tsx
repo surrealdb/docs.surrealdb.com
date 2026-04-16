@@ -1,17 +1,22 @@
 import { Anchor, Box, Flex, Text } from "@mantine/core";
 import { Icon, iconChevronLeft, iconChevronRight } from "@surrealdb/ui";
+import { useMemo } from "react";
 import { usePageContext } from "vike-react/usePageContext";
-import { findCurrentPageIndex, flattenSidebar, type SidebarItem } from "~/utils/sidebar";
+import { findLinkIndex, flattenNavigation, type NavSection } from "~/utils/navigation";
 import classes from "./style.module.scss";
 
 export interface PageNavigationProps {
-    sidebar: SidebarItem[];
+    navigation: NavSection[];
 }
 
-export function PageNavigation({ sidebar }: PageNavigationProps) {
+export function PageNavigation({ navigation }: PageNavigationProps) {
     const { urlPathname } = usePageContext();
-    const pages = flattenSidebar(sidebar);
-    const currentIndex = findCurrentPageIndex(pages, urlPathname);
+
+    const pages = useMemo(() => {
+        return flattenNavigation(navigation);
+    }, [navigation]);
+
+    const currentIndex = findLinkIndex(pages, urlPathname);
 
     if (currentIndex === -1) return null;
 
@@ -28,7 +33,7 @@ export function PageNavigation({ sidebar }: PageNavigationProps) {
             {prev ? (
                 <Anchor
                     className={classes.pageNavigationLink}
-                    href={prev.href}
+                    href={prev.path}
                     underline="never"
                 >
                     <Flex
@@ -53,7 +58,7 @@ export function PageNavigation({ sidebar }: PageNavigationProps) {
                                 c="bright"
                                 inherit
                             >
-                                {prev.label}
+                                {prev.title}
                             </Text>
                         </Box>
                     </Flex>
@@ -64,7 +69,7 @@ export function PageNavigation({ sidebar }: PageNavigationProps) {
             {next ? (
                 <Anchor
                     className={classes.pageNavigationLink}
-                    href={next.href}
+                    href={next.path}
                     underline="never"
                     ta="right"
                 >
@@ -87,7 +92,7 @@ export function PageNavigation({ sidebar }: PageNavigationProps) {
                                 c="bright"
                                 inherit
                             >
-                                {next.label}
+                                {next.title}
                             </Text>
                         </Box>
                         <Icon
