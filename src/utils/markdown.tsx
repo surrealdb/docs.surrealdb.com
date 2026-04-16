@@ -1,4 +1,11 @@
-import { extractHeaders, parseMarkdown, RailroadDiagram, SurrealistMini } from "@surrealdb/ui";
+import {
+    extractHeaders,
+    parseMarkdown,
+    RailroadDiagram,
+    Since,
+    type SinceProps,
+    SurrealistMini,
+} from "@surrealdb/ui";
 import { Boxes } from "~/components/Boxes";
 import { ContentTabItem, ContentTabs } from "~/components/ContentTabs";
 import { IconBox } from "~/components/IconBox";
@@ -28,6 +35,13 @@ export function registerMarkdownComponents() {
         Version: (props: { sdk?: string; prefix?: string }) => <Version {...props} />,
         IconBox,
         Boxes,
+        Since: ({ v, prefix, ...props }: SinceProps) => (
+            <Since
+                v={v}
+                prefix={prefix}
+                {...props}
+            />
+        ),
         Tabs: ContentTabs,
         TabItem: ContentTabItem,
         RailroadDiagram: (props: { ast: string }) => (
