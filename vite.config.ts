@@ -4,7 +4,6 @@ import vike from "vike/plugin";
 import { vikeContentCollectionPlugin } from "vike-content-collection";
 import { vikeSitemap } from "vike-sitemap-generator";
 import { defineConfig } from "vite";
-import tsconfigPaths from "vite-tsconfig-paths";
 
 loadEnvFile(".env.shared");
 
@@ -13,7 +12,6 @@ export default defineConfig({
     plugins: [
         vike(),
         react(),
-        tsconfigPaths(),
         vikeContentCollectionPlugin({
             contentDir: "src/content",
             lastModified: true,
@@ -47,22 +45,11 @@ export default defineConfig({
             ],
             exclude: [/^\/404$/, /^\/500$/],
             trailingSlash: false,
-            // lastmod: async (url) => {
-            //     const entry = findCollectionEntry(url);
-
-            //     if (entry?.lastModified) {
-            //         return entry.lastModified.toISOString().split("T")[0];
-            //     }
-
-            //     const filePath =
-            //         url === "/" ? "src/pages/index/+Page.tsx" : `src/pages${url}/+Page.tsx`;
-
-            //     return getLastModFromGit({ filePath });
-            // },
         }),
     ],
     resolve: {
         dedupe: ["react", "react-dom", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
+        tsconfigPaths: true,
     },
     build: {
         sourcemap: true,
