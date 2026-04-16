@@ -3,13 +3,13 @@ export const labCategories = [
     "Videos",
     "Blogposts",
     "Documentation",
-    "Learning Resources",
+    "Learning resources",
 ] as const;
 
 export const labTopics = [
     "AI",
     "Cloud",
-    "Data Management",
+    "Data management",
     "Examples",
     "Libraries",
     "Security",

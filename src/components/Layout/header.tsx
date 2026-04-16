@@ -50,8 +50,8 @@ export const NAV_LINKS: NavEntry[] = [
         label: "Learn",
         items: [
             { label: "Querying", href: "/docs/learn/querying" },
-            { label: "Schema Management", href: "/docs/learn/schema-management" },
-            { label: "Data Models", href: "/docs/learn/data-models" },
+            { label: "Schema management", href: "/docs/learn/schema-management" },
+            { label: "Data models", href: "/docs/learn/data-models" },
             { label: "Security", href: "/docs/learn/security" },
             { label: "Extensions", href: "/docs/learn/extensions" },
         ],
@@ -61,8 +61,8 @@ export const NAV_LINKS: NavEntry[] = [
         items: [
             { label: "Deployment", href: "/docs/build/deployment" },
             { label: "Migrating", href: "/docs/build/migrating" },
-            { label: "Embedding", href: "/docs/build/embedding" },
-            { label: "AI Agents", href: "/docs/build/ai-agents" },
+            { label: "Embedding SurrealDB", href: "/docs/build/embedding" },
+            { label: "AI agents", href: "/docs/build/ai-agents" },
             { label: "Integrations", href: "/docs/build/integrations" },
         ],
     },
@@ -78,15 +78,15 @@ export const NAV_LINKS: NavEntry[] = [
         label: "Explore",
         items: [
             { label: "Surrealist UI", href: "/docs/explore/surrealist" },
-            { label: "ML Models", href: "/docs/explore/ml-models" },
-            { label: "Tutorials & Demos", href: "/docs/explore/tutorials" },
+            { label: "ML models", href: "/docs/explore/ml-models" },
+            { label: "Tutorials & demos", href: "/docs/explore/tutorials" },
         ],
     },
     {
         label: "Reference",
         items: [
-            { label: "Query Language", href: "/docs/reference/query-language" },
-            { label: "CLI Tools", href: "/docs/reference/cli" },
+            { label: "Query language", href: "/docs/reference/query-language" },
+            { label: "CLI tools", href: "/docs/reference/cli" },
             { label: "REST API", href: "/docs/reference/rest-api" },
         ],
     },

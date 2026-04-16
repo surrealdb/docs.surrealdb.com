@@ -20,7 +20,7 @@ This document outlines the new structure for the SurrealDB docs.
         * What is SurrealDB → doc-surrealdb/index.md, doc-surrealdb/introduction/index.md
         * Architecture → doc-surrealdb/introduction/architecture.md (⚠️ REVIEW)
         * Concepts → doc-surrealdb/introduction/concepts.md (⚠️ REVIEW)
-        * Getting Started → doc-surrealdb/introduction/start.md (⚠️ REVIEW)
+        * Getting started → doc-surrealdb/introduction/start.md (⚠️ REVIEW)
     * SurrealDB Cloud
         * Create a SurrealDB account
         * Create an instance

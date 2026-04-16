@@ -57,7 +57,7 @@ For details on the different commands available, visit the [CLI tool documentati
 
 ## Parameters on startup
 
-A number of parameters can be used on startup such as `sync` to set when to flush the database to the file system. For more details on these parameters, see [this page](/docs/reference/cli/surrealdb-cli/start#supported-parameters-for-rocksdb) for the `start` command or [this page](/docs/reference/cli/surrealdb-cli/environment-variables#surrealkv-environment-variables) to set the same parameters using environment variables.
+A number of parameters can be used on startup such as `sync` to set when to flush the database to the file system. For more details on these parameters, see [this page](/docs/reference/cli/surrealdb-cli/commands/start#supported-parameters-for-rocksdb) for the `start` command or [this page](/docs/reference/cli/surrealdb-cli/environment-variables#rocksdb-environment-variables) to set the same parameters using environment variables.
 
 </TabItem>
 
@@ -65,62 +65,43 @@ A number of parameters can be used on startup such as `sync` to set when to flus
 
 ## SurrealKV
 
-> [!IMPORTANT]
-> Although included in SurrealDB since `2.0`, the storage engine itself is considered beta, and may require additional development and testing before it is ready for production use.
+[SurrealKV](https://github.com/surrealdb/surrealkv) is an embedded storage engine developed in house by SurrealDB: a versioned key-value store built on an LSM (log-structured merge) tree, with optional time-travel reads when versioning is enabled in SurrealDB. It is implemented in Rust and ships with the main SurrealDB release so the storage layer can evolve with SurrealDB’s access patterns.
 
-SurrealKV is an embedded ACID-compliant key-value storage engine with built-in versioning, that allows for historical or temporal querying. It is built entirely in Rust - like the rest of SurrealDB.
+> [!IMPORTANT]
+> SurrealKV is under active development. See [SurrealKV](https://github.com/surrealdb/surrealkv) release notes and SurrealDB release notes before relying on it for critical production workloads.
 
 ## Key features
 
-SurrealKV offers several key features that makes it a powerful and versatile database storage engine:
+At a high level, SurrealKV provides:
 
-- **Embedded Database**: SurrealKV is available for embedded environments.
-
-- **Built-in Versioning**: Start SurrealKV [in versioned mode](/docs/reference/cli/surrealdb-cli/start#surrealkv-beta) to track and access historical versions of your data.
-
-- **Compaction**: Efficient storage management through compaction.
-
-- **Durability Guaranteed**: Persistent storage with protection against system failures.
-
-## When do I use SurrealKV?
-
-While SurrealKV is particularly well-suited for certain use cases, it can differ in terms of performance and limitations from RocksDB. The next section lists the benefits and limitations of SurrealKV to allow you to make a decision on which to use.
+- ACID transactions with snapshot isolation (multiversion concurrency control or MVCC) for concurrent readers and writers.
+- Durability options (immediate vs eventual flush semantics) aligned with how you configure sync behaviour.
+- Built-in versioning for historical / temporal queries in SurrealDB when you opt in. See [versioned startup](/docs/reference/cli/surrealdb-cli/commands/start#supported-parameters-for-surrealkv) and the [`VERSION` clause](/docs/reference/query-language/statements/select#the-version-clause) for details.
+- LSM structure: writes batch into memtables and flush to SSTables.
+- Value log (WiscKey-style): Allows large values to be stored separately with garbage collection.
+- Checkpoint and restore support in the engine for consistent snapshots (see upstream [SurrealKV](https://github.com/surrealdb/surrealkv) documentation).
 
 ## Parameters on startup
 
-A number of parameters can be used on startup such as `versioned` to set whether to use versioning or not, and `sync` to specify when to flush the database to the file system. For more details on these parameters, see [this page](/docs/reference/cli/surrealdb-cli/start#supported-parameters-for-surrealkv) for the `start` command or [this page](/docs/reference/cli/surrealdb-cli/environment-variables#surrealkv-environment-variables) to set the same parameters using environment variables.
+Parameters such as `versioned` and `sync` control versioning and durability. See [Supported parameters for SurrealKV](/docs/reference/cli/surrealdb-cli/commands/start#supported-parameters-for-surrealkv) and [SurrealKV environment variables](/docs/reference/cli/surrealdb-cli/environment-variables#surrealkv-environment-variables).
 
 # SurrealKV performance characteristics and trade-offs
 
 ## Strengths
 
-SurrealKV offers several notable performance advantages:
+- Sequential write path: LSM trees batch writes and flush to sorted runs, which maps well to SSDs and sequential I/O.
+- Concurrent reads: MVCC snapshots let readers proceed without blocking writers in the common case.
+- Scalability: Unlike SurrealKV's earlier designs, the LSM architecture is intended to support datasets larger than RAM by keeping the hot working set in memtables and caching while spilling cold data to SSTables on disk.
 
-From a latency perspective, the system provides constant-time retrieval operations through direct offset lookups. Write operations are primarily bound by sequential I/O performance, and the system maintains minimal disk seeks during normal operation.
+## Limitations and operational notes
 
-In terms of throughput properties, SurrealKV excels through its sequential write patterns that maximize I/O bandwidth utilization. The system's concurrent read operations effectively scale with available CPU cores, while range queries are optimized through the trie's prefix-based organization.
-
-The recovery semantics are robust and predictable. During initial startup, the system performs a full segment scan to rebuild the index. Recovery and repair times scale proportionally with the total segment size and last active segment size, respectively. Data integrity is maintained through CRC verification during recovery. The system handles partial writes effectively by using CRC32 calculations from record fields to detect truncated writes, identifying and truncates incomplete records during recovery, and ensuring transaction logs are recovered to the last valid record boundary.
-
-Operationally, SurrealKV offers significant advantages. The compaction process runs concurrently with normal operations, and the append-only format makes replication procedures straightforward.
-
-## Limitations
-
-SurrealKV does have some important limitations to consider, many of which pertain to SurrealKV [when versioning is enabled](/docs/reference/cli/surrealdb-cli/start#surrealkv-beta):
-
-* Memory management is a key consideration, as the index must reside in memory. Memory usage scales with the number of unique keys, key size distribution, and the number of versions per key.
-
-* Write amplification is another factor to consider. Each update creates a new version, requiring periodic compaction. During compaction, space usage temporarily increases.
-
-* Range query performance varies depending on several factors: key distribution, version history depth, and range size. Large ranges may require multiple disk reads to complete.
-
-* From an operational standpoint, regular compaction is necessary for space reclamation. System restart time increases with log size, and high-cardinality keyspaces can create memory pressure.
+- Compaction and space: Compaction reclaims space but uses extra I/O and temporary disk headroom while merges run.
+- Read amplification: Point lookups may touch several levels; very wide range scans can require more I/O than a single B-tree–style read—plan indexes and query shapes accordingly.
+- Platform notes: The SurrealKV library targets Unix-like desktop and server OSes; WebAssembly is not a supported target for the native engine (browser embeddings use IndexedDB via SurrealDB’s WASM stack, not SurrealKV on disk). Windows support exists with some filesystem caveats. See upstream [platform compatibility](https://github.com/surrealdb/surrealkv#platform-compatibility) notes for more details.
 
 ## Performance implications
 
-SurrealKV is particularly well-suited for certain use cases. It performs optimally with write-intensive workloads, point query dominated patterns, prefix-based access patterns, and time-series data with version tracking.
-
-However, some scenarios may not be ideal for SurrealKV. These include memory-constrained environments, very large key spaces, scan-heavy workloads, and situations involving random updates to large datasets.
+SurrealKV tends to work well for write-heavy workloads, prefix-based access patterns, and time-series or versioned data where append-heavy writes and ordered keys are common. Point lookups are typically efficient, though they may involve checking multiple levels of on-disk data structures. Large range scans can require reading across multiple SSTables and levels, which may increase I/O without careful compaction and schema design. As with most LSM-based systems, performance can degrade in severely memory- or disk-constrained environments without tuning.
 
 </TabItem>
 
