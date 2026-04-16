@@ -147,7 +147,7 @@ const DATA_MODELS: ProductItem[] = [
 
 const INTEGRATIONS: ProductItem[] = [
     {
-        title: "Data Management",
+        title: "Data management",
         description:
             "SurrealDB integrates with Airbyte, Fivetran, and more to help you manage your data.",
         href: "/docs/integrations/data-management",

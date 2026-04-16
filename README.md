@@ -49,7 +49,7 @@ You can [enable/disable HTML streaming](https://vike.dev/stream) for all or spec
 
 ## Mantine
 
-This is a boilerplate for Mantine based on the [Getting Started](https://mantine.dev/docs/getting-started/) guide.
+This is a boilerplate for Mantine based on the [Getting started](https://mantine.dev/docs/getting-started/) guide.
 
 The following Packages are installed:
 
