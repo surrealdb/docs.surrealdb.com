@@ -80,6 +80,7 @@ export const NAV_LINKS: NavEntry[] = [
             { label: "Surrealist UI", href: "/docs/explore/surrealist" },
             { label: "ML models", href: "/docs/explore/ml-models" },
             { label: "Tutorials & demos", href: "/docs/explore/tutorials" },
+            { label: "Labs", href: "/docs/labs" },
         ],
     },
     {

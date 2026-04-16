@@ -39,7 +39,7 @@ const CATEGORY_IMAGES: Record<string, { dark: string; light: string }> = {
     Videos: { dark: catVideosDark, light: catVideosLight },
     Blogposts: { dark: catTutorialsDark, light: catTutorialsLight },
     Documentation: { dark: catIntegrationsDark, light: catIntegrationsLight },
-    "Learning Resources": { dark: catDemosDark, light: catDemosLight },
+    "Learning resources": { dark: catDemosDark, light: catDemosLight },
 };
 
 function getAuthorAvatarUrl(slug: string): string {
@@ -48,7 +48,11 @@ function getAuthorAvatarUrl(slug: string): string {
 
 export function LabCard({ item, isDark }: LabCardProps) {
     const categoryImages = CATEGORY_IMAGES[item.category];
-    const categoryImage = isDark ? categoryImages.dark : categoryImages.light;
+    const categoryImage = categoryImages
+        ? isDark
+            ? categoryImages.dark
+            : categoryImages.light
+        : undefined;
 
     let authorName: string;
     let authorRole: string;

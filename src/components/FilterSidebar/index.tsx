@@ -1,4 +1,5 @@
 import { Box, Checkbox, Divider, Stack, Title } from "@mantine/core";
+import { labLanguages, labTopics } from "~/utils/labs";
 import classes from "./style.module.scss";
 
 export interface FilterSidebarProps {
@@ -68,13 +69,13 @@ export function FilterSidebar({
                         onChange={setLanguageFilter}
                     >
                         <Stack gap="xs">
-                            {/* {labLanguages.map((lang) => (
+                            {labLanguages.map((lang) => (
                                 <Checkbox
                                     key={lang}
                                     value={lang}
                                     label={lang}
                                 />
-                            ))} */}
+                            ))}
                         </Stack>
                     </Checkbox.Group>
                 </Box>
@@ -96,13 +97,13 @@ export function FilterSidebar({
                         onChange={setTopicFilter}
                     >
                         <Stack gap="xs">
-                            {/* {labTopics.map((topic) => (
+                            {labTopics.map((topic) => (
                                 <Checkbox
                                     key={topic}
                                     value={topic}
                                     label={topic}
                                 />
-                            ))} */}
+                            ))}
                         </Stack>
                     </Checkbox.Group>
                 </Box>
