@@ -9,6 +9,7 @@ export const pageSchema = strictObject({
     description: string().optional(),
     position: number().optional(),
     icon: _enum(SECTION_ICONS_NAMES).optional(),
+    sidebar_label: string().optional(),
 });
 
 export type PageSchema = output<typeof pageSchema>;

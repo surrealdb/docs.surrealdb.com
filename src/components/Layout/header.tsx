@@ -45,8 +45,7 @@ function isMenuGroup(entry: NavEntry): entry is NavMenuGroup {
 }
 
 export const NAV_LINKS: NavEntry[] = [
-    { label: "Home", href: "/docs/" },
-    { label: "Start", href: "/docs/start" },
+    { label: "Start", href: "/docs/" },
     {
         label: "Learn",
         items: [

@@ -49,7 +49,12 @@ function collectLinks(folder: FolderNode, baseUrl: string): Positioned<NavLink>[
 
             items.push({
                 value: {
-                    title: category?.metadata.title ?? child.entry?.metadata.title ?? child.name,
+                    title:
+                        category?.metadata.sidebar_label ??
+                        category?.metadata.title ??
+                        child.entry?.metadata.sidebar_label ??
+                        child.entry?.metadata.title ??
+                        child.name,
                     path: href,
                     children: children.length > 0 ? children : undefined,
                 },
@@ -60,7 +65,7 @@ function collectLinks(folder: FolderNode, baseUrl: string): Positioned<NavLink>[
 
             items.push({
                 value: {
-                    title: metadata.title ?? child.name,
+                    title: metadata.sidebar_label ?? metadata.title ?? child.name,
                     path: join(baseUrl, slug),
                 },
                 position: metadata.position ?? 0,
@@ -83,7 +88,10 @@ function buildSection(folder: FolderNode, baseUrl: string): Positioned<NavSectio
     if (folder.entry) {
         items.push({
             value: {
-                title: folder.entry.metadata.title ?? folder.name,
+                title:
+                    folder.entry.metadata.sidebar_label ??
+                    folder.entry.metadata.title ??
+                    folder.name,
                 path: join(baseUrl, folder.entry.slug),
             },
             position: folder.entry.metadata.position ?? 0,
@@ -92,7 +100,7 @@ function buildSection(folder: FolderNode, baseUrl: string): Positioned<NavSectio
 
     return {
         value: {
-            title: category?.metadata.title ?? folder.name,
+            title: category?.metadata.sidebar_label ?? category?.metadata.title ?? folder.name,
             icon: category?.metadata.icon,
             links: sortByPosition(items),
         },
@@ -108,9 +116,10 @@ function buildSection(folder: FolderNode, baseUrl: string): Positioned<NavSectio
  * Deeper folders become links with children. Ordering is driven
  * by the `position` field in `__category` entries and page frontmatter.
  */
-export function buildNavigation(id: string): NavSection[] {
+export function buildNavigation(id: string, baseUrl?: string): NavSection[] {
     const root = getCollectionTree(id) as FolderNode;
     const rootCategory = getCategoryEntry(root);
+    const base = baseUrl ?? id;
 
     const rootLinks: Positioned<NavLink>[] = [];
     const sections: Positioned<NavSection>[] = [];
@@ -118,8 +127,8 @@ export function buildNavigation(id: string): NavSection[] {
     if (root.entry) {
         rootLinks.push({
             value: {
-                title: root.entry.metadata.title ?? "",
-                path: join(id),
+                title: root.entry.metadata.sidebar_label ?? root.entry.metadata.title ?? "",
+                path: join(base),
             },
             position: root.entry.metadata.position ?? 0,
         });
@@ -129,14 +138,14 @@ export function buildNavigation(id: string): NavSection[] {
         if (child.name === "__category") continue;
 
         if (isFolder(child)) {
-            sections.push(buildSection(child, id));
+            sections.push(buildSection(child, base));
         } else {
             const { metadata, slug } = child.entry;
 
             rootLinks.push({
                 value: {
-                    title: metadata.title ?? child.name,
-                    path: join(id, slug),
+                    title: metadata.sidebar_label ?? metadata.title ?? child.name,
+                    path: join(base, slug),
                 },
                 position: metadata.position ?? 0,
             });
@@ -144,7 +153,7 @@ export function buildNavigation(id: string): NavSection[] {
     }
 
     const rootSection: NavSection = {
-        title: rootCategory?.metadata.title ?? "Overview",
+        title: rootCategory?.metadata.sidebar_label ?? rootCategory?.metadata.title ?? "Overview",
         icon: rootCategory?.metadata.icon,
         links: sortByPosition(rootLinks),
     };

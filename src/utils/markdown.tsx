@@ -40,5 +40,7 @@ export function registerMarkdownComponents() {
 }
 
 export function getMarkdownScope(): Record<string, unknown> {
-    return getIconScope();
+    return {
+        ...getIconScope(),
+    };
 }
