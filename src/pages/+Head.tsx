@@ -57,6 +57,10 @@ export function Head() {
                 name="twitter:site"
                 content="@surrealdb"
             />
+            <script
+                src="/analytics.js"
+                defer
+            />
             <FontLinks />
             {breadcrumbJsonLd && (
                 <script
