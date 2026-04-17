@@ -4,6 +4,7 @@ import vike from "vike/plugin";
 import { vikeContentCollectionPlugin } from "vike-content-collection";
 import { vikeSitemap } from "vike-sitemap-generator";
 import { defineConfig } from "vite";
+import { docsSearchCrawlerPlugin } from "./search/plugin";
 
 loadEnvFile(".env.shared");
 
@@ -19,6 +20,9 @@ export default defineConfig({
                 field: "draft",
                 includeDrafts: false,
             },
+        }),
+        docsSearchCrawlerPlugin({
+            outFile: ".vike-content-collection/search-crawl.json",
         }),
         vikeSitemap({
             baseUrl: "https://surrealdb.com/docs",

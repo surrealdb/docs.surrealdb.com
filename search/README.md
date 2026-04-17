@@ -8,21 +8,30 @@ SurrealDB.
 
 ### Indexing (build-time)
 
-1. **Crawler** (`search/crawler.ts`) walks every markdown file in
-   `src/content/`, parses frontmatter and body, then yields two kinds of
-   records:
+1. **Crawler plugin** (`search/plugin/index.ts` + `search/plugin/crawl.ts`) is
+   registered as a Vite plugin. It runs after `vike-content-collection` has
+   parsed every `+Content.ts` collection and reads the already-validated
+   entries via `getCollection()` / `getCollectionEntry()`. For each entry it
+   yields two kinds of records:
    - **Page** — one per document (title, description, breadcrumb, full plain
      text).
    - **Section** — one per H2 heading within a page (title, breadcrumb, plain
      text until the next H2). Links to the parent page via `#anchor`.
-2. **Embedder** (`search/embed.ts`) sends each record's text to OpenAI
+   The plugin writes the resulting array to
+   `.vike-content-collection/search-crawl.json` during `closeBundle`.
+2. **Embedder** (`search/src/embed.ts`) sends each record's text to OpenAI
    `text-embedding-3-small` and receives a 1536-dimensional vector.
-3. **Indexer** (`search/indexer.ts`) connects to SurrealDB, compares content
-   hashes to skip unchanged records, upserts new/changed records with their
-   embeddings, and deletes stale records.
+3. **Indexer** (`search/scripts/indexer.ts`) reads
+   `search-crawl.json`, connects to SurrealDB, compares content hashes to skip
+   unchanged records, upserts new/changed records with their embeddings, and
+   deletes stale records.
 
 Content before the first H2 exists only on the page record, not as a separate
 section. Code blocks are excluded from indexed text.
+
+Breadcrumbs combine the Title-Cased collection ID, each subdirectory's
+`__category` entry title (resolved via `vike-content-collection`), and the page
+title — matching what the runtime layout (`src/utils/data.ts`) renders.
 
 ### Querying (runtime)
 
@@ -95,7 +104,15 @@ production search endpoint at `https://surrealdb.com/docs/api/search`.
    bun run search:schema
    ```
 
-4. Crawl and index all content:
+4. Build the docs (this also runs the crawler plugin and the indexer via the
+   `postbuild` step):
+
+   ```bash
+   bun run build
+   ```
+
+   Or, if you've already built once and just want to re-run the indexer
+   against the existing crawl artefact:
 
    ```bash
    bun run search:index
@@ -116,11 +133,14 @@ production search endpoint at `https://surrealdb.com/docs/api/search`.
 
 ### Commands
 
-| Command                  | Description                                    |
-| ------------------------ | ---------------------------------------------- |
-| `bun run search:schema`  | Apply `search/schema.surql` to local SurrealDB |
-| `bun run search:index`   | Crawl content and upsert into SurrealDB        |
-| `bun run search:serve`   | Start local search API on port 4322            |
+| Command                  | Description                                                  |
+| ------------------------ | ------------------------------------------------------------ |
+| `bun run search:schema`  | Apply `search/schema.surql` to local SurrealDB               |
+| `bun run search:index`   | Read the latest crawl artefact and upsert into SurrealDB     |
+| `bun run search:serve`   | Start local search API on port 4322                          |
+
+The crawl artefact itself (`.vike-content-collection/search-crawl.json`) is
+produced by `vike build` via the `docs-search-crawler` Vite plugin.
 
 ### Re-indexing
 
@@ -150,18 +170,24 @@ the production search API.
 
 ```
 search/
-├── schema.surql    # SurrealDB tables, indexes, fn::search
-├── types.ts        # CrawledPage, CrawledSection, SearchResult
-├── crawler.ts      # Markdown → page + section records
-├── embed.ts        # OpenAI text-embedding-3-small wrapper
-├── indexer.ts      # Incremental upsert into SurrealDB
-└── handler.ts      # Shared search handler (Vercel fn + local server)
+├── schema.surql           # SurrealDB tables, indexes, fn::search
+├── plugin/
+│   ├── index.ts           # Vite plugin that emits search-crawl.json
+│   └── crawl.ts           # Pure markdown → page + section transform
+├── src/
+│   ├── types.ts           # CrawledPage, CrawledSection, SearchResult
+│   ├── embed.ts           # OpenAI text-embedding-3-small wrapper
+│   ├── handler.ts         # Shared search handler (Vercel fn + local server)
+│   ├── db.ts              # SurrealDB connection helpers
+│   └── index.ts           # Common exports for @surrealdb/docs-search-common
+└── scripts/
+    ├── schema.ts          # Apply schema to SurrealDB
+    └── indexer.ts         # Reads crawl artefact, embeds, upserts
 
 api/
-└── search.ts       # Vercel serverless function
+└── search.ts              # Vercel serverless function
 
 scripts/
-├── index-search.ts   # Build-time / local indexer entry point
-├── search-schema.ts  # Apply schema to SurrealDB
-└── search-serve.ts   # Local dev search server (Bun.serve)
+├── index-search.ts        # Indexer entry point (postbuild)
+└── search-serve.ts        # Local dev search server (Bun.serve)
 ```
