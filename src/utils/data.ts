@@ -43,7 +43,7 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
     }
 
     const title = entry.metadata.title ? getSuffixedMetaTitle(entry.metadata.title) : undefined;
-    const description = entry.metadata.description ?? undefined;
+    const description = "description" in entry.metadata ? entry.metadata?.description : undefined;
 
     config({
         title,
@@ -75,6 +75,6 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         contentPath,
         breadcrumbs,
         title: entry.metadata.title ?? "",
-        description: entry.metadata.description ?? "",
+        description: description ?? "",
     };
 }

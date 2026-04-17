@@ -45,6 +45,20 @@ function sdkRedirects(): Redirect[] {
     return out;
 }
 
+function legacyMigratingRedirects(): Redirect[] {
+    const db = ["mongodb", "postgresql", "neo4j"];
+    const out: Redirect[] = [];
+
+    for (const d of db) {
+        out.push({
+            source: `/docs/surrealdb/migrating/${d}`,
+            destination: `/docs/build/migrating/from-other-databases/from-${d}`,
+        });
+    }
+
+    return out;
+}
+
 export const config: VercelConfig = {
     cleanUrls: true,
     trailingSlash: false,
@@ -56,6 +70,7 @@ export const config: VercelConfig = {
         ...legacyPrefixRedirects("integrations", "build/integrations"),
         ...legacyPrefixRedirects("tutorials", "explore/tutorials"),
         ...sdkRedirects(),
+        ...legacyMigratingRedirects(),
     ],
     rewrites: [
         // Redirect /docs to the root
