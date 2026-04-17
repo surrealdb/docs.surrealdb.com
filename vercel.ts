@@ -1,8 +1,77 @@
-import type { VercelConfig } from "@vercel/config/v1";
+import type { Redirect, VercelConfig } from "@vercel/config/v1";
+
+/**
+ * Legacy path prefixes from src-old (see src-old/content/config.ts urlForCollection)
+ * → new information-architecture paths under src/content + src/pages.
+ */
+function legacyPrefixRedirects(from: string, to: string): Redirect[] {
+    return [
+        { source: `/docs/${from}`, destination: `/${to}`, statusCode: 302 },
+        { source: `/docs/${from}/:path*`, destination: `/${to}/:path*`, statusCode: 302 },
+        { source: `/${from}`, destination: `/${to}`, statusCode: 302 },
+        { source: `/${from}/:path*`, destination: `/${to}/:path*`, statusCode: 302 },
+    ];
+}
+
+/** Old /sdk and /:version/sdk/* → index collection language docs. */
+function sdkRedirects(): Redirect[] {
+    const versions = ["1.x", "2.x", "3.x"] as const;
+    const out: Redirect[] = [
+        { source: "/docs/sdk/:sdk", destination: "/docs/languages/:sdk", statusCode: 302 },
+        {
+            source: "/docs/sdk/:sdk/:path*",
+            destination: "/docs/languages/:sdk/:path*",
+            statusCode: 302,
+        },
+        { source: "/sdk/:sdk", destination: "/docs/languages/:sdk", statusCode: 302 },
+        { source: "/sdk/:sdk/:path*", destination: "/docs/languages/:sdk/:path*", statusCode: 302 },
+    ];
+    for (const v of versions) {
+        out.push(
+            { source: `/docs/${v}/sdk/:sdk`, destination: "/languages/:sdk", statusCode: 302 },
+            {
+                source: `/docs/${v}/sdk/:sdk/:path*`,
+                destination: "/languages/:sdk/:path*",
+                statusCode: 302,
+            },
+            { source: `/${v}/sdk/:sdk`, destination: "/languages/:sdk", statusCode: 302 },
+            {
+                source: `/${v}/sdk/:sdk/:path*`,
+                destination: "/languages/:sdk/:path*",
+                statusCode: 302,
+            },
+        );
+    }
+    return out;
+}
+
+function legacyMigratingRedirects(): Redirect[] {
+    const db = ["mongodb", "postgresql", "neo4j"];
+    const out: Redirect[] = [];
+
+    for (const d of db) {
+        out.push({
+            source: `/docs/surrealdb/migrating/${d}`,
+            destination: `/docs/build/migrating/from-other-databases/from-${d}`,
+        });
+    }
+
+    return out;
+}
 
 export const config: VercelConfig = {
     cleanUrls: true,
     trailingSlash: false,
+    redirects: [
+        ...legacyPrefixRedirects("surrealql", "reference/query-language"),
+        ...legacyPrefixRedirects("cloud", "manage/cloud"),
+        ...legacyPrefixRedirects("surrealist", "explore/surrealist"),
+        ...legacyPrefixRedirects("surrealml", "explore/ml-models"),
+        ...legacyPrefixRedirects("integrations", "build/integrations"),
+        ...legacyPrefixRedirects("tutorials", "explore/tutorials"),
+        ...sdkRedirects(),
+        ...legacyMigratingRedirects(),
+    ],
     rewrites: [
         // Redirect /docs to the root
         {

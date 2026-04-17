@@ -33,7 +33,7 @@ export function PageNavigation({ navigation }: PageNavigationProps) {
             {prev ? (
                 <Anchor
                     className={classes.pageNavigationLink}
-                    href={prev.path}
+                    href={`/docs${prev.path}`}
                     underline="never"
                 >
                     <Flex
@@ -69,7 +69,7 @@ export function PageNavigation({ navigation }: PageNavigationProps) {
             {next ? (
                 <Anchor
                     className={classes.pageNavigationLink}
-                    href={next.path}
+                    href={`/docs${next.path}`}
                     underline="never"
                     ta="right"
                 >
