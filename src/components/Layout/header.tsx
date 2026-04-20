@@ -53,6 +53,7 @@ export const NAV_LINKS: NavEntry[] = [
             { label: "Schema management", href: "/docs/learn/schema-management" },
             { label: "Data models", href: "/docs/learn/data-models" },
             { label: "Security", href: "/docs/learn/security" },
+            { label: "Spectron", href: "/docs/learn/spectron" },
             { label: "Extensions", href: "/docs/learn/extensions" },
         ],
     },
