@@ -1,7 +1,7 @@
 import { getCollection } from "vike-content-collection";
 
 export default function onBeforeRenderStart() {
-    return getCollection("learn/spectron").map((entry) =>
-        entry.slug === "" ? "/learn/spectron" : `/learn/spectron/${entry.slug}`,
+    return getCollection("learn/context").map((entry) =>
+        entry.slug === "" ? "/learn/context" : `/learn/context/${entry.slug}`,
     );
 }
