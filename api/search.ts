@@ -56,10 +56,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Redirect to the canonical query so every spelling variant
     // ("How to SELECT?", "how to select", "select") resolves to
     // a single CDN cache entry.
+    //
+    // Location must be `/docs/api/search`, not `/api/search`: the browser
+    // resolves relative URLs against `surrealdb.com`, and `/api/search` is
+    // not served by the docs app on that host (only `/docs/...` is proxied).
     if (query !== raw) {
         res.writeHead(302, {
             ...CORS_HEADERS,
-            Location: `/api/search?q=${encodeURIComponent(query)}`,
+            Location: `/docs/api/search?q=${encodeURIComponent(query)}`,
             "Cache-Control": CACHE_CONTROL,
         });
         return res.end();
