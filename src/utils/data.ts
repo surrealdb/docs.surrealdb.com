@@ -1,5 +1,5 @@
 import type { Heading, Root } from "@surrealdb/ui";
-import { render } from "vike/abort";
+import { redirect, render } from "vike/abort";
 import type { PageContext } from "vike/types";
 import { type CollectionMap, getCollectionEntry } from "vike-content-collection";
 import { useConfig } from "vike-react/useConfig";
@@ -15,6 +15,23 @@ export interface PageData {
     breadcrumbs: string[];
     title: string;
     description: string;
+}
+
+/** One path segment up (e.g. `/a/b` → `/a`). */
+export function getParentPathname(pathname: string): string | null {
+    const trimmed = pathname.replace(/\/+$/, "");
+
+    if (trimmed === "" || trimmed === "/") {
+        return null;
+    }
+
+    const i = trimmed.lastIndexOf("/");
+
+    if (i <= 0) {
+        return "/";
+    }
+
+    return trimmed.slice(0, i) || "/";
 }
 
 /**
@@ -39,6 +56,12 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
     const entry = getCollectionEntry(id, path);
 
     if (!entry) {
+        const parent = getParentPathname(context.urlOriginal);
+
+        if (parent) {
+            throw redirect(parent, 302);
+        }
+
         throw render(404, "Not Found");
     }
 
