@@ -1,26 +1,52 @@
 ---
 position: 3
 title: Module architecture
-description: "How Surrealism modules are structured, compiled to WASM, sandboxed, and invoked by the SurrealDB engine."
+description: "How Surrealism modules are packaged, sandboxed, and invoked by SurrealDB, including exports metadata, runtime limits, and load strategy."
 ---
 
 # Module architecture
 
-<Since v="v3.0.0" />
+[Surrealism](/docs/learn/extensions/plugins/overview) modules are Rust crates packaged as `.surli` archives. Each archive contains your compiled component plus metadata about exported `#[surrealism]` functions. SurrealDB reads this metadata to map SurrealQL calls to module exports without recompiling the database.
 
-[Surrealism](/docs/learn/extensions/plugins/overview) modules are ordinary Rust crates that compile to a WebAssembly (WASM) binary. The build embeds metadata about each `#[surrealism]` function so SurrealDB can map SurrealQL calls to the correct exports without recompiling the database. You keep your business logic in Rust; SurrealDB ships the runtime that loads and executes the WASM.
+## Component target and sandbox
 
-## WASM target and sandbox
-
-The compiler targets WASM so your code runs inside SurrealDB’s WebAssembly runtime, not as a native library on the host. That boundary is the sandbox: memory, execution time, and host capabilities are constrained by the engine, which reduces the blast radius of untrusted or buggy extension code compared with loading raw shared objects.
+Surrealism builds target WASI Preview 2 (`wasm32-wasip2`) and run through the WASM component model runtime. Your code does not execute as a native library on the host. The runtime boundary provides sandboxing where memory, execution time, filesystem access, and host capabilities can be constrained by server policy.
 
 ## Interaction with the engine
 
-The WASM module does not link directly into SurrealDB’s core. Instead, the engine loads the binary, resolves exports, and marshals values between SurrealQL and your Rust functions through the Surrealism ABI. You work with SurrealDB’s types and APIs exposed by the SDK rather than arbitrary process memory. The same SurrealDB binary can load different modules over time; only the WASM you install and register determines which extension functions exist in a given environment.
+The module does not link directly into SurrealDB’s core. Instead, the engine loads it in the Surrealism runtime, resolves exports, and marshals values between SurrealQL and your Rust functions through the Surrealism ABI. You work with SDK-exposed types and host imports, not arbitrary process memory.
+
+At build time, Surrealism also extracts an exports manifest (names, argument types, return type, `writeable` flag, optional comment) and stores it in the archive. That allows metadata lookups without instantiating the module for every query-planning or introspection operation.
+
+## Runtime execution model
+
+Surrealism uses pooled module controllers so invocations can reuse warm execution contexts instead of rebuilding runtime state for each call.
+
+- **Pool ceiling:** per-module controller pool size is capped by `SURREAL_SURREALISM_MAX_POOL_SIZE`.
+- **Timeout mode:** strict timeout behaviour can be configured by module/runtime settings.
+- **Resource ceilings:** memory, execution time, and module KV limits can be enforced with Surrealism environment variables.
+
+For a complete list of server-level variables, see [environment variables](/docs/reference/cli/surrealdb-cli/environment-variables#surrealism-config).
+
+## Module loading strategy
+
+By default, SurrealDB eagerly compiles defined Surrealism modules at startup to reduce first-call latency. If you prefer lazy loading, start the server with:
+
+```bash
+surreal start --lazy-surrealism
+```
+
+Or set:
+
+```bash
+SURREAL_LAZY_SURREALISM=true surreal start
+```
 
 ## Lifecycle
 
-The end-to-end lifecycle is: **compile** the crate with [`surreal module`](/docs/reference/cli/surrealdb-cli/commands/module), **upload** the `.wasm` into storage (typically via [`DEFINE BUCKET`](/docs/reference/query-language/statements/define/bucket)), **define** the module so functions are registered ([`DEFINE MODULE`](/docs/reference/query-language/statements/define/module)), then **invoke** those functions from queries. Operational teams often automate upload and definition in CI so test and production databases stay aligned. The [overview](/docs/learn/extensions/plugins/overview) summarises this flow in one place.
+The end-to-end lifecycle is: **build** your crate with [`surreal module`](/docs/reference/cli/surrealdb-cli/commands/module), **upload** the `.surli` archive (typically via [`DEFINE BUCKET`](/docs/reference/query-language/statements/define/bucket)), **define** the module ([`DEFINE MODULE`](/docs/reference/query-language/statements/define/module)), then **invoke** functions from queries.
+
+Operational teams often automate upload and definition in CI so test and production databases stay aligned. The [overview](/docs/learn/extensions/plugins/overview) summarises this flow.
 
 ## Security
 
