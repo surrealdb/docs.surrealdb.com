@@ -5,7 +5,8 @@
 // with the current content. The process:
 //
 //   1. Fetch content hashes for all existing records
-//   2. Crawl all markdown files and compare hashes
+//   2. Read the crawl artefact produced by the docs-search
+//      Vite plugin and compare hashes
 //   3. Embed and upsert only changed entries (saves OpenAI $)
 //   4. Delete records for pages/sections that no longer exist
 //
@@ -13,11 +14,19 @@
 // triggers an embedding API call.
 // ══════════════════════════════════════════════════════════
 
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { RecordId, type Surreal } from "surrealdb";
 import { connectDb } from "../src/db";
 import { buildEmbedText, embedBatch } from "../src/embed";
 import type { CrawledEntry, CrawledPage, CrawledSection } from "../src/types";
-import { crawl } from "./crawler";
+
+// Default location of the artefact written by the
+// `docs-search-crawler` Vite plugin during `vike build`.
+const DEFAULT_CRAWL_FILE = join(
+    import.meta.dirname,
+    "../../.vike-content-collection/search-crawl.json",
+);
 
 // OpenAI's batch embedding endpoint accepts up to ~2048 texts,
 // but we chunk at 64 to keep individual requests manageable
@@ -36,6 +45,25 @@ interface HashRow {
 interface ExistingRecord {
     contentHash: string;
     rid: RecordId;
+}
+
+/**
+ * Loads the crawl artefact written by the `docs-search-crawler`
+ * Vite plugin during `vike build`. Errors with a clear message
+ * if the file is missing — typically that means the plugin
+ * didn't run (forgot to build first).
+ */
+async function readCrawlArtefact(path: string): Promise<CrawledEntry[]> {
+    let raw: string;
+    try {
+        raw = await readFile(path, "utf-8");
+    } catch (err) {
+        throw new Error(
+            `Could not read crawl artefact at ${path}. Run \`vike build\` first so the docs-search-crawler plugin can produce it. (${(err as Error).message})`,
+        );
+    }
+
+    return JSON.parse(raw) as CrawledEntry[];
 }
 
 /** Loads the content_hash for every existing page and section so
@@ -186,10 +214,14 @@ export async function runIndexer() {
         sectionsDeleted: 0,
     };
 
-    // Phase 2: Crawl all content and identify what changed.
-    console.log("[CW] Crawling content...");
+    // Phase 2: Read the crawl artefact and identify what changed.
+    const crawlFile = process.env.SEARCH_CRAWL_FILE ?? DEFAULT_CRAWL_FILE;
+    console.log(`[CW] Reading crawl artefact from ${crawlFile}...`);
 
-    for await (const entry of crawl()) {
+    const crawled = await readCrawlArtefact(crawlFile);
+    console.log(`[CW] Loaded ${crawled.length} crawled entries`);
+
+    for (const entry of crawled) {
         const rid = recordIdString(entry);
         seenIds.add(rid);
 
@@ -205,7 +237,7 @@ export async function runIndexer() {
         changed.push(entry);
     }
 
-    console.log(`[CW] Crawl complete. ${changed.length} entries to embed and upsert.`);
+    console.log(`[CW] ${changed.length} entries to embed and upsert.`);
 
     // Phase 3: Embed changed entries in batches, then upsert.
     const texts = changed.map(buildEmbedText);
