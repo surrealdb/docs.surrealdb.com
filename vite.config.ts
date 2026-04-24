@@ -12,15 +12,8 @@ const noExternalPkgs = ["@surrealdb/ui", "@mantine/core", "@mantine/hooks", "@ma
 
 const externalPkgs = ["vike-content-collection"];
 
-// On Vercel preview/development deployments the site is served from the root,
-// not under /docs. Using /docs as the base would make Vike's SSR middleware
-// reject every request with "Base URL is missing". Production deployments sit
-// behind the surrealdb.com CDN which preserves the /docs prefix, so /docs is
-// correct there.
-const base = process.env.VERCEL_ENV === "production" ? "/docs" : "/";
-
 export default defineConfig({
-    base,
+    base: "/docs",
     plugins: [
         vike(),
         react(),
