@@ -1,28 +1,31 @@
 import type { Config } from "vike/types";
 import vikeContentCollectionConfig from "vike-content-collection/config";
-// import vikePhoton from "vike-photon/config";
 import vikeReact from "vike-react/config";
 import vikeSitemapConfig from "vike-sitemap-generator/config";
-import { DEFAULT_META_DESCRIPTION, DEFAULT_META_TITLE } from "~/utils/meta";
 
 export default {
-    title: DEFAULT_META_TITLE,
-    description: DEFAULT_META_DESCRIPTION,
-    extends: [vikeReact, vikeContentCollectionConfig, vikeSitemapConfig],
-    prerender: true,
-    passToClient: ["sdkVersions"],
-    meta: {
-        Page: {
-            env: { client: true, server: true },
-        },
-        data: {
-            env: { server: true, client: false },
-        },
-        sitemap: {
-            env: { config: true, server: true, client: false },
-        },
-        Content: {
-            env: { server: true, client: false },
-        },
-    },
+	title: "SurrealDB | The ultimate multi-model database for tomorrow's applications",
+	description: "SurrealDB is the ultimate database for tomorrow's serverless, jamstack, single-page, and traditional applications.",
+	extends: [vikeReact, vikeContentCollectionConfig, vikeSitemapConfig],
+	prerender: false,
+	passToClient: ["sdkVersions"],
+	server: true,
+	ssr: true,
+	meta: {
+		Page: {
+			env: { server: true, client: true },
+		},
+		data: {
+			env: { server: true, client: false },
+		},
+		sitemap: {
+			env: { config: true, server: true, client: false },
+		},
+		sitemapUrls: {
+			env: { config: true, server: true },
+		},
+		Content: {
+			env: { server: true, client: false },
+		}
+	},
 } satisfies Config;
