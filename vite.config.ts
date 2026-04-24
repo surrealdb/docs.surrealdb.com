@@ -4,14 +4,19 @@ import vike from "vike/plugin";
 import { vikeContentCollectionPlugin } from "vike-content-collection";
 import { vikeSitemap } from "vike-sitemap-generator";
 import { defineConfig } from "vite";
+import { vercel } from "vite-plugin-vercel/vite";
 
 loadEnvFile(".env.shared");
+
+const noExternalPkgs = ["@surrealdb/ui", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"];
+const externalPkgs = ["vike-content-collection"];
 
 export default defineConfig({
     base: "/docs",
     plugins: [
         vike(),
         react(),
+        vercel(),
         vikeContentCollectionPlugin({
             contentDir: "src/content",
             lastModified: true,
@@ -52,13 +57,28 @@ export default defineConfig({
         tsconfigPaths: true,
     },
     build: {
-        sourcemap: true,
+        sourcemap: false,
         minify: true,
         cssMinify: true,
+        assetsInlineLimit: 0,
     },
     ssr: {
-        noExternal: ["@surrealdb/ui", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
-        external: ["vike-content-collection"],
+        noExternal: noExternalPkgs,
+        external: externalPkgs,
+    },
+    environments: {
+        vercel_node: {
+            resolve: {
+                noExternal: noExternalPkgs,
+                external: externalPkgs,
+            },
+        },
+        vercel_edge: {
+            resolve: {
+                noExternal: noExternalPkgs,
+                external: externalPkgs,
+            },
+        },
     },
     css: {
         modules: {

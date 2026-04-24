@@ -1,4 +1,4 @@
-import type { Redirect, VercelConfig } from "@vercel/config/v1";
+import type { Redirect, Rewrite, VercelConfig } from "@vercel/config/v1";
 
 /**
  * Legacy path prefixes from src-old (see src-old/content/config.ts urlForCollection)
@@ -73,17 +73,19 @@ export const config: VercelConfig = {
         ...legacyMigratingRedirects(),
     ],
     rewrites: [
-        // Redirect /docs to the root
-        {
-            source: "/docs",
-            destination: "/",
-            statusCode: 302,
-        },
-        {
-            source: "/docs/(.*)",
-            destination: "/$1",
-            statusCode: 302,
-        },
+        // On preview/direct Vercel access the docs project is served from /,
+        // but the rendered HTML still uses /docs/* URLs (driven by Vite's
+        // `base: "/docs"`). Strip the prefix internally so static assets
+        // resolve against `.vercel/output/static/` and SSR fall-through
+        // requests reach the function without an extra 302 round-trip.
+        // Production sits behind the surrealdb.com CDN which already strips
+        // /docs/* before forwarding, so these rules are non-production only.
+        ...(process.env.VERCEL_ENV !== "production"
+            ? [
+                  { source: "/docs", destination: "/" } satisfies Rewrite,
+                  { source: "/docs/:path*", destination: "/:path*" } satisfies Rewrite,
+              ]
+            : []),
     ],
     headers: [
         // Cache Vite build assets for 1 year
