@@ -71,19 +71,16 @@ export const config: VercelConfig = {
         ...legacyPrefixRedirects("tutorials", "explore/tutorials"),
         ...sdkRedirects(),
         ...legacyMigratingRedirects(),
-    ],
-    rewrites: [
-        // Redirect /docs to the root
-        {
-            source: "/docs",
-            destination: "/",
-            statusCode: 302,
-        },
-        {
-            source: "/docs/(.*)",
-            destination: "/$1",
-            statusCode: 302,
-        },
+        // On preview/direct Vercel access the site is served from /, so strip
+        // any stale /docs prefix that might appear in an incoming URL.
+        // Production sits behind the surrealdb.com CDN which already routes
+        // /docs/* correctly, so these rules are only needed for non-production.
+        ...(process.env.VERCEL_ENV !== "production"
+            ? [
+                  { source: "/docs", destination: "/", statusCode: 302 } satisfies Redirect,
+                  { source: "/docs/(.*)", destination: "/$1", statusCode: 302 } satisfies Redirect,
+              ]
+            : []),
     ],
     headers: [
         // Cache Vite build assets for 1 year
