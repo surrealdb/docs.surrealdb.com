@@ -19,5 +19,5 @@ export function collectionSitemapUrls(
 	const base = urlPrefix === "/" ? "" : urlPrefix;
 	return getCollection(collectionId).map((entry) =>
 		entry.slug === "" ? urlPrefix : `${base}/${entry.slug}`,
-	);
+	).filter((url) => !url.endsWith("__category"));
 }
