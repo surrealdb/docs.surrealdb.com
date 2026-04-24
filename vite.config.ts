@@ -9,7 +9,6 @@ import { vercel } from "vite-plugin-vercel/vite";
 loadEnvFile(".env.shared");
 
 const noExternalPkgs = ["@surrealdb/ui", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"];
-
 const externalPkgs = ["vike-content-collection"];
 
 export default defineConfig({
@@ -58,9 +57,10 @@ export default defineConfig({
         tsconfigPaths: true,
     },
     build: {
-        sourcemap: true,
+        sourcemap: false,
         minify: true,
         cssMinify: true,
+        assetsInlineLimit: 0,
     },
     ssr: {
         noExternal: noExternalPkgs,
