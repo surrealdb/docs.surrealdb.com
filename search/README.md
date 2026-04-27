@@ -8,16 +8,16 @@ SurrealDB.
 
 ### Indexing (build-time)
 
-1. **Crawler** (`search/crawler.ts`) walks every markdown file in
+1. **Crawler** (`search/scripts/crawler.ts`) walks every markdown file in
    `src/content/`, parses frontmatter and body, then yields two kinds of
    records:
    - **Page** — one per document (title, description, breadcrumb, full plain
      text).
    - **Section** — one per H2 heading within a page (title, breadcrumb, plain
      text until the next H2). Links to the parent page via `#anchor`.
-2. **Embedder** (`search/embed.ts`) sends each record's text to OpenAI
+2. **Embedder** (`search/src/embed.ts`) sends each record's text to OpenAI
    `text-embedding-3-small` and receives a 1536-dimensional vector.
-3. **Indexer** (`search/indexer.ts`) connects to SurrealDB, compares content
+3. **Indexer** (`search/scripts/indexer.ts`) connects to SurrealDB, compares content
    hashes to skip unchanged records, upserts new/changed records with their
    embeddings, and deletes stale records.
 
@@ -116,11 +116,11 @@ production search endpoint at `https://surrealdb.com/docs/api/search`.
 
 ### Commands
 
-| Command                  | Description                                    |
-| ------------------------ | ---------------------------------------------- |
-| `bun run search:schema`  | Apply `search/schema.surql` to local SurrealDB |
-| `bun run search:index`   | Crawl content and upsert into SurrealDB        |
-| `bun run search:serve`   | Start local search API on port 4322            |
+| Command                 | Description                                    |
+| ----------------------- | ---------------------------------------------- |
+| `bun run search:schema` | Apply `search/schema.surql` to local SurrealDB |
+| `bun run search:index`  | Crawl content and upsert into SurrealDB        |
+| `bun run search:serve`  | Start local search API on port 4322            |
 
 ### Re-indexing
 
@@ -137,14 +137,14 @@ the production search API.
 
 ### Environment variables (Vercel project settings)
 
-| Variable              | Description                             |
-| --------------------- | --------------------------------------- |
-| `SURREAL_ENDPOINT`    | SurrealDB WebSocket URL                 |
-| `SURREAL_NAMESPACE`   | SurrealDB namespace                     |
-| `SURREAL_DATABASE`    | SurrealDB database                      |
-| `SURREAL_USERNAME`    | SurrealDB username (root or scoped)     |
-| `SURREAL_PASSWORD`    | SurrealDB password                      |
-| `OPENAI_API_KEY`      | OpenAI API key for embeddings           |
+| Variable            | Description                         |
+| ------------------- | ----------------------------------- |
+| `SURREAL_ENDPOINT`  | SurrealDB WebSocket URL             |
+| `SURREAL_NAMESPACE` | SurrealDB namespace                 |
+| `SURREAL_DATABASE`  | SurrealDB database                  |
+| `SURREAL_USERNAME`  | SurrealDB username (root or scoped) |
+| `SURREAL_PASSWORD`  | SurrealDB password                  |
+| `OPENAI_API_KEY`    | OpenAI API key for embeddings       |
 
 ## File structure
 

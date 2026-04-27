@@ -36,7 +36,7 @@ DEFINE ANALYZER OVERWRITE simple
 DEFINE TABLE OVERWRITE page SCHEMAFULL;
 
 DEFINE FIELD OVERWRITE path         ON page TYPE string;
-DEFINE FIELD OVERWRITE collection   ON page TYPE string;  -- e.g. "doc-surrealql", "doc-sdk-javascript"
+DEFINE FIELD OVERWRITE collection   ON page TYPE string;  -- e.g. "reference/query-language", "index"
 DEFINE FIELD OVERWRITE title        ON page TYPE string;
 DEFINE FIELD OVERWRITE description  ON page TYPE string;
 DEFINE FIELD OVERWRITE breadcrumb   ON page TYPE string;  -- "SurrealQL > Statements > SELECT"

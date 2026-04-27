@@ -213,14 +213,27 @@ function isTokenPrefix(shorter: string[], longer: string[]): boolean {
  * happens to mention auth as one of many methods.
  */
 const CORE_COLLECTIONS = new Set([
-    "doc-surrealdb",
-    "doc-surrealql",
-    "doc-tutorials",
-    "doc-cloud",
-    "doc-surrealist",
-    "doc-surrealml",
-    "doc-surrealkv",
-    "doc-integrations",
+    "index",
+    "learn/security",
+    "learn/querying",
+    "learn/data-models",
+    "learn/schema-management",
+    "learn/extensions",
+    "learn/context",
+    "build/migrating",
+    "build/embedding",
+    "build/integrations",
+    "build/deployment",
+    "build/ai-agents",
+    "explore/tutorials",
+    "explore/surrealist",
+    "explore/ml-models",
+    "reference/cli",
+    "reference/query-language",
+    "reference/rest-api",
+    "manage/self-hosted",
+    "manage/cloud",
+    "manage/enterprise",
 ]);
 
 /**

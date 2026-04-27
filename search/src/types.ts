@@ -9,9 +9,9 @@
 
 export interface CrawledPage {
     kind: "page";
-    id: string; // e.g. "doc-surrealql:statements/select"
-    collection: string; // e.g. "doc-surrealql", "doc-sdk-javascript"
-    path: string; // URL path, e.g. "/docs/surrealql/statements/select"
+    id: string; // e.g. "reference/query-language:statements/select"
+    collection: string; // e.g. "reference/query-language", "index", "manage/cloud"
+    path: string; // URL path, e.g. "/docs/reference/query-language/statements/select"
     url: string; // same as path for pages
     title: string;
     description: string; // from frontmatter, used in search ranking
@@ -22,7 +22,7 @@ export interface CrawledPage {
 
 export interface CrawledSection {
     kind: "section";
-    id: string; // e.g. "doc-surrealql:statements/select#record-ranges"
+    id: string; // e.g. "reference/query-language:statements/select#record-ranges"
     pageId: string; // parent page id
     anchor: string; // URL fragment, e.g. "record-ranges"
     depth: number; // heading depth (always 2)
