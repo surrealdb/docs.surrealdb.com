@@ -1,7 +1,7 @@
 ---
 position: 3
 title: Manual transactions
-description: Manual transactions can be used via the Rust SDK in the same manner as regular SurrealQL queries
+description: Use SurrealQL BEGIN and COMMIT in queries, or the Rust SDK `begin` / `commit` / `cancel` transaction handle, and check per-statement results before committing
 ---
 
 
@@ -13,8 +13,6 @@ description: Manual transactions can be used via the Rust SDK in the same manner
 
 While every query in SurrealDB is run [inside its own transaction](/docs/reference/query-language/language-primitives/transactions), manual transactions made up of multiple statements can be used via the [BEGIN](/docs/reference/query-language/statements/begin) and [COMMIT](/docs/reference/query-language/statements/commit) keywords.
 
-The [`.query()`](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.query) method can take any number of statements, returning a [`Response`](https://docs.rs/surrealdb/latest/surrealdb/struct.Response.html) that contains the results of each of them. In addition, the same method before being called returns [a struct](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Query.html) that also allows [the same `.query()` method](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Query.html#method.query) to be called on it, chaining the new query onto the existing query. This can help greatly with readability, as the example code below shows.
-
 ## Getting started
 
 Start a running database using the following command:
@@ -23,7 +21,7 @@ Start a running database using the following command:
 surreal start --user root --pass secret 
 ```
 
-To follow along interactively, connect [using Surrealist](/docs/explore/surrealist/getting-started#creating-a-connection) or the following command to open up the CLI:
+To follow along interactively, connect [using Surrealist](/docs/explore/surrealist/getting-started#creating-a-connection) or the following command to open a connection in the CLI:
 
 ```
 surreal sql --user root --pass secret --pretty
@@ -33,11 +31,68 @@ Then use the `cargo add` command to add the `surrealdb` and `tokio` crates. The 
 
 ```toml
 [dependencies]
-surrealdb = "2.4.1"
-tokio = "1.49.0"
+surrealdb = "3.0.5"
+tokio = "1.52.1"
 ```
 
-Once this is done, copy and paste the following code to run a manual transaction that creates two `account` records and then transfers 300 units from one account to the other.
+### Using a client-side transaction
+
+Once this is done, you can use [`.begin()`](https://docs.rs/surrealdb/3.0.5/surrealdb/struct.Surreal.html#method.begin) to get a client-side [`Transaction`](https://docs.rs/surrealdb/3.0.5/surrealdb/method/struct.Transaction.html). Run your statements with [`.query()`](https://docs.rs/surrealdb/3.0.5/surrealdb/method/struct.Transaction.html#method.query) or other methods such as `.select()`,` `.create()` and so on, then end the transaction in one of two ways:
+
+* [`commit()`](https://docs.rs/surrealdb/3.0.5/surrealdb/method/struct.Transaction.html#method.commit) — apply the changes. The future resolves to a [`Surreal`](https://docs.rs/surrealdb/3.0.5/surrealdb/struct.Surreal.html) client again.
+* [`cancel()`](https://docs.rs/surrealdb/3.0.5/surrealdb/method/struct.Transaction.html#method.cancel) — roll back. This also returns the `Surreal` client when it completes.
+
+Note that the outer `Result` from `await`ing a query only shows that the statements have succeeded, but a response can still include per-statement failures (the request succeeded, but one of the SQL statements did not). Collect those with [`take_errors()`](https://docs.rs/surrealdb/3.0.5/surrealdb/struct.IndexedResults.html#method.take_errors) on the query response, or use [`check()`](https://docs.rs/surrealdb/3.0.5/surrealdb/struct.IndexedResults.html#method.check) to fail on the first error. If the outer `Result` is `Err`, the transaction is not usable as intended.
+
+The following example uses an in-memory database, runs every query in its own short transaction, and cancels (or would skip a commit) when a statement error shows up.
+
+```rust
+use surrealdb::Surreal;
+use surrealdb::engine::any::{connect, Any};
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("memory").await?;
+    db.use_ns("ns").use_db("db").await?;
+
+    let db = run_in_transaction(db, "LET $x: int = 'not a number';").await?;
+    let db = run_in_transaction(db, "SELECT SELECT SELECT").await?;
+    run_in_transaction(db, "9").await?;
+
+    Ok(())
+}
+
+// Runs a single query inside a new transaction.
+// `commit` only runs when there
+// are no per-statement errors;
+// otherwise the transaction is cancelled.
+async fn run_in_transaction(
+    db: Surreal<Any>,
+    surql: &str,
+) -> surrealdb::Result<Surreal<Any>> {
+    let tx = db.begin().await?;
+
+    match tx.query(surql).await {
+        Ok(mut response) => {
+            let errors = response.take_errors();
+            if !errors.is_empty() {
+                eprintln!("Errors from statements: {errors:#?}\n");
+                return tx.cancel().await;
+            }
+            println!("Ok: {response:#?}\n");
+            return tx.commit().await;
+        }
+        Err(e) => {
+            eprintln!("Error from query request: {e}\n");
+            return tx.cancel().await;
+        }
+    }
+}
+```
+
+### Using SurrealQL transaction statements
+
+A manual transaction can also be performed by sending in a `BEGIN` and other statements into the `.query()` method manually. This will result in the same behaviour as the previous method, but will not return a `Transaction` on the SDK side.
 
 ```rust
 use surrealdb::Surreal;
@@ -47,7 +102,7 @@ use surrealdb_types::{SurrealValue, ToSql, Value};
 
 #[tokio::main]
 async fn main() -> surrealdb::Result<()> {
-    let db = Surreal::new::<Ws>("localhost:8000").await?;
+    let db = connect("memory").await?;
 
     db.signin(Root {
         username: "root".to_string(),
@@ -141,10 +196,10 @@ async fn main() -> surrealdb::Result<()> {
 
     println!("{response:#?}");
 
-    // See if any errors were returned
-    response.check()?;
+	// See if any errors were returned
+	response.check()?;
 
-    Ok(())
+	Ok(())
 }
 ```
 
@@ -166,7 +221,7 @@ Start a running database using the following command:
 surreal start --user root --pass secret 
 ```
 
-To follow along interactively, connect [using Surrealist](/docs/explore/surrealist/getting-started#creating-a-connection) or the following command to open up the CLI:
+To follow along interactively, connect [using Surrealist](/docs/explore/surrealist/getting-started#creating-a-connection) or the following command to open a connection in the CLI:
 
 ```
 surreal sql --user root --pass secret --ns main --db main --pretty
@@ -268,6 +323,8 @@ async fn main() -> surrealdb::Result<()> {
 	Ok(())
 }
 ```
+
+`Surreal::begin()` and the `Transaction` handle (with [`commit()`](https://docs.rs/surrealdb/3.0.5/surrealdb/method/struct.Transaction.html#method.commit) / [`cancel()`](https://docs.rs/surrealdb/3.0.5/surrealdb/method/struct.Transaction.html#method.cancel)) are only in the `surrealdb` **Rust crate 3.0.0+**. The first tab (**3.x**) shows the full example, including per-statement errors and `commit` or `cancel`. In this 2.x tab, use `BEGIN` / `COMMIT` in SurrealQL, or [upgrade the crate to 3.0 or newer](https://crates.io/crates/surrealdb) and add `surrealdb = "3.0.5"` (or similar) in `Cargo.toml` to use that API.
 
 </TabItem>
 
