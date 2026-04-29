@@ -17,6 +17,11 @@ function mapResultsToActions(results: SearchResult[], query: string): SpotlightA
         id: `result-${index}`,
         label: String(result.title ?? ""),
         onClick: () => {
+            window.dataLayer?.push({
+                event: "search_result_click",
+                search_term: query,
+                result_url: result.url,
+            });
             window.location.href = String(result.url ?? "/");
         },
         children: (
@@ -39,7 +44,12 @@ export function SearchDocs(props: UnstyledButtonProps) {
     const abortController = useRef<AbortController | null>(null);
     const os = useOs();
 
-    useHotkeys([["mod+K", () => spotlight.open()]]);
+    const openSearch = useCallback(() => {
+        spotlight.open();
+        window.dataLayer?.push({ event: "search_opened" });
+    }, []);
+
+    useHotkeys([["mod+K", openSearch]]);
 
     useEffect(() => {
         if (rateLimitRemaining <= 0) return;
@@ -65,6 +75,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
             abortController.current = controller;
 
             const results = await searchDocs(value, controller.signal);
+            window.dataLayer?.push({ event: "search_query", search_term: value });
 
             setRateLimitRemaining(0);
             setActions(mapResultsToActions(results, value));
@@ -126,7 +137,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
                 px="md"
                 mb="md"
                 w="100%"
-                onClick={spotlight.open}
+                onClick={openSearch}
                 {...props}
             >
                 <Flex
