@@ -201,6 +201,83 @@ Errors: {2: InternalError("Tried to set `$x`, but couldn't coerce value: Expecte
 Successes: IndexedResults { results: {0: (DbResultStats { execution_time: Some(301.375µs), query_type: Some(Other) }, Ok(None)), 3: (DbResultStats { execution_time: Some(2.278083ms), query_type: Some(Other) }, Ok(Array(Array([Object(Object({"id": RecordId(RecordId { table: Table("person"), key: String("yq7gxgm3ffkr4kibumeb") })}))]))))}, live_queries: {} }
 ```
 
+### Per-statement stats (`.with_stats()`)
+
+The [`.with_stats()`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Query.html#method.with_stats) method can be used on the query builder before awaiting the future. The awaited value is [`WithStats<IndexedResults>`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.WithStats.html), which wraps the usual [`IndexedResults`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.IndexedResults.html) so each `.take(...)` can return both [`Stats`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Stats.html) (including execution time) and the deserialized statement result.
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb::types::Value;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("memory").await?;
+    db.use_ns("ns").use_db("db").await?;
+
+    let mut response = db
+        .query("CREATE person:ada SET name = 'Ada'; SELECT * FROM person;")
+        .with_stats()
+        .await?;
+
+    if let Some((stats, res)) = response.take(1) {
+        let records: Vec<Value> = res?;
+        println!("time = {:?}, records = {:?}", stats.execution_time, records);
+    }
+    Ok(())
+}
+```
+
+See [`WithStats::take`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.WithStats.html#method.take) on Docs.rs for the supported `.take` shapes (statement index, nested paths, and tuples).
+
+### Stream `LIVE SELECT` output (`.stream()`) {#live-select-stream}
+
+After awaiting `.query(...)`, [`IndexedResults::stream`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.IndexedResults.html#method.stream) turns the live-query slot at a given statement index into a [`QueryStream`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.QueryStream.html). Pass a statement index (`0`, `1`, …), or pass `()` to merge every `LIVE SELECT` in that response. The stream yields [`Notification`](https://docs.rs/surrealdb/latest/surrealdb/struct.Notification.html) values (or raw [`Value`](https://docs.rs/surrealdb/latest/surrealdb/types/enum.Value.html)) and implements [`futures::Stream`](https://docs.rs/futures/latest/futures/stream/trait.Stream.html). This can be polled with the [`StreamExt`](https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html) trait from the `futures` crate.
+
+If you prefer not to embed `LIVE SELECT` in SurrealQL, the same live subscription can be started with [`db.select(resource).live()`](/docs/languages/rust/methods/select-live) on top of [`select()`](/docs/languages/rust/methods/select); both approaches yield a stream of notifications.
+
+```rust
+use futures::StreamExt;
+use surrealdb::engine::any::connect;
+use surrealdb::opt::auth::Root;
+use surrealdb::types::Value;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("ws://localhost:8000").await?;
+    db.use_ns("main").use_db("main").await?;
+    db.signin(Root {
+        username: "root".into(),
+        password: "secret".into(),
+    })
+    .await?;
+
+    // Use 2 or 3 instead of () to only LIVE SELECT
+    // either person or cat
+    let mut response = db
+        .query(
+            "DEFINE TABLE IF NOT EXISTS person SCHEMALESS;
+            DEFINE TABLE IF NOT EXISTS cat SCHEMALESS;
+             LIVE SELECT * FROM person;
+             LIVE SELECT * FROM cat;",
+        )
+        .await?;
+    let mut stream = response.stream::<Value>(())?;
+
+    while let Some(item) = stream.next().await {
+        let notification = item?;
+        println!("{:?}", notification);
+    }
+    Ok(())
+}
+```
+
+To test the live stream, either log in using Surrealist or the CLI using the `surreal sql --user root --pass secret` command in another terminal window. You should see notifications similar to the following whenever a new record is created from the `person` or `cat` table, but not for others.
+
+```bash
+Notification { query_id: Uuid(3bad02bb-fd1e-402b-9a43-5b3eae88f279), action: Create, data: Object(Object({"id": RecordId(RecordId { table: Table("person"), key: String("zhby5ibqh8b2hfyyao30") })})) }
+Notification { query_id: Uuid(829d7ec7-d67c-47ef-bd7c-8b3e10b8d149), action: Create, data: Object(Object({"id": RecordId(RecordId { table: Table("cat"), key: String("cgu921pkfco7uk7ajeym") })})) }
+```
+
 ### Security when using the .query() method
 
 As the `.query()` method can be used to pass any SurrealQL query on to the database, it is an easy go-to when using complex queries. However, be sure to keep [the following best practices in mind](/docs/learn/security/best-practices/security-best-practices#query-safety) when doing so.
@@ -268,6 +345,8 @@ async fn main() -> surrealdb::Result<()> {
 ### See also
 
 * [.query() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.query)
+* [`Query::with_stats`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Query.html#method.with_stats), [`WithStats`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.WithStats.html), [`IndexedResults::stream`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.IndexedResults.html#method.stream)
+* [Live queries via `select().live()`](/docs/languages/rust/methods/select-live) (alternative to [`LIVE SELECT`](#live-select-stream) in this page)
 
 </TabItem>
 
