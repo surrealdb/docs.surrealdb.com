@@ -1,146 +1,84 @@
 ---
-position: 1
-title: Observability
-description: In SurrealDB, metrics and traces are available if enabled.
+position: 2
+title: Prometheus (pull)
+description: Prometheus (pull) — `GET /metrics`, scraper authentication, naming, and how this fits with OTLP (push).
 ---
 
-# Observability
+# Prometheus (pull)
 
-SurrealDB can be monitored by enabling built-in observability.
+For server log output (stderr, files, JSON, sockets, slow-query lines), see [Logging](/docs/build/deployment/observability/logging).
 
-## Enable observability
-To enable observability, the `SURREAL_TELEMETRY_PROVIDER` environment variable has to be set to `otlp`. If set to anything else, no observability will be available.
+SurrealDB exposes a single, unified observability surface backed by OpenTelemetry. Every metric, audit record, and slow-query record is recorded once and routed to multiple exporters:
 
-If enabled, SurrealDB will send metrics and/or traces to an [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/).  Configuration of the collector is done via [environment variables](https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/). The most important one is [OTEL_EXPORTER_OTLP_ENDPOINT](https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/#otel_exporter_otlp_endpoint). By default this is set to localhost. It should be set to the GRPC endpoint of your OTEL collector. For example if your OTEL collector named `my-collector` is running in Kubernetes in the `monitoring` namespace the following can be used: 
+- Prometheus (pull): text exposition at `GET /metrics` (scrapers call your server). The usual path if you already run Prometheus.
+- OTLP (push): when `SURREAL_TELEMETRY_PROVIDER=otlp` is set, the process pushes metrics, logs (audit and slow-query), and traces to a collector.
 
+For OTLP configuration, push intervals, process gauges, and backward-compatible HTTP/RPC instruments, see [OTLP (push)](/docs/build/deployment/observability/telemetry).
+
+To inspect async tasks and scheduling inside the Tokio runtime, see [Tokio console](/docs/build/deployment/observability/tokio-console).
+
+## Full reference in the SurrealDB repository
+
+The open-source tree includes two detailed reference documents (diagrams, full metric catalogues, migration tables, and implementation notes). Treat them as the canonical supplement to this site:
+
+- [OBSERVABILITY.md](https://github.com/surrealdb/surrealdb/blob/main/doc/OBSERVABILITY.md) — `/metrics` versus OTLP, pipeline overview, edition on the resource, naming rules, Prometheus migration from older series, `PUBLIC_METRICS` allowlist, metric families (public and authenticated-only), audit and slow-query paths, multi-tenant guidance, and local `curl` examples.
+- [TELEMETRY.md](https://github.com/surrealdb/surrealdb/blob/main/doc/TELEMETRY.md) — what flows over OTLP, push intervals, process metric refresh, histogram bucket views, legacy `OtelObserver` instruments, deprecated env vars, and the `dev/docker` observability stack.
+
+## Unified model (summary)
+
+Metrics are recorded once in labelled form and fanned out to exporters. A single `surrealdb.statement` counter, for example, carries `statement_type`, `outcome`, `namespace`, `database`, and `user` across builds; unresolved tenant context appears as a `"-"` sentinel so series stay stable. Build flavour (`community` vs `enterprise`) is exposed on the OpenTelemetry resource as `service.edition` (for example on `target_info` in Prometheus).
+
+When no exporter is configured, observers short-circuit so the hot path stays cheap. For the ASCII pipeline diagram and observer list, see [OBSERVABILITY.md](https://github.com/surrealdb/surrealdb/blob/main/doc/OBSERVABILITY.md).
+
+## Naming (summary)
+
+Instruments use dotted OpenTelemetry-style names (for example `surrealdb.statement.duration`) under signal-domain scopes (`surrealdb.statement`, `surrealdb.query`, …). The Prometheus text exporter maps those to underscore names with conventional `_total`, `_seconds`, and `_bytes` suffixes. Attribute keys with dots are sanitised for Prometheus.
+
+Many historical Prometheus series names and label shapes changed in SurrealDB 3.1. Dashboards that pre-date that release should be updated using the migration table in [OBSERVABILITY.md](https://github.com/surrealdb/surrealdb/blob/main/doc/OBSERVABILITY.md).
+
+## Metrics on or off
+
+| Switch | Default | Effect |
+| --- | --- | --- |
+| `SURREAL_METRICS_ENABLED` | `true` | When `false`, the `/metrics` route is not mounted |
+| `SURREAL_TELEMETRY_PROVIDER` | unset | Set to `otlp` to enable the OTLP push pipeline (metrics, logs, traces) |
+| `SURREAL_TELEMETRY_DISABLE_METRICS` | `false` | When `true`, suppresses the OTLP metrics reader (logs and traces unaffected) |
+
+When metrics are disabled, `/metrics` returns 404.
+
+## Collecting `/metrics` and security
+
+Anonymous scrapes only receive families on a public allowlist (aggregate process signals). Root credentials unlock the full Prometheus surface for that process; namespace and database users are not treated as authenticated for this endpoint. Dimensional families such as `surrealdb_statement_total` are intentionally excluded from anonymous output because they carry tenant labels — use OTLP or an authenticated scrape for those. See [OBSERVABILITY.md](https://github.com/surrealdb/surrealdb/blob/main/doc/OBSERVABILITY.md) for the `PUBLIC_METRICS` list and security discussion.
+
+## Audit and slow-query (summary)
+
+The same logical records go to a durable file sink (optional; compliance / SIEM) and to OpenTelemetry logs when configured; with OTLP, logs share the exporter with metrics and traces. Redaction runs before either path. Severity mapping, `fsync` / overflow behaviour, and redaction knobs are documented in [OBSERVABILITY.md](https://github.com/surrealdb/surrealdb/blob/main/doc/OBSERVABILITY.md) and under `SURREAL_AUDIT_*` / `SURREAL_SLOW_QUERY_*` in [Environment variables](/docs/reference/cli/surrealdb-cli/environment-variables).
+
+## Multi-tenant guidance
+
+Treat `/metrics` as operator-only in multi-tenant deployments: avoid exposing the main listener to untrusted scrapers, prefer disabling metrics if you cannot isolate the endpoint, and never give tenants root credentials used for the authenticated metric view.
+
+## Local development
+
+Compare anonymous and authenticated scrapes:
+
+```bash
+curl http://127.0.0.1:8000/metrics
+curl -u root:root http://127.0.0.1:8000/metrics
 ```
-OTEL_EXPORTER_OTLP_ENDPOINT="http://my-collector.monitoring.svc.cluster.local:4317"
+
+Disable metrics entirely:
+
+```bash
+SURREAL_METRICS_ENABLED=false surreal start ...
 ```
 
-Metrics can be disabled (even if `SURREAL_TELEMETRY_PROVIDER` is set to `otlp`) by setting the `SURREAL_TELEMETRY_DISABLE_METRICS` environment variable to `true`. Similarly traces can be disabled by setting `SURREAL_TELEMETRY_DISABLE_TRACING` to `true`.
+Push metrics, logs, and traces to a local collector:
 
-## Metrics
+```bash
+SURREAL_TELEMETRY_PROVIDER=otlp \
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
+surreal start ...
+```
 
-Metrics are gathered every minute and sent to the collector. The following metrics are present:
-
-<table>
-    <thead>
-        <tr>
-            <th colspan="1" scope="col">Name</th>
-            <th colspan="1" scope="col">[Instrument](https://opentelemetry.io/docs/concepts/signals/metrics/#metric-instruments)</th>
-            <th colspan="1" scope="col">Explanation</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td colspan="1" scope="row" data-label="Metric name">
-                rpc.server.duration
-            </td>
-            <td colspan="1" scope="row" data-label="Type">
-                histogram
-            </td>
-            <td colspan="1" scope="row" data-label="Explanation">
-                Measures duration of inbound RPC requests in milliseconds
-            </td>
-        </tr>
-        <tr>
-            <td colspan="1" scope="row" data-label="Metric name">
-                rpc.server.active_connections
-            </td>
-            <td colspan="1" scope="row" data-label="Type">
-                counter
-            </td>
-            <td colspan="1" scope="row" data-label="Explanation">
-                The number of active WebSocket connections
-            </td>
-        </tr>
-        <tr>
-            <td colspan="1" scope="row" data-label="Metric name">
-                rpc.server.response.size
-            </td>
-            <td colspan="1" scope="row" data-label="Type">
-                histogram
-            </td>
-            <td colspan="1" scope="row" data-label="Explanation">
-                Measures the size of HTTP response messages
-            </td>
-        </tr>
-        <tr>
-            <td colspan="1" scope="row" data-label="Metric name">
-                http.server.duration
-            </td>
-            <td colspan="1" scope="row" data-label="Type">
-                histogram
-            </td>
-            <td colspan="1" scope="row" data-label="Explanation">
-                The HTTP server duration in milliseconds
-            </td>
-        </tr>
-        <tr>
-            <td colspan="1" scope="row" data-label="Metric name">
-                http.server.active_requests
-            </td>
-            <td colspan="1" scope="row" data-label="Type">
-                counter
-            </td>
-            <td colspan="1" scope="row" data-label="Explanation">
-                The number of active HTTP requests
-            </td>
-        </tr>
-        <tr>
-            <td colspan="1" scope="row" data-label="Metric name">
-                http.server.request.size
-            </td>
-            <td colspan="1" scope="row" data-label="Type">
-                histogram
-            </td>
-            <td colspan="1" scope="row" data-label="Explanation">
-                Measures the size of HTTP request messages
-            </td>
-        </tr>
-        <tr>
-            <td colspan="1" scope="row" data-label="Metric name">
-                http.server.response.size
-            </td>
-            <td colspan="1" scope="row" data-label="Type">
-                histogram
-            </td>
-            <td colspan="1" scope="row" data-label="Explanation">
-                Measures the size of HTTP response messages
-            </td>
-        </tr>
-    </tbody>
-</table>
-
-The metrics are shown here in the form required by the [OpenTelemetry Metrics Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/) with a `.` separator. When ingested into Prometheus the `.` separator will be [replaced](https://prometheus.io/blog/2024/03/14/commitment-to-opentelemetry/#support-utf-8-metric-and-label-names) with an `_`. For example `rpc.server.active.connections` will be transformed into `rpc_server_active_connections`.
-
-## Tokio console
-
-<Since v="v3.0.0" />
-
-The [tokio console](https://github.com/tokio-rs/console) tool can also be used to observe the low-level async tasks for the database.
-
-To use it, [install the Cargo package manager for Rust](https://doc.rust-lang.org/cargo/getting-started/installation.html), use the command `cargo install --locked tokio-console` to install tokio console, and then `tokio-console` to run it.
-
-![A screenshot of the tokio console showing active SurrealDB tasks.](~/assets/img/surrealdb/reference-guide/tokio_console_1.png)
-
-![A screenshot of the tokio console showing poll times by percentile.](~/assets/img/surrealdb/reference-guide/tokio_console_2.png)
-
-The following environment variables are used to manage the console:
-
-* `SURREAL_TOKIO_CONSOLE_ENABLED` set to `true` to enable the console
-* `SURREAL_TOKIO_CONSOLE_SOCKET_ADDR` to override the default address at `127.0.0.1:6669`
-* `SURREAL_TOKIO_CONSOLE_RETENTION` to override the default `6s` (six seconds) value for length of time to [retain data for completed events](https://docs.rs/console-subscriber/0.4.1/console_subscriber/struct.Builder.html#method.retention).
-
-## Log output settings
-
-SurrealDB contains a large number of flags for the [surreal start](/docs/reference/cli/surrealdb-cli/commands/start) command and [environment variables](/docs/reference/cli/surrealdb-cli/environment-variables) to modify the output from the database server. A quick overview of some of these flags is as follows:
-
-* Use `--log` to set the logging level (`info`, `warn`, `trace`, etc.).
-* Use `--log-format` to set the format (`text` or `json`).
-* Use `--log-socket` to send logs to a certain host:port.
-* Use `--log-file-enabled` to output logs to a file, followed by `--log-file-path` to specify the path to save logs to to.
-* Use `--log-file-rotation` to specify whether to create a new file for logs at a certain interval (`daily`, `hourly`, or `never`).
-* Use `--slow-log-threshold` to specify a duration after which a query will be logged as a slow query.
-* Use `--slow-log-param-allow` and `--slow-log-param-deny` to indicate which parameters are to be calculated before logging. For example, if `$table_name` has the value "person", allowing `table_name` will change `SELECT * FROM $table_name` to `SELECT * FROM person` in the logs.
-
+For OTLP-focused setup and version tabs, see [OTLP (push)](/docs/build/deployment/observability/telemetry). For catalogue-level detail, use [OBSERVABILITY.md](https://github.com/surrealdb/surrealdb/blob/main/doc/OBSERVABILITY.md) and [TELEMETRY.md](https://github.com/surrealdb/surrealdb/blob/main/doc/TELEMETRY.md) on GitHub.
