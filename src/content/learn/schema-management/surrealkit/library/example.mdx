@@ -1,0 +1,166 @@
+---
+position: 2
+title: Library usage example
+description: "Worked examples of using SurrealKit's library API for both sync and rollouts in a Rust application."
+---
+
+# Library usage example
+
+Worked examples of using SurrealKit's library API directly in Rust, covering both sync (for development and ephemeral databases) and rollouts (for shared and production databases).
+
+For the macro-based approach to sync, see [embed\_schema! macro](/docs/learn/schema-management/surrealkit/embed-schema-macro).
+
+## Shared setup
+
+Both examples below assume the following `Cargo.toml` and connection setup.
+
+```toml
+[package]
+name = "my-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+surrealdb = "2"
+surrealkit = { version = "0.6.2", default-features = false }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+```
+
+```rust
+use surrealkit::{DbCfg, DbOverrides, connect};
+
+let cfg = DbCfg::from_env(None, &DbOverrides::default())?;
+let db = connect(&cfg).await?;
+```
+
+`DbCfg::from_env` reads `SURREALDB_HOST`, `SURREALDB_NAMESPACE`, `SURREALDB_NAME`, `SURREALDB_USER`, and `SURREALDB_PASSWORD` from the environment or a `.env` file.
+
+## Sync
+
+Use sync against local or ephemeral databases where fast iteration matters and pruning is safe. Schema files are embedded at compile time with `include_str!`.
+
+```rust
+use anyhow::Result;
+use surrealkit::{DbCfg, DbOverrides, EmbeddedSchemaFile, SyncOpts, connect, run_sync_embedded_with_opts};
+
+static SCHEMA: &[EmbeddedSchemaFile] = &[
+    EmbeddedSchemaFile {
+        path: "database/schema/users.surql",
+        sql: include_str!("../database/schema/users.surql"),
+    },
+    EmbeddedSchemaFile {
+        path: "database/schema/posts.surql",
+        sql: include_str!("../database/schema/posts.surql"),
+    },
+];
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let cfg = DbCfg::from_env(None, &DbOverrides::default())?;
+    let db = connect(&cfg).await?;
+
+    run_sync_embedded_with_opts(
+        &db,
+        SCHEMA,
+        &SyncOpts {
+            prune: true,
+            fail_fast: true,
+            ..Default::default()
+        },
+    ).await?;
+
+    Ok(())
+}
+```
+
+Cargo re-compiles whenever a `include_str!`-referenced file changes, so the binary always reflects the latest schema. `run_sync_embedded_with_opts` applies new or changed definitions and removes any that have been deleted from the schema files.
+
+To also load seed data after syncing:
+
+```rust
+use surrealkit::seed_from_dir;
+use std::path::Path;
+
+run_sync_embedded_with_opts(&db, SCHEMA, &SyncOpts::default()).await?;
+seed_from_dir(&db, Path::new("database/seed")).await?;
+```
+
+Seed files run on every startup, so use `UPSERT` or guard inserts if idempotency matters.
+
+## Rollouts
+
+Use rollouts for shared and production databases. You build a `RolloutSpec` that describes the steps for each phase, then call `run_start_with_spec` and `run_complete_with_spec` at the appropriate points around your application deployment.
+
+```rust
+use anyhow::Result;
+use surrealkit::{
+    DbCfg, DbOverrides, connect,
+    RolloutPhase, RolloutSpec, RolloutStep, RolloutStepKind,
+    run_start_with_spec, run_complete_with_spec,
+    schema_state::EntityKey,
+};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let cfg = DbCfg::from_env(None, &DbOverrides::default())?;
+    let db = connect(&cfg).await?;
+
+    let spec = RolloutSpec {
+        id: "add_account_table".to_string(),
+        name: "add_account_table".to_string(),
+        source_schema_hash: String::new(),
+        target_schema_hash: String::new(),
+        compatibility: "phased".to_string(),
+        renames: vec![],
+        steps: vec![
+            RolloutStep {
+                id: "create_account".to_string(),
+                phase: RolloutPhase::Start,
+                kind: RolloutStepKind::ApplySchema,
+                sql: Some("DEFINE TABLE account SCHEMAFULL;".to_string()),
+                files: vec![],
+                expect: None,
+                entities: vec![],
+                idempotent: None,
+            },
+            RolloutStep {
+                id: "rollback_account".to_string(),
+                phase: RolloutPhase::Rollback,
+                kind: RolloutStepKind::RemoveEntities,
+                entities: vec![
+                    EntityKey {
+                        kind: "table".to_string(),
+                        scope: None,
+                        name: "account".to_string(),
+                    },
+                ],
+                files: vec![],
+                sql: None,
+                expect: None,
+                idempotent: None,
+            },
+        ],
+    };
+
+    run_start_with_spec(&db, &spec).await?;
+
+    Ok(())
+}
+```
+
+After `run_start_with_spec` succeeds, deploy your application. Once the new version is stable, call `run_complete_with_spec` to apply the contract phase:
+
+```rust
+run_complete_with_spec(&db, &spec).await?;
+```
+
+If something goes wrong before completing, roll back the start phase:
+
+```rust
+use surrealkit::run_rollback_with_spec;
+
+run_rollback_with_spec(&db, &spec).await?;
+```
+
+In practice, `RolloutSpec` is typically deserialised from a generated `.toml` manifest rather than constructed by hand. The CLI's `rollout plan` command produces these manifests, which your deployment tooling can load and pass to the library functions.

@@ -1,0 +1,128 @@
+---
+position: 4
+title: Rollouts
+description: "Rollouts provide a controlled, phased migration workflow for shared and production SurrealDB databases, with review, staged execution, and rollback support."
+---
+
+# Rollouts
+
+Rollouts are SurrealKit's migration system for shared and production databases. Rather than immediately pushing all changes (as Sync does), Rollouts generate a reviewed manifest and apply it in two phases: an expand phase that adds new definitions without breaking existing consumers, and a contract phase that removes old ones after your application has been updated. Deploying schema and application changes separately means no downtime.
+
+## The phased migration model
+
+A complete rollout has three stages:
+
+1. **Start:** applies non-destructive changes: adding tables, fields, indexes, and access methods that new application code will use. The old application code continues to work alongside the new definitions.
+2. **App cutover:** you deploy the new version of your application. Both old and new application code remain compatible with the database during this window.
+3. **Complete:** applies destructive changes: removing legacy tables, fields, or indexes that are no longer needed. Only run this after the new application version is stable.
+
+## Command workflow
+
+### For an existing database: baseline first
+
+If you are adopting SurrealKit on a database that already exists, capture a baseline before planning any rollout:
+
+```bash
+surrealkit rollout baseline
+```
+
+This reads the current database schema and writes snapshot files to `database/snapshots/`. Future plans diff against this baseline. You only need to run this once.
+
+### Plan a rollout
+
+After editing your schema files, plan a rollout:
+
+```bash
+surrealkit rollout plan --name add_customer_indexes
+```
+
+SurrealKit computes the diff between the current snapshot and your schema files, then generates a timestamped manifest in `database/rollouts/`:
+
+```
+database/rollouts/20260302153045__add_customer_indexes.toml
+```
+
+Review this file before proceeding. It lists each step, the SQL it will execute, and which phase (start or complete) it belongs to. Commit it to your repository alongside your schema changes.
+
+### Start the rollout
+
+```bash
+surrealkit rollout start 20260302153045__add_customer_indexes
+```
+
+This applies all start-phase steps. SurrealKit records resumable state in the `__rollout` metadata table, so if the process is interrupted it can pick up where it left off. Only one rollout can be in progress at a time; concurrent starts are blocked.
+
+### Deploy your application
+
+After `start` completes, deploy the new version of your application. At this point both the old and new schema definitions coexist in the database.
+
+### Complete the rollout
+
+Once the new application version is healthy:
+
+```bash
+surrealkit rollout complete 20260302153045__add_customer_indexes
+```
+
+This applies all complete-phase steps (removing legacy definitions) and marks the rollout as done.
+
+## Rollback
+
+If something goes wrong after `start` but before `complete`, you can undo the start-phase changes:
+
+```bash
+surrealkit rollout rollback 20260302153045__add_customer_indexes
+```
+
+Rollback reverses what `start` applied. It is not available after `complete` has run, so verify your application is working correctly before calling `complete`.
+
+## Other commands
+
+### status
+
+Inspect the state of rollouts stored in the database:
+
+```bash
+surrealkit rollout status
+```
+
+### lint
+
+Validate a manifest file without connecting to the database or applying anything:
+
+```bash
+surrealkit rollout lint 20260302153045__add_customer_indexes
+```
+
+Useful in CI to catch manifest errors before they reach a shared environment.
+
+## Rollout state machine
+
+Each rollout transitions through the following states, recorded in the `__rollout` table:
+
+```
+planned → running_start → ready_to_complete → completed
+                       ↘
+                        rolled_back
+```
+
+| State | Meaning |
+|---|---|
+| `planned` | Manifest exists; neither start nor complete has run |
+| `running_start` | Start phase is in progress or was interrupted |
+| `ready_to_complete` | Start phase completed successfully |
+| `completed` | Both phases completed |
+| `rolled_back` | Start phase was reversed |
+
+## Artifacts
+
+| Path | Description |
+|---|---|
+| `database/rollouts/*.toml` | Generated rollout manifests; commit these |
+| `database/snapshots/schema_snapshot.json` | Schema state snapshot used for diffing |
+| `database/snapshots/catalog_snapshot.json` | Catalog snapshot |
+
+## Next steps
+
+- [Template Variables](/docs/learn/schema-management/surrealkit/template-variables): parameterise schema files for different environments
+- [Testing](/docs/learn/schema-management/surrealkit/testing): validate schema and permissions before promoting a rollout
