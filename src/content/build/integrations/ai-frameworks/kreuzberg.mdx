@@ -43,4 +43,349 @@ For more information on supported formats, see the [Kreuzberg docs](https://docs
 
 ## Getting started
 
-To get started, visit [SurrealDB in the Kreuzberg Docs](https://docs.kreuzberg.dev/integrations/surrealdb). For the complete API reference, embedding model options, chunking configuration, and database schema details, see the [`kreuzberg-surrealdb` README](https://github.com/kreuzberg-dev/kreuzberg-surrealdb).
+<Tabs>
+
+<TabItem label="Python">
+
+To get started if using Python, visit [SurrealDB in the Kreuzberg Docs](https://docs.kreuzberg.dev/integrations/surrealdb). For the complete API reference, embedding model options, chunking configuration, and database schema details, see the [`kreuzberg-surrealdb` README](https://github.com/kreuzberg-dev/kreuzberg-surrealdb).
+
+</TabItem>
+
+<TabItem label="Rust">
+
+As Kreuzberg is written in Rust and has its own [crate](https://crates.io/crates/kreuzberg), code can be written directly with much more boilerplate but also quite a bit of manual customisation. The following example shows a setup somewhat similar to the Python extension. It demonstrates a number of file types used to populate the same SurrealDB instance, in this case a [JSON file](https://github.com/surrealdb/docs.surrealdb.com/blob/main/src/content/build/integrations/ai-frameworks/demo.json), a [Markdown file](https://github.com/surrealdb/docs.surrealdb.com/blob/main/src/content/build/integrations/ai-frameworks/demo.md), and even an [HWPX file](https://github.com/surrealdb/docs.surrealdb.com/blob/main/src/content/build/integrations/ai-frameworks/demo.hwpx) that are assumed to be in a folder `/assets`.
+
+This can be run with either `cargo run -- memory` or `cargo run -- local`, depending on if you prefer a one-time embedded instance or a local instance that can be connected to via Surrealist to manually query the data after the Rust code has run.
+
+For more ideas on how to redo this example to suit your own needs, see the [API reference](https://github.com/kreuzberg-dev/kreuzberg-surrealdb#api-reference) section of the kreuzberg-surrealdb repo.
+
+```rust
+// Required features to run:
+// kreuzberg = { version = "4.9.4", default-features = true, features = ["archives", "language-detection", "xml"] }
+// surrealdb = { version = "3.1.0-beta.1", default-features = true, features = ["protocol-ws", "kv-mem"] }
+use anyhow::{Context, Result};
+use kreuzberg::{extract_file, ExtractionConfig, LanguageDetectionConfig};
+use sha2::{Digest, Sha256};
+use std::{
+    fs::read_to_string,
+    path::{Path, PathBuf},
+};
+use surrealdb::{
+    engine::any::connect,
+    opt::auth::Root,
+    types::{ToSql, Value},
+};
+
+use kreuzberg::types::ExtractionResult;
+use serde::{Deserialize, Serialize};
+use surrealdb::types::{RecordId, SurrealValue};
+
+/// One logical document inside `assets/demo.json` (`documents` array).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct JsonDocumentSpec {
+    pub title: String,
+    #[serde(default)]
+    pub language: Option<String>,
+    pub content: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JsonDocumentsFile {
+    pub documents: Vec<JsonDocumentSpec>,
+}
+
+/// Parse `demo.json`-style bundles to ingest records
+pub fn parse_json_documents_file(path: &Path) -> anyhow::Result<JsonDocumentsFile> {
+    let raw = read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    serde_json::from_str(&raw)
+        .with_context(|| format!("parse JSON documents bundle {}", path.display()))
+}
+
+#[derive(Debug, Clone, SurrealValue)]
+pub struct ExtractionMetadataNested {
+    subject: Option<String>,
+    language: Option<String>,
+    modified_at: Option<String>,
+    extraction_duration_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, SurrealValue)]
+pub struct ConnectorDocument {
+    id: RecordId,
+    source: String,
+    content: String,
+    mime_type: String,
+    title: Option<String>,
+    authors: Option<Vec<String>>,
+    created_at: Option<String>,
+    metadata: ExtractionMetadataNested,
+    quality_score: Option<f64>,
+    content_hash: String,
+    detected_languages: Option<Vec<String>>,
+    keywords: Option<Vec<String>>,
+}
+
+/// Build the SurrealDB document payload for `INSERT IGNORE …`.
+pub fn document_record_value(
+    table: &str,
+    extracted: &ExtractionResult,
+    source_label: String,
+    content_hash: &str,
+) -> ConnectorDocument {
+    let meta = &extracted.metadata;
+    ConnectorDocument {
+        id: RecordId::new(table, content_hash),
+        source: source_label,
+        content: extracted.content.clone(),
+        mime_type: extracted.mime_type.as_ref().to_string(),
+        title: meta.title.clone(),
+        authors: meta.authors.clone(),
+        created_at: meta.created_at.clone(),
+        metadata: ExtractionMetadataNested {
+            subject: meta.subject.clone(),
+            language: meta.language.clone(),
+            modified_at: meta.modified_at.clone(),
+            extraction_duration_ms: meta.extraction_duration_ms,
+        },
+        quality_score: extracted.quality_score,
+        content_hash: content_hash.to_string(),
+        detected_languages: extracted.detected_languages.clone(),
+        keywords: meta.keywords.clone(),
+    }
+}
+
+/// Build a connector row from a JSON catalogue entry (no Kreuzberg pass — plain text is already known).
+pub fn document_record_from_json_entry(
+    table: &str,
+    entry: &JsonDocumentSpec,
+    source: String,
+    content_hash: &str,
+) -> ConnectorDocument {
+    ConnectorDocument {
+        id: RecordId::new(table, content_hash),
+        source,
+        content: entry.content.clone(),
+        mime_type: "application/json".to_string(),
+        title: Some(entry.title.clone()),
+        authors: None,
+        created_at: None,
+        metadata: ExtractionMetadataNested {
+            subject: None,
+            language: entry.language.clone(),
+            modified_at: None,
+            extraction_duration_ms: None,
+        },
+        quality_score: None,
+        content_hash: content_hash.to_string(),
+        detected_languages: entry.language.as_ref().map(|l| vec![l.clone()]),
+        keywords: None,
+    }
+}
+
+const TABLE: &str = "documents";
+
+/// HWPX is a ZIP package; Kreuzberg maps `.hwpx`to `application/haansofthwpx`, which is only
+/// handled when the `hwp` feature is enabled (legacy CFB `.hwp` path is wrong for HWPX, which is essentially a .zip of .xml files).
+/// Force ZIP so `archives` + `xml` handle the package.
+const HWPX_ZIP_MIME: &str = "application/zip";
+
+fn sha256_hex(content: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(content.as_bytes());
+    format!("{:x}", h.finalize())
+}
+
+pub fn connector_schema(table: &str) -> String {
+    format!(
+        "DEFINE ANALYZER IF NOT EXISTS doc_analyzer TOKENIZERS class FILTERS lowercase,snowball(english);
+        DEFINE TABLE IF NOT EXISTS {table} SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS source ON TABLE {table} TYPE string;
+        DEFINE FIELD IF NOT EXISTS content ON TABLE {table} TYPE string;
+        DEFINE FIELD IF NOT EXISTS mime_type ON TABLE {table} TYPE string;
+        DEFINE FIELD IF NOT EXISTS title ON TABLE {table} TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS authors ON TABLE {table} TYPE option<array<string>>;
+        DEFINE FIELD IF NOT EXISTS created_at ON TABLE {table} TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS ingested_at ON TABLE {table} TYPE datetime DEFAULT time::now();
+        DEFINE FIELD IF NOT EXISTS metadata ON TABLE {table} TYPE object FLEXIBLE;
+        DEFINE FIELD IF NOT EXISTS quality_score ON TABLE {table} TYPE option<float>;
+        DEFINE FIELD IF NOT EXISTS content_hash ON TABLE {table} TYPE string;
+        DEFINE FIELD IF NOT EXISTS detected_languages ON TABLE {table} TYPE option<array<string>>;
+        DEFINE FIELD IF NOT EXISTS keywords ON TABLE {table} TYPE option<array<string>>;
+        DEFINE INDEX IF NOT EXISTS idx_doc_source ON TABLE {table} FIELDS source UNIQUE;
+        DEFINE INDEX IF NOT EXISTS idx_doc_hash ON TABLE {table} FIELDS content_hash UNIQUE;
+        DEFINE INDEX IF NOT EXISTS idx_doc_content ON TABLE {table} FIELDS content FULLTEXT ANALYZER doc_analyzer BM25(1.2,0.75) HIGHLIGHTS;"
+        )
+}
+
+// Add files such as demo.md, demo.hwpx, demo.json to /assets folder
+fn default_asset_paths() -> Vec<PathBuf> {
+    let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+    ["demo.md", "demo.hwpx", "demo.json"]
+        .into_iter()
+        .map(|name| assets.join(name))
+        .collect()
+}
+
+fn json_entry_source_label(path: &Path, index: usize) -> String {
+    format!("{}#{}", path.display(), index)
+}
+
+async fn ingest_path(
+    path: &Path,
+    table: &str,
+    config: &ExtractionConfig,
+) -> Result<Vec<ConnectorDocument>> {
+    let path = path
+        .canonicalize()
+        .with_context(|| format!("resolve path {}", path.display()))?;
+    if !path.is_file() {
+        anyhow::bail!("not a file: {}", path.display());
+    }
+
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    if ext == "json" {
+        let bundle = parse_json_documents_file(&path)?;
+        if bundle.documents.is_empty() {
+            anyhow::bail!("empty `documents` array in {}", path.display());
+        }
+        let mut records = Vec::with_capacity(bundle.documents.len());
+        for (i, entry) in bundle.documents.iter().enumerate() {
+            let hash = sha256_hex(&entry.content);
+            let source = json_entry_source_label(&path, i);
+            records.push(document_record_from_json_entry(table, entry, source, &hash));
+        }
+        Ok(records)
+    } else {
+        // `demo.md` / `.markdown`: Kreuzberg resolves `text/markdown` from the extension.
+        // Other non-JSON types: same path. `.hwpx` only: force `application/zip` (see `HWPX_ZIP_MIME`).
+        let mime_hint = (ext == "hwpx").then_some(HWPX_ZIP_MIME);
+        let extracted = extract_file(&path, mime_hint, config)
+            .await
+            .with_context(|| format!("Kreuzberg extract {}", path.display()))?;
+        if !extracted.processing_warnings.is_empty() {
+            eprintln!(
+                "Kreuzberg warnings ({}): {:?}",
+                path.display(),
+                extracted.processing_warnings
+            );
+        }
+        let hash = sha256_hex(extracted.content.as_str());
+        Ok(vec![document_record_value(
+            table,
+            &extracted,
+            path.display().to_string(),
+            &hash,
+        )])
+    }
+}
+
+fn usage() -> &'static str {
+    "usage: kreuzberg-surrealdb-example memory|local \n\
+     \n\
+       memory  — SurrealDB in-memory (no server).\n\
+       local   — SurrealDB at ws://localhost:8000 (expects root/secret, ns/db main)."
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let mut args = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if args.is_empty() {
+        eprintln!("{}\n", usage());
+        anyhow::bail!("missing mode: memory or local");
+    }
+
+    let mode = args.remove(0);
+    let mode_str = mode
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("mode must be valid UTF-8"))?;
+    let endpoint = match mode_str {
+        "memory" => "memory",
+        "local" => "ws://localhost:8000",
+        _ => {
+            eprintln!("{}\n", usage());
+            anyhow::bail!(
+                "first argument must be `memory` or `local`, got {:?}",
+                mode_str
+            );
+        }
+    };
+
+    let paths: Vec<PathBuf> = if args.is_empty() {
+        default_asset_paths()
+    } else {
+        args.into_iter().map(PathBuf::from).collect()
+    };
+
+    let config = ExtractionConfig {
+        chunking: None,
+        language_detection: Some(LanguageDetectionConfig {
+            enabled: true,
+            min_confidence: 0.55,
+            detect_multiple: true,
+        }),
+        ..Default::default()
+    };
+
+    let mut all_docs = Vec::new();
+    for p in &paths {
+        let mut records = ingest_path(p, TABLE, &config).await?;
+        all_docs.append(&mut records);
+    }
+
+    //eprintln!("Ingested {} record(s) from {} path(s).", all_docs.len(), paths.len());
+
+    let client = connect(endpoint).await?;
+    client.use_ns("main").use_db("main").await?;
+
+    if endpoint == "local" {
+        client
+            .signin(Root {
+                username: "root".into(),
+                password: "secret".into(),
+            })
+            .await?;
+    }
+
+    client.query(connector_schema(TABLE)).await?.check()?;
+
+    for doc in &all_docs {
+        client
+            .query(format!("INSERT IGNORE INTO {TABLE} $doc;"))
+            .bind(("doc", doc.clone()))
+            .await?
+            .check()?;
+    }
+
+    let records: Value = client
+        .query(
+        "SELECT
+            source,
+            content,
+            mime_type,
+            title,
+            metadata.language AS language,
+            search::score(0) AS score
+        FROM documents
+        WHERE content @0@ 'product'
+        ORDER BY score DESC
+        LIMIT 10;",
+        )
+        .await?
+        .check()?
+        .take(0)?;
+
+    println!("BM25 hits:\n{}", records.to_sql_pretty());
+
+    Ok(())
+}
+```
+
+</TabItem>
+
+</Tabs>
+
