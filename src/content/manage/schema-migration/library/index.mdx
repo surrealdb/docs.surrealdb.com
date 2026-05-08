@@ -1,0 +1,123 @@
+---
+position: 1
+title: Using SurrealKit as a library
+description: "Embed SurrealKit directly in a Rust application to connect to SurrealDB, sync schema at startup, and seed data without running the CLI."
+---
+
+# Using SurrealKit as a library
+
+SurrealKit is available as a Rust crate so you can drive connections, schema sync, and seeding from application code rather than the CLI. This is useful for applications that want to own their own database setup, for example applying schema on startup without a separate migration step.
+
+## Adding the dependency
+
+```toml
+[dependencies]
+surrealkit = { version = "0.6.2", default-features = false }
+```
+
+Disabling default features keeps the binary smaller by excluding CLI-only dependencies.
+
+## Connecting
+
+`DbCfg::from_env` reads the same environment variables as the CLI (`SURREALDB_HOST`, `SURREALDB_NAMESPACE`, etc.):
+
+```rust
+use surrealkit::{DbCfg, DbOverrides, connect};
+
+let cfg = DbCfg::from_env(None, &DbOverrides::default())?;
+let db = connect(&cfg).await?;
+```
+
+`DbOverrides` lets you override specific fields programmatically while leaving the rest to the environment:
+
+```rust
+let cfg = DbCfg::from_env(None, &DbOverrides {
+    host: Some("http://localhost:8000".to_string()),
+    ..Default::default()
+})?;
+```
+
+## Syncing schema at startup
+
+### Compile-time embedding
+
+The `embed_schema!` macro reads your `database/schema/` directory at compile time and bakes the SQL into the binary. No schema files need to ship alongside the executable.
+
+```rust
+surrealkit::embed_schema!();
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let db = surrealkit::connect(
+        &surrealkit::DbCfg::from_env(None, &Default::default())?
+    ).await?;
+
+    embedded_schema::sync(&db).await?;
+    Ok(())
+}
+```
+
+The macro generates an `embedded_schema` module. Calling `sync` on it applies any changed definitions and prunes removed ones, the same as `surrealkit sync` from the CLI.
+
+### Runtime sync from files
+
+If you prefer to load schema files at runtime (useful during development or in environments where the schema directory is mounted separately):
+
+```rust
+use surrealkit::{EmbeddedSchemaFile, run_sync_embedded};
+
+static SCHEMA: &[EmbeddedSchemaFile] = &[
+    EmbeddedSchemaFile {
+        path: "database/schema/users.surql",
+        sql: "DEFINE TABLE user SCHEMAFULL;",
+    },
+    EmbeddedSchemaFile {
+        path: "database/schema/orders.surql",
+        sql: "DEFINE TABLE order SCHEMAFULL;",
+    },
+];
+
+run_sync_embedded(&db, SCHEMA).await?;
+```
+
+### Sync with custom options
+
+`run_sync_embedded_with_opts` gives full control over sync behaviour:
+
+```rust
+use surrealkit::{SyncOpts, run_sync_embedded_with_opts};
+
+run_sync_embedded_with_opts(
+    &db,
+    SCHEMA,
+    &SyncOpts {
+        watch: false,
+        debounce_ms: 0,
+        dry_run: false,
+        fail_fast: true,
+        prune: true,
+        allow_shared_prune: false,
+    },
+).await?;
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `watch` | `false` | Re-sync on file changes |
+| `debounce_ms` | `0` | Debounce delay for watch mode |
+| `dry_run` | `false` | Print changes without applying them |
+| `fail_fast` | `false` | Stop on first error |
+| `prune` | `true` | Remove definitions not present in schema files |
+| `allow_shared_prune` | `false` | Permit pruning on a shared database |
+
+## Seeding
+
+`seed_from_dir` runs all `.surql` files in a directory against the database, in filename order:
+
+```rust
+use surrealkit::seed_from_dir;
+
+seed_from_dir(&db, std::path::Path::new("database/seed")).await?;
+```
+
+This is the programmatic equivalent of `surrealkit seed`.

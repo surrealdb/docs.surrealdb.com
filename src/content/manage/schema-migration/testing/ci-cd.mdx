@@ -1,0 +1,122 @@
+---
+position: 2
+title: CI / CD
+description: "Run SurrealKit tests in CI pipelines using the official GitHub Action, with JSON output for test reporting and Docker Compose for full end-to-end environments."
+---
+
+# CI / CD
+
+Tests exit non-zero on any failure, produce machine-readable JSON output, and there is an official GitHub Action that handles installation and execution.
+
+## JSON output
+
+Pass `--json-out` to write a structured report alongside the human-readable output:
+
+```bash
+surrealkit test --fail-fast --json-out results.json
+```
+
+The JSON file can be consumed by CI reporting tools or used for dashboards and notifications.
+
+## GitHub Actions
+
+The [`surrealkit-action`](https://github.com/surrealdb/surrealkit-action) installs the SurrealKit CLI and runs any SurrealKit command. It supports Linux x64, macOS ARM64, and Windows x64.
+
+### Basic test workflow
+
+```yaml
+name: tests
+on: [push, pull_request]
+
+jobs:
+  surrealkit-test:
+    runs-on: ubuntu-latest
+    services:
+      surrealdb:
+        image: surrealdb/surrealdb:latest
+        ports:
+          - '8000:8000'
+        options: >-
+          --health-cmd "/surreal is-ready"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 10
+        env:
+          SURREAL_USER: root
+          SURREAL_PASS: root
+    steps:
+      - uses: actions/checkout@v4
+      - uses: surrealdb/surrealkit-action@v1
+        with:
+          command: test
+          host: http://localhost:8000
+          user: root
+          pass: root
+          args: --fail-fast --json-out results.json
+```
+
+### Running a rollout in CI
+
+You can also use the action to apply a rollout as part of a deployment workflow:
+
+```yaml
+- uses: surrealdb/surrealkit-action@v1
+  with:
+    command: rollout start
+    args: ${{ env.ROLLOUT_ID }}
+    host: ${{ secrets.SURREALDB_HOST }}
+    user: ${{ secrets.SURREALDB_USER }}
+    pass: ${{ secrets.SURREALDB_PASSWORD }}
+```
+
+## Docker Compose
+
+For end-to-end testing that mirrors a production-like environment, run SurrealKit alongside SurrealDB in Docker Compose:
+
+```yaml
+services:
+  surrealdb:
+    image: surrealdb/surrealdb:latest
+    command: start --user root --pass secret memory
+    healthcheck:
+      test: ["CMD", "/surreal", "is-ready"]
+      interval: 1s
+      timeout: 5s
+      retries: 30
+
+  surrealkit:
+    image: ghcr.io/surrealdb/surrealkit:latest
+    depends_on:
+      surrealdb:
+        condition: service_healthy
+    volumes:
+      - ./database:/database:ro
+    command:
+      - --host=http://surrealdb:8000
+      - --ns=main
+      - --db=main
+      - --user=root
+      - --pass=secret
+      - test
+      - --fail-fast
+      - --json-out=/database/results.json
+```
+
+Run with:
+
+```bash
+docker compose run --rm surrealkit
+```
+
+The `database/` directory is mounted read-only; the container reads your schema files and test suites but cannot write back to them. The JSON report is written to `database/results.json` on the host.
+
+## Seeding before tests
+
+SurrealKit runs a setup phase before executing tests. By default this includes syncing your schema and running any seed files. To skip individual phases:
+
+```bash
+surrealkit test --no-sync   # skip schema sync, use whatever is already in the DB
+surrealkit test --no-seed   # skip seed data
+```
+
+In most CI environments you want both phases to run so each test job starts from a clean, consistent state.
