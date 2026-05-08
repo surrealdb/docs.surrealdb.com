@@ -394,7 +394,7 @@ function NavDropdown({ label, sections }: NavMenuGroup) {
                                 href={item.href}
                                 className={classes.navItem}
                                 bdrs="xs"
-                                p={6}
+                                p="sm"
                                 color="slate"
                                 leftSection={
                                     <Icon
