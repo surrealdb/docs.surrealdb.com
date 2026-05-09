@@ -47,10 +47,10 @@ export function IconBox({
     const onlyIcon = icon && !title && !description && !status;
 
     const lightSrc = typeof icon === "string" ? icon : icon?.light;
-    const darkSrc = typeof icon === "string" ? undefined : icon?.dark;
+    const darkSrc = typeof icon === "string" ? icon : icon?.dark;
 
-    const resolvedLightSrc = lightSrc ? (getImageUrl(lightSrc) ?? lightSrc) : undefined;
-    const resolvedDarkSrc = darkSrc ? (getImageUrl(darkSrc) ?? darkSrc) : undefined;
+    const resolvedLightSrc = (lightSrc && getImageUrl(lightSrc)) || lightSrc;
+    const resolvedDarkSrc = (darkSrc && getImageUrl(darkSrc)) || darkSrc;
 
     const content = (
         <>
@@ -65,33 +65,28 @@ export function IconBox({
                     wrap="nowrap"
                 >
                     {resolvedLightSrc && (
-                        <Box className={classes.iconWrapper}>
-                            <Image
-                                src={resolvedLightSrc}
-                                alt={title ?? "Icon"}
-                                w={32}
-                                miw={32}
-                                className={classes.lightIcon}
-                                data-only-icon={onlyIcon || undefined}
-                            />
-                            {resolvedDarkSrc && (
-                                <Image
-                                    src={resolvedDarkSrc}
-                                    alt={title ?? "Icon"}
-                                    w={32}
-                                    miw={32}
-                                    className={classes.darkIcon}
-                                    data-only-icon={onlyIcon || undefined}
-                                />
-                            )}
-                        </Box>
+                        <Image
+                            src={resolvedLightSrc}
+                            alt={title ?? "Icon"}
+                            w={24}
+                            className={classes.lightIcon}
+                            data-only-icon={onlyIcon || undefined}
+                        />
+                    )}
+                    {resolvedDarkSrc && (
+                        <Image
+                            src={resolvedDarkSrc}
+                            alt={title ?? "Icon"}
+                            w={24}
+                            className={classes.darkIcon}
+                            data-only-icon={onlyIcon || undefined}
+                        />
                     )}
                     {(title || subtitle) && (
                         <Stack gap={0}>
                             {title && (
                                 <Text
                                     fw={500}
-                                    lh="1.5"
                                     fz="lg"
                                     c="bright"
                                 >
