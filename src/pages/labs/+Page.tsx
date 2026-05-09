@@ -140,7 +140,6 @@ export default function Page() {
                 />
                 <Text
                     fz="sm"
-                    c="dimmed"
                     maw={640}
                 >
                     Explore official and community examples, tools, libraries, and integrations
@@ -200,12 +199,7 @@ export default function Page() {
                         className={classes.noResults}
                         w="852px"
                     >
-                        <Text
-                            fz="lg"
-                            c="dimmed"
-                        >
-                            No labs found matching your criteria.
-                        </Text>
+                        <Text fz="lg">No labs found matching your criteria.</Text>
                     </Box>
                 )}
             </Box>

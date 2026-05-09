@@ -140,7 +140,6 @@ export function LabCard({ item, isDark }: LabCardProps) {
                             </Text>
                             <Text
                                 fz="xs"
-                                c="dimmed"
                                 lh={1.3}
                             >
                                 {authorRole}

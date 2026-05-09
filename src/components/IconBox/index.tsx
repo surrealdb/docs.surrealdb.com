@@ -93,18 +93,12 @@ export function IconBox({
                                     fw={500}
                                     lh="1.5"
                                     fz="lg"
+                                    c="bright"
                                 >
                                     {title}
                                 </Text>
                             )}
-                            {subtitle && (
-                                <Text
-                                    fz="sm"
-                                    c="dimmed"
-                                >
-                                    {subtitle}
-                                </Text>
-                            )}
+                            {subtitle && <Text fz="sm">{subtitle}</Text>}
                         </Stack>
                     )}
                 </Group>
@@ -122,8 +116,8 @@ export function IconBox({
             {description && (
                 <Text
                     mt="md"
-                    c="dimmed"
                     className={classes.description}
+                    opacity={0.8}
                 >
                     {description}
                 </Text>

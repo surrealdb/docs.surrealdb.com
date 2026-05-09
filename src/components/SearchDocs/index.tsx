@@ -148,12 +148,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
                         path={iconSearch}
                         size="sm"
                     />
-                    <Text
-                        fz="sm"
-                        c="dimmed"
-                    >
-                        Search the docs
-                    </Text>
+                    <Text fz="sm">Search the docs</Text>
                     <Flex
                         align="center"
                         gap={4}
