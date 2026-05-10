@@ -1,10 +1,5 @@
 import type { NavSection } from "~/utils/navigation";
 
-export const DEFAULT_META_TITLE =
-    "SurrealDB | The ultimate multi-model database for tomorrow's applications";
-export const DEFAULT_META_DESCRIPTION =
-    "SurrealDB is the ultimate database for tomorrow's serverless, jamstack, single-page, and traditional applications.";
-
 export const BASE_URL = "https://surrealdb.com/docs";
 
 export function getSuffixedMetaTitle(title: string) {
