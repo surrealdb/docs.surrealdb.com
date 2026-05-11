@@ -338,7 +338,7 @@ function NavDropdown({ label, sections }: NavMenuGroup) {
             onChange={setHover}
             shadow="lg"
             offset={4}
-            width={320}
+            width={250}
             position="bottom-start"
             withinPortal
             trigger="click-hover"
@@ -372,17 +372,16 @@ function NavDropdown({ label, sections }: NavMenuGroup) {
                     </Flex>
                 </Anchor>
             </Menu.Target>
-            <Menu.Dropdown bdrs="xs">
+            <Menu.Dropdown
+                bdrs="xs"
+                bg="obsidian.7"
+            >
                 {sections.map((section, sectionIndex) => (
                     <Fragment key={section.heading}>
                         {section.heading && (
                             <Menu.Label
-                                className={classes.navDropdownSectionLabel}
+                                className={classes.navLinkLabel}
                                 mt={sectionIndex > 0 ? "lg" : undefined}
-                                fz="xs"
-                                lts={0.5}
-                                tt="uppercase"
-                                opacity={0.5}
                             >
                                 {section.heading}
                             </Menu.Label>
@@ -399,15 +398,15 @@ function NavDropdown({ label, sections }: NavMenuGroup) {
                                 leftSection={
                                     <Icon
                                         path={item.icon}
-                                        size="lg"
+                                        className={classes.navItemIcon}
                                         opacity={1}
-                                        c="slate.3"
+                                        size="lg"
                                     />
                                 }
                                 rightSection={
                                     <Icon
                                         path={iconChevronRight}
-                                        opacity={0.3}
+                                        opacity={0.2}
                                     />
                                 }
                             >
@@ -532,59 +531,62 @@ export function MobileNav() {
     return (
         <Stack
             component="nav"
-            gap={0}
+            gap="xs"
             px="sm"
         >
-            {NAV_LINKS.map((entry) =>
-                isMenuGroup(entry) ? (
-                    <MantineNavLink
-                        key={entry.label}
-                        label={entry.label}
-                        childrenOffset={16}
-                    >
-                        {entry.sections.map((section, sectionIndex) => (
-                            <Fragment key={section.heading}>
-                                {sectionIndex > 0 ? <Divider my="xs" /> : null}
-                                <Text
-                                    component="div"
-                                    className={classes.navMobileSectionHeading}
-                                >
-                                    {section.heading}
-                                </Text>
-                                {section.items.map((item) => (
-                                    <MantineNavLink
-                                        key={item.href}
-                                        label={item.label}
-                                        description={
-                                            <Text
-                                                fz="sm"
-                                                lineClamp={1}
-                                            >
-                                                {item.description}
-                                            </Text>
-                                        }
-                                        href={item.href}
-                                        component="a"
-                                        leftSection={
-                                            <Icon
-                                                path={item.icon}
-                                                size="md"
-                                            />
-                                        }
-                                    />
-                                ))}
-                            </Fragment>
-                        ))}
-                    </MantineNavLink>
-                ) : (
-                    <MantineNavLink
-                        key={entry.href}
-                        label={entry.label}
-                        href={entry.href}
-                        component="a"
-                    />
-                ),
-            )}
+            {NAV_LINKS.map((entry, i) => (
+                <>
+                    {i > 0 && <Divider />}
+                    {isMenuGroup(entry) ? (
+                        <MantineNavLink
+                            key={entry.label}
+                            label={entry.label}
+                            childrenOffset={16}
+                            bdrs="xs"
+                            py="sm"
+                        >
+                            {entry.sections.map((section, sectionIndex) => (
+                                <Fragment key={section.heading}>
+                                    <Text
+                                        component="div"
+                                        className={classes.navLinkLabel}
+                                        mt={sectionIndex > 0 ? "md" : undefined}
+                                    >
+                                        {section.heading}
+                                    </Text>
+                                    {section.items.map((item) => (
+                                        <MantineNavLink
+                                            key={item.href}
+                                            label={item.label}
+                                            href={item.href}
+                                            component="a"
+                                            py="sm"
+                                            bdrs="xs"
+                                            leftSection={
+                                                <Icon
+                                                    path={item.icon}
+                                                    className={classes.navItemIcon}
+                                                    opacity={1}
+                                                    size="md"
+                                                />
+                                            }
+                                        />
+                                    ))}
+                                </Fragment>
+                            ))}
+                        </MantineNavLink>
+                    ) : (
+                        <MantineNavLink
+                            key={entry.href}
+                            label={entry.label}
+                            href={entry.href}
+                            component="a"
+                            bdrs="xs"
+                            py="sm"
+                        />
+                    )}
+                </>
+            ))}
         </Stack>
     );
 }

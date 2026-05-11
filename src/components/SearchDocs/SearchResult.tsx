@@ -30,7 +30,6 @@ function ResultBreadcrumb({ breadcrumb }: { breadcrumb: string }) {
                 <Text
                     key={`${part}-${i}`}
                     fz="xs"
-                    c="dimmed"
                     lh="unset"
                 >
                     {part}
@@ -77,7 +76,6 @@ function ResultEntry({ item, query }: { item: SearchResultItem; query: string })
                 {snippet && (
                     <Highlight
                         fz="xs"
-                        c="dimmed"
                         highlight={highlightTokens}
                         className={classes.resultSnippet}
                         lineClamp={2}

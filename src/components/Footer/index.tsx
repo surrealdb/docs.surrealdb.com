@@ -30,12 +30,7 @@ export function Footer() {
             className={classes.root}
         >
             <Box className={classes.inner}>
-                <FooterLink
-                    href="https://github.com/surrealdb"
-                    c="dimmed"
-                >
-                    © SurrealDB 2026
-                </FooterLink>
+                <FooterLink href="https://github.com/surrealdb">© SurrealDB 2026</FooterLink>
                 <Box
                     component="span"
                     className={classes.separator}
