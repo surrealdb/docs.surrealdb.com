@@ -440,11 +440,19 @@ export function Header({ opened, onToggle }: HeaderProps) {
                 gap="md"
             >
                 <Group flex={1}>
-                    <Anchor href="/">
+                    <Anchor
+                        href="/"
+                        aria-label="SurrealDB home"
+                    >
+                        {/* ThemedImage forwards `alt` to its inner Mantine Image elements,
+                            but @surrealdb/ui's `ThemedImageProps` does not yet declare it.
+                            Spreading via an object literal bypasses the type gap until the
+                            upstream type is widened to match the runtime behaviour. */}
                         <ThemedImage
                             lightSrc={LogoLight}
                             darkSrc={LogoDark}
                             h={24}
+                            {...{ alt: "SurrealDB" }}
                         />
                     </Anchor>
                     <Divider
@@ -466,6 +474,7 @@ export function Header({ opened, onToggle }: HeaderProps) {
                             lightSrc={DocsLight}
                             darkSrc={DocsDark}
                             h={24}
+                            {...{ alt: "SurrealDB Docs" }}
                         />
                     </Anchor>
                 </Group>
