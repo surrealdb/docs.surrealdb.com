@@ -18,14 +18,16 @@ import { Fragment, useState } from "react";
 import { ClientOnly } from "vike-react/ClientOnly";
 import { usePageContext } from "vike-react/usePageContext";
 import { ColorSchemeToggle } from "../ColorSchemeToggle";
-import { ProductSwitcher, ProductSwitcherMobile } from "./product-switcher";
 import {
     flattenMenuItems,
-    getProductFromPath,
     isMenuGroup,
     type NavEntry,
     type NavItem,
     type NavMenuGroup,
+} from "./nav";
+import { ProductSwitcher, ProductSwitcherMobile } from "./product-switcher";
+import {
+    getProductFromPath,
     PRODUCTS,
     SURREALDB_LOGO_DARK,
     SURREALDB_LOGO_LIGHT,
@@ -38,7 +40,7 @@ export type {
     NavMenuGroup,
     NavMenuItem,
     NavMenuSection,
-} from "./products";
+} from "./nav";
 
 const SIGN_IN_URL =
     "https://app.surrealdb.com/signin?_gl=1*6c6cw1*FPAU*MjUyNzg4NDQ3LjE3NzA3MzU0OTI.*_ga*MTUwNTkxNTcyNS4xNzcwNzM1NDky*_ga_J1NWM32T1V*czE3NzE4NDcxMTMkbzQ2JGcxJHQxNzcxODQ3MjAwJGo1NiRsMCRoNjUwODcxODU5*_fplc*dEpHdFVZdTN2eEolMkJBWkNUY1R5NUhKbmJySSUyRk56eEN6ZHlEcU52cTJzbUV0dXpOcmZhSU5MeXZFdW90bFdPZWRpbE4yTzA1dmZ1MiUyRlc5RnM3djhEZ2NVeGZhdmoyNW1rcFFsSmhwUXJzR1BoR2ZIWUdsMXYyZ0tJSXFmOW93JTNEJTNE";
@@ -180,11 +182,12 @@ function useCurrentProduct() {
 }
 
 export interface HeaderProps {
+    navLinks: NavEntry[];
     opened?: boolean;
     onToggle?: () => void;
 }
 
-export function Header({ opened, onToggle }: HeaderProps) {
+export function Header({ navLinks, opened, onToggle }: HeaderProps) {
     const product = useCurrentProduct();
 
     return (
@@ -229,7 +232,7 @@ export function Header({ opened, onToggle }: HeaderProps) {
                     mx="auto"
                     className={classes.navList}
                 >
-                    {product.navLinks.map((entry) => (
+                    {navLinks.map((entry) => (
                         <Box
                             component="li"
                             key={entry.label}
@@ -280,7 +283,11 @@ export function Header({ opened, onToggle }: HeaderProps) {
     );
 }
 
-export function MobileNav() {
+export interface MobileNavProps {
+    navLinks: NavEntry[];
+}
+
+export function MobileNav({ navLinks }: MobileNavProps) {
     const product = useCurrentProduct();
 
     return (
@@ -293,7 +300,7 @@ export function MobileNav() {
             <ProductSwitcherMobile current={product.id} />
             <Divider />
             <Stack gap="xs">
-                {product.navLinks.map((entry, i) => (
+                {navLinks.map((entry, i) => (
                     <Fragment key={entry.label}>
                         {i > 0 && <Divider />}
                         {isMenuGroup(entry) ? (
