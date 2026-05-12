@@ -4,41 +4,6 @@ import { useState } from "react";
 import type { SearchResultItem, SearchResult as SearchResultType } from "~/utils/search";
 import classes from "./style.module.scss";
 
-interface SearchResultProps {
-    result: SearchResultType;
-    query: string;
-}
-
-function ResultBreadcrumb({ breadcrumb }: { breadcrumb: string }) {
-    const parts = breadcrumb.split(" > ").filter(Boolean);
-
-    return (
-        <Breadcrumbs
-            fz="xs"
-            separator={
-                <Text
-                    c="slate"
-                    fz="xs"
-                    fw={600}
-                >
-                    /
-                </Text>
-            }
-            className={classes.resultBreadcrumb}
-        >
-            {parts.map((part, i) => (
-                <Text
-                    key={`${part}-${i}`}
-                    fz="xs"
-                    lh="unset"
-                >
-                    {part}
-                </Text>
-            ))}
-        </Breadcrumbs>
-    );
-}
-
 function tokenizeQuery(query: string): string[] {
     return query.split(/[\s\-_/]+/).filter((t) => t.length > 1);
 }
@@ -55,27 +20,25 @@ function ResultEntry({ item, query }: { item: SearchResultItem; query: string })
             align="flex-start"
             wrap="nowrap"
         >
-            <Box className={classes.resultIcon}>
-                <Icon
-                    path={isSection ? iconText : iconFile}
-                    size="sm"
-                />
-            </Box>
+            <Icon
+                path={isSection ? iconText : iconFile}
+                size="md"
+                color="slate.3"
+                mt={2}
+            />
             <Stack
                 gap={2}
                 className={classes.resultContent}
             >
                 <Highlight
-                    fz="sm"
-                    fw={500}
                     truncate
                     highlight={highlightTokens}
+                    className={classes.resultTitle}
                 >
                     {title}
                 </Highlight>
                 {snippet && (
                     <Highlight
-                        fz="xs"
                         highlight={highlightTokens}
                         className={classes.resultSnippet}
                         lineClamp={2}
@@ -88,39 +51,49 @@ function ResultEntry({ item, query }: { item: SearchResultItem; query: string })
     );
 }
 
+interface SearchResultProps {
+    result: SearchResultType;
+    query: string;
+}
+
 export function SearchResultCard({ result, query }: SearchResultProps) {
     const [expanded, setExpanded] = useState(false);
-    const breadcrumb = String(result.breadcrumb ?? "");
     const more = Array.isArray(result.more) ? result.more : [];
     const preview = more.slice(0, 1);
     const hidden = more.slice(1);
     const hasHidden = hidden.length > 0;
 
+    const breadcrumb = String(result.breadcrumb ?? "");
+    const parts = breadcrumb.split(" > ").filter(Boolean);
+
     return (
-        <Stack
+        <Group
             gap="xs"
             className={classes.resultCard}
         >
-            <ResultBreadcrumb breadcrumb={breadcrumb} />
-            <ResultEntry
-                item={result}
-                query={query}
-            />
-            {preview.map((item, i) => (
-                <Box
-                    key={`more-${i}`}
-                    className={classes.resultMore}
+            <Box>
+                <Breadcrumbs
+                    fz="xs"
+                    ml={26}
+                    className={classes.resultBreadcrumb}
                 >
-                    <ResultEntry
-                        item={item}
-                        query={query}
-                    />
-                </Box>
-            ))}
-            {expanded &&
-                hidden.map((item, i) => (
+                    {parts.map((part, i) => (
+                        <Text
+                            key={`${part}-${i}`}
+                            fz="xs"
+                            lh="unset"
+                        >
+                            {part}
+                        </Text>
+                    ))}
+                </Breadcrumbs>
+                <ResultEntry
+                    item={result}
+                    query={query}
+                />
+                {preview.map((item, i) => (
                     <Box
-                        key={`hidden-${i}`}
+                        key={`more-${i}`}
                         className={classes.resultMore}
                     >
                         <ResultEntry
@@ -129,22 +102,35 @@ export function SearchResultCard({ result, query }: SearchResultProps) {
                         />
                     </Box>
                 ))}
-            {hasHidden && (
-                <Text
-                    fz="xs"
-                    c="surreal"
-                    className={classes.resultShowMore}
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        setExpanded((v) => !v);
-                    }}
-                >
-                    {expanded
-                        ? "Show less"
-                        : `+${hidden.length} more result${hidden.length > 1 ? "s" : ""} on this page`}
-                </Text>
-            )}
-        </Stack>
+                {expanded &&
+                    hidden.map((item, i) => (
+                        <Box
+                            key={`hidden-${i}`}
+                            className={classes.resultMore}
+                        >
+                            <ResultEntry
+                                item={item}
+                                query={query}
+                            />
+                        </Box>
+                    ))}
+                {hasHidden && (
+                    <Text
+                        fz="xs"
+                        c="surreal"
+                        className={classes.resultShowMore}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            setExpanded((v) => !v);
+                        }}
+                    >
+                        {expanded
+                            ? "Show less"
+                            : `+${hidden.length} more result${hidden.length > 1 ? "s" : ""} on this page`}
+                    </Text>
+                )}
+            </Box>
+        </Group>
     );
 }

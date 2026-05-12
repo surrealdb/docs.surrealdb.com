@@ -108,7 +108,6 @@ export interface SidebarProps extends BoxProps {
 export function Sidebar({ navigation, versionSelector, ...props }: SidebarProps) {
     return (
         <Stack
-            pt="xs"
             pb="sm"
             mah="calc(100vh - 56px - 1rem)"
             gap={0}

@@ -1,13 +1,25 @@
-import { Flex, Kbd, Loader, Text, UnstyledButton, type UnstyledButtonProps } from "@mantine/core";
-import { useDebouncedCallback, useHotkeys, useOs } from "@mantine/hooks";
+import {
+    Box,
+    Flex,
+    Group,
+    Kbd,
+    Loader,
+    SimpleGrid,
+    Stack,
+    Text,
+    UnstyledButton,
+    type UnstyledButtonProps,
+} from "@mantine/core";
+import { useDebouncedValue, useHotkeys, useInputState, useOs } from "@mantine/hooks";
 import {
     Spotlight,
     type SpotlightActionData,
     type SpotlightFilterFunction,
     spotlight,
 } from "@mantine/spotlight";
-import { Icon, iconSearch } from "@surrealdb/ui";
-import { type ChangeEventHandler, useCallback, useEffect, useRef, useState } from "react";
+import { Icon, iconArrowLeft, iconSearch } from "@surrealdb/ui";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { usePageContext } from "vike-react/usePageContext";
 import { getProductFromPath } from "~/utils/product";
 import { RateLimitError, SearchError, type SearchResult, searchDocs } from "~/utils/search";
@@ -38,15 +50,32 @@ function mapResultsToActions(results: SearchResult[], query: string): SpotlightA
 const noFilter: SpotlightFilterFunction = (_query, actions) => actions;
 
 export function SearchDocs(props: UnstyledButtonProps) {
-    const [actions, setActions] = useState<SpotlightActionData[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [search, setSearch] = useState("");
-    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [search, setSearch] = useInputState("");
+    const [debouncedSearch] = useDebouncedValue(search.trim(), 250);
     const [rateLimitRemaining, setRateLimitRemaining] = useState(0);
-    const abortController = useRef<AbortController | null>(null);
     const os = useOs();
     const { urlPathname } = usePageContext();
     const product = getProductFromPath(urlPathname);
+
+    const hasTypedQuery = search.trim().length > 0;
+
+    const searchQuery = useQuery({
+        queryKey: ["docs-search", debouncedSearch, product] as const,
+        queryFn: async ({ signal }) => {
+            const results = await searchDocs(debouncedSearch, signal, product);
+
+            window.dataLayer?.push({
+                event: "search_query",
+                search_term: debouncedSearch,
+                search_product: product,
+            });
+
+            return results;
+        },
+        enabled: debouncedSearch.length > 0,
+        placeholderData: keepPreviousData,
+        retry: false,
+    });
 
     const openSearch = useCallback(() => {
         spotlight.open();
@@ -61,79 +90,43 @@ export function SearchDocs(props: UnstyledButtonProps) {
         return () => clearTimeout(timer);
     }, [rateLimitRemaining]);
 
-    const executeSearch = useDebouncedCallback(async (value: string) => {
-        if (!value.trim()) {
-            setActions([]);
-            setErrorMessage(null);
-            setLoading(false);
-            return;
-        }
-
-        setLoading(true);
-        setErrorMessage(null);
-
-        const controller = new AbortController();
-
-        try {
-            abortController.current?.abort();
-            abortController.current = controller;
-
-            const results = await searchDocs(value, controller.signal, product);
-            window.dataLayer?.push({
-                event: "search_query",
-                search_term: value,
-                search_product: product,
-            });
-
-            setRateLimitRemaining(0);
-            setActions(mapResultsToActions(results, value));
-        } catch (error) {
-            if (error instanceof DOMException && error.name === "AbortError") {
-                return;
-            }
-
-            setActions([]);
-
-            if (error instanceof RateLimitError) {
-                setRateLimitRemaining(error.retryAfterSeconds ?? 10);
-            } else if (error instanceof SearchError) {
-                setErrorMessage(error.message);
-            } else {
-                setErrorMessage("Something went wrong — please try again");
-            }
-        } finally {
-            if (abortController.current === controller) {
-                setLoading(false);
-            }
-        }
-    }, 250);
-
-    const handleSearch = useCallback<ChangeEventHandler<HTMLInputElement>>(
-        (event) => {
-            const value = event.currentTarget.value;
-            setSearch(value);
-            executeSearch(value);
-        },
-        [executeSearch],
-    );
-
     useEffect(() => {
-        return () => {
-            abortController.current?.abort();
-        };
-    }, []);
+        if (searchQuery.error instanceof RateLimitError) {
+            setRateLimitRemaining(searchQuery.error.retryAfterSeconds ?? 10);
+        } else if (!searchQuery.error) {
+            setRateLimitRemaining(0);
+        }
+    }, [searchQuery.error]);
+
+    const loading = hasTypedQuery && (search.trim() !== debouncedSearch || searchQuery.isFetching);
+
+    const errorMessage =
+        searchQuery.error instanceof RateLimitError
+            ? null
+            : searchQuery.error instanceof SearchError
+              ? searchQuery.error.message
+              : searchQuery.error
+                ? "Something went wrong — please try again"
+                : null;
+
+    const actions = useMemo(() => {
+        if (!hasTypedQuery || debouncedSearch.length === 0) return [];
+        return mapResultsToActions(searchQuery.data ?? [], debouncedSearch);
+    }, [debouncedSearch, hasTypedQuery, searchQuery.data]);
 
     const modKey = os === "macos" ? "⌘" : "Ctrl";
-    const hasQuery = search.trim().length > 0;
+    const hasQuery = hasTypedQuery;
 
-    let nothingFound: string | undefined;
+    let nothingFound: ReactNode;
 
     if (rateLimitRemaining > 0) {
         nothingFound = `Too many requests — try again in ${rateLimitRemaining}s`;
     } else if (errorMessage) {
         nothingFound = errorMessage;
-    } else if (hasQuery && !loading) {
+    } else if (searchQuery.isSuccess && debouncedSearch.length > 0 && actions.length === 0) {
         nothingFound = "No results found";
+    } else {
+        nothingFound = <SearchTutorial modKey={modKey} />;
     }
 
     return (
@@ -148,10 +141,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
                 onClick={openSearch}
                 {...props}
             >
-                <Flex
-                    align="center"
-                    gap="sm"
-                >
+                <Group gap="sm">
                     <Icon
                         path={iconSearch}
                         size="sm"
@@ -165,7 +155,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
                         <Kbd size="xs">{modKey}</Kbd>
                         <Kbd size="xs">K</Kbd>
                     </Flex>
-                </Flex>
+                </Group>
             </UnstyledButton>
             <Spotlight
                 actions={hasQuery ? actions : []}
@@ -173,15 +163,20 @@ export function SearchDocs(props: UnstyledButtonProps) {
                 filter={noFilter}
                 scrollable
                 maxHeight={500}
+                transitionProps={{ transition: "fade-down" }}
+                overlayProps={{ blur: 0 }}
                 classNames={{
                     inner: classes.searchScreen,
                     actionsList: classes.searchList,
+                    content: classes.searchContent,
+                    search: classes.searchInput,
+                    empty: classes.searchEmpty,
                 }}
                 searchProps={{
                     placeholder: "Search the docs",
                     leftSection: loading ? <Loader size="xs" /> : <Icon path={iconSearch} />,
                     autoFocus: true,
-                    onChange: handleSearch,
+                    onChange: setSearch,
                     value: search,
                     className: classes.searchInput,
                     rightSection: <Kbd>Esc</Kbd>,
@@ -191,5 +186,52 @@ export function SearchDocs(props: UnstyledButtonProps) {
                 }}
             />
         </>
+    );
+}
+
+function SearchTutorial({ modKey }: { modKey: string }) {
+    return (
+        <Stack pt={90}>
+            <Text fz="lg">Enter a search term to find documentation</Text>
+            <SimpleGrid
+                cols={2}
+                mt="xl"
+            >
+                <Box ta="right">
+                    <Kbd>{modKey} + K</Kbd>
+                </Box>
+                <Box ta="left">
+                    <Text>to open the search</Text>
+                </Box>
+                <Box ta="right">
+                    <Kbd>
+                        <Icon
+                            path={iconArrowLeft}
+                            style={{ transform: "rotate(-90deg)" }}
+                        />
+                    </Kbd>
+                </Box>
+                <Box ta="left">
+                    <Text>to navigate down</Text>
+                </Box>
+                <Box ta="right">
+                    <Kbd>
+                        <Icon
+                            path={iconArrowLeft}
+                            style={{ transform: "rotate(90deg)" }}
+                        />
+                    </Kbd>
+                </Box>
+                <Box ta="left">
+                    <Text>to navigate up</Text>
+                </Box>
+                <Box ta="right">
+                    <Kbd>Esc</Kbd>
+                </Box>
+                <Box ta="left">
+                    <Text>to close the search</Text>
+                </Box>
+            </SimpleGrid>
+        </Stack>
     );
 }
