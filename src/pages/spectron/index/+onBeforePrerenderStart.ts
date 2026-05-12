@@ -1,7 +1,5 @@
-import { getCollection } from "vike-content-collection";
+import { prerenderCollectionUrls } from "~/utils/data";
 
 export default function onBeforeRenderStart() {
-    return getCollection("spectron").map((entry) =>
-        entry.slug === "" ? "/spectron" : `/spectron/${entry.slug}`,
-    );
+    return prerenderCollectionUrls("spectron/home", "/spectron");
 }

@@ -1,7 +1,7 @@
 import type { Heading, Root } from "@surrealdb/ui";
 import { render } from "vike/abort";
 import type { PageContext } from "vike/types";
-import { type CollectionMap, getCollectionEntry } from "vike-content-collection";
+import { type CollectionMap, getCollection, getCollectionEntry } from "vike-content-collection";
 import { useConfig } from "vike-react/useConfig";
 import { resolveMarkdown } from "./markdown";
 import { getSuffixedMetaTitle } from "./meta";
@@ -81,4 +81,17 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         title: entry.metadata.title ?? "",
         description: description ?? "",
     };
+}
+
+/**
+ * URLs for static prerendering. Omits category-only slug segments so crawlers
+ * never enqueue paths such as `/spectron/__category`.
+ */
+export function prerenderCollectionUrls<K extends keyof CollectionMap>(
+    collectionId: K,
+    pathnameBase: string,
+): string[] {
+    return getCollection(collectionId)
+        .filter((entry) => !entry.slug.includes("__category"))
+        .map((entry) => (entry.slug === "" ? pathnameBase : `${pathnameBase}/${entry.slug}`));
 }
