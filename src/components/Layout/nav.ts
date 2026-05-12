@@ -252,7 +252,7 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
 ];
 
 export const SPECTRON_NAV_LINKS: NavEntry[] = [
-    { label: "Get started", href: "/docs/spectron/get-started" },
+    { label: "Get started", href: "/docs/spectron" },
     { label: "Memory", href: "/docs/spectron/memory" },
     { label: "Knowledge", href: "/docs/spectron/knowledge" },
     { label: "Integrations", href: "/docs/spectron/integrations" },
