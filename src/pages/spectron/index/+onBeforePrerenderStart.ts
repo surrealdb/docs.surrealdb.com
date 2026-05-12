@@ -1,5 +1,5 @@
 import { prerenderCollectionUrls } from "~/utils/data";
 
 export default function onBeforeRenderStart() {
-    return prerenderCollectionUrls("spectron/home", "/spectron");
+    return prerenderCollectionUrls("spectron/index", "/spectron");
 }
