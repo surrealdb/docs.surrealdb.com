@@ -42,7 +42,8 @@ export function ProductSwitcher({ current }: ProductSwitcherProps) {
                         <ThemedImage
                             lightSrc={product.wordmarkLight}
                             darkSrc={product.wordmarkDark}
-                            h={24}
+                            h={20}
+                            w="auto"
                         />
                         <Icon
                             path={iconChevronDown}
