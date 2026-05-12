@@ -3,3 +3,174 @@ position: 4
 title: Migrate from a vector store
 description: "From chunk-only search to structured memory."
 ---
+
+# Migrating from a vector store
+
+Vector stores are a common first step for adding memory to AI agents. They work well for simple document retrieval but fall short when you need structured extraction, provenance tracking, temporal validity, or authority-based conflict resolution. This guide covers what you gain by migrating to Spectron and how to execute the migration.
+
+## What you gain
+
+| Capability | Vector store | Spectron |
+|---|---|---|
+| Document retrieval | Semantic similarity search | Hybrid (semantic + BM25 + graph traversal) |
+| Structured extraction | None — raw chunks | Entities, attributes, and relations |
+| Provenance | None — chunk origin only | Every fact traces back to the turn that produced it |
+| Correction tracking | None | Supersession chains with full history |
+| Temporal validity | None | `valid_from` / `valid_until` on every attribute |
+| Authority hierarchy | None | Layer 0 wins over Layer 1 |
+| Scope-based isolation | Manual metadata filtering | Dimensional scope with floor matching |
+| State inspection | None | Query memory state directly |
+
+The decision to migrate usually comes when one of the following becomes a pain point: contradictions silently accumulating, inability to correct or expire facts, no insight into what the agent actually knows, or metadata filtering becoming unmanageable.
+
+## Migration steps
+
+### 1. Export your existing documents
+
+Export the source documents from your vector store. For most systems, this means exporting the original text rather than the embeddings — Spectron re-indexes everything through its own pipeline.
+
+```python
+# Example: export from Pinecone
+import pinecone
+
+index = pinecone.Index("my-index")
+# Fetch all vectors with metadata (Pinecone requires pagination)
+results = index.query(
+    vector=[0.0] * 1536,
+    top_k=10000,
+    include_metadata=True,
+)
+documents = [
+    {"text": r.metadata["text"], "source": r.metadata.get("source", "")}
+    for r in results.matches
+]
+```
+
+```typescript
+// Example: export from a generic vector store
+const documents = await vectorStore.fetchAll({ includeMetadata: true });
+const exportedDocs = documents.map(doc => ({
+    text: doc.metadata.text,
+    source: doc.metadata.source ?? "",
+}));
+```
+
+### 2. Upload documents to Layer 0
+
+Ingest your exported documents into Spectron's Layer 0 knowledge layer. Each document is processed through the ingestion pipeline: chunked, keyword-extracted, and linked to knowledge nodes.
+
+```python
+import httpx
+
+mgmt = httpx.Client(
+    base_url="https://spectron.surrealdb.com/api/v1",
+    headers={"Authorization": "Bearer mgmt_..."},
+)
+
+for doc in documents:
+    mgmt.post(
+        "/contexts/my-context/knowledge/documents",
+        files={"file": (
+            "document.txt",
+            doc["text"].encode(),
+            "text/plain",
+        )},
+        data={
+            "title": doc.get("source", "Imported document"),
+            "source_url": doc.get("source", ""),
+        },
+    )
+```
+
+```typescript
+for (const doc of exportedDocs) {
+    const formData = new FormData();
+    formData.append("file", new Blob([doc.text], { type: "text/plain" }), "document.txt");
+    formData.append("title", doc.source || "Imported document");
+    formData.append("source_url", doc.source || "");
+
+    await fetch("https://spectron.surrealdb.com/api/v1/contexts/my-context/knowledge/documents", {
+        method: "POST",
+        headers: { "Authorization": "Bearer mgmt_..." },
+        body: formData,
+    });
+}
+```
+
+Spectron's ingestion pipeline handles chunking internally. You do not need to replicate the chunking strategy from your vector store.
+
+### 3. Handle the metadata gap
+
+Vector stores often have minimal, inconsistent, or missing metadata. Spectron's pipeline extracts structure from content, so missing metadata is less critical — but it is worth enriching documents before ingestion if you have source information available.
+
+If your vector store metadata includes document type, date, or author information, include it in the document upload:
+
+```python
+mgmt.post(
+    "/contexts/my-context/knowledge/documents",
+    files={"file": ("policy.md", content, "text/markdown")},
+    data={
+        "title": "Return policy",
+        "content_type": "policy",
+        "authored_at": "2024-01-15T00:00:00Z",
+    },
+)
+```
+
+### 4. Migrate conversational memory
+
+If your vector store also held per-user conversational memory (previous chat turns or extracted facts stored as vectors), re-ingest them as Spectron turns:
+
+```python
+# For each user, create a session and ingest their history
+for user_id, history in user_histories.items():
+    session = await memory.sessions.create(
+        scope={"org": "my-org", "user": user_id},
+    )
+    for message in history:
+        await session.turn(role=message["role"], content=message["content"])
+```
+
+```typescript
+for (const [userId, history] of Object.entries(userHistories)) {
+    const session = await memory.sessions.create({
+        scope: { org: "my-org", user: userId },
+    });
+    for (const message of history) {
+        await session.turn({ role: message.role, content: message.content });
+    }
+}
+```
+
+The extraction pipeline runs on each turn and re-derives structured entities and attributes from the conversation history. You do not need to manually map old vector metadata to Spectron's schema.
+
+## Coexistence strategy
+
+You do not need to cut over immediately. Run Spectron and your vector store in parallel for a period:
+
+1. **Write to both** — record turns in Spectron and continue writing to the vector store.
+2. **Read from Spectron first** — use Spectron's context retrieval as primary; fall back to the vector store if Spectron returns nothing.
+3. **Validate** — compare the quality of responses with Spectron context versus vector store context over a sample of real queries.
+4. **Cut over** — once satisfied, remove the vector store read path.
+
+```python
+async def retrieve_context(user_id: str, query: str) -> str:
+    # Try Spectron first
+    ctx = await session.context(query=query, top_k=6)
+    if ctx.items:
+        return ctx.formatted
+
+    # Fall back to vector store during transition
+    chunks = vector_store.search(query=query, user_id=user_id, top_k=6)
+    return "\n\n".join(c["text"] for c in chunks)
+```
+
+## Timeline
+
+| Week | Activity |
+|---|---|
+| 1 | Export documents; begin Layer 0 ingestion |
+| 2 | Begin recording new conversations as Spectron turns |
+| 3–4 | Coexistence: Spectron primary, vector store fallback |
+| 5 | Validate response quality; remove fallback |
+| 6+ | Re-ingest historical conversational memory if needed |

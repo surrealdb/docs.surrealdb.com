@@ -1,5 +1,180 @@
 ---
 position: 1
 title: Authentication
-description: "Bearer tokens and principal resolution."
+description: "API key authentication and management in Spectron."
 ---
+
+# Authentication
+
+Every request to Spectron must carry an API key in the `Authorization` header as a bearer token. Spectron validates the key, determines the principal type and scope floor, and enforces access controls before processing the request.
+
+```http
+Authorization: Bearer sk_live_...
+```
+
+There is no session-based authentication, OAuth, or cookie-based auth. All authentication is stateless and key-based.
+
+## Principal types
+
+Spectron has three principal types, each with a different trust level and capability set:
+
+| Principal | Scope floor | Capabilities |
+|---|---|---|
+| Management | `{}` (empty — no restrictions) | Full read and write access to all Contexts, keys, and configuration. |
+| Agent | `{org, agent[, user]}` | Read and write within the scope floor. Cannot access data outside their floor. |
+| Supervisor | `{org}` | Read-only across the org scope. Write access limited to reflection insights at their own floor. |
+
+See [Principals](/spectron/self-hosting/security/principals) for the full access control matrix.
+
+## Creating the first management key
+
+On a fresh installation, create the initial admin key using the `spectron init` command:
+
+```bash
+spectron init --admin-key
+```
+
+Or, if running via Docker:
+
+```bash
+docker compose exec spectron spectron init --admin-key
+```
+
+The command prints the key secret once. Store it immediately in a secrets manager or a restricted environment file.
+
+```
+Admin key created.
+  Name:   admin
+  Secret: sk_mgmt_01hx...
+
+This secret will not be shown again.
+```
+
+## Creating agent and supervisor keys
+
+Use the management API to create keys for agents and supervisors:
+
+```bash
+# Agent key scoped to a specific org and agent
+curl -s -X POST https://spectron.example.com/api/v1/contexts/acme-prod/keys/planner-agent \
+  -H "Authorization: Bearer $SPECTRON_MGMT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "principal": "agent",
+    "scope_floor": { "org": "anneal", "agent": "planner" }
+  }'
+```
+
+```bash
+# Supervisor key scoped to an org
+curl -s -X POST https://spectron.example.com/api/v1/contexts/acme-prod/keys/ops-supervisor \
+  -H "Authorization: Bearer $SPECTRON_MGMT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "principal": "supervisor",
+    "scope_floor": { "org": "anneal" }
+  }'
+```
+
+The response body contains the key secret. It is not stored in recoverable form — copy it before the response is discarded:
+
+```json
+{
+  "name": "planner-agent",
+  "secret": "sk_live_01hy...",
+  "principal": "agent",
+  "scope_floor": { "org": "anneal", "agent": "planner" },
+  "created_at": "2025-11-04T14:00:00Z"
+}
+```
+
+## Listing keys
+
+```bash
+curl -s https://spectron.example.com/api/v1/contexts/acme-prod/keys \
+  -H "Authorization: Bearer $SPECTRON_MGMT_KEY"
+```
+
+The listing endpoint returns key metadata — name, principal type, scope floor, creation date, expiry, and revocation status — but never the secret.
+
+## Key expiry
+
+Set `expires_at` when creating a key to make it expire automatically:
+
+```json
+{
+  "principal": "agent",
+  "scope_floor": { "org": "anneal", "agent": "planner" },
+  "expires_at": "2026-01-01T00:00:00Z"
+}
+```
+
+Expired keys are rejected with `401 Unauthorized`. Expiry is enforced server-side on every request.
+
+## Key revocation
+
+Revoke a key by deleting it:
+
+```bash
+curl -s -X DELETE https://spectron.example.com/api/v1/contexts/acme-prod/keys/planner-agent \
+  -H "Authorization: Bearer $SPECTRON_MGMT_KEY"
+```
+
+Deletion is immediate. Subsequent requests using the deleted key receive `401 Unauthorized`. Revocation is recorded in the control-plane audit log with a timestamp and the management key that performed the deletion.
+
+## Key rotation
+
+The recommended rotation procedure:
+
+1. Create a new key with the same principal type and scope floor.
+2. Update the secret in your application configuration (environment variable, secrets manager).
+3. Deploy the updated configuration and verify that the new key is working.
+4. Delete the old key.
+
+There is a brief window during step 2–3 where both old and new keys are valid. This is intentional — it allows zero-downtime rotation.
+
+## Audit linkage
+
+Every write operation (session creation, turn insertion, knowledge node creation, entity update) records the `api_key` name of the key that performed the operation. This enables audit queries of the form "what did key X write?" without requiring key secrets to be stored in the data layer.
+
+See [Profiles and audit trails](/spectron/self-hosting/observability/profiles-and-audit-trails) for querying the audit trail.
+
+## Delegation model
+
+Management keys can mint agent and supervisor keys. Agent and supervisor keys cannot mint sub-keys. There is no key hierarchy beyond these two levels.
+
+This means a management key must be held only by an operator or a CI/CD system that creates keys during provisioning. Application-level agents hold agent keys only.
+
+## SDK key management
+
+The Python SDK management client wraps the key management API:
+
+```python
+from spectron import SpectronManagement
+
+admin = SpectronManagement(
+    base_url="https://spectron.example.com",
+    api_key=os.environ["SPECTRON_MGMT_KEY"],
+)
+
+# Create a key
+key = await admin.contexts("acme-prod").keys.create(
+    name="planner-agent",
+    principal="agent",
+    scope_floor={"org": "anneal", "agent": "planner"},
+    expires_at="2026-01-01T00:00:00Z",
+)
+print(key.secret)  # Save immediately
+
+# List keys
+keys = await admin.contexts("acme-prod").keys.list()
+
+# Revoke a key
+await admin.contexts("acme-prod").keys.delete("planner-agent")
+```
+
+## Next steps
+
+- [Principals](/spectron/self-hosting/security/principals) — access control matrix for each principal type
+- [Scope as a security boundary](/spectron/self-hosting/security/scope-as-security-boundary) — how scope floors enforce isolation
+- [Multi-tenancy](/spectron/self-hosting/security/multi-tenancy) — patterns for serving multiple tenants

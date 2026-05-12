@@ -1,5 +1,153 @@
 ---
-position: 1
+position: 2
 title: Ontology grounding
-description: "Constrain extraction with entity types, keys, and relation labels."
+description: "Constrain extraction to known entity types, attribute keys, and relation labels for domain-specific accuracy."
 ---
+
+# Ontology grounding
+
+By default, Spectron's extraction pipeline operates in free-form mode. Given a conversation turn, it infers entity types, attribute names, and relation labels directly from the language of the text, without reference to any predefined vocabulary. This works well for general-purpose assistants where the subject matter is unpredictable and broad.
+
+For domain-specific deployments — customer support, sales intelligence, legal document analysis, medical note processing — free-form extraction produces inconsistent results. The same concept surfaces under different labels depending on phrasing: a customer's subscription plan might be extracted as `plan`, `subscription_tier`, `pricing_tier`, or `tier` across different turns. Queries and reconciliation both degrade when the same attribute is stored under multiple names.
+
+Ontology grounding solves this by supplying a controlled vocabulary that Spectron injects into the extraction prompt as a constraint. Extraction is then bounded to the types, keys, and labels you define.
+
+## What an ontology contains
+
+An ontology has three components:
+
+- **Entity types**: the classes of thing your domain cares about (e.g. `Customer`, `Product`, `Ticket`).
+- **Attribute keys per entity type**: the allowed property names for each type. Extraction maps every observed attribute to the closest key in this list rather than inventing a new name.
+- **Relation labels**: the allowed labels for edges between entities (e.g. `purchased`, `raised`, `resolved_by`).
+
+None of these components are mandatory. You can set only entity types without attribute keys if your goal is simply to suppress unexpected entity classes, or only relation labels if you want to constrain the graph topology without dictating attribute vocabulary.
+
+## Setting an ontology
+
+### Python
+
+```python
+from spectron import Spectron
+
+memory = Spectron(context="acme-support", api_key=os.environ["SPECTRON_API_KEY"])
+
+await memory.config.ontology(
+    entity_types=["Customer", "Product", "Ticket", "Agent"],
+    attribute_keys={
+        "Customer": ["name", "plan", "region", "email"],
+        "Product": ["name", "version", "category", "sku"],
+        "Ticket": ["id", "status", "priority", "channel"],
+        "Agent": ["name", "team"],
+    },
+    relation_labels=["purchased", "raised", "assigned_to", "resolved_by", "related_to"],
+)
+```
+
+### JavaScript
+
+```javascript
+import { Spectron } from "spectron";
+
+const memory = new Spectron({ context: "acme-support", apiKey: process.env.SPECTRON_API_KEY });
+
+await memory.config.ontology({
+    entity_types: ["Customer", "Product", "Ticket", "Agent"],
+    attribute_keys: {
+        Customer: ["name", "plan", "region", "email"],
+        Product: ["name", "version", "category", "sku"],
+        Ticket: ["id", "status", "priority", "channel"],
+        Agent: ["name", "team"],
+    },
+    relation_labels: ["purchased", "raised", "assigned_to", "resolved_by", "related_to"],
+});
+```
+
+The ontology is stored per-Context and applied immediately to all subsequent extraction runs. Existing extracted facts are not retroactively relabelled.
+
+## How grounding works
+
+When Spectron processes a turn with an ontology configured, the extraction prompt includes a structured constraint block:
+
+```
+Allowed entity types: Customer, Product, Ticket, Agent
+Allowed attribute keys for Customer: name, plan, region, email
+Allowed relation labels: purchased, raised, assigned_to, resolved_by, related_to
+```
+
+The model is instructed to map all observed entities, attributes, and relations to the closest matching entry in these lists. If the text mentions a concept that has no clear match, the extractor either maps it to the closest allowed key or omits it — it does not invent a new label.
+
+This keeps the knowledge graph consistent regardless of how users phrase their messages, and ensures that queries such as "list all customers on the enterprise plan" reliably match facts stored under `plan` rather than scattered across `plan`, `tier`, and `subscription_level`.
+
+## Partial ontologies
+
+You can supply any combination of the three components. For example, supplying only entity types without attribute keys constrains which entity classes are recognised but leaves attribute naming free-form:
+
+```python
+await memory.config.ontology(
+    entity_types=["Customer", "Order", "Product"],
+)
+```
+
+Or supplying only relation labels to constrain graph topology:
+
+```python
+await memory.config.ontology(
+    relation_labels=["ordered", "contains", "shipped_to"],
+)
+```
+
+## Updating an ontology
+
+Calling `memory.config.ontology()` replaces the existing ontology wholesale. To add new types or keys to an existing ontology, read the current configuration first, extend it, and write it back:
+
+```python
+config = await memory.config.get()
+existing = config.ontology
+
+await memory.config.ontology(
+    entity_types=existing.entity_types + ["Warranty"],
+    attribute_keys={
+        **existing.attribute_keys,
+        "Warranty": ["duration", "coverage", "start_date"],
+    },
+    relation_labels=existing.relation_labels + ["covered_by"],
+)
+```
+
+## Reading the current ontology
+
+```python
+config = await memory.config.get()
+print(config.ontology)
+```
+
+```javascript
+const config = await memory.config.get();
+console.log(config.ontology);
+```
+
+## Clearing an ontology
+
+To revert to free-form extraction, set all three fields to empty lists or omit them entirely:
+
+```python
+await memory.config.ontology(
+    entity_types=[],
+    attribute_keys={},
+    relation_labels=[],
+)
+```
+
+## When to use ontology grounding
+
+Use grounding when:
+
+- Your deployment has a **well-defined domain** with a stable set of entity types and relationships. Customer support, e-commerce, legal, and medical systems are good candidates.
+- You need **consistent attribute names** for downstream queries, filters, or integrations. If your application queries for `plan = "enterprise"`, every fact about customer plans must be stored under that exact key.
+- You are building a **multi-turn agent** where accumulated facts drive personalisation or decision logic. Inconsistent keys compound over time as the knowledge graph grows.
+
+Free-form extraction is preferable when:
+
+- The subject matter is genuinely open-ended and unpredictable (general-purpose assistants, research tools).
+- You are in the early stages of development and have not yet identified the relevant entity types for your domain.
+- You want to discover which entity types and relations naturally emerge from your data before committing to a fixed vocabulary.

@@ -1,5 +1,232 @@
 ---
 position: 1
 title: Uploading documents
-description: "Upload files into the async Layer 0 ingestion pipeline."
+description: "How to ingest documents into the Spectron knowledge layer."
 ---
+
+# Uploading documents
+
+Layer 0 of Spectron's memory architecture is the knowledge layer — a persistent store of documents, chunks, keyword graphs, and typed nodes that provides long-horizon context independent of any conversation session. Documents are ingested through an asynchronous upload pipeline that handles extraction, chunking, embedding, and indexing.
+
+## Supported formats
+
+Spectron accepts the following content types for document upload:
+
+| Format | MIME type |
+|---|---|
+| Plain text | `text/plain` |
+| Markdown | `text/markdown` |
+| JSON | `application/json` |
+| HTML | `text/html` |
+| PDF | `application/pdf` |
+| Images | `image/*` (png, jpeg, webp, gif) |
+| Audio | `audio/*` (wav, mp3, ogg, flac, aac) |
+| Video | `video/*` (mp4, webm, mov) |
+
+Image, audio, and video formats require a multimodal ingestion profile. See [Multimodal content](/spectron/knowledge/ingestion/multimodal-content) for details.
+
+## Uploading a document
+
+The upload endpoint is asynchronous. It accepts the file and returns a `202 Accepted` response immediately with the new document's ID and initial status. Processing continues in the background.
+
+### REST
+
+```http
+POST /v1/{context_id}/knowledge/upload
+Content-Type: multipart/form-data
+
+file=<binary>
+title=Returns Policy
+profile=text_only
+scope[org]=anneal
+```
+
+Response:
+
+```json
+{
+  "id": "doc:01hx9…",
+  "status": "queued",
+  "content_hash": "blake3:4f3c…",
+  "deduplicated": false
+}
+```
+
+### Python
+
+```python
+from spectron import Spectron
+
+memory = Spectron(context="acme-prod", api_key=os.environ["SPECTRON_API_KEY"])
+
+with open("returns.pdf", "rb") as f:
+    doc = await memory.knowledge.upload(
+        file=f,
+        title="Returns Policy",
+        profile="text_only",
+        scope={"org": "anneal"},
+    )
+
+print(doc.id)            # doc:01hx9…
+print(doc.status)        # queued
+print(doc.content_hash)  # blake3:4f3c…
+print(doc.deduplicated)  # False
+```
+
+### JavaScript
+
+```javascript
+import { Spectron } from "spectron";
+
+const memory = new Spectron({ context: "acme-prod", apiKey: process.env.SPECTRON_API_KEY });
+
+const file = new File([buffer], "returns.pdf", { type: "application/pdf" });
+
+const doc = await memory.knowledge.upload({
+    file,
+    title: "Returns Policy",
+    profile: "text_only",
+    scope: { org: "anneal" },
+});
+
+console.log(doc.id);           // doc:01hx9…
+console.log(doc.status);       // queued
+console.log(doc.deduplicated); // false
+```
+
+The `file` parameter accepts a `File`, `Blob`, or `ReadableStream` in JavaScript.
+
+## Polling for status
+
+Processing continues asynchronously after upload. Poll the document status endpoint until `status` reaches `ready` or `failed` before querying the document's content.
+
+```python
+import asyncio
+
+while True:
+    doc = await memory.knowledge.get(doc.id)
+    if doc.status in ("ready", "failed"):
+        break
+    await asyncio.sleep(2)
+
+if doc.status == "failed":
+    print(doc.error)
+```
+
+```javascript
+while (true) {
+    doc = await memory.knowledge.get(doc.id);
+    if (doc.status === "ready" || doc.status === "failed") break;
+    await new Promise(r => setTimeout(r, 2000));
+}
+```
+
+## Pipeline stages
+
+Once a document is uploaded, it passes through the following pipeline stages in order:
+
+| Status | Description |
+|---|---|
+| `queued` | Waiting to enter the pipeline |
+| `extracting` | Reading content from the uploaded bytes |
+| `chunking` | Splitting content into overlapping segments (1000 chars, 200-char overlap) |
+| `embedding` | Generating dense vectors via the configured embedding model (1536-dim HNSW) |
+| `rendering` | Building document summaries and section metadata |
+| `transcribing` | Transcribing audio or video to text (multimodal only) |
+| `captioning` | Generating captions for image content (multimodal only) |
+| `keywording` | Running RAKE keyword extraction (top-5 per document) |
+| `ready` | Fully indexed and available for retrieval |
+| `failed` | Pipeline error; inspect `doc.error` for the cause |
+
+## Content addressing and deduplication
+
+Every document is identified by a [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) hash of its raw bytes. If you upload the same file twice, Spectron detects the collision and returns the existing document ID with `deduplicated: true`:
+
+```json
+{
+  "id": "doc:01hx9…",
+  "status": "ready",
+  "content_hash": "blake3:4f3c…",
+  "deduplicated": true
+}
+```
+
+No reprocessing occurs. This makes it safe to upload documents without tracking which files you have previously ingested — the pipeline is idempotent by content.
+
+## Scope assignment
+
+The `scope` parameter on upload controls which principals can retrieve the document's chunks during recall. Scope keys must match the dimensions configured for the Context.
+
+```python
+# Org-level document — visible to all users in the org
+doc = await memory.knowledge.upload(
+    file=open("handbook.pdf", "rb"),
+    title="Employee Handbook",
+    scope={"org": "anneal"},
+)
+
+# User-level document — visible only to this user
+doc = await memory.knowledge.upload(
+    file=open("preferences.txt", "rb"),
+    title="User Preferences",
+    scope={"user": "tobie", "org": "anneal"},
+)
+```
+
+## Document management
+
+### Get a document
+
+```python
+doc = await memory.knowledge.get(doc.id)
+```
+
+### List documents
+
+```python
+docs = await memory.knowledge.list(
+    status="ready",
+    mime_type="application/pdf",
+    scope={"org": "anneal"},
+)
+```
+
+### Get chunks
+
+```python
+chunks = await memory.knowledge.chunks(doc.id, page=0, page_size=50)
+for chunk in chunks.items:
+    print(chunk.text)
+    print(chunk.position)
+    print(chunk.section)
+```
+
+### Download original bytes
+
+```python
+stream = await memory.knowledge.raw(doc.id)
+with open("original.pdf", "wb") as f:
+    async for chunk in stream:
+        f.write(chunk)
+```
+
+### Replace a document
+
+Replacing uploads a new version and re-runs the full pipeline. The original document ID is preserved. All existing chunks for the document are removed and replaced with those extracted from the new file.
+
+```python
+with open("returns_v2.pdf", "rb") as f:
+    await memory.knowledge.replace(doc.id, file=f)
+```
+
+### Delete a document
+
+Deletes the document record, all associated chunks, graph edges, keyword associations, and the original bytes from object storage.
+
+```python
+await memory.knowledge.delete(doc.id)
+```
+
+```javascript
+await memory.knowledge.delete(doc.id);
+```

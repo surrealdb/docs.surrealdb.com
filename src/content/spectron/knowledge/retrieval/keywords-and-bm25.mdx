@@ -1,5 +1,156 @@
 ---
 position: 3
 title: Keywords and BM25
-description: "Statistical keywords and full-text surfaces."
+description: "Using keyword extraction and full-text search in Spectron's knowledge layer."
 ---
+
+# Keywords and BM25
+
+Spectron combines two statistical retrieval mechanisms — RAKE keyword extraction and BM25 full-text search — to complement dense vector retrieval. Together, they ensure that exact terms, product identifiers, technical phrases, and domain vocabulary are reliably findable even when their embedding representation is weak.
+
+## RAKE keyword extraction
+
+During document ingestion, Spectron applies RAKE (Rapid Automatic Keyword Extraction) to each document. RAKE is a statistical, language-agnostic algorithm that identifies multi-word keyphrases by exploiting word co-occurrence and word frequency without requiring a language model or training data.
+
+Spectron extracts the **top-5 keyphrases per document** with a RAKE score of **0.8 or above**. These keyphrases are stored as keyword nodes in the knowledge graph and linked to their source documents via `knowledge_has_keyword` edges. A co-occurrence edge (`keyword_cooccurs_with`) is also created between keywords that appear in the same document, weighted by point mutual information (PMI).
+
+Because RAKE runs without an LLM, it adds negligible latency to the ingestion pipeline and incurs no token cost.
+
+### Why keyword extraction matters
+
+Embedding models represent meaning holistically. A query for "MLWK3LL/A" (a product SKU) may produce a low-similarity result even against a document that contains that exact string, because the embedding model has not learned to weight arbitrary identifier strings meaningfully. BM25 and keyword graph lookups have no such blind spot — they operate on token identity, not semantic proximity.
+
+Keywords extracted by RAKE also serve as seeds for `hybrid_graph` retrieval. When a query matches a keyword node, the retrieval pass can expand to all documents linked to that keyword before the final scoring step.
+
+## Keyword endpoints
+
+### Keywords for a document
+
+Retrieve the keyphrases extracted from a specific document:
+
+```python
+from spectron import Spectron
+
+memory = Spectron(context="acme-prod", api_key=os.environ["SPECTRON_API_KEY"])
+
+keywords = await memory.knowledge.keywords.for_document(doc.id)
+for kw in keywords:
+    print(kw.text, kw.score)
+# RETURN POLICY       1.8
+# UNOPENED ITEMS      1.5
+# 30 DAYS             1.2
+# PURCHASE DATE       1.1
+# INTERNATIONAL ORDERS 0.9
+```
+
+```javascript
+import { Spectron } from "spectron";
+
+const memory = new Spectron({ context: "acme-prod", apiKey: process.env.SPECTRON_API_KEY });
+
+const keywords = await memory.knowledge.keywords.forDocument(doc.id);
+for (const kw of keywords) {
+    console.log(kw.text, kw.score);
+}
+```
+
+### List keywords across the corpus
+
+List all keywords in the Context, optionally filtered by minimum document count:
+
+```python
+# Keywords that appear in at least 3 documents, sorted by frequency
+keywords = await memory.knowledge.keywords.list(
+    min_document_count=3,
+    sort="-document_count",
+)
+for kw in keywords:
+    print(kw.text, kw.document_count)
+```
+
+### Get a keyword by text
+
+```python
+detail = await memory.knowledge.keywords.get("RETURN POLICY")
+print(detail.text)            # RETURN POLICY
+print(detail.score)           # 1.8
+print(detail.document_count)  # 12
+print([d.id for d in detail.documents])
+```
+
+### Vector search over keywords
+
+Find keywords semantically similar to a query string. This uses the keyword text embeddings rather than the chunk embeddings, making it useful for building keyword-expansion pipelines:
+
+```python
+similar = await memory.knowledge.keywords.search("refund policies", k=10)
+for kw in similar:
+    print(kw.text, kw.similarity)
+# RETURN POLICY     0.94
+# REFUND WINDOW     0.91
+# EXCHANGE POLICY   0.88
+```
+
+### Co-occurrence neighbours
+
+Retrieve keywords that frequently co-occur with a given keyword across the document corpus. Co-occurrence is weighted by PMI: pairs that appear together more than their individual frequencies would predict receive higher scores.
+
+```python
+related = await memory.knowledge.keywords.related("RETURN POLICY")
+for kw in related:
+    print(kw.text, kw.pmi_score)
+# UNOPENED ITEMS     2.3
+# REFUND             2.1
+# PURCHASE DATE      1.9
+# EXCHANGE           1.7
+```
+
+## BM25 full-text search
+
+Spectron indexes all chunk text in a full-text index using the `spectron_analyzer`. The analyser applies two tokenisation passes:
+
+- **Blank tokeniser**: splits on whitespace only, preserving punctuation within tokens (useful for product codes like `MLWK3LL/A`)
+- **Class tokeniser**: splits on character class boundaries (letter/digit transitions), which separates alphanumeric identifiers without requiring spaces
+
+Both passes feed through two token filters:
+
+- **Lowercase**: case-normalisation for consistent matching
+- **Snowball**: English stemming (e.g. `returning` → `return`, `purchases` → `purchas`)
+
+This combination means that BM25 matches both exact-cased identifiers (via blank tokeniser) and inflected natural-language terms (via class tokeniser + Snowball).
+
+BM25 is invoked automatically when you use `mode="bm25"` or `mode="hybrid"` in the query endpoint. The BM25 score contributes to the RRF fusion in hybrid mode.
+
+```python
+# Pure BM25 — best for exact-term matching
+hits = await memory.knowledge.query(
+    query="MLWK3LL/A MacBook Pro",
+    mode="bm25",
+    k=10,
+    scope={"org": "anneal"},
+)
+```
+
+## Keyword graph in hybrid_graph retrieval
+
+When `mode="hybrid_graph"` is used, keywords serve as intermediate nodes in the graph-density rerank. The retrieval pipeline:
+
+1. Runs hybrid (vector + BM25) to produce initial candidates.
+2. Embeds the query and finds the top-k matching keyword nodes.
+3. Expands from those keyword nodes through `knowledge_has_keyword` edges to include additional chunks that share relevant keywords.
+4. Boosts the score of candidates that are reachable through high-PMI co-occurrence chains from the matched keywords.
+
+This means a query containing "returns" will boost any chunk connected to the keywords `RETURN POLICY`, `RETURN WINDOW`, and `REFUND` — even if the chunk's embedding or term frequency score would not have ranked it highly on its own.
+
+## When to use keyword versus vector search
+
+| Query type | Recommended mode |
+|---|---|
+| Product SKU, model number, API key fragment | `bm25` |
+| Exact phrase from a document | `bm25` |
+| Natural-language question (paraphrase likely) | `vector` or `hybrid` |
+| Mixed: named entities + prose context | `hybrid` |
+| Graph-connected topic exploration | `hybrid_graph` |
+| Keyword discovery and corpus analysis | Keyword endpoints |
+
+In practice, `hybrid` or `hybrid_graph` are the right defaults for most production queries. Use `bm25` directly only when you have strong reason to believe exact-match precision matters more than recall — for example, in lookup-style queries where the answer is a specific document known to contain an exact string.

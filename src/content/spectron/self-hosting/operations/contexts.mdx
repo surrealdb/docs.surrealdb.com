@@ -3,3 +3,221 @@ position: 1
 title: Contexts
 description: "Create, patch, and delete contexts via the management plane."
 ---
+
+# Contexts
+
+Contexts are the unit of isolation in Spectron. Each Context has its own SurrealDB database, its own API keys, and its own configuration. This page covers the operator lifecycle for creating, configuring, and removing Contexts.
+
+## Creating a Context
+
+A Context is created via the management API. The operation:
+
+1. Registers the Context in the control plane (`spectron/metadata` database)
+2. Creates the SurrealDB namespace and database (if they do not exist)
+3. Applies all schema migrations to the new database
+
+```http
+POST /api/v1/contexts/acme-prod
+Content-Type: application/json
+Authorization: Bearer mgmt-...
+
+{
+  "namespace": "acme",
+  "database": "prod",
+  "config": {
+    "token_limit": 1000000,
+    "models": {
+      "extraction": "openai/gpt-4o-mini",
+      "response": "openai/gpt-4o"
+    },
+    "providers": {
+      "openai": "sk-..."
+    }
+  }
+}
+```
+
+### Naming constraints
+
+- Context IDs must be lowercase alphanumeric with hyphens (`acme-prod`, `tenant-alpha`).
+- The `spectron` namespace is reserved for internal use. Do not bind a Context to `namespace: "spectron"`.
+- Two Contexts can share a namespace (different databases) or live in separate namespaces.
+
+### Using the CLI
+
+```bash
+spectronctl contexts create acme-prod \
+  --namespace acme \
+  --database prod \
+  --model-extraction openai/gpt-4o-mini \
+  --token-limit 1000000 \
+  --api-key mgmt-...
+```
+
+### Using the Python SDK
+
+```python
+from spectron import SpectronManagement
+
+admin = SpectronManagement(
+    base_url="https://spectron.example.com",
+    api_key=os.environ["SPECTRON_MGMT_KEY"],
+)
+
+await admin.contexts.create(
+    id="acme-prod",
+    namespace="acme",
+    database="prod",
+    config={
+        "token_limit": 1_000_000,
+        "models": {
+            "extraction": "openai/gpt-4o-mini",
+            "response": "openai/gpt-4o",
+        },
+        "providers": {
+            "openai": os.environ["OPENAI_API_KEY"],
+        },
+    },
+)
+```
+
+## Listing Contexts
+
+```http
+GET /api/v1/contexts
+Authorization: Bearer mgmt-...
+```
+
+```bash
+spectronctl contexts list --api-key mgmt-...
+```
+
+Returns all Contexts registered on this deployment. Provider API key values are replaced with a `providers_configured` list in the response.
+
+## Inspecting a Context
+
+```http
+GET /api/v1/contexts/acme-prod
+Authorization: Bearer mgmt-...
+```
+
+Returns the Context record including effective configuration:
+
+```json
+{
+  "id": "acme-prod",
+  "namespace": "acme",
+  "database": "prod",
+  "config": {
+    "token_limit": 1000000,
+    "models": {
+      "extraction": "openai/gpt-4o-mini",
+      "response": "openai/gpt-4o"
+    },
+    "providers_configured": ["openai"]
+  },
+  "created_at": "2026-01-15T10:00:00Z"
+}
+```
+
+## Updating Context configuration
+
+Send a partial `config` patch — only the fields you want to change:
+
+```http
+PATCH /api/v1/contexts/acme-prod
+Content-Type: application/json
+Authorization: Bearer mgmt-...
+
+{
+  "config": {
+    "token_limit": 2000000,
+    "models": {
+      "reflection": "anthropic/claude-opus-4-7"
+    },
+    "providers": {
+      "anthropic": "sk-ant-..."
+    }
+  }
+}
+```
+
+Changes take effect immediately for new requests.
+
+### Common config updates
+
+**Rotate a provider key:**
+```json
+{ "config": { "providers": { "openai": "sk-new-key-..." } } }
+```
+
+**Increase the token limit:**
+```json
+{ "config": { "token_limit": 5000000 } }
+```
+
+**Switch the reflection model:**
+```json
+{ "config": { "models": { "reflection": "anthropic/claude-opus-4-7" } } }
+```
+
+**Add retention policy:**
+```json
+{ "config": { "retention_days": 90 } }
+```
+
+## Provisioning API keys
+
+After creating a Context, provision at least one agent key for your application:
+
+```http
+POST /api/v1/contexts/acme-prod/keys
+Content-Type: application/json
+Authorization: Bearer mgmt-...
+
+{
+  "name": "app-agent",
+  "principal": "agent",
+  "scope_floor": { "org": "acme" }
+}
+```
+
+The secret is returned once in the response. Store it securely — it cannot be retrieved again. See [API keys and delegation](/spectron/self-hosting/security/api-keys-and-delegation) for key types and rotation.
+
+## Deleting a Context
+
+Deleting a Context is **irreversible**. It drops the bound SurrealDB database, removing all Layer 0 and Layer 1 data, all API keys for this Context, and the control-plane registry entry.
+
+```http
+DELETE /api/v1/contexts/acme-prod
+Authorization: Bearer mgmt-...
+```
+
+```bash
+spectronctl contexts delete acme-prod --api-key mgmt-...
+```
+
+The SurrealDB namespace is **not** deleted — it may contain other Contexts. Only the bound database is dropped.
+
+### Before deleting
+
+- Export any data you need to retain (SurrealDB native export or the `/knowledge` download API).
+- Revoke or rotate any external references to this Context's API keys.
+- Confirm there are no active agent processes writing to this Context.
+
+## Migrating a Context
+
+To move a Context to a different SurrealDB namespace/database:
+
+1. Create a new Context with the target `(namespace, database)` pair.
+2. Export data from the old Context's SurrealDB database and import it into the new database.
+3. Update your application to use the new Context ID and new API keys.
+4. Delete the old Context.
+
+Schema migrations run automatically when the new Context is created, so the new database will have the correct schema before you import data.
+
+## Context isolation guarantees
+
+- A caller holding an API key for Context `acme-prod` cannot read, write, or enumerate anything in another Context.
+- Two Contexts that share a SurrealDB namespace but different databases are fully isolated at the database level.
+- The control plane (Context registry, management keys) lives in the reserved `spectron/metadata` database and is not accessible via Context-level API keys.

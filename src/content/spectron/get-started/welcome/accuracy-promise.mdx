@@ -3,3 +3,130 @@ position: 3
 title: The accuracy promise
 description: "How Spectron demonstrates correctness with provenance and reconciliation."
 ---
+
+# The accuracy promise
+
+Spectron is built around a single design question: **can someone watch the memory state in real-time and verify that the system is correct?**
+
+This is a harder bar than "does retrieval generally return relevant results". It requires that every claim in memory has an origin, that corrections are explicitly tracked rather than silently applied, and that the full history of a fact is inspectable at any point. This page explains the mechanisms that make that possible.
+
+## Structured extraction, not free-form storage
+
+Most memory systems store text: raw messages, summarised paragraphs, embedded chunks. Spectron stores **structured facts**.
+
+When a turn arrives, the extraction pipeline identifies discrete entities, attributes, and relations:
+
+- **Entity**: `person:priya`
+- **Attribute**: `priya.role = "lead engineer"` (valid from 2024-01-15)
+- **Relation**: `priya.member_of → team:payments`
+
+These are stored as first-class records in SurrealDB, not as prose. This means:
+
+- Facts are queryable individually, not just retrievable in bulk.
+- You can ask "what is Priya's current role?" and get a direct, deterministic answer.
+- You can enumerate everything Spectron knows about an entity in a single query.
+- Duplicate facts are detected and merged, not appended.
+
+Structured extraction is harder to implement than text storage. It is also the foundation of every other accuracy guarantee — without discrete facts, there is nothing to trace, correct, or expire.
+
+## Every fact traces to its source
+
+Every attribute, relation, and entity record in Layer 1 carries a `source_turn` reference — a direct link to the specific turn that produced it.
+
+```json
+{
+  "entity": "person:priya",
+  "attribute": "role",
+  "value": "lead engineer",
+  "valid_from": "2024-01-15T09:32:00Z",
+  "valid_until": null,
+  "source_turn": "turn:01j3k9p2m8x4",
+  "confidence": 0.97,
+  "scope": { "org": "acme", "user": "priya" }
+}
+```
+
+From `source_turn`, you can retrieve the full turn record: the raw user message, the agent response, the session it belongs to, and the timestamp. The chain from a stored fact back to the original conversation is unbroken.
+
+This is not just useful for debugging. It is the audit trail that makes memory legally and operationally auditable — you can demonstrate exactly where a piece of information came from.
+
+## Corrections are tracked, not overwritten
+
+When a user corrects a prior statement — "actually I moved to the Infrastructure team in March" — Spectron does not overwrite the old fact. It builds a **supersession chain**:
+
+1. The existing attribute (`role = "lead engineer"`, team = "Payments") has its `valid_until` set to the current timestamp.
+2. The new attribute (`team = "Infrastructure"`) is written with `valid_from` set to the correction time.
+3. The new record references the old one via a `supersedes` link.
+
+```
+attribute:priya_team_v1
+  value: "Payments"
+  valid_from: 2024-01-15
+  valid_until: 2024-03-08      ← end-dated, not deleted
+
+attribute:priya_team_v2
+  value: "Infrastructure"
+  valid_from: 2024-03-08
+  valid_until: null             ← current
+  supersedes: attribute:priya_team_v1
+```
+
+Nothing is deleted. The full history of how a fact evolved is preserved in the graph. You can query the current value (filter `valid_until IS NULL`), the historical value at any point in time, or the complete chain of changes.
+
+This means:
+- Memory never silently accumulates contradictions.
+- The reason a fact changed can always be traced to a specific turn.
+- Rollback is possible: if an update was incorrect, the prior state is still present.
+
+## Temporal validity on every fact
+
+Every attribute and relation carries `valid_from` and `valid_until` timestamps. This is not optional metadata — it is a core part of the data model.
+
+Temporal validity enables:
+
+- **Point-in-time queries**: "What did Spectron know about Priya's role on 1 February?" returns the fact valid at that date, regardless of subsequent corrections.
+- **Automatic expiry**: Context-category memories (current situation, recent events) can be given an explicit `valid_until` at write time and will automatically be excluded from retrieval after that date without any manual cleanup.
+- **Freshness filtering**: Retrieval can filter to facts valid within a given recency window, preventing stale data from polluting responses.
+
+Deletion is not part of the model. Facts gain end times; they do not disappear.
+
+## The authority hierarchy
+
+Layer 0 (organisational knowledge) and Layer 1 (conversational memory) can conflict. A user might state a price, a policy, or a product specification that differs from the authoritative record. Spectron resolves this deterministically:
+
+**Layer 0 always wins.**
+
+When the reconciliation step detects a conflict between a newly extracted Layer 1 attribute and an existing Layer 0 record, it:
+
+1. Stores the Layer 1 attribute with a `conflict_with_l0` flag.
+2. Leaves the Layer 0 record unmodified.
+3. Logs the conflict with a reference to both the turn and the Layer 0 record.
+
+The agent's responses use Layer 0 as the authoritative answer. The conflict is visible in the memory state and can be reviewed, but it does not corrupt the knowledge base.
+
+This prevents a class of attacks and errors where conversational input is used to overwrite verified organisational data.
+
+## Observable state
+
+Every mechanism described above is queryable through the Spectron API and MCP server. You do not have to trust that memory is correct — you can inspect it directly.
+
+**Memory profile** (`memory_profile` / `GET /v1/{context_id}/memory/profile`): Returns the full set of current facts known about a given scope — all entities, their current attributes, and their relations.
+
+**Memory reflect** (`memory_reflect` / `GET /v1/{context_id}/memory/reflect`): Returns an analysis of the memory state: completeness, conflict flags, uncertain items, and expiring facts.
+
+**Direct SurrealDB access**: Because Spectron is backed by SurrealDB, operators running self-hosted deployments can connect directly to the database, run live queries, and build custom observability dashboards using SurrealDB's live query capabilities.
+
+This observability is the operational expression of the accuracy promise. If the system is correct, you should be able to see that it is correct — not infer it from output quality.
+
+## What this means in practice
+
+The accuracy guarantees are cumulative. A single fact in Spectron is:
+
+- **Structured** — queryable as a discrete record, not buried in prose
+- **Sourced** — linked to the turn that produced it
+- **Versioned** — corrections form a chain; history is never lost
+- **Temporal** — bounded in time; stale facts do not contaminate current context
+- **Protected** — Layer 0 authority prevents conversational data from overwriting verified knowledge
+- **Inspectable** — the full state is queryable by operators and supervisors at any time
+
+Together, these properties mean that the question "is the agent operating on correct information?" has a definitive, verifiable answer.

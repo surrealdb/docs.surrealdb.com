@@ -1,5 +1,152 @@
 ---
 position: 2
 title: Embedded library
-description: "Rust embedding alongside SurrealDB engines."
+description: "Running Spectron in-process within a Rust application."
 ---
+
+# Embedded library
+
+The Spectron Rust crate can run entirely in-process — inside the same binary as the calling application. There is no HTTP server, no network round-trips, and no separate process to manage.
+
+## What embedded mode means
+
+In server mode, your application sends HTTP requests to a running `spectron-server` binary. In embedded mode, the Spectron engine is a library linked directly into your binary. The same Rust types, the same extraction pipeline, and the same storage model are used in both modes — only the transport layer is absent.
+
+The data model is identical. Embedded deployments use the same SurrealDB tables, the same scope and principal semantics, and the same memory extraction pipeline as a server deployment. You can run Spectron embedded during development and switch to server mode in production without changing your data model or application logic.
+
+## When to use embedded mode
+
+Embedded mode is well suited for:
+
+- **Rust-native agents** — agents written entirely in Rust where adding an out-of-process dependency is undesirable.
+- **CLI tools** — command-line tools that need memory persistence without requiring the user to run a separate server.
+- **Integration testing** — tests that spin up the full Spectron stack in-process against a test SurrealDB instance, without port allocation or process management.
+- **Single-binary deployments** — applications that must ship as a single self-contained executable.
+- **Offline or air-gapped environments** — where network access is constrained and running a separate server is not practical.
+
+## Limitations
+
+Embedded mode has two constraints that server mode does not:
+
+- **No REST API** — the HTTP endpoints (`/v1/...` and `/api/v1/...`) are not available. Your Rust code calls the library API directly.
+- **No MCP server** — the MCP transport (`/mcp`) is not available. MCP clients cannot connect to an embedded instance.
+
+If you need either of these surfaces — for example, to serve MCP clients such as Claude Desktop or Cursor — deploy Spectron in server mode instead.
+
+## Dependencies
+
+Spectron requires a running SurrealDB instance and an object store even in embedded mode. The engine uses SurrealDB for all durable state and the object store for raw document bytes. You must provide connection details via environment variables or explicit configuration before initialising the library.
+
+## Adding the dependency
+
+Add `spectron` to your `Cargo.toml`:
+
+```toml
+[dependencies]
+spectron = { version = "0.1", features = ["embedded"] }
+tokio = { version = "1", features = ["full"] }
+```
+
+The `embedded` feature enables the in-process engine. Without it, only the client types (useful for calling a remote Spectron server from Rust) are compiled.
+
+## Configuration
+
+Configuration mirrors the server environment variables, passed programmatically:
+
+```rust
+use spectron::{Spectron, Config};
+
+let config = Config::builder()
+    .surrealdb_url("ws://localhost:8000")
+    .object_store_url("file:///var/spectron/objects")
+    .openai_api_key(std::env::var("OPENAI_API_KEY").unwrap())
+    .build()?;
+```
+
+Alternatively, the builder picks up the standard environment variables (`SPECTRON_SURREALDB_URL`, `SPECTRON_OBJECT_STORE_URL`, `OPENAI_API_KEY`) if they are set and you call `Config::from_env()`.
+
+## Basic usage
+
+```rust
+use spectron::{Spectron, Config, Scope};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let config = Config::from_env()?;
+    let spectron = Spectron::new(config).await?;
+
+    // Create or resume a context
+    let ctx = spectron.context("acme-prod").await?;
+
+    // Open a session
+    let scope = Scope::builder()
+        .org("anneal")
+        .agent("researcher")
+        .user("tobie")
+        .build();
+
+    let session = ctx.sessions().create(scope).await?;
+
+    // Record a turn
+    session.turns().add("user", "I'm moving to Amsterdam next month.").await?;
+
+    // Recall memory
+    let result = ctx.recall()
+        .query("Where is the user moving?")
+        .scope(scope)
+        .send()
+        .await?;
+
+    for fact in &result.facts {
+        println!("{}: {}", fact.attribute, fact.value);
+    }
+
+    Ok(())
+}
+```
+
+## Schema migrations
+
+When using embedded mode, call `spectron.migrate().await?` after initialising. This applies any pending schema migrations to the bound SurrealDB database. In server mode, migrations run automatically at startup. In embedded mode, you control when they run — typically once at application startup before serving any requests.
+
+```rust
+let spectron = Spectron::new(config).await?;
+spectron.migrate().await?; // apply pending migrations
+
+// now safe to use
+let ctx = spectron.context("acme-prod").await?;
+```
+
+## Testing with embedded mode
+
+Embedded mode is convenient for integration tests. Pair it with a temporary SurrealDB instance (or SurrealDB's in-memory mode) to create a fully isolated test environment:
+
+```rust
+#[tokio::test]
+async fn test_memory_extraction() -> anyhow::Result<()> {
+    let config = Config::builder()
+        .surrealdb_url("mem://") // in-memory SurrealDB — no external process needed
+        .object_store_url("memory://")
+        .openai_api_key(std::env::var("OPENAI_API_KEY").unwrap_or_default())
+        .build()?;
+
+    let spectron = Spectron::new(config).await?;
+    spectron.migrate().await?;
+
+    let ctx = spectron.context("test").await?;
+    let session = ctx.sessions().create(Scope::global()).await?;
+
+    session.turns().add("user", "My name is Alice.").await?;
+
+    let profile = ctx.profiles().get("Alice").await?;
+    assert!(profile.attributes.iter().any(|a| a.key == "name"));
+
+    Ok(())
+}
+```
+
+## Next steps
+
+- [Architecture overview](/spectron/self-hosting/deployment/architecture-overview) — how the server deployment fits together
+- [Docker](/spectron/self-hosting/deployment/docker) — running Spectron server locally for development
+- [Quickstart: embedded](/spectron/get-started/quickstarts/embedded) — step-by-step guide for the embedded path

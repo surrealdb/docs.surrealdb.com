@@ -1,5 +1,266 @@
 ---
 position: 3
 title: Errors and retries
-description: "Typed errors, backoff, and production defaults."
+description: "Handling errors and configuring retry behaviour in the Spectron SDKs."
 ---
+
+# Errors and retries
+
+The Spectron SDKs use a typed exception hierarchy so you can handle specific failure modes precisely. The retry policy is conservative by design: idempotent reads are retried automatically; writes are not.
+
+## Error hierarchy
+
+All Spectron exceptions inherit from `SpectronError` (Python) or the `SpectronError` base class (JavaScript). Catching the base class covers every Spectron-originated error:
+
+```python
+from spectron.errors import SpectronError
+
+try:
+    ctx = await memory.context(query="hello", scope={"user": "tobie"})
+except SpectronError as e:
+    print(e.status)    # HTTP status code
+    print(e.title)     # short error type
+    print(e.detail)    # human-readable explanation
+    print(e.extensions) # additional structured metadata, if present
+```
+
+### Exception types
+
+| Exception | HTTP status | When it occurs |
+|---|---|---|
+| `SpectronError` | — | Base class; any non-2xx response not matched by a subclass |
+| `AuthError` | 401 | Missing or invalid bearer token; also raised if the token has been revoked |
+| `ScopeError` | 403 | The principal type or scope floor rejects the call — e.g. a user-scoped key attempting to access another user's data |
+| `NotFoundError` | 404 | The requested resource (session, document, connector, etc.) does not exist |
+| `ValidationError` | 400 / 422 | The request body is malformed, missing required fields, or fails schema validation |
+| `RateLimitError` | 429 | The per-context rate limit or token budget has been exceeded |
+| `ServerError` | 5xx | An unexpected server-side error; retried automatically for idempotent requests |
+
+All exceptions carry four standard fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `status` | int | HTTP status code |
+| `title` | str | Short machine-readable error type (e.g. `"not_found"`, `"rate_limited"`) |
+| `detail` | str | Human-readable explanation suitable for logging |
+| `extensions` | dict | Additional metadata specific to the error type (e.g. `retry_after` for `RateLimitError`) |
+
+## Python error handling
+
+### Catching specific errors
+
+```python
+from spectron.errors import (
+    AuthError,
+    NotFoundError,
+    RateLimitError,
+    ScopeError,
+    ServerError,
+    ValidationError,
+)
+import asyncio
+
+async def query_with_handling():
+    try:
+        ctx = await memory.context(
+            query="what is my name?",
+            scope={"user": "tobie", "org": "acme"},
+        )
+        return ctx.context
+
+    except AuthError:
+        # API key is missing, expired, or revoked
+        raise RuntimeError("Invalid Spectron credentials — check SPECTRON_API_KEY")
+
+    except ScopeError as e:
+        # The principal does not have access to the requested scope
+        print(f"Scope denied: {e.detail}")
+        return None
+
+    except NotFoundError:
+        # The context or resource does not exist
+        return None
+
+    except ValidationError as e:
+        # Log and surface to the caller — this is a programming error
+        raise ValueError(f"Invalid Spectron request: {e.detail}") from e
+
+    except RateLimitError as e:
+        # Back off and retry once
+        retry_after = e.extensions.get("retry_after", 5)
+        await asyncio.sleep(retry_after)
+        return await memory.context(
+            query="what is my name?",
+            scope={"user": "tobie", "org": "acme"},
+        )
+
+    except ServerError as e:
+        # The SDK already retried 3× — escalate
+        print(f"Spectron server error after retries: {e.detail}")
+        return None
+```
+
+### Rate limit details
+
+`RateLimitError` carries a `retry_after` value in `extensions`:
+
+```python
+except RateLimitError as e:
+    retry_after = e.extensions.get("retry_after", 10)  # seconds
+    print(f"Rate limited — retry after {retry_after}s")
+    await asyncio.sleep(retry_after)
+```
+
+## JavaScript / TypeScript error handling
+
+```typescript
+import {
+    AuthError,
+    NotFoundError,
+    RateLimitError,
+    ScopeError,
+    ServerError,
+    SpectronError,
+    ValidationError,
+} from "spectron";
+
+async function queryWithHandling(): Promise<string | null> {
+    try {
+        const ctx = await memory.context({
+            query: "what is my name?",
+            scope: { user: "tobie", org: "acme" },
+        });
+        return ctx.context;
+
+    } catch (err) {
+        if (err instanceof AuthError) {
+            throw new Error("Invalid Spectron credentials — check SPECTRON_API_KEY");
+
+        } else if (err instanceof ScopeError) {
+            console.error("Scope denied:", err.detail);
+            return null;
+
+        } else if (err instanceof NotFoundError) {
+            return null;
+
+        } else if (err instanceof ValidationError) {
+            throw new Error(`Invalid Spectron request: ${err.detail}`);
+
+        } else if (err instanceof RateLimitError) {
+            const retryAfter = (err.extensions?.retryAfter ?? 10) as number;
+            await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+            // retry once
+            const ctx = await memory.context({
+                query: "what is my name?",
+                scope: { user: "tobie", org: "acme" },
+            });
+            return ctx.context;
+
+        } else if (err instanceof ServerError) {
+            console.error("Spectron server error after retries:", err.detail);
+            return null;
+
+        } else if (err instanceof SpectronError) {
+            console.error("Spectron error:", err.title, err.status);
+            return null;
+
+        } else {
+            throw err;
+        }
+    }
+}
+```
+
+## Retry policy
+
+The SDKs apply automatic retries only to idempotent requests (HTTP `GET` and any read-only `POST` such as query endpoints). Writes — turn submission, document upload, session creation — are never retried automatically.
+
+| Request type | Auto-retry | Max attempts | Backoff |
+|---|---|---|---|
+| Idempotent reads (`GET`, query `POST`) | Yes | 3 | Exponential: 250ms, 500ms, 1000ms |
+| Writes (`POST`, `PUT`, `DELETE`) | No | 1 | — |
+
+Retries fire only on `5xx` responses. `4xx` errors are not retried because they indicate a client-side problem that will not resolve on its own.
+
+### Disabling auto-retry
+
+Pass `retries=0` (Python) or `retries: 0` (JavaScript) to the constructor to disable all automatic retries:
+
+```python
+memory = Spectron(
+    context="acme-prod",
+    api_key=os.environ["SPECTRON_API_KEY"],
+    retries=0,
+)
+```
+
+```typescript
+const memory = new Spectron({
+    context: "acme-prod",
+    apiKey: process.env.SPECTRON_API_KEY!,
+    retries: 0,
+});
+```
+
+## Handling rate limits in production
+
+Spectron enforces per-context rate limits on both requests per second and token consumption per period. For high-throughput agents, implement a simple back-off loop:
+
+```python
+import asyncio
+from spectron.errors import RateLimitError
+
+async def query_with_backoff(query: str, scope: dict, max_attempts: int = 5):
+    for attempt in range(max_attempts):
+        try:
+            return await memory.context(query=query, scope=scope)
+        except RateLimitError as e:
+            if attempt == max_attempts - 1:
+                raise
+            wait = e.extensions.get("retry_after", 2 ** attempt)
+            await asyncio.sleep(wait)
+```
+
+```typescript
+async function queryWithBackoff(
+    query: string,
+    scope: Record<string, string>,
+    maxAttempts = 5,
+): Promise<MemoryContextResult> {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+            return await memory.context({ query, scope });
+        } catch (err) {
+            if (err instanceof RateLimitError && attempt < maxAttempts - 1) {
+                const wait = (err.extensions?.retryAfter ?? 2 ** attempt) as number;
+                await new Promise(resolve => setTimeout(resolve, wait * 1000));
+            } else {
+                throw err;
+            }
+        }
+    }
+    throw new Error("Unreachable");
+}
+```
+
+## Timeouts
+
+The default request timeout is 30 seconds. Streaming endpoints (when available) disable the read timeout and rely solely on the connection timeout. Adjust the timeout at the client level:
+
+```python
+memory = Spectron(
+    context="acme-prod",
+    api_key=os.environ["SPECTRON_API_KEY"],
+    timeout=10.0,  # seconds
+)
+```
+
+```typescript
+const memory = new Spectron({
+    context: "acme-prod",
+    apiKey: process.env.SPECTRON_API_KEY!,
+    timeout: 10000, // milliseconds
+});
+```
+
+Requests that exceed the timeout raise `SpectronError` with `status=0` and `title="timeout"` in Python, and a standard `TypeError` (network timeout) in JavaScript.

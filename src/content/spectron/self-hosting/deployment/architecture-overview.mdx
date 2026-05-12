@@ -1,5 +1,102 @@
 ---
 position: 1
 title: Architecture overview
-description: "Stateless Spectron, SurrealDB, control plane, and job queue."
+description: "How Spectron's components fit together in a self-hosted deployment."
 ---
+
+# Architecture overview
+
+A self-hosted Spectron deployment consists of three distinct layers: the Spectron application binary, SurrealDB, and an object store. Each layer has a distinct responsibility, and they are loosely coupled — you can scale each independently.
+
+## Component diagram
+
+```
+[Agent / Client SDK]
+        │
+        ▼
+[spectron-server]          ← stateless application binary
+        │    │
+        │    └─ /mcp       ← MCP server (Streamable HTTP)
+        │    └─ /api/v1    ← management REST API
+        │    └─ /v1/{ctx}  ← end-user REST API
+        │
+        ├────────────────────────────────────────┐
+        ▼                                        ▼
+[SurrealDB]                              [Object Store]
+(all durable state)                 (raw document bytes)
+        │
+        ├── control-plane database (API keys, context registry)
+        └── per-context databases  (sessions, turns, entities, traces)
+```
+
+## The Spectron binary
+
+`spectron-server` is a stateless Rust binary. It holds no in-memory state beyond open connections — no session cache, no embedding cache, no in-flight queue state. Everything is persisted to SurrealDB before a request completes.
+
+Because the binary is stateless, it can be replicated horizontally. Any number of `spectron-server` instances can serve requests from the same SurrealDB cluster. Load balancing across instances requires only a standard HTTP load balancer — no sticky sessions, no shared memory, no leader election.
+
+The binary exposes three HTTP surfaces:
+
+| Surface | Path | Principal |
+|---|---|---|
+| MCP server | `/mcp` | Any key |
+| Management REST | `/api/v1/...` | Management key only |
+| End-user REST | `/v1/{context_id}/...` | Agent or supervisor key |
+
+## SurrealDB
+
+SurrealDB is the system of record. All sessions, turns, extracted entities, attributes, relations, knowledge nodes, API keys, decision traces, and job queue entries live here.
+
+Spectron uses two levels of database within SurrealDB:
+
+- **Control-plane database** — a single shared database (by default `spectron/control`) that holds the Context registry, API key metadata, and global configuration. Every `spectron-server` instance connects to this database at startup.
+- **Per-Context databases** — each Context has its own SurrealDB database (for example, `acme/prod`). The namespace and database name are set when the Context is created. Scope and access controls are enforced at the Spectron application layer, not the SurrealDB authentication layer.
+
+This design means you can inspect Spectron's data directly with a SurrealDB client for debugging, auditing, or building custom dashboards using LIVE SELECT queries.
+
+## Object store
+
+The object store holds the raw bytes of documents uploaded to Spectron's knowledge layer. Text extraction, chunking, and embedding happen asynchronously in the `spectron-server` process after upload; only the processed content enters SurrealDB. The original bytes are retained in the object store for re-processing (for example, if you change chunking parameters or add a new embedding model).
+
+Supported object stores:
+
+| Backend | URL format |
+|---|---|
+| Amazon S3 | `s3://bucket/prefix?region=us-east-1` |
+| Google Cloud Storage | `gs://bucket/prefix` |
+| Azure Blob Storage | `az://container/prefix` |
+| Local filesystem | `file:///absolute/path` |
+| S3-compatible (MinIO, Tigris, etc.) | `s3://bucket/prefix?endpoint=https://...&region=auto` |
+
+See [Storage and scaling](/spectron/self-hosting/deployment/storage-and-scaling) for configuration details.
+
+## Job queue
+
+The extraction pipeline — chunking, embedding, entity extraction, reconciliation — runs asynchronously via a job queue backed by SurrealDB. When a document is uploaded or a session turn is added, Spectron enqueues a job. A worker thread within each `spectron-server` instance dequeues and processes jobs.
+
+In a multi-replica deployment, each instance runs its own worker. SurrealDB's row-level locking ensures that each job is processed exactly once across all instances.
+
+## Required configuration
+
+| Environment variable | Required | Description |
+|---|---|---|
+| `SPECTRON_SURREALDB_URL` | Yes | WebSocket URL of the SurrealDB instance (`ws://` or `wss://`). |
+| `SPECTRON_OBJECT_STORE_URL` | Yes | Object store URL. |
+| `OPENAI_API_KEY` | Conditional | Required if any context uses OpenAI models. |
+| `ANTHROPIC_API_KEY` | Conditional | Required if any context uses Anthropic models. |
+| `SPECTRON_PORT` | No | HTTP listen port. Default: `4000`. |
+| `SPECTRON_MAX_UPLOAD_BYTES` | No | Maximum document upload size. Default: `4294967296` (4 GB). |
+| `SPECTRON_SURREALDB_USER` | No | SurrealDB username. Default: `root`. |
+| `SPECTRON_SURREALDB_PASS` | No | SurrealDB password. Default: `root`. |
+
+## Horizontal scaling
+
+To scale Spectron horizontally, run multiple `spectron-server` replicas behind a load balancer. No additional configuration is needed beyond pointing all replicas at the same SurrealDB cluster and object store.
+
+SurrealDB scales independently. For production deployments with significant write volume, run SurrealDB in clustered mode (TiKV-backed) or use SurrealDB Cloud, and point `SPECTRON_SURREALDB_URL` at the cluster endpoint.
+
+## Next steps
+
+- [Docker](/spectron/self-hosting/deployment/docker) — running the full stack locally
+- [Kubernetes](/spectron/self-hosting/deployment/kubernetes) — production deployment guide
+- [Storage and scaling](/spectron/self-hosting/deployment/storage-and-scaling) — object store configuration and scaling guidance

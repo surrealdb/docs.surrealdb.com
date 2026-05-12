@@ -1,5 +1,182 @@
 ---
 position: 3
-title: Embedded (Rust)
-description: "Embed Spectron as a library with SurrealDB embedded engines."
+title: Embedded library quickstart
+description: "Embed Spectron directly in your Rust application without a separate server process."
 ---
+
+# Embedded library quickstart
+
+Spectron can run in-process inside a Rust application without any network overhead. Instead of deploying a separate server binary, you link the Spectron crate directly and call it through native Rust APIs. The data model, extraction pipeline, and memory semantics are identical to the server — the only difference is the transport layer.
+
+## When to use embedded mode
+
+Embedded mode is the right choice when:
+
+- You are building a **single-binary Rust agent** and do not want to manage a sidecar process
+- You need **zero-latency memory access** — in-process calls avoid the HTTP round trip entirely
+- You are writing **integration tests** that need a real Spectron instance without network dependencies
+- You are building on a **Rust-native agent framework** and want Spectron as a library dependency rather than an infrastructure service
+
+If you are integrating from Python, JavaScript, or any language other than Rust, use the [hosted](/spectron/get-started/quickstarts/hosted) or [self-hosted](/spectron/get-started/quickstarts/self-hosted) deployment instead. Embedded mode only exposes a Rust API; the REST API and MCP server are not available in this configuration.
+
+## Add the dependency
+
+Add the `spectron` crate to your `Cargo.toml`. Spectron requires an async runtime; the examples below use Tokio.
+
+```toml
+[dependencies]
+spectron = "0.1"
+tokio = { version = "1", features = ["full"] }
+```
+
+Spectron embeds SurrealDB using its in-process engine, so you do not need to provide a separate SurrealDB connection string for embedded use. If you want Spectron to persist data across restarts, configure a storage backend in the `SpectronConfig`:
+
+```toml
+[dependencies]
+spectron = { version = "0.1", features = ["rocksdb"] }
+tokio = { version = "1", features = ["full"] }
+```
+
+## Initialise Spectron
+
+Create a `Spectron` instance with a configuration struct. For in-memory storage (suitable for testing and ephemeral agents):
+
+```rust
+use spectron::{Spectron, SpectronConfig};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let config = SpectronConfig::builder()
+        .context("acme-prod")
+        .openai_api_key(std::env::var("OPENAI_API_KEY")?)
+        .build();
+
+    let memory = Spectron::new(config).await?;
+
+    Ok(())
+}
+```
+
+For persistent storage backed by the local filesystem:
+
+```rust
+use spectron::{Spectron, SpectronConfig};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let config = SpectronConfig::builder()
+        .context("acme-prod")
+        .storage_path("/var/lib/my-agent/spectron")
+        .openai_api_key(std::env::var("OPENAI_API_KEY")?)
+        .build();
+
+    let memory = Spectron::new(config).await?;
+
+    Ok(())
+}
+```
+
+## Store and retrieve memory
+
+The embedded API mirrors the session model used by the server and SDKs. Create a session with a scope, submit turns, and retrieve formatted context.
+
+```rust
+use spectron::{Spectron, SpectronConfig, Scope};
+use std::collections::HashMap;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let config = SpectronConfig::builder()
+        .context("acme-prod")
+        .openai_api_key(std::env::var("OPENAI_API_KEY")?)
+        .build();
+
+    let memory = Spectron::new(config).await?;
+
+    // Create a session scoped to a specific user
+    let mut scope = HashMap::new();
+    scope.insert("user".to_string(), "tobie".to_string());
+    scope.insert("org".to_string(), "anneal".to_string());
+
+    let session = memory.sessions().create(Scope::from(scope)).await?;
+
+    // Submit a turn — Spectron extracts entities, attributes, and relations
+    let result = session
+        .turn("user", "I just got promoted to CTO")
+        .await?;
+
+    println!("Entities:   {:?}", result.entities);
+    println!("Attributes: {:?}", result.attributes);
+    println!("Relations:  {:?}", result.relations);
+
+    // Retrieve formatted context for injection into a system prompt
+    let context = session
+        .context("What is Tobie's role?")
+        .await?;
+
+    println!("{}", context.context);
+
+    // Or let Spectron drive the full LLM loop
+    let reply = session.chat("What do you know about me?").await?;
+    println!("{}", reply);
+
+    session.close().await?;
+
+    Ok(())
+}
+```
+
+## What is unavailable in embedded mode
+
+Because embedded mode bypasses the HTTP server entirely, the following surfaces are not available:
+
+| Surface | Available |
+|---|---|
+| Rust embedded API | Yes |
+| REST API | No |
+| Python SDK | No |
+| JavaScript SDK | No |
+| MCP server | No |
+
+If you need the REST API or MCP server alongside embedded Rust usage, run the Spectron server binary and connect to it over HTTP. The self-hosted deployment can share its SurrealDB instance with other consumers.
+
+## Testing with embedded Spectron
+
+Embedded mode is well suited to unit and integration tests because it requires no external services. Use the in-memory storage backend and a real API key (or configure a test key) to exercise your agent's memory behaviour without network dependencies:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use spectron::{Spectron, SpectronConfig, Scope};
+    use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn stores_and_retrieves_user_role() -> anyhow::Result<()> {
+        let config = SpectronConfig::builder()
+            .context("test")
+            .openai_api_key(std::env::var("OPENAI_API_KEY").unwrap_or_default())
+            .build();
+
+        let memory = Spectron::new(config).await?;
+
+        let mut scope = HashMap::new();
+        scope.insert("user".to_string(), "alice".to_string());
+
+        let session = memory.sessions().create(Scope::from(scope)).await?;
+        session.turn("user", "I am the head of engineering").await?;
+
+        let ctx = session.context("What is Alice's role?").await?;
+        assert!(ctx.context.contains("head of engineering"));
+
+        session.close().await?;
+        Ok(())
+    }
+}
+```
+
+## Next steps
+
+- [Embedded library integration](/spectron/integrations/surfaces/embedded-library) — full configuration reference and feature flags
+- [Sessions and turns](/spectron/get-started/mental-model/sessions-and-turns) — the session data model in depth
+- [Two-layer architecture](/spectron/get-started/mental-model/two-layer-architecture) — how Layer 0 knowledge and Layer 1 memory interact
+- [Self-hosted quickstart](/spectron/get-started/quickstarts/self-hosted) — run the HTTP server if you need REST or MCP access

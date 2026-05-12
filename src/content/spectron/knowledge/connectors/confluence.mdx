@@ -1,5 +1,161 @@
 ---
-position: 6
+position: 5
 title: Confluence
-description: "Sync Confluence spaces and pages."
+description: "Sync Confluence spaces and pages into Spectron's knowledge layer."
 ---
+
+# Confluence
+
+The Confluence connector syncs pages from your Confluence Cloud instance into Spectron's Layer 0 knowledge store. Company wikis, runbooks, architecture decision records, and team documentation become instantly searchable by your agents alongside the rest of your knowledge base.
+
+## Authentication
+
+Spectron connects to Confluence using an Atlassian API token tied to a user account. The token is treated as a bearer credential and never exposed in logs or trace output.
+
+### Creating an API token
+
+1. Log in to [https://id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
+2. Click **Create API token**, give it a label (e.g. "Spectron"), and copy the generated token
+3. Note the email address of the Atlassian account — this is your `username`
+4. Note your Confluence base URL (e.g. `https://acme.atlassian.net/wiki`)
+
+The account used must have at least **Confluence read** permissions on the spaces you want to sync.
+
+### Configuration
+
+| Field | Type | Description |
+|---|---|---|
+| `base_url` | string | Confluence Cloud base URL (e.g. `https://acme.atlassian.net/wiki`) |
+| `username` | string | Atlassian account email address |
+| `api_token` | string | Atlassian API token |
+| `space_keys` | array of strings | Space keys to sync (e.g. `["ENG", "PROD", "HR"]`) |
+| `page_ids` | array of strings | Individual page IDs to sync (optional) |
+| `include_attachments` | boolean | Whether to extract and index text from PDF and Word attachments; defaults to `false` |
+| `webhook` | boolean | Enable real-time sync via Confluence webhooks; defaults to `false` |
+
+Space keys are the short identifiers visible in Confluence URLs: `https://acme.atlassian.net/wiki/spaces/{SPACE_KEY}/`.
+
+## Create a Confluence connector
+
+```python
+import os
+from spectron import Spectron
+
+memory = Spectron(
+    context="acme-prod",
+    base_url="https://api.spectron.dev",
+    api_key=os.environ["SPECTRON_API_KEY"],
+)
+
+connector = await memory.connectors.create(
+    kind="confluence",
+    config={
+        "base_url": "https://acme.atlassian.net/wiki",
+        "username": os.environ["CONFLUENCE_USER"],
+        "api_token": os.environ["CONFLUENCE_TOKEN"],
+        "space_keys": ["ENG", "PROD"],
+        "include_attachments": True,
+        "webhook": True,
+    },
+    scope={"org": "acme"},
+    sync_schedule="0 2 * * *",
+)
+```
+
+```http
+POST /v1/acme-prod/connectors
+Content-Type: application/json
+
+{
+  "kind": "confluence",
+  "config": {
+    "base_url": "https://acme.atlassian.net/wiki",
+    "username": "admin@acme.com",
+    "api_token": "...",
+    "space_keys": ["ENG", "PROD"],
+    "include_attachments": true,
+    "webhook": true
+  },
+  "scope": { "org": "acme" },
+  "sync_schedule": "0 2 * * *"
+}
+```
+
+## How pages are processed
+
+Confluence pages are stored as Confluence Storage Format (XHTML-based). Spectron fetches each page via the Confluence REST API v2, extracts the body, and normalises it:
+
+1. **XHTML to text** — structured macros (info panels, expand blocks, code macros) are unwrapped and their text is preserved
+2. **Heading-based chunking** — `<h1>`–`<h4>` elements serve as natural chunk boundaries
+3. **Metadata attachment** — the page title, space key, ancestor page titles, labels, and last-modified timestamp are stored as metadata on every chunk
+4. **Embedding and indexing** — chunks are embedded and indexed in the standard Layer 0 pipeline
+
+Each Confluence page becomes one or more knowledge nodes, depending on its length. Short pages (under ~500 tokens) are stored as a single node.
+
+## Attachment support
+
+When `include_attachments: true` is set, Spectron also processes text-extractable attachments on synced pages:
+
+| Attachment type | Processing |
+|---|---|
+| PDF | Text extracted with layout preservation |
+| Word (`.docx`) | Converted to text via LibreOffice |
+| Plain text (`.txt`, `.md`) | Ingested directly |
+
+Images and other binary attachments are skipped. Attachment knowledge nodes are linked to their parent page node in the Layer 0 graph.
+
+## Real-time sync with webhooks
+
+Set `webhook: true` to register a Confluence webhook. Spectron's webhook endpoint receives `page_created`, `page_updated`, and `page_trashed` events from Confluence and re-ingests the affected page within seconds.
+
+Confluence webhooks are configured at the site level. Spectron registers the webhook automatically during connector creation. Your Spectron instance must be reachable over HTTPS from Atlassian's infrastructure; for self-hosted deployments, set `SPECTRON_BASE_URL` to your public URL.
+
+## Selective sync with page IDs
+
+To sync specific pages rather than entire spaces, use `page_ids` instead of or alongside `space_keys`:
+
+```python
+connector = await memory.connectors.create(
+    kind="confluence",
+    config={
+        "base_url": "https://acme.atlassian.net/wiki",
+        "username": os.environ["CONFLUENCE_USER"],
+        "api_token": os.environ["CONFLUENCE_TOKEN"],
+        "page_ids": ["123456789", "987654321"],
+    },
+    scope={"org": "acme", "team": "security"},
+)
+```
+
+This is useful for syncing a curated set of reference pages — security policies, compliance documents, architecture decisions — without pulling in an entire space.
+
+## Managing the connector
+
+```python
+# List all connectors
+connectors = await memory.connectors.list()
+
+# Check sync status
+status = await memory.connectors.status(connector.id)
+print(status.status)          # "idle" | "syncing" | "error"
+print(status.records_synced)  # pages processed in last sync
+print(status.last_sync_at)
+
+# Add a new space
+await memory.connectors.update(
+    connector.id,
+    config={
+        "base_url": "https://acme.atlassian.net/wiki",
+        "username": os.environ["CONFLUENCE_USER"],
+        "api_token": os.environ["CONFLUENCE_TOKEN"],
+        "space_keys": ["ENG", "PROD", "HR"],
+        "webhook": True,
+    },
+)
+
+# Trigger an immediate sync
+await memory.connectors.sync(connector.id)
+
+# Delete the connector; knowledge nodes are retained by default
+await memory.connectors.delete(connector.id)
+```

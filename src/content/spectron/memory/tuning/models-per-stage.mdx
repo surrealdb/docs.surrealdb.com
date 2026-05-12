@@ -1,5 +1,161 @@
 ---
-position: 2
+position: 1
 title: Models per stage
-description: "Configure extraction, retrieval, reflection, and embedding models."
+description: "Configure which LLM is used for each processing stage in Spectron."
 ---
+
+# Models per stage
+
+Spectron's processing pipeline is divided into six distinct stages, each with a different latency profile, quality requirement, and cost envelope. Because these requirements differ significantly, Spectron allows you to assign a separate model to each stage rather than applying a single model uniformly.
+
+This lets you keep latency-critical paths on fast, inexpensive models while routing quality-sensitive background work to larger, more capable ones.
+
+## The six stages
+
+### Extraction
+
+The extraction stage runs synchronously on every turn. When your agent submits a conversation turn, Spectron immediately classifies the content and extracts structured facts — entities, attributes, relations, instructions, and uncertainties — before returning the result to your application. Because this sits in the critical path between your user's message and your agent's response, latency matters more here than anywhere else in the pipeline.
+
+### Query understanding
+
+Query understanding runs when a recall or search request arrives. Spectron classifies the incoming query — determining whether it is seeking a fact, a document chunk, an instruction, or a broader contextual summary — and dispatches it to the appropriate retrieval tier. This stage is also synchronous and latency-sensitive.
+
+### Response
+
+When Spectron's `/recall` endpoint generates a natural-language answer from retrieved context rather than returning raw records, the response stage handles that synthesis. It receives the retrieved facts and assembles them into a coherent reply. Response generation can be synchronous or buffered depending on how your application consumes the recall endpoint.
+
+### Reflection
+
+Reflection is the reconciliation pass that runs in the background after extraction. It compares new facts against existing memory, resolves contradictions, merges duplicates, and synthesises higher-order insights from accumulated context. Because reflection is not in the user-facing critical path, quality matters more than speed here. A larger, more reasoning-capable model typically produces better memory consolidation.
+
+### Background
+
+Background covers auxiliary reconciliation sweeps — importance decay, retention-policy enforcement, lifecycle expiry, and index maintenance — that run on a schedule rather than per-request. These jobs are low-priority and tolerate higher latency.
+
+### Embedding
+
+The embedding stage converts text into dense vectors for similarity search. Spectron uses these vectors for the semantic response cache, HNSW chunk retrieval, and query expansion. The embedding model must match the dimensionality expected by the index. Changing this setting after initial ingestion requires re-embedding all stored content.
+
+## Configuring models per stage
+
+Model assignment is per-Context. A single Spectron deployment can therefore serve multiple products with different model configurations.
+
+### Python
+
+```python
+from spectron import Spectron
+
+memory = Spectron(context="acme-prod", api_key=os.environ["SPECTRON_API_KEY"])
+
+await memory.config.models(
+    extraction="gpt-4o-mini",          # classify + extract from turns
+    query_understanding="gpt-4o-mini",  # classify incoming queries
+    response="gpt-4o-mini",             # generate responses from retrieved context
+    reflection="gpt-4o",                # synthesise insights, higher quality
+    background="gpt-4o-mini",           # background reconciliation
+    embedding="text-embedding-3-small",
+)
+```
+
+### JavaScript
+
+```javascript
+import { Spectron } from "spectron";
+
+const memory = new Spectron({ context: "acme-prod", apiKey: process.env.SPECTRON_API_KEY });
+
+await memory.config.models({
+    extraction: "gpt-4o-mini",
+    query_understanding: "gpt-4o-mini",
+    response: "gpt-4o-mini",
+    reflection: "gpt-4o",
+    background: "gpt-4o-mini",
+    embedding: "text-embedding-3-small",
+});
+```
+
+You may update any subset of stages. Omitting a key leaves the current assignment unchanged.
+
+## Supported providers
+
+Spectron supports two LLM providers: **OpenAI** and **Anthropic**. Provider keys are stored per-Context using the provider configuration endpoint.
+
+```python
+await memory.config.providers(
+    openai="sk-…",
+    anthropic="sk-ant-…",
+)
+```
+
+```javascript
+await memory.config.providers({
+    openai: "sk-…",
+    anthropic: "sk-ant-…",
+});
+```
+
+Provider keys are write-only on the API. Reading the context configuration returns a `providers_configured` array rather than the keys themselves:
+
+```json
+{
+  "providers_configured": ["openai", "anthropic"]
+}
+```
+
+To use an Anthropic model for a stage, reference it by its model identifier:
+
+```python
+await memory.config.models(
+    extraction="claude-3-haiku-20240307",
+    reflection="claude-opus-4-5",
+)
+```
+
+## Latency versus quality trade-offs
+
+The table below summarises the trade-off profile for each stage and a reasonable default strategy:
+
+| Stage | Synchronous | Latency sensitivity | Quality sensitivity | Default |
+|---|---|---|---|---|
+| `extraction` | Yes | High | Medium | Fast model (e.g. `gpt-4o-mini`) |
+| `query_understanding` | Yes | High | Medium | Fast model |
+| `response` | Yes | Medium | Medium | Fast model |
+| `reflection` | No | Low | High | Capable model (e.g. `gpt-4o`) |
+| `background` | No | Low | Low | Fast model |
+| `embedding` | Both | Medium | Fixed | Embedding model (e.g. `text-embedding-3-small`) |
+
+A common pattern is to keep extraction, query understanding, and response on the fastest available model for a given provider, and to use a larger model only for reflection — where consolidation quality has a lasting effect on the accuracy of all future recalls.
+
+## Reading the current configuration
+
+```python
+config = await memory.config.get()
+print(config.models)
+# {
+#   "extraction": "gpt-4o-mini",
+#   "query_understanding": "gpt-4o-mini",
+#   "response": "gpt-4o-mini",
+#   "reflection": "gpt-4o",
+#   "background": "gpt-4o-mini",
+#   "embedding": "text-embedding-3-small"
+# }
+```
+
+```javascript
+const config = await memory.config.get();
+console.log(config.models);
+```
+
+## Changing the embedding model
+
+The embedding model determines the vector dimensionality stored in the HNSW index. `text-embedding-3-small` produces 1536-dimensional vectors. If you switch to a model with a different output dimension, you must re-embed all stored knowledge chunks before the new model can be used for retrieval:
+
+```python
+# Update the embedding model
+await memory.config.models(embedding="text-embedding-3-large")
+
+# Trigger a full re-embedding sweep
+await memory.knowledge.reindex()
+```
+
+Re-indexing is asynchronous. Poll `memory.knowledge.reindex_status()` until `status` is `complete` before issuing queries against the new index.

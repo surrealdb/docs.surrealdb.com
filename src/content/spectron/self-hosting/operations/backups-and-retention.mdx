@@ -3,3 +3,231 @@ position: 3
 title: Backups and retention
 description: "Database backups and scoped retention policies."
 ---
+
+# Backups and retention
+
+Spectron's state is split across two storage systems. A complete backup strategy must cover both.
+
+## What needs to be backed up
+
+### SurrealDB
+
+SurrealDB holds all of Spectron's operational data:
+
+- Layer 0: knowledge nodes, embedding vectors, document metadata
+- Layer 1: entities, attributes, relations, memory categories
+- Sessions and turns
+- API keys (hashed)
+- Context configuration
+- Audit records
+
+Everything Spectron knows and every record of how it learned it lives in SurrealDB. If SurrealDB is lost without a backup, all memory is gone.
+
+### Object store
+
+The object store holds the original bytes of every document ingested into Layer 0: PDFs, DOCX files, plain text, and other uploaded content.
+
+Knowledge nodes in SurrealDB reference object store objects by key. The object store does not hold any extracted memory or session data — only the source documents. If the object store is lost, the extracted knowledge nodes remain intact in SurrealDB, but you lose the ability to re-ingest or audit the original documents.
+
+**Recommended**: SurrealDB backup + S3 versioning on the object store bucket.
+
+---
+
+## SurrealDB backup options
+
+### Export
+
+SurrealDB's `surreal export` command produces a portable SurrealQL dump of the entire database. This is the simplest backup strategy and works for any deployment size.
+
+```bash
+surreal export \
+    --conn ws://localhost:8000 \
+    --user root \
+    --pass root \
+    --ns spectron \
+    --db spectron \
+    backup-$(date +%Y%m%d-%H%M%S).surql
+```
+
+Restore with `surreal import`:
+
+```bash
+surreal import \
+    --conn ws://localhost:8000 \
+    --user root \
+    --pass root \
+    --ns spectron \
+    --db spectron \
+    backup-20260112-090000.surql
+```
+
+Schedule this with cron or your orchestrator's job scheduler. For most deployments, a daily export with 30-day retention is sufficient.
+
+### Snapshots
+
+For larger deployments or lower RPO requirements, SurrealDB supports filesystem-level snapshots. When running SurrealDB with RocksDB storage, you can take a consistent snapshot by pausing writes or using RocksDB's checkpoint feature.
+
+Consult the SurrealDB documentation for storage-engine-specific snapshot procedures.
+
+### Replication
+
+SurrealDB's raft-based clustering provides built-in replication across nodes. A multi-node cluster with at least three members provides high availability and reduces the blast radius of a single node failure. Replication is not a substitute for backups — it does not protect against data corruption or accidental deletion.
+
+---
+
+## Object store backup
+
+### S3 versioning
+
+Enable versioning on the S3 bucket (or compatible object store) used for Spectron document storage. With versioning enabled, every version of every object is retained. Deleted objects can be recovered by removing the delete marker.
+
+```bash
+aws s3api put-bucket-versioning \
+    --bucket spectron-documents \
+    --versioning-configuration Status=Enabled
+```
+
+Add a lifecycle rule to expire old versions after a retention window:
+
+```bash
+aws s3api put-bucket-lifecycle-configuration \
+    --bucket spectron-documents \
+    --lifecycle-configuration '{
+        "Rules": [{
+            "ID": "expire-old-versions",
+            "Status": "Enabled",
+            "NoncurrentVersionExpiration": { "NoncurrentDays": 90 }
+        }]
+    }'
+```
+
+### Cross-region replication
+
+For production deployments, enable cross-region replication on the object store bucket. This protects against a regional outage destroying source documents.
+
+---
+
+## Per-scope retention policies
+
+Spectron allows you to define retention policies at the scope level. A retention policy specifies a `ttl` for a particular memory category within a particular scope. When the TTL expires, the memory is eligible for hard deletion by the `lifecycle.expire()` sweep.
+
+### Configuration format
+
+Retention policies are defined in the Spectron server configuration file under `retention`:
+
+```yaml
+retention:
+  - scope:
+      org: acme
+    memory_category: context
+    ttl: 30d
+
+  - scope:
+      org: acme
+    memory_category: unknowns
+    ttl: 14d
+
+  - scope:
+      org: demo
+    memory_category: context
+    ttl: 7d
+```
+
+Policies are matched from most specific to least specific. A policy with both `org` and `agent` in the scope takes precedence over a policy with `org` alone.
+
+### Supported TTL values
+
+TTLs are expressed as duration strings: `7d`, `30d`, `90d`, `1y`. The minimum supported TTL is `1d`.
+
+The default TTLs when no policy is configured:
+
+| Category | Default TTL |
+|------------|-------------|
+| Identity | indefinite |
+| Knowledge | indefinite |
+| Context | 7 days |
+| Instructions | indefinite |
+| Unknowns | 30 days |
+
+### Setting retention via the API
+
+Retention policies can also be set programmatically via the management API:
+
+```python
+await admin.contexts("acme").retention.set([
+    {
+        "scope": {"org": "acme"},
+        "memory_category": "context",
+        "ttl": "30d",
+    },
+    {
+        "scope": {"org": "acme"},
+        "memory_category": "unknowns",
+        "ttl": "14d",
+    },
+])
+```
+
+---
+
+## lifecycle.expire()
+
+The `lifecycle.expire()` sweep is a background process that runs on a configurable schedule (default: every hour). It scans for memory records whose `valid_until` has passed or whose TTL has elapsed, and hard-deletes them from SurrealDB.
+
+You can trigger the sweep manually via the management API:
+
+```python
+result = await admin.lifecycle.expire()
+print(f"Expired {result.deleted_count} records")
+```
+
+Or via `spectronctl`:
+
+```bash
+spectronctl lifecycle expire --api-key mgmt-… --dry-run
+```
+
+The `--dry-run` flag reports what would be deleted without making changes. Run a dry-run before adjusting retention policies to understand the impact.
+
+---
+
+## Hard delete vs soft delete
+
+Spectron distinguishes between two deletion modes:
+
+### Soft delete via valid_until
+
+Setting a memory record's `valid_until` to a past timestamp marks it as no longer valid. The record is retained in SurrealDB and is excluded from recall queries. This is the default behaviour when `memory.forget()` is called.
+
+Soft-deleted records are visible in audit queries and can be reinstated by updating `valid_until`.
+
+### Hard delete via management API
+
+Hard deletion permanently removes the record from SurrealDB. It cannot be recovered without a backup.
+
+Hard delete is triggered by:
+
+- The `lifecycle.expire()` sweep (for records past their TTL)
+- An explicit management API call:
+
+```python
+await admin.entities.delete(
+    entity_id="ent_01hw…",
+    hard=True,
+)
+```
+
+**Use hard delete only when required for compliance purposes.** Soft delete is preferred in all other cases because it preserves audit history.
+
+---
+
+## Recommended backup schedule
+
+| Task | Frequency | Retention |
+|-------------------------------|-----------|-----------|
+| SurrealDB export | Daily | 30 days |
+| SurrealDB export (weekly) | Weekly | 1 year |
+| S3 object versioning | Continuous | 90 days for old versions |
+| Cross-region S3 replication | Continuous | — |
+
+Test your restore procedure regularly. A backup that has never been tested is not a backup.

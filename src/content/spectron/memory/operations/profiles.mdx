@@ -1,5 +1,186 @@
 ---
-position: 5
+position: 4
 title: Profiles
-description: "Aggregated profile blocks ready for system prompt injection."
+description: "Auto-maintained entity profiles aggregated from memory and knowledge."
 ---
+
+# Profiles
+
+A profile is a computed view over the memory store for a given entity — typically a user. It aggregates the entity's most relevant attributes, preferences, and active instructions into a structured object that can be injected directly into an LLM system prompt.
+
+Profiles are not a separate store. They are assembled on demand from the same attribute, instruction, and knowledge tables that back all other Spectron operations. There is no synchronisation lag and no risk of a profile drifting out of step with the underlying data.
+
+## Sections
+
+A profile is divided into four sections, each drawing from a different category of memory.
+
+**`static`** contains the entity's stable biographical and organisational facts — identity-category attributes and any resolved Layer 0 knowledge. These change rarely and carry no decay.
+
+**`dynamic`** contains the entity's recent situational context — context-category attributes from the current and recent sessions. This section reflects what the entity is doing right now.
+
+**`preferences`** contains knowledge-category attributes that describe how the entity likes things to work. Editor preferences, communication style, tool choices, and opinion-based attributes appear here.
+
+**`instructions`** contains all active instruction records scoped to this entity. These are directives the entity or a managing principal has given about how the agent should behave.
+
+| Section | Source | Volatility |
+|---|---|---|
+| `static` | Identity attributes + Layer 0 knowledge | Low — no decay |
+| `dynamic` | Context attributes | High — decays at 0.95/day |
+| `preferences` | Knowledge attributes | Medium — decays at 0.995/day |
+| `instructions` | Instruction table (`active = true`) | Varies |
+
+## Fetching a profile
+
+```python
+profile = await memory.profile(
+    scope={"org": "acme", "user": "tobie"},
+)
+
+print(profile.static)        # list of {"key": ..., "value": ...}
+print(profile.dynamic)       # list of {"key": ..., "value": ...}
+print(profile.preferences)   # list of {"key": ..., "value": ...}
+print(profile.instructions)  # list of {"label": ..., "description": ...}
+```
+
+```typescript
+import { Spectron } from "@spectron/sdk";
+
+const client = new Spectron({ apiKey: "sk-..." });
+const memory = client.memory({ contextId: "ctx_01jt4kx..." });
+
+const profile = await memory.profile({
+    scope: { org: "acme", user: "tobie" },
+});
+
+console.log(profile.static);
+console.log(profile.dynamic);
+console.log(profile.preferences);
+console.log(profile.instructions);
+```
+
+### REST
+
+```http
+GET /v1/{context_id}/profile?scope[user]=tobie&scope[org]=acme
+```
+
+```json
+{
+  "static": [
+    { "key": "name", "value": "Tobie Morgan Hitchcock" },
+    { "key": "role", "value": "CTO" },
+    { "key": "organisation", "value": "Acme Corp" },
+    { "key": "timezone", "value": "Europe/London" }
+  ],
+  "dynamic": [
+    { "key": "current_focus", "value": "Platform reliability roadmap" },
+    { "key": "recent_decision", "value": "Chose PostgreSQL for the new analytics service" }
+  ],
+  "preferences": [
+    { "key": "editor", "value": "Cursor" },
+    { "key": "language", "value": "TypeScript" },
+    { "key": "response_style", "value": "Concise, no filler phrases" }
+  ],
+  "instructions": [
+    { "label": "Language", "description": "Always respond in British English" },
+    { "label": "Code examples", "description": "Show TypeScript first, Python second" }
+  ]
+}
+```
+
+## Injecting profiles into system prompts
+
+The profile object is designed to be formatted directly into an LLM system prompt. A typical integration looks like this:
+
+```python
+profile = await memory.profile(scope={"org": "acme", "user": "tobie"})
+
+def format_profile(profile) -> str:
+    lines = ["## User profile"]
+
+    if profile.static:
+        lines.append("\n### About")
+        for item in profile.static:
+            lines.append(f"- {item['key'].replace('_', ' ').title()}: {item['value']}")
+
+    if profile.dynamic:
+        lines.append("\n### Current context")
+        for item in profile.dynamic:
+            lines.append(f"- {item['key'].replace('_', ' ').title()}: {item['value']}")
+
+    if profile.preferences:
+        lines.append("\n### Preferences")
+        for item in profile.preferences:
+            lines.append(f"- {item['value']}")
+
+    if profile.instructions:
+        lines.append("\n### Instructions")
+        for inst in profile.instructions:
+            lines.append(f"- {inst['description']}")
+
+    return "\n".join(lines)
+
+system_prompt = f"You are a helpful assistant.\n\n{format_profile(profile)}"
+```
+
+```typescript
+function formatProfile(profile: Profile): string {
+    const lines = ["## User profile"];
+
+    if (profile.static.length > 0) {
+        lines.push("\n### About");
+        for (const item of profile.static) {
+            lines.push(`- ${item.key}: ${item.value}`);
+        }
+    }
+
+    if (profile.dynamic.length > 0) {
+        lines.push("\n### Current context");
+        for (const item of profile.dynamic) {
+            lines.push(`- ${item.key}: ${item.value}`);
+        }
+    }
+
+    if (profile.preferences.length > 0) {
+        lines.push("\n### Preferences");
+        for (const item of profile.preferences) {
+            lines.push(`- ${item.value}`);
+        }
+    }
+
+    if (profile.instructions.length > 0) {
+        lines.push("\n### Instructions");
+        for (const inst of profile.instructions) {
+            lines.push(`- ${inst.description}`);
+        }
+    }
+
+    return lines.join("\n");
+}
+
+const systemPrompt = `You are a helpful assistant.\n\n${formatProfile(profile)}`;
+```
+
+## Scope filtering
+
+Scope controls which attributes and instructions appear in the profile. A profile requested at org scope will include attributes scoped to the org but not those scoped to individual users within it. A profile requested at user scope includes both.
+
+```python
+# Org-level profile — no user-specific memory
+org_profile = await memory.profile(scope={"org": "acme"})
+
+# User-level profile — org memory + user-specific memory
+user_profile = await memory.profile(scope={"org": "acme", "user": "tobie"})
+```
+
+This means you can build different profile shapes for different agent roles. A customer-facing agent that works with a specific user receives a full user profile. An org-level administrative agent receives only org-scoped context without any individual user's personal data.
+
+## Profile versus context
+
+Profiles and context queries serve overlapping but distinct purposes.
+
+`memory.context()` is query-driven: you describe what you need to know and Spectron retrieves the most relevant attributes for that query. Use it when the agent's question determines what memory is relevant.
+
+`memory.profile()` is entity-driven: you request everything Spectron knows about an entity, organised by category. Use it when you want a comprehensive briefing on a user at the start of a session, before any specific query has been issued.
+
+In practice, many integrations combine both: inject the profile at the start of the system prompt for background context, then call `memory.context()` at query time to surface specific relevant memories.

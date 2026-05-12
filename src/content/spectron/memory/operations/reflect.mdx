@@ -1,5 +1,178 @@
 ---
-position: 3
-title: Reflect
-description: "Synthesise insights over memories with optional persistence."
+position: 5
+title: Reflection
+description: "Synthesise insights from patterns across stored memories."
 ---
+
+# Reflection
+
+Reflection is a reasoning operation over the memory store. Unlike retrieval, which surfaces existing facts that match a query, reflection asks Spectron to examine a set of memories and draw conclusions from them — to reason about patterns, identify trends, and synthesise insights that do not exist as explicit stored attributes.
+
+The result is a synthesised text insight backed by evidence citations. If `persist` is enabled, the synthesised insights are also stored as new Layer 1 attributes, making them available to future queries.
+
+## How it works
+
+When you call `memory.reflect()`, Spectron:
+
+1. Retrieves the memories most relevant to your query using hybrid retrieval, respecting scope.
+2. Sends the retrieved evidence to an LLM with a synthesis prompt instructing it to reason over the material and surface patterns, risks, or insights.
+3. Returns the synthesised text alongside the supporting memories.
+4. If `persist=True`, writes the synthesised insights as new knowledge-category attributes at the caller's scope floor.
+
+Reflection is more expensive than retrieval — it always involves an LLM call — but it produces conclusions that no single stored attribute contains.
+
+## Basic usage
+
+```python
+out = await memory.reflect(
+    query="What patterns do you see in customer complaints this month?",
+    scope={"org": "acme"},
+    persist=False,
+)
+
+print(out.reflection)   # synthesised insight text
+print(out.evidence)     # list of supporting memory hits
+```
+
+```typescript
+import { Spectron } from "@spectron/sdk";
+
+const client = new Spectron({ apiKey: "sk-..." });
+const memory = client.memory({ contextId: "ctx_01jt4kx..." });
+
+const out = await memory.reflect({
+    query: "What patterns do you see in customer complaints this month?",
+    scope: { org: "acme" },
+    persist: false,
+});
+
+console.log(out.reflection);
+console.log(out.evidence);
+```
+
+### REST
+
+```http
+POST /v1/{context_id}/reflect
+Content-Type: application/json
+
+{
+  "query": "What patterns do you see in customer complaints this month?",
+  "scope": { "org": "acme" },
+  "persist": false
+}
+```
+
+```json
+{
+  "reflection": "Three recurring patterns emerged across 47 complaint sessions this month. First, billing confusion accounts for 38% of contacts — users consistently misunderstand how prorated charges work on plan changes. Second, a cluster of complaints about search accuracy correlates with a deployment that went out on the 3rd. Third, new users in the enterprise tier show disproportionate onboarding friction, particularly around SSO configuration.",
+  "supporting_memories": [
+    { "entity": "entity:[\"Session\", \"session:01jt2a...\"]", "key": "complaint_topic", "value": "billing proration" },
+    { "entity": "entity:[\"Session\", \"session:01jt3b...\"]", "key": "complaint_topic", "value": "search inaccuracy" }
+  ],
+  "new_insights": []
+}
+```
+
+## Persisting synthesised insights
+
+Setting `persist=True` instructs Spectron to write the synthesised insights back to memory as new attributes. This makes the reflection available to future retrieval queries without repeating the synthesis LLM call.
+
+```python
+out = await memory.reflect(
+    query="What does this user value most in a development tool?",
+    scope={"org": "acme", "user": "tobie"},
+    persist=True,
+)
+
+print(out.reflection)
+print(out.persisted_attributes)  # list of newly created attribute records
+```
+
+```typescript
+const out = await memory.reflect({
+    query: "What does this user value most in a development tool?",
+    scope: { org: "acme", user: "tobie" },
+    persist: true,
+});
+
+console.log(out.reflection);
+console.log(out.persistedAttributes);
+```
+
+When `persist=True`, the response includes `new_insights` (in the REST response) or `persisted_attributes` (in the SDK), listing the attribute records that were written:
+
+```json
+{
+  "reflection": "Tobie consistently prioritises fast feedback loops, keyboard-driven workflows, and tight integration between editing and running code. He has repeatedly mentioned frustration with context-switching between tools.",
+  "supporting_memories": [...],
+  "new_insights": [
+    {
+      "entity": "entity:[\"Person\", \"tobie_morgan_hitchcock\"]",
+      "category": "knowledge",
+      "key": "core_tool_values",
+      "value": "Fast feedback loops, keyboard-driven workflows, minimal context switching"
+    }
+  ]
+}
+```
+
+Persisted insights are stored as knowledge-category attributes, which carry a decay rate of 0.995 per day. They are available immediately for retrieval and appear in future profile requests.
+
+## Principal permissions for persist
+
+The scope at which insights are persisted depends on the calling principal's permissions.
+
+| Principal tier | Persist scope |
+|---|---|
+| Management | Any scope — can persist insights at any scope including org-wide |
+| Supervisor | Own scope floor — can persist at supervisor scope and below |
+| Agent | Own scope floor — persists at the agent's assigned scope |
+
+A supervisor agent reflecting on patterns across its team's interactions can persist org-level insights. An individual user-facing agent can persist insights at most at its own scope, meaning user-scoped and below.
+
+This prevents agents from writing to scopes they do not own. An agent operating for user A cannot persist insights visible to user B, even if the reflection was informed by shared org-level memory.
+
+## Use cases
+
+**Project risk analysis**: A project management agent reflects on all task and decision records for a project to identify risks the team has not explicitly surfaced.
+
+```python
+risks = await memory.reflect(
+    query="What risks are present in this project that we haven't explicitly discussed?",
+    scope={"org": "acme", "project": "platform-migration"},
+    persist=True,
+)
+```
+
+**Sales pattern recognition**: A sales coaching agent reflects on call notes and outcome records to identify what approaches correlate with successful closes.
+
+```python
+patterns = await memory.reflect(
+    query="What conversational patterns appear most often in deals that closed this quarter?",
+    scope={"org": "acme", "team": "sales"},
+    persist=True,
+)
+```
+
+**Support gap identification**: A support agent reflects on unresolved queries to identify topics where the knowledge base is insufficient.
+
+```python
+gaps = await memory.reflect(
+    query="Which questions did I fail to answer confidently this week, and what knowledge would have helped?",
+    scope={"org": "acme", "user": "support-agent-01"},
+    persist=True,
+)
+```
+
+## Reflection versus retrieval
+
+| | Retrieval (`memory.query`) | Reflection (`memory.reflect`) |
+|---|---|---|
+| Operation | Finds existing attributes matching a query | Reasons over retrieved attributes to produce new insights |
+| LLM involvement | Only at the `full_context` tier | Always |
+| Output | Ranked list of stored facts | Synthesised insight text + evidence |
+| Persist option | N/A — retrieval is read-only | Optional — writes new attributes |
+| Cost | Low to medium | Higher — always incurs an LLM call |
+
+Use retrieval when you need to surface known facts. Use reflection when you need to reason about patterns, draw conclusions, or produce summaries that span many individual memory records.

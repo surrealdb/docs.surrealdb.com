@@ -3,3 +3,197 @@ position: 2
 title: User memory in chat
 description: "Per-user scopes and profile injection."
 ---
+
+# User memory in chat
+
+Adding per-user persistent memory to a chat application is the most common Spectron integration. This guide covers the two integration shapes — Spectron-driven and caller-driven — and shows how to inject memory into system prompts and how memory accumulates across multiple sessions.
+
+## The pattern
+
+The core pattern is:
+
+1. **One session per conversation** — scoped to the user's identifier.
+2. **Profile injection** — retrieve the user's accumulated memory and prepend it to the system prompt before each LLM call.
+3. **Turn recording** — after each exchange, record both the user and assistant turns so the extraction pipeline can update memory.
+
+Memory builds up across sessions automatically. The second time a user starts a conversation, the profile already contains facts from previous sessions.
+
+## Integration shape 1 — Spectron drives the loop
+
+Use this shape when you want the simplest possible integration and are comfortable letting Spectron manage the LLM calls. You provide an `agent_fn` callback; Spectron calls it, records the result, and runs extraction.
+
+```python
+from spectron import Spectron
+
+client = Spectron(api_key="sk-...")
+memory = client.memory(context_id="chat")
+
+async def llm_call(messages: list[dict]) -> str:
+    # Build a memory-aware system prompt
+    user_id = messages[0].get("user_id")  # passed as metadata
+    profile = await memory.profile(scope={"user": user_id})
+    system = "You are a helpful assistant."
+    if profile.summary:
+        system += f"\n\n{profile.summary}"
+    return your_llm(system=system, messages=messages)
+
+# Per conversation
+session = await memory.sessions.create(
+    scope={"user": user_id},
+    agent_fn=llm_call,
+)
+
+# Each user message
+result = await session.chat(content=user_message)
+reply = result.response
+```
+
+```typescript
+import { Spectron } from "spectron";
+
+const client = new Spectron({ apiKey: "sk-..." });
+const memory = client.memory({ contextId: "chat" });
+
+const session = await memory.sessions.create({
+    scope: { user: userId },
+    agentFn: async (messages) => {
+        const profile = await memory.profile({ scope: { user: userId } });
+        let system = "You are a helpful assistant.";
+        if (profile.summary) system += `\n\n${profile.summary}`;
+        return yourLlm({ system, messages });
+    },
+});
+
+const result = await session.chat({ content: userMessage });
+const reply = result.response;
+```
+
+## Integration shape 2 — Caller drives the loop
+
+Use this shape when you already manage the conversation loop and want to inject Spectron memory into your existing flow without restructuring it.
+
+```python
+from spectron import Spectron
+
+client = Spectron(api_key="sk-...")
+memory = client.memory(context_id="chat")
+
+async def handle_message(user_id: str, session_id: str | None, user_message: str) -> str:
+    # Re-open existing session or create a new one
+    if session_id:
+        session = memory.sessions.open(session_id)
+    else:
+        session = await memory.sessions.create(scope={"user": user_id})
+
+    # Retrieve memory-enriched context
+    profile = await memory.profile(scope={"user": user_id})
+    ctx = await session.context(query=user_message, top_k=6)
+
+    # Build system prompt
+    system = "You are a helpful assistant."
+    if profile.summary:
+        system += f"\n\n## User context\n{profile.summary}"
+    if ctx.formatted:
+        system += f"\n\n## Relevant memory\n{ctx.formatted}"
+
+    # Your LLM call
+    response = your_llm(system=system, user=user_message)
+
+    # Record the exchange
+    await session.turn(role="user", content=user_message)
+    await session.turn(role="assistant", content=response)
+
+    return response
+```
+
+```typescript
+async function handleMessage(
+    userId: string,
+    sessionId: string | null,
+    userMessage: string,
+): Promise<string> {
+    const session = sessionId
+        ? memory.sessions.open(sessionId)
+        : await memory.sessions.create({ scope: { user: userId } });
+
+    const [profile, ctx] = await Promise.all([
+        memory.profile({ scope: { user: userId } }),
+        session.context({ query: userMessage, topK: 6 }),
+    ]);
+
+    let system = "You are a helpful assistant.";
+    if (profile.summary) system += `\n\n## User context\n${profile.summary}`;
+    if (ctx.formatted) system += `\n\n## Relevant memory\n${ctx.formatted}`;
+
+    const response = await yourLlm({ system, user: userMessage });
+
+    await session.turn({ role: "user", content: userMessage });
+    await session.turn({ role: "assistant", content: response });
+
+    return response;
+}
+```
+
+The key difference between the two shapes is ownership of the LLM call. The caller-driven shape is usually the right choice for existing applications because it requires no changes to the core call path — you add memory injection before and recording after.
+
+## Injecting profile into the system prompt
+
+The profile endpoint is designed for system prompt injection. It returns a `summary` string that is dense and LLM-readable, plus a structured `attributes` list if you want fine-grained control.
+
+```python
+profile = await memory.profile(scope={"user": user_id})
+
+# Simple injection
+system = f"You are a helpful assistant.\n\n{profile.summary}"
+
+# Fine-grained injection
+instructions = [a for a in profile.attributes if a.category == "instructions"]
+identity = [a for a in profile.attributes if a.category == "identity"]
+```
+
+```typescript
+const profile = await memory.profile({ scope: { user: userId } });
+
+// Simple injection
+const system = `You are a helpful assistant.\n\n${profile.summary}`;
+
+// Fine-grained injection
+const instructions = profile.attributes.filter(a => a.category === "instructions");
+const identity = profile.attributes.filter(a => a.category === "identity");
+```
+
+## How memory accumulates across sessions
+
+Memory is not session-scoped — it is user-scoped. Every session with the same `user` scope dimension feeds into the same pool of entities and attributes.
+
+Consider a user who has three conversations over a week:
+
+- **Session 1**: "I work at Acme Corp as a backend engineer." → extracts `employer: Acme Corp`, `role: backend engineer`.
+- **Session 2**: "I prefer concise answers." → extracts instruction `response_style: concise`.
+- **Session 3**: "I just moved to the platform team." → updates `role: platform engineer` with a supersession chain.
+
+By session 3, the profile contains all three facts. The role update from session 3 supersedes session 1, but the old value is preserved in the supersession chain for auditability.
+
+## Querying accumulated memory
+
+To see what Spectron currently knows about a user:
+
+```python
+entities = await memory.entities.list(scope={"user": user_id})
+for entity in entities:
+    print(f"{entity.type}/{entity.name}")
+    for attr in entity.attributes:
+        print(f"  {attr.key}: {attr.value}")
+```
+
+```typescript
+const entities = await memory.entities.list({ scope: { user: userId } });
+for (const entity of entities) {
+    console.log(`${entity.type}/${entity.name}`);
+    for (const attr of entity.attributes) {
+        console.log(`  ${attr.key}: ${attr.value}`);
+    }
+}
+```
+
+This is the same view the agent gets via the profile endpoint, but structured for programmatic inspection rather than prompt injection.

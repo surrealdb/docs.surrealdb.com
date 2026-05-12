@@ -1,5 +1,135 @@
 ---
-position: 5
+position: 4
 title: Provenance and traceability
-description: "Tracing facts back to turns, principals, and retrieval tiers."
+description: "Every fact traces back to the turn that produced it. How Spectron tracks corrections and makes memory observable."
 ---
+
+# Provenance and traceability
+
+Every piece of information Spectron stores is traceable back to the exact conversation turn that produced it. Corrections are preserved as a chain — never as an overwrite. This makes memory fully auditable and enables point-in-time reconstruction of what the system believed at any moment.
+
+## Source turns
+
+Every entity, attribute, and relation in Spectron carries a `source_turn` reference pointing to the turn record that caused it to be created or updated. No record is ever written without this link.
+
+```json
+{
+  "entity": "entity:[\"Person\", \"christian_battaglia\"]",
+  "category": "identity",
+  "key": "role",
+  "value": "Software Engineer",
+  "source_turn": "turn:abc001",
+  "valid_from": "2026-03-01T09:00:00Z"
+}
+```
+
+The `turn` record itself captures the full context of the interaction: the agent, the session, the principal (user or system), and the raw content that produced the extraction. Following the `source_turn` link from any attribute takes you back to the moment it was learned.
+
+## Supersession chains
+
+When a fact is corrected, Spectron does not update the existing record in place. Instead it creates a new attribute and links the two with a supersession chain:
+
+- The **old attribute** gains `superseded_by` (pointing to the new record) and `valid_until` (the timestamp of the correction).
+- The **new attribute** gains `supersedes` (pointing to the old record) and `valid_from` (the timestamp the new value took effect).
+
+```json
+// Original attribute — now superseded
+{
+  "id": "attr:001",
+  "entity": "entity:[\"Person\", \"christian_battaglia\"]",
+  "category": "identity",
+  "key": "role",
+  "value": "Software Engineer",
+  "source_turn": "turn:abc001",
+  "valid_from": "2026-03-01T09:00:00Z",
+  "valid_until": "2026-05-10T14:00:00Z",
+  "superseded_by": "attr:002"
+}
+
+// Corrected attribute — now current
+{
+  "id": "attr:002",
+  "entity": "entity:[\"Person\", \"christian_battaglia\"]",
+  "category": "identity",
+  "key": "role",
+  "value": "Staff Engineer",
+  "source_turn": "turn:xyz999",
+  "valid_from": "2026-05-10T14:00:00Z",
+  "supersedes": "attr:001"
+}
+```
+
+The correction is fully traceable: `attr:002` knows it supersedes `attr:001`, `attr:001` knows it was superseded by `attr:002`, and both link to the turns that produced them. No data is ever deleted.
+
+## Temporal validity and point-in-time queries
+
+The `valid_from` and `valid_until` timestamps on every attribute enable **point-in-time queries**: you can reconstruct exactly what Spectron believed about an entity at any moment in the past.
+
+A query for the current state of an entity retrieves only attributes where `valid_until` is null (i.e. not yet superseded). A point-in-time query adds a timestamp constraint:
+
+```json
+{
+  "entity": "entity:[\"Person\", \"christian_battaglia\"]",
+  "as_of": "2026-04-01T00:00:00Z"
+}
+```
+
+This returns all attributes where `valid_from ≤ 2026-04-01` and either `valid_until` is null or `valid_until > 2026-04-01` — the complete state of that entity as it was known on 1 April 2026.
+
+Point-in-time queries are useful for auditing disputes, debugging unexpected agent behaviour, or understanding how a belief evolved over time.
+
+## Decision traces
+
+Every query Spectron processes produces a `decision_trace`: a structured record of which memory tiers were consulted, what was retrieved from each, how scores were computed, and what was ultimately included in the response payload.
+
+```json
+{
+  "query_id": "qry:01jt5p...",
+  "scope": { "org": "apple", "user": "tobie" },
+  "tiers_consulted": ["layer_0", "identity", "knowledge", "context", "instructions"],
+  "results": [
+    {
+      "tier": "identity",
+      "attribute": "attr:044",
+      "key": "role",
+      "value": "Co-founder",
+      "base_score": 0.94,
+      "boost": 1.0,
+      "final_score": 0.94
+    },
+    {
+      "tier": "context",
+      "attribute": "attr:211",
+      "key": "current_task",
+      "value": "Implementing webhook delivery",
+      "base_score": 0.81,
+      "boost": 0.5,
+      "final_score": 0.405,
+      "decay_applied": 0.857
+    }
+  ],
+  "l0_conflicts": [],
+  "produced_at": "2026-05-12T16:45:00Z"
+}
+```
+
+Decision traces answer the question: "why did the agent say that?" Every response is backed by a traceable record of what was retrieved and why it was ranked as it was.
+
+## The state API
+
+The state API exposes the full memory graph for a given entity and scope, including superseded attributes and their chains. This is the primary observability interface for understanding what Spectron knows.
+
+```http
+GET /contexts/ctx_01jt4kx.../state
+  ?entity=entity:["Person","christian_battaglia"]
+  &scope={"org":"surrealdb","user":"christian"}
+  &include_superseded=true
+```
+
+The response includes the current attribute set, the full supersession history for each attribute, all active instructions, any open uncertainties, and the `resolves_to` relation to Layer 0 if present.
+
+## Watching memory build in real time
+
+Because every write is turn-sourced and every correction is chained, you can observe memory building up over a conversation in real time. A session that starts with no knowledge of a user and ends with a complete profile — name, role, preferences, active task, two corrections, and one unresolved uncertainty — produces a fully auditable graph where every node traces back to the exact message that produced it.
+
+This observability is not a debugging convenience: it is the mechanism by which Spectron guarantees accuracy. An agent that produces a wrong answer can always be traced to a specific turn, a specific extraction, and a specific retrieval decision.

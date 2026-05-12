@@ -1,5 +1,112 @@
 ---
-position: 4
-title: Forget
-description: "Temporal invalidation and scoped forgetting of attributes."
+position: 3
+title: Forgetting memories
+description: "How to soft-delete memories by natural-language query or by entity."
 ---
+
+# Forgetting memories
+
+Spectron uses soft deletion rather than hard deletion for memory records. When you forget something, the record is not removed from the database — its `valid_until` timestamp is set to the current time, which excludes it from all future retrieval. The original data remains in place for audit, provenance tracing, and point-in-time queries.
+
+This design reflects the temporal nature of memory: facts do not cease to have existed, they cease to be currently valid.
+
+## Semantic forget
+
+The most natural way to remove memory is with a natural-language statement. Spectron runs a similarity search against the attribute store, identifies the attributes that match your description, and sets `valid_until = now()` on each match.
+
+```python
+deleted = await memory.forget(
+    "anything about my old job",
+    scope={"org": "acme", "user": "tobie"},
+)
+
+print(deleted.count)   # number of attributes soft-deleted
+print(deleted.matched) # list of matched attribute summaries
+```
+
+```typescript
+import { Spectron } from "@spectron/sdk";
+
+const client = new Spectron({ apiKey: "sk-..." });
+const memory = client.memory({ contextId: "ctx_01jt4kx..." });
+
+const deleted = await memory.forget("anything about my old job", {
+    scope: { org: "acme", user: "tobie" },
+});
+
+console.log(deleted.count);
+console.log(deleted.matched);
+```
+
+### REST
+
+```http
+POST /v1/{context_id}/forget
+Content-Type: application/json
+
+{
+  "query": "anything about my old job",
+  "scope": { "org": "acme", "user": "tobie" }
+}
+```
+
+```json
+{
+  "count": 3,
+  "matched": [
+    { "entity": "entity:[\"Person\", \"tobie_morgan_hitchcock\"]", "key": "previous_employer", "value": "StartupCo" },
+    { "entity": "entity:[\"Person\", \"tobie_morgan_hitchcock\"]", "key": "previous_role", "value": "Staff Engineer" },
+    { "entity": "entity:[\"Person\", \"tobie_morgan_hitchcock\"]", "key": "years_at_previous_employer", "value": "4" }
+  ]
+}
+```
+
+The `matched` list lets you confirm what was affected before proceeding. If the results are not what you expected, you can inspect the matched attributes and refine your query. The soft-delete is immediate — there is no dry-run mode — but if you need to reverse it, a management-tier principal can clear the `valid_until` value to restore the attributes.
+
+## Surgical entity delete
+
+To target a specific entity precisely, use the entities delete method:
+
+```python
+await memory.entities.delete("Person", "christian_battaglia")
+```
+
+```typescript
+await memory.entities.delete({ type: "Person", name: "christian_battaglia" });
+```
+
+### REST
+
+```http
+DELETE /v1/{context_id}/entities/{type}/{name}
+```
+
+This soft-deletes the entity and all its attributes by setting `valid_until = now()` on each record. It does not delete the entity from the database — it expires it. Subsequent retrieval queries will not surface any attribute belonging to that entity.
+
+## What soft-delete preserves
+
+Setting `valid_until` rather than deleting rows preserves several important properties:
+
+**Temporal validity**: Spectron supports point-in-time queries. A record with `valid_until = 2026-05-12T10:00:00Z` was true up to that timestamp and false thereafter. This distinction matters for audit trails and for understanding how an agent's knowledge evolved over time.
+
+**Provenance**: Every attribute carries a `source_turn` reference. If you need to understand why an agent behaved a certain way in a past session, the source data is still present even after the attribute has been logically expired.
+
+**Instruction history**: Instructions given by users are stored with an `active` boolean. Deactivating an instruction (which is what forget does when it matches an instruction record) preserves the fact that the user issued it, for how long it was active, and when it was revoked.
+
+## Forget versus purge
+
+Soft-delete is available to any principal with write access to the relevant scope. **Hard deletion** — physically removing rows from the database — is a management-tier operation only, available through the management API.
+
+| Operation | Who can perform it | What it does |
+|---|---|---|
+| `memory.forget()` | Any write-scoped principal | Sets `valid_until` on matched attributes |
+| `entities.delete()` | Any write-scoped principal | Sets `valid_until` on entity and all its attributes |
+| Management purge | Management principal only | Permanently removes rows from the database |
+
+The management purge is intended for compliance use cases (right-to-erasure requests, data retention enforcement) where you need to guarantee that the data no longer exists anywhere in the system. For ordinary agent memory management, soft-delete is always sufficient.
+
+## How forget interacts with extraction
+
+If a turn is added to a session after a forget operation, and the turn contains information that matches what was forgotten, the extraction pipeline will create new attributes for the new information. Forget operates on the current state of the attribute store — it does not prevent future extraction of similar content.
+
+For example, if you forget "my old job" and then a subsequent turn includes "I used to work at StartupCo", the extraction pipeline will re-extract that fact and store it as a new attribute with a fresh `valid_from` timestamp.

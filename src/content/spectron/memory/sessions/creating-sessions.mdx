@@ -1,5 +1,133 @@
 ---
 position: 1
 title: Creating sessions
-description: "Open a scoped session and inherit scope on extracted records."
+description: "How to create and manage conversation sessions in Spectron."
 ---
+
+# Creating sessions
+
+A **session** is the fundamental unit of conversation in Spectron. It is a scoped, persistent container that groups all turns, extracted facts, and derived knowledge from a single conversational thread. Every entity, attribute, relation, instruction, and uncertainty produced by Spectron carries a reference to the session and turn it was extracted from, giving the memory layer complete provenance.
+
+## Why sessions exist
+
+Spectron stores memory as a structured graph of discrete facts rather than a bag of text chunks. For that model to be useful, each fact must answer two questions:
+
+- **Where did it come from?** Which conversation, which message, which principal?
+- **Who does it apply to?** Which user, organisation, or project?
+
+Sessions answer both. The session is the provenance anchor: every extracted fact carries a `source_turn` that links back through the turn to the session. The session is also the scope container: when you create a session, you declare the dimensional scope — user, organisation, project, or any combination — and every piece of data produced within that session inherits it automatically.
+
+## Session scope
+
+Scope is a free-form key–value object you supply when creating a session. The keys are dimension names (`user`, `org`, `project`, `team`, or any custom dimension you have configured in your context). Spectron propagates this scope to all records created during the session.
+
+```json
+{ "user": "tobie", "org": "anneal" }
+```
+
+Scope is used in two places:
+
+1. **Isolation**: queries against the state or recall endpoints are automatically filtered to the declared scope, so a user cannot retrieve facts that belong to another user in the same context.
+2. **Attribution**: corrections and supersessions track which scoped principal a fact belongs to, so diffs produced from `/state/diff` are always relative to a coherent scope.
+
+You may supply a subset of available dimensions. A session scoped to `{ "org": "anneal" }` without a `user` key will accumulate org-level knowledge rather than user-level knowledge.
+
+## Creating a session
+
+### REST
+
+```http
+POST /v1/{context_id}/sessions
+Content-Type: application/json
+
+{
+  "scope": { "user": "tobie", "org": "anneal" },
+  "metadata": { "channel": "web-chat", "locale": "en-GB" }
+}
+```
+
+Response:
+
+```json
+{
+  "id": "session:01hx7…",
+  "scope": { "user": "tobie", "org": "anneal" },
+  "created_at": "2026-05-12T16:24:00Z"
+}
+```
+
+The `metadata` field is optional. Use it to attach arbitrary operational data — channel, locale, application version — that should travel with the session record for auditing purposes but is not used by Spectron's extraction pipeline.
+
+### Python SDK
+
+```python
+from spectron import Spectron
+
+memory = Spectron(context="acme-prod", api_key=os.environ["SPECTRON_API_KEY"])
+
+session = await memory.sessions.create(
+    scope={"user": "tobie", "org": "anneal"},
+    metadata={"channel": "web-chat"}
+)
+
+print(session.id)       # session:01hx7…
+print(session.scope)    # {"user": "tobie", "org": "anneal"}
+```
+
+### JavaScript SDK
+
+```javascript
+import { Spectron } from "spectron";
+
+const memory = new Spectron({ context: "acme-prod", apiKey: process.env.SPECTRON_API_KEY });
+
+const session = await memory.sessions.create({
+    scope: { user: "tobie", org: "anneal" },
+    metadata: { channel: "web-chat" },
+});
+
+console.log(session.id);    // session:01hx7…
+console.log(session.scope); // { user: "tobie", org: "anneal" }
+```
+
+## Session lifecycle
+
+A typical session follows three stages:
+
+### 1. Create
+
+Call `POST /v1/{context_id}/sessions` (or `memory.sessions.create()` in the SDK) once per conversational thread. Store the returned session ID in your application state alongside the conversation context.
+
+### 2. Add turns
+
+As messages flow through your application, record each one by posting to the turns endpoint. Spectron extracts structured facts from each turn synchronously and returns the extraction result immediately. See [Adding turns](/spectron/memory/sessions/adding-turns) for the full extraction result shape.
+
+### 3. Close
+
+When the conversation ends, delete the session:
+
+```http
+DELETE /v1/{context_id}/sessions/{session_id}
+```
+
+```python
+await session.close()
+```
+
+```javascript
+await session.close();
+```
+
+Closing a session does not delete the extracted data. All entities, attributes, relations, and other facts persisted during the session remain in the memory layer, linked to their source turns, and continue to be available for retrieval and state queries. Closing merely marks the session as ended and releases any server-side resources held for it.
+
+## Session ownership
+
+Only the API key or principal that created a session may append turns to it. Attempting to post a turn to a session you did not create returns a `403 Forbidden` response. This prevents one tenant or user from injecting turns into another's conversational thread, which could otherwise corrupt the provenance chain.
+
+The ownership restriction applies to turn submission only. Reading the state and retrieving context from a session may be permitted to other principals depending on the access control configuration of the context. See [Authentication and principals](/spectron/self-hosting/security/principals) for details.
+
+## One session per thread
+
+Create one session per conversational thread. Do not reuse a session for unrelated conversations: scope and provenance are inherited from the session record, so mixing conversations produces mixed attribution. If a user starts a fresh chat window, create a new session even if it is the same user.
+
+For long-running agents that operate continuously across many user interactions, the pattern is the same — one session per logical thread — with each new top-level invocation or user-initiated conversation opening a new session.

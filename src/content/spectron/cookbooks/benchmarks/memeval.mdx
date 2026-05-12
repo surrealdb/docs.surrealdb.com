@@ -3,3 +3,199 @@ position: 3
 title: MemEval
 description: "Standardised cross-system comparisons."
 ---
+
+# MemEval
+
+MemEval is a standardised benchmark framework for evaluating memory systems for AI agents. It provides a fixed set of test scenarios, gold-standard ground truths, and evaluation metrics, enabling reproducible comparisons across different memory implementations and configurations.
+
+## What MemEval measures
+
+MemEval evaluates memory systems across three primary dimensions:
+
+**Accuracy** — whether the memory system recalls the correct facts when queried. A response is marked correct if it contains the ground-truth value for the queried attribute and does not contain contradictory values.
+
+**Recall** — whether all relevant facts are surfaced, not just one. A system that recalls only part of what it knows about a subject scores lower on recall even if each individual recalled fact is correct.
+
+**Coherence** — whether the recalled facts are consistent with one another. Coherence penalises systems that return contradictory values for the same attribute (e.g. a user's age as both 28 and 35 from different sessions).
+
+MemEval also measures secondary metrics including:
+
+- **Temporal accuracy**: does the system return the *current* value for an attribute that has changed over time, rather than an earlier value?
+- **Provenance traceability**: can the system identify which source turn or session a recalled fact came from?
+- **Forgetting fidelity**: after a `forget()` operation, does the fact remain absent from subsequent recall queries?
+
+---
+
+## Running Spectron against MemEval
+
+### Prerequisites
+
+Install the MemEval package and the Spectron Python SDK:
+
+```bash
+pip install memeval spectron
+```
+
+### Configuration
+
+Create a MemEval configuration file pointing at your Spectron instance:
+
+```yaml
+# memeval.yaml
+adapter: spectron
+spectron:
+  api_key: ${SPECTRON_API_KEY}
+  server: https://spectron.acme.com
+  context_id: ctx_memeval
+
+evaluation:
+  scenarios:
+    - basic_recall
+    - temporal_update
+    - contradiction_resolution
+    - multi_session_persistence
+    - forgetting
+  turns_per_scenario: 20
+  queries_per_scenario: 10
+```
+
+### Running the benchmark
+
+```bash
+memeval run --config memeval.yaml --output results/
+```
+
+MemEval will:
+
+1. Create a fresh Spectron context for the evaluation run
+2. Inject synthetic conversations according to each scenario
+3. Issue queries against the memory system
+4. Compare responses to the ground-truth answers
+5. Write results to `results/`
+
+Each run is isolated — MemEval creates and tears down its own context so your production data is not affected.
+
+### Programmatic usage
+
+```python
+import memeval
+import spectron
+
+adapter = memeval.SpectronAdapter(
+    memory=spectron.Memory(api_key="sk-…"),
+    context_id="ctx_memeval",
+)
+
+suite = memeval.Suite.load("standard-v1")
+results = await suite.run(adapter)
+
+print(results.summary())
+# Accuracy:   91.4%
+# Recall:     87.2%
+# Coherence:  96.8%
+# Temporal:   89.1%
+```
+
+---
+
+## Interpreting results
+
+### Accuracy
+
+An accuracy score above 90% is generally considered production-ready for customer-facing agents. Scores below 80% typically indicate either misconfigured extraction models or a poor fit between the test scenarios and your use case.
+
+If accuracy is low, check:
+
+- Are the extraction and embedding models appropriate for the language and domain of the test data?
+- Is the similarity threshold for recall set appropriately? (default: 0.82)
+- Is the ontology grounding configured for the scenario domain?
+
+### Recall
+
+Recall below 80% suggests the system is finding some relevant facts but missing others. Common causes:
+
+- The `top_k` limit in recall queries is too low for the scenario's information density
+- Embedding model quality is insufficient for the domain vocabulary
+
+### Coherence
+
+Coherence measures consistency, not correctness. A low coherence score (below 90%) usually means the reconciliation pipeline is failing to resolve contradictory facts from different turns or sessions.
+
+Review the reconciliation and supersession configuration. If your scenarios include adversarial contradictions (e.g. a user claiming different ages in different sessions), ensure temporal validity and authority hierarchy are correctly configured.
+
+### Temporal accuracy
+
+Low temporal accuracy (returning stale values for changed attributes) indicates the system is not correctly applying `valid_until` supersession. Check that the extraction pipeline is generating supersession events for attribute updates, not just appending new values.
+
+---
+
+## Using MemEval to compare configurations
+
+MemEval is most valuable when comparing Spectron configurations against each other. Run the same scenario suite with different settings and compare:
+
+```bash
+# Baseline configuration
+memeval run --config memeval-baseline.yaml --output results/baseline/
+
+# Alternative: different extraction model
+memeval run --config memeval-gpt4o.yaml --output results/gpt4o/
+
+# Compare
+memeval compare results/baseline/ results/gpt4o/
+```
+
+```
+                 baseline    gpt-4o-full
+Accuracy:          89.1%        92.4%  (+3.3%)
+Recall:            84.7%        88.1%  (+3.4%)
+Coherence:         95.2%        96.0%  (+0.8%)
+Temporal:          87.3%        90.5%  (+3.2%)
+Avg latency (ms):    180          340  (+89%)
+```
+
+This comparison shows the trade-off between `gpt-4o-mini` (baseline) and `gpt-4o` (full) for extraction: meaningfully better scores at roughly double the latency. Whether that trade-off is acceptable depends on your application's latency requirements.
+
+### Recommended comparison scenarios
+
+When evaluating a new Spectron deployment:
+
+1. Run MemEval against the default configuration to establish a baseline.
+2. Test with your actual domain vocabulary — MemEval supports custom scenario datasets.
+3. Compare extraction models (`gpt-4o-mini` vs `gpt-4o`) for your scenario complexity.
+4. If you are using ontology grounding, test with and without grounding to measure its impact.
+5. Run the forgetting and temporal scenarios specifically if your use case involves frequently updated facts.
+
+---
+
+## Custom scenarios
+
+MemEval supports custom scenario definitions for domain-specific evaluation. Define your own conversation templates and ground-truth queries:
+
+```yaml
+# custom-scenario.yaml
+name: ecommerce-support
+description: "Customer support agent with product knowledge"
+turns:
+  - role: user
+    content: "I bought the AirPods Pro last month and one earbud has crackling."
+  - role: assistant
+    content: "I'm sorry to hear that. Can I get your order number?"
+  - role: user
+    content: "It's ORD-88214."
+queries:
+  - query: "What product did the user purchase?"
+    ground_truth: "AirPods Pro"
+    category: accuracy
+  - query: "What is the user's reported issue?"
+    ground_truth: "crackling in one earbud"
+    category: accuracy
+  - query: "What is the user's order number?"
+    ground_truth: "ORD-88214"
+    category: accuracy
+```
+
+```bash
+memeval run --scenario custom-scenario.yaml --config memeval.yaml
+```
+
+Custom scenarios let you validate that Spectron correctly handles the specific entities and attributes that matter for your application.

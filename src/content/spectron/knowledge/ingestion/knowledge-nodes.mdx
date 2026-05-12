@@ -1,5 +1,201 @@
 ---
 position: 3
 title: Knowledge nodes
-description: "Typed nodes, manual import, and graph relations."
+description: "Manually importing and managing typed knowledge nodes in Layer 0."
 ---
+
+# Knowledge nodes
+
+Document ingestion — uploading PDFs, markdown files, HTML pages — is one way to populate Layer 0. The other is to import typed knowledge nodes directly, without going through the document pipeline. Nodes represent discrete, structured entities with explicit identities and relationships, as opposed to the implicit structure that emerges from chunking and embedding unstructured documents.
+
+## Nodes versus document chunks
+
+Documents are processed into chunks: overlapping text segments with associated embeddings, keywords, and section metadata. A chunk's identity is derived from its document and position — it has no stable external key, and its content is opaque text.
+
+A typed knowledge node is different:
+
+- It has a **kind** (entity type), a **slug** (stable identifier within that kind), and a **title** (human-readable label).
+- Its **content** is a structured JSON object — a set of attributes and values — rather than raw text.
+- It can be **upserted** by slug: resubmitting a node with the same kind and slug updates it in place.
+- It participates in the knowledge graph through explicit **relations** rather than inferred keyword co-occurrence.
+
+Use nodes when your data is already structured and has stable identifiers. Use document ingestion for unstructured text where structure must be extracted.
+
+## Node structure
+
+Each node has four fields:
+
+| Field | Description |
+|---|---|
+| `kind` | Entity type — a string that categorises the node (e.g. `product`, `policy`, `customer`) |
+| `slug` | Stable identifier within the kind (e.g. `airpods_pro_2`) — must be unique per kind |
+| `title` | Human-readable display name |
+| `content` | Arbitrary JSON object containing the node's attributes |
+
+Relations link one node to another using a directional edge with a label.
+
+## Upserting nodes
+
+The upsert operation creates a node if it does not exist and updates it if it does. Upserts are batched — send multiple nodes and relations in a single call.
+
+### Python
+
+```python
+from spectron import Spectron
+
+memory = Spectron(context="acme-prod", api_key=os.environ["SPECTRON_API_KEY"])
+
+await memory.knowledge.nodes.upsert(
+    nodes=[
+        {
+            "kind": "product",
+            "slug": "airpods_pro_2",
+            "title": "AirPods Pro 2",
+            "content": {"price": 249, "category": "Audio", "sku": "MLWK3LL/A"},
+        },
+        {
+            "kind": "product",
+            "slug": "macbook_pro_14",
+            "title": "MacBook Pro 14-inch",
+            "content": {"price": 1999, "category": "Computers", "sku": "MKGP3LL/A"},
+        },
+        {
+            "kind": "policy",
+            "slug": "returns",
+            "title": "Returns Policy",
+            "content": {"duration": "30 days", "scope": "unopened items"},
+        },
+    ],
+    relations=[
+        {
+            "in": ("product", "airpods_pro_2"),
+            "out": ("policy", "returns"),
+            "label": "covered_by",
+        },
+        {
+            "in": ("product", "macbook_pro_14"),
+            "out": ("policy", "returns"),
+            "label": "covered_by",
+        },
+    ],
+)
+```
+
+### JavaScript
+
+```javascript
+import { Spectron } from "spectron";
+
+const memory = new Spectron({ context: "acme-prod", apiKey: process.env.SPECTRON_API_KEY });
+
+await memory.knowledge.nodes.upsert({
+    nodes: [
+        {
+            kind: "product",
+            slug: "airpods_pro_2",
+            title: "AirPods Pro 2",
+            content: { price: 249, category: "Audio", sku: "MLWK3LL/A" },
+        },
+        {
+            kind: "policy",
+            slug: "returns",
+            title: "Returns Policy",
+            content: { duration: "30 days", scope: "unopened items" },
+        },
+    ],
+    relations: [
+        {
+            in: ["product", "airpods_pro_2"],
+            out: ["policy", "returns"],
+            label: "covered_by",
+        },
+    ],
+});
+```
+
+Relations are created atomically with the upsert. If a node referenced in a relation does not exist, the relation is still created — the node will be resolved when it is upserted later.
+
+## Querying nodes
+
+### Get a single node
+
+```python
+node = await memory.knowledge.nodes.get("product", "airpods_pro_2")
+print(node.title)    # AirPods Pro 2
+print(node.content)  # {"price": 249, "category": "Audio", "sku": "MLWK3LL/A"}
+```
+
+```javascript
+const node = await memory.knowledge.nodes.get("product", "airpods_pro_2");
+console.log(node.title);   // AirPods Pro 2
+console.log(node.content); // { price: 249, category: "Audio", sku: "MLWK3LL/A" }
+```
+
+### Search nodes by text
+
+```python
+results = await memory.knowledge.nodes.search(
+    query="wireless earbuds",
+    kind="product",
+    k=5,
+)
+for result in results:
+    print(result.node.title, result.score)
+```
+
+### List nodes of a kind
+
+```python
+products = await memory.knowledge.nodes.list(kind="product", page=0, page_size=50)
+```
+
+### Get related nodes
+
+Traverses the `knowledge_relates_to` edges to return nodes directly connected to a given node:
+
+```python
+related = await memory.knowledge.nodes.related("product", "airpods_pro_2")
+for node in related:
+    print(node.kind, node.slug, node.title)
+# policy  returns  Returns Policy
+```
+
+## Relations
+
+Relations are directed edges between two nodes. The `in` node is the source (the subject of the relation) and the `out` node is the target (the object). The `label` describes the relationship.
+
+Relations are stored as `knowledge_relates_to` edges in the knowledge graph and are traversable using the graph traversal API. See [Graph traversal](/spectron/knowledge/retrieval/graph-traversal) for details.
+
+Common relation patterns for a product catalogue:
+
+```python
+relations=[
+    # Products covered by a policy
+    {"in": ("product", "airpods_pro_2"), "out": ("policy", "returns"), "label": "covered_by"},
+    # Products that belong to a category node
+    {"in": ("product", "airpods_pro_2"), "out": ("category", "audio"), "label": "belongs_to"},
+    # Products that are variants of each other
+    {"in": ("product", "airpods_pro_2"), "out": ("product", "airpods_pro"), "label": "successor_of"},
+]
+```
+
+## When to use nodes versus documents
+
+| Use case | Recommendation |
+|---|---|
+| Product catalogue with structured attributes | Nodes — stable slugs, structured content, explicit relations |
+| Policy documents with prose explanations | Documents — text chunking + BM25 retrieval on natural language |
+| Organisation chart | Nodes — entities and relations are explicit |
+| Support knowledge base articles | Documents — article text benefits from semantic chunking |
+| Configuration or reference data | Nodes — structured, rarely changes, always retrieved by identity |
+| User manuals or technical guides | Documents — prose content suited to hybrid retrieval |
+
+Nodes and documents are complementary. A product catalogue might contain both: typed nodes for each product (structured attributes, explicit relations), and uploaded documents for the associated user manual (prose, retrieved by semantic similarity). Hybrid retrieval across Layer 0 combines both sources in a single query result.
+
+## Deleting nodes
+
+```python
+await memory.knowledge.nodes.delete("product", "airpods_pro_2")
+```
+
+Deleting a node removes the node record and all edges connecting it to other nodes. It does not remove document chunks that mention the product by name.

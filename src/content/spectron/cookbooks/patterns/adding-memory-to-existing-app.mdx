@@ -3,3 +3,215 @@ position: 1
 title: Adding memory to an existing app
 description: "Introduce turns without replacing your LLM client."
 ---
+
+# Adding memory to an existing app
+
+Most teams do not rebuild their application to add memory. This guide covers the minimal integration path: intercepting existing LLM calls to extract memory, injecting context before those calls, and gradually expanding the integration without disrupting what already works.
+
+## The minimal integration
+
+Spectron's minimum viable integration is two operations around your existing LLM call:
+
+1. **Before the call** — retrieve relevant context and prepend it to the system prompt.
+2. **After the call** — record the user message and assistant response as turns.
+
+No sessions are required for the first pass. No changes to your data model. No replacement of your LLM client.
+
+```python
+from spectron import Spectron
+
+client = Spectron(api_key="sk-...")
+memory = client.memory(context_id="my-app")
+
+CONTEXT_ID = "my-app"
+DEFAULT_SCOPE = {"org": "my-org"}  # Start with a single scope
+
+async def call_llm_with_memory(user_message: str, session_id: str | None = None) -> str:
+    # 1. Retrieve relevant context (create session on-the-fly if needed)
+    if session_id is None:
+        session = await memory.sessions.create(scope=DEFAULT_SCOPE)
+        session_id = session.id
+    else:
+        session = memory.sessions.open(session_id)
+
+    ctx = await session.context(query=user_message, top_k=5)
+
+    # 2. Inject into your existing system prompt
+    system = your_existing_system_prompt()
+    if ctx.formatted:
+        system = f"{system}\n\n## Relevant context\n{ctx.formatted}"
+
+    # 3. Your existing LLM call — unchanged
+    response = your_existing_llm_call(system=system, user=user_message)
+
+    # 4. Record the exchange
+    await session.turn(role="user", content=user_message)
+    await session.turn(role="assistant", content=response)
+
+    return response
+```
+
+```typescript
+import { Spectron } from "spectron";
+
+const client = new Spectron({ apiKey: "sk-..." });
+const memory = client.memory({ contextId: "my-app" });
+
+const DEFAULT_SCOPE = { org: "my-org" };
+
+async function callLlmWithMemory(
+    userMessage: string,
+    sessionId?: string,
+): Promise<{ response: string; sessionId: string }> {
+    const session = sessionId
+        ? memory.sessions.open(sessionId)
+        : await memory.sessions.create({ scope: DEFAULT_SCOPE });
+
+    const ctx = await session.context({ query: userMessage, topK: 5 });
+
+    let system = yourExistingSystemPrompt();
+    if (ctx.formatted) {
+        system = `${system}\n\n## Relevant context\n${ctx.formatted}`;
+    }
+
+    const response = await yourExistingLlmCall({ system, user: userMessage });
+
+    await session.turn({ role: "user", content: userMessage });
+    await session.turn({ role: "assistant", content: response });
+
+    return { response, sessionId: session.id };
+}
+```
+
+The key principle: **do not change what your LLM receives if there is no relevant memory**. The `if ctx.formatted` guard ensures that when Spectron has nothing useful to add, the call is identical to the original.
+
+## Intercepting existing LLM calls
+
+If your application already has a wrapper around LLM calls, add memory extraction at that layer. This avoids scattering Spectron calls throughout your codebase.
+
+```python
+# Before: a simple LLM wrapper
+async def llm(system: str, user: str) -> str:
+    return await openai_client.chat(system=system, user=user)
+
+# After: the same wrapper with memory
+async def llm(system: str, user: str, session_id: str | None = None) -> str:
+    if session_id:
+        session = memory.sessions.open(session_id)
+        ctx = await session.context(query=user, top_k=5)
+        if ctx.formatted:
+            system = f"{system}\n\n{ctx.formatted}"
+
+    response = await openai_client.chat(system=system, user=user)
+
+    if session_id:
+        await session.turn(role="user", content=user)
+        await session.turn(role="assistant", content=response)
+
+    return response
+```
+
+```typescript
+// Before
+async function llm(system: string, user: string): Promise<string> {
+    return openaiClient.chat({ system, user });
+}
+
+// After
+async function llm(system: string, user: string, sessionId?: string): Promise<string> {
+    let enrichedSystem = system;
+
+    if (sessionId) {
+        const session = memory.sessions.open(sessionId);
+        const ctx = await session.context({ query: user, topK: 5 });
+        if (ctx.formatted) enrichedSystem = `${system}\n\n${ctx.formatted}`;
+    }
+
+    const response = await openaiClient.chat({ system: enrichedSystem, user });
+
+    if (sessionId) {
+        const session = memory.sessions.open(sessionId);
+        await session.turn({ role: "user", content: user });
+        await session.turn({ role: "assistant", content: response });
+    }
+
+    return response;
+}
+```
+
+Making `session_id` optional means the change is backwards-compatible — all existing call sites continue to work without passing a session.
+
+## Starting with a single scope
+
+Do not attempt multi-user scoping on day one. Start with a single organisational scope and confirm the extraction pipeline is working correctly before splitting by user.
+
+```python
+# Phase 1: single scope, all conversations share it
+DEFAULT_SCOPE = {"org": "my-app"}
+
+# Phase 2 (later): add user dimension
+def scope_for_user(user_id: str) -> dict:
+    return {"org": "my-app", "user": user_id}
+```
+
+The profile and context endpoints are scope-matched: a scope of `{"org": "my-app", "user": "alice"}` matches memory stored under `{"org": "my-app", "user": "alice"}` and also memory stored under the broader `{"org": "my-app"}` scope (scope floor matching). Starting broad and narrowing later does not require data migration.
+
+## Expanding to multi-user
+
+Once single-scope extraction is verified, add the user dimension. The only change is in how you create sessions:
+
+```python
+# Before
+session = await memory.sessions.create(scope={"org": "my-app"})
+
+# After
+session = await memory.sessions.create(scope={"org": "my-app", "user": user_id})
+```
+
+Existing memory under the org-only scope remains accessible via scope floor matching. New memory is stored under the user scope and is only visible to that user's context retrievals.
+
+## Profile injection at session start
+
+Once you have per-user memory accumulating, add profile injection at the start of each new conversation:
+
+```python
+async def start_session(user_id: str) -> tuple[str, str]:
+    session = await memory.sessions.create(
+        scope={"org": "my-app", "user": user_id},
+    )
+
+    profile = await memory.profile(scope={"org": "my-app", "user": user_id})
+    system = your_existing_system_prompt()
+    if profile.summary:
+        system = f"{system}\n\n## About this user\n{profile.summary}"
+
+    return session.id, system
+```
+
+```typescript
+async function startSession(userId: string): Promise<{ sessionId: string; system: string }> {
+    const [session, profile] = await Promise.all([
+        memory.sessions.create({ scope: { org: "my-app", user: userId } }),
+        memory.profile({ scope: { org: "my-app", user: userId } }),
+    ]);
+
+    let system = yourExistingSystemPrompt();
+    if (profile.summary) {
+        system = `${system}\n\n## About this user\n${profile.summary}`;
+    }
+
+    return { sessionId: session.id, system };
+}
+```
+
+## Migration path summary
+
+| Phase | What you add | What changes |
+|---|---|---|
+| 1 — Extraction only | Record turns after each LLM call | Memory accumulates but is not used |
+| 2 — Context injection | Retrieve context and inject before each call | Responses become memory-aware |
+| 3 — Profile injection | Inject profile at session start | New sessions start with full user context |
+| 4 — Per-user scoping | Add `user` scope dimension | Memory is isolated per user |
+| 5 — Layer 0 | Ingest authoritative documents | Agents answer from authoritative knowledge |
+
+Each phase is independently deployable and backwards-compatible with the previous one.

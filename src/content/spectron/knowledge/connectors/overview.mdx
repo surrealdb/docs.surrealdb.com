@@ -1,5 +1,187 @@
 ---
 position: 1
 title: Connectors overview
-description: "Scheduled sync from warehouses and SaaS into Layer 0."
+description: "Automatically sync content from external sources into Spectron's knowledge layer."
 ---
+
+# Connectors overview
+
+Connectors bring external content into Spectron's Layer 0 knowledge store automatically. Instead of manually uploading documents or writing your own ingestion scripts, you configure a connector once and Spectron handles fetching, processing, and indexing the content on a schedule you control — or in near real-time via webhooks.
+
+> **Phase note:** Connectors are planned for a post-MVP release. The REST and SDK interfaces described here represent the intended API, which may change before general availability.
+
+## What connectors do
+
+A connector is a persistent configuration record that tells Spectron:
+
+- **Where** to fetch data (a warehouse, a SaaS workspace, a repository)
+- **What** to fetch (a SQL query, a folder, a set of pages)
+- **When** to fetch it (a cron schedule or on-demand)
+- **Who** the data belongs to (a scope that governs access)
+
+Once created, a connector runs on the configured schedule and keeps Layer 0 up to date. Every sync either creates new knowledge nodes or updates existing ones if the source content has changed. Deleted source content is soft-deleted in Layer 0 so that provenance is preserved.
+
+## Supported sources
+
+### Data warehouses
+
+| Connector | Description |
+|---|---|
+| Snowflake | Execute a SQL query against a Snowflake warehouse and sync the result set as structured knowledge nodes |
+| Databricks | Execute a SQL statement against a Databricks SQL warehouse and sync the result set |
+
+Data warehouse connectors treat each row in the result set as a discrete knowledge node. Because the data is already structured, no parser or chunking stage is required — each column maps directly to a typed field on the knowledge node.
+
+### SaaS document sources
+
+| Connector | Description |
+|---|---|
+| Google Drive | Sync Google Docs, PDFs, and other documents from selected folders |
+| Notion | Sync pages and databases from a Notion workspace |
+| GitHub | Sync repository files — READMEs, docs directories, wikis — from selected branches |
+| Confluence | Sync pages and spaces from a Confluence Cloud instance |
+
+SaaS connectors process each document through the full Layer 0 ingestion pipeline: extraction, chunking, embedding, and keyword graph construction. The result is the same rich knowledge structure as if you had uploaded the document manually.
+
+## How data warehouse connectors work
+
+When a data warehouse connector syncs, it executes the configured SQL query and receives a result set. Each row becomes a `knowledge` node in Layer 0:
+
+- Column names become field keys on the node
+- Column values are typed according to the warehouse schema (strings, numbers, booleans, timestamps)
+- A stable identifier derived from the primary-key columns prevents duplicate nodes across re-syncs
+
+Because the data is structured, queries against warehouse-sourced nodes can filter and sort on field values directly — no semantic chunking or embedding is needed to retrieve a specific product or customer record.
+
+## How SaaS connectors work
+
+SaaS connectors fetch documents (Notion pages, Google Docs, Confluence articles, GitHub markdown files) and pass each one through the Layer 0 ingestion pipeline:
+
+1. **Extraction** — the raw document format (Notion block tree, Google Docs JSON, HTML) is normalised to clean text
+2. **Chunking** — the text is split into semantically coherent chunks, respecting heading boundaries and paragraph structure
+3. **Embedding** — each chunk receives a dense vector embedding for semantic retrieval
+4. **Keyword graph** — PMI co-occurrence weights and BM25 inverted indices are built over the chunk vocabulary
+
+The resulting knowledge nodes are identical in structure to those produced by the manual upload API — connectors are a delivery mechanism, not a separate storage model.
+
+## Scheduling
+
+Connectors support cron-based scheduling via the `sync_schedule` field. The expression uses standard five-field cron syntax (minute, hour, day-of-month, month, day-of-week):
+
+```
+0 */6 * * *   # every six hours
+0 9 * * 1-5   # weekdays at 09:00
+0 2 * * *     # daily at 02:00
+*/30 * * * *  # every thirty minutes
+```
+
+If `sync_schedule` is omitted, the connector does not sync automatically and must be triggered manually.
+
+## Manual sync
+
+Any connector can be triggered manually regardless of its schedule:
+
+```python
+await memory.connectors.sync(connector.id)
+```
+
+```http
+POST /v1/{context_id}/connectors/{id}/sync
+```
+
+Manual sync is useful for:
+
+- Testing a new connector before enabling automatic scheduling
+- Forcing a refresh after a bulk update to the source system
+- Backfilling after a connector was paused
+
+## Status monitoring
+
+Each connector exposes a status endpoint that returns the current sync state and details of the last run:
+
+```python
+status = await memory.connectors.status(connector.id)
+
+print(status.status)          # "idle" | "syncing" | "paused" | "error"
+print(status.last_sync_at)    # datetime of last successful sync
+print(status.last_error)      # error message if status == "error"
+print(status.records_synced)  # count of nodes created/updated in last run
+```
+
+```http
+GET /v1/{context_id}/connectors/{id}/status
+```
+
+The four status values:
+
+| Status | Meaning |
+|---|---|
+| `idle` | Connector is configured and waiting for its next scheduled sync |
+| `syncing` | A sync is currently in progress |
+| `paused` | Automatic syncing is disabled; manual sync still works |
+| `error` | The last sync failed; `last_error` contains the reason |
+
+## Full SDK example
+
+```python
+import os
+from spectron import Spectron
+
+memory = Spectron(
+    context="acme-prod",
+    base_url="https://api.spectron.dev",
+    api_key=os.environ["SPECTRON_API_KEY"],
+)
+
+# Create a connector
+connector = await memory.connectors.create(
+    kind="notion",
+    config={
+        "token": os.environ["NOTION_TOKEN"],
+        "page_ids": ["abc123", "def456"],
+    },
+    scope={"org": "acme"},
+    sync_schedule="0 */6 * * *",
+)
+
+print(connector.id)      # connector:01jt4kx...
+print(connector.status)  # "idle"
+
+# Trigger an immediate sync
+await memory.connectors.sync(connector.id)
+
+# Check status
+status = await memory.connectors.status(connector.id)
+print(status.status)         # "syncing" or "idle"
+print(status.records_synced) # e.g. 47
+
+# List all connectors in this context
+connectors = await memory.connectors.list()
+for c in connectors:
+    print(c.id, c.kind, c.status)
+
+# Update the schedule
+await memory.connectors.update(connector.id, sync_schedule="0 2 * * *")
+
+# Remove the connector (source data is retained in Layer 0 by default)
+await memory.connectors.delete(connector.id)
+```
+
+## REST API summary
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/v1/{context_id}/connectors` | Create a new connector |
+| `GET` | `/v1/{context_id}/connectors` | List all connectors |
+| `PUT` | `/v1/{context_id}/connectors/{id}` | Update connector configuration |
+| `DELETE` | `/v1/{context_id}/connectors/{id}` | Delete connector and optionally its data |
+| `POST` | `/v1/{context_id}/connectors/{id}/sync` | Trigger a manual sync |
+| `GET` | `/v1/{context_id}/connectors/{id}/status` | Get sync status and last run details |
+
+## Next steps
+
+- [Snowflake and Databricks](/spectron/knowledge/connectors/snowflake-and-databricks) — configure data warehouse connectors
+- [Google Drive](/spectron/knowledge/connectors/google-drive) — sync documents from Google Workspace
+- [Notion](/spectron/knowledge/connectors/notion) — sync pages and databases from Notion
+- [Confluence](/spectron/knowledge/connectors/confluence) — sync spaces and pages from Confluence
+- [GitHub](/spectron/knowledge/connectors/github) — sync repository documentation

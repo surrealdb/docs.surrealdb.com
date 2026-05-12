@@ -1,5 +1,203 @@
 ---
-position: 5
+position: 6
 title: GitHub
-description: "Ingest repositories and documentation."
+description: "Sync GitHub repository content — READMEs, docs, wikis — into Spectron."
 ---
+
+# GitHub
+
+The GitHub connector syncs documentation files from your repositories into Spectron's Layer 0 knowledge store. READMEs, docs directories, wikis, and any other markdown or text files you designate are fetched, processed, and indexed so your agents can retrieve them semantically.
+
+## Authentication
+
+Spectron authenticates with GitHub using either a personal access token (PAT) or a GitHub App installation token.
+
+### Personal access token
+
+A classic PAT with `repo` (read) scope is sufficient for private repositories. For public repositories, a fine-grained PAT with **Contents: Read** permission is the least-privilege option.
+
+1. Go to [https://github.com/settings/tokens](https://github.com/settings/tokens)
+2. Generate a new token with **Contents: Read** (fine-grained) or `repo` (classic)
+3. Copy the token
+
+### GitHub App (recommended for organisations)
+
+Using a GitHub App is preferred in organisational contexts because it grants access at the installation level, supports granular repository permissions, and produces short-lived tokens that Spectron rotates automatically.
+
+1. Create a GitHub App in your organisation's settings
+2. Grant it **Contents: Read** repository permission
+3. Install it on the repositories you want to sync
+4. Provide the `app_id`, `installation_id`, and the PEM private key in the connector config
+
+### Configuration
+
+| Field | Type | Description |
+|---|---|---|
+| `token` | string | Personal access token (use this or `app_*` fields, not both) |
+| `app_id` | string | GitHub App ID (numeric) |
+| `installation_id` | string | GitHub App installation ID |
+| `private_key` | string | PEM-encoded private key for the GitHub App |
+| `repos` | array of objects | Repositories and path filters to sync (see below) |
+| `webhook` | boolean | Enable real-time sync on push; defaults to `false` |
+
+Each entry in `repos` specifies a repository and optional path constraints:
+
+| Field | Type | Description |
+|---|---|---|
+| `owner` | string | Repository owner (user or organisation) |
+| `repo` | string | Repository name |
+| `branch` | string | Branch to sync; defaults to the repository's default branch |
+| `paths` | array of strings | Glob patterns for files to include (e.g. `["docs/**", "README.md"]`); if omitted, all supported files are included |
+
+## Supported file types
+
+| Extension | Processing |
+|---|---|
+| `.md`, `.mdx` | Parsed as markdown; heading boundaries respected for chunking |
+| `.txt`, `.rst` | Plain text; paragraph-based chunking |
+| `.ipynb` | Jupyter notebooks; markdown cells and output cells extracted |
+
+Binary files, source code, and other file types are skipped. If you need to index source code, consider uploading it via the manual knowledge upload API with an appropriate content type.
+
+## Create a GitHub connector
+
+```python
+import os
+from spectron import Spectron
+
+memory = Spectron(
+    context="acme-prod",
+    base_url="https://api.spectron.dev",
+    api_key=os.environ["SPECTRON_API_KEY"],
+)
+
+# Using a personal access token
+connector = await memory.connectors.create(
+    kind="github",
+    config={
+        "token": os.environ["GITHUB_TOKEN"],
+        "repos": [
+            {
+                "owner": "acme",
+                "repo": "platform",
+                "branch": "main",
+                "paths": ["docs/**", "README.md", "CONTRIBUTING.md"],
+            },
+            {
+                "owner": "acme",
+                "repo": "design-system",
+                "branch": "main",
+                "paths": ["docs/**"],
+            },
+        ],
+        "webhook": True,
+    },
+    scope={"org": "acme"},
+    sync_schedule="0 */6 * * *",
+)
+```
+
+```http
+POST /v1/acme-prod/connectors
+Content-Type: application/json
+
+{
+  "kind": "github",
+  "config": {
+    "token": "ghp_...",
+    "repos": [
+      {
+        "owner": "acme",
+        "repo": "platform",
+        "branch": "main",
+        "paths": ["docs/**", "README.md"]
+      }
+    ],
+    "webhook": true
+  },
+  "scope": { "org": "acme" },
+  "sync_schedule": "0 */6 * * *"
+}
+```
+
+### Using a GitHub App
+
+```python
+connector = await memory.connectors.create(
+    kind="github",
+    config={
+        "app_id": os.environ["GITHUB_APP_ID"],
+        "installation_id": os.environ["GITHUB_INSTALLATION_ID"],
+        "private_key": os.environ["GITHUB_PRIVATE_KEY"],
+        "repos": [
+            {"owner": "acme", "repo": "platform", "paths": ["docs/**"]},
+        ],
+        "webhook": True,
+    },
+    scope={"org": "acme"},
+    sync_schedule="0 1 * * *",
+)
+```
+
+## Real-time sync on push
+
+When `webhook: true` is set, Spectron registers a GitHub webhook on each configured repository. On every push to the watched branch, GitHub sends a push event payload to Spectron. Spectron computes the diff of changed files, re-ingests modified files, and soft-deletes removed files.
+
+Typical end-to-end latency from `git push` to indexed is under 30 seconds.
+
+The webhook is registered automatically during connector creation. For self-hosted Spectron deployments, the server must be accessible over HTTPS from GitHub's webhook delivery infrastructure.
+
+## Scope assignment
+
+All knowledge nodes inherit the scope you declare on the connector. Use scope to isolate repository documentation by team:
+
+```python
+# Internal tooling docs visible only to the platform team
+await memory.connectors.create(
+    kind="github",
+    config={
+        "token": os.environ["GITHUB_TOKEN"],
+        "repos": [{"owner": "acme", "repo": "infra", "paths": ["docs/**"]}],
+    },
+    scope={"org": "acme", "team": "platform"},
+)
+
+# Public-facing API docs visible to all of acme
+await memory.connectors.create(
+    kind="github",
+    config={
+        "token": os.environ["GITHUB_TOKEN"],
+        "repos": [{"owner": "acme", "repo": "api-docs", "paths": ["**/*.md"]}],
+    },
+    scope={"org": "acme"},
+)
+```
+
+## Managing the connector
+
+```python
+# Check sync status
+status = await memory.connectors.status(connector.id)
+print(status.status)          # "idle" | "syncing" | "error"
+print(status.records_synced)  # files processed in last sync
+print(status.last_sync_at)
+
+# Add a new repository
+await memory.connectors.update(
+    connector.id,
+    config={
+        "token": os.environ["GITHUB_TOKEN"],
+        "repos": [
+            {"owner": "acme", "repo": "platform", "paths": ["docs/**"]},
+            {"owner": "acme", "repo": "new-repo", "paths": ["docs/**", "README.md"]},
+        ],
+        "webhook": True,
+    },
+)
+
+# Trigger an immediate full re-sync
+await memory.connectors.sync(connector.id)
+
+# Remove the connector; synced knowledge nodes are retained by default
+await memory.connectors.delete(connector.id)
+```

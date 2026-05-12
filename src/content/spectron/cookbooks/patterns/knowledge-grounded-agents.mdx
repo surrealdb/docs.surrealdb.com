@@ -3,3 +3,208 @@ position: 3
 title: Knowledge-grounded agents
 description: "Combine Layer 0 retrieval with Layer 1 memory."
 ---
+
+# Knowledge-grounded agents
+
+A knowledge-grounded agent answers from authoritative sources before consulting conversational memory. This pattern uses Spectron's Layer 0 to store canonical knowledge — product data, policies, technical documentation — and relies on the authority hierarchy to prevent conversational drift from corrupting those facts.
+
+## Why ground agents in Layer 0
+
+Without a knowledge layer, agents hallucinate or rely on stale training data for domain-specific questions. The common workaround — embedding documents in a vector store and retrieving chunks — improves recall but loses structure, provenance, and the ability to enforce authority.
+
+Layer 0 gives you:
+
+- **Structured knowledge nodes** with typed attributes, not just text chunks.
+- **Authority enforcement** — Layer 0 wins when a user asserts something conflicting.
+- **`resolves_to` links** — conversational references to products or policies resolve to authoritative nodes.
+- **Content addressing** — uploading the same document twice is idempotent.
+
+## Step 1 — Load authoritative knowledge
+
+Documents are ingested through the knowledge API. Spectron processes them into knowledge nodes (typed entities with attributes) and keyword-indexed chunks.
+
+```python
+import httpx
+
+mgmt = httpx.Client(
+    base_url="https://spectron.surrealdb.com/api/v1",
+    headers={"Authorization": "Bearer mgmt_..."},
+)
+
+# Upload a product specification as a JSON document
+with open("product-specs.json", "rb") as f:
+    mgmt.post(
+        "/contexts/my-context/knowledge/documents",
+        files={"file": ("product-specs.json", f, "application/json")},
+        data={"title": "Product specifications", "content_type": "product_data"},
+    )
+
+# Upload a policy document as Markdown
+with open("returns-policy.md", "rb") as f:
+    mgmt.post(
+        "/contexts/my-context/knowledge/documents",
+        files={"file": ("returns-policy.md", f, "text/markdown")},
+        data={"title": "Returns policy", "content_type": "policy"},
+    )
+```
+
+```typescript
+const formData = new FormData();
+formData.append(
+    "file",
+    new Blob([productSpecsJson], { type: "application/json" }),
+    "product-specs.json",
+);
+formData.append("title", "Product specifications");
+formData.append("content_type", "product_data");
+
+await fetch("https://spectron.surrealdb.com/api/v1/contexts/my-context/knowledge/documents", {
+    method: "POST",
+    headers: { "Authorization": "Bearer mgmt_..." },
+    body: formData,
+});
+```
+
+## Step 2 — Query Layer 0 in the agent loop
+
+Before generating a response, search Layer 0 for relevant knowledge nodes. Use `knowledge.search` for natural-language queries or `knowledge.get` for exact node lookups.
+
+```python
+from spectron import Spectron
+
+client = Spectron(api_key="sk-...")
+memory = client.memory(context_id="my-context")
+
+async def grounded_response(session, user_message: str) -> str:
+    # Search Layer 0 for relevant authoritative knowledge
+    knowledge = await memory.knowledge.search(
+        query=user_message,
+        top_k=4,
+    )
+
+    # Retrieve Layer 1 user context for personalisation
+    ctx = await session.context(query=user_message, top_k=4)
+
+    # Assemble the prompt with L0 facts taking precedence
+    system = "You are a product assistant. Answer from the knowledge provided."
+
+    if knowledge.nodes:
+        system += "\n\n## Authoritative knowledge\n"
+        for node in knowledge.nodes:
+            system += f"\n{node.formatted}"
+
+    if ctx.items:
+        system += f"\n\n## User context\n{ctx.formatted}"
+
+    response = your_llm(system=system, user=user_message)
+
+    await session.turn(role="user", content=user_message)
+    await session.turn(role="assistant", content=response)
+
+    return response
+```
+
+```typescript
+async function groundedResponse(session: Session, userMessage: string): Promise<string> {
+    const [knowledge, ctx] = await Promise.all([
+        memory.knowledge.search({ query: userMessage, topK: 4 }),
+        session.context({ query: userMessage, topK: 4 }),
+    ]);
+
+    let system = "You are a product assistant. Answer from the knowledge provided.";
+
+    if (knowledge.nodes.length > 0) {
+        system += "\n\n## Authoritative knowledge\n";
+        for (const node of knowledge.nodes) {
+            system += `\n${node.formatted}`;
+        }
+    }
+
+    if (ctx.items.length > 0) {
+        system += `\n\n## User context\n${ctx.formatted}`;
+    }
+
+    const response = await yourLlm({ system, user: userMessage });
+
+    await session.turn({ role: "user", content: userMessage });
+    await session.turn({ role: "assistant", content: response });
+
+    return response;
+}
+```
+
+## Step 3 — The `resolves_to` mechanism
+
+When a user mentions a product or policy, Spectron creates a Layer 1 entity and automatically creates a `resolves_to` relation pointing to the matching Layer 0 node. The context retrieval traverses this relation so the agent sees both layers together.
+
+```json
+// User says "I bought the AirPods Pro" — Layer 1 entity created
+{
+  "id": "entity:[\"Product\", \"airpods_pro\"]",
+  "layer": 1,
+  "scope": { "org": "acme", "user": "alice" }
+}
+
+// Layer 0 knowledge node — loaded from product catalogue
+{
+  "id": "knowledge:[\"Product\", \"airpods_pro\"]",
+  "layer": 0,
+  "name": "AirPods Pro (2nd generation)",
+  "price": 279,
+  "return_window_days": 30
+}
+
+// resolves_to — Spectron creates this automatically
+{
+  "in": "entity:[\"Product\", \"airpods_pro\"]",
+  "out": "knowledge:[\"Product\", \"airpods_pro\"]"
+}
+```
+
+At retrieval time, a query about the user's AirPods returns both the L1 entity (the user owns them) and the L0 node (authoritative specs). The agent receives a complete picture in a single context call.
+
+## Step 4 — Handling L0/L1 conflicts
+
+When a user asserts something that contradicts Layer 0, Spectron records the conflict rather than silently overwriting the authoritative fact.
+
+Example: the return policy is 30 days (Layer 0), and a user says "I thought it was 60 days".
+
+The extraction pipeline:
+
+1. Creates a Layer 1 attribute: `return_window_days: 60` on the policy entity.
+2. Detects the conflict with the Layer 0 node (which says 30).
+3. Sets `contradicts_l0: true` on the attribute.
+4. Adds the item to the `uncertainties` list in the extraction result.
+
+The agent is informed via the context retrieval:
+
+```json
+{
+  "type": "conflict",
+  "l0_fact": { "key": "return_window_days", "value": 30 },
+  "l1_belief": { "key": "return_window_days", "value": 60, "source": "user assertion" },
+  "recommendation": "Inform the user of the authoritative value."
+}
+```
+
+The agent can then politely correct the user without any custom conflict-detection code.
+
+## Exact node retrieval
+
+For lookups where you know the entity type and name (from a structured UI, a product SKU field, etc.), use `knowledge.get` instead of a search:
+
+```python
+node = await memory.knowledge.get(
+    entity_type="Product",
+    entity_name="airpods_pro",
+)
+```
+
+```typescript
+const node = await memory.knowledge.get({
+    entityType: "Product",
+    entityName: "airpods_pro",
+});
+```
+
+This is faster than semantic search and appropriate when the reference is unambiguous.

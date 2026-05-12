@@ -3,3 +3,212 @@ position: 2
 title: Migrate from Zep
 description: "Mapping temporal graphs and context blocks."
 ---
+
+# Migrating from Zep
+
+Zep and Spectron share similar goals — persistent, structured memory for AI agents — but differ significantly in scope model, authority hierarchy, and extraction approach. This guide covers concept mapping, SDK migration, and the key behavioural differences to account for during migration.
+
+## Concept mapping
+
+| Zep concept | Spectron equivalent | Notes |
+|---|---|---|
+| User | Scope dimension `user` | Spectron scopes are multi-dimensional; user is one axis |
+| Session | Session | One-to-one concept; Spectron sessions have richer metadata |
+| Memory context | `context()` response | Spectron returns ranked items rather than a single blended string |
+| Facts | Entities + attributes + relations | Spectron extracts structured triples, not flat facts |
+| Knowledge (Zep Graph) | Layer 0 knowledge nodes | Spectron separates authoritative knowledge (L0) from conversational memory (L1) |
+| Entity node (Zep Graph) | Entity (Layer 1) | Spectron entities are scoped; they cannot be accessed cross-scope by default |
+| Relation edge (Zep Graph) | Relation (`relates_to`) | Spectron relations carry temporal validity |
+| Summary | Profile + reflection | Spectron's `profile()` is scope-aware; `reflect()` produces synthesised summaries |
+
+The most significant structural difference is Spectron's two-layer model. Zep does not distinguish between authoritative knowledge and conversational memory — everything lives in a single graph. In Spectron, documents and policies go into Layer 0 (protected from conversational drift) and conversational facts go into Layer 1.
+
+## SDK migration
+
+### Creating users and sessions
+
+```python
+# Zep
+from zep_python import ZepClient
+zep = ZepClient(api_key="...")
+zep.user.add(CreateUserRequest(user_id="alice"))
+session = zep.memory.add_session(
+    Session(session_id="sess_001", user_id="alice")
+)
+
+# Spectron
+from spectron import Spectron
+client = Spectron(api_key="sk-...")
+memory = client.memory(context_id="my-context")
+session = await memory.sessions.create(
+    scope={"org": "my-app", "user": "alice"},
+)
+```
+
+```typescript
+// Zep
+import { ZepClient } from "@getzep/zep-cloud";
+const zep = new ZepClient({ apiKey: "..." });
+await zep.user.add({ userId: "alice" });
+const session = await zep.memory.addSession({ sessionId: "sess_001", userId: "alice" });
+
+// Spectron
+import { Spectron } from "spectron";
+const client = new Spectron({ apiKey: "sk-..." });
+const memory = client.memory({ contextId: "my-context" });
+const session = await memory.sessions.create({
+    scope: { org: "my-app", user: "alice" },
+});
+```
+
+### Adding messages
+
+```python
+# Zep
+from zep_python import Memory, Message
+zep.memory.add(session_id="sess_001", memory=Memory(
+    messages=[Message(role="user", content="I just moved to London.")]
+))
+
+# Spectron
+await session.turn(role="user", content="I just moved to London.")
+```
+
+```typescript
+// Zep
+await zep.memory.add("sess_001", {
+    messages: [{ role: "user", content: "I just moved to London." }],
+});
+
+// Spectron
+await session.turn({ role: "user", content: "I just moved to London." });
+```
+
+### Retrieving memory
+
+```python
+# Zep
+memory_result = zep.memory.get("sess_001")
+context_str = memory_result.context  # Zep returns a blended string
+
+# Spectron
+ctx = await session.context(query="Where does Alice live?", top_k=5)
+context_str = ctx.formatted  # Ranked and formatted for prompt injection
+```
+
+```typescript
+// Zep
+const memoryResult = await zep.memory.get("sess_001");
+const contextStr = memoryResult.context;
+
+// Spectron
+const ctx = await session.context({ query: "Where does Alice live?", topK: 5 });
+const contextStr = ctx.formatted;
+```
+
+### Searching memory
+
+```python
+# Zep — searches the user's memory graph
+results = zep.memory.search_sessions(
+    user_id="alice",
+    text="location",
+)
+
+# Spectron — queries across the user scope
+results = await memory.query(
+    scope={"org": "my-app", "user": "alice"},
+    query="location",
+)
+```
+
+```typescript
+// Zep
+const results = await zep.memory.searchSessions({ userId: "alice", text: "location" });
+
+// Spectron
+const results = await memory.query({
+    scope: { org: "my-app", user: "alice" },
+    query: "location",
+});
+```
+
+## Migrating existing Zep data
+
+### Export sessions and messages from Zep
+
+```python
+import json
+from zep_python import ZepClient
+
+zep = ZepClient(api_key="...")
+users = zep.user.list_ordered()
+
+export = {}
+for user in users:
+    sessions = zep.memory.list_sessions(user_id=user.user_id)
+    export[user.user_id] = []
+    for sess in sessions:
+        messages = zep.memory.get(sess.session_id).messages or []
+        export[user.user_id].append({
+            "session_id": sess.session_id,
+            "messages": [{"role": m.role, "content": m.content} for m in messages],
+        })
+
+with open("zep_export.json", "w") as f:
+    json.dump(export, f)
+```
+
+### Re-ingest into Spectron
+
+```python
+from spectron import Spectron
+import json
+
+client = Spectron(api_key="sk-...")
+memory = client.memory(context_id="my-context")
+
+with open("zep_export.json") as f:
+    data = json.load(f)
+
+for user_id, sessions in data.items():
+    for session_data in sessions:
+        session = await memory.sessions.create(
+            scope={"org": "my-app", "user": user_id},
+        )
+        for message in session_data["messages"]:
+            await session.turn(role=message["role"], content=message["content"])
+```
+
+```typescript
+import { Spectron } from "spectron";
+import { readFileSync } from "node:fs";
+
+const client = new Spectron({ apiKey: "sk-..." });
+const memory = client.memory({ contextId: "my-context" });
+
+const data = JSON.parse(readFileSync("zep_export.json", "utf-8"));
+
+for (const [userId, sessions] of Object.entries(data)) {
+    for (const sessionData of sessions as any[]) {
+        const session = await memory.sessions.create({
+            scope: { org: "my-app", user: userId },
+        });
+        for (const message of sessionData.messages) {
+            await session.turn({ role: message.role, content: message.content });
+        }
+    }
+}
+```
+
+The extraction pipeline re-derives structured entities and attributes from the re-ingested messages. You do not need to manually migrate Zep graph nodes.
+
+## Key differences to account for
+
+**Scope model vs user-based isolation**: Zep isolates memory per user implicitly. Spectron uses explicit multi-dimensional scopes — you must pass `scope` on every session creation and context retrieval. This is more explicit but also more flexible: you can scope by organisation, project, and user simultaneously.
+
+**Authority hierarchy**: Zep treats all memory uniformly. Spectron separates Layer 0 (authoritative, protected) from Layer 1 (conversational, mutable). If you were storing policy or product documents in Zep's knowledge graph, move them to Spectron's Layer 0 ingestion pipeline so they cannot be overridden by user assertions.
+
+**Temporal validity**: Spectron attributes carry `valid_from` and `valid_until` timestamps. Zep tracks fact recency but does not have first-class expiry. If you relied on Zep's fact invalidation, map that behaviour to Spectron's `forget()` endpoint or temporal validity metadata.
+
+**Context response format**: Zep returns a single blended context string. Spectron's `context()` returns structured items that you can filter, reorder, or format yourself. The `ctx.formatted` property provides a ready-to-inject string for a direct drop-in replacement.

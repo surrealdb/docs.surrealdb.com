@@ -3,3 +3,287 @@ position: 4
 title: MCP tools
 description: "Tool payloads and ACL alignment."
 ---
+
+# MCP tools
+
+Spectron's MCP server exposes seven tools at `/mcp`. Each tool maps to one or more REST endpoints and carries the same authentication and scope semantics.
+
+## Authentication
+
+All tools use bearer-token authentication. Pass the key in the MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "spectron": {
+      "url": "https://spectron.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer sk-...",
+        "X-Spectron-Context": "acme-prod"
+      }
+    }
+  }
+}
+```
+
+The `X-Spectron-Context` header selects the Context. The `X-Spectron-Scope` header sets persistent scope defaults for all tool calls from this connection.
+
+## Scope handling
+
+Scope is layered in three steps on each tool call:
+
+1. **Key scope floor** — enforced server-side. Cannot be narrowed.
+2. **`X-Spectron-Scope` header defaults** — set at connection/install time.
+3. **Per-call `scope` argument** — per-tool override.
+
+A tool call cannot produce a scope narrower than the key's floor.
+
+---
+
+## `memory_store`
+
+Store a memory from the current conversation. Auto-classifies into Identity / Knowledge / Context categories and reconciles against existing memory.
+
+**Principal required:** agent or management.
+
+**Input:**
+```jsonc
+{
+  "content": "I just got promoted to CTO.",   // required
+  "role": "user",                              // optional, default "user"
+  "session_id": "sess_abc123",                 // optional — creates implicit session if omitted
+  "scope": { "user": "alice", "org": "acme" } // optional
+}
+```
+
+**Output:**
+```jsonc
+{
+  "turn_id": "turn:01HF...",
+  "entities": [{ "id": ["Person", "alice"], "action": "updated" }],
+  "attributes": [{ "key": "role", "value": "CTO", "action": "superseded" }],
+  "relations": [],
+  "instructions": [],
+  "uncertainties": [],
+  "corrections": [],
+  "trace_id": "decision_trace:..."
+}
+```
+
+**Underlying REST endpoint:** `POST /v1/{context_id}/sessions/{id}/turns`
+
+---
+
+## `memory_recall`
+
+Retrieve relevant memory and knowledge for a query. Returns a formatted context block ready for prompt injection.
+
+**Principal required:** any (agent, supervisor, management).
+
+**Input:**
+```jsonc
+{
+  "query": "What does Alice do at Acme?",  // required
+  "k": 10,                                  // optional, default 10
+  "scope": { "org": "acme" }               // optional
+}
+```
+
+**Output:**
+```jsonc
+{
+  "context": "Alice — CTO at Acme Corp. Currently leading the Q3 roadmap review.",
+  "tier": "direct",
+  "query_ms": 12,
+  "trace_id": "decision_trace:..."
+}
+```
+
+The `context` field is intended for direct injection into the system prompt. The `tier` field indicates the resolution path: `direct`, `cache`, `hybrid`, or `full_context`.
+
+**Underlying REST endpoint:** `POST /v1/{context_id}/context`
+
+---
+
+## `memory_reflect`
+
+Synthesise patterns or insights from existing memory. Can optionally persist the reflection as new Layer 1 attributes.
+
+**Principal required:** any for `persist: false`; supervisor or management for `persist: true`.
+
+**Input:**
+```jsonc
+{
+  "query": "What recurring complaints have customers raised this month?",
+  "persist": true,                                 // optional, default false
+  "scope": { "org": "acme", "project": "support" } // optional
+}
+```
+
+**Output:**
+```jsonc
+{
+  "reflection": "Three recurring patterns emerged: billing confusion (8 tickets), …",
+  "evidence": ["memory_chunk:01HF...", "attribute:..."],
+  "persisted_attributes": [],
+  "trace_id": "decision_trace:..."
+}
+```
+
+When `persist: true`, `persisted_attributes` lists the attributes stored from this reflection.
+
+**Underlying REST endpoint:** `POST /v1/{context_id}/reflect`
+
+---
+
+## `memory_profile`
+
+Get the aggregated profile for the active scope — static facts, dynamic context, preferences, and active instructions — formatted for system prompt injection.
+
+**Principal required:** any.
+
+**Input:**
+```jsonc
+{
+  "scope": { "user": "alice", "org": "acme" } // optional
+}
+```
+
+**Output:**
+```jsonc
+{
+  "static": [
+    { "key": "name", "value": "Alice" },
+    { "key": "role", "value": "CTO" }
+  ],
+  "dynamic": [
+    { "key": "current_task", "value": "Q3 roadmap review" }
+  ],
+  "preferences": [
+    { "key": "editor", "value": "Neovim" }
+  ],
+  "instructions": [
+    { "label": "tone", "description": "Concise and direct" }
+  ]
+}
+```
+
+**Underlying REST endpoint:** `GET /v1/{context_id}/profile`
+
+---
+
+## `knowledge_search`
+
+Search the authoritative Layer 0 knowledge base. Returns ranked document chunks with source references.
+
+**Principal required:** any.
+
+**Input:**
+```jsonc
+{
+  "query": "What is the return window for unopened items?", // required
+  "mode": "hybrid",                                         // optional: vector | bm25 | hybrid | hybrid_graph
+  "k": 5,                                                   // optional, default 5
+  "threshold": 0.5,                                         // optional
+  "filter": { "mime_type": ["application/pdf"] }            // optional
+}
+```
+
+**Output:**
+```jsonc
+{
+  "results": [
+    {
+      "chunk": {
+        "id": "knowledge_chunk:...",
+        "text": "Unopened items may be returned within 30 days of purchase...",
+        "section": "Eligibility",
+        "position": 7
+      },
+      "score": 0.87,
+      "document": {
+        "id": "document:0197...",
+        "title": "Returns Policy (2026 revision)",
+        "source": "returns.pdf"
+      }
+    }
+  ],
+  "query_ms": 38,
+  "trace_id": "decision_trace:..."
+}
+```
+
+**Underlying REST endpoint:** `POST /v1/{context_id}/knowledge/query`
+
+---
+
+## `knowledge_get`
+
+Fetch a specific document, chunk, or typed knowledge node by ID. Use this after `knowledge_search` has identified the source — fetching by ID is faster and more deterministic than re-searching.
+
+**Principal required:** any.
+
+**Input:**
+```jsonc
+{
+  "kind": "document",                                         // document | chunk | node
+  "id": "document:0197...",                                   // for kind=document or kind=chunk
+  "node": { "kind": "product", "slug": "airpods_pro_2" }     // for kind=node
+}
+```
+
+**Output:** A typed payload matching the underlying endpoint — document metadata and status, a paginated chunk list, or a knowledge node with its content and related edges.
+
+**Underlying REST endpoints:**
+- `GET /v1/{context_id}/knowledge/{id}`
+- `GET /v1/{context_id}/knowledge/{id}/chunks`
+- `GET /v1/{context_id}/knowledge/nodes/{kind}/{slug}`
+
+---
+
+## `memory_forget`
+
+Stop believing something. Sets `valid_until` on attributes that semantically match the query. Does not physically delete records.
+
+**Principal required:** agent or management.
+
+**Input:**
+```jsonc
+{
+  "query": "anything about my previous role at the old company", // required
+  "scope": { "user": "alice" }                                   // optional
+}
+```
+
+**Output:**
+```jsonc
+{
+  "deleted": 3,
+  "trace_id": "decision_trace:..."
+}
+```
+
+The `deleted` count reflects attributes soft-deleted (marked with `valid_until`).
+
+**Underlying REST endpoint:** `POST /v1/{context_id}/forget`
+
+---
+
+## Tool ACL summary
+
+| Tool | agent | supervisor | management |
+|---|---|---|---|
+| `memory_store` | ✓ | ✓ | ✓ |
+| `memory_recall` | ✓ | ✓ | ✓ |
+| `memory_reflect` (no persist) | ✓ | ✓ | ✓ |
+| `memory_reflect` (persist=true) | ✗ | ✓ | ✓ |
+| `memory_profile` | ✓ | ✓ | ✓ |
+| `knowledge_search` | ✓ | ✓ | ✓ |
+| `knowledge_get` | ✓ | ✓ | ✓ |
+| `memory_forget` | ✓ | ✓ | ✓ |
+
+## Streaming
+
+Most tools are synchronous — the full response is returned in a single payload.
+
+`memory_reflect` with `persist: true` on a large corpus may take several seconds. The server emits MCP `progress` notifications while the underlying reflection handler runs.

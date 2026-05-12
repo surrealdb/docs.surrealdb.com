@@ -1,5 +1,175 @@
 ---
 position: 2
 title: Reconciliation and supersession
-description: "Corrections, conflicts, and supersession chains on attributes."
+description: "How Spectron deduplicates entities, detects conflicts, and tracks corrections with full history."
 ---
+
+# Reconciliation and supersession
+
+Extracted data is not written directly to the memory store. Before any record is persisted, Spectron runs a reconciliation pass that compares the new extractions against everything already in the store. This prevents duplicate entities, detects conflicting facts, and decides whether a new value should replace an old one or coexist alongside it.
+
+## Reconciliation steps
+
+### 1. Entity matching
+
+For each extracted entity, Spectron checks whether an equivalent entity already exists in the current scope:
+
+1. **Exact name match** within scope — if an entity with the same name and type already exists, the new extraction is matched to it rather than creating a duplicate.
+2. **Embedding similarity** — when no exact match is found, Spectron computes a vector embedding of the entity name and compares it against existing entity embeddings. A similarity score at or above the configured threshold (default 0.85) is treated as a match.
+
+Matched entities are merged: new attributes and relations are written onto the existing entity record. Unmatched entities create new records.
+
+### 2. Attribute conflict detection
+
+For each extracted attribute, Spectron checks whether the same `(entity, key)` combination already has a value in the same scope. If it does and the new value differs, a conflict is detected.
+
+What happens next depends on the nature of the conflict:
+
+- **Layer 1 conflict** — the new value supersedes the old. The old attribute is retained with a `superseded_by` link and a `valid_until` timestamp.
+- **Layer 0 conflict** — the new value is stored in Layer 1 with a `contradicts_l0` flag. The Layer 0 fact is not modified. See [Authority hierarchy](/spectron/memory/reasoning-model/authority-hierarchy) for details.
+
+### 3. Supersession
+
+When a Layer 1 attribute is superseded by a new value, both records are updated atomically:
+
+```surql
+-- Mark the old attribute as superseded
+UPDATE attribute:old_id SET
+    superseded_by = attribute:new_id,
+    valid_until = time::now();
+
+-- Link the new attribute back to what it replaces
+UPDATE attribute:new_id SET
+    supersedes = attribute:old_id,
+    valid_from = time::now();
+```
+
+Neither record is deleted. The old attribute remains queryable for historical analysis; the new attribute is what current-state queries return.
+
+### 4. Scope-aware coexistence
+
+Different scopes may legitimately hold different values for the same attribute key. Consider a user who belongs to two organisations with different preferences, or a situation where an org-level default and a user-level override coexist.
+
+Spectron does not treat cross-scope differences as conflicts. Conflict detection operates **within a single scope**. Two attributes with the same `(entity, key)` but different scopes are independent records — each may be valid in its own context without either superseding the other.
+
+### 5. Layer 0 authority check
+
+Before writing any attribute, Spectron checks whether the same fact exists in Layer 0 for the same entity (via a `resolves_to` link). If a Layer 0 fact is found and the extracted value contradicts it:
+
+- The Layer 1 attribute is written with `contradicts_l0: true`
+- The Layer 0 record is left untouched
+- The discrepancy is surfaced in the `/state` API response
+
+This check prevents conversational assertions from silently corrupting authoritative knowledge.
+
+### 6. Implicit invalidation
+
+The extraction document may include an `invalidations` array listing facts the user has explicitly negated:
+
+```json
+{
+  "invalidations": [
+    { "entity": "Christian Battaglia", "key": "role", "reason": "User stated they have quit" }
+  ]
+}
+```
+
+Each invalidation entry triggers an automatic `valid_until = time::now()` write on the matching active attribute. The attribute is not deleted — it is soft-closed with a timestamp, preserving the historical record.
+
+## The supersession chain
+
+When a fact changes over time, Spectron builds a linked chain of attributes. Each node in the chain points to the one it replaced and the one that replaced it:
+
+```json
+// February 2025 — Christian is COO
+{
+  "id": "attribute:1",
+  "entity": "entity:christian",
+  "key": "role",
+  "value": "COO",
+  "valid_from": "2025-02-01T00:00:00Z",
+  "valid_until": "2025-06-15T09:32:00Z",
+  "superseded_by": "attribute:2"
+}
+
+// June 2025 — Christian becomes CEO
+{
+  "id": "attribute:2",
+  "entity": "entity:christian",
+  "key": "role",
+  "value": "CEO",
+  "valid_from": "2025-06-15T09:32:00Z",
+  "valid_until": "2026-02-03T14:20:00Z",
+  "supersedes": "attribute:1",
+  "superseded_by": "attribute:3"
+}
+
+// February 2026 — Christian becomes CTO
+{
+  "id": "attribute:3",
+  "entity": "entity:christian",
+  "key": "role",
+  "value": "CTO",
+  "valid_from": "2026-02-03T14:20:00Z",
+  "valid_until": null,
+  "supersedes": "attribute:2"
+}
+```
+
+`valid_until: null` and `superseded_by: null` together indicate the current active value.
+
+## Querying current state
+
+To retrieve the current value of all attributes — ignoring superseded history:
+
+```surql
+SELECT * FROM attribute
+WHERE superseded_by IS NONE
+AND (valid_until IS NONE OR valid_until > time::now());
+```
+
+This pattern is safe to use in real-time contexts: only the most recent, non-expired value for each `(entity, key)` pair is returned.
+
+## Querying historical state
+
+To reconstruct the state of an entity at an arbitrary point in time:
+
+```surql
+SELECT * FROM attribute
+WHERE entity = $entity_id
+AND valid_from <= $point_in_time
+AND (valid_until IS NONE OR valid_until > $point_in_time);
+```
+
+This returns every attribute that was active at the specified time, including values that have since been superseded.
+
+To retrieve the full correction history for a specific attribute key:
+
+```surql
+SELECT * FROM attribute
+WHERE entity = $entity_id
+AND key = $key
+ORDER BY valid_from ASC;
+```
+
+## Correction versus coexistence
+
+It is worth distinguishing between two situations that look similar but have different semantics:
+
+**Correction** — the user provides a new value for a fact that was previously recorded. The old value is superseded and marked with a `valid_until` timestamp. This represents a change in reality: what was once true is no longer true.
+
+**Coexistence** — two attributes with the same key exist in different scopes. Neither supersedes the other. This represents different truths in different contexts: an org-level preference and a user-level override are both valid simultaneously.
+
+Spectron determines which case applies by comparing the scopes of the conflicting attributes. Same scope → correction and supersession. Different scope → coexistence.
+
+## Why data is never deleted
+
+Spectron does not delete memory records. This is a deliberate design principle with several practical implications:
+
+**Auditability** — you can inspect every fact ever extracted, when it was believed, and when it was corrected. This is essential for compliance and debugging.
+
+**Correction recovery** — if a supersession is applied incorrectly (for example, the extraction pipeline misinterprets sarcasm as a genuine correction), the original value is still in the store and can be reinstated without data recovery.
+
+**Temporal reasoning** — point-in-time queries are only possible because historical values are never erased. An agent can answer questions like "what did we know about this customer in January?" accurately and without approximation.
+
+**Uncertainty handling** — old values that are now marked uncertain or contradicted are preserved as evidence. The system maintains the full context of what was believed and when.

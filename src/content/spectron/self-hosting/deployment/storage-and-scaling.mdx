@@ -1,5 +1,183 @@
 ---
 position: 5
 title: Storage and scaling
-description: "Object storage, sizing, and horizontal scaling guidance."
+description: "Configuring object storage and scaling Spectron for production."
 ---
+
+# Storage and scaling
+
+## Object store
+
+Spectron uses an object store to persist the raw bytes of uploaded documents. Text is extracted, chunked, and embedded asynchronously; only the processed content enters SurrealDB. The original bytes remain in the object store for re-processing if you change chunking or embedding configuration.
+
+### Supported backends
+
+| Backend | URL format |
+|---|---|
+| Amazon S3 | `s3://bucket/prefix?region=us-east-1` |
+| Google Cloud Storage | `gs://bucket/prefix` |
+| Azure Blob Storage | `az://container/prefix` |
+| Local filesystem | `file:///absolute/path` |
+| S3-compatible (MinIO, Tigris, Cloudflare R2, etc.) | `s3://bucket/prefix?endpoint=https://minio.example.com&region=auto` |
+
+Set the backend via the `SPECTRON_OBJECT_STORE_URL` environment variable.
+
+### Amazon S3
+
+```bash
+SPECTRON_OBJECT_STORE_URL=s3://my-spectron-bucket/prod?region=eu-west-1
+```
+
+Credentials are resolved in the standard AWS credential chain: environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`), shared credentials file, or IAM instance roles. On EC2 or EKS with IRSA, Spectron picks up the instance or pod role automatically — no explicit credential configuration is required.
+
+To use explicit credentials:
+
+```bash
+AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+SPECTRON_OBJECT_STORE_URL=s3://my-spectron-bucket/prod?region=eu-west-1
+```
+
+Attach a bucket policy that grants Spectron `s3:GetObject`, `s3:PutObject`, and `s3:DeleteObject` on your bucket.
+
+### Google Cloud Storage
+
+```bash
+SPECTRON_OBJECT_STORE_URL=gs://my-spectron-bucket/prod
+```
+
+Credentials are resolved via Application Default Credentials (ADC). On GKE with Workload Identity, the pod service account is used automatically. For local development, run `gcloud auth application-default login`.
+
+### Azure Blob Storage
+
+```bash
+SPECTRON_OBJECT_STORE_URL=az://my-spectron-container/prod
+AZURE_STORAGE_ACCOUNT=mystorageaccount
+AZURE_STORAGE_ACCESS_KEY=...
+```
+
+### Local filesystem
+
+```bash
+SPECTRON_OBJECT_STORE_URL=file:///var/lib/spectron/objects
+```
+
+Local filesystem storage is appropriate for development and single-server deployments. It is not suitable for multi-replica deployments because each replica would need access to the same filesystem path. Use a network filesystem (NFS, EFS) or switch to S3 or GCS before running more than one Spectron instance.
+
+### S3-compatible storage
+
+MinIO, Tigris, Cloudflare R2, and other S3-compatible stores are supported via the `endpoint` query parameter:
+
+```bash
+# MinIO
+SPECTRON_OBJECT_STORE_URL=s3://spectron/prod?endpoint=http://minio:9000&region=us-east-1
+
+# Cloudflare R2
+SPECTRON_OBJECT_STORE_URL=s3://spectron-bucket/prod?endpoint=https://account.r2.cloudflarestorage.com&region=auto
+```
+
+Pair S3-compatible storage with explicit credential environment variables since these stores do not support IAM instance roles.
+
+## Scaling Spectron
+
+### Horizontal scaling
+
+Spectron is stateless. To increase throughput, add more replicas. Every replica reads from and writes to the same SurrealDB cluster and object store. A standard HTTP load balancer distributes requests across replicas — no sticky sessions, no shared in-process state.
+
+In Kubernetes, increase `spec.replicas` in the `Deployment` manifest or configure an HPA. On bare metal, run multiple instances on different ports behind Nginx or HAProxy.
+
+### Scaling SurrealDB
+
+SurrealDB is the stateful component. For write-heavy deployments, move from a single-node file-backed SurrealDB to a clustered deployment using the TiKV storage engine:
+
+```bash
+# TiKV-backed SurrealDB (distributed mode)
+SPECTRON_SURREALDB_URL=ws://surrealdb-cluster:8000
+```
+
+Alternatively, use SurrealDB Cloud and point `SPECTRON_SURREALDB_URL` at the cloud endpoint. SurrealDB Cloud handles replication, failover, and backups.
+
+### Job queue concurrency
+
+Each `spectron-server` instance runs an internal extraction worker. The worker dequeues and processes jobs (text extraction, embedding, entity extraction) from the SurrealDB-backed queue. SurrealDB's row-level locking ensures each job is processed exactly once across all replicas.
+
+To increase extraction throughput without adding full Spectron replicas, set `SPECTRON_WORKER_CONCURRENCY` to allow each instance to process multiple jobs in parallel:
+
+```bash
+SPECTRON_WORKER_CONCURRENCY=4  # default: 2
+```
+
+Raising this value increases LLM API call frequency and memory usage proportionally.
+
+## Performance tuning
+
+### Token limits
+
+Set a per-Context token budget to avoid unbounded LLM spend:
+
+```bash
+curl -s -X PATCH https://spectron.example.com/api/v1/contexts/acme-prod \
+  -H "Authorization: Bearer $SPECTRON_MGMT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "config": { "token_limit": 5000000 } }'
+```
+
+The `token_limit` is a monthly cap across all model stages. When the cap is reached, Spectron returns `429 Too Many Requests` for operations that would require LLM calls.
+
+### Chunk size
+
+The chunk size controls how documents are split before embedding. Smaller chunks improve retrieval precision; larger chunks reduce embedding cost. Set at the Context level:
+
+```json
+{
+  "config": {
+    "ingestion": {
+      "chunk_size": 512,
+      "chunk_overlap": 64
+    }
+  }
+}
+```
+
+Values are in tokens. The default chunk size is `512` with an overlap of `64`.
+
+### HNSW parameters
+
+Spectron uses SurrealDB's HNSW vector index for semantic search. The index parameters affect recall accuracy and index build time:
+
+```json
+{
+  "config": {
+    "vector": {
+      "hnsw_ef_construction": 200,
+      "hnsw_m": 16
+    }
+  }
+}
+```
+
+Higher `ef_construction` improves recall but increases memory usage and index build time. The defaults (`ef_construction: 200`, `m: 16`) are suitable for most deployments.
+
+### Model routing for cost
+
+Configure cheaper models for high-frequency extraction and reserve expensive models for reflection:
+
+```json
+{
+  "config": {
+    "models": {
+      "extraction": "openai/gpt-4o-mini",
+      "reflection": "openai/gpt-4o",
+      "response": "openai/gpt-4o"
+    }
+  }
+}
+```
+
+See [Cost and rate limits](/spectron/self-hosting/observability/cost-and-rate-limits) for monitoring and controlling LLM spend.
+
+## Next steps
+
+- [Architecture overview](/spectron/self-hosting/deployment/architecture-overview) — component diagram
+- [Kubernetes](/spectron/self-hosting/deployment/kubernetes) — production deployment with HPA
+- [Cost and rate limits](/spectron/self-hosting/observability/cost-and-rate-limits) — token budgets and rate limiting

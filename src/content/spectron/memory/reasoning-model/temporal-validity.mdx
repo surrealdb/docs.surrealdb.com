@@ -1,5 +1,136 @@
 ---
 position: 3
 title: Temporal validity
-description: "Point-in-time queries with valid_from and valid_until."
+description: "How Spectron tracks when facts were true using valid_from and valid_until."
 ---
+
+# Temporal validity
+
+Facts change. A person changes jobs; a preference shifts; a project is cancelled; a policy is updated. Most memory systems respond to these changes by overwriting the old value with the new one. Spectron takes a different approach: it records **when each fact was true**, not just what the current value is.
+
+Every `attribute` and `relation` record in Spectron carries two temporal fields:
+
+- `valid_from` — when the fact became true
+- `valid_until` — when the fact ceased to be true (`null` means it is still valid)
+
+These two fields together define the **validity interval** for a fact.
+
+## What temporal validity enables
+
+### Current-state queries
+
+Filter to only facts that are true right now:
+
+```surql
+SELECT * FROM attribute
+WHERE entity = $entity_id
+AND (valid_until IS NONE OR valid_until > time::now());
+```
+
+### Point-in-time queries
+
+Reconstruct what was known at any past moment:
+
+```surql
+SELECT * FROM attribute
+WHERE entity = $entity_id
+AND valid_from <= $point_in_time
+AND (valid_until IS NONE OR valid_until > $point_in_time);
+```
+
+This is useful for answering questions like "what role did Christian hold in February 2025?" even after several corrections have been applied since then.
+
+### Historical analysis
+
+Retrieve the full sequence of values a fact has taken, ordered chronologically:
+
+```surql
+SELECT key, value, valid_from, valid_until FROM attribute
+WHERE entity = $entity_id
+AND key = "role"
+ORDER BY valid_from ASC;
+```
+
+### Temporal reasoning
+
+An agent can be given a time reference from the conversation ("when I joined the company", "before the rebrand") and use it to query the memory state at the approximate corresponding time. This enables nuanced answers that account for what was true then versus now.
+
+## How it differs from deletion
+
+When a record is deleted, the information it contained is lost. If a mistake is later discovered — a correction was applied incorrectly, or a value was invalidated prematurely — there is nothing to recover.
+
+Spectron closes facts with `valid_until` rather than deleting them. The record remains in the store, queryable and auditable. The only thing that changes is the validity interval: the fact is no longer returned by current-state queries, but it is still returned by point-in-time and historical queries.
+
+| Operation | Deletion model | Temporal validity model |
+|---|---|---|
+| Apply correction | Delete old, insert new | Close old with `valid_until`, insert new with `valid_from` |
+| Query current state | Query all records | Filter `valid_until IS NONE OR valid_until > now()` |
+| Query past state | Not possible | Filter by `valid_from ≤ t < valid_until` |
+| Recover from bad correction | Requires backup | Reopen old record, close new record |
+| Audit history | Not possible | Query full sequence of values |
+
+## Interaction with supersession
+
+Temporal validity and supersession are closely related but serve different purposes. Supersession tracks **why** a value changed (it was replaced by a newer value). Temporal validity tracks **when** values were active.
+
+When a correction is applied, both mechanisms are updated together:
+
+```surql
+-- Close the old attribute
+UPDATE attribute:old SET
+    valid_until = time::now(),
+    superseded_by = attribute:new;
+
+-- Open the new attribute
+UPDATE attribute:new SET
+    valid_from = time::now(),
+    supersedes = attribute:old;
+```
+
+The `supersedes` / `superseded_by` links let you traverse the correction chain; the `valid_from` / `valid_until` fields let you filter by time. They are complementary, not redundant.
+
+## The correction path versus the expiry path
+
+There are two distinct situations that result in a `valid_until` being set on an attribute:
+
+**Correction** — a new value is extracted that conflicts with the existing one. The old value is closed, a new value is opened, and a `supersedes` / `superseded_by` link connects the two records. You can traverse the chain to see the full history of corrections.
+
+**Expiry** — a fact has a natural end time that does not correspond to a new value. For example, a promotional offer that expires, a temporary project assignment, or a time-limited instruction. The `valid_until` is set directly — either at extraction time when a temporal marker is detected ("until the end of the quarter"), or via the API — without creating a supersession link.
+
+```python
+# Set an expiry on a specific attribute
+await memory.attributes.update(
+    attribute_id="attribute:promo_plan",
+    valid_until="2026-12-31T23:59:59Z",
+)
+```
+
+```typescript
+await memory.attributes.update({
+    attributeId: "attribute:promo_plan",
+    validUntil: "2026-12-31T23:59:59Z",
+});
+```
+
+Querying for attributes with an upcoming expiry:
+
+```surql
+SELECT entity, key, value, valid_until FROM attribute
+WHERE valid_until IS NOT NONE
+AND valid_until > time::now()
+AND valid_until < time::now() + 30d
+ORDER BY valid_until ASC;
+```
+
+## Temporal markers in extraction
+
+When a turn contains explicit temporal language, the extraction pipeline attempts to set `valid_from` and `valid_until` directly:
+
+| Turn content | Extracted temporal fields |
+|---|---|
+| "I became CEO in January 2025" | `valid_from: "2025-01-01"` (approximate) |
+| "I used to live in Berlin" | `valid_until: now()` on the previous `city` attribute |
+| "I'm on the Pro plan until next year" | `valid_until: "2027-01-01"` (approximate) |
+| "I was CTO before the acquisition" | `valid_until: acquisition_date` if known, else flagged as uncertainty |
+
+Where a temporal reference cannot be resolved to a precise date, it is stored as an `uncertainty` record alongside the attribute, noting the ambiguity for potential future resolution.

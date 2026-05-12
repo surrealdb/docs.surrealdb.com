@@ -3,3 +3,143 @@ position: 3
 title: Migrate from LangMem
 description: "Moving LangChain memory to Spectron."
 ---
+
+# Migrating from LangMem
+
+LangMem is LangChain's in-process memory library, typically backed by a local vector store or an in-memory store. This guide covers the concept mapping and migration path to Spectron.
+
+## Concept mapping
+
+| LangMem concept | Spectron equivalent | Notes |
+|---|---|---|
+| Namespace | Scope + Context | Spectron uses dimensional scopes within a named Context |
+| Memory (document) | Entities + attributes | Spectron extracts structure; LangMem stores flat text |
+| `put_memories()` | `session.remember()` | Write path is similar; extraction differs |
+| `search_memory()` | `session.recall()` | Spectron adds graph-density reranking |
+| `get_memories()` | `session.profile()` | Returns structured snapshot |
+| Memory type (`semantic`, `episodic`, `procedural`) | Memory category (`knowledge`, `context`, `instructions`) | Categories have different volatility and expiry |
+| `delete_memories()` | `session.forget()` | Spectron supports scoped and targeted forget |
+| InMemoryStore | Embedded Spectron (in-process SurrealDB) | See the embedded deployment guide |
+
+## Migration example
+
+### LangMem (Python)
+
+```python
+from langgraph.store.memory import InMemoryStore
+from langmem import create_memory_store_manager
+
+store = InMemoryStore(
+    index={"dims": 1536, "embed": embeddings}
+)
+memory = create_memory_store_manager(
+    "openai/gpt-4o",
+    namespace=("user", "alice"),
+    store=store,
+)
+
+await memory.aput(
+    [{"content": "Alice prefers concise, technical answers."}]
+)
+results = await memory.asearch("communication style")
+```
+
+### Spectron equivalent
+
+```python
+from spectron import SpectronClient
+
+client = SpectronClient(
+    base_url="https://spectron.example.com",
+    api_key=os.environ["SPECTRON_AGENT_KEY"],
+)
+
+async with client.sessions.create(scope={"user": "alice"}) as session:
+    await session.remember("Alice prefers concise, technical answers.")
+    results = await session.recall("communication style", top_k=5)
+    print(results.formatted)
+```
+
+## Key differences
+
+**Persistence**: LangMem with `InMemoryStore` loses all memory when the process restarts. Spectron is durable by default — all memory lives in SurrealDB and survives restarts, deployments, and crashes.
+
+**Structured extraction**: LangMem stores memories as text documents. Spectron extracts structured entities, attributes, and relations. "Alice prefers concise answers" becomes an entity `Person/alice` with attribute `communication_style = "concise, technical"` — queryable and updatable as structured data.
+
+**Conflict handling**: LangMem stores all memories and relies on the retrieval layer to resolve conflicts via recency ranking. Spectron detects contradictions and supersedes old attribute values, maintaining a correct, single current value with a history chain.
+
+**Namespace vs scope**: LangMem uses a tuple namespace `("user", "alice")`. Spectron uses a multi-dimensional scope dictionary `{"user": "alice"}`. Spectron scopes support subset matching — a query at `{"org": "acme"}` retrieves all memory across all users in that org.
+
+**Categorisation**: Spectron's memory categories map loosely to LangMem memory types:
+- LangMem `semantic` → Spectron `knowledge` (facts, preferences)
+- LangMem `episodic` → Spectron `context` (recent, auto-expiring events)
+- LangMem `procedural` → Spectron `instructions` (behavioural directives)
+
+## LangChain integration
+
+Spectron ships a LangChain memory adapter (planned). Until it is released, use the SDK directly and inject the formatted context into your chain or graph:
+
+```python
+from langchain_core.messages import SystemMessage
+from spectron import SpectronClient
+
+client = SpectronClient(...)
+
+class SpectronMemory:
+    def __init__(self, client: SpectronClient, scope: dict):
+        self.client = client
+        self.scope = scope
+        self._session = None
+    
+    async def __aenter__(self):
+        self._session = await self.client.sessions.create(scope=self.scope).__aenter__()
+        return self
+    
+    async def __aexit__(self, *args):
+        await self._session.__aexit__(*args)
+    
+    async def load_context(self, query: str) -> str:
+        ctx = await self._session.recall(query=query, top_k=5)
+        return ctx.formatted
+    
+    async def save_turn(self, role: str, content: str):
+        await self._session.add_turn(role=role, content=content)
+
+# Usage in a LangGraph node
+async def agent_node(state, memory: SpectronMemory):
+    context = await memory.load_context(state["messages"][-1].content)
+    messages = [
+        SystemMessage(content=f"Memory:\n{context}"),
+        *state["messages"],
+    ]
+    response = await llm.ainvoke(messages)
+    await memory.save_turn("assistant", response.content)
+    return {"messages": [response]}
+```
+
+## Migrating from LangChain ConversationBufferMemory
+
+If you are using the older LangChain `ConversationBufferMemory` or similar in-context memory, migration is straightforward: replace the buffer with Spectron sessions. Instead of passing the full conversation history as context (which grows without bound), pass a recalled summary from Spectron.
+
+```python
+# Before: buffer-based
+memory = ConversationBufferMemory()
+chain = ConversationChain(llm=llm, memory=memory)
+
+# After: Spectron-based
+async with client.sessions.create(scope={"user": user_id}) as session:
+    # At turn start, recall relevant context
+    context = await session.recall(query=user_message, top_k=5)
+    
+    # Pass context as part of the system prompt instead of full history
+    response = await llm.ainvoke([
+        SystemMessage(content=f"Relevant context:\n{context.formatted}"),
+        HumanMessage(content=user_message),
+    ])
+    
+    # Store the turn
+    await session.add_turn(role="user", content=user_message)
+    await session.add_turn(role="assistant", content=response.content)
+```
+
+This approach scales indefinitely — context window size is bounded by the `top_k` recall, not by conversation length.

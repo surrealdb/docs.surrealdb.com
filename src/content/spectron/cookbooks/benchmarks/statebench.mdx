@@ -3,3 +3,88 @@ position: 2
 title: StateBench
 description: "Stateful correctness and adversarial tracks."
 ---
+
+# StateBench
+
+StateBench is a custom in-tree conformance suite that tests whether Spectron correctly maintains structured state in the face of contradictions, updates, and multi-entity turns. Unlike LoCoMo and MemEval — which use LLM-as-judge for scoring — StateBench uses **exact match** assertions against the structured state returned by `get_state()`.
+
+## What it measures
+
+StateBench is organised into **tracks**, each targeting a specific aspect of the extraction and reconciliation pipeline:
+
+| Track | What it tests |
+|---|---|
+| `name_update` | Entity attribute supersession when a name changes |
+| `preference_change` | Preference attribute updates with correct supersession chains |
+| `location_tracking` | Relation updates (`lives_in`) when the user moves |
+| `contradiction_handling` | Conflicting information producing valid supersession chains |
+| `temporal_ordering` | Temporal markers in text resolving to correct `valid_from` timestamps |
+| `multi_entity` | Multiple distinct entities appearing in the same turn |
+| `instruction_management` | Instruction creation, updates, and deactivation |
+| `relationship_updates` | Relation creation, modification, and invalidation |
+
+## Evaluation method
+
+Each track defines a sequence of conversation turns followed by `StateAssertion` checks. The harness:
+
+1. Creates a fresh Spectron session and processes all turns in order.
+2. Calls `get_state()` to retrieve the current structured state as a `StructuredState` object.
+3. Runs each `StateAssertion` against the state using exact match logic.
+
+Assertions can check:
+- Whether a named entity exists
+- The current value of an attribute on an entity
+- The shape of a supersession chain (old value → invalidated_at → new value)
+- Whether a relation exists between two entities
+- Whether an instruction is active or deactivated
+
+A track passes only if every assertion passes. The benchmark reports per-track pass/fail and an overall percentage.
+
+## Reference scores
+
+| System | StateBench score |
+|---|---|
+| Memgine (reference) | 97.3% |
+
+## Running StateBench
+
+```bash
+# Full StateBench run
+spectron-eval bench statebench
+
+# Run only specific tracks
+spectron-eval bench statebench --dataset contradiction_handling,name_update
+
+# Save a Markdown report
+spectron-eval bench statebench --report ./reports/statebench-$(date +%Y%m%d).md
+
+# CI mode — deterministic, no API keys needed
+spectron-eval bench statebench --fake
+```
+
+StateBench is the only benchmark that produces meaningful results in `--fake` mode because assertions use exact match rather than LLM-as-judge. This is why it is the primary conformance suite for per-PR CI.
+
+## CI strategy
+
+**Per-PR (required, blocks merge):** All StateBench tracks run with `--fake` on every pull request. This catches regressions in attribute supersession, relation handling, instruction management, and temporal ordering without requiring real LLM API keys.
+
+The run diffs output against the committed baseline at `eval/bench/BASELINE-statebench.md`. A PR that degrades any track must update the baseline or fix the regression.
+
+**Nightly (real LLMs):** StateBench also runs with real LLMs in the nightly suite to validate that the fake LLM approximation holds.
+
+## Feature flag
+
+```toml
+[features]
+bench-statebench = []
+bench = ["bench-locomo", "bench-statebench", "bench-longmemeval"]
+```
+
+## Adding a new track
+
+Tracks live in `src/bench/statebench/`. Each track is a Rust struct that implements `BenchmarkDataset` and provides:
+
+1. A list of `BenchSession` objects (turns to ingest).
+2. A list of `StateAssertion` checks to evaluate after ingestion.
+
+New tracks are automatically picked up by the harness if they are registered in the `statebench` module.

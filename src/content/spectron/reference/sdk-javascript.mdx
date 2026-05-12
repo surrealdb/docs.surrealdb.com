@@ -1,5 +1,409 @@
 ---
-position: 6
-title: SDK — JavaScript
-description: "Generated methods and types."
+position: 8
+title: JavaScript SDK reference
+description: "Complete method reference for the Spectron JavaScript and TypeScript SDK."
 ---
+
+# JavaScript SDK reference
+
+The Spectron JavaScript SDK targets Node.js, Bun, Deno, and browser environments. All methods return `Promise`s, naming follows `camelCase`, and the package ships TypeScript declarations for every method and response type.
+
+## Installation
+
+```bash
+npm install spectron
+# or
+bun add spectron
+```
+
+Node.js 18 or later is required. The package ships as ESM with a CommonJS fallback.
+
+## Client construction
+
+### `Spectron` — memory client
+
+```typescript
+import { Spectron } from "spectron";
+
+const memory = new Spectron({
+  context: "acme-prod",
+  baseUrl: "https://api.spectron.dev",
+  apiKey: process.env.SPECTRON_API_KEY,
+});
+```
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `context` | `string` | Yes | The Context identifier to operate against. |
+| `apiKey` | `string` | No | API key. Defaults to `SPECTRON_API_KEY` environment variable. |
+| `baseUrl` | `string` | No | Defaults to `https://api.spectron.dev`. |
+| `timeout` | `number` | No | Request timeout in milliseconds. Default: `30000`. |
+
+#### Multi-context pattern
+
+If your application manages multiple Contexts, construct a root client and obtain per-Context handles:
+
+```typescript
+import { Spectron } from "spectron";
+
+const client = new Spectron({ apiKey: "sk-..." });
+const memory = client.memory({ contextId: "ctx_01jt4kx..." });
+```
+
+### `SpectronManagement` — admin client
+
+```typescript
+import { SpectronManagement } from "spectron";
+
+const admin = new SpectronManagement({
+  baseUrl: "https://api.spectron.dev",
+  apiKey: "sk-admin-...",
+});
+```
+
+---
+
+## Sessions
+
+Sessions represent bounded conversations. Turns are added to sessions; the extraction pipeline runs on each turn and persists structured memory to Layer 1.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.sessions.create(options)` | `POST /{ctx}/sessions` | Create a new session with dimensional scope. Returns `Promise<Session>`. |
+| `session.close()` | `DELETE /{ctx}/sessions/{id}` | Close and finalise a session. Returns `Promise<void>`. |
+| `session.turn(options)` | `POST /{ctx}/sessions/{id}/turns` | Add a turn and run the extraction pipeline. Returns `Promise<TurnResult>`. |
+| `session.turns()` | `GET /{ctx}/sessions/{id}/turns` | List all turns in a session. Returns `Promise<Turn[]>`. |
+| `session.context(options)` | `POST /{ctx}/sessions/{id}/context` | Retrieve formatted memory context scoped to this session. Returns `Promise<ContextResult>`. |
+| `session.chat(message)` | `POST /{ctx}/sessions/{id}/chat` | Send a message, run the agent, extract memory, and return the reply. Returns `Promise<ChatResult>`. |
+
+```typescript
+import { Spectron } from "spectron";
+
+const memory = new Spectron({ apiKey: "sk-..." });
+
+const session = await memory.sessions.create({
+  scope: { org: "acme", user: "tobie" },
+});
+
+const result = await session.turn({
+  role: "user",
+  content: "I was just promoted to CTO.",
+});
+console.log(result.extraction.attributesUpserted); // updated attributes
+console.log(result.extractionMs);
+
+const ctx = await session.context({ query: "What is Tobie's current role?" });
+console.log(ctx.context); // formatted string for system prompt injection
+
+const turns = await session.turns();
+console.log(turns.length);
+
+await session.close();
+```
+
+---
+
+## One-shot memory
+
+Use these methods when you do not need a persistent session — for example, when building a system prompt before a conversation begins, or for one-off lookups.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.query(options)` | `POST /{ctx}/query` | Return ranked memory hits with scores and tiers. Returns `Promise<QueryResult>`. |
+| `memory.context(options)` | `POST /{ctx}/context` | Return a formatted context string ready for system-prompt injection. Returns `Promise<ContextResult>`. |
+
+```typescript
+// Retrieve formatted context for a system prompt
+const ctx = await memory.context({
+  query: "brief on tobie",
+  k: 10,
+  scope: { org: "acme", user: "tobie" },
+});
+const systemPrompt = `You are a helpful assistant.\n\n## Memory\n${ctx.context}`;
+
+// Retrieve ranked hits for inspection or custom formatting
+const hits = await memory.query({
+  query: "What team does Tobie work in?",
+  k: 5,
+  scope: { org: "acme", user: "tobie" },
+});
+for (const hit of hits.hits) {
+  console.log(hit.entity, hit.key, hit.value, hit.score);
+}
+console.log(hits.tier);     // "direct" | "cache" | "hybrid" | "full_context"
+console.log(hits.traceId);  // correlates with the decision_trace record
+```
+
+---
+
+## State, profile, and entities
+
+These methods expose the structured Layer 1 memory model directly — useful for inspection, debugging, and building custom UIs over memory state.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.state()` | `GET /{ctx}/state` | Return a snapshot of the full memory state for the current scope. Returns `Promise<MemoryState>`. |
+| `memory.profile()` | `GET /{ctx}/profile` | Return a structured profile for the principal subject of the current scope. Returns `Promise<Profile>`. |
+| `memory.entities.list(options?)` | `GET /{ctx}/entities` | List all entities, optionally filtered by type. Returns `Promise<Entity[]>`. |
+| `memory.entities.get(type, name)` | `GET /{ctx}/entities/{type}/{name}` | Fetch all attributes for a named entity. Returns `Promise<Entity>`. |
+| `memory.entities.history(type, name, key)` | `GET /{ctx}/entities/{type}/{name}/history/{key}` | Full temporal history for a single attribute key. Returns `Promise<AttributeHistory[]>`. |
+| `memory.entities.delete(type, name)` | `DELETE /{ctx}/entities/{type}/{name}` | Delete an entity and all its attributes. Returns `Promise<void>`. |
+
+```typescript
+// Get a structured profile for the current user
+const profile = await memory.profile({ scope: { org: "acme", user: "tobie" } });
+console.log(profile.name, profile.role, profile.preferences);
+
+// Inspect attribute history for a key that has changed over time
+const history = await memory.entities.history(
+  "Person",
+  "tobie_morgan_hitchcock",
+  "role",
+);
+for (const record of history) {
+  console.log(record.value, record.validFrom, record.validTo);
+}
+```
+
+---
+
+## Intelligence and lifecycle
+
+Reflection runs the reasoning model over current memory and returns — or persists — synthesised insights. Forget removes memory matching a natural-language query. Lifecycle operations trigger scheduled maintenance tasks.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.reflect(options)` | `POST /{ctx}/reflect` | Run the reasoning model against the query. If `persist: true`, derived facts are written back to memory. Returns `Promise<ReflectResult>`. |
+| `memory.forget(options)` | `POST /{ctx}/forget` | Remove memory records that match the natural-language query. Returns `Promise<ForgetResult>`. |
+| `memory.lifecycle.expire()` | `POST /{ctx}/lifecycle/expire` | Expire attributes that have passed their `validTo` date. Returns `Promise<LifecycleResult>`. |
+| `memory.lifecycle.decay()` | `POST /{ctx}/lifecycle/decay` | Apply decay to low-confidence or rarely accessed attributes. Returns `Promise<LifecycleResult>`. |
+
+```typescript
+// Reflect without persisting
+const result = await memory.reflect({
+  query: "What are Tobie's main areas of focus this quarter?",
+  persist: false,
+});
+console.log(result.reflection);
+console.log(result.supportingEntities);
+
+// Remove a specific memory
+const forgetResult = await memory.forget({
+  query: "Tobie's previous role as VP Engineering",
+  scope: { org: "acme", user: "tobie" },
+});
+console.log(forgetResult.deletedCount);
+console.log(forgetResult.affectedEntities);
+```
+
+---
+
+## Traces
+
+Every retrieval and extraction operation writes a decision trace. Use these methods to inspect traces for observability and debugging.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.traces.list(options?)` | `GET /{ctx}/traces` | List recent decision traces, most recent first. Returns `Promise<Trace[]>`. |
+| `memory.traces.get(id)` | `GET /{ctx}/traces/{id}` | Fetch a single trace record by ID. Returns `Promise<Trace>`. |
+| `memory.traces.stats()` | `GET /{ctx}/traces/stats` | Aggregate statistics: tier distribution, mean latency, cache hit rate. Returns `Promise<TraceStats>`. |
+
+```typescript
+const traces = await memory.traces.list({ limit: 20 });
+for (const trace of traces) {
+  console.log(trace.id, trace.resolutionTier, trace.latencyMs);
+}
+
+const stats = await memory.traces.stats();
+console.log(stats.tierDistribution); // { direct: 0.42, hybrid: 0.48, fullContext: 0.10 }
+console.log(stats.meanLatencyMs);
+console.log(stats.cacheHitRate);
+```
+
+---
+
+## Knowledge — documents
+
+These methods manage Layer 0 document ingestion and retrieval.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.knowledge.upload(options)` | `POST /{ctx}/knowledge` | Upload a document. Accepts `File`, `Blob`, URL string, or `ReadableStream`. Returns `Promise<Document>`. |
+| `memory.knowledge.replace(id, file)` | `PUT /{ctx}/knowledge/{id}` | Replace an existing document's content, reprocessing it fully. Returns `Promise<Document>`. |
+| `memory.knowledge.get(id)` | `GET /{ctx}/knowledge/{id}` | Fetch document metadata and processing status. Returns `Promise<Document>`. |
+| `memory.knowledge.raw(id)` | `GET /{ctx}/knowledge/{id}/raw` | Download the original file as a `Blob`. Returns `Promise<Blob>`. |
+| `memory.knowledge.chunks(id, options?)` | `GET /{ctx}/knowledge/{id}/chunks` | List chunks for a document with pagination. Returns `Promise<ChunkPage>`. |
+| `memory.knowledge.list(options?)` | `GET /{ctx}/knowledge` | List all documents with optional filters. Returns `Promise<Document[]>`. |
+| `memory.knowledge.related(id)` | `GET /{ctx}/knowledge/{id}/related` | Find related documents via the graph. Returns `Promise<Document[]>`. |
+| `memory.knowledge.delete(id)` | `DELETE /{ctx}/knowledge/{id}` | Delete a document and all its chunks and keywords. Returns `Promise<void>`. |
+| `memory.knowledge.query(options)` | `POST /{ctx}/knowledge/query` | Search knowledge using vector, BM25, or hybrid modes. Returns `Promise<KnowledgeQueryResult>`. |
+
+```typescript
+// Upload a policy document
+const doc = await memory.knowledge.upload({
+  file: new File([pdfBytes], "returns-policy.pdf", { type: "application/pdf" }),
+  title: "Returns Policy",
+  tags: ["policy", "returns"],
+});
+console.log(doc.id, doc.status); // status: "processing" | "ready" | "failed"
+
+// Search with hybrid mode
+const results = await memory.knowledge.query({
+  query: "what is the refund window for unopened items?",
+  mode: "hybrid", // "vector" | "bm25" | "hybrid" | "hybrid_graph"
+  k: 10,
+  threshold: 0.5,
+});
+for (const chunk of results.chunks) {
+  console.log(chunk.content, chunk.score, chunk.documentId);
+}
+```
+
+---
+
+## Knowledge — keywords
+
+The keyword graph is built automatically from document content. Use these methods to search and inspect it directly.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.knowledge.keywords.forDocument(id)` | `GET /{ctx}/knowledge/{id}/keywords` | List all keywords extracted from a specific document. Returns `Promise<Keyword[]>`. |
+| `memory.knowledge.keywords.list(options?)` | `GET /{ctx}/knowledge/keywords` | List all keywords in the Context. Returns `Promise<Keyword[]>`. |
+| `memory.knowledge.keywords.get(normalised)` | `GET /{ctx}/knowledge/keywords/{norm}` | Fetch a keyword record by its normalised form. Returns `Promise<Keyword>`. |
+| `memory.knowledge.keywords.search(options)` | `POST /{ctx}/knowledge/keywords/search` | Search the keyword graph using semantic similarity. Returns `Promise<Keyword[]>`. |
+| `memory.knowledge.keywords.related(normalised)` | `GET /{ctx}/knowledge/keywords/{norm}/related` | Find related keywords by PMI co-occurrence weight. Returns `Promise<Keyword[]>`. |
+
+```typescript
+// Find semantically related keywords
+const related = await memory.knowledge.keywords.related("refund-window");
+for (const kw of related) {
+  console.log(kw.term, kw.weight);
+}
+```
+
+---
+
+## Knowledge — typed nodes
+
+Typed knowledge nodes form an explicit graph in Layer 0. Use them for structured product catalogues, org charts, policy hierarchies, or any structured reference data.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.knowledge.nodes.list(options?)` | `GET /{ctx}/knowledge/nodes` | List all nodes, optionally filtered by kind. Returns `Promise<KnowledgeNode[]>`. |
+| `memory.knowledge.nodes.upsert(options)` | `POST /{ctx}/knowledge/nodes/batch` | Create or update nodes and relations in a single operation. Returns `Promise<UpsertResult>`. |
+| `memory.knowledge.nodes.search(options)` | `POST /{ctx}/knowledge/nodes/search` | Semantic search over node content. Returns `Promise<NodeSearchResult>`. |
+| `memory.knowledge.nodes.get(kind, slug)` | `GET /{ctx}/knowledge/nodes/{kind}/{slug}` | Fetch a single node by kind and slug. Returns `Promise<KnowledgeNode>`. |
+| `memory.knowledge.nodes.related(kind, slug)` | `GET /{ctx}/knowledge/nodes/{kind}/{slug}/related` | Fetch nodes related to the given node via graph edges. Returns `Promise<KnowledgeNode[]>`. |
+| `memory.knowledge.nodes.delete(kind, slug)` | `DELETE /{ctx}/knowledge/nodes/{kind}/{slug}` | Delete a node and its outgoing edges. Returns `Promise<void>`. |
+
+```typescript
+// Upsert product and policy nodes with a typed relation
+await memory.knowledge.nodes.upsert({
+  nodes: [
+    { kind: "Product", slug: "pro-plan", attributes: { name: "Pro Plan", priceUsd: 49 } },
+    { kind: "Policy", slug: "returns-policy", attributes: { windowDays: 30 } },
+  ],
+  relations: [
+    { fromKind: "Product", fromSlug: "pro-plan", relation: "governed_by", toKind: "Policy", toSlug: "returns-policy" },
+  ],
+});
+
+// Semantic search over nodes
+const results = await memory.knowledge.nodes.search({
+  query: "what plan has a 30-day return window?",
+  k: 5,
+});
+for (const node of results.nodes) {
+  console.log(node.kind, node.slug, node.score);
+}
+```
+
+---
+
+## Knowledge — graph traversal
+
+Traverse the typed knowledge graph from a starting node, following typed edge labels to a specified depth.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.knowledge.traverse(options)` | `POST /{ctx}/knowledge/traverse` | Walk the graph from a start node following named edge types. Returns `Promise<TraversalResult>`. |
+| `memory.knowledge.traverseRecursive(options)` | `POST /{ctx}/knowledge/traverse/recursive` | Recursive traversal with cycle detection and depth limit. Returns `Promise<TraversalResult>`. |
+| `memory.knowledge.traverseSiblings(options)` | `POST /{ctx}/knowledge/traverse/siblings` | Find nodes that share a common parent or relation target. Returns `Promise<TraversalResult>`. |
+
+```typescript
+// Traverse the graph from a product node
+const result = await memory.knowledge.traverse({
+  start: { kind: "Product", slug: "pro-plan" },
+  edges: ["governed_by", "superseded_by"],
+  depth: 3,
+});
+for (const node of result.nodes) {
+  console.log(node.kind, node.slug, node.depth);
+}
+```
+
+---
+
+## Management
+
+`SpectronManagement` provides administrative operations on Contexts and API keys. All management methods require an admin-level key.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `admin.contexts.create(id, options?)` | `POST /api/v1/contexts/{id}` | Create a new Context. Returns `Promise<Context>`. |
+| `admin.contexts.list()` | `GET /api/v1/contexts` | List all Contexts. Returns `Promise<Context[]>`. |
+| `admin.contexts.get(id)` | `GET /api/v1/contexts/{id}` | Fetch a Context's configuration and status. Returns `Promise<Context>`. |
+| `admin.contexts.update(id, config)` | `PATCH /api/v1/contexts/{id}` | Partially update a Context's configuration. Returns `Promise<Context>`. |
+| `admin.contexts.delete(id)` | `DELETE /api/v1/contexts/{id}` | Delete a Context and all its data. Irreversible. Returns `Promise<void>`. |
+| `admin.contexts(id).keys.create(name, options)` | `POST /api/v1/contexts/{id}/keys/{name}` | Create an API key with a given principal and scope floor. Returns `Promise<ApiKey>`. |
+| `admin.contexts(id).keys.list()` | `GET /api/v1/contexts/{id}/keys` | List all API keys for a Context. Returns `Promise<ApiKey[]>`. |
+| `admin.contexts(id).keys.delete(name)` | `DELETE /api/v1/contexts/{id}/keys/{name}` | Revoke an API key immediately. Returns `Promise<void>`. |
+
+```typescript
+import { SpectronManagement } from "spectron";
+
+const admin = new SpectronManagement({
+  baseUrl: "https://api.spectron.dev",
+  apiKey: "sk-admin-...",
+});
+
+// Create a context
+const ctx = await admin.contexts.create("acme-prod", {
+  config: { region: "eu-west-1" },
+});
+console.log(ctx.id, ctx.status);
+
+// Create an agent key scoped to a specific organisation
+const key = await admin.contexts("acme-prod").keys.create("agent-key-acme", {
+  principal: "agent",
+  scopeFloor: { org: "acme" },
+});
+console.log(key.key); // only shown once
+```
+
+---
+
+## Config shortcuts
+
+These methods on the `Spectron` client are convenience wrappers around `admin.contexts.update()`. They patch a specific section of the Context configuration.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.config.models(options)` | `PATCH /api/v1/contexts/{ctx}` | Update the model configuration (extraction, embedding, synthesis models). Returns `Promise<Context>`. |
+| `memory.config.providers(options)` | `PATCH /api/v1/contexts/{ctx}` | Update LLM provider credentials and routing. Returns `Promise<Context>`. |
+| `memory.config.ontology(options)` | `PATCH /api/v1/contexts/{ctx}` | Update the ontology: entity types, attribute categories, and relation kinds. Returns `Promise<Context>`. |
+
+```typescript
+// Switch the extraction model
+await memory.config.models({
+  extraction: "gpt-4o-mini",
+  embedding: "text-embedding-3-small",
+  synthesis: "gpt-4o",
+});
+
+// Define a custom entity type list
+await memory.config.ontology({
+  entityTypes: ["Person", "Team", "Product", "Customer"],
+  attributeCategories: ["identity", "preference", "context", "knowledge"],
+});
+```

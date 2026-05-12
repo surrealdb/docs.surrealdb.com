@@ -1,5 +1,246 @@
 ---
 position: 1
-title: Remember
-description: "Persist new facts and structured extractions from conversation."
+title: Storing memories
+description: "How to store information in Spectron through turns and sessions."
 ---
+
+# Storing memories
+
+Spectron does not accept raw text blobs. Every piece of information enters memory through the **extraction pipeline**: a turn is submitted, the pipeline classifies its content, extracts structured entities and attributes, reconciles them against existing memory and Layer 0 knowledge, and persists the results. Storage is an outcome of that reasoning process, not a direct write.
+
+This means you never tell Spectron "store the fact that Tobie is a CTO". You tell Spectron "Tobie said this in a conversation", and Spectron decides what to extract, how to categorise it, and whether it contradicts anything already known.
+
+## Sessions and turns
+
+Memory enters Spectron through **turns** nested inside a **session**. A session represents a single conversation or interaction — a bounded context with a scope, a start time, and an ordered list of turns. Each turn has a role (`user` or `assistant`) and a content string.
+
+When a turn is added to a session, the extraction pipeline runs asynchronously and returns a structured diff: what entities and attributes were created, updated, or flagged as uncertain.
+
+## Integration patterns
+
+There are two patterns for managing the agent loop.
+
+### Spectron drives the loop
+
+Use this when you want Spectron to manage conversation history and invoke your agent. Spectron creates the session, calls your agent, records the response, and extracts memory from every exchange.
+
+```python
+import asyncio
+from spectron import Spectron
+
+client = Spectron(api_key="sk-...")
+memory = client.memory(context_id="ctx_01jt4kx...")
+
+async def my_agent(messages: list[dict]) -> str:
+    # Your LLM call here
+    return "Congratulations on the promotion! ..."
+
+async def main():
+    session = await memory.sessions.create(
+        scope={"org": "acme", "user": "tobie"},
+        agent_fn=my_agent,
+    )
+
+    result = await session.turn(
+        role="user",
+        content="I just got promoted to CTO",
+    )
+    # Spectron called my_agent, recorded the response, and extracted memory
+    print(result.extraction)
+
+asyncio.run(main())
+```
+
+```typescript
+import { Spectron } from "@spectron/sdk";
+
+const client = new Spectron({ apiKey: "sk-..." });
+const memory = client.memory({ contextId: "ctx_01jt4kx..." });
+
+async function myAgent(messages: Array<{ role: string; content: string }>): Promise<string> {
+    // Your LLM call here
+    return "Congratulations on the promotion! ...";
+}
+
+const session = await memory.sessions.create({
+    scope: { org: "acme", user: "tobie" },
+    agentFn: myAgent,
+});
+
+const result = await session.turn({
+    role: "user",
+    content: "I just got promoted to CTO",
+});
+
+console.log(result.extraction);
+```
+
+### Caller drives the loop
+
+Use this when your application already manages the agent loop and you want to record turns after the fact. You create the session explicitly, run your agent, then push each turn into the session as it occurs.
+
+```python
+import asyncio
+from spectron import Spectron
+
+client = Spectron(api_key="sk-...")
+memory = client.memory(context_id="ctx_01jt4kx...")
+
+async def main():
+    session = await memory.sessions.create(
+        scope={"org": "acme", "user": "tobie"},
+    )
+
+    # User sends a message
+    user_result = await session.turn(
+        role="user",
+        content="I just got promoted to CTO",
+    )
+    print(user_result.extraction)
+
+    # Your agent responds — record the assistant turn too
+    assistant_response = "Congratulations on the promotion! ..."
+    await session.turn(
+        role="assistant",
+        content=assistant_response,
+    )
+
+asyncio.run(main())
+```
+
+```typescript
+import { Spectron } from "@spectron/sdk";
+
+const client = new Spectron({ apiKey: "sk-..." });
+const memory = client.memory({ contextId: "ctx_01jt4kx..." });
+
+const session = await memory.sessions.create({
+    scope: { org: "acme", user: "tobie" },
+});
+
+const userResult = await session.turn({
+    role: "user",
+    content: "I just got promoted to CTO",
+});
+console.log(userResult.extraction);
+
+const assistantResponse = "Congratulations on the promotion! ...";
+await session.turn({
+    role: "assistant",
+    content: assistantResponse,
+});
+```
+
+### REST
+
+```http
+POST /v1/{context_id}/sessions
+Content-Type: application/json
+
+{
+  "scope": { "org": "acme", "user": "tobie" }
+}
+```
+
+```http
+POST /v1/{context_id}/sessions/{session_id}/turns
+Content-Type: application/json
+
+{
+  "role": "user",
+  "content": "I just got promoted to CTO"
+}
+```
+
+## The extraction result
+
+Adding a user turn returns an extraction diff describing what the pipeline did:
+
+```json
+{
+  "turn_id": "turn:01jt4m...",
+  "session_id": "session:01jt4k...",
+  "extraction": {
+    "entities_created": [
+      { "type": "Person", "name": "tobie_morgan_hitchcock" }
+    ],
+    "attributes_upserted": [
+      {
+        "entity": "entity:[\"Person\", \"tobie_morgan_hitchcock\"]",
+        "category": "identity",
+        "key": "role",
+        "value": "CTO",
+        "previous_value": "VP Engineering",
+        "action": "updated"
+      }
+    ],
+    "attributes_created": [],
+    "uncertainties": [],
+    "instructions": []
+  },
+  "extraction_ms": 340
+}
+```
+
+The `action` field on each attribute indicates whether the value was newly created (`created`), updated from a previous value (`updated`), or left unchanged because the extracted value matched what was already stored (`unchanged`).
+
+If the extracted value contradicts a Layer 0 fact, the attribute is still stored but the extraction result includes a `contradicts_l0` flag and the item appears in `uncertainties` rather than `attributes_upserted`.
+
+## Recording assistant turns
+
+Assistant turns are extracted for agent-side behaviour: instructions the agent committed to, follow-up items the agent mentioned, and so on. Recording them is optional but improves memory completeness for long-running conversations.
+
+```python
+await session.turn(role="assistant", content="Got it — I'll remember to use TypeScript for all examples from now on.")
+```
+
+The extraction pipeline applies lighter classification to assistant content by default. An assistant statement like the one above would produce an instruction record rather than an entity attribute.
+
+## Bulk storage via multiple turns
+
+To ingest a batch of existing conversation history, add turns sequentially within the same session. The pipeline processes each turn in order, so later turns can reference entities introduced by earlier ones.
+
+```python
+history = [
+    {"role": "user", "content": "I work at Acme Corp as a backend engineer."},
+    {"role": "assistant", "content": "Noted — I'll keep that in mind."},
+    {"role": "user", "content": "I prefer concise answers without filler phrases."},
+    {"role": "user", "content": "My team uses Go for all new services."},
+]
+
+for turn in history:
+    await session.turn(role=turn["role"], content=turn["content"])
+```
+
+```typescript
+const history = [
+    { role: "user", content: "I work at Acme Corp as a backend engineer." },
+    { role: "assistant", content: "Noted — I'll keep that in mind." },
+    { role: "user", content: "I prefer concise answers without filler phrases." },
+    { role: "user", content: "My team uses Go for all new services." },
+];
+
+for (const turn of history) {
+    await session.turn({ role: turn.role, content: turn.content });
+}
+```
+
+Each turn's extraction is independent but shares the session's scope, so all extracted attributes are scoped to the same `org` and `user` dimensions.
+
+## One-shot upsert
+
+If you do not need a persistent session object — for example, when processing a single webhook event or a one-off statement — you can post directly to the turns endpoint with an ephemeral session ID:
+
+```http
+POST /v1/{context_id}/sessions/{id}/turns
+Content-Type: application/json
+
+{
+  "role": "user",
+  "content": "The launch is now scheduled for the 20th.",
+  "scope": { "org": "acme", "user": "tobie" },
+  "create_session": true
+}
+```
+
+Setting `create_session: true` instructs the server to create the session if it does not already exist. This is equivalent to a create-then-add sequence but in a single request.

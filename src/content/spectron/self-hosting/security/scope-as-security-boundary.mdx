@@ -1,5 +1,74 @@
 ---
-position: 4
+position: 3
 title: Scope as a security boundary
-description: "Subset matching rules with pinned scope floors."
+description: "How scope-bound API keys enforce data isolation in Spectron."
 ---
+
+# Scope as a security boundary
+
+Scope in Spectron has two roles. The first is data partitioning: scope fields (`org`, `agent`, `user`) categorise data so that a recall query for one user does not surface another user's memories. The second, and more important role, is as a security boundary: the scope floor bound to an API key physically restricts what data the key can read or write, regardless of what the caller requests.
+
+These two roles are related but distinct. Understanding the difference matters when designing a multi-tenant deployment.
+
+## Data partitioning vs security enforcement
+
+**Data partitioning** is what happens when you set `scope: { org: "anneal", user: "tobie" }` on a recall query. Spectron filters results to facts within that scope. This is useful for keeping per-user memories separate within a shared Context.
+
+**Security enforcement** happens at the API key level. A key with scope floor `{ org: "anneal", agent: "planner" }` cannot — regardless of what scope it requests — read or write data outside that floor. The server enforces this on every request. The client cannot override it.
+
+The distinction matters because a client holding an agent key could, in principle, send a request with a broader scope in the query body. The server ignores the broadening — the effective scope is always the intersection of the requested scope and the key's scope floor. If the intersection would be empty (i.e., the request asks for data outside the floor), the server returns `403 Forbidden`.
+
+## The three request invariants
+
+Every request to Spectron is validated against three invariants before any data access occurs:
+
+1. **Principal type check** — is this key type permitted to call this endpoint at all? (A supervisor key cannot create sessions; an agent key cannot create API keys.)
+
+2. **Scope floor check on reads** — the scope in the query must be a subset of or equal to the key's scope floor. A key with floor `{ org: "anneal", agent: "planner" }` cannot query scope `{ org: "anneal" }` because that is broader than the floor.
+
+3. **Scope floor check on writes** — the scope of any created or modified record must be within the key's scope floor. An agent key cannot write a session with scope `{ org: "acme" }` if its floor is `{ org: "anneal" }`.
+
+These three invariants are checked server-side in every request handler. There is no client-side enforcement — the client SDK does not gate these checks.
+
+## Why agent keys physically cannot see outside their floor
+
+An agent key with floor `{ org: "anneal", agent: "planner" }` has its floor stored in the control-plane database at key creation time. Every query the server issues against SurrealDB for that key's request includes a `WHERE scope CONTAINSALL [org = "anneal", agent = "planner"]` predicate (or its equivalent in Spectron's internal query builder). This predicate is injected by the server, not the client. A compromised or malicious client cannot remove it.
+
+The result is that an agent key is not merely configured to see only its scope floor — it is architecturally prevented from accessing anything outside it by the server-side query construction.
+
+## General knowledge and the empty scope
+
+Some knowledge in Spectron lives at scope `{}` — the empty scope. This is general knowledge: facts that apply across all scopes, such as background context about your product or organisation that should be available to all agents regardless of their specific scope floor.
+
+Only management keys can write general knowledge. Agent keys with any non-empty scope floor cannot write to scope `{}`. This prevents an agent key from injecting facts into the general pool that would then be visible to all other agents.
+
+During recall, Spectron's resolution pipeline includes general knowledge in its results automatically where relevant. Agent keys benefit from general knowledge on read, but cannot contribute to it on write.
+
+## Scope elevation and why it is impossible
+
+A caller cannot elevate the scope of their key. The scope floor is set at key creation time by a management key and cannot be changed without deleting and recreating the key. There is no "sudo" mode, no token exchange, and no JWT claim that widens the scope floor.
+
+If an application needs to operate across multiple orgs or multiple agents, it must either:
+
+- Hold multiple agent keys (one per org/agent combination), or
+- Hold a management key (operator-level trust) and accept the operational responsibility that entails.
+
+## Context isolation
+
+Scope enforcement operates within a single Context. A key created for Context A cannot access any data in Context B, regardless of its scope floor. Context boundaries are enforced at a different layer — the key metadata includes the Context it belongs to, and the server validates this before any scope check.
+
+## Summary
+
+| Claim | True? |
+|---|---|
+| The client can widen the effective scope by passing a broader scope in the request body. | No. The server intersects the requested scope with the key's floor. |
+| An agent key with floor `{org, agent}` can read data at scope `{org}`. | No. The floor is a minimum restriction. The key cannot read at a broader scope than its floor. |
+| A management key can read data in any scope within its Context. | Yes. The management floor is `{}` — unrestricted. |
+| General knowledge (scope `{}`) is readable by agent keys via recall. | Yes. Spectron's recall pipeline includes it. But agents cannot write to it. |
+| Two agent keys with the same scope floor can see each other's sessions. | Yes, if they have the same floor. Isolation below the floor requires adding `user` to the floor. |
+
+## Next steps
+
+- [Principals](/spectron/self-hosting/security/principals) — principal types and access control matrix
+- [Multi-tenancy](/spectron/self-hosting/security/multi-tenancy) — patterns for isolating tenants within a single Context
+- [Authentication](/spectron/self-hosting/security/authentication) — key creation and rotation

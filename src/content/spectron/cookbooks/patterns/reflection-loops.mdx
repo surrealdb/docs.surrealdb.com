@@ -3,3 +3,196 @@ position: 4
 title: Reflection loops
 description: "Scheduled or triggered reflect jobs."
 ---
+
+# Reflection loops
+
+Reflection is Spectron's mechanism for synthesising higher-order insights from accumulated memory. Unlike retrieval — which surfaces facts that already exist — reflection runs an LLM reasoning pass over a scope's memory and produces new insights that can be persisted back as Layer 1 attributes. It is how Spectron moves from storing individual facts to producing understanding.
+
+## What reflection does
+
+A reflection request takes a query, a scope, and optional parameters, then:
+
+1. Retrieves relevant memory items across the scope.
+2. Sends them to a reasoning model alongside your query.
+3. Returns a synthesised response.
+4. If `persist: true`, stores the synthesised insights as new attributes on the relevant entities.
+
+This is different from `context()`, which retrieves and ranks existing facts. Reflection reasons across facts to produce conclusions that are not explicitly stored anywhere.
+
+## Basic reflection call
+
+```python
+from spectron import Spectron
+
+client = Spectron(api_key="sk-...")
+memory = client.memory(context_id="support")
+
+result = await memory.reflect(
+    scope={"org": "acme", "user": "alice"},
+    query="What are Alice's most frequently reported frustrations?",
+    persist=False,
+)
+
+print(result.synthesis)
+```
+
+```typescript
+import { Spectron } from "spectron";
+
+const client = new Spectron({ apiKey: "sk-..." });
+const memory = client.memory({ contextId: "support" });
+
+const result = await memory.reflect({
+    scope: { org: "acme", user: "alice" },
+    query: "What are Alice's most frequently reported frustrations?",
+    persist: false,
+});
+
+console.log(result.synthesis);
+```
+
+The `synthesis` field is a free-form text response from the reasoning model. When `persist: false`, nothing is written back to memory — useful for exploratory analysis or generating one-off summaries.
+
+## Persisting synthesised insights
+
+Set `persist: true` to write the insights back as Layer 1 attributes. The reasoning model produces structured attribute suggestions which are reconciled against the existing memory state before being committed.
+
+```python
+result = await memory.reflect(
+    scope={"org": "acme", "user": "alice"},
+    query="Summarise this customer's product preferences and risk of churn.",
+    persist=True,
+    target_entity_type="Customer",
+    target_entity_name="alice",
+    target_attribute_key="churn_risk_summary",
+)
+```
+
+```typescript
+const result = await memory.reflect({
+    scope: { org: "acme", user: "alice" },
+    query: "Summarise this customer's product preferences and risk of churn.",
+    persist: true,
+    targetEntityType: "Customer",
+    targetEntityName: "alice",
+    targetAttributeKey: "churn_risk_summary",
+});
+```
+
+The persisted attribute appears in future `profile()` and `context()` calls, enriching responses with synthesised understanding rather than just raw facts.
+
+## Cross-user reflection with supervisor keys
+
+Supervisor API keys have broader scope access — they can reflect across multiple users or the entire organisation scope. This enables pattern analysis across your user base.
+
+```python
+supervisor_memory = client.memory(
+    context_id="support",
+    api_key="supervisor_sk_...",
+)
+
+result = await supervisor_memory.reflect(
+    scope={"org": "acme"},  # No user — reflects across all users in the org
+    query="What are the most common product complaints this week?",
+    persist=True,
+    target_entity_type="Organisation",
+    target_entity_name="acme",
+    target_attribute_key="weekly_complaint_summary",
+)
+```
+
+```typescript
+const supervisorMemory = client.memory({
+    contextId: "support",
+    apiKey: "supervisor_sk_...",
+});
+
+const result = await supervisorMemory.reflect({
+    scope: { org: "acme" },
+    query: "What are the most common product complaints this week?",
+    persist: true,
+    targetEntityType: "Organisation",
+    targetEntityName: "acme",
+    targetAttributeKey: "weekly_complaint_summary",
+});
+```
+
+## When to run reflections
+
+Reflection is a compute-intensive operation. Appropriate trigger points:
+
+- **End of session** — after a conversation closes, reflect to produce a session summary and update the user's churn risk or sentiment attributes.
+- **Daily batch** — run a nightly reflection across all active users to update aggregate attributes.
+- **Event-triggered** — run a targeted reflection when a specific event occurs (a complaint, a high-value purchase, an escalation).
+- **Weekly insights** — broader organisational reflections that surface cross-user patterns.
+
+### Scheduling as a background job
+
+```python
+import asyncio
+from datetime import datetime, timezone
+
+async def nightly_reflection(memory, org_id: str):
+    """Run nightly reflection for all users in an org."""
+    entities = await memory.entities.list(
+        scope={"org": org_id},
+        entity_type="Customer",
+    )
+
+    for customer in entities:
+        await memory.reflect(
+            scope={"org": org_id, "user": customer.name},
+            query="Update this customer's satisfaction score and churn risk based on recent interactions.",
+            persist=True,
+            target_entity_type="Customer",
+            target_entity_name=customer.name,
+            target_attribute_key="satisfaction_score",
+        )
+        # Respect rate limits between requests
+        await asyncio.sleep(0.5)
+
+    print(f"[{datetime.now(timezone.utc).isoformat()}] Nightly reflection complete for {len(entities)} customers.")
+```
+
+```typescript
+async function nightlyReflection(memory: Memory, orgId: string): Promise<void> {
+    const entities = await memory.entities.list({
+        scope: { org: orgId },
+        entityType: "Customer",
+    });
+
+    for (const customer of entities) {
+        await memory.reflect({
+            scope: { org: orgId, user: customer.name },
+            query: "Update this customer's satisfaction score and churn risk based on recent interactions.",
+            persist: true,
+            targetEntityType: "Customer",
+            targetEntityName: customer.name,
+            targetAttributeKey: "satisfaction_score",
+        });
+
+        await new Promise(r => setTimeout(r, 500));
+    }
+
+    console.log(`Nightly reflection complete for ${entities.length} customers.`);
+}
+```
+
+## Example reflection queries
+
+| Use case | Query |
+|---|---|
+| Session summary | "Summarise this conversation and any commitments the agent made." |
+| Customer health | "Rate this customer's satisfaction and likelihood to renew (1–10)." |
+| Project risk | "What risks or blockers have been mentioned about this project?" |
+| Complaint patterns | "What product issues have been raised most frequently this month?" |
+| Learning trajectory | "What topics has this learner mastered and what gaps remain?" |
+
+## Reflection versus retrieval
+
+| | `context()` / `recall()` | `reflect()` |
+|---|---|---|
+| What it does | Retrieves existing facts | Reasons across facts to produce new conclusions |
+| Output | Ranked memory items | Free-form synthesis (+ optional persisted attributes) |
+| Cost | Low (retrieval only) | Higher (LLM reasoning pass) |
+| When to use | Before every LLM call | Periodically or on specific events |

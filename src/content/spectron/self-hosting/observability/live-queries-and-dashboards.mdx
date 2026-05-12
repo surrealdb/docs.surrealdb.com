@@ -3,3 +3,146 @@ position: 4
 title: Live queries and dashboards
 description: "Live SurrealDB queries and operational dashboards."
 ---
+
+# Live queries and dashboards
+
+Spectron's observability story is built on SurrealDB's native capabilities. Because all state lives in SurrealDB, you can use live queries to stream real-time updates, build dashboards with direct database queries, and connect any BI tool that can speak to SurrealDB.
+
+## Live queries
+
+SurrealDB's `LIVE SELECT` statement streams changes from any table in real time. This is useful for building real-time dashboards, monitoring ingestion queues, and watching memory state evolve.
+
+### Monitor document ingestion
+
+```surql
+-- Stream status changes for all documents being processed
+LIVE SELECT id, title, status, error, processing_started_at, processing_completed_at
+FROM document
+WHERE status IN ["queued", "extracting", "chunking", "embedding", "keywording"];
+```
+
+Every status transition — `queued → extracting → chunking → embedding → keywording → ready` — triggers a live update. A failed document triggers an update with `status = "failed"` and the `error` field populated.
+
+### Monitor extraction activity
+
+```surql
+-- Stream new turns being processed
+LIVE SELECT id, session, role, content, created_at
+FROM turn
+ORDER BY created_at DESC;
+
+-- Stream new entities as they are extracted
+LIVE SELECT id, name, type, memory_category, scope, created_at
+FROM entity;
+```
+
+### Monitor trace activity
+
+```surql
+-- Stream real-time operation traces
+LIVE SELECT query, tier, duration_ms, token_cost, api_key_id, created_at
+FROM decision_trace;
+```
+
+Use this to watch which queries are hitting the cache versus falling through to retrieval, and to identify unexpectedly slow operations.
+
+## Operational dashboards
+
+You can build dashboards by querying SurrealDB directly from any tool that supports SurrealDB as a data source, or by running scheduled queries via the Spectron REST API.
+
+### Key metrics to track
+
+**Ingestion pipeline health:**
+```surql
+SELECT status, count() AS count
+FROM document
+WHERE created_at > time::now() - 1d
+GROUP BY status;
+```
+
+**Memory growth rate:**
+```surql
+SELECT
+    time::format(created_at, "%Y-%m-%d") AS day,
+    count() AS new_entities
+FROM entity
+WHERE created_at > time::now() - 30d
+GROUP BY day
+ORDER BY day;
+```
+
+**Query resolution tier distribution:**
+```surql
+SELECT tier, count() AS calls, math::mean(duration_ms) AS avg_ms
+FROM decision_trace
+WHERE created_at > time::now() - 1d
+GROUP BY tier;
+```
+
+A healthy deployment typically shows:
+- 30–60% `direct` (exact attribute match, very fast)
+- 10–20% `cache` (semantic response cache hit)
+- 20–50% `hybrid` (retrieval + synthesis)
+- <5% `full_context` (expensive full synthesis)
+
+**Error rate:**
+```surql
+SELECT count() AS failed_docs
+FROM document
+WHERE status = "failed"
+  AND created_at > time::now() - 24h;
+```
+
+### Cache effectiveness
+
+```surql
+-- Cache hit rate over the last hour
+LET $total = (SELECT count() FROM decision_trace WHERE created_at > time::now() - 1h);
+LET $cache = (SELECT count() FROM decision_trace WHERE tier = "cache" AND created_at > time::now() - 1h);
+RETURN ($cache / $total) * 100;
+```
+
+Low cache hit rates (<10%) in a production workload may indicate the cache TTL is too short or the similarity threshold too high.
+
+## SurrealDB Surrealist integration
+
+[Surrealist](https://surrealdb.com/surrealist) can connect to the SurrealDB instance backing your Spectron deployment. Once connected, you can:
+
+- Browse the Context's tables directly
+- Run ad-hoc SurrealQL queries
+- Inspect entity graphs visually
+- Monitor table row counts
+
+Connect to the same SurrealDB instance and namespace/database as your Context:
+
+```
+Host: ws://your-surrealdb:8000/rpc
+Namespace: acme
+Database: prod
+```
+
+## Prometheus metrics
+
+Spectron exposes Prometheus metrics at `/metrics`:
+
+| Metric | Type | Description |
+|---|---|---|
+| `spectron_requests_total` | Counter | Total HTTP requests, labelled by endpoint and status |
+| `spectron_request_duration_seconds` | Histogram | Request latency distribution |
+| `spectron_llm_tokens_total` | Counter | Total LLM tokens, labelled by context and stage |
+| `spectron_extraction_turns_total` | Counter | Total turns processed, labelled by context |
+| `spectron_documents_queued` | Gauge | Documents currently in the ingestion queue |
+| `spectron_cache_hits_total` | Counter | Semantic response cache hits |
+| `spectron_cache_misses_total` | Counter | Semantic response cache misses |
+
+Use these metrics with Prometheus + Grafana for production dashboarding without direct SurrealDB access.
+
+## Alerting recommendations
+
+Set up alerts for:
+
+- **High ingestion error rate** — `spectron_documents_queued` growing without a corresponding increase in `status = "ready"` documents
+- **Token budget approaching limit** — alert at 80% of the monthly `token_limit`
+- **Low cache hit rate** — below 5% in production indicates a caching configuration issue
+- **Slow operations** — P99 latency above 5s for hybrid retrieval
+- **Authentication errors** — elevated `401`/`403` response rates may indicate key rotation issues or misconfigured clients

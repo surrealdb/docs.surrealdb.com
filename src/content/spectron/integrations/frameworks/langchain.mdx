@@ -3,3 +3,165 @@ position: 1
 title: LangChain
 description: "LangChain adapter patterns for Spectron."
 ---
+
+# LangChain
+
+> The LangChain integration is planned for a later phase of Spectron's development. The patterns described here reflect the intended API surface. Specific package names and method signatures may change before release.
+
+Spectron provides a first-class adapter for LangChain via a dedicated package. This lets you use Spectron as the memory backend for any LangChain chain or agent without building your own session management or extraction logic.
+
+## Installation
+
+```bash
+pip install spectron spectron-langchain
+```
+
+```bash
+npm install spectron @spectron/langchain
+```
+
+The `spectron-langchain` package depends on both `spectron` and `langchain`. It does not bundle LangChain — install the version that matches your application.
+
+## SpectronMemory
+
+`SpectronMemory` is a LangChain `BaseChatMemory` implementation backed by a Spectron session. It implements the standard `load_memory_variables` and `save_context` interface, so it works as a drop-in replacement for `ConversationBufferMemory`, `ConversationSummaryMemory`, or similar.
+
+```python
+from langchain_openai import ChatOpenAI
+from langchain.chains import ConversationChain
+from spectron_langchain import SpectronMemory
+
+memory = SpectronMemory(
+    api_key="sk-…",
+    scope={"org": "acme", "user": "u_alice"},
+)
+
+chain = ConversationChain(
+    llm=ChatOpenAI(model="gpt-4o"),
+    memory=memory,
+    verbose=True,
+)
+
+response = chain.invoke({"input": "My name is Alice and I work at Acme Corp."})
+print(response["response"])
+```
+
+Internally, `SpectronMemory` creates or resumes a Spectron session bound to the provided scope. Each call to `save_context` appends a user turn and an assistant turn to the session. Each call to `load_memory_variables` calls `memory.recall()` to retrieve relevant context for the current input.
+
+### Session persistence
+
+By default, `SpectronMemory` creates a new session each time it is instantiated. To resume an existing session (for example, across HTTP requests), pass the session ID:
+
+```python
+memory = SpectronMemory(
+    api_key="sk-…",
+    scope={"org": "acme", "user": "u_alice"},
+    session_id="sess_01hw…",
+)
+```
+
+To retrieve the current session ID for storage:
+
+```python
+print(memory.session_id)  # sess_01hw…
+```
+
+## ConversationalRetrievalChain
+
+`SpectronMemory` integrates directly with `ConversationalRetrievalChain`. This pattern combines:
+
+- **Spectron Layer 1** for conversational memory (who the user is, what they have said)
+- **Spectron Layer 0** (or any LangChain retriever) for document retrieval
+
+```python
+from langchain.chains import ConversationalRetrievalChain
+from langchain_openai import ChatOpenAI
+from spectron_langchain import SpectronMemory, SpectronRetriever
+
+llm = ChatOpenAI(model="gpt-4o")
+
+memory = SpectronMemory(
+    api_key="sk-…",
+    scope={"org": "acme", "user": "u_alice"},
+)
+
+# SpectronRetriever wraps Spectron's Layer 0 knowledge search
+retriever = SpectronRetriever(
+    api_key="sk-…",
+    context_id="ctx_acme",
+)
+
+chain = ConversationalRetrievalChain.from_llm(
+    llm=llm,
+    retriever=retriever,
+    memory=memory,
+)
+
+response = chain.invoke({"question": "What is the return policy for AirPods Pro?"})
+print(response["answer"])
+```
+
+In this setup, every question the user asks is:
+
+1. Enriched with relevant Layer 1 memory (loaded via `load_memory_variables`)
+2. Used to retrieve relevant Layer 0 documents (via `SpectronRetriever`)
+3. Answered by the LLM with both sources in context
+4. Saved back to Spectron via `save_context`
+
+## How session.turn maps to chain messages
+
+LangChain uses input/output key pairs (`human_prefix`, `ai_prefix`). Spectron maps these to turn roles:
+
+| LangChain | Spectron turn role |
+|-----------|-------------------|
+| Human message | `user` |
+| AI message | `assistant` |
+| System message | `system` |
+
+Tool messages (for agent traces) are stored as `tool` role turns. `SpectronMemory` captures tool call results when used with LangChain agents:
+
+```python
+from langchain.agents import AgentExecutor, create_openai_tools_agent
+from spectron_langchain import SpectronMemory
+
+memory = SpectronMemory(
+    api_key="sk-…",
+    scope={"org": "acme", "user": "u_alice"},
+    capture_tool_calls=True,  # store tool results as turns
+)
+```
+
+## JavaScript / TypeScript
+
+```javascript
+import { ChatOpenAI } from "@langchain/openai";
+import { ConversationChain } from "langchain/chains";
+import { SpectronMemory } from "@spectron/langchain";
+
+const memory = new SpectronMemory({
+    apiKey: "sk-…",
+    scope: { org: "acme", user: "u_alice" },
+});
+
+const chain = new ConversationChain({
+    llm: new ChatOpenAI({ model: "gpt-4o" }),
+    memory,
+});
+
+const response = await chain.invoke({ input: "My name is Alice." });
+console.log(response.response);
+```
+
+## Configuration reference
+
+| Option | Type | Default | Description |
+|----------------|--------|---------|--------------------------------------|
+| `api_key` | string | — | Spectron API key |
+| `scope` | object | — | Scope for all memory operations |
+| `session_id` | string | `null` | Resume an existing session |
+| `memory_key` | string | `"history"` | Key used in LangChain's memory dict |
+| `return_messages`| bool | `true` | Return `BaseMessage` objects or text |
+| `capture_tool_calls` | bool | `false` | Store tool results as turns |
+| `await_processing` | bool | `false` | Wait for extraction before returning |
+
+For more on Spectron sessions and turn roles, see [Sessions and turns](/spectron/get-started/mental-model/sessions-and-turns).

@@ -3,3 +3,230 @@ position: 4
 title: Long-running research agent
 description: "Sessions across days with reflection."
 ---
+
+# Long-running research agent
+
+Research agents accumulate findings across many sessions, often spanning days or weeks. This guide shows how to structure sessions and use reflection to distil growing memory into durable, queryable knowledge.
+
+## The challenge
+
+A research agent that works on a topic over multiple sessions faces a core tension:
+
+- **Too many sessions**: each session starts fresh, losing continuity
+- **One long session**: context window fills up, early findings are lost
+- **Flat memory**: facts pile up without structure, recall becomes noisy
+
+Spectron addresses this through structured entity extraction, temporal attributes, and the reflect operation — which synthesises accumulated session memory into consolidated findings that persist across sessions.
+
+## Architecture
+
+A long-running research agent typically uses:
+
+- **One session per working day** (or per topic block) — sessions remain focused and bounded
+- **Scope by project** — all sessions for a research topic share a `project` scope dimension
+- **Reflection at session end** — distils findings before the session closes
+- **Profile at session start** — loads the consolidated state before the first response
+
+```
+Day 1 session → extract → reflect → consolidated memory
+Day 2 session → profile → load context → research → reflect → updated memory
+Day 3 session → profile → load context → research → reflect → updated memory
+```
+
+## Session structure
+
+### Starting a session
+
+```python
+from spectron import SpectronClient
+
+client = SpectronClient(
+    base_url="https://spectron.example.com",
+    api_key=os.environ["SPECTRON_AGENT_KEY"],
+)
+
+async with client.sessions.create(
+    scope={"org": "acme", "user": "researcher-alice", "project": "quantum-computing-survey"},
+    metadata={"day": 3, "focus": "error correction"},
+) as session:
+    # Load consolidated state from previous sessions
+    profile = await session.profile()
+    system_prompt = f"""You are a research assistant working on a quantum computing survey.
+    
+Current research state:
+{profile.formatted}
+
+Continue from where we left off."""
+    # ... conduct research ...
+```
+
+### JavaScript equivalent
+
+```javascript
+import { SpectronClient } from "spectron";
+
+const client = new SpectronClient({
+    baseUrl: process.env.SPECTRON_BASE_URL,
+    apiKey: process.env.SPECTRON_AGENT_KEY,
+});
+
+const session = await client.sessions.create({
+    scope: { org: "acme", user: "researcher-alice", project: "quantum-computing-survey" },
+    metadata: { day: 3, focus: "error correction" },
+});
+
+const profile = await session.profile();
+```
+
+## Storing research findings
+
+As the agent discovers new information, store findings as structured memory:
+
+```python
+# Store a factual finding
+await session.remember(
+    content="Surface codes are the leading error correction approach for near-term quantum hardware. IBM and Google both use variants of surface codes in their 2024 roadmaps.",
+    memory_category="knowledge",
+)
+
+# Store a source reference
+await session.remember(
+    content="Preskill 2018 coined 'Quantum Volume' as a hardware-independent performance metric. Paper: arXiv:1801.00862",
+    memory_category="knowledge",
+)
+
+# Store an open question for follow-up
+await session.remember(
+    content="UNCLEAR: Whether topological qubits (Microsoft) will outpace surface codes before 2030. Need to check latest Microsoft Station Q publications.",
+    memory_category="uncertainties",
+)
+
+# Store a research directive
+await session.remember(
+    content="Always cross-reference vendor claims with peer-reviewed papers. IBM and Google press releases tend to overstate error rates.",
+    memory_category="instructions",
+)
+```
+
+## Mid-session recall
+
+When the user asks a question that might connect to earlier findings, use recall before generating an answer:
+
+```python
+async def answer_with_context(session, user_question: str) -> str:
+    # Retrieve relevant prior findings
+    context = await session.recall(
+        query=user_question,
+        top_k=5,
+    )
+    
+    prompt = f"""Research context from previous sessions:
+{context.formatted}
+
+User question: {user_question}
+
+Answer based on prior research, noting any gaps or uncertainties."""
+    
+    return await llm.complete(prompt)
+```
+
+## Reflection at session end
+
+At the end of each session, use `reflect` to distil findings into consolidated summaries:
+
+```python
+# Distil findings from this session
+await session.reflect(
+    query="What were the key findings, open questions, and next steps from today's research?",
+    persist=True,  # Store the synthesis as a new memory
+)
+
+# Also distil any conflicts found
+await session.reflect(
+    query="Were there any contradictions found between sources? What needs verification?",
+    persist=True,
+)
+```
+
+The `persist=True` flag stores the reflection output as a `knowledge` category memory item, scoped to the project. Future sessions will see these consolidated summaries in their profile.
+
+## Knowledge base ingestion
+
+Research papers and documents should be ingested into Layer 0 for high-fidelity retrieval:
+
+```python
+# Using the management client to ingest a PDF
+management = client.management
+
+await management.contexts.ingest(
+    context_id="research-ctx",
+    content=open("quantum-error-correction.pdf", "rb").read(),
+    title="Quantum Error Correction: Surface Codes and Beyond",
+    mime_type="application/pdf",
+    scope={"org": "acme", "project": "quantum-computing-survey"},
+    tags=["error-correction", "surface-codes"],
+)
+```
+
+After ingestion, the agent can retrieve from Layer 0 via `knowledge_search` (MCP) or `session.knowledge_search()` (SDK):
+
+```python
+results = await session.knowledge_search(
+    query="surface code fidelity thresholds 2024",
+    top_k=3,
+    mode="hybrid_graph",
+)
+```
+
+## Session metadata and continuity
+
+Tag sessions with metadata to make them queryable and to track progress:
+
+```python
+session = await client.sessions.create(
+    scope={"org": "acme", "project": "quantum-survey"},
+    metadata={
+        "day": 4,
+        "focus": "topological qubits",
+        "sources_reviewed": 0,
+        "citations_found": 0,
+    },
+)
+
+# Update metadata during the session
+await session.update_metadata({
+    "sources_reviewed": 12,
+    "citations_found": 34,
+})
+```
+
+## State and diffs between sessions
+
+Use `get_state()` to inspect the accumulated knowledge at any point:
+
+```python
+state = await session.get_state()
+print(f"Entities: {len(state.entities)}")
+print(f"Relations: {len(state.relations)}")
+print(f"Open uncertainties: {len(state.uncertainties)}")
+```
+
+Use `diff_since()` to see what changed since the previous session:
+
+```python
+# Get what changed since session ID from yesterday
+diff = await session.diff_since(session_id="sess_prev_day")
+print(f"New facts: {len(diff.added_attributes)}")
+print(f"Revised facts: {len(diff.superseded_attributes)}")
+print(f"Resolved uncertainties: {len(diff.resolved_uncertainties)}")
+```
+
+## Long-term research patterns
+
+For research spanning weeks or months, consider:
+
+**Weekly reflection**: Run a dedicated reflection pass each week that synthesises all findings into a structured overview. Tag it with the week number for easy retrieval.
+
+**Uncertainty triage**: Regularly recall all `uncertainties` memories and close them out — either confirming them with sources and converting to `knowledge`, or marking them as `forget` once resolved.
+
+**Scope pruning**: When a research sub-topic is complete, use `memory.forget(scope={..., "project": "sub-topic"})` to prune stale context that would otherwise add noise to future recalls.
