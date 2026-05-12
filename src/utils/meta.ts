@@ -1,4 +1,5 @@
 import type { NavSection } from "~/utils/navigation";
+import { PRODUCT_META, type ProductId } from "~/utils/product";
 
 export const DEFAULT_META_TITLE =
     "SurrealDB | The ultimate multi-model database for tomorrow's applications";
@@ -7,8 +8,8 @@ export const DEFAULT_META_DESCRIPTION =
 
 export const BASE_URL = "https://surrealdb.com/docs";
 
-export function getSuffixedMetaTitle(title: string) {
-    return `${title} | SurrealDB Docs`;
+export function getSuffixedMetaTitle(title: string, productId: ProductId = "surrealdb") {
+    return `${title} | ${PRODUCT_META[productId].label}`;
 }
 
 /**

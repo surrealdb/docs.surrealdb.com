@@ -6,6 +6,7 @@ import { useConfig } from "vike-react/useConfig";
 import { resolveMarkdown } from "./markdown";
 import { getSuffixedMetaTitle } from "./meta";
 import { buildNavigation, type NavSection } from "./navigation";
+import { getProductFromPath } from "./product";
 
 export interface PageData {
     ast: Root;
@@ -42,7 +43,10 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         throw render(404, "Not Found");
     }
 
-    const title = entry.metadata.title ? getSuffixedMetaTitle(entry.metadata.title) : undefined;
+    const productId = getProductFromPath(context.urlPathname);
+    const title = entry.metadata.title
+        ? getSuffixedMetaTitle(entry.metadata.title, productId)
+        : undefined;
     const description = "description" in entry.metadata ? entry.metadata?.description : undefined;
 
     config({

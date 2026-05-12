@@ -8,6 +8,8 @@ import {
 } from "@mantine/spotlight";
 import { Icon, iconSearch } from "@surrealdb/ui";
 import { type ChangeEventHandler, useCallback, useEffect, useRef, useState } from "react";
+import { usePageContext } from "vike-react/usePageContext";
+import { getProductFromPath } from "~/utils/product";
 import { RateLimitError, SearchError, type SearchResult, searchDocs } from "~/utils/search";
 import { SearchResultCard } from "./SearchResult";
 import classes from "./style.module.scss";
@@ -43,6 +45,8 @@ export function SearchDocs(props: UnstyledButtonProps) {
     const [rateLimitRemaining, setRateLimitRemaining] = useState(0);
     const abortController = useRef<AbortController | null>(null);
     const os = useOs();
+    const { urlPathname } = usePageContext();
+    const product = getProductFromPath(urlPathname);
 
     const openSearch = useCallback(() => {
         spotlight.open();
@@ -74,8 +78,12 @@ export function SearchDocs(props: UnstyledButtonProps) {
             abortController.current?.abort();
             abortController.current = controller;
 
-            const results = await searchDocs(value, controller.signal);
-            window.dataLayer?.push({ event: "search_query", search_term: value });
+            const results = await searchDocs(value, controller.signal, product);
+            window.dataLayer?.push({
+                event: "search_query",
+                search_term: value,
+                search_product: product,
+            });
 
             setRateLimitRemaining(0);
             setActions(mapResultsToActions(results, value));

@@ -1,4 +1,9 @@
-import { handleSearch, MAX_QUERY_LENGTH, normaliseQuery } from "@surrealdb/docs-search-common";
+import {
+    handleSearch,
+    MAX_QUERY_LENGTH,
+    normaliseQuery,
+    type SearchResult,
+} from "@surrealdb/docs-search-common";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const CORS_HEADERS: Record<string, string> = {
@@ -14,6 +19,31 @@ const CORS_HEADERS: Record<string, string> = {
 // while revalidating (24 h) so most requests never hit the
 // serverless function or the OpenAI embedding API.
 const CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400";
+
+// Products are isolated at the URL prefix level: every Spectron
+// page lives under /docs/spectron, every SurrealDB page does not.
+// We filter results in the API wrapper so the search index can
+// stay shared while UX is fully product-scoped.
+const SPECTRON_PATH_PREFIX = "/docs/spectron";
+
+const PRODUCTS = ["surrealdb", "spectron"] as const;
+type ProductId = (typeof PRODUCTS)[number];
+
+function isProductId(value: string): value is ProductId {
+    return (PRODUCTS as readonly string[]).includes(value);
+}
+
+function isSpectronUrl(url: string | undefined): boolean {
+    if (!url) return false;
+    return url === SPECTRON_PATH_PREFIX || url.startsWith(`${SPECTRON_PATH_PREFIX}/`);
+}
+
+function filterByProduct(results: SearchResult[], product: ProductId): SearchResult[] {
+    if (product === "spectron") {
+        return results.filter((result) => isSpectronUrl(result.url));
+    }
+    return results.filter((result) => !isSpectronUrl(result.url));
+}
 
 function setCors(res: VercelResponse) {
     for (const [key, value] of Object.entries(CORS_HEADERS)) {
@@ -53,24 +83,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
     }
 
+    const rawProduct = typeof req.query.product === "string" ? req.query.product : "";
+    const product: ProductId = isProductId(rawProduct) ? rawProduct : "surrealdb";
+
     // Redirect to the canonical query so every spelling variant
     // ("How to SELECT?", "how to select", "select") resolves to
-    // a single CDN cache entry.
+    // a single CDN cache entry. Product is part of the cache key
+    // so each product gets its own cached response.
     //
     // Location must be `/docs/api/search`, not `/api/search`: the browser
     // resolves relative URLs against `surrealdb.com`, and `/api/search` is
     // not served by the docs app on that host (only `/docs/...` is proxied).
     if (query !== raw) {
+        const params = new URLSearchParams({ q: query, product });
         res.writeHead(302, {
             ...CORS_HEADERS,
-            Location: `/docs/api/search?q=${encodeURIComponent(query)}`,
+            Location: `/docs/api/search?${params}`,
             "Cache-Control": CACHE_CONTROL,
         });
         return res.end();
     }
 
     try {
-        const results = await handleSearch(query);
+        const allResults = await handleSearch(query);
+        const results = filterByProduct(allResults, product);
         res.setHeader("Cache-Control", CACHE_CONTROL);
         return res.status(200).json({ success: true, results });
     } catch (err) {
