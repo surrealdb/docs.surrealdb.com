@@ -30,7 +30,7 @@ function SidebarNavLink({ link }: { link: NavLinkItem }) {
 
         return (
             <NavLink
-                className={classes.navItem}
+                className={classes.sidebarNavLink}
                 label={link.title}
                 href={`/docs${link.path}`}
                 childrenOffset={16}
@@ -38,7 +38,6 @@ function SidebarNavLink({ link }: { link: NavLinkItem }) {
                 aria-expanded={expanded}
                 aria-current={active ? "page" : undefined}
                 active={active}
-                variant="light"
                 py="xs"
             >
                 {link.children.map((child) => (
@@ -53,10 +52,9 @@ function SidebarNavLink({ link }: { link: NavLinkItem }) {
 
     return (
         <NavLink
-            className={classes.navItem}
+            className={classes.sidebarNavLink}
             label={link.title}
             href={`/docs${link.path}`}
-            variant="light"
             aria-current={active ? "page" : undefined}
             active={active}
             py="xs"
@@ -74,8 +72,7 @@ function SidebarSection({ section }: { section: NavSection }) {
                 gap="sm"
                 mt="lg"
                 mb="sm"
-                px="sm"
-                className={classes.sidebarSectionHeader}
+                px="md"
             >
                 {icon && (
                     <Icon
@@ -86,7 +83,7 @@ function SidebarSection({ section }: { section: NavSection }) {
                 <Text
                     component="h3"
                     fz="md"
-                    fw="bold"
+                    fw={600}
                 >
                     {section.title}
                 </Text>
@@ -132,7 +129,7 @@ export function Sidebar({ navigation, versionSelector, ...props }: SidebarProps)
             <Stack
                 gap="lg"
                 component="nav"
-                px="lg"
+                px="md"
                 flex={1}
                 style={{ overflowY: "auto" }}
             >
