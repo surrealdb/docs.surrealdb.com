@@ -9,7 +9,7 @@ export const pageSchema = strictObject({
     title: string().optional(),
     description: string().optional(),
     position: number().optional(),
-    icon: _enum(SECTION_ICONS_NAMES).optional()
+    icon: _enum(SECTION_ICONS_NAMES).optional(),
 });
 
 export type PageSchema = output<typeof pageSchema>;

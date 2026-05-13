@@ -22,7 +22,7 @@ export interface ProductMeta {
 export const PRODUCT_META: Record<ProductId, ProductMeta> = {
     surrealdb: {
         id: "surrealdb",
-        label: "SurrealDB Docs",
+        label: "SurrealDB",
         shortLabel: "SurrealDB",
         description: "Database, query language, SDKs, and tooling.",
         homeHref: "/docs/",
@@ -30,7 +30,7 @@ export const PRODUCT_META: Record<ProductId, ProductMeta> = {
     },
     spectron: {
         id: "spectron",
-        label: "Spectron Docs",
+        label: "Spectron",
         shortLabel: "Spectron",
         description: "Persistent agent memory built on knowledge graphs.",
         homeHref: "/docs/spectron",

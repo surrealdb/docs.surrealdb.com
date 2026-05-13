@@ -49,10 +49,7 @@ function collectLinks(folder: FolderNode, baseUrl: string): Positioned<NavLink>[
 
             items.push({
                 value: {
-                    title:
-                        category?.metadata.title ??
-                        child.entry?.metadata.title ??
-                        child.name,
+                    title: category?.metadata.title ?? child.entry?.metadata.title ?? child.name,
                     path: href,
                     children: children.length > 0 ? children : undefined,
                 },
@@ -86,9 +83,7 @@ function buildSection(folder: FolderNode, baseUrl: string): Positioned<NavSectio
     if (folder.entry) {
         items.push({
             value: {
-                title:
-                    folder.entry.metadata.title ??
-                    folder.name,
+                title: folder.entry.metadata.title ?? folder.name,
                 path: join(baseUrl, folder.entry.slug),
             },
             position: folder.entry.metadata.position ?? 0,

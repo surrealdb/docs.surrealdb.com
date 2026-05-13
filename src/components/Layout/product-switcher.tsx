@@ -1,4 +1,4 @@
-import { Anchor, Box, Flex, Group, Menu, Stack, Text } from "@mantine/core";
+import { Anchor, Box, Flex, Group, Image, Menu, Stack, Text } from "@mantine/core";
 import { Icon, iconCheck, iconChevronDown, ThemedImage } from "@surrealdb/ui";
 import { useState } from "react";
 import { PRODUCT_ORDER, PRODUCTS, type ProductConfig, type ProductId } from "./products";
@@ -58,7 +58,6 @@ export function ProductSwitcher({ current }: ProductSwitcherProps) {
                 bg="obsidian.7"
                 p="xs"
             >
-                <Menu.Label className={classes.navLinkLabel}>Documentation</Menu.Label>
                 {PRODUCT_ORDER.map((id) => (
                     <ProductMenuItem
                         key={id}
@@ -88,12 +87,10 @@ function ProductMenuItem({ product, active }: ProductMenuItemProps) {
             p="sm"
             color="slate"
             leftSection={
-                <Box className={classes.productSwitcherIcon}>
-                    <Icon
-                        path={product.icon}
-                        size="lg"
-                    />
-                </Box>
+                <Image
+                    src={product.picto}
+                    w={32}
+                />
             }
             rightSection={
                 active ? (
@@ -105,28 +102,19 @@ function ProductMenuItem({ product, active }: ProductMenuItemProps) {
                 ) : null
             }
         >
-            <Stack gap={2}>
-                <Group
-                    align="center"
-                    gap="xs"
-                    wrap="nowrap"
-                >
-                    <Text
-                        fz="sm"
-                        fw={600}
-                        c="bright"
-                    >
-                        {product.label}
-                    </Text>
-                </Group>
-                <Text
-                    fz="xs"
-                    c="slate.3"
-                    lineClamp={2}
-                >
-                    {product.description}
-                </Text>
-            </Stack>
+            <Text
+                fw={600}
+                c="bright"
+            >
+                {product.label}
+            </Text>
+            <Text
+                c="slate.3"
+                lineClamp={2}
+                fz="xs"
+            >
+                {product.description}
+            </Text>
         </Menu.Item>
     );
 }
@@ -141,14 +129,6 @@ export function ProductSwitcherMobile({ current }: ProductSwitcherMobileProps) {
             component="section"
             aria-label="Switch documentation"
         >
-            <Text
-                component="div"
-                className={classes.navLinkLabel}
-                px="sm"
-                mb="xs"
-            >
-                Documentation
-            </Text>
             <Stack gap="xs">
                 {PRODUCT_ORDER.map((id) => {
                     const product = PRODUCTS[id];
@@ -169,12 +149,10 @@ export function ProductSwitcherMobile({ current }: ProductSwitcherMobileProps) {
                                 gap="md"
                                 p="sm"
                             >
-                                <Box className={classes.productSwitcherIcon}>
-                                    <Icon
-                                        path={product.icon}
-                                        size="lg"
-                                    />
-                                </Box>
+                                <Image
+                                    src={product.picto}
+                                    w={32}
+                                />
                                 <Stack
                                     gap={2}
                                     flex={1}

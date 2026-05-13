@@ -1,4 +1,4 @@
-import { iconQuery, iconSpectron } from "@surrealdb/ui";
+import { pictoSpectron, pictoSurrealDB } from "@surrealdb/ui";
 import DocsDark from "~/assets/img/logo/dark/docs.svg";
 import SpectronDark from "~/assets/img/logo/dark/spectron.svg";
 import LogoDark from "~/assets/img/logo/dark/surrealdb.svg";
@@ -23,7 +23,7 @@ export const PRODUCT_ORDER: ProductId[] = [...PRODUCT_ORDER_META];
  * stays focused on branding (icon, wordmark, label, home link).
  */
 export interface ProductConfig extends ProductMeta {
-    icon: string;
+    picto: string;
     wordmarkLight: string;
     wordmarkDark: string;
 }
@@ -31,13 +31,13 @@ export interface ProductConfig extends ProductMeta {
 export const PRODUCTS: Record<ProductId, ProductConfig> = {
     surrealdb: {
         ...PRODUCT_META.surrealdb,
-        icon: iconQuery,
+        picto: pictoSurrealDB,
         wordmarkLight: DocsLight,
         wordmarkDark: DocsDark,
     },
     spectron: {
         ...PRODUCT_META.spectron,
-        icon: iconSpectron,
+        picto: pictoSpectron,
         wordmarkLight: SpectronLight,
         wordmarkDark: SpectronDark,
     },
