@@ -91,8 +91,8 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                 heading: "Extending",
                 items: [
                     {
-                        label: "Agent memory context",
-                        href: "/docs/learn/context",
+                        label: "Spectron",
+                        href: "/docs/spectron",
                         description: "LLM memory and tool context patterns.",
                         icon: iconMemory,
                     },
