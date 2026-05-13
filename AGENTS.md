@@ -36,10 +36,10 @@ config.
 
 There are two kinds of collections:
 
-| Kind | Schema | Collections |
-| ---- | ------------- | ---------------------------------------------------------------- |
-| Docs | `abstractDoc` | `doc-surrealdb`, `doc-cloud`, `doc-surrealist`, `doc-surrealml`, `doc-surrealkv`, `doc-surrealql`, `doc-integrations`, `doc-tutorials`, `doc-sdk-*` |
-| Labs | `labCollection` | `labs-items` |
+| Kind | Schema          | Collections                                                                                                                                         |
+| ---- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Docs | `abstractDoc`   | `doc-surrealdb`, `doc-cloud`, `doc-surrealist`, `doc-surrealml`, `doc-surrealkv`, `doc-surrealql`, `doc-integrations`, `doc-tutorials`, `doc-sdk-*` |
+| Labs | `labCollection` | `labs-items`                                                                                                                                        |
 
 Every `+Content.ts` follows the same pattern:
 
@@ -54,8 +54,8 @@ export const Content = {
 
 ### Schemas (in `src/content/config.ts`)
 
-- **`abstractDoc`** — `title`, `description`, `sidebar_position`,
-  `sidebar_label`, `no_page_headings`, `no_sidebar` (all optional, strict
+- **`abstractDoc`** — `title`, `description`, `position`,
+  `no_page_headings`, `no_sidebar` (all optional, strict
   object)
 - **`labCollection`** — `title` (required), `url`, `category`, `author`,
   `topics`, `languages`
@@ -75,8 +75,8 @@ prefixes:
 
 1. Create a `.md` file in the appropriate `src/content/<collection>/` folder.
 2. Add YAML frontmatter matching the collection's schema.
-3. For docs, sidebar ordering uses `sidebar_position` in frontmatter and
-   `_category_.json` files in subdirectories.
+3. For docs, sidebar ordering uses `position` in frontmatter and
+   `__category.json` files in subdirectories.
 
 ### Data loading pattern (`+data.ts`)
 
@@ -108,10 +108,10 @@ entries sorted by title.
 - `getBreadcrumbs` — breadcrumbs are sidebar-based, not collection-hierarchy
   based
 - `getAdjacentEntries` — prev/next navigation follows sidebar tree order with
-  `_category_.json`, not a simple metadata sort
+  `__category.json`, not a simple metadata sort
 - `getEntryUrl` — collection names (`doc-surrealdb`) don't match URL paths
   (`/surrealdb`); the project uses `urlForCollection` for mapping
-- `getCollectionTree` — sidebar uses `_category_.json` for structure
+- `getCollectionTree` — sidebar uses `__category.json` for structure
 
 ### Rendering
 
@@ -128,7 +128,7 @@ an AST consumed by `RenderMarkdown`. The pipeline lives in
 ### Sidebar generation
 
 `getSidebarItemsFromCollection` in `src/utils/sidebar.ts` builds nested sidebar
-trees from `getCollection(id)` plus `_category_.json` files loaded via
+trees from `getCollection(id)` plus `__category.json` files loaded via
 `getCategories` from `src/lib/categories.ts`.
 
 ### Prerendering

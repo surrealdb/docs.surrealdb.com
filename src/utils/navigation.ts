@@ -50,9 +50,7 @@ function collectLinks(folder: FolderNode, baseUrl: string): Positioned<NavLink>[
             items.push({
                 value: {
                     title:
-                        category?.metadata.sidebar_label ??
                         category?.metadata.title ??
-                        child.entry?.metadata.sidebar_label ??
                         child.entry?.metadata.title ??
                         child.name,
                     path: href,
@@ -65,7 +63,7 @@ function collectLinks(folder: FolderNode, baseUrl: string): Positioned<NavLink>[
 
             items.push({
                 value: {
-                    title: metadata.sidebar_label ?? metadata.title ?? child.name,
+                    title: metadata.title ?? child.name,
                     path: join(baseUrl, slug),
                 },
                 position: metadata.position ?? 0,
@@ -89,7 +87,6 @@ function buildSection(folder: FolderNode, baseUrl: string): Positioned<NavSectio
         items.push({
             value: {
                 title:
-                    folder.entry.metadata.sidebar_label ??
                     folder.entry.metadata.title ??
                     folder.name,
                 path: join(baseUrl, folder.entry.slug),
@@ -100,7 +97,7 @@ function buildSection(folder: FolderNode, baseUrl: string): Positioned<NavSectio
 
     return {
         value: {
-            title: category?.metadata.sidebar_label ?? category?.metadata.title ?? folder.name,
+            title: category?.metadata.title ?? folder.name,
             icon: category?.metadata.icon,
             links: sortByPosition(items),
         },
@@ -127,7 +124,7 @@ export function buildNavigation(id: string, baseUrl?: string): NavSection[] {
     if (root.entry) {
         rootLinks.push({
             value: {
-                title: root.entry.metadata.sidebar_label ?? root.entry.metadata.title ?? "",
+                title: root.entry.metadata.title ?? "",
                 path: join(base),
             },
             position: root.entry.metadata.position ?? 0,
@@ -144,7 +141,7 @@ export function buildNavigation(id: string, baseUrl?: string): NavSection[] {
 
             rootLinks.push({
                 value: {
-                    title: metadata.sidebar_label ?? metadata.title ?? child.name,
+                    title: metadata.title ?? child.name,
                     path: join(base, slug),
                 },
                 position: metadata.position ?? 0,
@@ -153,7 +150,7 @@ export function buildNavigation(id: string, baseUrl?: string): NavSection[] {
     }
 
     const rootSection: NavSection = {
-        title: rootCategory?.metadata.sidebar_label ?? rootCategory?.metadata.title ?? "Overview",
+        title: rootCategory?.metadata.title ?? "Overview",
         icon: rootCategory?.metadata.icon,
         links: sortByPosition(rootLinks),
     };

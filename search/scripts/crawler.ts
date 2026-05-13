@@ -34,8 +34,8 @@ import type { CrawledEntry, CrawledPage, CrawledSection } from "../src/types";
 const CONTENT_DIR = join(import.meta.dirname, "../../src/content");
 
 interface CategoryMeta {
-    sidebar_label: string;
-    sidebar_position: number;
+    title: string;
+    position: number;
 }
 
 // Versioned SDK collections (e.g. "doc-sdk-javascript-1x") are
@@ -66,7 +66,7 @@ async function* walkMarkdown(dir: string): AsyncGenerator<string> {
 }
 
 /**
- * Loads _category_.json files from a collection directory tree.
+ * Loads __category.json files from a collection directory tree.
  * These provide sidebar labels used to build breadcrumbs
  * (e.g. "SurrealQL > Statements > SELECT"). The root category
  * is keyed by "" and subdirectory categories by their relative
@@ -76,10 +76,10 @@ async function loadCategoryMap(collectionDir: string): Promise<Map<string, Categ
     const categories = new Map<string, CategoryMeta>();
 
     try {
-        const raw = await readFile(join(collectionDir, "_category_.json"), "utf-8");
+        const raw = await readFile(join(collectionDir, "__category.json"), "utf-8");
         categories.set("", JSON.parse(raw) as CategoryMeta);
     } catch {
-        // no root _category_.json
+        // no root __category.json
     }
 
     async function scan(dir: string) {
@@ -89,7 +89,7 @@ async function loadCategoryMap(collectionDir: string): Promise<Map<string, Categ
             if (!entry.isDirectory()) continue;
 
             const subdir = join(dir, entry.name);
-            const catPath = join(subdir, "_category_.json");
+            const catPath = join(subdir, "__category.json");
 
             try {
                 const raw = await readFile(catPath, "utf-8");
@@ -97,7 +97,7 @@ async function loadCategoryMap(collectionDir: string): Promise<Map<string, Categ
                 const relPath = relative(collectionDir, subdir);
                 categories.set(relPath, meta);
             } catch {
-                // no _category_.json in this dir
+                // no __category.json in this dir
             }
 
             await scan(subdir);
@@ -224,7 +224,7 @@ function splitAtHeadings(
 // ──────────────────────────────────────────────────────────
 // Breadcrumb and URL construction
 //
-// Breadcrumbs are built from _category_.json sidebar labels
+// Breadcrumbs are built from __category.json sidebar labels
 // and the page title, producing strings like:
 //   "SurrealQL > Statements > DEFINE > TABLE"
 //
@@ -240,7 +240,7 @@ function buildBreadcrumb(
     categories: Map<string, CategoryMeta>,
     pageLabel: string,
 ): string {
-    const rootLabel = categories.get("")?.sidebar_label ?? collection;
+    const rootLabel = categories.get("")?.title ?? collection;
     const parts: string[] = [rootLabel];
 
     // Walk each segment of the slug to pick up intermediate
@@ -253,7 +253,7 @@ function buildBreadcrumb(
         const cat = categories.get(dirPath);
 
         if (cat) {
-            parts.push(cat.sidebar_label);
+            parts.push(cat.title);
         }
     }
 
@@ -362,7 +362,7 @@ export async function* crawl(): AsyncGenerator<CrawledEntry> {
             const slug = buildSlug(filePath, collectionDir);
             const ast = parseMarkdown(body);
             const pageUrl = buildUrl(collection, slug);
-            const pageLabel = parsed.sidebar_label ?? parsed.title ?? slug.split("/").pop() ?? "";
+            const pageLabel = parsed.title ?? slug.split("/").pop() ?? "";
             const breadcrumb = buildBreadcrumb(collection, slug, categories, pageLabel);
             const pageContent = astToPlainText(ast);
             const description = parsed.description ?? "";
