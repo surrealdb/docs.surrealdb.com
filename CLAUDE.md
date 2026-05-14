@@ -41,10 +41,10 @@ Some pages in this repo are **derived** from canonical documentation that lives 
 
 ### Observability
 
-The Observability section under `src/content/build/deployment/observability/` (and the cross-linked stub at `src/content/manage/enterprise/security/audit-logging.mdx`) is derived from:
+The Observability section under `src/content/build/deployment/observability/` (and the cross-linked stub at `src/content/manage/enterprise/security/audit-logging.mdx`) is derived from two files that **both live in the private `surrealdb/surrealdb-private` repository** — that monorepo is the canonical source of truth for the observability surface, even for the Community-edition content:
 
-- **Community surface** — `surrealdb/doc/OBSERVABILITY.md` in the public `surrealdb/surrealdb` repository. Covers the `[C]` metrics, environment variables and access paths available in every edition.
-- **Enterprise surface** — `enterprise/doc/OBSERVABILITY.md` in the private `surrealdb/surrealdb-private` (Enterprise) repository. Adds the `[E]` content: SurrealDS metrics, audit log pipeline, slow-query log pipeline, hash chaining and the operator runbook.
+- **Community surface** — `surrealdb/doc/OBSERVABILITY.md` inside `surrealdb-private`. Covers the `[C]` metrics, environment variables and access paths available in every edition.
+- **Enterprise surface** — `enterprise/doc/OBSERVABILITY.md` inside `surrealdb-private`. Adds the `[E]` content: SurrealDS metrics, audit log pipeline, slow-query log pipeline, hash chaining and the operator runbook.
 
 When updating observability docs:
 
