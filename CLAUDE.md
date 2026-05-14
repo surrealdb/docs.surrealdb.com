@@ -53,6 +53,18 @@ When updating observability docs:
 3. Tag new-in-version items with `<Since v="..." />` and update the **Migration** section in `metrics.mdx` if names change.
 4. If an upstream change adds a new metric, environment variable or audit event, mirror it here in the same release cycle.
 
+### Edition and Since markers
+
+`<Edition value="..." />` and `<Since v="..." />` must be placed in a paragraph **below** the heading, never on the heading line itself. The parser concatenates `text` and `inlineCode` children of a heading and slugifies the result; trailing JSX leaves a trailing space that github-slugger turns into a trailing hyphen, silently breaking every cross-link to that heading.
+
+```mdx
+### Audit log knobs
+
+<Edition value="enterprise" />
+
+Body text…
+```
+
 ## References
 
 - [Mantine](https://mantine.dev/llms.txt)
