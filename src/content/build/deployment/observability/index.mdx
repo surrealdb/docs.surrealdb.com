@@ -1,0 +1,213 @@
+---
+position: 0
+title: Observability
+description: "Metrics, telemetry, audit logs, slow-query logs, structured logging and tracing in SurrealDB Community and Enterprise."
+---
+
+# Observability
+
+SurrealDB ships a unified observability surface covering metrics, distributed tracing, structured logs, audit records and slow-query records. Metrics and traces are available in every edition; audit and slow-query record pipelines are added by the Enterprise composer. Every signal flows through the same OpenTelemetry SDK and can be exposed in two ways:
+
+- **Prometheus pull** on the built-in `/metrics` endpoint.
+- **OTLP push** to an OpenTelemetry collector over gRPC.
+
+Both pipelines can run together or separately, and disabling them is a single environment variable away.
+
+<Since v="v3.1.0" />
+
+The `surrealdb.*` metric namespace, the `PUBLIC_METRICS` allowlist, the audit-log pipeline and the slow-query log pipeline are new in SurrealDB 3.1. Operators upgrading from 3.0 should also read the [Migration from 3.0](/docs/build/deployment/observability/metrics#migration-from-30) section in the metrics reference.
+
+## Editions at a glance
+
+The community server publishes the full set of primary signal families. The Enterprise composer adds the SurrealDS cluster metrics, the audit and slow-query log pipelines (with their own self-metrics), and the reserved per-tenant rollup scope.
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Capability</th>
+            <th scope="col">Community</th>
+            <th scope="col">Enterprise</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Capability">Prometheus <code>/metrics</code> endpoint</td>
+            <td scope="row" data-label="Community"><Edition value="community" /></td>
+            <td scope="row" data-label="Enterprise"><Edition value="enterprise" /></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Capability">OTLP push (metrics, logs, traces)</td>
+            <td scope="row" data-label="Community"><Edition value="community" /></td>
+            <td scope="row" data-label="Enterprise"><Edition value="enterprise" /></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Capability">Primary signal families (statement, query, transaction, RPC, auth, session, network, HTTP, live query, slow-query counter, GraphQL, MCP, storage)</td>
+            <td scope="row" data-label="Community"><Edition value="community" /></td>
+            <td scope="row" data-label="Enterprise"><Edition value="enterprise" /></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Capability">Public metrics allowlist for anonymous scrapers</td>
+            <td scope="row" data-label="Community"><Edition value="community" /></td>
+            <td scope="row" data-label="Enterprise"><Edition value="enterprise" /></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Capability">SurrealDS cluster metrics (<code>surrealdb.ds.*</code>)</td>
+            <td scope="row" data-label="Community">—</td>
+            <td scope="row" data-label="Enterprise"><Edition value="enterprise" /></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Capability">Audit log records (file sink + optional OTel logs)</td>
+            <td scope="row" data-label="Community">—</td>
+            <td scope="row" data-label="Enterprise"><Edition value="enterprise" /></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Capability">Slow-query log records (file sink + optional OTel logs)</td>
+            <td scope="row" data-label="Community">—</td>
+            <td scope="row" data-label="Enterprise"><Edition value="enterprise" /></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Capability">Hash-chained, tamper-evident records</td>
+            <td scope="row" data-label="Community">—</td>
+            <td scope="row" data-label="Enterprise"><Edition value="enterprise" /></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Capability">Three-pass redaction (literal, identifier, regex)</td>
+            <td scope="row" data-label="Community">—</td>
+            <td scope="row" data-label="Enterprise"><Edition value="enterprise" /></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Capability">Per-tenant rollup scope (<code>surrealdb.tenant</code>) <em>(reserved)</em></td>
+            <td scope="row" data-label="Community">—</td>
+            <td scope="row" data-label="Enterprise"><Edition value="enterprise" /></td>
+        </tr>
+    </tbody>
+</table>
+
+Edition is also carried on the OTel `Resource` via the `service.edition` attribute (`community` or `enterprise`), so dashboards can group or filter on it without hard-coding metric scopes.
+
+## Quickstart
+
+<Tabs>
+<TabItem label="Prometheus pull">
+
+The `/metrics` endpoint is mounted by default. Anonymous scrapers receive only the six metrics on the [public allowlist](/docs/build/deployment/observability/metrics#public-metrics-allowlist); root credentials unlock the full surface.
+
+```bash
+# Start the server (Community example)
+surreal start --user root --pass root memory
+
+# Anonymous scrape — public allowlist only
+curl http://127.0.0.1:8000/metrics
+
+# Operator scrape — full surface, including labelled families
+curl -u root:root http://127.0.0.1:8000/metrics
+```
+
+To turn the endpoint off entirely:
+
+```bash
+SURREAL_METRICS_ENABLED=false surreal start ...
+# /metrics now returns 404
+```
+
+</TabItem>
+<TabItem label="OTLP push">
+
+OTLP push targets any OpenTelemetry collector. SurrealDB exports metrics, logs (including audit and slow-query records when opted in) and traces over gRPC, using native-TLS roots when the endpoint is HTTPS.
+
+```bash
+SURREAL_TELEMETRY_PROVIDER=otlp \
+OTEL_EXPORTER_OTLP_ENDPOINT="http://my-collector.monitoring.svc.cluster.local:4317" \
+surreal start ...
+```
+
+To selectively disable parts of the OTLP pipeline:
+
+```bash
+SURREAL_TELEMETRY_DISABLE_METRICS=true   # OTLP metrics off; logs + traces still push
+SURREAL_TELEMETRY_DISABLE_TRACING=true   # OTLP traces off; metrics + logs still push
+```
+
+Audit and slow-query records flow over OTLP **only when explicitly opted in** per pipeline via `SURREAL_AUDIT_OTEL_EXPORT=true` / `SURREAL_SLOW_QUERY_OTEL_EXPORT=true`. The local file sink remains the primary path for compliance ingestion.
+
+</TabItem>
+</Tabs>
+
+## What's new in 3.1
+
+<Since v="v3.1.0" />
+
+- A reworked metric namespace — every instrument is now `surrealdb.*`, grouped by signal family (statement, query, transaction, RPC, …). Names from 3.0 are mapped in the [Migration table](/docs/build/deployment/observability/metrics#migration-from-30).
+- **Dual access paths.** Prometheus pull on `/metrics` and OTLP push run side-by-side. Both pipelines can be toggled independently.
+- **Public metrics allowlist (`PUBLIC_METRICS`).** Six low-sensitivity gauges are safe to expose anonymously; the rest require root credentials.
+- **Audit log pipeline.** <Edition value="enterprise" /> Durable NDJSON file sink with size-based rotation, tunable fsync cadence, optional hash chaining for tamper-evidence, and three-pass redaction.
+- **Slow-query log pipeline.** <Edition value="enterprise" /> Mirrors the audit pipeline, with a configurable duration threshold and the slow-query counter metric.
+- **SurrealDS cluster metrics.** <Edition value="enterprise" /> Around thirty instruments covering network, consensus, view changes, recovery and garbage collection.
+- **OpenTelemetry alignment.** Standard semantic-convention attribute keys (`http.request.method`, `http.route`, `http.response.status_code`, `db.namespace`, `db.user`) replace ad-hoc keys.
+
+## Where to go next
+
+<Boxes>
+    <IconBox
+        title="Metrics reference"
+        description="Access paths, label catalogue, every metric grouped by signal family, and the 3.0 → 3.1 migration table."
+        href="/docs/build/deployment/observability/metrics"
+    />
+    <IconBox
+        title="Configuration reference"
+        description="All telemetry, audit log and slow-query log environment variables, plus recommended configurations for local, production and multi-tenant deployments."
+        href="/docs/build/deployment/observability/configuration"
+    />
+    <IconBox
+        title="Audit logging"
+        description="Enterprise audit log pipeline: events captured, record shape, rotation, hash chaining and redaction."
+        href="/docs/build/deployment/observability/audit-logging"
+    />
+    <IconBox
+        title="Slow-query logging"
+        description="Enterprise slow-query log pipeline: how a query qualifies, record shape and pipeline self-metrics."
+        href="/docs/build/deployment/observability/slow-query-logging"
+    />
+    <IconBox
+        title="Cloud monitoring"
+        description="The built-in monitoring dashboard, log retention and metrics views for SurrealDB Cloud instances."
+        href="/docs/build/deployment/surrealdb-cloud/operations/monitoring-overview"
+    />
+    <IconBox
+        title="Self-hosted monitoring"
+        description="Pairing the `/health` endpoint, Prometheus and Grafana with the observability surface for a self-hosted deployment."
+        href="/docs/manage/self-hosted/monitoring-and-observability"
+    />
+</Boxes>
+
+## Tokio console
+
+<Since v="v3.0.0" />
+
+The [tokio console](https://github.com/tokio-rs/console) tool can be attached to the server to observe the low-level async tasks for the database.
+
+To use it, [install the Cargo package manager for Rust](https://doc.rust-lang.org/cargo/getting-started/installation.html), run `cargo install --locked tokio-console` to install the console binary, then run `tokio-console` to connect.
+
+![A screenshot of the tokio console showing active SurrealDB tasks.](~/assets/img/surrealdb/reference-guide/tokio_console_1.png)
+
+![A screenshot of the tokio console showing poll times by percentile.](~/assets/img/surrealdb/reference-guide/tokio_console_2.png)
+
+The following environment variables manage the console:
+
+- `SURREAL_TOKIO_CONSOLE_ENABLED` — set to `true` to enable the console.
+- `SURREAL_TOKIO_CONSOLE_SOCKET_ADDR` — override the default address at `127.0.0.1:6669`.
+- `SURREAL_TOKIO_CONSOLE_RETENTION` — override the default `6s` (six seconds) [retention window](https://docs.rs/console-subscriber/0.4.1/console_subscriber/struct.Builder.html#method.retention) for completed events.
+
+## Structured log output
+
+SurrealDB exposes a number of CLI flags and environment variables for tuning the structured log output emitted by the server process. The full list is in the [`surreal start`](/docs/reference/cli/surrealdb-cli/commands/start) reference and the [environment variables](/docs/reference/cli/surrealdb-cli/environment-variables) catalogue. A short summary of the most useful flags:
+
+- `--log` — set the logging level (`info`, `warn`, `trace`, etc.).
+- `--log-format` — set the format (`text` or `json`).
+- `--log-socket` — send logs to a `host:port`.
+- `--log-file-enabled` — write logs to a file, paired with `--log-file-path`.
+- `--log-file-rotation` — rotation interval (`daily`, `hourly`, or `never`).
+- `--slow-log-threshold` — duration after which a query is logged as a slow query.
+- `--slow-log-param-allow` / `--slow-log-param-deny` — control which parameters are rendered before logging (for example, allowing `table_name` rewrites `SELECT * FROM $table_name` to `SELECT * FROM person` in the logs).
+
+The structured log output is separate from the [Enterprise audit log pipeline](/docs/build/deployment/observability/audit-logging) and from the [slow-query log pipeline](/docs/build/deployment/observability/slow-query-logging), which produce their own NDJSON records and (optionally) emit OTel logs.

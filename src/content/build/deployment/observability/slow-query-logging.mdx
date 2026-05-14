@@ -1,0 +1,114 @@
+---
+position: 4
+title: Slow-query logging
+description: "The Enterprise slow-query log pipeline: how a query qualifies, record shape, rotation, hash chaining, redaction and pipeline self-metrics."
+---
+
+# Slow-query logging <Edition value="enterprise" />
+
+<Since v="v3.1.0" />
+
+The slow-query log captures the full statement text and execution context for queries that cross a configurable duration threshold. It is part of SurrealDB Enterprise and is **off by default** — set `SURREAL_SLOW_QUERY_SINK=file`, `SURREAL_SLOW_QUERY_FILE_PATH` and `SURREAL_SLOW_QUERY_THRESHOLD_MS` to enable it.
+
+The slow-query pipeline is architecturally identical to the [audit log pipeline](/docs/build/deployment/observability/audit-logging) — same observer, same queue, same worker, same NDJSON file format, same optional OTel logs export, same hash chaining, same three-pass redaction. The intentional symmetry keeps operator runbooks short. The two pipelines differ in defaults and intent:
+
+- **Audit records are compliance data.** Default overflow policy is `block` (preserve at the cost of latency); typical configurations also enable hash chaining.
+- **Slow-query records are triage data.** Default overflow policy is `drop` (prefer dropping over busy-yielding the executor on a hot path). Hash chaining is rarely needed.
+
+The full set of configuration variables lives on the [configuration reference](/docs/build/deployment/observability/configuration#slow-query-log-knobs).
+
+## Relationship to the slow-query counter
+
+Two related instruments cover slow queries:
+
+- The `surrealdb_slow_query_total` counter (Community edition; see [metrics reference](/docs/build/deployment/observability/metrics#slow-query-counter--surrealdbslow_query)) increments for every statement above `SURREAL_SLOW_QUERY_METRIC_THRESHOLD_MS` (default 1000 ms). It is cheap and always-on when metrics are enabled.
+- The slow-query log records on this page capture the full statement text and context for queries above `SURREAL_SLOW_QUERY_THRESHOLD_MS` (no default — required when the sink is enabled). This is opt-in and writes to a file sink.
+
+The two thresholds are independent. Most deployments set the metric threshold at a high value (the counter is a sanity-check signal) and the log threshold lower (to capture the long tail of triage candidates).
+
+## How a query qualifies
+
+A statement is captured when its wall-clock duration is `≥ SURREAL_SLOW_QUERY_THRESHOLD_MS`. The pipeline only registers an observer when the sink is enabled, so the cost of slow-query capture is zero when `SURREAL_SLOW_QUERY_SINK=none` (the default).
+
+## Record shape
+
+Slow-query records share the audit envelope (`ts`, `event_type`, `outcome`, `duration_ms`, identity context, optional `sql`, optional hash chain fields) and additionally carry:
+
+- `statement_type` — the statement category (`select`, `update`, `create`, …).
+- `threshold_ms` — the threshold the query crossed, for forensic context.
+- `result_rows` — number of rows produced (when applicable).
+
+The `event_type` field is always `slow_query`. A captured record looks like:
+
+```json
+{
+  "ts": "2026-03-04T10:23:11.482Z",
+  "event_type": "slow_query",
+  "outcome": "success",
+  "statement_type": "select",
+  "duration_ms": 512,
+  "threshold_ms": 250,
+  "result_rows": 1842,
+  "namespace": "acme",
+  "database": "prod",
+  "user": "svc_orders",
+  "sql": "SELECT * FROM orders WHERE status = 'shipped' FETCH customer"
+}
+```
+
+The `sql` field is included by default (`SURREAL_SLOW_QUERY_INCLUDE_SQL=true`). Throughput-sensitive deployments can set it to `false` to skip the per-statement `to_sql()` rendering, at the cost of losing SQL context on captures.
+
+## OpenTelemetry logs export
+
+When `SURREAL_SLOW_QUERY_OTEL_EXPORT=true` each captured record is also emitted as an OTel `LogRecord` on the SDK logger provider:
+
+- **Event name:** `surrealdb.slow_query.statement`.
+- **Severity:** `WARN` (fixed — slow path is degraded by definition).
+- **Body:** a short human-readable string, for example `"slow select 500ms (threshold 100ms)"`.
+- **Attributes:** the structured fields from the record envelope (`db.namespace`, `db.name`, `db.user`, `db.statement`, `surrealdb.statement_type`, `surrealdb.outcome`, `surrealdb.duration_ms`, `surrealdb.threshold_ms`, `surrealdb.result_rows`).
+
+Like the audit pipeline, OTel export is off by default. The file sink is the primary path.
+
+## Rotation and durability
+
+Same knobs as the audit pipeline, prefixed `SURREAL_SLOW_QUERY_*`:
+
+- File mode `0600` on Unix. The parent directory must exist or startup fails.
+- Size-based rotation at `SURREAL_SLOW_QUERY_FILE_ROTATE_BYTES` (default 256 MiB).
+- `SURREAL_SLOW_QUERY_FILE_ROTATE_KEEP` rotation generations retained (default `8`).
+- Mid-stream fsync cadence from `SURREAL_SLOW_QUERY_FSYNC_EVERY` (default `0`). Rotation and graceful shutdown always fsync regardless.
+
+## Hash chaining
+
+Identical to the audit pipeline. `SURREAL_SLOW_QUERY_HASH_CHAIN=true` adds `prev_hash` / `hash` SHA-256 fields and requires `SURREAL_SLOW_QUERY_FSYNC_EVERY=1`. Most operators leave hash chaining off for slow-query data — the pipeline is triage tooling, not a compliance record, and the per-record fsync cost is rarely worth paying for a `drop`-default pipeline. See the audit log [Hash chaining](/docs/build/deployment/observability/audit-logging#hash-chaining) section for the full semantics.
+
+## Redaction
+
+Identical to the audit pipeline, under `SURREAL_SLOW_QUERY_REDACT_LITERALS`, `SURREAL_SLOW_QUERY_REDACT_TABLES` and `SURREAL_SLOW_QUERY_REDACT_REGEX`. Three layered passes run synchronously on the executor thread before the record reaches the queue. See [Redaction](/docs/build/deployment/observability/audit-logging#redaction) on the audit log page for the full mechanics.
+
+## Overflow semantics
+
+The slow-query pipeline defaults to `drop` — a record that cannot be enqueued is discarded and the `surrealdb_slow_query_dropped` gauge increments. The reasoning is that the executor is on a hot path during a slow query (by definition), and busy-yielding it to preserve a triage record is a poor trade-off.
+
+Operators who need lossless slow-query capture can set `SURREAL_SLOW_QUERY_OVERFLOW=block`. The trade-off is the same as on the audit pipeline — the policy uses a bounded busy-yield loop, not a wall-clock time-bound, and offers no lossless guarantee on a `current_thread` runtime.
+
+Whichever policy is configured, alert on `rate(surrealdb_slow_query_dropped[5m]) > 0` and `rate(surrealdb_slow_query_append_errors[5m]) > 0` — both indicate records were lost.
+
+## Pipeline self-metrics
+
+Five observable gauges expose the live state of the pipeline, mirroring the audit equivalents:
+
+| Metric | Notes |
+| --- | --- |
+| `surrealdb_slow_query_records` | Cumulative records successfully enqueued. |
+| `surrealdb_slow_query_dropped` | Cumulative records dropped. **Alert on any non-zero rate.** |
+| `surrealdb_slow_query_queue_depth` | Records currently buffered between observer and worker. |
+| `surrealdb_slow_query_appended` | Cumulative records the worker wrote to the sink. |
+| `surrealdb_slow_query_append_errors` | Cumulative sink-write failures. **Alert on any non-zero rate.** |
+
+## Related references
+
+- [Configuration → Slow-query log knobs](/docs/build/deployment/observability/configuration#slow-query-log-knobs) — every slow-query environment variable.
+- [Audit logging](/docs/build/deployment/observability/audit-logging) — the sister pipeline for compliance data.
+- [Metrics reference → Slow-query counter](/docs/build/deployment/observability/metrics#slow-query-counter--surrealdbslow_query) — the Community-edition counter that bumps when a statement crosses `SURREAL_SLOW_QUERY_METRIC_THRESHOLD_MS`.
+- [Metrics reference → Slow-query pipeline self-metrics](/docs/build/deployment/observability/metrics#slow-query-log-pipeline-self-metrics) — the five gauges in the metric catalogue.

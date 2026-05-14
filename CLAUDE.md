@@ -35,6 +35,24 @@ All code should adhere to SOLID where applicable:
 
 All user-facing text must use British English spelling (`-ise`, `-our`, `-re`, `-ogue`).
 
+## Source of truth
+
+Some pages in this repo are **derived** from canonical documentation that lives in other SurrealDB repositories. When you edit a derived page, verify its content against the upstream file, and when upstream changes land, propagate them here.
+
+### Observability
+
+The Observability section under `src/content/build/deployment/observability/` (and the cross-linked stub at `src/content/manage/enterprise/security/audit-logging.mdx`) is derived from:
+
+- **Community surface** — `surrealdb/doc/OBSERVABILITY.md` in the public `surrealdb/surrealdb` repository. Covers the `[C]` metrics, environment variables and access paths available in every edition.
+- **Enterprise surface** — `enterprise/doc/OBSERVABILITY.md` in the private `surrealdb/surrealdb-private` (Enterprise) repository. Adds the `[E]` content: SurrealDS metrics, audit log pipeline, slow-query log pipeline, hash chaining and the operator runbook.
+
+When updating observability docs:
+
+1. Read both upstream files before making changes. The Enterprise file is the superset.
+2. Preserve the Community / Enterprise distinction using `<Edition value="..." />`.
+3. Tag new-in-version items with `<Since v="..." />` and update the **Migration** section in `metrics.mdx` if names change.
+4. If an upstream change adds a new metric, environment variable or audit event, mirror it here in the same release cycle.
+
 ## References
 
 - [Mantine](https://mantine.dev/llms.txt)
