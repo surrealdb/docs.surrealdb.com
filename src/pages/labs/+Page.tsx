@@ -93,7 +93,10 @@ export default function Page() {
         return items.filter((item) => {
             if (search) {
                 const q = search.toLowerCase();
-                if (!item.title.toLowerCase().includes(q)) {
+                const inTitle = item.title.toLowerCase().includes(q);
+                const desc = item.description?.toLowerCase() ?? "";
+                const inDesc = desc.length > 0 && desc.includes(q);
+                if (!inTitle && !inDesc) {
                     return false;
                 }
             }
@@ -140,7 +143,6 @@ export default function Page() {
                 />
                 <Text
                     fz="sm"
-                    c="dimmed"
                     maw={640}
                 >
                     Explore official and community examples, tools, libraries, and integrations
@@ -151,6 +153,7 @@ export default function Page() {
                         href="https://github.com/surrealdb/docs.surrealdb.com?tab=readme-ov-file#creating-a-new-lab"
                         target="_blank"
                         rel="noopener noreferrer"
+                        variant="vibrant"
                         fz="sm"
                     >
                         guide on creating a new Lab
@@ -183,29 +186,24 @@ export default function Page() {
                 />
 
                 {filtered.length > 0 ? (
-                    <SimpleGrid
-                        cols={{ base: 1, sm: 2, lg: 3 }}
-                        w="852px"
-                    >
-                        {filtered.map((item) => (
-                            <LabCard
-                                key={item.slug}
-                                item={item}
-                                isDark={isDark}
-                            />
-                        ))}
-                    </SimpleGrid>
-                ) : (
-                    <Box
-                        className={classes.noResults}
-                        w="852px"
-                    >
-                        <Text
-                            fz="lg"
-                            c="dimmed"
+                    <Box>
+                        <SimpleGrid
+                            className={classes.gridWrap}
+                            cols={{ base: 1, lg: 2 }}
+                            spacing="md"
                         >
-                            No labs found matching your criteria.
-                        </Text>
+                            {filtered.map((item) => (
+                                <LabCard
+                                    key={item.slug}
+                                    item={item}
+                                    isDark={isDark}
+                                />
+                            ))}
+                        </SimpleGrid>
+                    </Box>
+                ) : (
+                    <Box className={classes.noResults}>
+                        <Text fz="lg">No labs found matching your criteria.</Text>
                     </Box>
                 )}
             </Box>

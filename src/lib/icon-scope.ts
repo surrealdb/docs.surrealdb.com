@@ -4,6 +4,8 @@ const ICON_BASE = "~/assets/img/icon";
 
 type IconEntry = [variableName: string, theme: "light" | "dark", filename: string];
 
+// FIXME This is in dire need of a refactor and all images should be revised
+
 const ICON_ENTRIES: IconEntry[] = [
     ["LightRust", "light", "rust"],
     ["DarkRust", "dark", "rust"],

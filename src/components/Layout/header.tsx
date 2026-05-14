@@ -8,13 +8,39 @@ import {
     Divider,
     Flex,
     Group,
-    Image,
     Loader,
     NavLink as MantineNavLink,
     Menu,
     Stack,
+    Text,
 } from "@mantine/core";
-import { Icon, iconChevronDown, ThemedImage } from "@surrealdb/ui";
+import {
+    Icon,
+    iconAPI,
+    iconAuthKeyhole,
+    iconAutoFix,
+    iconBraces,
+    iconChevronDown,
+    iconChevronRight,
+    iconCloud,
+    iconFunction,
+    iconProgressClock,
+    iconQuery,
+    iconRelation,
+    iconRoutes,
+    iconSandbox,
+    iconServerSecure,
+    iconSidekick,
+    iconSpectron,
+    iconSurrealist,
+    iconTable,
+    iconText,
+    iconTransfer,
+    iconVideo,
+    iconWrench,
+    ThemedImage,
+} from "@surrealdb/ui";
+import { Fragment, useState } from "react";
 import { ClientOnly } from "vike-react/ClientOnly";
 import { usePageContext } from "vike-react/usePageContext";
 import DocsDark from "~/assets/img/logo/dark/docs.svg";
@@ -30,67 +56,235 @@ const SIGN_IN_URL =
 export interface NavItem {
     label: string;
     href: string;
-    icon?: string;
+}
+
+export interface NavMenuItem {
+    label: string;
+    href: string;
+    description: string;
+    icon: string;
+}
+
+export interface NavMenuSection {
+    heading?: string;
+    items: NavMenuItem[];
 }
 
 export interface NavMenuGroup {
     label: string;
-    items: NavItem[];
+    sections: NavMenuSection[];
 }
 
 export type NavEntry = NavItem | NavMenuGroup;
 
 function isMenuGroup(entry: NavEntry): entry is NavMenuGroup {
-    return "items" in entry;
+    return "sections" in entry;
+}
+
+function flattenMenuItems(group: NavMenuGroup): NavMenuItem[] {
+    return group.sections.flatMap((section) => section.items);
 }
 
 export const NAV_LINKS: NavEntry[] = [
     { label: "Start", href: "/docs/" },
     {
         label: "Learn",
-        items: [
-            { label: "Querying", href: "/docs/learn/querying" },
-            { label: "Schema management", href: "/docs/learn/schema-management" },
-            { label: "Data models", href: "/docs/learn/data-models" },
-            { label: "Security", href: "/docs/learn/security" },
-            { label: "Agent memory context", href: "/docs/learn/context" },
-            { label: "Extensions", href: "/docs/learn/extensions" },
+        sections: [
+            {
+                heading: "Database",
+                items: [
+                    {
+                        label: "Querying",
+                        href: "/docs/learn/querying",
+                        description: "SurrealQL and live result handling.",
+                        icon: iconQuery,
+                    },
+                    {
+                        label: "Schema management",
+                        href: "/docs/learn/schema-management",
+                        description: "Namespaces, tables, and indexes.",
+                        icon: iconTable,
+                    },
+                    {
+                        label: "Data models",
+                        href: "/docs/learn/data-models",
+                        description: "Documents, graphs, vectors, time series.",
+                        icon: iconBraces,
+                    },
+                    {
+                        label: "Security",
+                        href: "/docs/learn/security",
+                        description: "Authentication, scopes, and permissions.",
+                        icon: iconAuthKeyhole,
+                    },
+                ],
+            },
+            {
+                heading: "Extending",
+                items: [
+                    {
+                        label: "Agent memory context",
+                        href: "/docs/learn/context",
+                        description: "LLM memory and tool context patterns.",
+                        icon: iconSpectron,
+                    },
+                    {
+                        label: "Extensions",
+                        href: "/docs/learn/extensions",
+                        description: "Functions, procedures, and plugins.",
+                        icon: iconFunction, // TODO iconPuzzle
+                    },
+                ],
+            },
         ],
     },
     {
         label: "Build",
-        items: [
-            { label: "Deployment", href: "/docs/build/deployment" },
-            { label: "Migrating", href: "/docs/build/migrating" },
-            { label: "Embedding SurrealDB", href: "/docs/build/embedding" },
-            { label: "AI agents", href: "/docs/build/ai-agents" },
-            { label: "Integrations", href: "/docs/build/integrations" },
+        sections: [
+            {
+                heading: "Running",
+                items: [
+                    {
+                        label: "Deployment",
+                        href: "/docs/build/deployment",
+                        description: "Cloud, edge, and on-premises.",
+                        icon: iconRoutes,
+                    },
+                    {
+                        label: "Embedding SurrealDB",
+                        href: "/docs/build/embedding",
+                        description: "Native and WebAssembly embedding.",
+                        icon: iconSandbox,
+                    },
+                ],
+            },
+            {
+                heading: "Ecosystem",
+                items: [
+                    {
+                        label: "Migrating",
+                        href: "/docs/build/migrating",
+                        description: "Import data and schemas from elsewhere.",
+                        icon: iconTransfer,
+                    },
+                    {
+                        label: "Integrations",
+                        href: "/docs/build/integrations",
+                        description: "SDKs, frameworks, and connectors.",
+                        icon: iconRelation,
+                    },
+                ],
+            },
+            {
+                heading: "Intelligence",
+                items: [
+                    {
+                        label: "AI agents",
+                        href: "/docs/build/ai-agents",
+                        description: "Design patterns for AI agents.",
+                        icon: iconSidekick,
+                    },
+                ],
+            },
         ],
     },
     {
         label: "Manage",
-        items: [
-            { label: "SurrealDB Cloud", href: "/docs/manage/cloud" },
-            { label: "Self-hosted", href: "/docs/manage/self-hosted" },
-            { label: "Observability", href: "/docs/manage/observability" },
-            //{ label: "Enterprise Edition", href: "/docs/manage/enterprise" },
+        sections: [
+            {
+                heading: "Hosting",
+                items: [
+                    {
+                        label: "SurrealDB Cloud",
+                        href: "/docs/manage/cloud",
+                        description: "Hosted instances and Cloud console.",
+                        icon: iconCloud,
+                    },
+                    {
+                        label: "Self-hosted",
+                        href: "/docs/manage/self-hosted",
+                        description: "Clusters, backups, your infrastructure.",
+                        icon: iconServerSecure,
+                    },
+                ],
+            },
+            {
+                heading: "Operations",
+                items: [
+                    {
+                        label: "Schema migration",
+                        href: "/docs/manage/schema-migration",
+                        description: "Promote schema updates safely.",
+                        icon: iconProgressClock,
+                    },
+                ],
+            },
         ],
     },
     {
         label: "Explore",
-        items: [
-            { label: "Surrealist UI", href: "/docs/explore/surrealist" },
-            { label: "ML models", href: "/docs/explore/ml-models" },
-            { label: "Tutorials & demos", href: "/docs/explore/tutorials" },
-            { label: "Labs", href: "/docs/labs" },
+        sections: [
+            {
+                heading: "Tools",
+                items: [
+                    {
+                        label: "Surrealist UI",
+                        href: "/docs/explore/surrealist",
+                        description: "Official SurrealDB IDE.",
+                        icon: iconSurrealist,
+                    },
+                ],
+            },
+            {
+                heading: "Guides and resources",
+                items: [
+                    // {
+                    //     label: "ML models",
+                    //     href: "/docs/explore/ml-models",
+                    //     description: "Models inside SurrealDB.",
+                    //     icon: iconModuleML,
+                    // },
+                    {
+                        label: "Tutorials & demos",
+                        href: "/docs/explore/tutorials",
+                        description: "Hands-on walkthroughs and demos.",
+                        icon: iconVideo,
+                    },
+                    {
+                        label: "SurrealDB Labs",
+                        href: "/docs/labs",
+                        description: "Preview features and lab notes.",
+                        icon: iconAutoFix,
+                    },
+                ],
+            },
         ],
     },
     {
         label: "Reference",
-        items: [
-            { label: "Query language", href: "/docs/reference/query-language" },
-            { label: "CLI tools", href: "/docs/reference/cli" },
-            { label: "REST API", href: "/docs/reference/rest-api" },
+        sections: [
+            {
+                items: [
+                    {
+                        label: "Query language",
+                        href: "/docs/reference/query-language",
+                        description: "Syntax, statements, and builtins.",
+                        icon: iconText,
+                    },
+                    {
+                        label: "CLI tools",
+                        href: "/docs/reference/cli",
+                        description: "CLI install, backup, and ops.",
+                        icon: iconWrench,
+                    },
+                    {
+                        label: "REST API",
+                        href: "/docs/reference/rest-api",
+                        description: "HTTP API for queries and admin.",
+                        icon: iconAPI,
+                    },
+                ],
+            },
         ],
     },
 ];
@@ -104,7 +298,7 @@ function useIsNavActive(entry: NavEntry) {
     const pathname = normalizeHref(urlPathname);
 
     if (isMenuGroup(entry)) {
-        return entry.items.some((item) => {
+        return flattenMenuItems(entry).some((item) => {
             const href = normalizeHref(item.href);
             return pathname === href || pathname.startsWith(`${href}/`);
         });
@@ -121,6 +315,8 @@ function NavLink({ label, href }: NavItem) {
         <Anchor
             href={href}
             fz="sm"
+            py="sm"
+            px="xs"
             fw={500}
             underline="never"
             className={classes.navLink}
@@ -132,26 +328,36 @@ function NavLink({ label, href }: NavItem) {
     );
 }
 
-function NavDropdown({ label, items }: NavMenuGroup) {
-    const active = useIsNavActive({ label, items });
+function NavDropdown({ label, sections }: NavMenuGroup) {
+    const active = useIsNavActive({ label, sections });
+    const [hover, setHover] = useState(false);
 
     return (
         <Menu
-            shadow="md"
-            width={220}
+            opened={hover}
+            onChange={setHover}
+            shadow="lg"
+            offset={4}
+            width={250}
             position="bottom-start"
             withinPortal
             trigger="click-hover"
+            transitionProps={{
+                transition: "scale-y",
+            }}
         >
             <Menu.Target>
                 <Anchor
                     component="button"
                     fz="sm"
+                    py="sm"
+                    px="xs"
                     fw={500}
                     underline="never"
                     className={classes.navLink}
                     data-active={active || undefined}
                     aria-current={active ? "page" : undefined}
+                    mod={{ hover, active }}
                 >
                     <Flex
                         align="center"
@@ -161,31 +367,53 @@ function NavDropdown({ label, items }: NavMenuGroup) {
                         <Icon
                             path={iconChevronDown}
                             size="xs"
+                            className={classes.navLinkChevron}
                         />
                     </Flex>
                 </Anchor>
             </Menu.Target>
-            <Menu.Dropdown bdrs="xs">
-                {items.map((item) => (
-                    <Menu.Item
-                        key={item.href}
-                        component="a"
-                        href={item.href}
-                        bdrs="xs"
-                        p="sm"
-                        leftSection={
-                            item.icon ? (
-                                <Image
-                                    src={item.icon}
-                                    w={20}
-                                    h={20}
-                                    fit="contain"
-                                />
-                            ) : undefined
-                        }
-                    >
-                        {item.label}
-                    </Menu.Item>
+            <Menu.Dropdown
+                bdrs="xs"
+                bg="obsidian.7"
+            >
+                {sections.map((section, sectionIndex) => (
+                    <Fragment key={section.heading}>
+                        {section.heading && (
+                            <Menu.Label
+                                className={classes.navLinkLabel}
+                                mt={sectionIndex > 0 ? "lg" : undefined}
+                            >
+                                {section.heading}
+                            </Menu.Label>
+                        )}
+                        {section.items.map((item) => (
+                            <Menu.Item
+                                key={item.href}
+                                component="a"
+                                href={item.href}
+                                className={classes.navItem}
+                                bdrs="xs"
+                                p="sm"
+                                color="slate"
+                                leftSection={
+                                    <Icon
+                                        path={item.icon}
+                                        className={classes.navItemIcon}
+                                        opacity={1}
+                                        size="lg"
+                                    />
+                                }
+                                rightSection={
+                                    <Icon
+                                        path={iconChevronRight}
+                                        opacity={0.2}
+                                    />
+                                }
+                            >
+                                {item.label}
+                            </Menu.Item>
+                        ))}
+                    </Fragment>
                 ))}
             </Menu.Dropdown>
         </Menu>
@@ -243,7 +471,7 @@ export function Header({ opened, onToggle }: HeaderProps) {
                 <Group
                     component="ul"
                     align="center"
-                    gap="xl"
+                    gap="lg"
                     visibleFrom="lg"
                     mx="auto"
                     className={classes.navList}
@@ -303,44 +531,62 @@ export function MobileNav() {
     return (
         <Stack
             component="nav"
-            gap={0}
+            gap="xs"
             px="sm"
         >
-            {NAV_LINKS.map((entry) =>
-                isMenuGroup(entry) ? (
-                    <MantineNavLink
-                        key={entry.label}
-                        label={entry.label}
-                        childrenOffset={16}
-                    >
-                        {entry.items.map((item) => (
-                            <MantineNavLink
-                                key={item.href}
-                                label={item.label}
-                                href={item.href}
-                                component="a"
-                                leftSection={
-                                    item.icon ? (
-                                        <Image
-                                            src={item.icon}
-                                            w={20}
-                                            h={20}
-                                            fit="contain"
+            {NAV_LINKS.map((entry, i) => (
+                <>
+                    {i > 0 && <Divider />}
+                    {isMenuGroup(entry) ? (
+                        <MantineNavLink
+                            key={entry.label}
+                            label={entry.label}
+                            childrenOffset={16}
+                            bdrs="xs"
+                            py="sm"
+                        >
+                            {entry.sections.map((section, sectionIndex) => (
+                                <Fragment key={section.heading}>
+                                    <Text
+                                        component="div"
+                                        className={classes.navLinkLabel}
+                                        mt={sectionIndex > 0 ? "md" : undefined}
+                                    >
+                                        {section.heading}
+                                    </Text>
+                                    {section.items.map((item) => (
+                                        <MantineNavLink
+                                            key={item.href}
+                                            label={item.label}
+                                            href={item.href}
+                                            component="a"
+                                            py="sm"
+                                            bdrs="xs"
+                                            leftSection={
+                                                <Icon
+                                                    path={item.icon}
+                                                    className={classes.navItemIcon}
+                                                    opacity={1}
+                                                    size="md"
+                                                />
+                                            }
                                         />
-                                    ) : undefined
-                                }
-                            />
-                        ))}
-                    </MantineNavLink>
-                ) : (
-                    <MantineNavLink
-                        key={entry.href}
-                        label={entry.label}
-                        href={entry.href}
-                        component="a"
-                    />
-                ),
-            )}
+                                    ))}
+                                </Fragment>
+                            ))}
+                        </MantineNavLink>
+                    ) : (
+                        <MantineNavLink
+                            key={entry.href}
+                            label={entry.label}
+                            href={entry.href}
+                            component="a"
+                            bdrs="xs"
+                            py="sm"
+                        />
+                    )}
+                </>
+            ))}
         </Stack>
     );
 }
