@@ -212,6 +212,12 @@ export const NAV_LINKS: NavEntry[] = [
                 heading: "Operations",
                 items: [
                     {
+                        label: "Observability",
+                        href: "/docs/manage/observability",
+                        description: "Metrics, OTLP, logging, audit and slow-query pipelines.",
+                        icon: iconQuery,
+                    },
+                    {
                         label: "Schema migration",
                         href: "/docs/manage/schema-migration",
                         description: "Promote schema updates safely.",
