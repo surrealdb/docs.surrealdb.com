@@ -217,6 +217,12 @@ export const NAV_LINKS: NavEntry[] = [
                         description: "Promote schema updates safely.",
                         icon: iconProgressClock,
                     },
+                    {
+                        label: "Observability",
+                        href: "/docs/manage/observability",
+                        description: "Observing your SurrealDB instance.",
+                        icon: iconText,
+                    },
                 ],
             },
         ],
