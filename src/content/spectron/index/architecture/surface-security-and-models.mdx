@@ -1,0 +1,73 @@
+---
+position: 6
+title: Surface, models, security, and benchmarks
+description: "HTTP ingest and read verbs, integrations, model hooks, security properties, and evaluation harnesses."
+---
+
+# Surface, models, security, and benchmarks
+
+This page condenses the **operator-facing surface** described in the canonical Spectron architecture document: how to call the system, how models plug in, how security properties attach to stored state, and how claims are benchmarked.
+
+## Ingest and read (HTTP)
+
+Two ingest families and one read family sit over a **unified** substrate (same reconciler, same graph, same retrieval stack):
+
+| Verb | Purpose |
+| --- | --- |
+| `POST /v1/{ctx}/facts` | Text or triples, with `infer: "full" \| "triples" \| "preview" \| "none"`. Single-fact path. |
+| `POST /v1/{ctx}/facts/batch` | Bulk conversation ingest (`messages: [{ role, content, ts }, …]` plus an `extract` mode). Large dialogues are one HTTP call; idempotent with `Idempotency-Key`. |
+| `POST /v1/{ctx}/documents` | Byte ingest into the **multi-modal** pipeline (async). Extracted facts reconcile the same way as `/facts`. |
+| `POST /v1/{ctx}/query` | Unified read over facts and passages (`include`, `mode`, filters on `source` and scope). Thin formatters (for example `/context`-style helpers) compose on top. |
+| `POST /v1/{ctx}/chat` | **Spectron-as-agent**: stores the user message, retrieves via `/query`, calls the configured LLM, stores the assistant reply – all through existing primitives. SSE when `stream: true`. |
+
+Trace listing: `GET /v1/{ctx}/traces` and `GET /v1/{ctx}/traces/{id}` (with neighbourhood) back the graph-resident trace model described in [Traces and memory evolution](/docs/spectron/architecture/traces-and-evolution).
+
+For path-by-path HTTP details, payloads, and examples, start at [REST API](/docs/spectron/reference/rest-api).
+
+## Integrations
+
+Three integration shapes are first-class:
+
+- **Generated OpenAPI SDKs** – Python (`pip install surrealdb[spectron]`), TypeScript (`@surrealdb/spectron`), Kotlin, Swift – with streaming helpers where `/chat` / `/reflect` stream.
+- **MCP over HTTP** – tools wrapping the same REST handlers; shared auth; responses carry trace identifiers. See [MCP server](/docs/spectron/integrations/mcp-server/install) and [MCP tools reference](/docs/spectron/integrations/mcp-server/tools-reference).
+- **Harness adapters** – LangChain histories, Claude Code hooks, OpenAI Agents callbacks, Vercel AI SDK middleware, n8n/Zapier nodes – thin wrappers that flush conversations into `/facts/batch` so agents do not need bespoke glue.
+
+## Model configuration (five hooks)
+
+LLMs and embedders appear in five distinct pipeline roles – each independently configurable **per Context** (defaults) and **per call** (overrides), with the exact model, provider, tokens, and cost recorded on **`decision_trace`**, **`retrieval_trace`**, and **`response_trace`**:
+
+1. **Extraction** – turns and document chunks → typed entities, attributes, relations (usually a fast structured-output model).
+2. **Embedding** – vectors for entities, attributes, chunks; optional modality-native embedders behind the Context **IngestionProfile**.
+3. **Reconciliation** – optional disambiguation when structural signals are inconclusive.
+4. **Synthesis** – `/chat` and `/reflect` generation (often the most capable model).
+5. **Elaboration / consolidation** – background passes (typically cost-sensitive).
+
+Provider-agnostic OpenAI-compatible endpoints plus first-class Anthropic and Google clients; local inference is supported where deployments require it. **The embedding model used at write time must match read-time** within a Context (or schedule a re-embed).
+
+## Security and privacy (properties, not slogans)
+
+- **Encryption** – TLS 1.3 at the Spectron tier; at-rest encryption for the SurrealDB substrate in supported deployments; object-store originals under customer-managed keys where applicable. mTLS available for service-to-service hardening.
+- **Graph-resident audit** – writes emit `decision_trace`; ranked reads emit `retrieval_trace`; `/chat` and `/reflect` emit `response_trace`. Retention is policy-controlled per Context (for example long-lived decision traces versus time-bounded retrieval/response traces).
+- **Prompt-injection handling** – configurable **ingest-time** scanning on uploads and batched turns; **`spectron fsck --check injection`** for substrate-wide sweeps with operator follow-up (`forget` or overrides).
+- **Right to be forgotten** – `forget` removes derived rows, optionally originating turns or documents, and object-store originals by content hash; supersession history can be retained for audit or purged with an explicit flag. PII checks apply even when `infer: "none"`.
+
+Each guarantee is **queryable substrate state** (traces, configuration rows, provenance) – not a line in a README that cannot be verified.
+
+## Benchmarks
+
+Spectron is evaluated in-tree (for example **`spectron-eval`**) against conversational-memory and document-retrieval harnesses – including LongMemEval-style multi-session recall and update, LoCoMo-style long-dialogue synthesis, and StateBench-style consistency under change, plus document corpora with **factoid versus graph-heavy** splits so structural retrieval improvements do not mask regressions on either slice.
+
+Ranking, reconciliation, elaboration, and consolidation changes are expected to ship with **trace-attributed deltas**, not anecdotes.
+
+### Inspectability and operational signals
+
+Without any external metrics SaaS, operators can still derive:
+
+- **Cost** – aggregate tokens, model, latency from `response_trace`.
+- **Cache hit rate** – ratio of responses with `reused_from` set.
+- **Contradiction rate** – `uncertainty` rows per *N* writes by source-kind pairs.
+- **Source distribution** – attributes by `source.kind` over time.
+- **Supersession churn** – `decision_trace.superseded` per entity.
+- **Retrieval quality** – candidate set sizes and per-index agreement from `retrieval_trace`.
+
+CLI surfaces such as `spectron entities show`, `spectron entities history`, `spectron sessions …`, `spectron documents …`, `spectron recall "…" --json`, and `spectron inspect trace:…` expose live state and reconstruction paths – see also [Self-hosting observability](/docs/spectron/self-hosting/observability/tracing) if you run your own stack.

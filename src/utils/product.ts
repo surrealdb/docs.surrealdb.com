@@ -42,7 +42,7 @@ export const PRODUCT_META: Record<ProductId, ProductMeta> = {
  * Resolve which product a given URL belongs to. Drives top nav,
  * wordmark, search filter, and meta title suffix. Vike's
  * `urlPathname` does not include the `/docs` base, so this matches
- * against the in-app pathname (e.g. `/spectron/getting-started`).
+ * against the in-app pathname (e.g. `/spectron/quickstarts/surrealist-dashboard`).
  */
 export function getProductFromPath(urlPathname: string): ProductId {
     if (urlPathname === "/spectron" || urlPathname.startsWith("/spectron/")) {

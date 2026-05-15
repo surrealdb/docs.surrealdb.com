@@ -1,164 +1,67 @@
 ---
 position: 4
 title: How it works in five minutes
-description: "High-level flow from turns to structured memory and context."
+description: "From a message to structured substrate state – extraction, reconciliation, traces, and tiered reads."
 ---
 
 # How it works in five minutes
 
-This page walks through the complete lifecycle of a piece of memory in Spectron: from a message in a conversation to a structured fact stored in SurrealDB, retrievable by future sessions.
+This page sketches the lifecycle from a user message to **durable, queryable** state in SurrealDB, and how a later question is answered **cheaply first**, with expensive paths only when needed.
 
-## The basic flow
+For the canonical narrative (pillars, categories, hybrid retrieval, trace feedback, tri-temporal semantics), start with the [Spectron overview hub](/docs/spectron) and the [Architecture](/docs/spectron/architecture/principles-and-non-goals) pages.
+
+## End-to-end write path
 
 ```
-User message
-     │
-     ▼
-┌─────────────┐
-│   Session   │  Conversations are tracked as sessions,
-│    turn     │  each message is a turn
-└──────┬──────┘
-       │
-       ▼
-┌─────────────────────────────────────────┐
-│           Extraction pipeline           │
-│                                         │
-│  Stage 0: Pattern matching   (<5ms)     │
-│  Stage 1: Fast LLM         (200–500ms)  │
-│  Stage 2: Strong LLM          (1–3s)    │
-└──────────────────┬──────────────────────┘
-                   │ entities, attributes, relations
-                   ▼
-┌─────────────────────────────────────────┐
-│             Reconciliation              │
-│                                         │
-│  Entity dedup (exact + similarity ≥0.85)│
-│  Conflict detection → supersession      │
-│  Scope-aware coexistence                │
-│  L0 authority check                     │
-└──────────────────┬──────────────────────┘
-                   │
-                   ▼
-┌─────────────────────────────────────────┐
-│           SurrealDB (Layer 1)           │
-│                                         │
-│  entity, attribute, relation tables     │
-│  source_turn, valid_from, valid_until   │
-│  scope: {org, user, project, ...}       │
-└──────────────────┬──────────────────────┘
-                   │
-                   ▼
-             Future retrieval
+User message (or document bytes)
+        │
+        ▼
+   Session / ingest
+   (turn row or async document job)
+        │
+        ▼
+┌───────────────────────────────┐
+│  Extraction (pattern + LLM)   │  Typed entities, attributes, relations
+└───────────────┬───────────────┘
+                ▼
+┌───────────────────────────────┐
+│  Reconciliation (one function)│  Dedup, scope, supersession, uncertainty
+└───────────────┬───────────────┘
+                ▼
+┌───────────────────────────────┐
+│  SurrealDB substrate          │  Graph + vectors + docs + geometry
+│  + decision_trace nodes       │  Linked to considered / created rows
+└───────────────────────────────┘
 ```
 
-## Sessions and turns
+**Sessions and turns** remain the conversational unit of work – see [Sessions and turns](/docs/spectron/mental-model/sessions-and-turns). **Documents** enter the multi-modal pipeline instead of the turn path; extracted facts still reconcile identically – see [Knowledge](/docs/spectron/knowledge).
 
-Every conversation in Spectron is a **session**. Sessions are created explicitly — either by your application code or by the SDK when you call `session.chat()` or `session.turn()`. Each message pair (user input + agent response) is a **turn**.
+## Reconciliation in one sentence
 
-Turns are the atomic unit of memory. When a turn is submitted, the extraction pipeline runs synchronously before the response is returned. By the time the session replies, the memory has already been updated.
+New extractions never “win” by accident: they are merged, superseded, or rejected into **`uncertainty`** using the **same** rules whether the bytes came from a **turn** or a **document** (`source.kind` tells the story).
 
-```python
-import spectron
+## Read path: tiered resolution
 
-client = spectron.Client(api_key="...")
-session = client.sessions.create(context_id="acme-support")
+Reads do **not** always run hybrid vector search. `/query` (and `/chat` / `/reflect` paths that read through it) climb a **four-tier ladder** after a small query-understanding step:
 
-# Memory is extracted and stored synchronously on each turn
-response = session.turn(
-    user="My name is Priya and I'm the lead engineer on the Payments team.",
-    assistant="Nice to meet you, Priya!"
-)
-```
+1. **Structured lookup** when the question maps to a key in the graph.
+2. **Semantic response reuse** when a prior `response_trace` still cites **current** facts (`reused_from` links the new trace).
+3. **Hybrid retrieval + synthesis** – BM25, vectors, graph hops, keyword bridges, trace-derived features fused into one ranking, then LLM synthesis.
+4. **Broader sweep** only when tier 3 is thin or low-confidence.
 
-After this turn, Spectron has extracted and stored:
-- An entity: `person:priya`
-- Attributes: `name = "Priya"`, `role = "lead engineer"`, `team = "Payments"`
-- Linked to the current `source_turn`
+Each tier emits **`retrieval_trace`** metadata so you can see **which tier answered** and why. Full detail: [Coherence, retrieval, and cost tiers](/docs/spectron/architecture/coherence-retrieval-and-tiers).
 
-## The extraction pipeline
+## What is stored on each fact
 
-Extraction runs in up to three stages. Earlier stages are faster and handle simpler patterns; later stages handle ambiguity and complex inference.
-
-**Stage 0 — Pattern matching (&lt;5ms)**
-Deterministic rules handle unambiguous facts: names, dates, identifiers, explicit statements. No LLM involved. If Stage 0 captures everything with high confidence, the pipeline stops here.
-
-**Stage 1 — Fast LLM (200–500ms)**
-A small, fast language model handles moderately complex extraction: implied preferences, relational statements, corrections. Used when Stage 0 produces incomplete or low-confidence results.
-
-**Stage 2 — Strong LLM (1–3s)**
-A more capable model handles nuanced extraction: conflicting statements, heavily contextual facts, multi-hop relations. Only invoked when Stages 0 and 1 are insufficient.
-
-The pipeline is designed to spend the minimum compute necessary. Most turns complete at Stage 0 or Stage 1.
-
-## Reconciliation
-
-After extraction, the reconciliation step integrates new facts with existing memory.
-
-**Entity deduplication**: Before creating a new entity record, Spectron checks whether it already exists. It uses exact name matching first, then falls back to embedding similarity — if a new entity is within 0.85 cosine similarity of an existing one, it is treated as the same entity rather than a duplicate.
-
-**Conflict detection and supersession**: If a new attribute contradicts an existing one (for example, a user's role has changed), Spectron does not overwrite or discard either value. Instead:
-1. The existing attribute's `valid_until` is set to the current time.
-2. The new attribute is written with `valid_from` set to the current time.
-3. The new attribute's record links back to the old one, forming a supersession chain.
-
-Nothing is deleted. The full history of how a fact evolved is preserved.
-
-**Scope-aware coexistence**: Two attributes with the same key but different scope can coexist. A user's `project` at `{org: "acme", user: "priya"}` is distinct from `{org: "acme", user: "rahul"}`. Scope prevents facts from bleeding across users or tenants.
-
-**Layer 0 authority check**: If a newly extracted fact conflicts with a Layer 0 document, the conflict is logged but Layer 0 is not modified. The Layer 1 attribute is stored with a conflict flag; Layer 0 remains authoritative.
-
-## Retrieval
-
-When an agent needs context, Spectron resolves queries through a tiered system — from fastest to most thorough:
-
-**Tier 1 — Direct lookup**: Structured queries with a known answer in the graph. "What is Priya's role?" resolves directly to `lead engineer` without involving a language model. Latency is graph read speed.
-
-**Tier 2 — Semantic response cache**: If the same conceptual query has been answered recently (measured by cosine similarity of the query embedding), the cached response is returned. Avoids repeated LLM calls for common questions.
-
-**Tier 3 — Hybrid retrieval**: Combines semantic search (embedding similarity) with BM25 lexical search and graph density reranking. Used for queries that require synthesising across multiple facts or documents.
-
-**Tier 4 — Full context synthesis**: An LLM synthesises a response over all relevant retrieved memory. Used when the answer cannot be read directly from the graph and requires reasoning across multiple pieces of evidence.
-
-The tiered approach means simple, frequent queries — the majority of production workloads — are answered cheaply and quickly.
-
-## What gets stored
-
-Every fact in Layer 1 carries the following metadata:
-
-| Field | Description |
-|-------|-------------|
-| `source_turn` | The turn record that produced this fact |
-| `valid_from` | When this fact became true |
-| `valid_until` | When this fact was superseded (null if still current) |
-| `scope` | Dimensional attributes: `{org, user, project, ...}` |
-| `confidence` | Extraction confidence score from the pipeline |
-
-This metadata is what makes memory observable. You can query it directly to audit what the agent knows, when it learned it, and whether it is still current.
+Beyond value and scope, expect **`source.*`**, **`valid_from` / `valid_until`**, **`confidence`**, and edges into **`decision_trace`** rows. The exact field names evolve with releases; the **invariants** are: provenance is mandatory, supersession is non-destructive, and uncertainty is representable.
 
 ## Integration shapes
 
-Spectron supports two patterns for integrating with your agent's conversation loop:
-
-**Spectron drives the loop** — call `session.chat()` and Spectron handles retrieval, response generation, and memory in a single call:
-
-```python
-response = session.chat("What's the best approach for the Payments migration?")
-print(response.message)
-```
-
-**You drive the loop** — use `session.turn()` to store memory and `session.context()` to retrieve it, then pass context to your own LLM call:
-
-```python
-context = session.context(query="Payments migration approach")
-response = your_llm.generate(context=context.text, user_message=message)
-session.turn(user=message, assistant=response)
-```
-
-The second pattern gives full control over model selection, prompting, and response handling.
+You can let Spectron drive `/chat`, or you can own the loop and call ingest + `/query` yourself – see [REST API](/docs/spectron/reference/rest-api) and [Integrations](/docs/spectron/integrations).
 
 ## Next steps
 
-- [Two-layer architecture](/docs/spectron/mental-model/two-layer-architecture) — detailed explanation of Layer 0 and Layer 1
-- [Extraction pipeline](/docs/spectron/memory/reasoning-model/extraction-pipeline) — in-depth coverage of the three extraction stages
-- [Temporal validity](/docs/spectron/memory/reasoning-model/temporal-validity) — how `valid_from` / `valid_until` work
-- [Authority hierarchy](/docs/spectron/memory/reasoning-model/authority-hierarchy) — when and how Layer 0 overrides Layer 1
+- [Unified substrate and authority](/docs/spectron/mental-model/two-layer-architecture)
+- [Extraction pipeline](/docs/spectron/memory/reasoning-model/extraction-pipeline)
+- [Tri-temporal model](/docs/spectron/architecture/tri-temporal-model)
+- [Traces and memory evolution](/docs/spectron/architecture/traces-and-evolution)

@@ -1,26 +1,35 @@
 ---
 position: 4
-title: Authority hierarchy
-description: "Layer 0 authoritative knowledge takes precedence over Layer 1 conversational memory."
+title: Authority when pillars meet
+description: "How the Authoritative and Experiential pillars interact – reconciliation, uncertainty, and resolves_to."
 ---
 
-# Authority hierarchy
+# Authority when pillars meet
 
-Spectron maintains two distinct layers of information with different authority levels. Understanding which layer wins in a conflict — and why — is essential for designing agents that behave predictably when users assert things that contradict what you know to be true.
+Spectron’s memory model is built around **eight pillars** of agent memory – not a flat “two layers” split. Two of those pillars matter most for day-to-day API behaviour:
 
-## Layer 0 always wins
+- **[Authoritative](/docs/spectron/architecture/eight-pillars-and-categories)** – curated artefacts (`source.kind = "document"`, operator `upsert`): manuals, policies, product data, structured exports. Higher default **trust**.
+- **[Experiential](/docs/spectron/architecture/eight-pillars-and-categories)** – conversational input and everything derived from it (`turn`, `reflect`, `elaboration`, `consolidation`, …). The **Experiential** pillar includes the **six memory categories** (episodic turns plus identity, knowledge, context, instructions, uncertainty) described in [Memory categories](/docs/spectron/mental-model/memory-categories).
 
-**Layer 0 is the authoritative layer.** It holds knowledge your team has explicitly loaded: product catalogues, policies, documentation, structured reference data. This layer does not change based on what users say.
+**Reconciliation** (its own pillar) is the single function that merges streams: supersession, **`uncertainty`** rows, and trust/calibration logic are identical whether facts arrived from a document or a turn.
 
-**Layer 1 is the conversational layer.** It holds what agents and users have told each other. This layer evolves with every interaction.
+Physically, both streams are rows in the **same** SurrealDB substrate – see [Unified substrate and authority](/docs/spectron/mental-model/two-layer-architecture).
 
-When a user asserts something that conflicts with a Layer 0 fact, Spectron records the user's belief in Layer 1 but does not overwrite Layer 0. The user's assertion is preserved — it may be relevant conversational context — but it does not become the authoritative truth.
+## Curated truth is never silently overwritten
 
-This prevents a class of failure that is common in simpler memory systems: **hallucination amplification**, where an agent hears an incorrect assertion from one user, stores it as fact, and then repeats it to other users or uses it to answer future questions.
+**Authoritative** content does not change because a user said something different. When an experiential assertion conflicts with curated knowledge, Spectron:
 
-## What happens when Layer 1 contradicts Layer 0
+1. Keeps the curated row unchanged.
+2. Stores the user’s belief in the experiential graph with provenance intact.
+3. Surfaces the clash (for example via **`uncertainty`** and/or conflict flags on the attribute).
 
-Consider a concrete example. Your Layer 0 knowledge base contains:
+The user’s assertion remains valuable conversational context – it simply does **not** become canonical truth.
+
+This prevents **hallucination amplification**: incorrect chatter never silently rewrites product, policy, or compliance data.
+
+## Worked example
+
+Your authoritative knowledge base contains:
 
 ```json
 {
@@ -33,9 +42,11 @@ Consider a concrete example. Your Layer 0 knowledge base contains:
 }
 ```
 
+> The `layer` field in JSON examples is illustrative of API grouping; the conceptual model is the **Authoritative** pillar, not a separate database.
+
 A user tells the agent: "Your return policy is 60 days."
 
-The extraction pipeline detects a contradiction with Layer 0 and writes the following to Layer 1:
+The extraction pipeline detects a conflict and writes to **experiential** memory:
 
 ```json
 {
@@ -50,78 +61,30 @@ The extraction pipeline detects a contradiction with Layer 0 and writes the foll
 }
 ```
 
-The Layer 0 record is unchanged. The `/state` API surfaces both pieces of information and clearly distinguishes them:
+> `contradicts_l0` is the **legacy API flag name** for “conflicts with authoritative (curated) knowledge.” New integrations should read it as “contradicts authoritative content” regardless of the suffix.
 
-```json
-{
-  "facts": {
-    "layer_0": {
-      "Policy.returns.duration_days": 30
-    },
-    "layer_1": {
-      "Policy.returns.duration_days": {
-        "value": "60",
-        "contradicts_l0": true,
-        "note": "User asserted this in turn:xyz789; Layer 0 states 30 days"
-      }
-    }
-  }
-}
-```
+The curated record is unchanged. The `/state` API can surface both values so the agent can acknowledge the user’s belief while stating the policy that actually applies.
 
-The agent can use this distinction to respond appropriately: acknowledging what the user believes while providing the accurate Layer 0 information.
+## Attribute resolution order
 
-## Attribute lookups and the authority order
+When both curated and experiential values exist for the same key:
 
-When an agent queries for the value of a specific attribute, Spectron resolves it in the following order:
+1. **Authoritative** values are returned as ground truth for factual questions (price, policy, specification).
+2. **Experiential** values are returned alongside for personalisation, with conflict flags when they disagree.
 
-1. **Layer 0** — if an authoritative value exists for this entity and key, it is returned as the primary value
-2. **Layer 1** — if a Layer 1 attribute exists for the same key in the current scope, it is returned alongside the Layer 0 value, with the `contradicts_l0` flag if applicable
-
-This means agents always have access to both the ground truth and the conversational context, and can make deliberate choices about how to use each.
+Agents should **trust curated answers for compliance** and use experiential rows for preferences, history, and stated beliefs.
 
 ## The `resolves_to` mechanism
 
-Layer 1 entities can be linked to their corresponding Layer 0 knowledge nodes via a `resolves_to` relation. This is how a conversational reference to a product, policy, or any named thing connects to the authoritative record for that thing.
+Experiential **entities** can link to typed **knowledge** nodes via `resolves_to` so a mention of “AirPods Pro” in chat joins the same real-world object as the catalogue row. See [Cross-layer linking](/docs/spectron/knowledge/retrieval/cross-layer-linking).
 
-```json
-{
-  "in": "entity:[\"Product\", \"airpods_pro\"]",
-  "out": "knowledge:[\"Product\", \"airpods_pro\"]",
-  "relation": "resolves_to"
-}
-```
+Resolution combines LLM suggestions, embedding checks, background scans, and manual overrides – all without breaking the single-substrate model.
 
-Once this link exists, queries for the Layer 1 entity automatically surface Layer 0 facts for it. The agent does not need to know in advance which Layer 0 node corresponds to a user's mention — the resolution happens automatically.
+## Practical guidance
 
-### How resolution works
+- **Facts with regulatory weight** – always ground in **Authoritative** content.
+- **Personalisation** – lives in the **Experiential** pillar (identity, knowledge, context, instructions).
+- **Contradictions** – surface them honestly; never pick silently.
+- **Context scope** – curated catalogue updates propagate to every agent in the Context; experiential rows remain scoped per user/team/project as you configure.
 
-Resolution proceeds in four steps:
-
-1. **LLM suggestion** — during extraction, the LLM is provided with a summary of accessible Layer 0 node titles and types. It proposes `resolves_to` mappings for any Layer 1 entities it believes correspond to Layer 0 nodes.
-2. **Embedding verification** — each proposed link is validated by computing the embedding similarity between the Layer 1 entity name and the Layer 0 node title. Links below the configured threshold (default 0.85) are rejected.
-3. **Background scanning** — a periodic background job scans Layer 1 entities that have no `resolves_to` link and attempts resolution against the current Layer 0 state. This catches cases where a matching Layer 0 node did not exist at extraction time but was added later.
-4. **Manual override** — links can be set or corrected via the entity API when automated resolution produces an incorrect mapping.
-
-```http
-PATCH /contexts/{ctx}/entities/{entity_id}
-Content-Type: application/json
-
-{
-  "resolves_to": "knowledge:[\"Product\", \"airpods_pro\"]"
-}
-```
-
-## Practical implications for agent design
-
-**Trust Layer 0 for facts.** When an agent needs to answer a factual question — price, policy, specification — it should query Layer 0. Layer 1 provides context about what the user believes or prefers, not ground truth.
-
-**Use Layer 1 for personalisation.** The user's history, preferences, stated attributes, and prior decisions live in Layer 1. These are not overridden by Layer 0 and are essential for personalised responses.
-
-**Surface contradictions explicitly.** When a user's Layer 1 belief contradicts a Layer 0 fact, the recommended pattern is to acknowledge the discrepancy directly rather than silently defaulting to one or the other:
-
-> "You mentioned our return window is 60 days, but our policy is actually 30 days for unused items in original packaging. I want to make sure you have the accurate information."
-
-**Do not rely on Layer 1 for compliance-sensitive facts.** Anything that carries regulatory, contractual, or financial weight should be sourced from Layer 0. A user's claim about a commitment made by your company does not become binding just because it was extracted into Layer 1.
-
-**Layer 0 is scoped to the Context.** All users within a Context share the same Layer 0 knowledge base. Changes to Layer 0 are immediately reflected for all agents operating within that Context. This makes Layer 0 the right place for product updates, policy changes, and any correction that should affect all users simultaneously.
+For the full pillar list (reconciliation, elaboration, reflection, consolidation, calibration, collective), see [Eight pillars and six categories](/docs/spectron/architecture/eight-pillars-and-categories).
