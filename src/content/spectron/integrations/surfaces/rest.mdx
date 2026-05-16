@@ -1,0 +1,257 @@
+---
+position: 1
+title: REST API
+description: "Accessing Spectron directly via its HTTP REST API."
+---
+
+# REST API
+
+Spectron exposes a REST API over HTTP. Every SDK operation maps directly to an HTTP endpoint, so you can integrate Spectron from any language or tool that can make HTTP requests.
+
+## URL structure
+
+Spectron serves three distinct URL prefixes from the same binary:
+
+| Prefix | Purpose |
+|---|---|
+| `/api/v1/...` | Management endpoints – lifecycle and key management. Require a management key. |
+| `/v1/{context_id}/...` | End-user endpoints – memory, sessions, knowledge, and recall. Require an agent or supervisor key scoped to the named Context. |
+| `/mcp` | MCP server (Streamable HTTP transport). Used by MCP clients such as Claude Desktop, Cursor, and custom agents. |
+
+The `context_id` in the end-user prefix is the identifier you assigned when creating the Context. It is not a UUID – you choose the name (for example, `acme-prod` or `platform-staging`).
+
+## Authentication
+
+All requests must include a bearer token in the `Authorization` header:
+
+```http
+Authorization: Bearer <api_key>
+```
+
+The token determines the principal type and scope floor. Spectron enforces all access controls server-side on every request.
+
+### Selecting a Context
+
+For management endpoints, the Context is part of the URL path (`/api/v1/contexts/{id}/...`).
+
+For end-user endpoints, the Context is also part of the URL path (`/v1/{context_id}/...`). You may optionally pass an `X-Spectron-Context` header as an alternative when your routing layer needs to keep the path generic:
+
+```http
+GET /v1/sessions
+Authorization: Bearer <api_key>
+X-Spectron-Context: acme-prod
+```
+
+When the header and the URL path both specify a Context, the URL path takes precedence.
+
+## Management vs end-user surfaces
+
+### Management endpoints (`/api/v1/...`)
+
+Management endpoints control the infrastructure around Contexts. They require a management key (created with `spectron init --admin-key` on first run).
+
+Typical management operations:
+
+```http
+POST   /api/v1/contexts
+GET    /api/v1/contexts
+GET    /api/v1/contexts/{id}
+PATCH  /api/v1/contexts/{id}
+DELETE /api/v1/contexts/{id}
+
+POST   /api/v1/contexts/{id}/keys/{name}
+GET    /api/v1/contexts/{id}/keys
+DELETE /api/v1/contexts/{id}/keys/{name}
+```
+
+### End-user endpoints (`/v1/{context_id}/...`)
+
+End-user endpoints carry the core Spectron operations: creating sessions, adding turns, recalling memory, uploading documents, and so on. They accept agent keys and supervisor keys.
+
+```http
+POST   /v1/{ctx}/sessions
+GET    /v1/{ctx}/sessions/{session_id}
+POST   /v1/{ctx}/sessions/{session_id}/turns
+POST   /v1/{ctx}/sessions/{session_id}/chat
+GET    /v1/{ctx}/sessions/{session_id}/context
+GET    /v1/{ctx}/sessions/{session_id}/state
+GET    /v1/{ctx}/sessions/{session_id}/diff
+
+POST   /v1/{ctx}/recall
+GET    /v1/{ctx}/profiles/{entity_id}
+
+POST   /v1/{ctx}/documents
+GET    /v1/{ctx}/documents/{document_id}
+DELETE /v1/{ctx}/documents/{document_id}
+
+GET    /v1/{ctx}/traces
+GET    /v1/{ctx}/traces/stats
+```
+
+See the [REST API reference](/docs/spectron/reference/rest-api) for the full endpoint listing with request and response schemas.
+
+## Request format
+
+All request bodies are JSON. Set the `Content-Type` header accordingly:
+
+```http
+Content-Type: application/json
+```
+
+Requests without a body (GET, DELETE) do not require `Content-Type`.
+
+## Response format
+
+All responses are JSON. Successful responses return HTTP 2xx with a JSON body. The shape of the body depends on the endpoint – see the reference for per-endpoint schemas.
+
+## Error format
+
+Spectron uses [RFC 7807 Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) for all error responses:
+
+```json
+{
+  "type": "https://spectron.ai/errors/not-found",
+  "title": "Not Found",
+  "status": 404,
+  "detail": "Session 'sess_01hx3...' does not exist in context 'acme-prod'.",
+  "instance": "/v1/acme-prod/sessions/sess_01hx3..."
+}
+```
+
+| Field | Description |
+|---|---|
+| `type` | URI identifying the error class. Machine-readable. |
+| `title` | Short human-readable summary. Stable across Spectron versions. |
+| `status` | HTTP status code. Mirrors the HTTP response code. |
+| `detail` | Human-readable description of this specific occurrence. |
+| `instance` | The URL that triggered the error. |
+
+Common status codes:
+
+| Code | Meaning |
+|---|---|
+| `400` | Malformed request body or invalid field value. |
+| `401` | Missing or invalid `Authorization` header. |
+| `403` | Valid key but insufficient scope or principal type for this operation. |
+| `404` | Resource not found (or not visible to the current principal). |
+| `409` | Conflict – e.g., a Context with this identifier already exists. |
+| `413` | Request body exceeds `SPECTRON_MAX_UPLOAD_BYTES`. |
+| `422` | Semantically invalid request – body is well-formed JSON but violates business rules. |
+| `429` | Rate limit exceeded. |
+| `500` | Internal server error. |
+
+## Pagination
+
+Endpoints that return lists support cursor-based pagination via `after` and `limit` query parameters:
+
+```http
+GET /v1/acme-prod/traces?limit=50&after=trace_01hx9...
+```
+
+Responses include a `next_cursor` field when further pages are available:
+
+```json
+{
+  "items": [ ... ],
+  "next_cursor": "trace_01hy2...",
+  "has_more": true
+}
+```
+
+Pass `next_cursor` as `after` in the subsequent request. When `has_more` is `false`, you have reached the last page.
+
+## Rate limiting
+
+Spectron enforces per-Context rate limits configured at Context creation or update time. When a limit is exceeded, the server returns `429 Too Many Requests` with a `Retry-After` header indicating the number of seconds until the limit resets:
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 12
+Content-Type: application/json
+
+{
+  "type": "https://spectron.ai/errors/rate-limited",
+  "title": "Too Many Requests",
+  "status": 429,
+  "detail": "Context 'acme-prod' has exceeded its requests-per-minute limit of 300."
+}
+```
+
+See [Cost and rate limits](/docs/spectron/self-hosting/observability/cost-and-rate-limits) for configuration options.
+
+## cURL examples
+
+### Create a session
+
+```bash
+curl -s -X POST https://spectron.example.com/v1/acme-prod/sessions \
+  -H "Authorization: Bearer $SPECTRON_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": { "org": "anneal", "agent": "planner", "user": "tobie" }
+  }'
+```
+
+```json
+{
+  "id": "sess_01hx3kj7m4p2...",
+  "context_id": "acme-prod",
+  "scope": { "org": "anneal", "agent": "planner", "user": "tobie" },
+  "created_at": "2025-11-04T14:22:00Z"
+}
+```
+
+### Add a turn
+
+```bash
+curl -s -X POST https://spectron.example.com/v1/acme-prod/sessions/sess_01hx3.../turns \
+  -H "Authorization: Bearer $SPECTRON_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "role": "user",
+    "content": "I moved from Berlin to Amsterdam last month."
+  }'
+```
+
+### Recall memory
+
+```bash
+curl -s -X POST https://spectron.example.com/v1/acme-prod/recall \
+  -H "Authorization: Bearer $SPECTRON_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Where does the user live?",
+    "scope": { "org": "anneal", "user": "tobie" }
+  }'
+```
+
+### Create an API key
+
+```bash
+curl -s -X POST https://spectron.example.com/api/v1/contexts/acme-prod/keys/planner-agent \
+  -H "Authorization: Bearer $SPECTRON_MGMT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "principal": "agent",
+    "scope_floor": { "org": "anneal", "agent": "planner" }
+  }'
+```
+
+```json
+{
+  "name": "planner-agent",
+  "secret": "sk_live_...",
+  "principal": "agent",
+  "scope_floor": { "org": "anneal", "agent": "planner" },
+  "created_at": "2025-11-04T14:00:00Z"
+}
+```
+
+The `secret` field is returned only at creation time and is not retrievable afterwards. Store it immediately.
+
+## Next steps
+
+- [REST API reference](/docs/spectron/reference/rest-api) – complete endpoint listing with request and response schemas
+- [Management API reference](/docs/spectron/reference/management-api) – management endpoint schemas
+- [Authentication](/docs/spectron/self-hosting/security/authentication) – key types, rotation, and expiry
+- [Principals](/docs/spectron/self-hosting/security/principals) – access control model

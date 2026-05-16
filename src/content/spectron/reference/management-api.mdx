@@ -1,0 +1,258 @@
+---
+position: 3
+title: Management API
+description: "Contexts, keys, and operator lifecycle."
+---
+
+# Management API
+
+The management API provides control-plane operations: creating Contexts, managing API keys, and operator lifecycle. All management endpoints are under `/api/v1/` and require a management key.
+
+## Authentication
+
+Management endpoints require a bearer token with management-level access:
+
+```http
+Authorization: Bearer mgmt-...
+```
+
+Management keys are provisioned out-of-band at server setup. They are distinct from per-Context end-user keys.
+
+## Contexts
+
+### List Contexts
+
+```http
+GET /api/v1/contexts
+```
+
+Returns all Contexts registered on this Spectron deployment.
+
+**Response:**
+```json
+{
+  "contexts": [
+    {
+      "id": "acme-prod",
+      "namespace": "acme",
+      "database": "prod",
+      "config": {
+        "token_limit": 1000000,
+        "models": { "extraction": "openai/gpt-4o-mini" },
+        "providers_configured": ["openai"]
+      },
+      "created_at": "2026-01-15T10:00:00Z"
+    }
+  ]
+}
+```
+
+### Create a Context
+
+```http
+POST /api/v1/contexts/{context_id}
+Content-Type: application/json
+
+{
+  "namespace": "acme",
+  "database": "prod",
+  "config": {
+    "token_limit": 1000000,
+    "models": {
+      "extraction": "openai/gpt-4o-mini",
+      "response": "openai/gpt-4o"
+    },
+    "providers": {
+      "openai": "sk-..."
+    }
+  }
+}
+```
+
+Creates the Context, provisions the SurrealDB namespace and database, and applies schema migrations. Returns `201 Created`.
+
+**Response:**
+```json
+{
+  "id": "acme-prod",
+  "namespace": "acme",
+  "database": "prod",
+  "config": {
+    "token_limit": 1000000,
+    "models": { "extraction": "openai/gpt-4o-mini" },
+    "providers_configured": ["openai"]
+  },
+  "created_at": "2026-05-12T10:00:00Z"
+}
+```
+
+### Get a Context
+
+```http
+GET /api/v1/contexts/{context_id}
+```
+
+Returns the Context record. Provider API key values are replaced with a `providers_configured` summary.
+
+### Update Context config
+
+```http
+PATCH /api/v1/contexts/{context_id}
+Content-Type: application/json
+
+{
+  "config": {
+    "token_limit": 2000000,
+    "models": {
+      "reflection": "anthropic/claude-opus-4-7"
+    }
+  }
+}
+```
+
+Deep-merges the provided config into the existing config. Unset fields are left unchanged.
+
+### Delete a Context
+
+```http
+DELETE /api/v1/contexts/{context_id}
+```
+
+Drops the bound SurrealDB database (removing all authoritative knowledge and experiential memory data), deletes the associated API keys, and removes the control-plane registry entry. This is irreversible. Returns `204 No Content`.
+
+## API keys
+
+### List keys for a Context
+
+```http
+GET /api/v1/contexts/{context_id}/keys
+```
+
+**Response:**
+```json
+{
+  "keys": [
+    {
+      "id": "cak_01HF...",
+      "name": "app-agent",
+      "principal": "agent",
+      "scope_floor": { "org": "acme" },
+      "created_at": "2026-01-15T10:00:00Z",
+      "last_used_at": "2026-05-12T09:15:00Z"
+    }
+  ]
+}
+```
+
+The secret is never returned after creation.
+
+### Create a key
+
+```http
+POST /api/v1/contexts/{context_id}/keys
+Content-Type: application/json
+
+{
+  "name": "app-agent",
+  "principal": "agent",
+  "scope_floor": { "org": "acme" }
+}
+```
+
+**Response (secret shown once):**
+```json
+{
+  "id": "cak_01HF...",
+  "name": "app-agent",
+  "principal": "agent",
+  "scope_floor": { "org": "acme" },
+  "secret": "sk-acme-prod-...",
+  "created_at": "2026-05-12T10:00:00Z"
+}
+```
+
+**Principal types:**
+
+| Principal | Capabilities |
+|---|---|
+| `agent` | Create sessions, add turns, recall context, search knowledge. Cannot persist reflections or manage keys. |
+| `supervisor` | All agent capabilities plus persisting reflections at the supervisor's scope floor. |
+
+### Rotate a key
+
+```http
+POST /api/v1/contexts/{context_id}/keys/{key_id}/rotate
+```
+
+Generates a new secret for the key. The old secret is immediately invalidated. Returns the new secret (shown once).
+
+### Delete a key
+
+```http
+DELETE /api/v1/contexts/{context_id}/keys/{key_id}
+```
+
+Revokes the key immediately. Returns `204 No Content`.
+
+## Knowledge upload (management-only)
+
+Document ingestion requires a management key or an agent key with explicit upload capability. See [Uploading documents](/docs/spectron/knowledge/ingestion/uploading-documents) for the full upload API.
+
+```http
+POST /v1/{context_id}/knowledge
+Content-Type: multipart/form-data
+Authorization: Bearer mgmt-...
+
+file=@document.pdf
+title=Product Catalogue
+scope[org]=acme
+```
+
+## Ontology management
+
+Ontology endpoints (entity type definitions, attribute key declarations, and relation label declarations) are management-only. See [Ontology grounding](/docs/spectron/memory/tuning/ontology-grounding) for details.
+
+```http
+GET    /api/v1/contexts/{context_id}/ontology
+PUT    /api/v1/contexts/{context_id}/ontology
+DELETE /api/v1/contexts/{context_id}/ontology
+```
+
+## Lifecycle operations
+
+### Trigger decay pass
+
+Runs the lifecycle decay pass immediately, expiring `context`-category memories past their TTL and pruning expired semantic cache entries:
+
+```http
+POST /api/v1/contexts/{context_id}/lifecycle/decay
+```
+
+### Force reindex
+
+Triggers re-embedding and re-indexing of all chunks in a Context (e.g. after changing the embedding model):
+
+```http
+POST /api/v1/contexts/{context_id}/lifecycle/reindex
+```
+
+This is a long-running operation. Poll the returned job ID to track progress.
+
+## Pagination
+
+List endpoints support cursor-based pagination:
+
+```http
+GET /api/v1/contexts/{context_id}/keys?cursor=cak_01HF...&limit=20
+```
+
+**Response:**
+```json
+{
+  "keys": [...],
+  "next_cursor": "cak_01HG...",
+  "has_more": true
+}
+```
+
+`next_cursor` is `null` and `has_more` is `false` when the last page has been reached.

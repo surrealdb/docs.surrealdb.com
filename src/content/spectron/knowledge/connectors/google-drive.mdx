@@ -1,0 +1,160 @@
+---
+position: 3
+title: Google Drive
+description: "Sync documents from Google Drive into Spectron's knowledge layer."
+---
+
+# Google Drive
+
+The Google Drive connector pulls documents from your Google Workspace into Spectron's authoritative knowledge store. Google Docs, PDFs, and other supported file types are fetched, extracted to text, and processed through the full ingestion pipeline – chunked, embedded, and indexed – so your agents can retrieve them semantically.
+
+## Authentication
+
+The connector authenticates as a service account with read-only access to the folders and files you specify. Using a service account is preferred over OAuth user tokens because it does not expire and does not depend on a specific user's session.
+
+### Creating a service account
+
+1. In the Google Cloud Console, create or select a project
+2. Navigate to **IAM & Admin → Service Accounts** and create a new service account
+3. Grant it no project-level roles (it only needs file-level access in Drive)
+4. Create a JSON key and download it – this is your `credentials` value
+5. In Google Drive, share each folder or file you want to sync with the service account's email address (e.g. `spectron@my-project.iam.gserviceaccount.com`), granting Viewer access
+
+### Configuration
+
+| Field | Type | Description |
+|---|---|---|
+| `credentials` | object | The parsed contents of the service account JSON key file |
+| `folder_ids` | array of strings | Google Drive folder IDs to sync recursively |
+| `file_ids` | array of strings | Individual file IDs to sync (optional; used alongside or instead of `folder_ids`) |
+| `include_shared_drives` | boolean | Whether to include shared (Team) Drive folders; defaults to `false` |
+
+You can find a folder or file ID in its Google Drive URL: `https://drive.google.com/drive/folders/{folder_id}`.
+
+## Supported document types
+
+| Type | Processing |
+|---|---|
+| Google Docs (`.gdoc`) | Exported to plain text via the Docs API; headings preserved as section boundaries |
+| Google Slides (`.gslides`) | Speaker notes and slide text extracted |
+| PDF | Text extracted with layout preservation; multi-column PDFs are linearised |
+| Plain text (`.txt`, `.md`, `.rst`) | Ingested directly |
+| Microsoft Word (`.docx`) | Converted to text via LibreOffice |
+
+Binary files (images, spreadsheets, executables) are skipped. Google Sheets can be exported as CSV and synced as structured data, but this requires a separate Sheets-specific configuration that is not available in the initial release.
+
+## Create a Google Drive connector
+
+```python
+import json
+import os
+from spectron import Spectron
+
+memory = Spectron(
+    context="acme-prod",
+    base_url="https://api.spectron.dev",
+    api_key=os.environ["SPECTRON_API_KEY"],
+)
+
+with open("service-account.json") as f:
+    credentials = json.load(f)
+
+connector = await memory.connectors.create(
+    kind="gdrive",
+    config={
+        "credentials": credentials,
+        "folder_ids": ["1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"],
+        "include_shared_drives": True,
+    },
+    scope={"org": "acme"},
+    sync_schedule="0 */4 * * *",
+)
+
+print(connector.id)
+```
+
+```http
+POST /v1/acme-prod/connectors
+Content-Type: application/json
+
+{
+  "kind": "gdrive",
+  "config": {
+    "credentials": { "type": "service_account", "project_id": "...", "..." : "..." },
+    "folder_ids": ["1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"],
+    "include_shared_drives": true
+  },
+  "scope": { "org": "acme" },
+  "sync_schedule": "0 */4 * * *"
+}
+```
+
+## Real-time sync with webhooks
+
+For near-instant sync when documents change, configure a Drive Push Notification webhook. Spectron registers the webhook automatically when the connector is created if the `webhook` key is set to `true` in the config:
+
+```python
+connector = await memory.connectors.create(
+    kind="gdrive",
+    config={
+        "credentials": credentials,
+        "folder_ids": ["1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"],
+        "webhook": True,
+    },
+    scope={"org": "acme"},
+)
+```
+
+When a document is created, modified, or deleted in a watched folder, Google Drive sends a change notification to Spectron's webhook endpoint. Spectron enqueues the affected file for re-ingestion. Typical end-to-end latency from save to indexed is under 30 seconds.
+
+Webhook registration requires the Spectron server to be reachable from Google's infrastructure. This is handled automatically for hosted Spectron. For self-hosted deployments, ensure your instance is accessible over HTTPS at a publicly routable hostname and set `SPECTRON_BASE_URL` in your server configuration.
+
+## Scope assignment
+
+All knowledge nodes produced by a Google Drive connector inherit the scope you specify at creation time. Use scope to isolate documents by team or project:
+
+```python
+# Sync the engineering docs folder, visible only to the engineering org
+await memory.connectors.create(
+    kind="gdrive",
+    config={"credentials": credentials, "folder_ids": ["eng-folder-id"]},
+    scope={"org": "acme", "team": "engineering"},
+)
+
+# Sync the company handbook, visible to all of acme
+await memory.connectors.create(
+    kind="gdrive",
+    config={"credentials": credentials, "folder_ids": ["handbook-folder-id"]},
+    scope={"org": "acme"},
+)
+```
+
+## Scheduling recommendations
+
+Google Drive document stores are typically updated irregularly. A sync schedule of every 4–6 hours is sufficient for most teams. Combine scheduled sync with webhooks for critical content that must be available immediately after editing.
+
+## Managing the connector
+
+```python
+# Check sync status
+status = await memory.connectors.status(connector.id)
+print(status.status)          # "idle" | "syncing" | "error"
+print(status.records_synced)  # files processed in last sync
+print(status.last_sync_at)
+
+# Add additional folders without disrupting existing sync
+await memory.connectors.update(
+    connector.id,
+    config={
+        "credentials": credentials,
+        "folder_ids": ["original-folder-id", "new-folder-id"],
+        "webhook": True,
+    },
+)
+
+# Force an immediate re-sync
+await memory.connectors.sync(connector.id)
+
+# Remove the connector; synced knowledge nodes are retained
+await memory.connectors.delete(connector.id)
+```

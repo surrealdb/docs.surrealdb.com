@@ -1,0 +1,164 @@
+---
+position: 4
+title: Notion
+description: "Sync Notion pages and databases into Spectron's knowledge layer."
+---
+
+# Notion
+
+The Notion connector syncs pages and databases from your Notion workspace into Spectron's authoritative knowledge store. Notion's block-based content model is normalised to structured markdown and processed through the full ingestion pipeline, making your team's Notion knowledge immediately searchable by your agents.
+
+## Authentication
+
+Spectron connects to Notion using an internal integration token. This is the recommended authentication method for server-to-server access because it does not depend on a user's OAuth session.
+
+### Creating an integration
+
+1. Go to [https://www.notion.so/my-integrations](https://www.notion.so/my-integrations) and click **New integration**
+2. Give the integration a name (e.g. "Spectron") and select the workspace to connect
+3. Under **Capabilities**, enable **Read content** – no other permissions are required
+4. Copy the **Internal Integration Token** (it begins with `secret_`)
+5. Share each page or database you want to sync with the integration: open the page in Notion, click **Share**, and invite your integration by name
+
+### Configuration
+
+| Field | Type | Description |
+|---|---|---|
+| `token` | string | Notion internal integration token |
+| `page_ids` | array of strings | IDs of top-level pages to sync (sub-pages are included recursively) |
+| `database_ids` | array of strings | IDs of databases to sync |
+| `webhook` | boolean | Enable real-time sync via Notion webhooks; defaults to `false` |
+
+A page or database ID appears in its Notion URL: `https://www.notion.so/{workspace}/{page-title}-{id}`. The ID is the 32-character hex string at the end.
+
+## Create a Notion connector
+
+```python
+import os
+from spectron import Spectron
+
+memory = Spectron(
+    context="acme-prod",
+    base_url="https://api.spectron.dev",
+    api_key=os.environ["SPECTRON_API_KEY"],
+)
+
+connector = await memory.connectors.create(
+    kind="notion",
+    config={
+        "token": os.environ["NOTION_TOKEN"],
+        "page_ids": [
+            "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d",  # Engineering handbook
+        ],
+        "database_ids": [
+            "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c",  # Product backlog
+        ],
+        "webhook": True,
+    },
+    scope={"org": "acme"},
+    sync_schedule="0 */6 * * *",
+)
+```
+
+```http
+POST /v1/acme-prod/connectors
+Content-Type: application/json
+
+{
+  "kind": "notion",
+  "config": {
+    "token": "secret_...",
+    "page_ids": ["1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d"],
+    "database_ids": ["9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c"],
+    "webhook": true
+  },
+  "scope": { "org": "acme" },
+  "sync_schedule": "0 */6 * * *"
+}
+```
+
+## How Notion content is processed
+
+### Pages
+
+Notion pages are represented internally as a tree of blocks (paragraphs, headings, callouts, toggles, code blocks, child pages, etc.). Spectron traverses this tree and normalises it to clean markdown:
+
+- Heading blocks (`heading_1`, `heading_2`, `heading_3`) become markdown headings and serve as chunk boundaries
+- Paragraph, bulleted list, numbered list, and quote blocks are converted to their markdown equivalents
+- Callout and toggle blocks are unwrapped and their text content is preserved
+- Code blocks are fenced with the language annotation if present
+- Child pages are fetched recursively and processed as separate knowledge nodes, preserving the parent–child relationship in authoritative knowledge
+
+The resulting markdown is then passed through the standard authoritative knowledge chunking and embedding pipeline.
+
+### Databases
+
+Notion databases are collections of pages with structured properties. Spectron processes database items in two ways:
+
+1. **Database properties** (title, status, date, select, multi-select, person, URL, number) are stored as typed fields on the knowledge node, enabling exact-match and range queries
+2. **Page body** of each database item is processed through the same markdown pipeline as standalone pages
+
+This means a product specification stored as a Notion database row is both queryable by its structured fields (status, assignee, due date) and searchable by the semantic content of its body.
+
+### Property type mapping
+
+| Notion property type | Spectron field type |
+|---|---|
+| `title`, `rich_text` | string |
+| `number` | number |
+| `checkbox` | boolean |
+| `date` | datetime |
+| `select`, `status` | string |
+| `multi_select` | array of strings |
+| `url` | string |
+| `email` | string |
+| `people` | array of strings (names) |
+| `relation` | array of node IDs |
+
+## Real-time sync with webhooks
+
+When `webhook: true` is set, Spectron registers a Notion webhook that fires whenever a connected page or database item is created, updated, or deleted. The affected content is re-ingested within seconds.
+
+Notion webhooks require your Spectron instance to be reachable over HTTPS. For hosted Spectron, this is configured automatically. For self-hosted deployments, set `SPECTRON_BASE_URL` in your server environment to the publicly accessible URL.
+
+## Scope assignment
+
+Scope is inherited by all knowledge nodes produced from the connector, including sub-pages and database items:
+
+```python
+# Sync the product team's Notion space, visible only to the product team
+await memory.connectors.create(
+    kind="notion",
+    config={
+        "token": os.environ["NOTION_TOKEN"],
+        "page_ids": ["product-wiki-page-id"],
+    },
+    scope={"org": "acme", "team": "product"},
+)
+```
+
+## Managing the connector
+
+```python
+# Check sync status
+status = await memory.connectors.status(connector.id)
+print(status.status)          # "idle" | "syncing" | "error"
+print(status.records_synced)  # pages/items processed in last sync
+
+# Add a new database without disrupting existing pages
+await memory.connectors.update(
+    connector.id,
+    config={
+        "token": os.environ["NOTION_TOKEN"],
+        "page_ids": ["1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d"],
+        "database_ids": [
+            "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c",
+            "new-database-id",
+        ],
+        "webhook": True,
+    },
+)
+
+# Force an immediate full re-sync
+await memory.connectors.sync(connector.id)
+```

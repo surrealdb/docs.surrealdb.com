@@ -56,23 +56,27 @@
 
 ## Table of Contents
 
-- [Getting Started with SurrealDB](#getting-started-with-surrealdb)
+- [Table of Contents](#table-of-contents)
+- [Getting started with SurrealDB](#getting-started-with-surrealdb)
 - [Learn SurrealDB](#learn-surrealdb)
-- [Contributing to the Documentation](#contributing-to-the-documentation)
+- [Contributing to the documentation](#contributing-to-the-documentation)
   - [Good First Issues](#good-first-issues)
 - [Installation](#installation)
-- [Contributing Lab Content](#contributing-lab-content-to-surrealdb-documentation)
-  - [Overview](#overview)
-  - [Prerequisites](#prerequisites)
-  - [Creating a New Lab](#creating-a-new-lab)
-    - [Using the Lab Creation Tool](#using-the-lab-creation-tool)
-- [Categories](#categories)
-- [Topics](#topics)
+- [Contributing Lab content to SurrealDB Documentation](#contributing-lab-content-to-surrealdb-documentation)
+- [Overview](#overview)
+- [Prerequisites](#prerequisites)
+- [Creating a new Lab](#creating-a-new-lab)
+  - [Using the Lab creation tool](#using-the-lab-creation-tool)
+  - [Manual creation](#manual-creation)
+- [Content guidelines](#content-guidelines)
+  - [Categories](#categories)
+  - [Topics](#topics)
 - [Best practices](#best-practices)
 - [Submitting your contribution](#submitting-your-contribution)
 - [Review process](#review-process)
 - [Need help?](#need-help)
 - [Development](#development)
+  - [Railroad diagrams (reusable)](#railroad-diagrams-reusable)
 - [Building](#building)
 - [Adding a new doc](#adding-a-new-doc)
 - [File structure](#file-structure)
@@ -304,7 +308,7 @@ bun run build
 
 Documentation pages live in `src/content/` and are loaded via [`vike-content-collection`](https://github.com/welpie21/vike-content-collection). Each top-level folder under `src/content/` is a content collection registered through a `+Content.ts` file that points at a schema in `src/content/config.ts`.
 
-To add a new page, create a `.md` or `.mdx` file inside the appropriate collection folder with frontmatter that matches the collection's schema (see `abstractDoc` and `labCollection` in `src/content/config.ts`). Sidebar ordering is controlled by `sidebar_position` in frontmatter and `_category_.json` files within subdirectories.
+To add a new page, create a `.md` or `.mdx` file inside the appropriate collection folder with frontmatter that matches the collection's schema (see `abstractDoc` and `labCollection` in `src/content/config.ts`). Sidebar ordering is controlled by `position` in frontmatter and `__category.json` files within subdirectories.
 
 If you add a brand new collection, you will also need to register it in `src/content/config.ts` (URL prefix via `urlForCollection`) and add a matching `+onBeforePrerenderStart.ts` so the routes are prerendered.
 

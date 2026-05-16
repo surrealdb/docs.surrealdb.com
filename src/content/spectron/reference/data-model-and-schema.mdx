@@ -1,0 +1,347 @@
+---
+position: 8
+title: Data model and schema
+description: "Tables, relations, and indexes in SurrealDB."
+---
+
+# Data model and schema
+
+Spectron stores all state in SurrealDB. This page describes the key tables, their fields, and the indexes that power retrieval. Schema migrations are bundled in the Spectron binary and applied automatically when a Context is created or upgraded.
+
+## Schema namespaces
+
+| Namespace | Database | Contents |
+|---|---|---|
+| `spectron` | `metadata` | Control plane: Context registry, API keys |
+| `spectron` | `_jobqueue` | Async ingestion job queue |
+| `<context_ns>` | `<context_db>` | All authoritative knowledge and experiential memory data for one Context |
+
+Each Context is bound to its own `(namespace, database)` pair. Tables are never shared across Contexts.
+
+## Control plane tables
+
+### `context`
+
+The Context registry. Records each Context's binding and embedded configuration.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Context identifier (e.g. `acme-prod`) |
+| `namespace` | string | Bound SurrealDB namespace |
+| `database` | string | Bound SurrealDB database |
+| `config` | object | Embedded config (models, providers, limits) |
+| `created_at` | datetime | |
+
+### `api_key`
+
+Management keys (not per-Context). Used for creating and managing Contexts.
+
+### `context_api_key`
+
+Per-Context end-user keys, stored as Argon2 hashes. Each key carries its principal type and scope floor.
+
+| Field | Type | Notes |
+|---|---|---|
+| `context_id` | string | The Context this key belongs to |
+| `name` | string | Human-readable label |
+| `key_hash` | string | Argon2 hash of the secret |
+| `principal` | string | `agent` \| `supervisor` |
+| `scope_floor` | object | Minimum scope dimensions for this key |
+| `created_at` | datetime | |
+| `last_used_at` | datetime (optional) | |
+
+## Knowledge tables (Authoritative pillar, per Context)
+
+### `document`
+
+Source files and their processing state.
+
+```surql
+DEFINE TABLE document SCHEMAFULL;
+DEFINE FIELD title              ON document TYPE string;
+DEFINE FIELD mime_type          ON document TYPE string;
+DEFINE FIELD source             ON document TYPE string;
+DEFINE FIELD storage_key        ON document TYPE string;
+DEFINE FIELD content_hash       ON document TYPE string;
+DEFINE FIELD size_bytes         ON document TYPE int;
+DEFINE FIELD language           ON document TYPE option<string>;
+DEFINE FIELD chunk_count        ON document TYPE option<int>;
+DEFINE FIELD keyword_count      ON document TYPE option<int>;
+DEFINE FIELD scope              ON document TYPE set<record<scope_attribute>>;
+DEFINE FIELD version            ON document TYPE int DEFAULT 1;
+DEFINE FIELD status             ON document TYPE string DEFAULT "queued"
+    ASSERT $value IN ["queued", "extracting", "chunking", "embedding", "keywording", "ready", "failed"];
+DEFINE FIELD error              ON document TYPE option<string>;
+DEFINE FIELD processing_started_at   ON document TYPE option<datetime>;
+DEFINE FIELD processing_completed_at ON document TYPE option<datetime>;
+DEFINE FIELD created_at         ON document TYPE datetime DEFAULT time::now() READONLY;
+DEFINE FIELD updated_at         ON document TYPE datetime DEFAULT time::now();
+DEFINE INDEX content_hash_index ON document FIELDS content_hash;
+DEFINE INDEX scope_index        ON document FIELDS scope;
+DEFINE INDEX status_index       ON document FIELDS status;
+```
+
+### `knowledge_chunk`
+
+Text segments extracted from documents, with vector embeddings.
+
+```surql
+DEFINE TABLE knowledge_chunk SCHEMAFULL;
+DEFINE FIELD document    ON knowledge_chunk TYPE record<document>;
+DEFINE FIELD text        ON knowledge_chunk TYPE string;
+DEFINE FIELD embedding   ON knowledge_chunk TYPE array<float, 1536>;
+DEFINE FIELD position    ON knowledge_chunk TYPE int;
+DEFINE FIELD section     ON knowledge_chunk TYPE option<string>;
+DEFINE FIELD char_start  ON knowledge_chunk TYPE int;
+DEFINE FIELD char_end    ON knowledge_chunk TYPE int;
+DEFINE FIELD token_count ON knowledge_chunk TYPE option<int>;
+DEFINE FIELD scope       ON knowledge_chunk TYPE set<record<scope_attribute>>;
+DEFINE FIELD created_at  ON knowledge_chunk TYPE datetime DEFAULT time::now() READONLY;
+DEFINE INDEX embedding_index ON knowledge_chunk FIELDS embedding HNSW DIMENSION 1536 DIST COSINE TYPE F32;
+DEFINE INDEX document_index  ON knowledge_chunk FIELDS document;
+DEFINE INDEX scope_index     ON knowledge_chunk FIELDS scope;
+```
+
+### `keyword`
+
+RAKE-extracted keyphrases from documents, stored as nodes in the keyword graph.
+
+```surql
+DEFINE TABLE keyword SCHEMAFULL;
+DEFINE FIELD text           ON keyword TYPE string;
+DEFINE FIELD normalised     ON keyword TYPE string;
+DEFINE FIELD embedding      ON keyword TYPE array<float, 1536>;
+DEFINE FIELD scope          ON keyword TYPE set<record<scope_attribute>> DEFAULT [];
+DEFINE FIELD document_count ON keyword TYPE int DEFAULT 0;
+DEFINE FIELD created_at     ON keyword TYPE datetime DEFAULT time::now() READONLY;
+DEFINE FIELD updated_at     ON keyword TYPE datetime DEFAULT time::now();
+DEFINE INDEX embedding_index  ON keyword FIELDS embedding HNSW DIMENSION 1536 DIST COSINE TYPE F32;
+DEFINE INDEX normalised_index ON keyword FIELDS normalised UNIQUE;
+```
+
+### `knowledge_has_keyword`
+
+Relation edge from a document to its keywords.
+
+```surql
+DEFINE TABLE knowledge_has_keyword TYPE RELATION IN document OUT keyword SCHEMAFULL;
+DEFINE FIELD score      ON knowledge_has_keyword TYPE float;
+DEFINE FIELD scope      ON knowledge_has_keyword TYPE set<record<scope_attribute>> DEFAULT [];
+DEFINE FIELD created_at ON knowledge_has_keyword TYPE datetime DEFAULT time::now() READONLY;
+DEFINE INDEX unique_pair ON knowledge_has_keyword FIELDS in, out UNIQUE;
+```
+
+### `knowledge`
+
+Typed knowledge nodes for structured, manually imported authoritative data.
+
+```surql
+DEFINE TABLE knowledge SCHEMAFULL;
+-- Additional fields defined in authoritative knowledge migrations (V4__layer_0_knowledge_nodes.surql)
+```
+
+### `knowledge_relates_to`
+
+Typed relation edges between knowledge nodes.
+
+```surql
+DEFINE TABLE knowledge_relates_to TYPE RELATION IN knowledge OUT knowledge SCHEMAFULL;
+```
+
+### `connector`
+
+Scheduled sync connectors to external data sources.
+
+```surql
+DEFINE TABLE connector SCHEMAFULL;
+DEFINE FIELD kind           ON connector TYPE string;
+DEFINE FIELD config         ON connector TYPE object FLEXIBLE;
+DEFINE FIELD scope          ON connector TYPE set<record<scope_attribute>>;
+DEFINE FIELD sync_schedule  ON connector TYPE option<string>;
+DEFINE FIELD last_sync_at   ON connector TYPE option<datetime>;
+DEFINE FIELD status         ON connector TYPE string DEFAULT "idle"
+    ASSERT $value IN ["idle", "syncing", "paused", "error"];
+DEFINE FIELD created_at     ON connector TYPE datetime DEFAULT time::now() READONLY;
+```
+
+## Experiential pillar tables (per Context)
+
+### `scope_attribute`
+
+Canonical key-value scope tags shared across all scoped records.
+
+```surql
+DEFINE TABLE scope_attribute SCHEMAFULL;
+DEFINE FIELD key   ON scope_attribute TYPE string;
+DEFINE FIELD value ON scope_attribute TYPE string;
+DEFINE INDEX key_value ON scope_attribute FIELDS key, value UNIQUE;
+```
+
+### `session`
+
+First-class conversation records.
+
+```surql
+DEFINE TABLE session SCHEMAFULL;
+DEFINE FIELD scope      ON session TYPE set<record<scope_attribute>>;
+DEFINE FIELD metadata   ON session TYPE option<object> FLEXIBLE;
+DEFINE FIELD created_at ON session TYPE datetime DEFAULT time::now() READONLY;
+DEFINE INDEX scope_index ON session FIELDS scope;
+```
+
+### `turn`
+
+Individual messages within a session.
+
+```surql
+DEFINE TABLE turn SCHEMAFULL;
+DEFINE FIELD session    ON turn TYPE record<session>;
+DEFINE FIELD role       ON turn TYPE string
+    ASSERT $value IN ["user", "assistant", "system", "tool"];
+DEFINE FIELD content    ON turn TYPE string;
+DEFINE FIELD seq        ON turn TYPE int;
+DEFINE FIELD created_at ON turn TYPE datetime DEFAULT time::now() READONLY;
+DEFINE INDEX session_seq ON turn FIELDS session, seq UNIQUE;
+```
+
+### `entity`
+
+Named things tracked in experiential memory.
+
+```surql
+DEFINE TABLE entity SCHEMAFULL;
+DEFINE FIELD id              ON entity TYPE array<string, 2>;
+DEFINE FIELD name            ON entity TYPE string;
+DEFINE FIELD type            ON entity TYPE string;
+DEFINE FIELD memory_category ON entity TYPE string
+    ASSERT $value IN ["identity", "knowledge", "context"];
+DEFINE FIELD scope           ON entity TYPE set<record<scope_attribute>>;
+DEFINE FIELD embedding       ON entity TYPE array<float, 1536>;
+DEFINE FIELD resolves_to     ON entity TYPE option<record<knowledge>>;
+DEFINE FIELD source_turn     ON entity TYPE option<record<turn>>;
+DEFINE FIELD created_at      ON entity TYPE datetime DEFAULT time::now() READONLY;
+DEFINE FIELD updated_at      ON entity TYPE datetime DEFAULT time::now();
+DEFINE INDEX embedding_index  ON entity FIELDS embedding HNSW DIMENSION 1536 DIST COSINE TYPE F32;
+DEFINE INDEX type_index       ON entity FIELDS type;
+DEFINE INDEX scope_index      ON entity FIELDS scope;
+DEFINE INDEX resolves_to_index ON entity FIELDS resolves_to;
+```
+
+### `attribute`
+
+Key-value properties on entities, with supersession chains.
+
+```surql
+DEFINE TABLE attribute SCHEMAFULL;
+DEFINE FIELD entity          ON attribute TYPE record<entity>;
+DEFINE FIELD key             ON attribute TYPE string;
+DEFINE FIELD value           ON attribute TYPE string;
+DEFINE FIELD memory_category ON attribute TYPE string
+    ASSERT $value IN ["identity", "knowledge", "context"];
+DEFINE FIELD scope           ON attribute TYPE set<record<scope_attribute>>;
+DEFINE FIELD supersedes      ON attribute TYPE option<record<attribute>>;
+DEFINE FIELD superseded_by   ON attribute TYPE option<record<attribute>>;
+DEFINE FIELD source_turn     ON attribute TYPE option<record<turn>>;
+DEFINE FIELD valid_from      ON attribute TYPE option<datetime>;
+DEFINE FIELD valid_until     ON attribute TYPE option<datetime>;
+DEFINE FIELD created_at      ON attribute TYPE datetime DEFAULT time::now() READONLY;
+DEFINE INDEX entity_key      ON attribute FIELDS entity, key;
+DEFINE INDEX scope_index     ON attribute FIELDS scope;
+DEFINE INDEX temporal_index  ON attribute FIELDS valid_from, valid_until;
+```
+
+### `relates_to`
+
+Graph edges between entities.
+
+```surql
+DEFINE TABLE relates_to TYPE RELATION IN entity OUT entity SCHEMAFULL;
+DEFINE FIELD label           ON relates_to TYPE string;
+DEFINE FIELD memory_category ON relates_to TYPE string
+    ASSERT $value IN ["identity", "knowledge", "context"];
+DEFINE FIELD scope       ON relates_to TYPE set<record<scope_attribute>>;
+DEFINE FIELD source_turn ON relates_to TYPE option<record<turn>>;
+DEFINE FIELD valid_from  ON relates_to TYPE option<datetime>;
+DEFINE FIELD valid_until ON relates_to TYPE option<datetime>;
+DEFINE FIELD created_at  ON relates_to TYPE datetime DEFAULT time::now() READONLY;
+DEFINE INDEX label_index    ON relates_to FIELDS label;
+DEFINE INDEX scope_index    ON relates_to FIELDS scope;
+DEFINE INDEX temporal_index ON relates_to FIELDS valid_from, valid_until;
+```
+
+### `instruction`
+
+Behavioural directives for the agent.
+
+```surql
+DEFINE TABLE instruction SCHEMAFULL;
+DEFINE FIELD label       ON instruction TYPE string;
+DEFINE FIELD description ON instruction TYPE string;
+DEFINE FIELD active      ON instruction TYPE bool DEFAULT true;
+DEFINE FIELD scope       ON instruction TYPE set<record<scope_attribute>>;
+DEFINE FIELD source_turn ON instruction TYPE option<record<turn>>;
+DEFINE FIELD created_at  ON instruction TYPE datetime DEFAULT time::now() READONLY;
+DEFINE INDEX scope_index ON instruction FIELDS scope;
+```
+
+### `uncertainty`
+
+Ambiguous or unresolved information from extraction.
+
+```surql
+DEFINE TABLE uncertainty SCHEMAFULL;
+DEFINE FIELD about      ON uncertainty TYPE string;
+DEFINE FIELD reason     ON uncertainty TYPE string;
+DEFINE FIELD scope      ON uncertainty TYPE set<record<scope_attribute>>;
+DEFINE FIELD source_turn ON uncertainty TYPE record<turn>;
+DEFINE FIELD resolved   ON uncertainty TYPE bool DEFAULT false;
+DEFINE FIELD created_at ON uncertainty TYPE datetime DEFAULT time::now() READONLY;
+DEFINE INDEX scope_index ON uncertainty FIELDS scope;
+```
+
+### `memory_chunk`
+
+Raw text segments from turns, embedded for semantic recall.
+
+```surql
+DEFINE TABLE memory_chunk SCHEMAFULL;
+DEFINE FIELD session     ON memory_chunk TYPE record<session>;
+DEFINE FIELD text        ON memory_chunk TYPE string;
+DEFINE FIELD embedding   ON memory_chunk TYPE array<float, 1536>;
+DEFINE FIELD scope       ON memory_chunk TYPE set<record<scope_attribute>>;
+DEFINE FIELD source_turn ON memory_chunk TYPE option<record<turn>>;
+DEFINE FIELD created_at  ON memory_chunk TYPE datetime DEFAULT time::now() READONLY;
+DEFINE INDEX embedding_index ON memory_chunk FIELDS embedding HNSW DIMENSION 1536 DIST COSINE TYPE F32;
+DEFINE INDEX session_index   ON memory_chunk FIELDS session;
+DEFINE INDEX scope_index     ON memory_chunk FIELDS scope;
+```
+
+### `decision_trace`
+
+Audit record for every retrieval and storage operation.
+
+| Field | Description |
+|---|---|
+| `query` | The original query or operation description |
+| `tier` | Resolution tier: `direct`, `cache`, `hybrid`, `full_context` |
+| `scope` | The scope used for this operation |
+| `sources` | IDs of contributing memory/knowledge chunks |
+| `token_cost` | Tokens consumed by any LLM call |
+| `duration_ms` | Total duration |
+| `api_key_id` | The key that made the request |
+| `session_id` | Associated session (if any) |
+| `created_at` | Timestamp |
+
+## Migrations
+
+Schema migrations are SQL files bundled into the Spectron binary and applied automatically:
+
+| Migration | Contents |
+|---|---|
+| `V1__scope_attributes.surql` | `scope_attribute` table |
+| `V2__layer_1_memory.surql` | Session, turn, entity, attribute, relation, instruction, uncertainty, memory_chunk |
+| `V3__layer_0_knowledge.surql` | Document, knowledge_chunk, keyword, connectors |
+| `V4__layer_0_knowledge_nodes.surql` | Typed knowledge nodes and relations |
+| `V5__decision_traces.surql` | Decision trace and semantic response cache |
+
+Migrations are applied once per Context database. Spectron tracks applied migrations in a `_migrations` table in each Context database.

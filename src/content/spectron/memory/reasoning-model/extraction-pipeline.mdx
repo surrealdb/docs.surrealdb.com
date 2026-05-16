@@ -1,0 +1,174 @@
+---
+position: 1
+title: Extraction pipeline
+description: "How Spectron classifies and extracts structured memory from conversation turns."
+---
+
+# Extraction pipeline
+
+Every time a conversation turn is submitted to Spectron, it passes through a multi-stage extraction pipeline that transforms raw text into structured memory records. The pipeline is designed to balance latency against accuracy: fast pattern matching runs first and short-circuits when sufficient, handing off to progressively more capable models only when needed.
+
+## Three-stage architecture
+
+### Stage 0 – Pattern matching (<5 ms)
+
+The first stage is entirely heuristic. It runs a battery of deterministic checks over the raw turn text, looking for:
+
+- **Known entity references** – mentions of entities already in the memory store, matched by name or alias
+- **Temporal markers** – explicit time references ("last Tuesday", "since January", "three months ago") that inform `valid_from` and `valid_until` fields on extracted facts
+- **Instruction patterns** – imperative phrases that commonly signal behavioural directives ("always", "never", "from now on", "please stop")
+
+When Stage 0 produces a confident result – for example, a simple correction to a known attribute – the pipeline can resolve and persist without invoking any LLM. This keeps the median latency for common operations under 10 ms end to end.
+
+### Stage 1 – Fast LLM (200–500 ms)
+
+When Stage 0 does not produce a definitive result, the turn is forwarded to a fast, cost-efficient language model (such as Claude Haiku, GPT-4o mini, or Gemini Flash). The model is prompted with the turn text, the current memory state summary, and any ontology constraints in effect.
+
+Stage 1 handles the majority of turns: simple attribute assertions, new entity introductions, preference statements, and straightforward corrections.
+
+### Stage 2 – Strong LLM (1–3 s)
+
+A subset of turns requires deeper reasoning: contradictions between multiple claims in the same turn, multi-hop relation inference, ambiguous pronoun resolution, or situations where the Stage 1 output fails a validation check. These are escalated to a stronger model (such as Claude Sonnet or GPT-4o).
+
+Stage 2 is invoked only when Stage 1 returns a result that does not pass structural validation, or when the turn has been pre-classified as high complexity based on length, entity density, or the presence of negation and conditional language.
+
+## Extraction output
+
+Regardless of which stage resolves the turn, the pipeline produces a structured extraction document:
+
+```json
+{
+  "entities": [
+    { "name": "Christian Battaglia", "type": "Person", "memory_category": "identity" }
+  ],
+  "attributes": [
+    { "entity": "Christian Battaglia", "key": "role", "value": "CEO", "memory_category": "identity" }
+  ],
+  "relations": [
+    { "subject": "Christian Battaglia", "verb": "works_at", "object": "Anneal", "memory_category": "identity" }
+  ],
+  "instructions": [
+    { "label": "Track sarcasm", "description": "Track personal details and include visual labels for sarcasm" }
+  ],
+  "uncertainties": [
+    { "about": "job title", "reason": "User made a joke about being CEO, then appeared to correct themselves" }
+  ],
+  "invalidations": [
+    { "entity": "Christian Battaglia", "key": "role", "reason": "User stated they have quit" }
+  ]
+}
+```
+
+Each field corresponds to a separate set of records written to the memory store:
+
+| Field | Records created |
+|---|---|
+| `entities` | `entity` records, one per named thing mentioned |
+| `attributes` | `attribute` records, key-value facts on entities |
+| `relations` | `relation` records, typed edges between entities |
+| `instructions` | `instruction` records, behavioural directives for the agent |
+| `uncertainties` | `uncertainty` records, flagged ambiguities for later resolution |
+| `invalidations` | Triggers `valid_until` writes on matching existing attributes |
+
+## Memory categories
+
+Each extracted item is assigned a `memory_category` during extraction. Categories control default decay behaviour and influence how Spectron scores retrieval relevance:
+
+| Category | Typical content | Default decay |
+|---|---|---|
+| `identity` | Name, role, affiliation, demographics | None |
+| `preference` | Opinions, style preferences, communication style | Slow |
+| `context` | Current situation, active tasks, recent decisions | Fast |
+| `instruction` | Behavioural directives | None (explicit deactivation only) |
+| `episodic` | One-off events, past conversations | Medium |
+
+The memory category is assigned by the LLM during extraction, guided by the category definitions above. You can override category assignments via the ontology configuration.
+
+## Synchronous processing path
+
+For interactive conversational agents, extraction runs synchronously on the turn submission request. The call does not return until the extraction is complete and all records are persisted. This guarantees that the next call to `/state` or `/recall` immediately reflects the turn.
+
+```python
+import spectron
+
+memory = spectron.Client(api_key="...", context="acme-support")
+
+# Synchronous – extraction is complete before this returns
+memory.turns.add(
+    session="sess_abc123",
+    role="user",
+    content="I'm Christian, CEO at Anneal. Always respond in bullet points.",
+    scope={"org": "acme", "user": "christian"},
+)
+
+# Immediately consistent – reflects the entities extracted above
+state = memory.state(scope={"org": "acme", "user": "christian"})
+```
+
+```typescript
+import Spectron from "@spectronmemory/sdk";
+
+const memory = new Spectron({ apiKey: "...", context: "acme-support" });
+
+await memory.turns.add({
+    session: "sess_abc123",
+    role: "user",
+    content: "I'm Christian, CEO at Anneal. Always respond in bullet points.",
+    scope: { org: "acme", user: "christian" },
+});
+
+const state = await memory.state({ scope: { org: "acme", user: "christian" } });
+```
+
+## Error handling
+
+LLM-based extraction can produce malformed or structurally invalid output. The pipeline handles this in two steps:
+
+1. **Retry with structured output enforcement** – the request is retried with a stricter prompt and, where the model supports it, a JSON schema constraint on the response format.
+2. **Fallback to `memory_chunk`** – if the retry also fails, the raw turn text is stored as an unstructured `memory_chunk` record and flagged for review. The turn is not lost, but no structured entities or attributes are extracted from it until the chunk is reprocessed.
+
+You can query flagged chunks via the management API:
+
+```http
+GET /contexts/{ctx}/chunks?status=flagged
+```
+
+Chunks can be reprocessed once the underlying cause (typically a model provider error or an unusually long turn) has been addressed:
+
+```http
+POST /contexts/{ctx}/chunks/{chunk_id}/reprocess
+```
+
+## Ontology grounding
+
+By default, the extraction pipeline infers entity types, attribute keys, and relation labels from the turn content with no constraints. For applications where consistency matters – customer support, CRM enrichment, structured data extraction – you can ground the pipeline to a known ontology.
+
+```python
+await memory.config.ontology(
+    entity_types=["Customer", "Product", "Ticket"],
+    attribute_keys={
+        "Customer": ["name", "plan", "region", "contact_email"],
+        "Ticket": ["status", "priority", "category"],
+    },
+    relation_labels=["purchased", "raised", "resolved_by", "escalated_to"],
+)
+```
+
+```typescript
+await memory.config.ontology({
+    entityTypes: ["Customer", "Product", "Ticket"],
+    attributeKeys: {
+        Customer: ["name", "plan", "region", "contact_email"],
+        Ticket: ["status", "priority", "category"],
+    },
+    relationLabels: ["purchased", "raised", "resolved_by", "escalated_to"],
+});
+```
+
+When an ontology is configured:
+
+- Entity types not in the list are either mapped to the closest match or discarded, depending on the `unknown_types` setting (`"map"` | `"discard"` | `"allow"`)
+- Attribute keys are normalised to the declared list; free-form keys are rejected
+- Relation labels are constrained to the declared set
+
+Ontology grounding is especially useful when Spectron feeds downstream systems (a CRM, a data warehouse) that expect consistent field names and entity schemas.

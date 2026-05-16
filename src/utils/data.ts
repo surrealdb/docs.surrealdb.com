@@ -1,11 +1,12 @@
 import type { Heading, Root } from "@surrealdb/ui";
 import { render } from "vike/abort";
 import type { PageContext } from "vike/types";
-import { type CollectionMap, getCollectionEntry } from "vike-content-collection";
+import { type CollectionMap, getCollection, getCollectionEntry } from "vike-content-collection";
 import { useConfig } from "vike-react/useConfig";
 import { resolveMarkdown } from "./markdown";
 import { getSuffixedMetaTitle } from "./meta";
 import { buildNavigation, type NavSection } from "./navigation";
+import { getProductFromPath } from "./product";
 
 export interface PageData {
     ast: Root;
@@ -42,7 +43,10 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         throw render(404, "Not Found");
     }
 
-    const title = entry.metadata.title ? getSuffixedMetaTitle(entry.metadata.title) : undefined;
+    const productId = getProductFromPath(context.urlPathname);
+    const title = entry.metadata.title
+        ? getSuffixedMetaTitle(entry.metadata.title, productId)
+        : undefined;
     const description = "description" in entry.metadata ? entry.metadata?.description : undefined;
 
     config({
@@ -77,4 +81,17 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         title: entry.metadata.title ?? "",
         description: description ?? "",
     };
+}
+
+/**
+ * URLs for static prerendering. Omits category-only slug segments so crawlers
+ * never enqueue paths such as `/spectron/__category`.
+ */
+export function prerenderCollectionUrls<K extends keyof CollectionMap>(
+    collectionId: K,
+    pathnameBase: string,
+): string[] {
+    return getCollection(collectionId)
+        .filter((entry) => !entry.slug.includes("__category"))
+        .map((entry) => (entry.slug === "" ? pathnameBase : `${pathnameBase}/${entry.slug}`));
 }

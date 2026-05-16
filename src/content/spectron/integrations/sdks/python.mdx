@@ -1,0 +1,447 @@
+---
+position: 1
+title: Python SDK
+description: "Using Spectron from Python applications and agents."
+---
+
+# Python SDK
+
+The Spectron Python SDK (`spectron`) provides an async-first client for building memory-enabled Python agents and applications. A synchronous façade is available for codebases that do not use `asyncio`.
+
+## Installation
+
+```bash
+pip install spectron
+```
+
+The SDK requires Python 3.9 or later. It has no mandatory third-party dependencies beyond `httpx` for HTTP transport.
+
+## Client construction
+
+### Async client
+
+```python
+import os
+from spectron import Spectron
+
+memory = Spectron(
+    context="acme-prod",
+    base_url="https://api.spectron.dev",
+    api_key=os.environ["SPECTRON_API_KEY"],
+)
+```
+
+All methods on `Spectron` are coroutines and must be awaited. The client is safe to share across coroutines within the same event loop.
+
+### Configuration options
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `context` | str | required | The context ID that scopes this client |
+| `base_url` | str | `"https://api.spectron.dev"` | Server URL |
+| `api_key` | str | required | Bearer token for authentication |
+| `timeout` | float | `30.0` | Request timeout in seconds |
+| `retries` | int | `3` | Maximum retry attempts for idempotent requests |
+
+### Synchronous façade
+
+If your code does not use `asyncio`, import from `spectron.sync` instead:
+
+```python
+import os
+from spectron.sync import Spectron
+
+memory = Spectron(
+    context="acme-prod",
+    api_key=os.environ["SPECTRON_API_KEY"],
+)
+
+# All methods are identical but return values directly instead of coroutines
+session = memory.sessions.create(scope={"user": "tobie", "org": "acme"})
+```
+
+The sync façade runs its own event loop internally. Do not use it from inside an `asyncio` event loop – use the async client there.
+
+## Sessions
+
+### Creating a session
+
+```python
+session = await memory.sessions.create(
+    scope={"user": "tobie", "org": "acme"},
+    metadata={"channel": "web-chat", "locale": "en-GB"},
+)
+
+print(session.id)     # "session:01hx7..."
+print(session.scope)  # {"user": "tobie", "org": "acme"}
+```
+
+### Accessing a session handle
+
+Once you have a session ID, you can obtain a session handle without creating a new session:
+
+```python
+session = memory.sessions.get("session:01hx7...")
+```
+
+### Closing a session
+
+```python
+await session.close()
+```
+
+Closing does not delete extracted data. All entities, attributes, and relations persist and remain retrievable.
+
+## Adding turns
+
+A turn submits a single user or assistant message to the extraction pipeline. Spectron extracts entities, attributes, relations, instructions, uncertainties, and corrections from the text and persists them to experiential memory.
+
+```python
+result = await session.turns.add(
+    role="user",
+    content="I just moved to Berlin and I'm starting a new role as VP of Engineering next Monday.",
+)
+
+print(result.turn_id)
+print(result.entities)      # [{"id": "Person/tobie", "label": "Tobie"}]
+print(result.attributes)    # [{"entity": "...", "key": "city", "value": "Berlin"}, ...]
+print(result.relations)     # [{"subject": "...", "predicate": "works_at", "object": "..."}]
+print(result.instructions)  # []
+print(result.corrections)   # []
+print(result.trace_id)
+```
+
+### Turn roles
+
+| Role | Use |
+|---|---|
+| `"user"` | End-user message |
+| `"assistant"` | Agent or LLM response |
+| `"system"` | System prompt injection (not typically extracted) |
+
+### Batching turns
+
+For transcripts or bulk imports, add turns individually – each turn is processed synchronously and its extraction result returned before the next is submitted:
+
+```python
+transcript = [
+    {"role": "user", "content": "What's the weather like in Tokyo?"},
+    {"role": "assistant", "content": "It's currently 18°C and overcast."},
+    {"role": "user", "content": "I'm planning a trip there in June for two weeks."},
+]
+
+for message in transcript:
+    await session.turns.add(role=message["role"], content=message["content"])
+```
+
+## Retrieving context
+
+### `memory.context()` – formatted string for LLM injection
+
+```python
+ctx = await memory.context(
+    query="what do I know about tobie?",
+    k=10,
+    scope={"user": "tobie", "org": "acme"},
+)
+
+system_prompt = f"""You are a helpful assistant.
+
+## Memory
+{ctx.context}
+"""
+
+print(ctx.tier)      # "direct" | "cache" | "hybrid" | "full_context"
+print(ctx.query_ms)
+```
+
+### `memory.query()` – ranked hits
+
+```python
+hits = await memory.query(
+    query="tobie's current role",
+    k=10,
+    scope={"user": "tobie", "org": "acme"},
+)
+
+for hit in hits.hits:
+    print(hit.entity, hit.key, hit.value, hit.score)
+```
+
+## Agentic chat
+
+`session.chat()` drives the full LLM loop: it retrieves context, builds a system prompt, calls the configured LLM, processes the response through the extraction pipeline, and returns the assistant reply. Use this when you want Spectron to own the entire memory-augmented interaction.
+
+```python
+reply = await session.chat("What's the best approach for refactoring a monolith?")
+print(reply)
+```
+
+Pass `stream=True` to receive an async generator of token deltas:
+
+```python
+async for token in session.chat("Explain our current architecture.", stream=True):
+    print(token, end="", flush=True)
+```
+
+## Two integration patterns
+
+### Pattern 1: Spectron drives the loop
+
+Spectron manages retrieval, LLM calls, and extraction. Your code calls `session.chat()` and handles the reply.
+
+```python
+async def handle_message(user_id: str, org_id: str, message: str) -> str:
+    session = await memory.sessions.create(scope={"user": user_id, "org": org_id})
+    reply = await session.chat(message)
+    await session.close()
+    return reply
+```
+
+### Pattern 2: Caller drives the loop
+
+Your code controls the LLM. Spectron provides context retrieval and extraction as separate operations.
+
+```python
+import openai
+
+client = openai.AsyncOpenAI()
+
+async def handle_message(user_id: str, org_id: str, message: str) -> str:
+    scope = {"user": user_id, "org": org_id}
+
+    # 1. Retrieve memory context
+    ctx = await memory.context(query=message, k=10, scope=scope)
+
+    # 2. Build the system prompt
+    system = f"You are a helpful assistant.\n\n## Memory\n{ctx.context}"
+
+    # 3. Call the LLM
+    response = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": message},
+        ],
+    )
+    reply = response.choices[0].message.content
+
+    # 4. Store both turns in Spectron
+    session = await memory.sessions.create(scope=scope)
+    await session.turns.add(role="user", content=message)
+    await session.turns.add(role="assistant", content=reply)
+    await session.close()
+
+    return reply
+```
+
+## Knowledge upload and query
+
+### Uploading a document
+
+```python
+with open("product-spec.pdf", "rb") as f:
+    doc = await memory.knowledge.upload(
+        file=f,
+        filename="product-spec.pdf",
+        content_type="application/pdf",
+        scope={"org": "acme"},
+        metadata={"version": "2.1", "author": "alice"},
+    )
+
+print(doc.id)
+print(doc.chunk_count)
+```
+
+### Querying authoritative knowledge
+
+```python
+results = await memory.knowledge.query(
+    query="what is the return policy for digital products?",
+    mode="hybrid",  # "vector" | "bm25" | "hybrid" | "hybrid_graph"
+    k=10,
+    threshold=0.5,
+    scope={"org": "acme"},
+)
+
+for result in results.results:
+    print(result.chunk_text)
+    print(result.score)
+    print(result.document_title)
+```
+
+### Fetching a specific document or chunk
+
+```python
+doc = await memory.knowledge.get("document:01jt4kx...")
+chunk = await memory.knowledge.get("chunk:01jt4ky...")
+```
+
+## Entities and profiles
+
+### Retrieving entity attributes
+
+```python
+entity = await memory.entities.get("Person/tobie", scope={"org": "acme"})
+print(entity.attributes)  # {"role": "CTO", "city": "Berlin", ...}
+```
+
+### Retrieving a user profile
+
+Profiles aggregate static facts, dynamic context, preferences, and active instructions for a given scope into a single object suitable for system prompt injection:
+
+```python
+profile = await memory.profiles.get(scope={"user": "tobie", "org": "acme"})
+print(profile.identity)      # {"name": "Tobie", "role": "CTO"}
+print(profile.preferences)   # {"language": "British English", ...}
+print(profile.instructions)  # ["Always respond in bullet points", ...]
+print(profile.dynamic)       # {"current_project": "Platform v3", ...}
+```
+
+## Reflection
+
+`memory.reflect()` synthesises insights from existing memories without requiring new input. Pass `persist=True` to write the derived attributes back to experiential memory.
+
+```python
+reflection = await memory.reflect(
+    prompt="What are the recurring themes in this user's work?",
+    scope={"user": "tobie", "org": "acme"},
+    persist=True,
+)
+
+print(reflection.reflection)
+print(reflection.evidence)          # supporting memory hits
+print(reflection.persisted_attributes)  # attributes written to experiential memory
+```
+
+## Forgetting
+
+`memory.forget()` performs a semantic soft-delete. Provide a natural-language description of what to remove; Spectron identifies matching entities and attributes and marks them as deleted.
+
+```python
+result = await memory.forget(
+    description="anything about Tobie's previous employer",
+    scope={"user": "tobie", "org": "acme"},
+)
+
+print(result.deleted_count)
+print(result.trace_id)
+```
+
+## Management client
+
+`SpectronManagement` provides context-level administration operations – creating contexts, rotating API keys, and querying usage.
+
+```python
+from spectron import SpectronManagement
+
+mgmt = SpectronManagement(
+    base_url="https://api.spectron.dev",
+    api_key=os.environ["SPECTRON_MANAGEMENT_KEY"],
+)
+
+# Create a context
+ctx = await mgmt.contexts.create(name="acme-staging")
+print(ctx.id)
+
+# List contexts
+contexts = await mgmt.contexts.list()
+
+# Rotate an API key
+new_key = await mgmt.api_keys.rotate(ctx.id)
+print(new_key.key)
+
+# Query usage
+usage = await mgmt.usage.get(ctx.id, period="2026-05")
+print(usage.total_tokens)
+print(usage.total_requests)
+```
+
+## Traces
+
+Every operation that touches the extraction pipeline or retrieval system produces a trace record. Retrieve traces for debugging and observability:
+
+```python
+trace = await memory.traces.get("trace:01jt4m...")
+print(trace.query)
+print(trace.resolution_tier)
+print(trace.latency_ms)
+print(trace.retrieved_count)
+```
+
+## Error handling
+
+```python
+from spectron import Spectron
+from spectron.errors import (
+    AuthError,
+    NotFoundError,
+    RateLimitError,
+    ScopeError,
+    ServerError,
+    ValidationError,
+)
+
+memory = Spectron(context="acme-prod", api_key=os.environ["SPECTRON_API_KEY"])
+
+try:
+    ctx = await memory.context(query="what is my name?", scope={"user": "tobie"})
+except AuthError:
+    # Invalid or missing API key
+    print("Authentication failed")
+except ScopeError:
+    # Principal does not have access to the requested scope
+    print("Scope not permitted")
+except RateLimitError as e:
+    # Rate or token budget exceeded; retry after e.retry_after seconds
+    import asyncio
+    await asyncio.sleep(e.retry_after)
+except NotFoundError:
+    print("Resource not found")
+except ValidationError as e:
+    print(f"Bad request: {e.detail}")
+except ServerError:
+    # 5xx; SDK already retried 3× for this idempotent GET
+    print("Server error after retries")
+```
+
+See [Errors and retries](/docs/spectron/integrations/sdks/errors-and-retries) for a complete reference.
+
+## Scope ergonomics
+
+Pass scope as a dict at the call site for explicit control, or set a default scope on the client:
+
+```python
+# Client-level default scope (applied to all calls unless overridden)
+memory = Spectron(
+    context="acme-prod",
+    api_key=os.environ["SPECTRON_API_KEY"],
+    default_scope={"org": "acme"},
+)
+
+# Override at the call site for user-specific queries
+ctx = await memory.context(
+    query="my recent projects",
+    scope={"org": "acme", "user": "tobie"},  # overrides default
+)
+```
+
+## Lifecycle and connection management
+
+The async client holds a connection pool internally. Call `await memory.close()` when you are done to release connections cleanly:
+
+```python
+memory = Spectron(context="acme-prod", api_key=os.environ["SPECTRON_API_KEY"])
+
+try:
+    # ... use memory ...
+finally:
+    await memory.close()
+```
+
+Or use the async context manager:
+
+```python
+async with Spectron(context="acme-prod", api_key=os.environ["SPECTRON_API_KEY"]) as memory:
+    ctx = await memory.context(query="hello")
+```

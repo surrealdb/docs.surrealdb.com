@@ -1,0 +1,137 @@
+---
+position: 2
+title: Contexts and scope
+description: "How Contexts isolate tenants and how dimensional scope partitions data within a Context."
+---
+
+# Contexts and scope
+
+Spectron uses two complementary mechanisms to partition data: **Contexts** provide hard isolation between entirely separate products or deployments, and **dimensional scope** partitions data within a single Context for multi-tenancy and per-user isolation.
+
+## Contexts
+
+A **Context** is the fundamental unit of isolation in Spectron. Each Context maps to its own SurrealDB `(namespace, database)` pair holding **all** substrate state for that product line – documents, turns, entities, traces, and configuration. Nothing crosses the boundary between Contexts: schemas, data, and API keys are Context-local.
+
+Typical reasons to create separate Contexts:
+
+- Separate products or applications with no shared knowledge
+- Distinct business units that must not share agent memory
+- Test and production environments
+
+Contexts are created and managed through the Spectron management API:
+
+```http
+POST /contexts
+Content-Type: application/json
+
+{
+  "name": "acme-support",
+  "description": "Customer support agent for Acme Corp"
+}
+```
+
+```json
+{
+  "id": "ctx_01jt4kx...",
+  "name": "acme-support",
+  "namespace": "spectron",
+  "database": "ctx_01jt4kx",
+  "created_at": "2026-05-12T10:00:00Z"
+}
+```
+
+The returned `(namespace, database)` pair is the SurrealDB location for all data within this Context. You issue API keys scoped to a specific Context – a key for `acme-support` cannot read or write data belonging to any other Context.
+
+## Dimensional scope
+
+Within a single Context, **dimensional scope** provides fine-grained partitioning. Every memory record carries a set of arbitrary key-value tags – its scope – that describe the organisational dimensions it belongs to.
+
+```json
+{ "org": "apple", "user": "tobie", "project": "watch" }
+```
+
+Scope is freeform. You define the dimensions that matter for your application: `org`, `user`, `team`, `project`, `region`, `env` – any combination.
+
+### Subset matching
+
+Scope resolution uses **subset matching**: a memory record is accessible to a query if the record's scope is a subset of the query's scope.
+
+```
+record scope ⊆ query scope → accessible
+```
+
+A record tagged `{org: "apple"}` is visible to any query whose scope includes `org: "apple"`, regardless of what other dimensions the query carries:
+
+| Record scope | Query scope | Accessible? |
+|---|---|---|
+| `{}` | `{org: "apple", user: "tobie"}` | Yes – empty scope is a subset of everything |
+| `{org: "apple"}` | `{org: "apple", user: "tobie"}` | Yes – `{org}` ⊆ `{org, user}` |
+| `{org: "apple", user: "tobie"}` | `{org: "apple"}` | No – `{org, user}` ⊄ `{org}` |
+| `{org: "apple", user: "tobie"}` | `{org: "apple", user: "tobie"}` | Yes – equal sets |
+| `{org: "google"}` | `{org: "apple", user: "tobie"}` | No – different org value |
+
+This means that data scoped broadly (e.g. to an org) is automatically visible in narrower queries (e.g. to a specific user within that org), while data scoped to a specific user is never visible when querying without that user dimension.
+
+### Example queries
+
+**Query as a specific user within an org:**
+```json
+{
+  "scope": { "org": "apple", "user": "tobie" }
+}
+```
+Matches records with scope `{}`, `{org: "apple"}`, `{user: "tobie"}`, or `{org: "apple", user: "tobie"}`.
+
+**Query at org level (no user):**
+```json
+{
+  "scope": { "org": "apple" }
+}
+```
+Matches records with scope `{}` or `{org: "apple"}`. Does not surface any user-specific memory.
+
+**Query with a project dimension:**
+```json
+{
+  "scope": { "org": "apple", "user": "tobie", "project": "watch" }
+}
+```
+Matches records scoped to any subset of those three dimensions, including project-specific memory.
+
+## Geographic scope
+
+Scope dimensions are not limited to string tags. **Geometry-valued** dimensions (points, polygons, linestrings) let fleets partition work at the substrate level – for example a service territory polygon. Spatial predicates compose with semantic and graph signals in the same fused ranker; see [Coherence, retrieval, and cost tiers](/docs/spectron/architecture/coherence-retrieval-and-tiers).
+
+## Cross-scope reads and collective promotion
+
+Some deployments need an explicit **merged view**: rows at the requested scope floor **plus** corroborated narrower-scope rows, with provenance preserved.
+
+**Collective promotion** is the **only** automatic cross-scope motion of facts: when *N* principals assert the same fact at a narrow scope, a **policy-gated** corroboration step may promote an org-wide row with `derived_from` pointers to the originals. Everything else crosses scopes only via explicit writes.
+
+## Scope as a security boundary
+
+Scope is enforced server-side through scoped API keys. When you issue an API key, you bind it to a fixed scope:
+
+```http
+POST /contexts/ctx_01jt4kx.../keys
+Content-Type: application/json
+
+{
+  "scope": { "org": "apple" },
+  "description": "Apple tenant key"
+}
+```
+
+Any request authenticated with this key can only query or write memory where the resolved scope includes `org: "apple"`. The client cannot escalate its scope beyond what the key permits – even if the request payload specifies a wider scope, the server clamps it to the key's scope.
+
+This means multi-tenancy is enforced at the infrastructure level. Each tenant receives its own API key scoped to its organisation identifier; their agents can never read or write another tenant's memory.
+
+## Use cases
+
+**Multi-tenancy**: Create one Context for your product, issue one API key per customer organisation scoped to `{org: "<id>"}`. Authoritative knowledge can be shared org-wide while experiential memory remains partitioned by user and project dimensions.
+
+**Per-user isolation**: Include `user: "<id>"` in every interaction's scope. User-specific preferences, history, and instructions are visible only when querying with that user's scope.
+
+**Collaborative memory**: Scope shared knowledge to just `{org: "apple"}` so all users in that org benefit from it, while personal memory is scoped to `{org: "apple", user: "<id>"}` and remains private.
+
+**Project-level context**: Add a `project` dimension for agents that work across multiple projects. Project-specific instructions and context are only surfaced when the agent is operating in that project's scope.

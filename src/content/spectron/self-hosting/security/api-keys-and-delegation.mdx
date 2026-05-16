@@ -1,0 +1,201 @@
+---
+position: 3
+title: API keys and delegation
+description: "Minting, rotation, and delegated sub-keys."
+---
+
+# API keys and delegation
+
+Spectron uses API keys for all authenticated operations. Keys carry a scope floor that restricts what memory they can read and write. A key can never access memory outside its scope floor, and it can only mint sub-keys with a scope floor that is equal to or narrower than its own.
+
+## Creating keys
+
+Keys are created via the management API or `spectronctl`. Each key requires:
+
+- **Principal type**: the kind of caller the key represents (`agent`, `supervisor`, `management`)
+- **Scope floor**: the minimum scope that all operations using this key must satisfy
+- **Name**: a human-readable label for auditing
+- **Expiry** (optional): a timestamp after which the key is automatically rejected
+
+```python
+import spectron
+
+admin = spectron.Admin(api_key="mgmt-…", server="https://spectron.acme.com")
+
+key = await admin.contexts("ctx_acme").keys.create(
+    name="planner-agent",
+    principal="agent",
+    scope_floor={"org": "acme", "agent": "planner"},
+)
+
+print(key.id)        # key_01hw…
+print(key.plaintext) # sk-…  (shown once only – store immediately)
+```
+
+```javascript
+import { Admin } from "spectron";
+
+const admin = new Admin({ apiKey: "mgmt-…", server: "https://spectron.acme.com" });
+
+const key = await admin.contexts("ctx_acme").keys.create({
+    name: "planner-agent",
+    principal: "agent",
+    scopeFloor: { org: "acme", agent: "planner" },
+});
+
+console.log(key.id);        // key_01hw…
+console.log(key.plaintext); // sk-…  (shown once only)
+```
+
+> The plaintext key is returned only at creation time. Spectron stores only the hash. If the value is lost, delete the key and create a new one.
+
+### Principal types
+
+| Principal | Description |
+|------------|---------------------------------------------------------------|
+| `agent` | An individual agent. Reads and writes memory within its scope floor. |
+| `supervisor` | Reads memory across all agents within its org scope. Typically used for reflection and cross-agent queries. |
+| `management` | Full administrative access to the context: key management, configuration, lifecycle operations. |
+
+---
+
+## Key storage
+
+Spectron stores the HMAC-SHA256 hash of each key in SurrealDB. The plaintext is never persisted. Authentication on each request hashes the presented key and compares it to the stored hash.
+
+Because keys are hashed on storage, you cannot retrieve a key's value after creation. Treat key creation responses like you would treat newly generated secrets: copy the value immediately to a secrets manager or environment variable.
+
+---
+
+## Key rotation
+
+To rotate a key without downtime:
+
+1. Create a new key with the same scope floor and principal type.
+2. Update all callers to use the new key.
+3. Verify the old key is no longer in use (check `last_used_at`).
+4. Delete the old key.
+
+```python
+# Step 1: Create replacement
+new_key = await admin.contexts("ctx_acme").keys.create(
+    name="planner-agent-v2",
+    principal="agent",
+    scope_floor={"org": "acme", "agent": "planner"},
+)
+
+# Step 3: Check old key activity
+old_key = await admin.contexts("ctx_acme").keys.get("key_01hw…")
+print(old_key.last_used_at)  # 2026-01-15T09:12:00Z
+
+# Step 4: Delete old key
+await admin.contexts("ctx_acme").keys.delete("key_01hw…")
+```
+
+Deletion is immediate. Any in-flight requests using the deleted key will fail on their next API call.
+
+---
+
+## Delegation
+
+A key holder can mint sub-keys with a scope floor that is a superset of (or equal to) their own scope floor. This is the delegation invariant: a delegated key can never be broader than the key that created it.
+
+**Example**: a planner agent key with `{org: "acme", agent: "planner"}` can mint a sub-key for a specific tool:
+
+```python
+sub_key = await admin.contexts("ctx_acme").keys.create(
+    name="tool-search",
+    principal="agent",
+    scope_floor={"org": "acme", "agent": "planner", "tool": "search"},
+    expires_at="2026-06-01T00:00:00Z",
+    created_by="key_01hw…",  # the parent key
+)
+```
+
+The `created_by` field records which key minted this sub-key, forming an auditable delegation chain.
+
+**Invalid delegation** – the following would be rejected because the sub-key's floor is broader than the parent:
+
+```python
+# This will fail: {org: "acme"} is broader than {org: "acme", agent: "planner"}
+await admin.contexts("ctx_acme").keys.create(
+    name="too-broad",
+    scope_floor={"org": "acme"},  # broader than parent → rejected
+    created_by="key_01hw…",
+)
+# raises: ScopeEscapeError: delegated floor must be superset of parent floor
+```
+
+### Use cases for delegation
+
+- **Per-tool auditing**: mint a sub-key per tool call so `last_used_at` tracks tool-level activity
+- **Session-bounded tokens**: create a key that expires when a session ends
+- **Temporary access**: grant a contractor key scoped to a single agent for a time-bounded period
+- **Principle of least privilege**: give each component exactly the scope it needs
+
+---
+
+## Expiry
+
+Keys accept an `expires_at` field in RFC 3339 format. After this timestamp, the key is rejected on every request with a `401 Unauthorized` response.
+
+```python
+import datetime
+
+expires = (datetime.datetime.utcnow() + datetime.timedelta(days=30)).isoformat() + "Z"
+
+key = await admin.contexts("ctx_acme").keys.create(
+    name="temp-contractor",
+    principal="agent",
+    scope_floor={"org": "acme", "agent": "contractor"},
+    expires_at=expires,
+)
+```
+
+Expired keys are not automatically deleted. They remain in the key list with `status: "expired"` and can be inspected for audit purposes. Delete them when no longer needed.
+
+---
+
+## Revocation
+
+To immediately invalidate a key, delete it:
+
+```python
+await admin.contexts("ctx_acme").keys.delete("key_01hw…")
+```
+
+Deletion is hard and immediate. If you want to preserve the key record for audit purposes without allowing further use, set `revoked_at` instead:
+
+```python
+await admin.contexts("ctx_acme").keys.revoke("key_01hw…")
+```
+
+A revoked key has `revoked_at` set to the current timestamp and `status: "revoked"`. It cannot be unreveoked. Use deletion when the record is no longer needed; use revocation when you need the audit trail.
+
+---
+
+## Audit fields
+
+Every key carries the following audit fields:
+
+| Field | Description |
+|--------------|--------------------------------------------------------------|
+| `id` | Unique key identifier |
+| `name` | Human-readable label |
+| `principal` | Principal type |
+| `scope_floor` | The scope floor enforced on all requests using this key |
+| `created_at` | When the key was created |
+| `created_by` | Key ID of the parent key that minted this key (if delegated) |
+| `last_used_at` | Timestamp of the most recent authenticated request |
+| `expires_at` | Expiry timestamp (null if no expiry) |
+| `revoked_at` | Revocation timestamp (null if active) |
+| `status` | `active`, `expired`, or `revoked` |
+
+```python
+keys = await admin.contexts("ctx_acme").keys.list()
+
+for key in keys:
+    print(f"{key.name:20} {key.status:8} last used: {key.last_used_at}")
+```
+
+The `created_by` chain lets you audit delegation trees: given any key, you can walk `created_by` back to the root management key.

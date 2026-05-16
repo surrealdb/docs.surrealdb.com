@@ -1,0 +1,157 @@
+---
+position: 4
+title: Multi-tenancy
+description: "Patterns for serving multiple tenants from a single Spectron deployment."
+---
+
+# Multi-tenancy
+
+A single Spectron deployment can serve multiple tenants. There are two primary patterns, and you can mix them depending on the isolation requirements of your product.
+
+## Pattern 1: separate Contexts per tenant
+
+Each tenant gets its own Context – a separately named SurrealDB database with its own API keys, configuration, and data. The Contexts are completely isolated at the database level.
+
+```
+Context: tenant-alpha    (ns: tenants, db: alpha)
+Context: tenant-beta     (ns: tenants, db: beta)
+Context: tenant-gamma    (ns: tenants, db: gamma)
+```
+
+**Advantages:**
+
+- Strongest isolation guarantee. Tenant data is in separate databases with separate key namespaces.
+- Per-tenant configuration (model selection, token limits, ontology, chunking parameters) without any risk of cross-tenant effect.
+- Independent deletion: deleting a Context drops the bound database without touching any other tenant's data.
+- Regulatory compliance: you can prove to an auditor that tenant A's data is in database A and tenant B's data is in database B.
+
+**Disadvantages:**
+
+- Higher operational overhead as tenant count grows. Each Context is an independent unit to monitor, upgrade (though migrations are automatic), and back up.
+- Slightly higher SurrealDB resource usage due to separate databases.
+
+**Use when:**
+
+- You have a small to medium number of large tenants.
+- Compliance or contractual obligations require physical data separation.
+- Tenants require different LLM providers or model configurations.
+
+### Provisioning a Context per tenant
+
+```python
+from spectron import SpectronManagement
+
+admin = SpectronManagement(
+    base_url="https://spectron.example.com",
+    api_key=os.environ["SPECTRON_MGMT_KEY"],
+)
+
+async def provision_tenant(tenant_id: str, openai_key: str) -> str:
+    """Create a Context and return an agent key secret."""
+    await admin.contexts.create(
+        id=f"tenant-{tenant_id}",
+        namespace="tenants",
+        database=tenant_id,
+        config={
+            "token_limit": 1_000_000,
+            "models": {
+                "extraction": "openai/gpt-4o-mini",
+                "response": "openai/gpt-4o",
+            },
+            "providers": {
+                "openai": openai_key,
+            },
+        },
+    )
+
+    key = await admin.contexts(f"tenant-{tenant_id}").keys.create(
+        name="app-agent",
+        principal="agent",
+        scope_floor={"org": tenant_id},
+    )
+    return key.secret
+```
+
+## Pattern 2: scope-based isolation within a single Context
+
+All tenants share a single Context. Each tenant is assigned an `org` value, and agent keys for each tenant have a scope floor of `{org: tenant_id}`. Scope enforcement ensures that tenant A's key cannot access tenant B's data.
+
+```
+Context: platform-prod
+
+  Tenant alpha: keys with scope_floor = {org: "alpha"}
+  Tenant beta:  keys with scope_floor = {org: "beta"}
+  Tenant gamma: keys with scope_floor = {org: "gamma"}
+```
+
+**Advantages:**
+
+- Lower operational overhead. One Context to manage, monitor, and configure.
+- Easier to add new tenants – create a scope-bound key; no new database provisioning needed.
+- Shared general knowledge (scope `{}`) across all tenants – useful for product-level context that every agent should know.
+
+**Disadvantages:**
+
+- Isolation is enforced at the application layer, not the database layer. While Spectron's scope enforcement is server-side and architecturally sound, the isolation is not as verifiable to an auditor as physical database separation.
+- Shared configuration: model choices, token limits, and ontology apply to all tenants in the Context (though token limits can be tracked per-scope via traces).
+- Deleting one tenant's data requires a targeted redaction operation rather than dropping a database.
+
+**Use when:**
+
+- You have many small tenants (SaaS with hundreds or thousands of organisations).
+- All tenants use the same model configuration.
+- Regulatory obligations do not require physical data separation.
+
+### Provisioning a tenant key
+
+```python
+async def provision_tenant(tenant_id: str) -> str:
+    """Add a tenant to the shared Context and return an agent key secret."""
+    key = await admin.contexts("platform-prod").keys.create(
+        name=f"tenant-{tenant_id}",
+        principal="agent",
+        scope_floor={"org": tenant_id},
+    )
+    return key.secret
+```
+
+The key secret is given to the tenant's application. It can create sessions, recall memory, and upload documents – all strictly within `{org: tenant_id}`.
+
+## Cross-tenant data impossibility
+
+Under scope-based isolation, a key with scope floor `{org: "alpha"}` physically cannot read data written by a key with scope floor `{org: "beta"}`. The server enforces this at the query level – see [Scope as a security boundary](/docs/spectron/self-hosting/security/scope-as-security-boundary) for the mechanism.
+
+Cross-tenant contamination through the recall endpoint is also prevented: a recall query carries the requesting key's scope floor, and Spectron's retrieval pipeline applies that floor as a mandatory filter at every tier.
+
+## Per-tenant retention policies
+
+In pattern 1 (separate Contexts), set a `retention_days` value per Context:
+
+```json
+{ "config": { "retention_days": 90 } }
+```
+
+In pattern 2 (shared Context), retention is uniform across all tenants. Implement per-tenant retention by scheduling targeted forget operations via the management API using the tenant's `org` scope.
+
+## Per-tenant token budgets
+
+In pattern 1, set `token_limit` per Context.
+
+In pattern 2, use decision traces to monitor token usage per `org` scope. Spectron records the scope of every LLM call in the `decision_trace` table – query it to compute per-tenant token consumption and enforce budgets at the application layer.
+
+## Choosing between the two patterns
+
+| Factor | Separate Contexts | Shared Context |
+|---|---|---|
+| Number of tenants | Small to medium | Large |
+| Isolation guarantee | Database-level | Application-level |
+| Per-tenant configuration | Full | Limited |
+| Provisioning complexity | Higher | Lower |
+| Deletion | Drop database | Targeted redaction |
+| Regulatory compliance | Easier to verify | Requires scope audit |
+
+## Next steps
+
+- [Scope as a security boundary](/docs/spectron/self-hosting/security/scope-as-security-boundary) – how scope floors work
+- [Principals](/docs/spectron/self-hosting/security/principals) – key types and capabilities
+- [Managing contexts](/docs/spectron/self-hosting/operations/contexts) – Context lifecycle management

@@ -1,0 +1,186 @@
+---
+position: 2
+title: Multimodal content
+description: "Ingesting images, audio, and video into the Spectron knowledge layer."
+---
+
+# Multimodal content
+
+Spectron can ingest more than text. Images, audio recordings, and video files are all first-class document types in authoritative knowledge. Depending on the ingestion profile you select, Spectron applies OCR, speech-to-text transcription, and visual embedding to extract retrievable content from non-textual sources.
+
+## Ingestion profiles
+
+The `profile` parameter on the upload endpoint controls which extraction modalities are applied. Four profiles are available:
+
+| Profile | Description |
+|---|---|
+| `text_only` | Extracts text from plain-text, markdown, HTML, JSON, and PDF documents. No OCR or visual processing. Default. |
+| `text_plus_ocr` | All of `text_only`, plus OCR for images and scanned PDFs. |
+| `multimodal_balanced` | OCR for images and PDFs, CLIP visual embeddings for images, speech-to-text transcript for audio and video. |
+| `multimodal_full` | All available modalities – OCR, CLIP embeddings, transcription, and per-frame captioning for video. |
+
+Specify the profile at upload time:
+
+```python
+doc = await memory.knowledge.upload(
+    file=open("product-diagram.png", "rb"),
+    title="Product Architecture Diagram",
+    profile="multimodal_balanced",
+    scope={"org": "anneal"},
+)
+```
+
+```javascript
+const doc = await memory.knowledge.upload({
+    file: imageFile,
+    title: "Product Architecture Diagram",
+    profile: "multimodal_balanced",
+    scope: { org: "anneal" },
+});
+```
+
+## Supported formats
+
+### Images
+
+| Format | MIME type | Notes |
+|---|---|---|
+| PNG | `image/png` | Lossless; recommended for diagrams and screenshots |
+| JPEG | `image/jpeg` | Suitable for photographs |
+| WebP | `image/webp` | Modern format; lossless or lossy |
+| GIF | `image/gif` | Static and animated; first frame used for embedding |
+
+### Audio
+
+| Format | MIME type |
+|---|---|
+| WAV | `audio/wav` |
+| MP3 | `audio/mpeg` |
+| OGG | `audio/ogg` |
+| FLAC | `audio/flac` |
+| AAC | `audio/aac` |
+
+### Video
+
+| Format | MIME type |
+|---|---|
+| MP4 | `video/mp4` |
+| WebM | `video/webm` |
+| MOV | `video/quicktime` |
+
+## OCR
+
+OCR (optical character recognition) recognises printed and handwritten text in images and scanned PDFs. The recognised text is extracted, split into chunks, and embedded in exactly the same way as text from a native PDF or HTML document. Chunks derived from OCR carry a `source: "ocr"` annotation in their metadata.
+
+OCR is available with `text_plus_ocr`, `multimodal_balanced`, and `multimodal_full` profiles.
+
+```python
+doc = await memory.knowledge.upload(
+    file=open("scanned-invoice.pdf", "rb"),
+    title="Invoice 1042",
+    profile="text_plus_ocr",
+    scope={"org": "anneal"},
+)
+```
+
+Pipeline stages during OCR processing include `extracting` and `rendering`. Once the document is `ready`, its chunks are searchable by text query.
+
+## Speech-to-text
+
+For audio and video documents, Spectron generates a full transcript and appends it to the chunk body so the spoken content is retrievable by semantic and keyword search. In addition to the full transcript, the pipeline produces time-coded `audio_chunk` segments that record approximately which part of the recording a retrieved chunk came from.
+
+An `audio_chunk` segment looks like:
+
+```json
+{
+  "chunk_id": "chunk:01hy2…",
+  "start_ms": 14200,
+  "end_ms": 28700,
+  "text": "The return window for unopened items is thirty days from purchase."
+}
+```
+
+This lets your application link a retrieved fact back to the precise moment in a recording – useful for surfacing relevant clips or timestamped citations.
+
+Transcription is available with `multimodal_balanced` and `multimodal_full` profiles.
+
+```python
+doc = await memory.knowledge.upload(
+    file=open("support-call.mp3", "rb"),
+    title="Support Call 2026-05-12",
+    profile="multimodal_balanced",
+    scope={"user": "tobie", "org": "anneal"},
+)
+```
+
+The pipeline status will pass through `transcribing` before reaching `ready`.
+
+## CLIP visual embeddings
+
+For image content processed under `multimodal_balanced` or `multimodal_full`, Spectron generates a CLIP visual embedding alongside any OCR text. CLIP embeddings capture the semantic content of the image independently of its textual labels, enabling retrieval by visual similarity.
+
+When a query is issued against a context that includes images, the CLIP embeddings participate in the vector search alongside text embeddings. A query such as "product dimension diagram" can retrieve a relevant engineering drawing even if that drawing contains no recognisable text.
+
+## Video captions
+
+Under `multimodal_full`, Spectron generates per-frame captions for video documents. Captions are indexed as additional text chunks associated with the video document. This allows text-based queries to retrieve video content described by the visual scene, not only by the spoken transcript.
+
+Video caption extraction is the most resource-intensive stage and is therefore opt-in, available only with `multimodal_full`.
+
+## HTTP provider integration
+
+By default, Spectron uses its built-in OCR and speech-to-text providers. For deployments that have existing OCR or STT infrastructure, you can configure a custom HTTP endpoint that Spectron will call in place of the built-in provider:
+
+```python
+await memory.config.providers(
+    ocr_endpoint="https://ocr.internal.example.com/v1/extract",
+    stt_endpoint="https://stt.internal.example.com/v1/transcribe",
+)
+```
+
+Spectron posts the raw file bytes to these endpoints and expects a JSON response with the extracted text:
+
+```json
+{ "text": "Recognised content here…" }
+```
+
+Custom endpoints must be reachable from the Spectron server and must respond within 60 seconds. Authentication headers can be configured per endpoint through the same provider configuration object.
+
+## Checking pipeline progress
+
+Multimodal documents take longer to process than text-only uploads. The `status` field reflects the current pipeline stage precisely, so you can surface progress information in your application:
+
+```python
+import asyncio
+
+stages = []
+
+while True:
+    doc = await memory.knowledge.get(doc.id)
+    if doc.status not in stages:
+        stages.append(doc.status)
+        print(f"Stage: {doc.status}")
+
+    if doc.status in ("ready", "failed"):
+        break
+
+    await asyncio.sleep(3)
+```
+
+Example output for a video document processed with `multimodal_full`:
+
+```
+Stage: queued
+Stage: extracting
+Stage: transcribing
+Stage: captioning
+Stage: chunking
+Stage: embedding
+Stage: keywording
+Stage: rendering
+Stage: ready
+```
+
+## PII redaction
+
+PII redaction can be enabled per-Context and applies to all ingested content, including OCR-recognised text and speech transcripts, before chunking. See [Context configuration](/docs/spectron/self-hosting/security/authentication) for details on enabling PII redaction.

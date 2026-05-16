@@ -1,0 +1,227 @@
+---
+position: 3
+title: Coding agent with project memory
+description: "Repository scoped sessions and MCP."
+---
+
+# Coding agent with project memory
+
+This guide shows how to build a coding assistant – similar to an in-editor AI agent – that uses Spectron via MCP to remember coding conventions, past decisions, team preferences, and ongoing work across sessions.
+
+## What the agent remembers
+
+A coding agent working on a repository accumulates a surprising amount of context that is useful across sessions:
+
+- **Coding conventions**: "We use `Result<T, Error>` not exceptions in this codebase"
+- **Past decisions**: "We chose Tanstack Query over SWR because of the devtools"
+- **Team preferences**: "Alice prefers functional components; Bob owns the auth module"
+- **Ongoing work**: "The migration to Postgres is 80% complete, blocked on the auth service"
+- **Documentation**: Product specs, architecture decisions, API contracts
+
+Without persistent memory, every new session starts from scratch. With Spectron, the agent can recall relevant context at the start of each conversation and update its memory as new decisions are made.
+
+---
+
+## Installing the MCP server
+
+Spectron provides an MCP server that exposes memory operations as tools. Install it into your editor using the MCP installer:
+
+```bash
+# Install for Cursor
+npx install-mcp spectron --client cursor --context my-project
+
+# With repository-scoped memory
+npx install-mcp spectron \
+    --client cursor \
+    --context my-project \
+    --scope '{"project": "my-repo"}'
+```
+
+This registers the Spectron MCP server in your editor's MCP configuration. You will be prompted for your Spectron API key during installation.
+
+### Manual configuration
+
+If you prefer to configure the MCP server manually, add it to your editor's MCP config:
+
+```json
+{
+  "mcpServers": {
+    "spectron": {
+      "command": "npx",
+      "args": ["@spectron/mcp"],
+      "env": {
+        "SPECTRON_API_KEY": "sk-…",
+        "SPECTRON_SCOPE": "{\"project\": \"my-repo\"}",
+        "SPECTRON_SERVER": "https://spectron.acme.com"
+      }
+    }
+  }
+}
+```
+
+---
+
+## Scope per repository
+
+Scoping memory to a repository ensures that conventions from one project do not bleed into another. Use the `project` dimension in the scope:
+
+```json
+{ "org": "acme", "project": "my-repo" }
+```
+
+With this scope, all memory stored during sessions for `my-repo` is isolated from memory for other projects. Team-wide knowledge (e.g. company-wide conventions) lives at the `org` scope and is readable by all project-scoped sessions.
+
+---
+
+## Session start: loading context
+
+At the beginning of each coding session, the agent should call `memory_profile` to load relevant context before it responds to the first user message:
+
+```
+Tool: memory_profile
+Arguments: { "scope": { "org": "acme", "project": "my-repo" } }
+```
+
+This returns a structured snapshot of what Spectron knows about this project: ongoing work, decisions, preferences, and conventions. The agent includes this in its system context before the user's first message.
+
+A typical profile for a coding agent might look like:
+
+```json
+{
+  "identity": [
+    { "label": "repo", "attributes": { "name": "my-repo", "language": "TypeScript", "framework": "React" } }
+  ],
+  "knowledge": [
+    { "label": "state_management", "attributes": { "choice": "Tanstack Query", "reason": "devtools" } },
+    { "label": "error_handling", "attributes": { "pattern": "Result<T, Error>", "exceptions": "never" } }
+  ],
+  "context": [
+    { "label": "active_migration", "attributes": { "task": "postgres_migration", "progress": "80%", "blocker": "auth_service" } }
+  ]
+}
+```
+
+---
+
+## Storing decisions
+
+When a significant decision is made during a session, use `memory_store` to persist it:
+
+```
+Tool: memory_store
+Arguments: {
+  "content": "We decided to use Zod for runtime validation because it integrates with our existing TypeScript types and provides better error messages than Yup.",
+  "scope": { "org": "acme", "project": "my-repo" },
+  "memory_category": "knowledge"
+}
+```
+
+For team preferences and conventions, the agent can store these automatically when it identifies a directive in the conversation:
+
+```
+User: "Always use named exports in this project, never default exports."
+
+Tool: memory_store
+Arguments: {
+  "content": "Always use named exports, never default exports.",
+  "scope": { "org": "acme", "project": "my-repo" },
+  "memory_category": "instructions"
+}
+```
+
+---
+
+## Documentation lookup with knowledge_search
+
+When the user asks a question that might be answered by project documentation ingested into authoritative knowledge, use `knowledge_search`:
+
+```
+Tool: knowledge_search
+Arguments: {
+  "query": "What is the authentication flow for the API?",
+  "scope": { "org": "acme", "project": "my-repo" },
+  "top_k": 3
+}
+```
+
+This searches the authoritative knowledge base for relevant passages from ingested documents (architecture decision records, API specs, README files).
+
+To ingest project documentation into authoritative knowledge:
+
+```bash
+spectronctl contexts ingest ctx_acme ./docs/architecture.md \
+    --label "Architecture Decision Records" \
+    --tags "architecture,adr" \
+    --api-key mgmt-…
+
+spectronctl contexts ingest ctx_acme ./docs/api-spec.yaml \
+    --label "API Specification" \
+    --tags "api,spec" \
+    --api-key mgmt-…
+```
+
+---
+
+## Full session flow
+
+Here is what a typical coding session looks like with Spectron MCP integrated:
+
+**Session start**
+
+```
+Tool: memory_profile
+→ Returns: ongoing work, conventions, decisions, preferences
+
+Tool: knowledge_search (query = user's first message)
+→ Returns: relevant documentation passages
+```
+
+**During the session**
+
+```
+User: "How should I handle errors in the new payment module?"
+
+Tool: memory_recall
+Arguments: { "query": "error handling patterns", "scope": { "project": "my-repo" } }
+→ Returns: "Use Result<T, Error> not exceptions in this codebase"
+
+Agent: "Based on this project's conventions, you should use Result<T, Error>…"
+```
+
+**When a decision is made**
+
+```
+User: "Let's use Stripe's webhook library directly rather than wrapping it."
+
+Tool: memory_store
+Arguments: {
+  "content": "Payment module uses Stripe webhook library directly, no wrapper.",
+  "memory_category": "knowledge"
+}
+```
+
+**Session end (optional)**
+
+```
+Tool: memory_reflect
+Arguments: {
+  "query": "What was decided and what needs follow-up?",
+  "scope": { "project": "my-repo" },
+  "persist": true
+}
+→ Synthesises and stores a session summary
+```
+
+---
+
+## Multi-developer teams
+
+When multiple developers work on the same project, they share memory at the project scope. Each developer's session contributes to and reads from the same experiential memory.
+
+For individual preferences, use the `user` dimension alongside `project`:
+
+```json
+{ "org": "acme", "project": "my-repo", "user": "alice" }
+```
+
+Alice's personal preferences (code style, preferred approaches) live at the user scope. Project-wide conventions live at the project scope. Both are accessible when Alice's session is active.

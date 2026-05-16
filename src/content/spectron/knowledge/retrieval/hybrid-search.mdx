@@ -1,0 +1,200 @@
+---
+position: 1
+title: Hybrid search
+description: "Using vector, BM25, and graph-density retrieval modes in Spectron."
+---
+
+# Hybrid search
+
+Spectron exposes four retrieval modes for querying the knowledge layer. Each mode trades coverage, precision, and computational cost differently. Choosing the right mode for your query pattern is the most direct lever for improving retrieval quality.
+
+## Query modes
+
+### `vector`
+
+Pure HNSW (hierarchical navigable small world) approximate nearest-neighbour search over dense embeddings. The query is embedded with the same model used at ingestion, and the top-k nearest chunk embeddings are returned.
+
+Vector search excels at paraphrase and semantic similarity – finding chunks that express the same idea in different words. It is weak on exact strings, product codes, proper names, and rare terms that are poorly represented in the embedding model's training data.
+
+### `bm25`
+
+BM25 full-text search over the chunk corpus. The query is tokenised and matched against the inverted index. Results are ranked by term frequency–inverse document frequency weighted by document length.
+
+BM25 excels at exact terms, product identifiers, model numbers, and specific technical phrases. It is weak on synonyms and paraphrase – if the query uses a term not present in the chunk, BM25 will not find it.
+
+### `hybrid`
+
+Reciprocal rank fusion (RRF) of vector and BM25 results. Both retrieval passes run independently, and their ranked lists are merged into a single ranking using the RRF formula:
+
+```
+score(d) = Σ 1 / (k + rank_i(d))
+```
+
+where `k` is a smoothing constant (default 60) and `rank_i(d)` is the rank of document `d` in retrieval pass `i`. Documents appearing in both lists receive a combined score; documents appearing in only one list are still represented with a lower combined score.
+
+Hybrid mode is the default. It reliably outperforms either mode in isolation across a wide range of query types and is appropriate for most production deployments.
+
+### `hybrid_graph`
+
+Hybrid retrieval plus a graph-density reranking pass. After the initial hybrid retrieval, each candidate chunk is rescored based on its connectivity in the knowledge graph. Chunks that are more densely connected to other relevant content – via keyword co-occurrence, document-level links, typed-knowledge edges, or semantic section similarity – receive a higher rerank score.
+
+The graph-density reranker draws on:
+
+- **Keyword graph**: chunks linked to high-scoring keywords that match query terms
+- **Typed-knowledge graph**: chunks adjacent to knowledge nodes relevant to the query
+- **Section vectors**: semantic similarity between query and document section headings
+- **Document links**: outbound links from the retrieved document to related documents
+- **Document summaries**: summary-level similarity as a signal for topic alignment
+- **Keyword co-occurrence**: keywords that frequently appear together with the matched terms
+- **Personalised PageRank**: random-walk authority scores from query-matched seed nodes
+
+`hybrid_graph` produces the highest-quality results for complex queries requiring multi-hop reasoning, but adds latency proportional to graph depth. For simple factual lookups, `hybrid` is sufficient.
+
+## Basic query
+
+```python
+from spectron import Spectron
+
+memory = Spectron(context="acme-prod", api_key=os.environ["SPECTRON_API_KEY"])
+
+hits = await memory.knowledge.query(
+    query="what is the return window for unopened items?",
+    mode="hybrid",
+    k=10,
+)
+
+for hit in hits:
+    print(hit.score)
+    print(hit.chunk.text)
+    print(hit.document.title)
+```
+
+```javascript
+import { Spectron } from "spectron";
+
+const memory = new Spectron({ context: "acme-prod", apiKey: process.env.SPECTRON_API_KEY });
+
+const hits = await memory.knowledge.query({
+    query: "what is the return window for unopened items?",
+    mode: "hybrid",
+    k: 10,
+});
+
+for (const hit of hits) {
+    console.log(hit.score, hit.chunk.text, hit.document.title);
+}
+```
+
+## Full query with all options
+
+```python
+hits = await memory.knowledge.query(
+    query="what is the return window for unopened items?",
+    mode="hybrid_graph",
+    k=10,
+    threshold=0.5,          # minimum score to include in results
+    vector_weight=0.5,      # relative weight of vector vs BM25 in RRF
+    rrf_k=60,               # RRF smoothing constant
+    graph_alpha=0.3,        # weight of graph-density rerank vs base score
+    expand_graph=True,      # include one-hop keyword and typed-knowledge context
+    use_hyde=False,         # Hypothetical Document Embeddings query expansion
+    decompose_query=False,  # sub-question decomposition
+    use_reranker=False,     # cross-encoder reranking
+    filter={"mime_type": ["application/pdf"]},
+    scope={"org": "anneal"},
+)
+```
+
+## Query result structure
+
+Each hit in the result contains:
+
+```json
+{
+  "chunk": {
+    "id": "chunk:01hy2…",
+    "text": "Unopened items may be returned within 30 days of the original purchase date.",
+    "section": "Eligibility",
+    "position": 7
+  },
+  "score": 0.87,
+  "document": {
+    "id": "doc:01hx9…",
+    "title": "Returns Policy",
+    "source": "returns.pdf"
+  }
+}
+```
+
+- `chunk.position` is the chunk's ordinal position within the document, useful for retrieving surrounding context.
+- `chunk.section` is the heading of the section containing this chunk, or `null` for documents without section structure.
+- `score` is the normalised relevance score after all reranking passes.
+- `document` provides provenance for display, citation, or follow-up retrieval.
+
+## Advanced options
+
+### HyDE (Hypothetical Document Embeddings)
+
+When `use_hyde=True`, Spectron generates a hypothetical answer to the query using the configured response model, then embeds that hypothetical answer rather than the raw query string. This improves recall for queries phrased as questions rather than document-like statements, at the cost of one LLM call per query.
+
+```python
+hits = await memory.knowledge.query(
+    query="what is the return window for unopened items?",
+    mode="hybrid",
+    use_hyde=True,
+)
+```
+
+### Sub-question decomposition
+
+When `decompose_query=True`, Spectron splits complex queries into a set of simpler sub-questions, executes each independently, and merges the results. This is useful when a single query implicitly asks multiple things:
+
+```python
+hits = await memory.knowledge.query(
+    query="what are the return and warranty policies for AirPods Pro 2?",
+    mode="hybrid",
+    decompose_query=True,
+)
+```
+
+Decomposition adds latency proportional to the number of sub-questions and consumes additional LLM tokens. Use it for explicit multi-topic queries rather than as a default.
+
+### Cross-encoder reranking
+
+When `use_reranker=True`, the top-k results from the initial retrieval pass are reranked using a cross-encoder model that jointly encodes the query and each candidate chunk. Cross-encoder reranking is more accurate than bi-encoder (embedding) similarity but significantly slower.
+
+```python
+hits = await memory.knowledge.query(
+    query="return policy for international purchases",
+    mode="hybrid",
+    use_reranker=True,
+    k=20,   # retrieve more candidates for the reranker to rescore
+)
+```
+
+### Metadata filtering
+
+Apply hard filters before retrieval to restrict results to a subset of the document corpus:
+
+```python
+hits = await memory.knowledge.query(
+    query="Q3 revenue",
+    mode="hybrid",
+    filter={
+        "mime_type": ["application/pdf"],
+        "scope": {"org": "anneal"},
+    },
+)
+```
+
+Filters are applied before scoring, so they do not affect the ranking of results that pass through.
+
+## Choosing a mode
+
+| Query pattern | Recommended mode |
+|---|---|
+| General natural-language questions | `hybrid` |
+| Product codes, model numbers, exact phrases | `bm25` |
+| Paraphrase, synonym-heavy queries | `vector` |
+| Complex multi-hop reasoning, graph context | `hybrid_graph` |
+| High-recall requirements (academic, legal) | `hybrid` + `use_reranker=True` |

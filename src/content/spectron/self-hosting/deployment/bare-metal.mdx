@@ -1,0 +1,206 @@
+---
+position: 4
+title: Bare metal
+description: "Running Spectron as a systemd service on Linux."
+---
+
+# Bare metal
+
+You can run Spectron directly on a Linux host as a systemd service. This is appropriate for single-server deployments, edge environments, or situations where container runtimes are not available.
+
+## Prerequisites
+
+- A Linux host with systemd (Debian, Ubuntu, RHEL, Fedora, or equivalent)
+- A running SurrealDB instance (local or remote)
+- An object store endpoint (S3-compatible, GCS, or a local filesystem path)
+- `curl` for downloading the binary
+
+## Downloading the binary
+
+Download the latest `spectron-server` binary from the GitHub releases page:
+
+```bash
+# Replace VERSION with the desired release, e.g. 0.1.0
+VERSION=0.1.0
+ARCH=x86_64  # or aarch64 for ARM64
+
+curl -Lo /usr/local/bin/spectron \
+  "https://github.com/surrealdb/docs/spectron/releases/download/v${VERSION}/spectron-server-linux-${ARCH}"
+
+chmod +x /usr/local/bin/spectron
+```
+
+Verify the installation:
+
+```bash
+spectron --version
+```
+
+## Creating a dedicated user
+
+Run Spectron as a dedicated non-root user:
+
+```bash
+useradd --system --no-create-home --shell /sbin/nologin spectron
+```
+
+Create the data directory for local object storage (skip if using S3 or GCS):
+
+```bash
+mkdir -p /var/lib/docs/spectron/objects
+chown spectron:spectron /var/lib/docs/spectron/objects
+```
+
+## Environment file
+
+Create an environment file at `/etc/docs/spectron/env`. Restrict its permissions so that only root and the `spectron` user can read it:
+
+```bash
+mkdir -p /etc/spectron
+touch /etc/docs/spectron/env
+chmod 640 /etc/docs/spectron/env
+chown root:spectron /etc/docs/spectron/env
+```
+
+Populate it:
+
+```ini
+# /etc/docs/spectron/env
+
+SPECTRON_SURREALDB_URL=ws://127.0.0.1:8000
+SPECTRON_OBJECT_STORE_URL=file:///var/lib/docs/spectron/objects
+SPECTRON_PORT=4000
+
+OPENAI_API_KEY=sk-...
+# ANTHROPIC_API_KEY=sk-ant-...
+
+SPECTRON_SURREALDB_USER=root
+SPECTRON_SURREALDB_PASS=changeme
+```
+
+Never commit this file to version control.
+
+## systemd service unit
+
+Create the service unit file at `/etc/systemd/system/spectron.service`:
+
+```ini
+[Unit]
+Description=Spectron – Agentic Memory Layer
+Documentation=https://docs.surrealdb.com/spectron
+After=network.target
+Wants=network.target
+
+[Service]
+Type=exec
+User=spectron
+Group=spectron
+EnvironmentFile=/etc/docs/spectron/env
+ExecStart=/usr/local/bin/spectron serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# Harden the service
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/spectron
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=spectron
+
+[Install]
+WantedBy=multi-user.target
+```
+
+## Enabling and starting the service
+
+Reload systemd to pick up the new unit, then enable and start the service:
+
+```bash
+systemctl daemon-reload
+systemctl enable spectron
+systemctl start spectron
+```
+
+Check the service status:
+
+```bash
+systemctl status spectron
+```
+
+## First-run initialisation
+
+On the first run, create the admin management key. Stop the service first to avoid concurrent init operations, or use the `spectron init` command directly (it is safe to run against a running instance):
+
+```bash
+sudo -u spectron SPECTRON_SURREALDB_URL=ws://127.0.0.1:8000 \
+  spectron init --admin-key
+```
+
+Copy the printed management key secret. Store it in a secrets manager or a separately access-controlled file. It is not recoverable.
+
+## Log management
+
+Spectron logs to the systemd journal. Use `journalctl` to view logs:
+
+```bash
+# Follow live logs
+journalctl -u spectron -f
+
+# Last 200 lines
+journalctl -u spectron -n 200
+
+# Logs since yesterday
+journalctl -u spectron --since yesterday
+```
+
+Systemd's journal handles log rotation automatically. Configure retention limits in `/etc/systemd/journald.conf` if needed (`SystemMaxUse`, `MaxRetentionSec`).
+
+## Health check
+
+Verify the service is responding:
+
+```bash
+curl http://localhost:4000/health
+```
+
+```json
+{ "status": "ok", "surrealdb": "connected", "object_store": "ok" }
+```
+
+## Upgrading
+
+Download the new binary, replace the existing one, and restart the service. Schema migrations run automatically on startup.
+
+```bash
+VERSION=0.2.0
+curl -Lo /tmp/spectron \
+  "https://github.com/surrealdb/docs/spectron/releases/download/v${VERSION}/spectron-server-linux-x86_64"
+chmod +x /tmp/spectron
+
+# Atomically replace the binary (avoids partial writes)
+mv /tmp/spectron /usr/local/bin/spectron
+
+systemctl restart spectron
+journalctl -u spectron -f  # watch startup logs to confirm migration success
+```
+
+## Firewall
+
+Expose port 4000 only to trusted clients. If Spectron sits behind a reverse proxy, bind the application listener to `127.0.0.1` and expose only the proxy's port externally:
+
+```bash
+# In /etc/docs/spectron/env, restrict to loopback:
+SPECTRON_BIND=127.0.0.1:4000
+```
+
+## Next steps
+
+- [Architecture overview](/docs/spectron/self-hosting/deployment/architecture-overview) – component relationships
+- [Storage and scaling](/docs/spectron/self-hosting/deployment/storage-and-scaling) – configuring object store backends
+- [Authentication](/docs/spectron/self-hosting/security/authentication) – key management after initial setup

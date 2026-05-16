@@ -1,0 +1,219 @@
+---
+position: 4
+title: State and diffs
+description: "Reading structured memory state and tracking what changed between turns."
+---
+
+# State and diffs
+
+The state endpoints give you a structured, queryable view of everything Spectron has learned within a given scope. Rather than replaying the conversation history, you query the current knowledge graph directly – grouped by category and filtered by scope – and receive a clean, structured representation of what the agent knows.
+
+## The `/state` endpoint
+
+```http
+GET /v1/{context_id}/state?scope[user]=tobie&scope[org]=anneal
+```
+
+The scope parameters filter the state to the specified dimensional intersection. Omitting a dimension broadens the query – `scope[org]=anneal` without a user returns the union of all user-level knowledge for that organisation.
+
+Response:
+
+```json
+{
+  "scope": { "user": "tobie", "org": "anneal" },
+  "identity": {
+    "entities": [
+      { "id": "entity:01hy2a…", "type": "person", "label": "Tobie" }
+    ],
+    "attributes": [
+      { "key": "job_title", "value": "CTO", "valid_from": "2026-05-12T16:24:00Z" },
+      { "key": "location",  "value": "Berlin",  "valid_from": "2026-04-01T09:00:00Z" }
+    ]
+  },
+  "knowledge": {
+    "facts": [],
+    "relations": []
+  },
+  "context": {
+    "recent_topics": ["promotion", "relocation"],
+    "open_threads": []
+  },
+  "instructions": [
+    { "text": "Always respond in German when the user writes in German.", "priority": "high" }
+  ],
+  "unknowns": [
+    { "text": "Whether Tobie holds any equity in Anneal.", "source_turn": "turn:01hy3…" }
+  ],
+  "corrections": [
+    {
+      "attribute": "attr:01hy2c…",
+      "previous": { "key": "location", "value": "London", "source_turn": "turn:01hy1…" },
+      "current":  { "key": "location", "value": "Berlin",  "source_turn": "turn:01hy2…" },
+      "timestamp": "2026-05-01T10:15:00Z"
+    }
+  ]
+}
+```
+
+### Response structure
+
+| Field | Description |
+|---|---|
+| `identity` | Named entities and their current attributes within this scope. |
+| `knowledge` | Extracted facts and relations that are not directly tied to the scoped entity. |
+| `context` | Conversational context: recent topics, open threads, pending questions. |
+| `instructions` | Persistent behavioural directives extracted from the conversation. |
+| `unknowns` | Statements flagged as uncertain or unverified. |
+| `corrections` | Attributes that were corrected, with their previous and current values. |
+
+The state endpoint always returns the current, canonical view. Superseded attributes are not present in `identity.attributes` – they appear only in `corrections` as the `previous` side of a correction record.
+
+## The `/state/diff` endpoint
+
+The diff endpoint returns only what changed since a given turn. This is more efficient than polling the full state on every message.
+
+```http
+GET /v1/{context_id}/state/diff?since={turn_id}&scope[user]=tobie&scope[org]=anneal
+```
+
+Response:
+
+```json
+{
+  "added": [
+    { "type": "attribute", "key": "job_title", "value": "CTO", "source_turn": "turn:01hy2…" }
+  ],
+  "updated": [
+    { "type": "attribute", "key": "location", "value": "Berlin", "previous_value": "London" }
+  ],
+  "superseded": [
+    { "type": "attribute", "key": "location", "value": "London", "superseded_at": "2026-05-01T10:15:00Z" }
+  ]
+}
+```
+
+Pass the `turn_id` returned from a previous `session.turn()` call as the `since` parameter. The response contains only records that were added, updated, or superseded after that turn.
+
+Use this endpoint to drive incremental UI updates. After each message, fetch the diff since the previous turn and apply only the changed records rather than re-rendering the entire state.
+
+## Python SDK
+
+```python
+state = await memory.state(scope={"user": "tobie", "org": "anneal"})
+
+print(state.identity.attributes)   # Current attribute list
+print(state.instructions)          # Active behavioural instructions
+print(state.unknowns)              # Flagged uncertainties
+print(state.corrections)           # Correction history
+```
+
+The `scope` parameter is optional. If omitted, the SDK uses the scope from the active session.
+
+## JavaScript SDK
+
+```javascript
+const state = await memory.state({ scope: { user: "tobie", org: "anneal" } });
+
+console.log(state.identity.attributes);
+console.log(state.instructions);
+console.log(state.unknowns);
+console.log(state.corrections);
+```
+
+## Profile endpoint
+
+The profile endpoint returns a richer, opinionated view of a single user's memory – pre-formatted for prompt injection or display in account or preferences UIs.
+
+### Python SDK
+
+```python
+profile = await memory.profile()
+```
+
+### JavaScript SDK
+
+```javascript
+const profile = await memory.profile();
+```
+
+Response shape:
+
+| Field | Description |
+|---|---|
+| `static` | Stable identity facts: name, role, organisation, contact details. |
+| `dynamic` | Frequently-updated attributes: location, status, current project, mood. |
+| `preferences` | Extracted preferences and stated likes or dislikes. |
+| `instructions` | Active behavioural directives applicable to this user. |
+
+The profile view does not include raw turn references. It is a synthesised snapshot intended for injection into system prompts or display in a "what does the AI know about me?" UI.
+
+## Using diffs for real-time UI updates
+
+A common pattern is to store the `turn_id` returned from each `session.turn()` call and use it to fetch incremental diffs immediately after the model responds:
+
+```python
+result = await session.turn(role="user", content="I moved to Berlin last month")
+previous_turn_id = result.turn_id
+
+# … LLM call and assistant turn …
+
+diff = await memory.state_diff(since=previous_turn_id, scope={"user": "tobie"})
+
+for item in diff.added:
+    ui.add_fact(item)
+
+for item in diff.updated:
+    ui.animate_update(item.key, old=item.previous_value, new=item.value)
+
+for item in diff.superseded:
+    ui.strike_through(item.key, item.value)
+```
+
+```javascript
+const result = await session.turn({ role: "user", content: "I moved to Berlin last month" });
+const previousTurnId = result.turnId;
+
+// … LLM call and assistant turn …
+
+const diff = await memory.stateDiff({ since: previousTurnId, scope: { user: "tobie" } });
+
+for (const item of diff.added) {
+    ui.addFact(item);
+}
+
+for (const item of diff.updated) {
+    ui.animateUpdate(item.key, { old: item.previousValue, new: item.value });
+}
+
+for (const item of diff.superseded) {
+    ui.strikeThrough(item.key, item.value);
+}
+```
+
+## The corrections format in detail
+
+Corrections are produced during reconciliation whenever a newly extracted attribute contradicts an existing one. Each correction record contains both sides of the change and the turn references that establish provenance:
+
+```json
+{
+  "attribute": "attr:01hy2c…",
+  "previous": {
+    "key": "location",
+    "value": "London",
+    "source_turn": "turn:01hy1…",
+    "valid_from": "2025-11-01T00:00:00Z",
+    "valid_until": "2026-04-30T23:59:59Z"
+  },
+  "current": {
+    "key": "location",
+    "value": "Berlin",
+    "source_turn": "turn:01hy2…",
+    "valid_from": "2026-05-01T00:00:00Z"
+  },
+  "timestamp": "2026-05-01T10:15:00Z"
+}
+```
+
+`valid_until` on the previous record is set to just before the correction timestamp, preserving a temporally accurate record of when the prior value was valid. This allows historical queries – "what did the agent know about Tobie's location in March 2026?" – to return the correct answer.
+
+Corrections accumulate and are never deleted. The full supersession chain for any attribute is always queryable, which means the audit trail for any fact is complete and irrevocable. See [Temporal validity](/docs/spectron/memory/reasoning-model/temporal-validity) and [Reconciliation and supersession](/docs/spectron/memory/reasoning-model/reconciliation-and-supersession) for the detailed model.

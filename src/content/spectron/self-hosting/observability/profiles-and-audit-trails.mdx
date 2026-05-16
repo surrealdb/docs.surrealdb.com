@@ -1,0 +1,153 @@
+---
+position: 2
+title: Profiles and audit trails
+description: "Audit linkage across principals and turns."
+---
+
+# Profiles and audit trails
+
+Spectron provides a complete audit trail by linking every piece of memory back to the principal that created it, the session it came from, and the turn that produced it.
+
+## Provenance chain
+
+Every entity, attribute, relation, instruction, and uncertainty carries two provenance fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `source_turn` | `record<turn>` | The turn that produced this record |
+| `api_key_id` | string | The API key used to create the session |
+
+The `turn` record links to its `session`, which carries its `scope`. This means you can always trace:
+
+> "Why does the system believe X?" → attribute → source turn → session → scope + API key
+
+## Querying provenance with SurrealQL
+
+```surql
+-- What turns contributed to Alice's memory?
+SELECT source_turn.*, source_turn.session.*
+FROM attribute
+WHERE entity.name = "Alice"
+  AND superseded_by IS NONE;
+
+-- Which API key created a specific entity?
+SELECT entity.*, entity.source_turn.session.*
+FROM entity
+WHERE entity.id = ["Person", "alice"];
+
+-- All memory created by a specific key
+SELECT *
+FROM attribute
+WHERE source_turn.session.api_key_id = "cak_01HF..."
+  AND superseded_by IS NONE;
+```
+
+## Audit API
+
+### Get attribute history
+
+```http
+GET /v1/{context_id}/entities/{type}/{name}/attributes/{key}/history
+```
+
+Returns the full supersession chain for an attribute – current value, all superseded values, and the turn that caused each change:
+
+```json
+{
+  "key": "role",
+  "current": {
+    "value": "CTO",
+    "valid_from": "2026-05-01T09:00:00Z",
+    "source_turn": "turn:01HG...",
+    "created_at": "2026-05-12T10:01:00Z"
+  },
+  "history": [
+    {
+      "value": "VP Engineering",
+      "valid_from": "2024-01-01T00:00:00Z",
+      "valid_until": "2026-05-12T10:01:00Z",
+      "source_turn": "turn:01HE...",
+      "superseded_by": "attribute:01HG..."
+    }
+  ]
+}
+```
+
+### Scope-filtered trace listing
+
+```http
+GET /v1/{context_id}/traces?scope[org]=acme&scope[user]=alice
+```
+
+All operations that touched data within the specified scope. Includes creation, retrieval, and modification events.
+
+### Entity access log
+
+The decision trace records which entities and chunks contributed to each recall operation. To find who accessed a specific entity:
+
+```surql
+SELECT api_key_id, created_at
+FROM decision_trace
+WHERE sources CONTAINS "entity:[\"Person\",\"alice\"]"
+ORDER BY created_at DESC
+LIMIT 50;
+```
+
+## Audit for multi-tenant deployments
+
+In scope-based multi-tenancy, each tenant's data carries a unique `org` scope value. Audit queries can be scoped per tenant:
+
+```surql
+-- All writes by tenant "alpha" this month
+SELECT *
+FROM decision_trace
+WHERE scope.org = "alpha"
+  AND created_at > time::now() - 30d
+ORDER BY created_at DESC;
+
+-- Memory created vs accessed per tenant
+SELECT
+    scope.org AS tenant,
+    count() AS operations,
+    math::sum(token_cost) AS tokens
+FROM decision_trace
+WHERE created_at > time::now() - 7d
+GROUP BY scope.org
+ORDER BY operations DESC;
+```
+
+## Key-level audit
+
+Each `context_api_key` record tracks `last_used_at`. For more detailed per-key auditing, query decision traces by `api_key_id`:
+
+```surql
+-- Activity by key
+SELECT api_key_id, count() AS calls, math::sum(token_cost) AS tokens
+FROM decision_trace
+WHERE created_at > time::now() - 30d
+GROUP BY api_key_id;
+```
+
+## Compliance use cases
+
+**Right to erasure (GDPR Article 17):** To demonstrate that a user's data has been removed, query all attributes and entities scoped to `{user: alice}` and confirm they have been soft-deleted (via `forget`) or that `valid_until` is set.
+
+**Data lineage:** For any attribute, follow the `source_turn` chain to the original user message that produced it. The `turn.content` field contains the verbatim text.
+
+**Access logs:** Every read operation produces a decision trace. Decision traces are the access log – they record which keys accessed which data and when.
+
+## Exporting audit data
+
+For long-term retention or integration with external SIEM tools, export the `decision_trace` table using SurrealDB's export capabilities:
+
+```bash
+# Export decision traces to NDJSON
+surreal export \
+  --conn ws://localhost:8000 \
+  --user root --pass root \
+  --ns spectron_acme --db prod \
+  --table decision_trace \
+  audit-export-$(date +%Y%m%d).ndjson
+```
+
+Schedule regular exports before the retention window expires to maintain a complete audit history.

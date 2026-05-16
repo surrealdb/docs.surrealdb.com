@@ -1,0 +1,218 @@
+---
+position: 2
+title: Graph traversal
+description: "Traversing the knowledge graph to explore relationships between documents and nodes."
+---
+
+# Graph traversal
+
+Beyond embedding-based retrieval, Spectron maintains a richly connected knowledge graph over documents, chunks, keywords, and typed nodes. Graph traversal lets you walk this graph explicitly – following known edge types to discover related content, trace provenance chains, or map relationships between entities.
+
+## Graph edges
+
+The knowledge graph uses the following edge types:
+
+| Edge label | Source | Target | Description |
+|---|---|---|---|
+| `knowledge_has_keyword` | Document or chunk | Keyword | Associates content with extracted keywords |
+| `knowledge_relates_to` | Knowledge node | Knowledge node | Explicit relation between typed nodes |
+| `knowledge_links_to` | Document or chunk | Document | Outbound hyperlink or citation |
+| `knowledge_same_as` | Knowledge node | Knowledge node | Identity equivalence between nodes (e.g. aliases) |
+| `keyword_cooccurs_with` | Keyword | Keyword | Keywords that frequently appear together in the same documents |
+| `knowledge_derived_from` | Knowledge node or chunk | Document or chunk | Provenance link – this item was extracted or derived from that source |
+
+These edges are populated automatically during ingestion. `knowledge_relates_to` edges can also be created explicitly via the node upsert API (see [Knowledge nodes](/docs/spectron/knowledge/ingestion/knowledge-nodes)).
+
+## Traversal operations
+
+Spectron provides three traversal operations with different exploration strategies.
+
+### `traverse` – parameterised walk
+
+Walks the graph from a starting node, following specified edge types up to a given depth. Returns all nodes and edges encountered.
+
+Use this when you want to explore a specific set of relationship types from a known starting point, and you want fine-grained control over which edges to follow.
+
+```python
+from spectron import Spectron
+
+memory = Spectron(context="acme-prod", api_key=os.environ["SPECTRON_API_KEY"])
+
+walk = await memory.knowledge.traverse(
+    start=("document", doc.id),
+    edges=["knowledge_has_keyword", "knowledge_relates_to"],
+    depth=2,
+)
+
+for node in walk.nodes:
+    print(node.type, node.id)
+
+for edge in walk.edges:
+    print(edge.label, edge.from_id, "->", edge.to_id)
+```
+
+```javascript
+import { Spectron } from "spectron";
+
+const memory = new Spectron({ context: "acme-prod", apiKey: process.env.SPECTRON_API_KEY });
+
+const walk = await memory.knowledge.traverse({
+    start: ["document", doc.id],
+    edges: ["knowledge_has_keyword", "knowledge_relates_to"],
+    depth: 2,
+});
+
+for (const node of walk.nodes) {
+    console.log(node.type, node.id);
+}
+```
+
+### `traverse_recursive` – BFS by depth
+
+Performs a breadth-first traversal from a starting typed knowledge node, following a single specified edge type up to a maximum depth. Returns all reachable nodes at each depth level.
+
+Use this when you want to explore a hierarchy or relationship tree from a known root, following one consistent edge type. Typical uses include traversing product taxonomy trees or expanding a policy coverage graph.
+
+```python
+recursive = await memory.knowledge.traverse_recursive(
+    start=("knowledge", "product", "airpods_pro_2"),
+    edge="knowledge_relates_to",
+    max_depth=3,
+)
+
+for depth, nodes in enumerate(recursive.levels):
+    print(f"Depth {depth}: {[n.slug for n in nodes]}")
+```
+
+```javascript
+const recursive = await memory.knowledge.traverse_recursive({
+    start: ["knowledge", "product", "airpods_pro_2"],
+    edge: "knowledge_relates_to",
+    max_depth: 3,
+});
+```
+
+### `traverse_siblings` – shared-neighbour lookup
+
+Finds nodes that share at least one common neighbour with the starting node via the specified edge. This is effectively a "co-citation" or "customers also viewed" pattern: nodes that relate to the same thing as the starting node.
+
+Use this for discovery – finding nodes that are thematically related without a direct edge between them.
+
+```python
+siblings = await memory.knowledge.traverse_siblings(
+    start=("knowledge", "product", "airpods_pro_2"),
+    edge="knowledge_relates_to",
+)
+
+for sibling in siblings:
+    print(sibling.kind, sibling.slug, sibling.title)
+# policy  returns            Returns Policy
+# policy  warranty           Warranty Terms
+# product macbook_pro_14     MacBook Pro 14-inch
+```
+
+```javascript
+const siblings = await memory.knowledge.traverse_siblings({
+    start: ["knowledge", "product", "airpods_pro_2"],
+    edge: "knowledge_relates_to",
+});
+```
+
+## Practical examples
+
+### Finding all keywords for a document
+
+Walk one hop from a document through `knowledge_has_keyword` edges to retrieve the document's keyword associations:
+
+```python
+walk = await memory.knowledge.traverse(
+    start=("document", doc.id),
+    edges=["knowledge_has_keyword"],
+    depth=1,
+)
+
+keywords = [n for n in walk.nodes if n.type == "keyword"]
+print([kw.text for kw in keywords])
+# ["RETURN POLICY", "UNOPENED ITEMS", "30 DAYS"]
+```
+
+### Tracing policy relationships
+
+Given a policy node, traverse two hops to find all products covered by it, and then the categories those products belong to:
+
+```python
+walk = await memory.knowledge.traverse(
+    start=("knowledge", "policy", "returns"),
+    edges=["knowledge_relates_to"],
+    depth=2,
+)
+
+products = [n for n in walk.nodes if n.type == "knowledge" and n.kind == "product"]
+categories = [n for n in walk.nodes if n.type == "knowledge" and n.kind == "category"]
+```
+
+### Discovering related products
+
+Use `traverse_siblings` to find products that share policy or category relationships with a given product:
+
+```python
+related_products = await memory.knowledge.traverse_siblings(
+    start=("knowledge", "product", "airpods_pro_2"),
+    edge="knowledge_relates_to",
+)
+```
+
+This returns all products connected through shared intermediary nodes (policies, categories, warranties), without requiring a direct product-to-product edge.
+
+### Finding the source of a derived node
+
+Use `knowledge_derived_from` to trace a knowledge node back to the document or chunk it was extracted from:
+
+```python
+walk = await memory.knowledge.traverse(
+    start=("knowledge", "product", "airpods_pro_2"),
+    edges=["knowledge_derived_from"],
+    depth=1,
+)
+
+sources = [n for n in walk.nodes if n.type in ("document", "chunk")]
+```
+
+### Exploring keyword co-occurrence
+
+Walk the `keyword_cooccurs_with` edges to find keywords that frequently appear alongside a given keyword across the document corpus:
+
+```python
+walk = await memory.knowledge.traverse(
+    start=("keyword", "RETURN POLICY"),
+    edges=["keyword_cooccurs_with"],
+    depth=1,
+)
+
+related_keywords = [n.text for n in walk.nodes if n.type == "keyword"]
+# ["REFUND", "UNOPENED ITEMS", "PURCHASE DATE", "EXCHANGE"]
+```
+
+## Combining traversal with retrieval
+
+Graph traversal is complementary to hybrid search. A common pattern is to use traversal to expand context after a retrieval hit:
+
+```python
+# 1. Retrieve initial hits
+hits = await memory.knowledge.query(
+    query="what is the warranty for AirPods Pro 2?",
+    mode="hybrid",
+    k=5,
+)
+
+# 2. For each retrieved document, walk the graph to find related nodes
+for hit in hits:
+    walk = await memory.knowledge.traverse(
+        start=("document", hit.document.id),
+        edges=["knowledge_has_keyword", "knowledge_links_to"],
+        depth=2,
+    )
+    # Use walk.nodes to augment the context passed to the LLM
+```
+
+This pattern is what `hybrid_graph` mode automates internally. Use explicit traversal when you need finer control over which edges to follow or want to inspect the graph structure directly.

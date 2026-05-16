@@ -1,0 +1,142 @@
+---
+position: 1
+title: Migrate from Mem0
+description: "Mapping concepts and incremental migration."
+---
+
+# Migrating from Mem0
+
+This guide maps Mem0 concepts to their Spectron equivalents and walks through an incremental migration strategy that lets you run both systems in parallel during transition.
+
+## Concept mapping
+
+| Mem0 concept | Spectron equivalent | Notes |
+|---|---|---|
+| User ID | Scope dimension `user` | Spectron scopes are multi-dimensional; `user` is one axis |
+| Agent ID | Scope dimension `agent` | Combine with `user` for agent-per-user isolation |
+| Run ID | Session | Spectron sessions are first-class records with richer metadata |
+| Memory (flat string) | Entities + attributes + relations | Spectron extracts structured triples from text |
+| `add()` | `session.remember()` | Spectron also deduplicates and reconciles on write |
+| `search()` | `session.recall()` | Spectron adds graph-density reranking |
+| `get_all()` | `session.profile()` | Returns structured snapshot, not a flat list |
+| `delete()` | `session.forget()` | Spectron supports scoped bulk forget |
+| History | Session turns + temporal attributes | Spectron tracks `valid_from`/`valid_until` on attributes |
+
+## SDK migration
+
+### Python
+
+**Mem0:**
+```python
+from mem0 import Memory
+
+m = Memory()
+m.add("I prefer vegetarian food.", user_id="alice")
+results = m.search("What are Alice's food preferences?", user_id="alice")
+```
+
+**Spectron:**
+```python
+from spectron import SpectronClient
+
+client = SpectronClient(base_url=..., api_key=...)
+
+async with client.sessions.create(scope={"user": "alice"}) as session:
+    await session.remember("I prefer vegetarian food.")
+    results = await session.recall("What are Alice's food preferences?", top_k=5)
+    print(results.formatted)
+```
+
+### JavaScript
+
+**Mem0:**
+```javascript
+import { Memory } from "mem0ai";
+
+const m = new Memory();
+await m.add("I prefer vegetarian food.", { user_id: "alice" });
+const results = await m.search("food preferences", { user_id: "alice" });
+```
+
+**Spectron:**
+```javascript
+import { SpectronClient } from "spectron";
+
+const client = new SpectronClient({ baseUrl: ..., apiKey: ... });
+
+const session = await client.sessions.create({ scope: { user: "alice" } });
+await session.remember("I prefer vegetarian food.");
+const results = await session.recall("What are Alice's food preferences?", { topK: 5 });
+console.log(results.formatted);
+await session.close();
+```
+
+## Key differences
+
+**Structured extraction**: Mem0 stores memories as flat text strings. Spectron extracts structured entities, attributes, and relations. When you write "Alice prefers vegetarian food", Spectron creates an entity `Person/alice` with attribute `food_preference = "vegetarian"`. Future writes that contradict this (e.g. "Alice now eats fish") update the attribute with a supersession chain, so you can see the history.
+
+**Conflict resolution**: Mem0 stores new memories alongside old ones. Spectron detects when a new memory contradicts a stored attribute and automatically supersedes the old value. The old value is not deleted – it is marked as superseded with a timestamp.
+
+**Scoped multi-tenancy**: Mem0 uses separate `user_id` and `agent_id` parameters. Spectron uses a multi-dimensional scope dictionary. This allows cross-cutting queries – for example, recalling all memory at scope `{org: "acme"}` retrieves everything across users and agents within the org.
+
+**Authoritative versus experiential**: Mem0 treats all memory uniformly. Spectron models **eight pillars** of agent memory; among them, **Authoritative** curated content (ingested documents, knowledge nodes) is distinct from **Experiential** conversational memory (turns and the **six memory categories**). Reconciliation gives **Authoritative** precedence when they conflict. See [Eight pillars and six categories](/docs/spectron/architecture/eight-pillars-and-categories).
+
+## Incremental migration strategy
+
+### Step 1: run both systems in parallel
+
+Wrap your memory calls in a thin adapter that writes to both Mem0 and Spectron:
+
+```python
+class MemoryAdapter:
+    def __init__(self, mem0_client, spectron_client):
+        self.mem0 = mem0_client
+        self.spectron = spectron_client
+    
+    async def add(self, content: str, user_id: str):
+        # Write to both
+        self.mem0.add(content, user_id=user_id)
+        async with self.spectron.sessions.create(scope={"user": user_id}) as s:
+            await s.remember(content)
+    
+    async def search(self, query: str, user_id: str, use_spectron: bool = False):
+        if use_spectron:
+            async with self.spectron.sessions.create(scope={"user": user_id}) as s:
+                return await s.recall(query, top_k=5)
+        return self.mem0.search(query, user_id=user_id)
+```
+
+### Step 2: validate recall quality
+
+Compare recall results between the two systems for a sample of production queries. Use the `use_spectron=True` flag on a percentage of traffic while monitoring for quality regressions.
+
+### Step 3: migrate existing memories
+
+Export existing Mem0 memories and replay them into Spectron:
+
+```python
+existing_memories = m.get_all(user_id="alice")
+
+async with client.sessions.create(scope={"user": "alice"}) as session:
+    for memory in existing_memories:
+        await session.remember(memory["memory"])
+```
+
+Spectron's reconciliation pipeline deduplicates on write, so replaying memories that contain the same facts will produce correct structured state rather than duplicates.
+
+### Step 4: cut over
+
+Once recall quality is satisfactory, remove the dual-write and switch reads to Spectron only.
+
+## Session management difference
+
+Mem0's `add()` takes a `user_id` directly – there is no concept of a session. Spectron requires a session as context for each turn. The nearest equivalent to Mem0's `add()` is:
+
+```python
+# One-shot add without a long-lived session
+async with client.sessions.create(scope={"user": user_id}) as session:
+    await session.add_turn(role="user", content=content)
+# Session closes automatically; memory is extracted and persisted
+```
+
+If your application does not have natural session boundaries (e.g. it stores individual facts rather than conversations), create a short-lived session for each batch of writes and close it immediately.

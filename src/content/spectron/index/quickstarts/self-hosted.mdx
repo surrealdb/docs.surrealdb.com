@@ -1,0 +1,232 @@
+---
+position: 2
+title: Self-hosted quickstart
+description: "Deploy Spectron on your own infrastructure using Docker."
+---
+
+# Self-hosted quickstart
+
+This guide walks you through running Spectron on your own infrastructure using Docker Compose. By the end you will have a running Spectron server, a management key, a Context, an end-user API key, and a working memory session.
+
+## Prerequisites
+
+- Docker and Docker Compose installed
+- An OpenAI or Anthropic API key for LLM-backed extraction and response generation
+- Optional: an S3-compatible object store for production deployments. For local development, the local filesystem store is sufficient.
+
+## Step 1 – Create a Docker Compose file
+
+Spectron is distributed as a single binary container image. The following `docker-compose.yml` starts Spectron alongside a SurrealDB instance and uses the local filesystem for object storage.
+
+```yaml
+services:
+  spectron:
+    image: surrealdb/spectron:latest
+    ports:
+      - "4000:4000"
+    environment:
+      SPECTRON_SURREALDB_URL: ws://surrealdb:8000
+      SPECTRON_OBJECT_STORE_URL: file:///data/objects
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    volumes:
+      - spectron-data:/data
+    depends_on:
+      - surrealdb
+
+  surrealdb:
+    image: surrealdb/surrealdb:latest
+    command: start --log debug file:/data/surrealdb.db
+    volumes:
+      - surreal-data:/data
+
+volumes:
+  spectron-data:
+  surreal-data:
+```
+
+For production, replace `SPECTRON_OBJECT_STORE_URL` with an S3-compatible URL:
+
+```bash
+SPECTRON_OBJECT_STORE_URL=s3://my-bucket/spectron?region=us-east-1
+```
+
+Start the stack:
+
+```bash
+docker compose up -d
+```
+
+Spectron will be available at `http://localhost:4000`.
+
+## Step 2 – Initialise the first admin key
+
+The management API requires an admin-level key. Generate one at startup using `spectron init`:
+
+```bash
+docker compose exec spectron spectron init --admin-key
+```
+
+This prints a management key to stdout. Copy it now – it will not be shown again.
+
+```
+SPECTRON_MGMT_KEY=mgmt_...
+```
+
+Store it in your environment:
+
+```bash
+export SPECTRON_MGMT_KEY="mgmt_..."
+```
+
+## Step 3 – Create a Context
+
+A **Context** is the top-level organisational unit in Spectron. It owns its own SurrealDB namespace and database, its own API keys, and its own model configuration.
+
+Use the management API to create one:
+
+```bash
+curl -X POST http://localhost:4000/management/contexts \
+  -H "Authorization: Bearer $SPECTRON_MGMT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "acme-prod",
+    "namespace": "acme",
+    "database": "prod",
+    "config": {
+      "models": {
+        "extraction": "gpt-4o-mini",
+        "response": "gpt-4o"
+      }
+    }
+  }'
+```
+
+Or using the management SDK:
+
+```python
+import asyncio
+import os
+from spectron import SpectronManagement
+
+async def main():
+    admin = SpectronManagement(
+        base_url="http://localhost:4000",
+        api_key=os.environ["SPECTRON_MGMT_KEY"],
+    )
+    await admin.contexts.create(
+        "acme-prod",
+        namespace="acme",
+        database="prod",
+        config={
+            "models": {
+                "extraction": "gpt-4o-mini",
+                "response": "gpt-4o",
+            }
+        },
+    )
+
+asyncio.run(main())
+```
+
+## Step 4 – Create an end-user API key
+
+End-user keys are scoped to a Context and can optionally enforce a minimum scope floor – a set of scope dimensions that the caller cannot remove. This prevents a key issued to one agent from accessing another agent's memory.
+
+```bash
+curl -X POST http://localhost:4000/management/contexts/acme-prod/keys \
+  -H "Authorization: Bearer $SPECTRON_MGMT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "planner",
+    "principal": "agent",
+    "scope_floor": {
+      "org": "anneal",
+      "agent": "planner"
+    }
+  }'
+```
+
+Or with the SDK:
+
+```python
+async def main():
+    admin = SpectronManagement(
+        base_url="http://localhost:4000",
+        api_key=os.environ["SPECTRON_MGMT_KEY"],
+    )
+    key = await admin.contexts("acme-prod").keys.create(
+        name="planner",
+        principal="agent",
+        scope_floor={"org": "anneal", "agent": "planner"},
+    )
+    print(key.secret)  # store this – shown only once
+```
+
+Export the returned key:
+
+```bash
+export SPECTRON_API_KEY="sk-..."
+```
+
+## Step 5 – Store and query memory
+
+With a Context and an API key in place, the client-side experience is identical to the hosted service. Point the SDK at your local server instead of `api.spectron.dev`.
+
+```python
+import asyncio
+import os
+from spectron import Spectron
+
+memory = Spectron(
+    context="acme-prod",
+    base_url="http://localhost:4000",
+    api_key=os.environ["SPECTRON_API_KEY"],
+)
+
+async def main():
+    session = await memory.sessions.create(scope={"user": "tobie", "org": "anneal"})
+
+    result = await session.turn(role="user", content="I just got promoted to CTO")
+    print(result.entities)
+    print(result.attributes)
+
+    context = await session.context(query="What is Tobie's role?")
+    print(context.context)
+
+    reply = await session.chat("What do you know about me?")
+    print(reply)
+
+    await session.close()
+
+asyncio.run(main())
+```
+
+```javascript
+import { Spectron } from "spectron";
+
+const memory = new Spectron({
+  context: "acme-prod",
+  baseUrl: "http://localhost:4000",
+  apiKey: process.env.SPECTRON_API_KEY,
+});
+
+const session = await memory.sessions.create({
+  scope: { user: "tobie", org: "anneal" },
+});
+
+const result = await session.turn({ role: "user", content: "I just got promoted to CTO" });
+console.log(result.entities);
+
+const context = await session.context({ query: "What is Tobie's role?" });
+console.log(context.context);
+
+await session.close();
+```
+
+## Next steps
+
+- [Docker deployment guide](/docs/spectron/self-hosting/deployment/docker) – production configuration, TLS, and reverse proxy setup
+- [Architecture overview](/docs/spectron/self-hosting/deployment/architecture-overview) – how Spectron, SurrealDB, and the object store interact
+- [API keys and delegation](/docs/spectron/self-hosting/security/api-keys-and-delegation) – key hierarchy and scope floors in depth
+- [Contexts and scope](/docs/spectron/mental-model/contexts-and-scope) – multi-tenancy and dimensional scope
+- [Management API reference](/docs/spectron/reference/management-api) – full management API documentation

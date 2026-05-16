@@ -1,0 +1,234 @@
+---
+position: 5
+title: Stateful workflows
+description: "Diff-friendly state for workflow UIs."
+---
+
+# Stateful workflows
+
+Spectron is not limited to conversational memory. Its entity-attribute model and temporal validity system make it a natural fit for tracking the state of long-running, multi-step agent workflows – processes that span hours or days, survive restarts, and need to avoid repeating completed steps.
+
+## Why use Spectron for workflow state
+
+Traditional approaches to workflow state – Redis keys, database rows, task queue metadata – require purpose-built state management. Spectron adds:
+
+- **Scoped isolation** – workflow state for project A cannot interfere with project B.
+- **Temporal validity** – step results can expire, triggering re-execution.
+- **Provenance** – every state change traces back to the turn or operation that caused it.
+- **State diff** – query what changed since a checkpoint without building your own diffing logic.
+- **Observability** – inspect the full state of any workflow at any point in time.
+
+## Step 1 – Design your state model
+
+Map your workflow steps to entity types and attributes. A research workflow might look like:
+
+| Entity type | Example entities | Key attributes |
+|---|---|---|
+| `ResearchTask` | `market_analysis_q1` | `status`, `assigned_model`, `deadline` |
+| `SearchResult` | `result_001` | `query`, `url`, `summary`, `relevance_score` |
+| `Report` | `market_report_draft` | `status`, `word_count`, `sections_complete` |
+
+## Step 2 – Scope workflow state to a project identifier
+
+Use a `project` or `task` scope dimension to isolate each workflow's state:
+
+```python
+from spectron import Spectron
+
+client = Spectron(api_key="sk-...")
+memory = client.memory(context_id="workflows")
+
+# Each workflow run gets its own scope
+workflow_scope = {"org": "acme", "project": "market-analysis-q1-2025"}
+
+session = await memory.sessions.create(scope=workflow_scope)
+```
+
+```typescript
+import { Spectron } from "spectron";
+
+const client = new Spectron({ apiKey: "sk-..." });
+const memory = client.memory({ contextId: "workflows" });
+
+const workflowScope = { org: "acme", project: "market-analysis-q1-2025" };
+const session = await memory.sessions.create({ scope: workflowScope });
+```
+
+## Step 3 – Record step completions as turns
+
+Use turns to record what each step did. The extraction pipeline stores the results as Context-category attributes on the relevant entities.
+
+```python
+async def run_search_step(session, query: str) -> list[dict]:
+    results = await your_search_api(query)
+
+    # Record the step as an agent turn – extraction captures the results
+    await session.turn(
+        role="assistant",
+        content=f"Completed search for '{query}'. Found {len(results)} results. "
+                f"Top result: {results[0]['url']} – {results[0]['summary'][:200]}",
+    )
+
+    return results
+```
+
+```typescript
+async function runSearchStep(session: Session, query: string): Promise<SearchResult[]> {
+    const results = await yourSearchApi(query);
+
+    await session.turn({
+        role: "assistant",
+        content: `Completed search for '${query}'. Found ${results.length} results. `
+            + `Top result: ${results[0].url} – ${results[0].summary.slice(0, 200)}`,
+    });
+
+    return results;
+}
+```
+
+## Step 4 – Check state before each step
+
+Before running a step, check whether it has already been completed. This makes the workflow idempotent – safe to restart without duplicating work.
+
+```python
+async def should_run_step(memory, scope: dict, step_name: str) -> bool:
+    ctx = await memory.context(
+        scope=scope,
+        query=f"Has the {step_name} step been completed?",
+        top_k=3,
+    )
+
+    # Check if there is an existing completion record for this step
+    for item in ctx.items:
+        if item.entity_type == "WorkflowStep" and item.attributes.get("name") == step_name:
+            if item.attributes.get("status") == "completed":
+                return False
+
+    return True
+```
+
+```typescript
+async function shouldRunStep(
+    memory: Memory,
+    scope: Record<string, string>,
+    stepName: string,
+): Promise<boolean> {
+    const ctx = await memory.context({
+        scope,
+        query: `Has the ${stepName} step been completed?`,
+        topK: 3,
+    });
+
+    for (const item of ctx.items) {
+        if (
+            item.entityType === "WorkflowStep"
+            && item.attributes.name === stepName
+            && item.attributes.status === "completed"
+        ) {
+            return false;
+        }
+    }
+
+    return true;
+}
+```
+
+## Step 5 – Using temporal validity for step expiry
+
+Some workflow steps have results that go stale – a price lookup, a news summary, a resource availability check. Set `valid_until` on the turn to give the extracted attributes a time-to-live:
+
+```http
+POST /v1/{context_id}/sessions/{session_id}/turns
+Content-Type: application/json
+
+{
+  "role": "assistant",
+  "content": "Fetched current gold price: $2,340/oz",
+  "metadata": {
+    "valid_until": "2025-11-16T00:00:00Z"
+  }
+}
+```
+
+When the validity period expires, the attribute no longer appears in context retrievals and `should_run_step` returns `true` again, triggering a re-fetch.
+
+## Step 6 – Tracking progress with state diff
+
+The state diff endpoint returns the delta between two points in time for a scope. Use it to build progress tracking UIs or detect stalled workflows:
+
+```python
+# Get all state changes in the last hour
+diff = await memory.state.diff(
+    scope=workflow_scope,
+    since="2025-11-15T09:00:00Z",
+)
+
+print(f"Steps completed: {diff.attributes_updated}")
+print(f"New entities: {diff.entities_created}")
+print(f"Open uncertainties: {diff.uncertainties_added}")
+```
+
+```typescript
+const diff = await memory.state.diff({
+    scope: workflowScope,
+    since: "2025-11-15T09:00:00Z",
+});
+
+console.log(`Steps completed: ${diff.attributesUpdated}`);
+console.log(`New entities: ${diff.entitiesCreated}`);
+console.log(`Open uncertainties: ${diff.uncertaintiesAdded}`);
+```
+
+The diff is useful for:
+
+- **Progress bars** – count completed steps vs total expected.
+- **Stall detection** – alert if no state changes have occurred in N minutes.
+- **Audit trails** – record what changed during a workflow run for compliance.
+
+## Putting it together
+
+```python
+async def run_research_workflow(user_id: str, topic: str):
+    scope = {"org": "acme", "project": f"research-{topic.replace(' ', '-')}"}
+    session = await memory.sessions.create(scope=scope)
+
+    steps = [
+        ("web_search", lambda: run_search_step(session, topic)),
+        ("summarise", lambda: run_summarise_step(session, topic)),
+        ("draft_report", lambda: run_draft_step(session, topic)),
+    ]
+
+    for step_name, step_fn in steps:
+        if await should_run_step(memory, scope, step_name):
+            await step_fn()
+        else:
+            print(f"Skipping {step_name} – already completed.")
+
+    # Final state summary
+    state = await memory.state.get(scope=scope)
+    return state
+```
+
+```typescript
+async function runResearchWorkflow(userId: string, topic: string) {
+    const scope = { org: "acme", project: `research-${topic.replace(/ /g, "-")}` };
+    const session = await memory.sessions.create({ scope });
+
+    const steps = [
+        { name: "web_search", fn: () => runSearchStep(session, topic) },
+        { name: "summarise", fn: () => runSummariseStep(session, topic) },
+        { name: "draft_report", fn: () => runDraftStep(session, topic) },
+    ];
+
+    for (const { name, fn } of steps) {
+        if (await shouldRunStep(memory, scope, name)) {
+            await fn();
+        } else {
+            console.log(`Skipping ${name} – already completed.`);
+        }
+    }
+
+    const state = await memory.state.get({ scope });
+    return state;
+}
+```

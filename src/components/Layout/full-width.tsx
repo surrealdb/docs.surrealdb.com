@@ -2,9 +2,16 @@ import { Container, Drawer, Stack } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { Footer } from "~/components/Footer";
 import { Header, MobileNav } from "./header";
+import type { NavEntry } from "./nav";
 import classes from "./style.module.scss";
 
-export function FullWidthLayout({ children }: { children: React.ReactNode }) {
+export interface FullWidthLayoutProps {
+    children: React.ReactNode;
+    /** Top navigation entries shown in the header. Defined per layout. */
+    navLinks: NavEntry[];
+}
+
+export function FullWidthLayout({ children, navLinks }: FullWidthLayoutProps) {
     const [menuOpened, { toggle: toggleMenu, close: closeMenu }] = useDisclosure();
 
     return (
@@ -13,6 +20,7 @@ export function FullWidthLayout({ children }: { children: React.ReactNode }) {
             gap={0}
         >
             <Header
+                navLinks={navLinks}
                 opened={menuOpened}
                 onToggle={toggleMenu}
             />
@@ -23,7 +31,7 @@ export function FullWidthLayout({ children }: { children: React.ReactNode }) {
                 hiddenFrom="lg"
                 withCloseButton={false}
             >
-                <MobileNav />
+                <MobileNav navLinks={navLinks} />
             </Drawer>
             <Container
                 component="main"

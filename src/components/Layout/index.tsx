@@ -19,6 +19,7 @@ import type { PageData } from "~/utils/data";
 import { CopyPageMenu } from "../CopyPageMenu";
 import { Footer } from "../Footer";
 import { Header, MobileNav } from "./header";
+import type { NavEntry } from "./nav";
 import { PageNavigation } from "./page-navigation";
 import { Sidebar } from "./sidebar";
 import classes from "./style.module.scss";
@@ -26,6 +27,8 @@ import classes from "./style.module.scss";
 export interface DefaultLayoutProps {
     data: PageData;
     children: React.ReactNode;
+    /** Top navigation entries shown in the header. Defined per layout. */
+    navLinks: NavEntry[];
     lastUpdated?: string;
     showToc?: boolean;
     versionSelector?: React.ReactNode;
@@ -34,6 +37,7 @@ export interface DefaultLayoutProps {
 export function DefaultLayout({
     children,
     data,
+    navLinks,
     showToc = true,
     versionSelector,
 }: DefaultLayoutProps) {
@@ -50,6 +54,7 @@ export function DefaultLayout({
     return (
         <div className={classes.layout}>
             <Header
+                navLinks={navLinks}
                 opened={menuOpened}
                 onToggle={toggleMenu}
             />
@@ -65,7 +70,7 @@ export function DefaultLayout({
                 hiddenFrom="lg"
                 withCloseButton={false}
             >
-                <MobileNav />
+                <MobileNav navLinks={navLinks} />
             </Drawer>
             <Drawer
                 opened={sidebarOpened}

@@ -1,0 +1,205 @@
+---
+position: 2
+title: Docker
+description: "Deploying Spectron with Docker and Docker Compose."
+---
+
+# Docker
+
+Docker Compose is the fastest way to run the full Spectron stack locally. The compose file starts Spectron and SurrealDB together with a single command.
+
+## Prerequisites
+
+- [Docker Desktop](https://docs.docker.com/get-docker/) 4.x or later (includes Docker Compose v2)
+- An OpenAI or Anthropic API key for LLM operations
+
+## compose.yaml
+
+Create a `compose.yaml` file in a new directory:
+
+```yaml
+services:
+  surrealdb:
+    image: surrealdb/surrealdb:latest
+    command: start --log info --user root --pass root file:/data/surreal.db
+    volumes:
+      - surrealdb-data:/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "surreal", "isready", "--endpoint", "http://localhost:8000"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  spectron:
+    image: ghcr.io/surrealdb/spectron:latest
+    depends_on:
+      surrealdb:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      SPECTRON_SURREALDB_URL: ws://surrealdb:8000
+      SPECTRON_OBJECT_STORE_URL: file:///var/docs/spectron/objects
+    volumes:
+      - spectron-objects:/var/docs/spectron/objects
+    ports:
+      - "4000:4000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  surrealdb-data:
+  spectron-objects:
+```
+
+## Environment file
+
+Create a `.env` file alongside `compose.yaml`. Never commit this file to version control.
+
+```bash
+# .env
+OPENAI_API_KEY=sk-...
+# ANTHROPIC_API_KEY=sk-ant-...  # uncomment if using Anthropic models
+```
+
+## Starting the stack
+
+```bash
+docker compose up -d
+```
+
+Docker pulls the images and starts both services. Wait for the health checks to pass – SurrealDB starts first, then Spectron connects to it.
+
+Check that both services are healthy:
+
+```bash
+docker compose ps
+```
+
+```
+NAME              STATUS
+spectron-1        Up (healthy)
+surrealdb-1       Up (healthy)
+```
+
+## First-run initialisation
+
+Before you can use Spectron, create an admin management key. Run this command once against the running container:
+
+```bash
+docker compose exec spectron spectron init --admin-key
+```
+
+The command prints a management key secret. Copy it immediately – it is not stored in recoverable form. Store it in a secrets manager or a `.env` file (outside version control).
+
+```
+Admin key created.
+  Name:   admin
+  Secret: sk_mgmt_...
+
+This secret will not be shown again. Store it securely.
+```
+
+Set the management key in your shell:
+
+```bash
+export SPECTRON_MGMT_KEY=sk_mgmt_...
+```
+
+## Creating your first Context
+
+A Context is the top-level container for a Spectron deployment. Create one with the management key:
+
+```bash
+curl -s -X POST http://localhost:4000/api/v1/contexts \
+  -H "Authorization: Bearer $SPECTRON_MGMT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "dev",
+    "namespace": "spectron",
+    "database": "dev",
+    "config": {
+      "models": {
+        "extraction": "openai/gpt-4o-mini",
+        "response": "openai/gpt-4o"
+      }
+    }
+  }'
+```
+
+Create an agent key for the Context:
+
+```bash
+curl -s -X POST http://localhost:4000/api/v1/contexts/dev/keys/my-agent \
+  -H "Authorization: Bearer $SPECTRON_MGMT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "principal": "agent",
+    "scope_floor": { "org": "my-org", "agent": "my-agent" }
+  }'
+```
+
+The response includes the key secret. Use it in your application as `SPECTRON_API_KEY`.
+
+## Health check endpoint
+
+```bash
+curl http://localhost:4000/health
+```
+
+```json
+{
+  "status": "ok",
+  "surrealdb": "connected",
+  "object_store": "ok",
+  "version": "0.1.0"
+}
+```
+
+A `200 OK` response with `"status": "ok"` means Spectron is running and connected to all dependencies.
+
+## Viewing logs
+
+```bash
+# All services
+docker compose logs -f
+
+# Spectron only
+docker compose logs -f spectron
+```
+
+## Stopping the stack
+
+```bash
+docker compose down
+```
+
+Data persists in the named volumes (`surrealdb-data`, `spectron-objects`) and is available when you restart.
+
+## Upgrading
+
+Pull the latest image and restart the Spectron service. Migrations run automatically at startup.
+
+```bash
+docker compose pull spectron
+docker compose up -d spectron
+```
+
+SurrealDB should be upgraded separately. Follow SurrealDB's upgrade guide before updating `surrealdb/surrealdb` in your compose file.
+
+## Production considerations
+
+The configuration above is suitable for development and small internal deployments. For production, review the following before going live:
+
+- Replace `file:///var/docs/spectron/objects` with an S3 or GCS URL so object storage is not tied to the container's local filesystem.
+- Run SurrealDB in clustered mode (TiKV-backed) or use SurrealDB Cloud for high availability.
+- Place Spectron behind a TLS-terminating reverse proxy (Nginx, Caddy, or a cloud load balancer).
+- Store all secrets in a secrets manager rather than a plain `.env` file.
+- Set `SPECTRON_MAX_UPLOAD_BYTES` to match your upload policy.
+
+See [Kubernetes](/docs/spectron/self-hosting/deployment/kubernetes) for a production-grade deployment guide.

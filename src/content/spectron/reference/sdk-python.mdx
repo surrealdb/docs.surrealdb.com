@@ -1,0 +1,449 @@
+---
+position: 7
+title: Python SDK reference
+description: "Complete method reference for the Spectron Python SDK."
+---
+
+# Python SDK reference
+
+The Spectron Python SDK provides async-first access to the full Spectron API. All methods are `async def` and return typed response objects. Naming follows `snake_case` throughout.
+
+## Installation
+
+```bash
+pip install spectron
+```
+
+Python 3.10 or later is required.
+
+## Client construction
+
+### `Spectron` – memory client
+
+Use `Spectron` to interact with a single Context. Pass the context identifier, base URL, and API key directly to the constructor.
+
+```python
+from spectron import Spectron
+
+memory = Spectron(
+    context="acme-prod",
+    base_url="https://api.spectron.dev",
+    api_key="sk-...",
+)
+```
+
+When using self-hosted Spectron, set `base_url` to your deployment URL. The `api_key` parameter defaults to the `SPECTRON_API_KEY` environment variable if omitted.
+
+#### Multi-context pattern
+
+If your application manages multiple Contexts, construct a root client and obtain per-Context handles:
+
+```python
+from spectron import Spectron
+
+client = Spectron(api_key="sk-...")
+memory = client.memory(context_id="ctx_01jt4kx...")
+```
+
+### `SpectronManagement` – admin client
+
+`SpectronManagement` provides access to management operations: creating and configuring Contexts, managing API keys, and updating model configuration. It requires an admin-level key.
+
+```python
+from spectron import SpectronManagement
+
+admin = SpectronManagement(
+    base_url="https://api.spectron.dev",
+    api_key="sk-admin-...",
+)
+```
+
+---
+
+## Sessions
+
+Sessions represent bounded conversations. Turns are added to sessions; the extraction pipeline runs on each turn and persists structured memory to experiential memory.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.sessions.create(scope, metadata?)` | `POST /{ctx}/sessions` | Create a new session with dimensional scope. |
+| `session.close()` | `DELETE /{ctx}/sessions/{id}` | Close and finalise a session. |
+| `session.turn(role, content)` | `POST /{ctx}/sessions/{id}/turns` | Add a turn and run the extraction pipeline. |
+| `session.turns()` | `GET /{ctx}/sessions/{id}/turns` | List all turns in a session. |
+| `session.context(query)` | `POST /{ctx}/sessions/{id}/context` | Retrieve formatted memory context scoped to this session. |
+| `session.chat(message)` | `POST /{ctx}/sessions/{id}/chat` | Send a message, run the agent, extract memory, and return the reply. |
+
+```python
+import asyncio
+from spectron import Spectron
+
+memory = Spectron(api_key="sk-...")
+
+async def main():
+    session = await memory.sessions.create(
+        scope={"org": "acme", "user": "tobie"},
+    )
+
+    result = await session.turn(
+        role="user",
+        content="I was just promoted to CTO.",
+    )
+    print(result.extraction.attributes_upserted)  # list of updated attributes
+    print(result.extraction_ms)
+
+    ctx = await session.context(query="What is Tobie's current role?")
+    print(ctx.context)  # formatted string for injection into system prompt
+
+    turns = await session.turns()
+    print(len(turns))
+
+    await session.close()
+
+asyncio.run(main())
+```
+
+---
+
+## One-shot memory
+
+Use these methods when you do not need a persistent session object – for example, when building a system prompt before a conversation begins, or for one-off lookups.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.query(query, k?, session_id?)` | `POST /{ctx}/query` | Return ranked memory hits with scores and tiers. |
+| `memory.context(query, k?)` | `POST /{ctx}/context` | Return a formatted context string ready for system-prompt injection. |
+
+```python
+# Retrieve formatted context for a system prompt
+ctx = await memory.context(
+    query="brief on tobie",
+    k=10,
+    scope={"org": "acme", "user": "tobie"},
+)
+system_prompt = f"You are a helpful assistant.\n\n## Memory\n{ctx.context}"
+
+# Retrieve ranked hits for custom formatting or inspection
+hits = await memory.query(
+    query="What team does Tobie work in?",
+    k=5,
+    scope={"org": "acme", "user": "tobie"},
+)
+for hit in hits.hits:
+    print(hit.entity, hit.key, hit.value, hit.score)
+print(hits.tier)      # "direct" | "cache" | "hybrid" | "full_context"
+print(hits.trace_id)  # correlates with the decision_trace record
+```
+
+---
+
+## State, profile, and entities
+
+These methods expose the structured experiential memory model directly – useful for inspection, debugging, and building custom UIs over memory state.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.state()` | `GET /{ctx}/state` | Return a snapshot of the full memory state for the current scope. |
+| `memory.profile()` | `GET /{ctx}/profile` | Return a structured profile for the principal subject of the current scope. |
+| `memory.entities.list(type?)` | `GET /{ctx}/entities` | List all entities, optionally filtered by type. |
+| `memory.entities.get(type, name)` | `GET /{ctx}/entities/{type}/{name}` | Fetch all attributes for a named entity. |
+| `memory.entities.history(type, name, key)` | `GET /{ctx}/entities/{type}/{name}/history/{key}` | Full temporal history for a single attribute key on an entity. |
+| `memory.entities.delete(type, name)` | `DELETE /{ctx}/entities/{type}/{name}` | Delete an entity and all its attributes. |
+
+```python
+# Get a structured profile for the current user
+profile = await memory.profile(scope={"org": "acme", "user": "tobie"})
+print(profile.name, profile.role, profile.preferences)
+
+# List all Person entities in the context
+people = await memory.entities.list(type="Person")
+for person in people:
+    print(person.name)
+
+# Inspect the attribute history for a key that has changed over time
+history = await memory.entities.history("Person", "tobie_morgan_hitchcock", "role")
+for record in history:
+    print(record.value, record.valid_from, record.valid_to)
+```
+
+---
+
+## Intelligence and lifecycle
+
+Reflection runs the reasoning model over current memory and returns – or persists – synthesised insights. Forget removes memory matching a natural-language query. Lifecycle operations trigger scheduled maintenance tasks.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.reflect(query, persist?)` | `POST /{ctx}/reflect` | Run the reasoning model against the query and return synthesised insights. If `persist=True`, derived facts are written back to memory. |
+| `memory.forget(query)` | `POST /{ctx}/forget` | Remove memory records that match the natural-language query. |
+| `memory.lifecycle.expire()` | `POST /{ctx}/lifecycle/expire` | Expire attributes that have passed their `valid_to` date. |
+| `memory.lifecycle.decay()` | `POST /{ctx}/lifecycle/decay` | Apply decay to low-confidence or rarely accessed attributes. |
+
+```python
+# Reflect without persisting – returns a synthesis without writing
+result = await memory.reflect(
+    query="What are Tobie's main areas of focus this quarter?",
+    persist=False,
+)
+print(result.reflection)
+print(result.supporting_entities)
+
+# Reflect and persist – derived facts are written back to memory
+result = await memory.reflect(
+    query="Summarise the team structure based on known roles.",
+    persist=True,
+)
+
+# Remove a specific memory
+forget_result = await memory.forget(
+    query="Tobie's previous role as VP Engineering",
+    scope={"org": "acme", "user": "tobie"},
+)
+print(forget_result.deleted_count)
+print(forget_result.affected_entities)
+```
+
+---
+
+## Traces
+
+Every retrieval and extraction operation writes a decision trace to the database. Use these methods to inspect traces for observability and debugging.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.traces.list(limit?)` | `GET /{ctx}/traces` | List recent decision traces, most recent first. |
+| `memory.traces.get(id)` | `GET /{ctx}/traces/{id}` | Fetch a single trace record by ID. |
+| `memory.traces.stats()` | `GET /{ctx}/traces/stats` | Aggregate statistics: tier distribution, mean latency, cache hit rate. |
+
+```python
+# Review recent traces
+traces = await memory.traces.list(limit=20)
+for trace in traces:
+    print(trace.id, trace.resolution_tier, trace.latency_ms)
+
+# Inspect a single trace
+trace = await memory.traces.get("trace:01jt4m...")
+print(trace.query, trace.resolution_tier, trace.cached)
+
+# Check tier distribution to spot degradation
+stats = await memory.traces.stats()
+print(stats.tier_distribution)  # {"direct": 0.42, "hybrid": 0.48, "full_context": 0.10}
+print(stats.mean_latency_ms)
+print(stats.cache_hit_rate)
+```
+
+---
+
+## Knowledge – documents
+
+These methods manage authoritative knowledge document ingestion and retrieval.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.knowledge.upload(file, ..., profile?)` | `POST /{ctx}/knowledge` | Upload a document. Accepts file path, URL, or bytes. |
+| `memory.knowledge.replace(id, file)` | `PUT /{ctx}/knowledge/{id}` | Replace an existing document's content, reprocessing it fully. |
+| `memory.knowledge.get(id)` | `GET /{ctx}/knowledge/{id}` | Fetch document metadata and processing status. |
+| `memory.knowledge.raw(id)` | `GET /{ctx}/knowledge/{id}/raw` | Download the original uploaded file. |
+| `memory.knowledge.chunks(id, page?, page_size?)` | `GET /{ctx}/knowledge/{id}/chunks` | List the retrieved chunks for a document, with pagination. |
+| `memory.knowledge.list(...)` | `GET /{ctx}/knowledge` | List all documents in the Context, with optional filters. |
+| `memory.knowledge.related(id)` | `GET /{ctx}/knowledge/{id}/related` | Find documents related to the given document via the graph. |
+| `memory.knowledge.delete(id)` | `DELETE /{ctx}/knowledge/{id}` | Delete a document and all its chunks and keywords. |
+| `memory.knowledge.query(query, mode?, ...)` | `POST /{ctx}/knowledge/query` | Search knowledge using vector, BM25, or hybrid modes. |
+
+```python
+import asyncio
+from spectron import Spectron
+
+memory = Spectron(api_key="sk-...")
+
+async def main():
+    # Upload a policy document
+    doc = await memory.knowledge.upload(
+        file="/path/to/returns-policy.pdf",
+        title="Returns Policy",
+        tags=["policy", "returns"],
+    )
+    print(doc.id, doc.status)  # status: "processing" | "ready" | "failed"
+
+    # Search knowledge with hybrid mode
+    results = await memory.knowledge.query(
+        query="what is the refund window for unopened items?",
+        mode="hybrid",  # "vector" | "bm25" | "hybrid" | "hybrid_graph"
+        k=10,
+        threshold=0.5,
+    )
+    for chunk in results.chunks:
+        print(chunk.content, chunk.score, chunk.document_id)
+
+asyncio.run(main())
+```
+
+---
+
+## Knowledge – keywords
+
+The keyword graph is built automatically from document content. Use these methods to search and inspect it directly.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.knowledge.keywords.for_document(id)` | `GET /{ctx}/knowledge/{id}/keywords` | List all keywords extracted from a specific document. |
+| `memory.knowledge.keywords.list(...)` | `GET /{ctx}/knowledge/keywords` | List all keywords in the Context. |
+| `memory.knowledge.keywords.get(normalised)` | `GET /{ctx}/knowledge/keywords/{norm}` | Fetch a keyword record by its normalised form. |
+| `memory.knowledge.keywords.search(query, k?, threshold?)` | `POST /{ctx}/knowledge/keywords/search` | Search the keyword graph using semantic similarity. |
+| `memory.knowledge.keywords.related(normalised)` | `GET /{ctx}/knowledge/keywords/{norm}/related` | Find related keywords by PMI co-occurrence weight. |
+
+```python
+# Find keywords in a specific document
+keywords = await memory.knowledge.keywords.for_document("doc:01jt4m...")
+for kw in keywords:
+    print(kw.term, kw.tf_idf)
+
+# Find semantically related keywords
+related = await memory.knowledge.keywords.related("refund-window")
+for kw in related:
+    print(kw.term, kw.weight)
+```
+
+---
+
+## Knowledge – typed nodes
+
+Typed knowledge nodes form an explicit graph in authoritative knowledge. Use them for structured product catalogues, org charts, policy hierarchies, or any structured reference data.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.knowledge.nodes.list(kind?)` | `GET /{ctx}/knowledge/nodes` | List all nodes, optionally filtered by kind. |
+| `memory.knowledge.nodes.upsert(nodes, relations?)` | `POST /{ctx}/knowledge/nodes/batch` | Create or update nodes and their relations in a single operation. |
+| `memory.knowledge.nodes.search(query, k?, threshold?)` | `POST /{ctx}/knowledge/nodes/search` | Semantic search over node content. |
+| `memory.knowledge.nodes.get(kind, slug)` | `GET /{ctx}/knowledge/nodes/{kind}/{slug}` | Fetch a single node by kind and slug. |
+| `memory.knowledge.nodes.related(kind, slug)` | `GET /{ctx}/knowledge/nodes/{kind}/{slug}/related` | Fetch nodes related to the given node via graph edges. |
+| `memory.knowledge.nodes.delete(kind, slug)` | `DELETE /{ctx}/knowledge/nodes/{kind}/{slug}` | Delete a node and its outgoing edges. |
+
+```python
+# Upsert a product and a policy, linked by a relation
+await memory.knowledge.nodes.upsert(
+    nodes=[
+        {"kind": "Product", "slug": "pro-plan", "attributes": {"name": "Pro Plan", "price_usd": 49}},
+        {"kind": "Policy", "slug": "returns-policy", "attributes": {"window_days": 30}},
+    ],
+    relations=[
+        {"from_kind": "Product", "from_slug": "pro-plan", "relation": "governed_by", "to_kind": "Policy", "to_slug": "returns-policy"},
+    ],
+)
+
+# Search nodes
+results = await memory.knowledge.nodes.search(
+    query="what plan has a 30-day return window?",
+    k=5,
+)
+for node in results.nodes:
+    print(node.kind, node.slug, node.score)
+```
+
+---
+
+## Knowledge – graph traversal
+
+Traverse the typed knowledge graph from a starting node, following typed edge labels to a specified depth.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.knowledge.traverse(start, edges, depth)` | `POST /{ctx}/knowledge/traverse` | Walk the graph from a start node following named edge types. |
+| `memory.knowledge.traverse_recursive(...)` | `POST /{ctx}/knowledge/traverse/recursive` | Recursive traversal with cycle detection and depth limit. |
+| `memory.knowledge.traverse_siblings(...)` | `POST /{ctx}/knowledge/traverse/siblings` | Find nodes that share a common parent or relation target. |
+
+```python
+# Find all policies that govern Pro Plan, transitively
+result = await memory.knowledge.traverse(
+    start={"kind": "Product", "slug": "pro-plan"},
+    edges=["governed_by", "superseded_by"],
+    depth=3,
+)
+for node in result.nodes:
+    print(node.kind, node.slug, node.depth)
+
+# Recursive traversal of an org chart
+result = await memory.knowledge.traverse_recursive(
+    start={"kind": "Team", "slug": "platform"},
+    edges=["reports_to"],
+    depth=5,
+    direction="inbound",
+)
+```
+
+---
+
+## Management
+
+`SpectronManagement` provides administrative operations on Contexts and API keys. All management methods require an admin-level key.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `admin.contexts.create(id, ...)` | `POST /api/v1/contexts/{id}` | Create a new Context with optional configuration. |
+| `admin.contexts.list()` | `GET /api/v1/contexts` | List all Contexts in the account. |
+| `admin.contexts.get(id)` | `GET /api/v1/contexts/{id}` | Fetch a Context's configuration and status. |
+| `admin.contexts.update(id, config)` | `PATCH /api/v1/contexts/{id}` | Partially update a Context's configuration. |
+| `admin.contexts.delete(id)` | `DELETE /api/v1/contexts/{id}` | Delete a Context and all its data. Irreversible. |
+| `admin.contexts(id).keys.create(name, principal, scope_floor, ...)` | `POST /api/v1/contexts/{id}/keys/{name}` | Create an API key for a Context with a given principal and scope floor. |
+| `admin.contexts(id).keys.list()` | `GET /api/v1/contexts/{id}/keys` | List all API keys for a Context. |
+| `admin.contexts(id).keys.delete(name)` | `DELETE /api/v1/contexts/{id}/keys/{name}` | Revoke an API key immediately. |
+
+```python
+from spectron import SpectronManagement
+
+admin = SpectronManagement(
+    base_url="https://api.spectron.dev",
+    api_key="sk-admin-...",
+)
+
+async def main():
+    # Create a context
+    ctx = await admin.contexts.create(
+        id="acme-prod",
+        config={
+            "region": "eu-west-1",
+        },
+    )
+    print(ctx.id, ctx.status)
+
+    # Create an agent key scoped to a specific organisation
+    key = await admin.contexts("acme-prod").keys.create(
+        name="agent-key-acme",
+        principal="agent",
+        scope_floor={"org": "acme"},
+    )
+    print(key.key)  # only shown once
+
+    # List all contexts
+    contexts = await admin.contexts.list()
+    for c in contexts:
+        print(c.id, c.created_at)
+
+asyncio.run(main())
+```
+
+---
+
+## Config shortcuts
+
+These methods on the `Spectron` client are convenience wrappers around `admin.contexts.update()`. They patch a specific section of the Context configuration.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `memory.config.models(...)` | `PATCH /api/v1/contexts/{ctx}` | Update the model configuration (extraction, embedding, synthesis models). |
+| `memory.config.providers(...)` | `PATCH /api/v1/contexts/{ctx}` | Update LLM provider credentials and routing. |
+| `memory.config.ontology(...)` | `PATCH /api/v1/contexts/{ctx}` | Update the ontology: entity types, attribute categories, and relation kinds. |
+
+```python
+# Switch the extraction model
+await memory.config.models(
+    extraction="gpt-4o-mini",
+    embedding="text-embedding-3-small",
+    synthesis="gpt-4o",
+)
+
+# Define a custom entity type
+await memory.config.ontology(
+    entity_types=["Person", "Team", "Product", "Customer"],
+    attribute_categories=["identity", "preference", "context", "knowledge"],
+)
+```

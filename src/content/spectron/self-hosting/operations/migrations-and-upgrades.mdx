@@ -1,0 +1,171 @@
+---
+position: 4
+title: Migrations and upgrades
+description: "Schema migrations and upgrade playbooks."
+---
+
+# Migrations and upgrades
+
+Spectron bundles schema migrations into the binary and applies them automatically. This page explains how migrations work and what to expect during version upgrades.
+
+## How migrations work
+
+Spectron ships SQL migration files in a versioned directory bundled into the binary:
+
+| Migration file | Contents |
+|---|---|
+| `V1__scope_attributes.surql` | `scope_attribute` table |
+| `V2__layer_1_memory.surql` | Session, turn, entity, attribute, relation, instruction, uncertainty, memory_chunk |
+| `V3__layer_0_knowledge.surql` | Document, knowledge_chunk, keyword, connectors |
+| `V4__layer_0_knowledge_nodes.surql` | Typed knowledge nodes and relations |
+| `V5__decision_traces.surql` | Decision trace and semantic response cache |
+
+### When migrations run
+
+Migrations run in two scenarios:
+
+1. **Context creation** – when `POST /api/v1/contexts/{id}` is called, all migrations are applied to the new database from scratch.
+2. **Server startup** – at startup, Spectron checks each registered Context for pending migrations and applies them automatically.
+
+Applied migrations are tracked in a `_migrations` table inside each Context database:
+
+```surql
+SELECT * FROM _migrations ORDER BY applied_at ASC;
+```
+
+### Migration safety
+
+Spectron migrations are **additive only** – they add new tables, fields, and indexes. They never drop tables or rename fields. This ensures that a rollback is always safe: if you downgrade to a previous version, the extra tables and fields are simply unused.
+
+## Upgrading Spectron
+
+### Rolling upgrades
+
+Spectron is a stateless application server. All durable state lives in SurrealDB. A rolling upgrade works as follows:
+
+1. Deploy the new Spectron binary (or container image) alongside the running version.
+2. The new version starts up and applies any pending migrations to all registered Contexts.
+3. Route traffic to the new version.
+4. Shut down the old version.
+
+Because migrations are additive, the old version continues to function correctly against a migrated database – it simply ignores the new tables and fields it doesn't know about.
+
+### Docker upgrade
+
+```bash
+# Pull the new image
+docker pull surrealdb/spectron:2.0.0
+
+# Stop the old container
+docker stop spectron-prod
+
+# Start the new container (migrations run automatically on startup)
+docker run -d \
+  --name spectron-prod \
+  -p 8080:8080 \
+  -e SPECTRON_SURREALDB_URL=ws://surrealdb:8000 \
+  -e SPECTRON_SURREALDB_USER=root \
+  -e SPECTRON_SURREALDB_PASS=root \
+  surrealdb/spectron:2.0.0
+```
+
+Check the logs to confirm migrations completed:
+
+```bash
+docker logs spectron-prod | grep -i migration
+# [INFO] Context acme-prod: Applied migration V6__...
+# [INFO] All migrations applied successfully.
+```
+
+### Kubernetes upgrade
+
+Update the image tag in your deployment:
+
+```bash
+kubectl set image deployment/spectron spectron=surrealdb/spectron:2.0.0
+```
+
+Kubernetes performs a rolling update. Each new pod applies pending migrations on startup before serving traffic. Because all Spectron pods connect to the same SurrealDB instance, only the first pod to start applies each migration – subsequent pods see the migrations already applied.
+
+For zero-downtime upgrades, use `strategy.rollingUpdate.maxUnavailable: 0` in your deployment spec.
+
+### Bare metal / systemd upgrade
+
+```bash
+# Download the new binary
+curl -L https://download.surrealdb.com/docs/spectron/v2.0.0/spectron-linux-amd64 -o /usr/local/bin/spectron-new
+chmod +x /usr/local/bin/spectron-new
+
+# Apply migrations with the new binary without starting the server
+/usr/local/bin/spectron-new migrate \
+  --surrealdb-url ws://localhost:8000 \
+  --surrealdb-user root \
+  --surrealdb-pass root
+
+# Replace the binary and restart
+sudo systemctl stop spectron
+cp /usr/local/bin/spectron-new /usr/local/bin/spectron
+sudo systemctl start spectron
+```
+
+## Downgrading
+
+Since migrations are additive, you can safely downgrade to a previous Spectron version. The extra tables and fields added by the newer version are ignored. No data loss occurs.
+
+If you need to reclaim disk space from unused tables after a downgrade, use the `spectronctl contexts vacuum` command (available in v2.0+), which removes tables introduced in versions newer than the current binary.
+
+## Manual migration management
+
+In some deployments, you may want to apply migrations explicitly rather than relying on automatic application at startup.
+
+### Run migrations without starting the server
+
+```bash
+spectron migrate \
+  --surrealdb-url ws://localhost:8000 \
+  --surrealdb-user root \
+  --surrealdb-pass root \
+  --contexts acme-prod,acme-staging
+```
+
+### Check pending migrations
+
+```bash
+spectronctl migrations status \
+  --context acme-prod \
+  --api-key mgmt-...
+```
+
+Output:
+```
+Context: acme-prod (ns=acme, db=prod)
+  Applied: V1, V2, V3, V4, V5
+  Pending: V6__response_cache_v2.surql
+```
+
+### Apply pending migrations selectively
+
+```bash
+spectronctl migrations apply \
+  --context acme-prod \
+  --migration V6 \
+  --api-key mgmt-...
+```
+
+## Backup before major upgrades
+
+Before upgrading to a major version, take a SurrealDB backup:
+
+```bash
+surreal export \
+  --conn ws://localhost:8000 \
+  --user root --pass root \
+  --ns acme --db prod \
+  pre-upgrade-backup-$(date +%Y%m%d).surql
+```
+
+Store the backup externally. For the full backup and restore workflow, see [Backups and retention](/docs/spectron/self-hosting/operations/backups-and-retention).
+
+## Changelog
+
+Breaking changes in each release are documented in the Spectron changelog. The changelog notes which migration is applied, what it changes, and whether any application code changes are required alongside the upgrade.

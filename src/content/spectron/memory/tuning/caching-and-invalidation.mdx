@@ -1,0 +1,144 @@
+---
+position: 3
+title: Caching and invalidation
+description: "How Spectron's semantic response cache works and how to manage memory lifecycle."
+---
+
+# Caching and invalidation
+
+Spectron applies several complementary mechanisms to control what stays in memory, for how long, and at what quality. The semantic response cache eliminates redundant LLM calls for similar queries. Importance scoring governs which facts survive decay. Lifecycle sweeps enforce time-based expiry and scheduled degradation.
+
+## Semantic response cache
+
+When a recall query arrives, Spectron embeds the query text and checks it against a store of previously answered queries using cosine similarity. If a stored query embedding matches the incoming one with a similarity score greater than 0.95, Spectron returns the cached response directly without invoking the LLM.
+
+The cache sits at **tier 2** of the query resolution pipeline, after a direct lookup (tier 1) but before the full hybrid retrieval and response generation path (tier 3). For workloads where many users ask semantically similar questions – "what is my current plan?", "which plan am I on?", "tell me my subscription tier?" – this eliminates the majority of response-generation tokens.
+
+Cache behaviour in decision traces:
+
+```json
+{
+  "query": "what plan am I on?",
+  "tier": 2,
+  "cached": true,
+  "similarity": 0.97,
+  "response": "You are on the Enterprise plan."
+}
+```
+
+The cache is per-Context. Cache entries are scoped to the same dimensions as the query (user, org, project), so a cached answer for one user is never returned to another.
+
+### Cache invalidation
+
+Cache entries are invalidated when new facts that would affect the response are extracted. If a turn is processed that updates the user's plan, all cached query embeddings for that scope that relate to plan-type facts are evicted. Invalidation is automatic and does not require explicit intervention.
+
+To manually flush the cache for a Context:
+
+```python
+await memory.cache.flush()
+```
+
+```javascript
+await memory.cache.flush();
+```
+
+## Importance scoring
+
+Every fact in Spectron carries an importance score between 0.0 and 1.0. The score governs how long the fact survives and how prominently it is weighted during retrieval. Initial scores are assigned by memory category:
+
+| Category | Initial importance |
+|---|---|
+| Identity | 1.0 |
+| Knowledge | 0.8 |
+| Context | 0.5 |
+
+**Identity** facts – user preferences, persistent attributes, long-term profile information – are assigned the maximum score and never decay (see below). **Knowledge** facts – extracted from documents or structured ingestion – start high because they represent deliberate, curated information. **Context** facts – extracted from ephemeral conversation turns – start lower, reflecting that most conversational detail is transient.
+
+### Reinforcement on recall
+
+Each time a fact is retrieved and returned to a caller, its importance score is multiplied by 1.1, capped at 1.0. This means frequently recalled facts reinforce themselves, while facts that are never retrieved gradually become less significant. The reinforcement reflects observed utility: if a fact keeps being surfaced, it is clearly relevant and should be retained.
+
+## Importance decay
+
+Importance scores decay on a per-category schedule. Decay runs as a background sweep at regular intervals (in standard deployments, nightly).
+
+| Category | Decay factor per day | Notes |
+|---|---|---|
+| Context | × 0.95 | Aggressive – most conversational facts become negligible within a few weeks |
+| Knowledge | × 0.995 | Slow – curated knowledge remains relevant for much longer |
+| Identity | No decay | Identity facts persist indefinitely unless explicitly deleted |
+
+A context-category fact starting at importance 0.5 decays to approximately 0.07 after 30 days, and to effectively zero after 60 days. It will be swept up by the auto-expiry TTL long before it reaches those values.
+
+## Auto-expiry TTL
+
+Spectron applies a default time-to-live (TTL) of **7 days** to context-category facts. After the TTL elapses, the fact is eligible for removal during the next lifecycle sweep. This prevents the memory layer from accumulating stale conversational detail indefinitely.
+
+The TTL applies to the context category only. Knowledge and identity facts are not subject to the default TTL unless a retention policy overrides this.
+
+## Retention policies
+
+Retention policies let you define custom TTL rules per scope, per memory category. A policy is a set of rules with the shape `{ scope, memory_category, ttl }`.
+
+```python
+await memory.config.retention([
+    # Keep context facts for 30 days for paying customers
+    {"scope": {"plan": "enterprise"}, "memory_category": "context", "ttl": "30d"},
+    # Keep all knowledge facts for 1 year
+    {"scope": {}, "memory_category": "knowledge", "ttl": "365d"},
+])
+```
+
+Rules are evaluated in order; the first matching rule applies. A rule with an empty scope matches all principals. When no rule matches, the default TTL applies.
+
+Retention policies are enforced during the reconciliation sweep, not at write time. A fact written when a policy allows 30-day retention will be expired 30 days after creation, regardless of whether the policy is later changed.
+
+## Lifecycle sweeps
+
+Two background sweeps manage memory lifecycle:
+
+### Expiry sweep
+
+The expiry sweep removes facts that have exceeded their TTL. It runs as a background job in standard deployments. You can trigger it explicitly:
+
+```python
+await memory.lifecycle.expire()
+```
+
+```javascript
+await memory.lifecycle.expire();
+```
+
+### Decay sweep
+
+The decay sweep applies the per-category importance multipliers to all facts in the Context. It runs nightly in standard deployments. To trigger manually:
+
+```python
+await memory.lifecycle.decay()
+```
+
+```javascript
+await memory.lifecycle.decay();
+```
+
+Manual triggering is useful during testing, when you want to fast-forward the decay state of a Context, or when managing self-hosted deployments where background job scheduling is under your control.
+
+## Querying lifecycle state
+
+To inspect the importance score and TTL of a specific fact:
+
+```python
+fact = await memory.state.get(fact_id)
+print(fact.importance)      # 0.45
+print(fact.expires_at)      # "2026-06-18T00:00:00Z"
+print(fact.memory_category) # "context"
+```
+
+To see which facts are approaching expiry:
+
+```python
+expiring = await memory.state.list(
+    scope={"user": "tobie"},
+    expires_before="2026-06-01T00:00:00Z",
+)
+```

@@ -18,6 +18,7 @@ import {
     iconPlus,
     iconQuery,
     iconServer,
+    iconSpectron,
     iconTransfer,
 } from "@surrealdb/ui";
 
@@ -43,6 +44,7 @@ export const SECTION_ICONS = new Map([
     ["query", iconQuery],
     ["server", iconServer],
     ["server", iconServer],
+    ["spectron", iconSpectron],
     ["support", iconHelp],
     ["transfer", iconTransfer],
 ] as const);

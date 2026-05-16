@@ -1,0 +1,267 @@
+---
+position: 3
+title: Kubernetes
+description: "Deploying Spectron on Kubernetes for production workloads."
+---
+
+# Kubernetes
+
+Spectron is designed for Kubernetes. The application binary is stateless, which means you can run multiple replicas behind a standard `Service` and scale horizontally with a `HorizontalPodAutoscaler`. SurrealDB is a separate concern and should be deployed as a `StatefulSet` or managed externally.
+
+## Secrets
+
+Create a Kubernetes `Secret` for API keys before deploying any other resources. Never embed secrets directly in manifest files.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: spectron-secrets
+  namespace: spectron
+type: Opaque
+stringData:
+  OPENAI_API_KEY: "sk-..."
+  SPECTRON_SURREALDB_PASS: "changeme"
+```
+
+Apply it:
+
+```bash
+kubectl apply -f secret.yaml
+```
+
+In production, use an external secrets manager (AWS Secrets Manager, GCP Secret Manager, HashiCorp Vault) with an operator such as the External Secrets Operator to populate the `Secret` from your secrets store.
+
+## SurrealDB StatefulSet
+
+Deploy SurrealDB as a `StatefulSet` so that storage is tied to the pod identity:
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: surrealdb
+  namespace: spectron
+spec:
+  serviceName: surrealdb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: surrealdb
+  template:
+    metadata:
+      labels:
+        app: surrealdb
+    spec:
+      containers:
+        - name: surrealdb
+          image: surrealdb/surrealdb:latest
+          args:
+            - start
+            - --log
+            - info
+            - --user
+            - root
+            - --pass
+            - $(SURREALDB_PASS)
+            - file:/data/surreal.db
+          env:
+            - name: SURREALDB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: spectron-secrets
+                  key: SPECTRON_SURREALDB_PASS
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 50Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: surrealdb
+  namespace: spectron
+spec:
+  selector:
+    app: surrealdb
+  ports:
+    - port: 8000
+      targetPort: 8000
+  clusterIP: None  # headless service for StatefulSet
+```
+
+For production with high write volume, replace the single-replica `StatefulSet` with SurrealDB in TiKV-backed clustered mode or use SurrealDB Cloud and point `SPECTRON_SURREALDB_URL` at the cluster endpoint.
+
+## Spectron Deployment
+
+Spectron is stateless, so it uses a `Deployment` with `RollingUpdate`:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spectron
+  namespace: spectron
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: spectron
+  template:
+    metadata:
+      labels:
+        app: spectron
+    spec:
+      containers:
+        - name: spectron
+          image: ghcr.io/surrealdb/spectron:latest
+          ports:
+            - containerPort: 4000
+          env:
+            - name: SPECTRON_SURREALDB_URL
+              value: "ws://surrealdb.spectron.svc.cluster.local:8000"
+            - name: SPECTRON_OBJECT_STORE_URL
+              value: "s3://my-spectron-bucket/prod?region=eu-west-1"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: spectron-secrets
+                  key: OPENAI_API_KEY
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spectron
+  namespace: spectron
+spec:
+  selector:
+    app: spectron
+  ports:
+    - port: 80
+      targetPort: 4000
+  type: ClusterIP
+```
+
+Expose Spectron externally via an `Ingress` or `LoadBalancer` depending on your cluster setup. Ensure TLS termination at the ingress layer.
+
+## Horizontal Pod Autoscaler
+
+Spectron scales well on CPU and memory. Configure an HPA to handle traffic spikes:
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: spectron
+  namespace: spectron
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: spectron
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+```
+
+## Namespace
+
+All resources above use the `spectron` namespace. Create it before applying the manifests:
+
+```bash
+kubectl create namespace spectron
+```
+
+## Applying all manifests
+
+```bash
+kubectl apply -f secret.yaml
+kubectl apply -f surrealdb.yaml
+kubectl apply -f spectron.yaml
+kubectl apply -f hpa.yaml
+```
+
+Wait for the Spectron pods to reach `Running` state:
+
+```bash
+kubectl rollout status deployment/spectron -n spectron
+```
+
+## First-run initialisation
+
+Run the `spectron init` command inside one of the running pods to create the admin management key:
+
+```bash
+kubectl exec -n spectron deploy/spectron -- spectron init --admin-key
+```
+
+Copy the printed secret. It is shown only once.
+
+## Upgrading
+
+Update the image tag in your `Deployment` manifest and apply it. The rolling update strategy ensures zero-downtime upgrades. Schema migrations run automatically when each new pod starts.
+
+```bash
+# Update the image tag (replace 0.2.0 with the target version)
+kubectl set image deployment/spectron spectron=ghcr.io/surrealdb/spectron:0.2.0 -n spectron
+kubectl rollout status deployment/spectron -n spectron
+```
+
+## Next steps
+
+- [Storage and scaling](/docs/spectron/self-hosting/deployment/storage-and-scaling) – object store configuration and scaling advice
+- [Authentication](/docs/spectron/self-hosting/security/authentication) – creating and managing API keys
+- [Observability](/docs/spectron/self-hosting/observability/tracing) – monitoring your deployment

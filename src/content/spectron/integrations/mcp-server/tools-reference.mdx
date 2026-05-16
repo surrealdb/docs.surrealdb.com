@@ -1,0 +1,396 @@
+---
+position: 2
+title: MCP tools reference
+description: "Complete reference for all seven Spectron MCP tools."
+---
+
+# MCP tools reference
+
+Spectron exposes seven tools over the Model Context Protocol at `/mcp`. All tools use the same bearer-token authentication as the REST API and respect the `X-Spectron-Context` and `X-Spectron-Scope` headers set during installation.
+
+## Common fields
+
+Every tool response includes:
+
+| Field | Type | Description |
+|---|---|---|
+| `trace_id` | string | Correlates this call with **trace** rows in the substrate (`decision_trace`, `retrieval_trace`, or `response_trace` depending on the tool). Use for debugging and audit walks. |
+
+Every tool that writes **experiential** memory also returns:
+
+| Field | Type | Description |
+|---|---|---|
+| `turn_id` | string | The turn record created by the extraction pipeline |
+
+---
+
+## `memory_store`
+
+Store a conversational exchange. Spectron auto-classifies the content, reconciles new facts against existing memory, and persists structured records to the **experiential** graph.
+
+**REST equivalent:** `POST /v1/{context_id}/sessions/{session_id}/turns`
+
+### Input
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `role` | `"user"` \| `"assistant"` | Yes | Who produced the content |
+| `content` | string | Yes | The message text to extract memory from |
+| `session_id` | string | No | Existing session to append to. A new session is created if omitted. |
+| `scope` | object | No | Scope key–value pairs. Overrides the default scope from `X-Spectron-Scope`. |
+
+### Output
+
+| Field | Type | Description |
+|---|---|---|
+| `turn_id` | string | ID of the turn record created |
+| `session_id` | string | Session the turn was appended to |
+| `entities` | array | Entities extracted from the content |
+| `attributes` | array | Attributes extracted and persisted |
+| `relations` | array | Relations between entities |
+| `instructions` | array | Imperative instructions extracted (e.g. "always respond in bullet points") |
+| `uncertainties` | array | Uncertain or unverifiable claims flagged during extraction |
+| `corrections` | array | Values that supersede previously stored attributes |
+| `trace_id` | string | Trace record ID |
+
+### Example
+
+An LLM invokes this tool at the end of a conversation turn:
+
+```
+Tool: memory_store
+Input: {
+  "role": "user",
+  "content": "I just got promoted to VP of Engineering and I'm moving to Singapore next month.",
+  "scope": { "user": "tobie", "org": "acme" }
+}
+
+Output: {
+  "turn_id": "turn:01jt4kx...",
+  "session_id": "session:01jt4ky...",
+  "entities": [
+    { "id": "Person/tobie", "label": "Tobie" }
+  ],
+  "attributes": [
+    { "entity": "Person/tobie", "key": "role", "value": "VP of Engineering", "category": "identity" },
+    { "entity": "Person/tobie", "key": "city", "value": "Singapore", "category": "identity", "valid_from": "2026-06-01" }
+  ],
+  "relations": [],
+  "instructions": [],
+  "corrections": [],
+  "trace_id": "trace:01jt4m..."
+}
+```
+
+---
+
+## `memory_recall`
+
+Retrieve relevant context for a query from **experiential** memory and **authoritative** knowledge in one call. Returns a pre-formatted context string designed for direct injection into an LLM system prompt.
+
+**REST equivalent:** `POST /v1/{context_id}/context`
+
+### Input
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `query` | string | Yes | Natural-language query describing what context to retrieve |
+| `k` | integer | No | Maximum number of memory hits to include (default: 10) |
+| `scope` | object | No | Scope filter. Overrides the default scope. |
+
+### Output
+
+| Field | Type | Description |
+|---|---|---|
+| `context` | string | Formatted context block for system prompt injection |
+| `tier` | string | Resolution tier used: `"direct"`, `"cache"`, `"hybrid"`, or `"full_context"` |
+| `query_ms` | integer | Time taken to resolve the query in milliseconds |
+| `trace_id` | string | Trace record ID |
+
+### Example
+
+```
+Tool: memory_recall
+Input: {
+  "query": "What do I know about Tobie's current situation?",
+  "scope": { "user": "tobie", "org": "acme" }
+}
+
+Output: {
+  "context": "### Tobie\n- Role: VP of Engineering (updated 2026-05-12)\n- City: Singapore (from 2026-06-01)\n- Organisation: Acme Corp\n- Preference: Concise answers, no filler phrases",
+  "tier": "direct",
+  "query_ms": 3,
+  "trace_id": "trace:01jt4n..."
+}
+```
+
+The `context` string can be placed directly in a system prompt:
+
+```
+You are a helpful assistant.
+
+## Memory
+### Tobie
+- Role: VP of Engineering (updated 2026-05-12)
+...
+```
+
+---
+
+## `memory_reflect`
+
+Synthesise patterns and insights from existing memories. Useful for periodic summarisation, generating user briefs, or deriving higher-order facts from accumulated context.
+
+Pass `persist: true` to write the derived attributes back to **experiential** memory as durable facts.
+
+**REST equivalent:** `POST /v1/{context_id}/reflect`
+
+### Input
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `prompt` | string | Yes | A directive describing what patterns or insights to look for (e.g. "What are the recurring themes in this user's goals?") |
+| `scope` | object | No | Scope to reflect over |
+| `persist` | boolean | No | If `true`, saves derived attributes to **experiential** memory (default: `false`) |
+| `k` | integer | No | Number of memory records to consider during reflection (default: 20) |
+
+### Output
+
+| Field | Type | Description |
+|---|---|---|
+| `reflection` | string | Synthesised insights in natural language |
+| `evidence` | array | Memory records used as evidence for the reflection |
+| `persisted_attributes` | array | Attributes written to **experiential** memory if `persist` was `true` |
+| `trace_id` | string | Trace record ID |
+
+### Example
+
+```
+Tool: memory_reflect
+Input: {
+  "prompt": "What career themes emerge from this user's history?",
+  "scope": { "user": "tobie", "org": "acme" },
+  "persist": true
+}
+
+Output: {
+  "reflection": "Tobie consistently moves toward technical leadership roles and has a pattern of relocating for career advancement. Recent trajectory: engineer → CTO → VP of Engineering with international moves.",
+  "evidence": [...],
+  "persisted_attributes": [
+    { "entity": "Person/tobie", "key": "career_theme", "value": "technical leadership progression" }
+  ],
+  "trace_id": "trace:01jt4p..."
+}
+```
+
+---
+
+## `memory_profile`
+
+Return the aggregated profile for the current principal. The profile groups identity facts, dynamic context, preferences, and active instructions into a single object suitable for direct system prompt injection.
+
+**REST equivalent:** `GET /v1/{context_id}/profiles/{entity_id}`
+
+### Input
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `scope` | object | No | Scope identifying the principal. Uses the default scope if omitted. |
+
+### Output
+
+| Field | Type | Description |
+|---|---|---|
+| `identity` | object | Static identity facts (name, role, organisation, etc.) |
+| `dynamic` | object | Recently updated contextual facts (current project, mood, focus area) |
+| `preferences` | object | Stated preferences (language, response style, format) |
+| `instructions` | array | Active imperative instructions to apply during the session |
+| `trace_id` | string | Trace record ID |
+
+### Example
+
+```
+Tool: memory_profile
+Input: {
+  "scope": { "user": "tobie", "org": "acme" }
+}
+
+Output: {
+  "identity": {
+    "name": "Tobie",
+    "role": "VP of Engineering",
+    "organisation": "Acme Corp",
+    "city": "Singapore"
+  },
+  "dynamic": {
+    "current_project": "Platform v3",
+    "focus": "Hiring for the Singapore office"
+  },
+  "preferences": {
+    "response_style": "concise",
+    "language": "British English"
+  },
+  "instructions": [
+    "Always respond in bullet points when listing more than three items",
+    "Do not include filler phrases such as 'Great question!'"
+  ],
+  "trace_id": "trace:01jt4q..."
+}
+```
+
+---
+
+## `knowledge_search`
+
+Search the **authoritative** knowledge base only (documents, structured records, connector-synced content). Does not include conversational memory. Returns ranked results with chunk text, score, and source metadata.
+
+**REST equivalent:** `POST /v1/{context_id}/knowledge/query`
+
+### Input
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `query` | string | Yes | Natural-language search query |
+| `mode` | string | No | Retrieval mode: `"vector"`, `"bm25"`, `"hybrid"` (default), or `"hybrid_graph"` |
+| `k` | integer | No | Number of results to return (default: 10) |
+| `threshold` | number | No | Minimum relevance score (0–1); results below this are excluded |
+| `scope` | object | No | Scope filter |
+
+### Retrieval modes
+
+| Mode | Description |
+|---|---|
+| `vector` | Dense semantic search using HNSW index. Best for conceptual similarity. |
+| `bm25` | Sparse keyword search. Best for exact terminology, product names, and codes. |
+| `hybrid` | Combines vector and BM25 with Reciprocal Rank Fusion. Recommended default. |
+| `hybrid_graph` | Hybrid retrieval extended with graph density re-ranking. Best for multi-hop relational queries. |
+
+### Output
+
+| Field | Type | Description |
+|---|---|---|
+| `results` | array | Ranked result objects |
+| `results[].chunk_text` | string | The text of the matched chunk |
+| `results[].score` | number | Relevance score (0–1) |
+| `results[].document_title` | string | Title of the source document |
+| `results[].document_id` | string | ID of the source document |
+| `results[].chunk_id` | string | ID of the specific chunk |
+| `results[].metadata` | object | Additional metadata attached during ingestion |
+| `trace_id` | string | Trace record ID |
+
+### Example
+
+```
+Tool: knowledge_search
+Input: {
+  "query": "what is the refund policy for subscription plans?",
+  "mode": "hybrid",
+  "k": 5,
+  "scope": { "org": "acme" }
+}
+
+Output: {
+  "results": [
+    {
+      "chunk_text": "Subscription plans may be cancelled at any time. Refunds are issued on a pro-rata basis for the unused portion of the current billing period, provided the cancellation request is submitted within 14 days of the renewal date.",
+      "score": 0.94,
+      "document_title": "Acme Billing Policies v3",
+      "document_id": "document:01jt4r...",
+      "chunk_id": "chunk:01jt4s...",
+      "metadata": { "version": "3.0", "last_reviewed": "2026-03-01" }
+    }
+  ],
+  "trace_id": "trace:01jt4t..."
+}
+```
+
+---
+
+## `knowledge_get`
+
+Fetch a specific document, chunk, or knowledge node by its ID. Returns the full record without re-ranking or scoring. Use this when you already know which resource you need.
+
+**REST equivalent:** `GET /v1/{context_id}/knowledge/{id}`
+
+### Input
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | Yes | The ID of the document, chunk, or knowledge node to retrieve |
+
+### Output
+
+The returned object shape depends on the record type:
+
+**Document:**
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Document ID |
+| `title` | string | Document title |
+| `content_type` | string | MIME type |
+| `chunk_count` | integer | Number of chunks the document was split into |
+| `metadata` | object | Metadata attached during ingestion |
+| `created_at` | string | ISO 8601 datetime |
+
+**Chunk:**
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Chunk ID |
+| `document_id` | string | Parent document ID |
+| `text` | string | Chunk text |
+| `position` | integer | Position within the document |
+
+### Example
+
+```
+Tool: knowledge_get
+Input: { "id": "chunk:01jt4s..." }
+
+Output: {
+  "id": "chunk:01jt4s...",
+  "document_id": "document:01jt4r...",
+  "text": "Subscription plans may be cancelled at any time...",
+  "position": 4
+}
+```
+
+---
+
+## `memory_forget`
+
+Semantically soft-delete memories matching a natural-language description. Spectron identifies relevant entities and attributes, marks them as deleted, and returns the count of records removed.
+
+**REST equivalent:** `POST /v1/{context_id}/forget`
+
+### Input
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `description` | string | Yes | Natural-language description of what to forget (e.g. "anything about Tobie's previous employer") |
+| `scope` | object | No | Scope to restrict the deletion to |
+
+### Output
+
+| Field | Type | Description |
+|---|---|---|
+| `deleted_count` | integer | Number of records soft-deleted |
+| `trace_id` | string | Trace record ID |
+
+### Example
+
+```
+Tool: memory_forget
+Input: {
+  "description": "Tobie's previous job title and employer",
+  "scope": { "user": "tobie", "org": "acme" }
+}
+
+Output: {
+  "deleted_count": 3,
+  "trace_id": "trace:01jt4u..."
+}
+```
+
+Soft-deleted records are excluded from all future retrieval but retained in the database for audit purposes. They can be permanently purged via the management API.

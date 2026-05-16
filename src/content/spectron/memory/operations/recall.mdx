@@ -1,0 +1,264 @@
+---
+position: 2
+title: Recalling memories
+description: "How to retrieve relevant context from Spectron memory."
+---
+
+# Recalling memories
+
+Spectron exposes two retrieval primitives with different return shapes. `memory.query()` returns a ranked list of individual memory hits suitable for inspection or custom formatting. `memory.context()` returns a pre-formatted string designed for direct injection into an LLM system prompt. For most agent integrations, `memory.context()` is the right starting point.
+
+## `memory.query()` – ranked hits
+
+Use `memory.query()` when you need structured access to what was retrieved – for debugging, for building custom context formatters, or for feeding results into a retrieval-augmented pipeline.
+
+```python
+hits = await memory.query(
+    query="What role does Christian have?",
+    k=10,
+    scope={"org": "acme", "user": "tobie"},
+)
+
+print(hits.tier)          # "direct" | "hybrid" | "full_context"
+print(hits.query_ms)      # e.g. 12
+print(hits.trace_id)      # correlates with the decision_trace row
+
+for hit in hits.hits:
+    print(hit.entity, hit.key, hit.value, hit.score)
+```
+
+```typescript
+import { Spectron } from "@spectron/sdk";
+
+const client = new Spectron({ apiKey: "sk-..." });
+const memory = client.memory({ contextId: "ctx_01jt4kx..." });
+
+const hits = await memory.query({
+    query: "What role does Christian have?",
+    k: 10,
+    scope: { org: "acme", user: "tobie" },
+});
+
+console.log(hits.tier);       // "direct" | "hybrid" | "full_context"
+console.log(hits.queryMs);
+for (const hit of hits.hits) {
+    console.log(hit.entity, hit.key, hit.value, hit.score);
+}
+```
+
+### REST
+
+```http
+POST /v1/{context_id}/query
+Content-Type: application/json
+
+{
+  "query": "What role does Christian have?",
+  "k": 10,
+  "scope": { "org": "acme", "user": "tobie" }
+}
+```
+
+```json
+{
+  "tier": "direct",
+  "hits": [
+    {
+      "entity": "entity:[\"Person\", \"christian_battaglia\"]",
+      "category": "identity",
+      "key": "role",
+      "value": "Head of Product",
+      "score": 1.0,
+      "valid_from": "2026-03-01T09:00:00Z"
+    }
+  ],
+  "query_ms": 4,
+  "trace_id": "trace:01jt4m..."
+}
+```
+
+## `memory.context()` – formatted string for LLM injection
+
+Use `memory.context()` when you want a string you can paste directly into a system prompt. Spectron retrieves the relevant hits and formats them into a structured block with section headings for each entity.
+
+```python
+ctx = await memory.context(
+    query="brief on tobie",
+    k=10,
+    scope={"org": "acme", "user": "tobie"},
+)
+
+system_prompt = f"""
+You are a helpful assistant.
+
+## Memory
+{ctx.context}
+"""
+
+print(ctx.tier)      # resolution tier used
+print(ctx.query_ms)
+```
+
+```typescript
+const ctx = await memory.context({
+    query: "brief on tobie",
+    k: 10,
+    scope: { org: "acme", user: "tobie" },
+});
+
+const systemPrompt = `You are a helpful assistant.\n\n## Memory\n${ctx.context}`;
+
+console.log(ctx.tier);
+console.log(ctx.queryMs);
+```
+
+### REST
+
+```http
+POST /v1/{context_id}/context
+Content-Type: application/json
+
+{
+  "query": "brief on tobie",
+  "k": 10,
+  "scope": { "org": "acme", "user": "tobie" }
+}
+```
+
+```json
+{
+  "context": "### Tobie Morgan Hitchcock\n- Role: CTO (updated 2026-05-10)\n- Organisation: Acme Corp\n- Current focus: Platform reliability roadmap\n- Preference: Concise answers, no filler phrases\n- Instruction: Always respond in British English",
+  "tier": "hybrid",
+  "query_ms": 28
+}
+```
+
+The formatted string groups attributes by entity, orders them by category (identity before knowledge before context), and includes recency signals for recently updated values. The exact format is stable across Spectron versions – you can rely on it as a system prompt fragment.
+
+## Knowledge-only queries
+
+To query authoritative knowledge independently of experiential memory, use `memory.knowledge.query()`. This is useful when you want authoritative product or policy information without mixing in conversational memory.
+
+```python
+knowledge_hits = await memory.knowledge.query(
+    query="what is the return window for unopened items?",
+    mode="hybrid",  # "vector" | "bm25" | "hybrid" | "hybrid_graph"
+    k=10,
+    threshold=0.5,
+)
+```
+
+```typescript
+const knowledgeHits = await memory.knowledge.query({
+    query: "what is the return window for unopened items?",
+    mode: "hybrid",
+    k: 10,
+    threshold: 0.5,
+});
+```
+
+### REST
+
+```http
+POST /v1/{context_id}/knowledge/query
+Content-Type: application/json
+
+{
+  "query": "what is the return window for unopened items?",
+  "mode": "hybrid",
+  "k": 10,
+  "threshold": 0.5
+}
+```
+
+### Query modes
+
+| Mode | Description |
+|---|---|
+| `vector` | Dense semantic search using HNSW index. Best for conceptual similarity. |
+| `bm25` | Keyword-based sparse retrieval. Best for exact terminology and product names. |
+| `hybrid` | Combines vector and BM25 scores with Reciprocal Rank Fusion. Recommended default. |
+| `hybrid_graph` | Hybrid retrieval extended with graph density reranking across the typed knowledge graph. Best for multi-hop relational queries. |
+
+## Tiered resolution pipeline
+
+Every query – whether `memory.query()` or `memory.context()` – passes through a four-tier resolution pipeline. Spectron attempts each tier in order and returns as soon as a tier produces a confident answer.
+
+### Tier 1: Direct lookup
+
+Spectron pattern-matches the query against known entity-attribute patterns. A question like "What is Tobie's role?" maps directly to `entity = Person/tobie, key = role` and resolves in a single database read with no LLM involvement. Latency is typically under 5 ms.
+
+This tier fires on questions about named entities with explicit attributes, time-stable identity facts, and recently cached values.
+
+### Tier 2: Semantic response cache
+
+If the query does not match a direct-lookup pattern, Spectron computes a vector embedding and checks it against a cache of recent query embeddings. A cosine similarity above 0.95 returns the cached response immediately.
+
+This tier eliminates redundant LLM calls for agents that ask structurally identical questions across many sessions – common in production deployments where thousands of users trigger the same retrieval pattern.
+
+### Tier 3: Hybrid retrieval
+
+For queries that miss the cache, Spectron runs full hybrid retrieval:
+
+- **HNSW semantic search** across the attribute and knowledge store
+- **BM25 keyword search** over the same corpus
+- **Graph density reranking** using the typed knowledge graph, section-level document vectors, PMI co-occurrence weights, document link graph, and personalised PageRank
+
+The ranked results are assembled and returned. No LLM call is made at this tier.
+
+### Tier 4: Full context synthesis
+
+If the retrieved hits are sparse or low-confidence, Spectron sends the top results to an LLM with a synthesis prompt and returns the synthesised answer alongside the supporting evidence.
+
+### Interpreting `hits.tier`
+
+| Value | Meaning |
+|---|---|
+| `direct` | Resolved via exact entity-attribute lookup. Fastest and most accurate. |
+| `cache` | Served from the semantic response cache. |
+| `hybrid` | Retrieved and reranked without LLM synthesis. |
+| `full_context` | LLM synthesised the answer from retrieved evidence. |
+
+The tier is included in every response so you can monitor resolution quality over time. A high proportion of `full_context` responses may indicate that your entity extraction or ontology coverage needs tuning.
+
+## Decision tracing
+
+Every query produces a `decision_trace` record in the database:
+
+```json
+{
+  "id": "trace:01jt4m...",
+  "query": "What role does Christian have?",
+  "resolution_tier": "direct",
+  "latency_ms": 4,
+  "cached": false,
+  "retrieved_count": 1,
+  "top_scores": [1.0],
+  "scope": { "org": "acme", "user": "tobie" },
+  "created_at": "2026-05-12T10:00:00Z"
+}
+```
+
+Traces are queryable via the management API and visible in the observability dashboard. See [Tracing](/docs/spectron/self-hosting/observability/tracing) for details.
+
+## Scope filtering
+
+All retrieval respects dimensional scope. Pass a `scope` object to limit results to memory records whose scope is a subset of the requested scope:
+
+```python
+# Only surfaces memory scoped to this specific user
+hits = await memory.query(
+    query="recent projects",
+    k=10,
+    scope={"org": "acme", "user": "tobie"},
+)
+
+# Surfaces all org-level memory but no user-specific memory
+hits = await memory.query(
+    query="team structure",
+    k=10,
+    scope={"org": "acme"},
+)
+```
+
+A record tagged `{org: "acme"}` is visible to both queries above. A record tagged `{org: "acme", user: "tobie"}` is only visible to the first. See [Contexts and scope](/docs/spectron/mental-model/contexts-and-scope) for a full explanation of subset matching.

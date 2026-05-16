@@ -1,0 +1,278 @@
+---
+position: 2
+title: Customer support agent
+description: "Ticket-linked memory with authoritative knowledge policies."
+---
+
+# Customer support agent
+
+This guide walks through building a customer support agent that uses Spectron for two distinct purposes: **authoritative knowledge** holds the authoritative product knowledge – FAQs, policies, and the product catalogue – and **experiential memory** holds per-customer memory accumulated over every interaction. The result is an agent that answers product questions correctly and remembers each customer's history without manual context injection.
+
+## What you are building
+
+- A Context with an ontology covering `Customer`, `Product`, and `Ticket` entity types.
+- authoritative knowledge nodes for the product catalogue and policy documents.
+- Per-customer sessions scoped by `user_id`, so each customer's memory is isolated.
+- A conversation loop that retrieves relevant context before each LLM call and extracts new facts after each turn.
+
+## Prerequisites
+
+A Spectron Context is created through the management API or the dashboard. The examples below assume you have a `context_id` and a management API key for ingestion, plus an agent API key for the conversation loop.
+
+## Step 1 – Create the Context
+
+Define the entity ontology when creating the Context. This tells the extraction pipeline what entity types to recognise and extract.
+
+```python
+import httpx
+
+mgmt = httpx.Client(
+    base_url="https://spectron.surrealdb.com/api/v1",
+    headers={"Authorization": "Bearer mgmt_..."},
+)
+
+mgmt.post("/contexts", json={
+    "id": "support",
+    "display_name": "Customer Support",
+    "config": {
+        "ontology": {
+            "entities": [
+                {
+                    "type": "Customer",
+                    "description": "A person or organisation that has purchased or enquired about a product.",
+                    "attributes": ["name", "email", "plan", "account_status", "preferred_channel"],
+                },
+                {
+                    "type": "Product",
+                    "description": "A product in the catalogue.",
+                    "attributes": ["name", "sku", "category", "price", "return_window_days"],
+                },
+                {
+                    "type": "Ticket",
+                    "description": "A support case or complaint.",
+                    "attributes": ["issue_summary", "status", "resolution", "sentiment"],
+                },
+            ]
+        }
+    },
+})
+```
+
+```typescript
+const response = await fetch("https://spectron.surrealdb.com/api/v1/contexts", {
+    method: "POST",
+    headers: {
+        "Authorization": "Bearer mgmt_...",
+        "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+        id: "support",
+        display_name: "Customer Support",
+        config: {
+            ontology: {
+                entities: [
+                    {
+                        type: "Customer",
+                        description: "A person or organisation that has purchased or enquired about a product.",
+                        attributes: ["name", "email", "plan", "account_status", "preferred_channel"],
+                    },
+                    {
+                        type: "Product",
+                        description: "A product in the catalogue.",
+                        attributes: ["name", "sku", "category", "price", "return_window_days"],
+                    },
+                    {
+                        type: "Ticket",
+                        description: "A support case or complaint.",
+                        attributes: ["issue_summary", "status", "resolution", "sentiment"],
+                    },
+                ],
+            },
+        },
+    }),
+});
+```
+
+## Step 2 – Ingest the product catalogue into authoritative knowledge
+
+Upload your product catalogue as a document. Spectron chunks it, extracts keywords, and creates knowledge nodes that agents can query.
+
+```python
+import pathlib
+
+with open("products.json", "rb") as f:
+    mgmt.post(
+        "/contexts/support/knowledge/documents",
+        files={"file": ("products.json", f, "application/json")},
+        data={"title": "Product catalogue", "content_type": "product_data"},
+    )
+```
+
+```typescript
+const formData = new FormData();
+formData.append("file", new Blob([productJson], { type: "application/json" }), "products.json");
+formData.append("title", "Product catalogue");
+formData.append("content_type", "product_data");
+
+await fetch("https://spectron.surrealdb.com/api/v1/contexts/support/knowledge/documents", {
+    method: "POST",
+    headers: { "Authorization": "Bearer mgmt_..." },
+    body: formData,
+});
+```
+
+## Step 3 – Ingest policy documents
+
+Policy documents are ingested the same way. Spectron parses them and extracts structured knowledge nodes for policy rules, deadlines, and conditions.
+
+```python
+for path in pathlib.Path("policies/").glob("*.md"):
+    with open(path, "rb") as f:
+        mgmt.post(
+            "/contexts/support/knowledge/documents",
+            files={"file": (path.name, f, "text/markdown")},
+            data={"title": path.stem.replace("-", " ").title(), "content_type": "policy"},
+        )
+```
+
+```typescript
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+const files = await readdir("policies/");
+for (const filename of files.filter(f => f.endsWith(".md"))) {
+    const content = await readFile(join("policies", filename));
+    const formData = new FormData();
+    formData.append("file", new Blob([content], { type: "text/markdown" }), filename);
+    formData.append("title", filename.replace(/-/g, " ").replace(".md", ""));
+    formData.append("content_type", "policy");
+
+    await fetch("https://spectron.surrealdb.com/api/v1/contexts/support/knowledge/documents", {
+        method: "POST",
+        headers: { "Authorization": "Bearer mgmt_..." },
+        body: formData,
+    });
+}
+```
+
+## Step 4 – Handle a customer conversation
+
+Each customer conversation is a session scoped to that customer's `user_id`. The scope ensures that Customer entity attributes (past tickets, preferences, purchase history) are isolated per customer.
+
+### Initialise the client
+
+```python
+from spectron import Spectron
+
+client = Spectron(api_key="sk-...")
+memory = client.memory(context_id="support")
+```
+
+```typescript
+import { Spectron } from "spectron";
+
+const client = new Spectron({ apiKey: "sk-..." });
+const memory = client.memory({ contextId: "support" });
+```
+
+### Create a session per conversation
+
+```python
+session = await memory.sessions.create(
+    scope={"org": "acme-support", "user": customer_id},
+)
+```
+
+```typescript
+const session = await memory.sessions.create({
+    scope: { org: "acme-support", user: customerId },
+});
+```
+
+### Retrieve context before each agent call
+
+Before generating a response, retrieve relevant memory. The `context()` call performs hybrid retrieval across authoritative knowledge and experiential memory, returning a ranked summary the agent can use.
+
+```python
+async def respond(session, user_message: str) -> str:
+    # 1. Retrieve relevant context from both layers
+    ctx = await session.context(query=user_message, top_k=8)
+
+    # 2. Build the system prompt
+    system = f"""You are a customer support agent for Acme Corp.
+Use the context below to answer accurately.
+
+{ctx.formatted}"""
+
+    # 3. Call your LLM
+    response = your_llm(system=system, user=user_message)
+
+    # 4. Record both turns so Spectron extracts memory from the exchange
+    await session.turn(role="user", content=user_message)
+    await session.turn(role="assistant", content=response)
+
+    return response
+```
+
+```typescript
+async function respond(session: Session, userMessage: string): Promise<string> {
+    // 1. Retrieve relevant context from both layers
+    const ctx = await session.context({ query: userMessage, topK: 8 });
+
+    // 2. Build the system prompt
+    const system = `You are a customer support agent for Acme Corp.
+Use the context below to answer accurately.
+
+${ctx.formatted}`;
+
+    // 3. Call your LLM
+    const response = await yourLlm({ system, user: userMessage });
+
+    // 4. Record both turns
+    await session.turn({ role: "user", content: userMessage });
+    await session.turn({ role: "assistant", content: response });
+
+    return response;
+}
+```
+
+## Step 5 – What the agent sees
+
+After a few interactions, the context retrieval for a query like "what is your return policy for AirPods?" will surface:
+
+- **authoritative knowledge**: The return policy knowledge node (authoritative: 30 days, no opened packaging).
+- **authoritative knowledge**: The AirPods Pro product node (price, SKU, warranty terms).
+- **experiential memory**: The customer entity with attributes – plan tier, previous ticket about a delivery issue, preferred contact channel.
+
+The agent answers the return policy question correctly from authoritative knowledge and can personalise the response ("since you're on the Pro plan, you also have extended phone support") using experiential memory context.
+
+## Step 6 – Querying a customer's memory directly
+
+At any point you can inspect what Spectron knows about a specific customer:
+
+```python
+entities = await memory.entities.list(
+    scope={"org": "acme-support", "user": customer_id},
+    entity_type="Customer",
+)
+for entity in entities:
+    print(entity.attributes)
+```
+
+```typescript
+const entities = await memory.entities.list({
+    scope: { org: "acme-support", user: customerId },
+    entityType: "Customer",
+});
+for (const entity of entities) {
+    console.log(entity.attributes);
+}
+```
+
+This is useful for building agent dashboards, pre-populating ticket forms, or debugging unexpected agent behaviour.
+
+## Authoritative and Experiential interaction
+
+When a customer says "your return policy is actually 60 days", Spectron stores their belief under the **Experiential** pillar with a `contradicts_l0` flag (legacy API name) rather than updating the curated policy under the **Authoritative** pillar. The agent is informed of the discrepancy and can correct the customer without the curated record being silently overwritten.
+
+This is the core guarantee: **Authoritative** content is protected from conversational drift regardless of how many users assert conflicting information. See [Eight pillars and six categories](/docs/spectron/architecture/eight-pillars-and-categories) and [Authority when pillars meet](/docs/spectron/memory/reasoning-model/authority-hierarchy).

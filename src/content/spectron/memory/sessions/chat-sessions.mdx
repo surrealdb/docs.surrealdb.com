@@ -1,0 +1,173 @@
+---
+position: 3
+title: Chat sessions
+description: "Using session.chat() for Spectron-managed conversation loops."
+---
+
+# Chat sessions
+
+The `chat` endpoint lets Spectron manage the entire LLM conversation loop in a single call. Rather than recording a turn, retrieving context, calling your LLM, and recording the assistant's reply separately, you hand all of that to Spectron and receive the model's reply along with a memory diff in one response.
+
+## Two integration patterns
+
+Spectron supports two ways to integrate memory into a conversation:
+
+| Pattern | Use when |
+|---|---|
+| **Spectron drives the loop** (`session.chat()`) | You want minimal integration surface. Spectron handles context retrieval, model invocation, and memory persistence. |
+| **Caller drives the loop** (`session.turn()` + `session.context()`) | You need control over the model call – custom prompts, streaming, tool use, multi-step chains, or your own model infrastructure. |
+
+The two patterns are not mutually exclusive. A single session can use `chat` for simple turns and `turn` + `context` for turns that require tool use or custom prompting.
+
+## What Spectron does in `chat`
+
+When you call `session.chat()`, Spectron executes the following steps:
+
+1. **Appends the user turn** – stores the message with `role: "user"` and runs the extraction pipeline (identical to a manual `session.turn()` call).
+2. **Retrieves context** – queries the memory layer for relevant facts, applying the tiered retrieval strategy (direct scope → hybrid → full context) and formats them into an injection-ready string.
+3. **Calls the response model** – invokes the configured `response` model with the retrieved context prepended to the system prompt and the conversation history as messages.
+4. **Persists the assistant turn** – stores the model's reply as an `assistant` turn and runs extraction on it.
+5. **Returns** the reply text and the combined memory diff (entities, attributes, relations, and corrections produced by both the user and assistant turns).
+
+## The `chat` endpoint
+
+```http
+POST /v1/{context_id}/sessions/{session_id}/chat
+Content-Type: application/json
+
+{
+  "content": "What do you know about me?"
+}
+```
+
+Response:
+
+```json
+{
+  "reply": "Based on what you've shared, you're Tobie, CTO at Anneal, based in Berlin…",
+  "memory_updates": {
+    "entities": [],
+    "attributes": [],
+    "relations": [],
+    "corrections": []
+  }
+}
+```
+
+### `reply`
+
+The plain-text response from the configured response model. This is ready to display directly in your UI.
+
+### `memory_updates`
+
+The combined extraction diff from both the user turn and the assistant turn. The shape matches the extraction result from `session.turn()`. Use this to update UI state or trigger any downstream logic that depends on changes to the memory graph.
+
+## Python SDK
+
+```python
+from spectron import Spectron
+
+memory = Spectron(context="acme-prod", api_key=os.environ["SPECTRON_API_KEY"])
+session = await memory.sessions.create(scope={"user": "tobie", "org": "anneal"})
+
+reply = await session.chat("What do you know about me?")
+
+print(reply.reply)            # The model's response string
+print(reply.memory_updates)   # Entities, attributes, relations, corrections
+```
+
+## JavaScript SDK
+
+```javascript
+import { Spectron } from "spectron";
+
+const memory = new Spectron({ context: "acme-prod", apiKey: process.env.SPECTRON_API_KEY });
+const session = await memory.sessions.create({ scope: { user: "tobie", org: "anneal" } });
+
+const reply = await session.chat({ message: "What do you know about me?" });
+
+console.log(reply.reply);          // The model's response string
+console.log(reply.memoryUpdates);  // Entities, attributes, relations, corrections
+```
+
+## Full loop example
+
+The following pattern shows a minimal chat loop using `session.chat()`:
+
+```python
+import os
+from spectron import Spectron
+
+memory = Spectron(context="acme-prod", api_key=os.environ["SPECTRON_API_KEY"])
+session = await memory.sessions.create(scope={"user": "tobie", "org": "anneal"})
+
+while True:
+    user_input = input("You: ")
+    if user_input.lower() in {"exit", "quit"}:
+        break
+
+    result = await session.chat(user_input)
+    print(f"Agent: {result.reply}")
+
+    if result.memory_updates.corrections:
+        for c in result.memory_updates.corrections:
+            print(f"  [memory corrected] {c.previous.value!r} → {c.current.value!r}")
+
+await session.close()
+```
+
+```javascript
+import * as readline from "node:readline";
+import { Spectron } from "spectron";
+
+const memory = new Spectron({ context: "acme-prod", apiKey: process.env.SPECTRON_API_KEY });
+const session = await memory.sessions.create({ scope: { user: "tobie", org: "anneal" } });
+
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+const ask = () => rl.question("You: ", async (input) => {
+    if (input.trim().toLowerCase() === "exit") {
+        await session.close();
+        rl.close();
+        return;
+    }
+
+    const result = await session.chat({ message: input });
+    console.log(`Agent: ${result.reply}`);
+
+    for (const c of result.memoryUpdates.corrections) {
+        console.log(`  [memory corrected] ${c.previous.value} → ${c.current.value}`);
+    }
+
+    ask();
+});
+
+ask();
+```
+
+## Configuring the response model
+
+The model used for response generation is configured at the context level in `config.models.response`. This is separate from the extraction model (`config.models.extraction`) used to parse turns into structured facts.
+
+```yaml
+# spectron.config.yaml
+models:
+  extraction: openai/gpt-4o-mini
+  response: openai/gpt-4o
+```
+
+You may use any provider supported by your Spectron deployment. The extraction and response models can differ – a faster, cheaper model is often suitable for extraction while a more capable model handles final response generation.
+
+See [Models and providers](/docs/spectron/self-hosting/operations/models-and-providers) for the full list of supported providers and how to configure API keys.
+
+## When to use `session.turn()` instead
+
+Use `session.turn()` plus your own model call when you need:
+
+- **Streaming responses** – `session.chat()` waits for the full completion before returning. If you require token-level streaming to your UI, drive the LLM loop yourself.
+- **Tool use** – if your agent needs to call external tools mid-conversation, you need control over the turn-taking loop to interleave tool calls and results.
+- **Custom prompting** – if you maintain your own system prompt structure, persona configuration, or prompt template that cannot be expressed through Spectron's context injection format.
+- **Multiple models per turn** – if your architecture uses a router, ensemble, or chain of models.
+- **Explicit context control** – if you want to inspect or modify the retrieved context string before it reaches the model.
+
+The `session.context()` method retrieves the formatted context string that Spectron would have injected, so you can replicate the retrieval step in the manual pattern. See [Retrieving context](/docs/spectron/memory/operations/recall) for details.

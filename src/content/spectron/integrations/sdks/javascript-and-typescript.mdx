@@ -1,0 +1,419 @@
+---
+position: 2
+title: JavaScript and TypeScript SDK
+description: "Using Spectron from JavaScript and TypeScript applications."
+---
+
+# JavaScript and TypeScript SDK
+
+The Spectron JavaScript SDK (`spectron`) is a Promise-based client for Node.js and browser-compatible environments. Every method returns a `Promise`, making it straightforward to use with `async`/`await` in any modern JavaScript or TypeScript project.
+
+## Installation
+
+```bash
+npm install spectron
+# or
+yarn add spectron
+# or
+pnpm add spectron
+```
+
+The package ships as both ESM and CJS with full TypeScript declaration files. Node.js 18 or later is required; for browser use, a modern ESM-capable bundler (Vite, esbuild, Rollup, Webpack 5) is assumed.
+
+## Client construction
+
+### ESM
+
+```typescript
+import { Spectron } from "spectron";
+
+const memory = new Spectron({
+    context: "acme-prod",
+    baseUrl: "https://api.spectron.dev",
+    apiKey: process.env.SPECTRON_API_KEY!,
+});
+```
+
+### CJS
+
+```javascript
+const { Spectron } = require("spectron");
+
+const memory = new Spectron({
+    context: "acme-prod",
+    apiKey: process.env.SPECTRON_API_KEY,
+});
+```
+
+### Configuration options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `context` | `string` | required | Context ID that scopes this client |
+| `baseUrl` | `string` | `"https://api.spectron.dev"` | Server URL |
+| `apiKey` | `string` | required | Bearer token for authentication |
+| `timeout` | `number` | `30000` | Request timeout in milliseconds |
+| `retries` | `number` | `3` | Maximum retries for idempotent requests |
+| `defaultScope` | `Record<string, string>` | `{}` | Default scope applied to all calls |
+
+## TypeScript types
+
+All request and response shapes are fully typed. Import types directly when you need them:
+
+```typescript
+import type {
+    MemoryContextResult,
+    MemoryQueryResult,
+    MemoryQueryHit,
+    Session,
+    TurnResult,
+    KnowledgeQueryResult,
+    ReflectionResult,
+    ForgetResult,
+    SpectronError,
+} from "spectron";
+```
+
+## Sessions
+
+### Creating a session
+
+```typescript
+const session = await memory.sessions.create({
+    scope: { user: "tobie", org: "acme" },
+    metadata: { channel: "web-chat" },
+});
+
+console.log(session.id);    // "session:01hx7..."
+console.log(session.scope); // { user: "tobie", org: "acme" }
+```
+
+### Getting an existing session
+
+```typescript
+const session = memory.sessions.get("session:01hx7...");
+```
+
+### Closing a session
+
+```typescript
+await session.close();
+```
+
+## Adding turns
+
+```typescript
+const result = await session.turns.add({
+    role: "user",
+    content: "I just relocated to Amsterdam and I'm joining Acme as Head of Design.",
+});
+
+console.log(result.turnId);
+console.log(result.entities);
+console.log(result.attributes);
+console.log(result.relations);
+console.log(result.traceId);
+```
+
+Note the camelCase naming convention: the SDK uses camelCase for all JavaScript-facing properties (`turnId`, `queryMs`, `traceId`, etc.), while the REST API and Python SDK use snake_case (`turn_id`, `query_ms`, `trace_id`).
+
+## Retrieving context
+
+### `memory.context()` – formatted string for LLM injection
+
+```typescript
+const ctx = await memory.context({
+    query: "what do I know about tobie?",
+    k: 10,
+    scope: { user: "tobie", org: "acme" },
+});
+
+const systemPrompt = `You are a helpful assistant.\n\n## Memory\n${ctx.context}`;
+
+console.log(ctx.tier);    // "direct" | "cache" | "hybrid" | "full_context"
+console.log(ctx.queryMs);
+```
+
+### `memory.query()` – ranked hits
+
+```typescript
+const hits = await memory.query({
+    query: "tobie's current role",
+    k: 10,
+    scope: { user: "tobie", org: "acme" },
+});
+
+for (const hit of hits.hits) {
+    console.log(hit.entity, hit.key, hit.value, hit.score);
+}
+```
+
+## Agentic chat
+
+```typescript
+const reply = await session.chat("What do you know about my work history?");
+console.log(reply);
+```
+
+## Knowledge upload and query
+
+### Uploading a document
+
+```typescript
+import { readFileSync } from "fs";
+
+const fileBuffer = readFileSync("product-spec.pdf");
+const blob = new Blob([fileBuffer], { type: "application/pdf" });
+
+const doc = await memory.knowledge.upload({
+    file: blob,
+    filename: "product-spec.pdf",
+    scope: { org: "acme" },
+    metadata: { version: "2.1", author: "alice" },
+});
+
+console.log(doc.id);
+console.log(doc.chunkCount);
+```
+
+### Querying authoritative knowledge
+
+```typescript
+const results = await memory.knowledge.query({
+    query: "what is the return policy for digital products?",
+    mode: "hybrid", // "vector" | "bm25" | "hybrid" | "hybrid_graph"
+    k: 10,
+    threshold: 0.5,
+    scope: { org: "acme" },
+});
+
+for (const result of results.results) {
+    console.log(result.chunkText);
+    console.log(result.score);
+    console.log(result.documentTitle);
+}
+```
+
+### Fetching a specific document or chunk
+
+```typescript
+const doc = await memory.knowledge.get("document:01jt4kx...");
+const chunk = await memory.knowledge.get("chunk:01jt4ky...");
+```
+
+## Entity profiles
+
+```typescript
+// Retrieve a user profile for direct system-prompt injection
+const profile = await memory.profiles.get({
+    scope: { user: "tobie", org: "acme" },
+});
+
+console.log(profile.identity);    // { name: "Tobie", role: "CTO" }
+console.log(profile.preferences); // { language: "British English" }
+console.log(profile.instructions);
+console.log(profile.dynamic);
+```
+
+## Reflection
+
+```typescript
+const reflection = await memory.reflect({
+    prompt: "What are the recurring themes in this user's work?",
+    scope: { user: "tobie", org: "acme" },
+    persist: true,
+});
+
+console.log(reflection.reflection);
+console.log(reflection.evidence);
+console.log(reflection.persistedAttributes);
+```
+
+## Forgetting
+
+```typescript
+const result = await memory.forget({
+    description: "anything about Tobie's previous employer",
+    scope: { user: "tobie", org: "acme" },
+});
+
+console.log(result.deletedCount);
+console.log(result.traceId);
+```
+
+## Management client
+
+```typescript
+import { SpectronManagement } from "spectron";
+
+const mgmt = new SpectronManagement({
+    baseUrl: "https://api.spectron.dev",
+    apiKey: process.env.SPECTRON_MANAGEMENT_KEY!,
+});
+
+// Create a context
+const ctx = await mgmt.contexts.create({ name: "acme-staging" });
+console.log(ctx.id);
+
+// List contexts
+const contexts = await mgmt.contexts.list();
+
+// Rotate an API key
+const newKey = await mgmt.apiKeys.rotate(ctx.id);
+console.log(newKey.key);
+
+// Query usage
+const usage = await mgmt.usage.get(ctx.id, { period: "2026-05" });
+console.log(usage.totalTokens);
+```
+
+## Error handling
+
+```typescript
+import {
+    SpectronError,
+    AuthError,
+    ScopeError,
+    NotFoundError,
+    ValidationError,
+    RateLimitError,
+    ServerError,
+} from "spectron";
+
+try {
+    const ctx = await memory.context({
+        query: "what is my name?",
+        scope: { user: "tobie" },
+    });
+} catch (err) {
+    if (err instanceof AuthError) {
+        console.error("Authentication failed – check your API key");
+    } else if (err instanceof ScopeError) {
+        console.error("Scope not permitted");
+    } else if (err instanceof RateLimitError) {
+        // err.retryAfter is the number of seconds to wait
+        await new Promise(resolve => setTimeout(resolve, err.retryAfter * 1000));
+    } else if (err instanceof NotFoundError) {
+        console.error("Resource not found");
+    } else if (err instanceof ValidationError) {
+        console.error("Bad request:", err.detail);
+    } else if (err instanceof ServerError) {
+        console.error("Server error after retries");
+    } else if (err instanceof SpectronError) {
+        console.error("Spectron error:", err.title, err.status);
+    } else {
+        throw err;
+    }
+}
+```
+
+See [Errors and retries](/docs/spectron/integrations/sdks/errors-and-retries) for a complete reference.
+
+## Two integration patterns
+
+### Pattern 1: Spectron drives the loop
+
+```typescript
+async function handleMessage(userId: string, orgId: string, message: string): Promise<string> {
+    const session = await memory.sessions.create({
+        scope: { user: userId, org: orgId },
+    });
+    const reply = await session.chat(message);
+    await session.close();
+    return reply;
+}
+```
+
+### Pattern 2: Caller drives the loop
+
+Use this pattern when you control the LLM and want Spectron to handle only context retrieval and memory extraction:
+
+```typescript
+import OpenAI from "openai";
+
+const openai = new OpenAI();
+
+async function handleMessage(userId: string, orgId: string, message: string): Promise<string> {
+    const scope = { user: userId, org: orgId };
+
+    // 1. Retrieve memory context
+    const ctx = await memory.context({ query: message, k: 10, scope });
+
+    // 2. Call the LLM with the memory-augmented system prompt
+    const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+            { role: "system", content: `You are a helpful assistant.\n\n## Memory\n${ctx.context}` },
+            { role: "user", content: message },
+        ],
+    });
+    const reply = response.choices[0].message.content ?? "";
+
+    // 3. Store both turns for future extraction
+    const session = await memory.sessions.create({ scope });
+    await session.turns.add({ role: "user", content: message });
+    await session.turns.add({ role: "assistant", content: reply });
+    await session.close();
+
+    return reply;
+}
+```
+
+## Scope ergonomics
+
+```typescript
+// Set a client-level default scope
+const memory = new Spectron({
+    context: "acme-prod",
+    apiKey: process.env.SPECTRON_API_KEY!,
+    defaultScope: { org: "acme" },
+});
+
+// Override per call for user-specific queries
+const ctx = await memory.context({
+    query: "my recent projects",
+    scope: { org: "acme", user: "tobie" }, // overrides default
+});
+```
+
+## camelCase vs snake_case
+
+The JavaScript SDK uses camelCase throughout to follow JavaScript conventions. The table below maps the most common field names:
+
+| REST / Python | JavaScript SDK |
+|---|---|
+| `turn_id` | `turnId` |
+| `trace_id` | `traceId` |
+| `query_ms` | `queryMs` |
+| `chunk_count` | `chunkCount` |
+| `chunk_text` | `chunkText` |
+| `document_title` | `documentTitle` |
+| `deleted_count` | `deletedCount` |
+| `retry_after` | `retryAfter` |
+| `persisted_attributes` | `persistedAttributes` |
+| `resolution_tier` | `resolutionTier` |
+
+## Streaming (future)
+
+Streaming responses for `session.chat()` are planned and will be exposed as `AsyncIterable<string>`:
+
+```typescript
+// Planned API – not yet available
+for await (const token of session.chat("Tell me about our Q3 goals.", { stream: true })) {
+    process.stdout.write(token);
+}
+```
+
+## Lifecycle
+
+The SDK client manages an internal HTTP connection pool. In long-lived server processes, you do not need to close the client between requests. In short-lived scripts or Lambda functions, call `memory.close()` before the process exits:
+
+```typescript
+const memory = new Spectron({ context: "acme-prod", apiKey: "..." });
+
+try {
+    // ... use memory ...
+} finally {
+    await memory.close();
+}
+```

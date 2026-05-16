@@ -1,0 +1,244 @@
+---
+position: 1
+title: Personal AI assistant
+description: "End-user scoped memory with profiles and preferences."
+---
+
+# Personal AI assistant
+
+This guide covers building a personal AI assistant that learns from every conversation and retains that knowledge across sessions. The assistant accumulates user preferences, biographical facts, current projects, and behavioural instructions. It injects relevant context automatically at the start of each new session so the experience feels continuous.
+
+## What you are building
+
+- A single-user Context scoped by `user_id`.
+- Memory that spans multiple sessions: identity facts, knowledge, context-specific state, and instructions.
+- A profile endpoint that produces a ready-to-inject system prompt fragment.
+- The ability to forget outdated information when the user's situation changes.
+
+## Step 1 – Create a session per conversation
+
+Each conversation is a new session. The scope ties the session to the user so all extracted facts are associated with them.
+
+```python
+from spectron import Spectron
+
+client = Spectron(api_key="sk-...")
+memory = client.memory(context_id="assistant")
+
+async def start_conversation(user_id: str):
+    session = await memory.sessions.create(
+        scope={"user": user_id},
+    )
+    return session
+```
+
+```typescript
+import { Spectron } from "spectron";
+
+const client = new Spectron({ apiKey: "sk-..." });
+const memory = client.memory({ contextId: "assistant" });
+
+async function startConversation(userId: string) {
+    const session = await memory.sessions.create({
+        scope: { user: userId },
+    });
+    return session;
+}
+```
+
+## Step 2 – Inject memory at the start of each session
+
+The profile endpoint returns a structured summary of everything Spectron knows about the user – identity attributes, active projects, preferences, and instructions – formatted as a system prompt fragment.
+
+```python
+async def build_system_prompt(user_id: str) -> str:
+    profile = await memory.profile(scope={"user": user_id})
+
+    base = """You are a personal AI assistant. Be concise, direct, and helpful."""
+
+    if profile.summary:
+        return f"{base}\n\n## What you know about this user\n\n{profile.summary}"
+
+    return base
+```
+
+```typescript
+async function buildSystemPrompt(userId: string): Promise<string> {
+    const profile = await memory.profile({ scope: { user: userId } });
+
+    const base = "You are a personal AI assistant. Be concise, direct, and helpful.";
+
+    if (profile.summary) {
+        return `${base}\n\n## What you know about this user\n\n${profile.summary}`;
+    }
+
+    return base;
+}
+```
+
+A profile summary looks something like this after a few conversations:
+
+```
+The user is Tobie Morgan Hitchcock, a software engineer at SurrealDB. They are working on the JavaScript SDK and prefer TypeScript. They have two children and live in London. They prefer bullet-point responses and dislike filler phrases. They are currently migrating a large codebase from CommonJS to ESM.
+```
+
+This summary is synthesised from the five memory categories: Identity (name, role, location), Knowledge (technical stack), Context (current project), and Instructions (response style preferences).
+
+## Step 3 – Run the conversation loop
+
+The simplest integration records each exchange as a pair of turns. Spectron extracts facts asynchronously and they are available for the next session.
+
+```python
+async def chat(session, user_id: str, user_message: str) -> str:
+    # Build context-aware system prompt
+    system = await build_system_prompt(user_id)
+
+    # Retrieve session-specific relevant context
+    ctx = await session.context(query=user_message, top_k=5)
+    if ctx.items:
+        system += f"\n\n## Relevant context\n\n{ctx.formatted}"
+
+    # Call your LLM
+    response = your_llm(system=system, user=user_message)
+
+    # Record both turns
+    await session.turn(role="user", content=user_message)
+    await session.turn(role="assistant", content=response)
+
+    return response
+```
+
+```typescript
+async function chat(session: Session, userId: string, userMessage: string): Promise<string> {
+    // Build context-aware system prompt
+    let system = await buildSystemPrompt(userId);
+
+    // Retrieve session-specific relevant context
+    const ctx = await session.context({ query: userMessage, topK: 5 });
+    if (ctx.items.length > 0) {
+        system += `\n\n## Relevant context\n\n${ctx.formatted}`;
+    }
+
+    // Call your LLM
+    const response = await yourLlm({ system, user: userMessage });
+
+    // Record both turns
+    await session.turn({ role: "user", content: userMessage });
+    await session.turn({ role: "assistant", content: response });
+
+    return response;
+}
+```
+
+## Step 4 – How memory builds up
+
+After the user says "I prefer bullet-point responses", the extraction pipeline creates an `Instruction` record:
+
+```json
+{
+  "category": "instructions",
+  "key": "response_format",
+  "value": "Use bullet points. Avoid filler phrases.",
+  "source_turn": "turn:01jt4m...",
+  "valid_from": "2024-11-15T10:23:00Z"
+}
+```
+
+After the user says "I just moved from Berlin to London", the extraction pipeline updates the `location` attribute on the user's `Person` entity and creates a supersession chain:
+
+```json
+{
+  "entity": "entity:[\"Person\", \"tobie\"]",
+  "category": "identity",
+  "key": "location",
+  "value": "London",
+  "previous_value": "Berlin",
+  "action": "updated",
+  "valid_from": "2024-11-15T10:25:00Z"
+}
+```
+
+The old value is retained in the supersession chain for auditability but no longer appears in the active profile.
+
+## Step 5 – Using `session.chat()` instead of `session.turn()`
+
+If you want Spectron to manage the agent call rather than just recording turns, use the `chat()` endpoint. Pass an `agent_fn` callback and Spectron drives the loop – calling your function, recording the result, and running extraction.
+
+```python
+async def my_llm(messages: list[dict]) -> str:
+    system = await build_system_prompt(user_id)
+    return your_llm(system=system, messages=messages)
+
+session = await memory.sessions.create(
+    scope={"user": user_id},
+    agent_fn=my_llm,
+)
+
+result = await session.chat(content="What are my current projects?")
+print(result.response)
+```
+
+```typescript
+const session = await memory.sessions.create({
+    scope: { user: userId },
+    agentFn: async (messages) => {
+        const system = await buildSystemPrompt(userId);
+        return yourLlm({ system, messages });
+    },
+});
+
+const result = await session.chat({ content: "What are my current projects?" });
+console.log(result.response);
+```
+
+The `chat()` call returns the assistant response, the extraction diff, and the updated session state.
+
+## Step 6 – Forgetting outdated information
+
+When a user's situation changes significantly – they change jobs, finish a project, move city – you can explicitly forget stale facts rather than waiting for the supersession chain to handle it via new turns.
+
+```python
+# Forget a specific attribute
+await memory.forget(
+    scope={"user": user_id},
+    entity_type="Person",
+    entity_name="tobie",
+    attribute_key="employer",
+)
+
+# Or forget everything in a category
+await memory.forget(
+    scope={"user": user_id},
+    category="context",
+)
+```
+
+```typescript
+// Forget a specific attribute
+await memory.forget({
+    scope: { user: userId },
+    entityType: "Person",
+    entityName: "tobie",
+    attributeKey: "employer",
+});
+
+// Or forget everything in a category
+await memory.forget({
+    scope: { user: userId },
+    category: "context",
+});
+```
+
+`forget` marks the matched attributes as expired (sets `valid_until` to now) and removes them from future context retrievals. The records are retained for audit purposes.
+
+## Memory categories in a personal assistant
+
+| Category | Examples |
+|---|---|
+| Identity | Name, location, occupation, family |
+| Knowledge | Domain expertise, tools, languages, opinions |
+| Context | Current projects, recent events, open tasks |
+| Instructions | Response style, formatting preferences, topics to avoid |
+| Unknowns | Contradictory or uncertain statements flagged for review |
+
+The profile endpoint surfaces all five categories in a single call, prioritising high-confidence, recently validated facts.

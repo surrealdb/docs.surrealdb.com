@@ -73,14 +73,14 @@ for quick-reference conventions and `AGENTS.md` for full architectural detail.
 ## 7. Content collection changes
 
 - [ ] Frontmatter matches the schema in `src/content/config.ts`:
-  - Docs → `abstractDoc` (`title`, `description`, `sidebar_position`,
-    `sidebar_label`, `no_page_headings`, `no_sidebar` — all optional).
+  - Docs → `abstractDoc` (`title`, `description`, `position`,
+    `no_page_headings`, `no_sidebar` — all optional).
   - Labs → `labCollection` (`title` required; `url`, `category`, `author`,
     `topics`, `languages` optional).
 - [ ] New markdown files are placed under the correct
   `src/content/<collection>/` folder.
-- [ ] Sidebar ordering uses `sidebar_position` in frontmatter and
-  `_category_.json` files in subdirectories.
+- [ ] Sidebar ordering uses `position` in frontmatter and
+  `__category.json` files in subdirectories.
 - [ ] Content slugs are derived automatically — no manual slug field is added.
 - [ ] If a **new doc collection** is introduced:
   - `urlForCollection` in `src/content/config.ts` is updated.
@@ -108,14 +108,14 @@ for quick-reference conventions and `AGENTS.md` for full architectural detail.
 The project intentionally **does not** use the following APIs — flag any
 introduction of them:
 
-| API                  | Reason not used                                                              |
-| -------------------- | ---------------------------------------------------------------------------- |
+| API                  | Reason not used                                                             |
+| -------------------- | --------------------------------------------------------------------------- |
 | `renderEntry`        | Rendering uses `@surrealdb/ui`'s `parseMarkdown` → AST → `RenderMarkdown`.  |
-| `extractHeadings`    | Custom heading extraction in `src/lib/markdown.ts` using `github-slugger`.   |
-| `getBreadcrumbs`     | Breadcrumbs are sidebar-based, not collection-hierarchy based.               |
-| `getAdjacentEntries` | Prev/next follows sidebar tree order with `_category_.json`.                 |
-| `getEntryUrl`        | Collection names don't match URL paths; `urlForCollection` is used instead.  |
-| `getCollectionTree`  | Sidebar uses `_category_.json` for structure.                                |
+| `extractHeadings`    | Custom heading extraction in `src/lib/markdown.ts` using `github-slugger`.  |
+| `getBreadcrumbs`     | Breadcrumbs are sidebar-based, not collection-hierarchy based.              |
+| `getAdjacentEntries` | Prev/next follows sidebar tree order with `__category.json`.                |
+| `getEntryUrl`        | Collection names don't match URL paths; `urlForCollection` is used instead. |
+| `getCollectionTree`  | Sidebar uses `__category.json` for structure.                               |
 
 ## 10. Common pitfalls
 
@@ -132,15 +132,15 @@ introduction of them:
 
 ## Key files reference
 
-| File                        | Purpose                            |
-| --------------------------- | ---------------------------------- |
-| `CLAUDE.md`                 | Quick-reference conventions        |
-| `AGENTS.md`                 | Full architecture detail           |
-| `src/content/config.ts`     | Content schemas and URL mapping    |
-| `src/utils/markdown.tsx`    | Markdown rendering pipeline        |
-| `src/utils/sidebar.ts`      | Sidebar tree building              |
-| `src/utils/collection.ts`   | URL-to-slug parsing                |
-| `src/lib/categories.ts`     | `_category_.json` loader           |
-| `src/lib/markdown.ts`       | Heading extraction                 |
-| `src/pages/+config.ts`      | Vike root config                   |
-| `biome.json`                | Linter and formatter rules         |
+| File                      | Purpose                         |
+| ------------------------- | ------------------------------- |
+| `CLAUDE.md`               | Quick-reference conventions     |
+| `AGENTS.md`               | Full architecture detail        |
+| `src/content/config.ts`   | Content schemas and URL mapping |
+| `src/utils/markdown.tsx`  | Markdown rendering pipeline     |
+| `src/utils/sidebar.ts`    | Sidebar tree building           |
+| `src/utils/collection.ts` | URL-to-slug parsing             |
+| `src/lib/categories.ts`   | `__category.json` loader        |
+| `src/lib/markdown.ts`     | Heading extraction              |
+| `src/pages/+config.ts`    | Vike root config                |
+| `biome.json`              | Linter and formatter rules      |

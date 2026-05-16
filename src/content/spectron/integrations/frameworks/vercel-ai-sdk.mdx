@@ -1,0 +1,165 @@
+---
+position: 2
+title: Vercel AI SDK
+description: "Using Spectron memory with the Vercel AI SDK."
+---
+
+# Vercel AI SDK
+
+Spectron provides a memory plugin for the [Vercel AI SDK](https://sdk.vercel.ai), enabling `streamText` and `generateText` calls to automatically record turns and retrieve relevant memory context. The plugin is published as a separate package – `spectron-ai-sdk` – and is not bundled with the core Spectron SDK.
+
+> **Later-phase integration.** The `spectron-ai-sdk` package is planned for a future release and is not yet available. This page describes the intended integration design. Check the [Spectron changelog](/docs/spectron/reference) for availability updates.
+
+## How it works
+
+The plugin wraps the Vercel AI SDK's `streamText` and `generateText` functions with three additional steps:
+
+1. **Context injection** – before the model call, the plugin queries Spectron for memory relevant to the current conversation and prepends a context block to the system prompt.
+2. **Turn recording** – the user message is recorded as a `user` turn in the current Spectron session before the model call.
+3. **Automatic assistant recording** – after the model responds, the assistant message is recorded as an `assistant` turn, triggering memory extraction.
+
+The session lifecycle maps onto the calling application's conversation state. The plugin exposes a `SpectronSession` object that your application maintains across calls within a single conversation.
+
+## Installation
+
+```bash
+npm install spectron-ai-sdk
+```
+
+or
+
+```bash
+bun add spectron-ai-sdk
+```
+
+## Configuration
+
+```typescript
+import { createSpectron } from "spectron-ai-sdk";
+import { openai } from "@ai-sdk/openai";
+import { streamText } from "ai";
+
+const spectron = createSpectron({
+    context: "acme-prod",
+    apiKey: process.env.SPECTRON_API_KEY!,
+});
+```
+
+### Configuration options
+
+| Option | Type | Description |
+|---|---|---|
+| `context` | `string` | Spectron Context identifier |
+| `apiKey` | `string` | Agent-level API key |
+| `baseUrl` | `string` | Spectron server URL. Defaults to the hosted cloud endpoint. |
+| `scope` | `Scope` | Default scope for all sessions created through this client. |
+| `injectContext` | `boolean` | Whether to prepend retrieved memory to the system prompt. Default: `true`. |
+| `recordTurns` | `boolean` | Whether to record user and assistant turns. Default: `true`. |
+
+## Creating a session
+
+Create a session at the start of a conversation. The session object is lightweight – hold it in memory for the duration of the conversation.
+
+```typescript
+const session = await spectron.createSession({
+    scope: { org: "acme", agent: "support-bot", user: "tobie" },
+});
+```
+
+Reuse the session object across all turns in the same conversation. At the end of the conversation, call `session.close()` to flush any pending state.
+
+## Using with `streamText`
+
+```typescript
+import { streamText } from "ai";
+import { openai } from "@ai-sdk/openai";
+
+export async function POST(req: Request) {
+    const { messages, sessionId } = await req.json();
+
+    const session = await spectron.resumeSession(sessionId);
+    const userMessage = messages.at(-1);
+
+    const result = await session.streamText({
+        model: openai("gpt-4o"),
+        system: "You are a helpful customer support agent.",
+        messages,
+    });
+
+    return result.toDataStreamResponse();
+}
+```
+
+The plugin intercepts the call to record the user message, injects the retrieved context block into the system prompt, calls `streamText`, and records the streamed assistant reply once it completes.
+
+## Using with `generateText`
+
+```typescript
+import { generateText } from "ai";
+
+const result = await session.generateText({
+    model: openai("gpt-4o-mini"),
+    system: "You are a product analyst.",
+    prompt: "Summarise the user's preferences.",
+});
+
+console.log(result.text);
+```
+
+## Accessing the session in a Next.js API route
+
+A full Next.js App Router example with session persistence via a session ID stored client-side:
+
+```typescript
+// app/api/chat/route.ts
+import { createSpectron } from "spectron-ai-sdk";
+import { openai } from "@ai-sdk/openai";
+
+const spectron = createSpectron({
+    context: "acme-prod",
+    apiKey: process.env.SPECTRON_API_KEY!,
+});
+
+export async function POST(req: Request) {
+    const { messages, spectronSessionId, userId } = await req.json();
+
+    // Create a new session on the first turn; resume on subsequent turns
+    const session = spectronSessionId
+        ? await spectron.resumeSession(spectronSessionId)
+        : await spectron.createSession({
+              scope: { org: "acme", agent: "assistant", user: userId },
+          });
+
+    const result = await session.streamText({
+        model: openai("gpt-4o"),
+        system: "You are a knowledgeable assistant with access to user history.",
+        messages,
+    });
+
+    // Return the session ID so the client can pass it back on the next turn
+    const response = result.toDataStreamResponse();
+    response.headers.set("X-Spectron-Session-Id", session.id);
+
+    return response;
+}
+```
+
+## Memory diffs
+
+After `generateText` (non-streaming), the plugin attaches a `memoryUpdates` field to the result object:
+
+```typescript
+const result = await session.generateText({ ... });
+
+console.log(result.memoryUpdates.entities);    // Newly identified entities
+console.log(result.memoryUpdates.attributes);  // Extracted attributes
+console.log(result.memoryUpdates.corrections); // Facts that superseded older values
+```
+
+For streaming responses, use `session.getLastDiff()` after the stream completes.
+
+## Next steps
+
+- [JavaScript SDK](/docs/spectron/integrations/sdks/javascript-and-typescript) – using Spectron directly with the TypeScript SDK
+- [Chat sessions](/docs/spectron/memory/sessions/chat-sessions) – understanding how Spectron manages conversation sessions
+- [Adding turns](/docs/spectron/memory/sessions/adding-turns) – the manual turn-recording API

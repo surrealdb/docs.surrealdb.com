@@ -1,0 +1,125 @@
+---
+position: 1
+title: CrewAI
+description: "Using Spectron memory with CrewAI multi-agent frameworks."
+---
+
+# CrewAI
+
+Spectron provides a memory integration for [CrewAI](https://crewai.com), the open-source framework for orchestrating multi-agent workflows. The integration is published as a separate package – `spectron-crewai` – and is not bundled with the core Spectron SDK.
+
+> **Later-phase integration.** The `spectron-crewai` package is planned for a future release and is not yet available. This page describes the intended integration design. Check the [Spectron changelog](/docs/spectron/reference) for availability updates.
+
+## How it works
+
+The CrewAI integration maps Spectron's scope model to CrewAI's crew and agent concepts:
+
+| Spectron scope field | CrewAI concept |
+|---|---|
+| `org` | Crew identifier |
+| `agent` | Agent role name within the crew |
+| `user` | End-user identifier (when applicable) |
+
+Memory is stored and retrieved at two levels:
+
+- **Crew-level memory** – facts and context shared across all agents in the crew. Stored with scope `{org: crew_id}`.
+- **Agent-level memory** – facts specific to a single agent's role. Stored with scope `{org: crew_id, agent: role_name}`.
+
+When an agent in the crew executes a task, the integration automatically retrieves relevant crew-level and agent-level context and injects it into the task prompt. At the end of a task, the integration records the agent's output as a memory turn, triggering extraction.
+
+## Installation
+
+```bash
+pip install spectron-crewai
+```
+
+This installs `spectron-crewai` and its dependency on the `spectron` Python SDK.
+
+## Configuration
+
+```python
+from crewai import Crew, Agent, Task
+from spectron_crewai import SpectronMemory
+
+memory = SpectronMemory(
+    context="acme-prod",
+    api_key=os.environ["SPECTRON_API_KEY"],
+    crew_id="market-research-crew",
+)
+
+researcher = Agent(
+    role="Researcher",
+    goal="Find and summarise market trends",
+    backstory="You are an expert market analyst.",
+    memory=memory.agent_memory(role="researcher"),
+)
+
+writer = Agent(
+    role="Writer",
+    goal="Write a market report based on research",
+    backstory="You are a clear and concise technical writer.",
+    memory=memory.agent_memory(role="writer"),
+)
+
+crew = Crew(
+    agents=[researcher, writer],
+    tasks=[...],
+    memory=memory.crew_memory(),
+)
+```
+
+### Configuration options
+
+| Option | Type | Description |
+|---|---|---|
+| `context` | `str` | Spectron Context identifier |
+| `api_key` | `str` | Agent-level API key with appropriate scope |
+| `crew_id` | `str` | Maps to the `org` scope field |
+| `base_url` | `str` | Spectron server URL. Defaults to the hosted cloud endpoint. |
+| `extraction_on_output` | `bool` | Whether to extract memory from agent outputs. Default: `True`. |
+
+## Usage pattern
+
+Once configured, memory is transparent to your crew definition. CrewAI calls the integration's hooks at task boundaries – you do not need to add explicit `remember` or `recall` calls.
+
+```python
+result = crew.kickoff(inputs={"topic": "AI in logistics"})
+```
+
+During execution:
+1. Before each agent task, the integration queries Spectron for relevant crew-level and agent-level context.
+2. That context is prepended to the task description as a memory block.
+3. After each agent completes a task, the output is recorded as a memory turn.
+4. Extraction runs asynchronously and updates the entity graph.
+
+On subsequent crew runs, accumulated knowledge is available to all agents.
+
+## Accessing accumulated knowledge
+
+You can inspect what the crew has learned using the standard Spectron SDK independently of CrewAI:
+
+```python
+from spectron import Spectron
+
+memory = Spectron(context="acme-prod", api_key=os.environ["SPECTRON_API_KEY"])
+
+result = await memory.recall(
+    query="What has the crew learned about AI in logistics?",
+    scope={"org": "market-research-crew"},
+)
+
+for fact in result.facts:
+    print(f"{fact.attribute}: {fact.value}")
+```
+
+## Scope isolation between crews
+
+Each crew uses a distinct `crew_id`, which maps to the `org` scope field. Spectron's scope enforcement ensures that one crew cannot read another crew's memory, provided you use scope-bound agent keys (a key with scope floor `{org: crew_id}` cannot access data at a different `org`).
+
+See [Scope as a security boundary](/docs/spectron/self-hosting/security/scope-as-security-boundary) for details.
+
+## Next steps
+
+- [Python SDK](/docs/spectron/integrations/sdks/python) – using Spectron directly from Python
+- [Contexts and scope](/docs/spectron/mental-model/contexts-and-scope) – understanding the scope model
+- [Multi-tenancy](/docs/spectron/self-hosting/security/multi-tenancy) – isolating memory across multiple crews

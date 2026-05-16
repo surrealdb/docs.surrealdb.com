@@ -1,0 +1,110 @@
+---
+position: 4
+title: Cross-layer linking
+description: "resolves_to links from experiential memory entities into authoritative knowledge nodes."
+---
+
+# Cross-layer linking
+
+When an experiential memory entity corresponds to something in authoritative knowledge – a product, a policy, a person – Spectron can link the two via a `resolves_to` reference. The agent then has both conversational context from experiential memory and authoritative facts from authoritative knowledge for the same real-world thing.
+
+## What `resolves_to` does
+
+Every experiential memory entity can carry an optional `resolves_to` field pointing to an authoritative knowledge node:
+
+```surql
+DEFINE FIELD resolves_to ON entity TYPE option<record<knowledge>>;
+```
+
+When the link is present, attribute lookups prefer **curated (authoritative) values**, then **experiential** attributes for conversational context. If the two conflict, the **Authoritative** pillar wins – the reconciler does not overwrite curated facts.
+
+### Example
+
+A user mentions "I bought AirPods Pro last week." Spectron extracts:
+
+- **experiential memory entity**: `entity:["Product","airpods_pro"]` with attribute `purchased = "last week"`
+- **authoritative knowledge node**: `knowledge:["product","airpods_pro_2"]` with `price = 249`, `return_policy = "30 days"`, `warranty = "1 year"`
+
+With `resolves_to` set, the agent can answer "Can I still return them?" by combining:
+- *User's memory* (experiential): purchased last week
+- *Authoritative policy* (authoritative): 30-day return window
+
+Neither source is sufficient alone. Together they give a correct, grounded answer.
+
+## How resolution works
+
+Resolution follows a four-step process:
+
+### 1. Extraction-time suggestion
+
+During extraction, the LLM is provided with a summary of accessible authoritative knowledge node titles and kinds within the session's scope. The extraction prompt invites the LLM to suggest `resolves_to` mappings for entities it recognises as matching authoritative knowledge nodes.
+
+### 2. Embedding verification
+
+Suggestions are verified by embedding similarity. The entity's embedding is compared against the embeddings of candidate knowledge nodes. Only mappings above a configurable similarity threshold (default 0.85 cosine similarity) are accepted. This prevents the LLM from hallucinating links to nodes that don't exist or that are only loosely related.
+
+### 3. Background scan
+
+A background job periodically scans experiential memory entities that have no `resolves_to` link against authoritative knowledge nodes. This catches matches for entities that were created before a relevant authoritative knowledge node existed – for example, a product entity that predates the product catalogue being loaded.
+
+### 4. Manual override
+
+Links can be set or corrected via the entity API:
+
+```http
+PUT /v1/{context_id}/entities/{type}/{name}
+Content-Type: application/json
+
+{
+  "resolves_to": "knowledge:product:airpods_pro_2"
+}
+```
+
+Python SDK:
+```python
+entity = await memory.entities.get("Product", "airpods_pro")
+# entity.resolves_to is the current link, or None
+```
+
+## Querying via the entity API
+
+```python
+entity = await memory.entities.get("Product", "airpods_pro")
+print(entity.resolves_to)  # "knowledge:product:airpods_pro_2" or None
+```
+
+```javascript
+const entity = await memory.entities.get("Product", "airpods_pro");
+console.log(entity.resolvesTo);
+```
+
+The entity response includes the resolved authoritative knowledge node's summary when `resolves_to` is set.
+
+## How the agent combines curated and experiential context
+
+When an agent retrieves context and an experiential-memory entity resolves to an authoritative knowledge node, Spectron's query resolver:
+
+1. Retrieves the entity's conversational attributes (what the user said, what was learned in sessions).
+2. Retrieves the knowledge node's curated content (price, policy, specifications).
+3. Merges them into the formatted context block, distinguishing authoritative facts from experiential memories.
+4. Flags any contradictions (for example an experiential-memory attribute that conflicts with curated values – API responses may still expose the legacy key `contradicts_l0`) so the agent can handle them appropriately.
+
+This combined context block is returned by `session.context()` and the `memory_recall` MCP tool.
+
+## Scope and access
+
+`resolves_to` links are only created when the authoritative knowledge node is accessible from the session's scope. An entity created in scope `{org: "apple"}` can only resolve to authoritative knowledge nodes also accessible from that scope. Nodes uploaded with empty scope `{}` are globally accessible and can be linked from any entity.
+
+## Auditing links
+
+To find all experiential memory entities linked to a specific authoritative knowledge node:
+
+```http
+GET /v1/{context_id}/entities?resolves_to=knowledge:product:airpods_pro_2
+```
+
+To find unlinked entities that might benefit from resolution:
+
+```http
+GET /v1/{context_id}/entities?resolves_to=null&type=Product
+```

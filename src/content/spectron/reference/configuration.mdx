@@ -1,0 +1,164 @@
+---
+position: 9
+title: Configuration
+description: "Context config, models, and limits."
+---
+
+# Configuration
+
+Spectron has two configuration surfaces: server-wide settings (in the server binary or environment) and per-Context configuration (stored in the control plane and patchable at runtime).
+
+## Server-wide configuration
+
+Server configuration is provided via environment variables or a TOML configuration file passed at startup. These settings apply to all Contexts unless overridden at the Context level.
+
+### Core settings
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `SPECTRON_BIND` | string | `0.0.0.0:8080` | Listen address and port |
+| `SPECTRON_SURREALDB_URL` | string | – | SurrealDB connection URL (required) |
+| `SPECTRON_SURREALDB_USER` | string | – | SurrealDB username (required) |
+| `SPECTRON_SURREALDB_PASS` | string | – | SurrealDB password (required) |
+| `SPECTRON_OBJECT_STORE` | string | `local://./data` | Object store backend (see below) |
+
+### Default model settings
+
+These apply to all Contexts that do not override them:
+
+| Variable | Default | Description |
+|---|---|---|
+| `SPECTRON_MODEL_EXTRACTION` | `gpt-4o-mini` | LLM for experiential memory extraction (Stage 1 fast pass) |
+| `SPECTRON_MODEL_EXTRACTION_STRONG` | `gpt-4o` | LLM for extraction Stage 2 |
+| `SPECTRON_MODEL_QUERY_UNDERSTANDING` | `gpt-4o-mini` | LLM for query classification |
+| `SPECTRON_MODEL_RESPONSE` | `gpt-4o-mini` | LLM for response synthesis |
+| `SPECTRON_MODEL_REFLECTION` | `gpt-4o` | LLM for reflection operations |
+| `SPECTRON_MODEL_BACKGROUND` | `gpt-4o-mini` | LLM for background reconciliation |
+| `SPECTRON_MODEL_EMBEDDING` | `text-embedding-3-small` | Embedding model (must be 1536-dim) |
+
+### Default provider API keys
+
+| Variable | Description |
+|---|---|
+| `SPECTRON_OPENAI_API_KEY` | Default OpenAI API key for all Contexts |
+| `SPECTRON_ANTHROPIC_API_KEY` | Default Anthropic API key for all Contexts |
+
+### Object store configuration
+
+| Backend | `SPECTRON_OBJECT_STORE` format | Notes |
+|---|---|---|
+| Local filesystem | `local:///path/to/data` | Development and single-node deployments |
+| Amazon S3 | `s3://bucket-name/prefix` | Requires `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` or instance role |
+| Google Cloud Storage | `gcs://bucket-name/prefix` | Requires `GOOGLE_APPLICATION_CREDENTIALS` |
+| Azure Blob Storage | `azure://container/prefix` | Requires `AZURE_STORAGE_ACCOUNT` + `AZURE_STORAGE_ACCESS_KEY` |
+
+## Per-Context configuration
+
+Each Context stores a `config` object in the control plane. This is updated via `PATCH /api/v1/contexts/{id}` and applies immediately to new requests.
+
+### Full config schema
+
+```json
+{
+  "config": {
+    "token_limit": 1000000,
+    "retention_days": 90,
+    "models": {
+      "extraction": "openai/gpt-4o-mini",
+      "extraction_strong": "openai/gpt-4o",
+      "query_understanding": "openai/gpt-4o-mini",
+      "response": "openai/gpt-4o-mini",
+      "reflection": "openai/gpt-4o",
+      "background": "openai/gpt-4o-mini",
+      "embedding": "openai/text-embedding-3-small"
+    },
+    "providers": {
+      "openai": "sk-...",
+      "anthropic": "sk-ant-..."
+    }
+  }
+}
+```
+
+### Config fields
+
+| Field | Type | Description |
+|---|---|---|
+| `token_limit` | integer (optional) | Monthly token cap across all LLM + embedding calls. Enforced before each ingestion write. `null` = no limit. |
+| `retention_days` | integer (optional) | Automatic expiry for `context`-category experiential memory data. `null` = no automatic expiry. |
+| `models.extraction` | string | Model for Stage 1 fast extraction. Format: `provider/model-name`. |
+| `models.extraction_strong` | string | Model for Stage 2 strong extraction. |
+| `models.query_understanding` | string | Model for classifying and expanding queries. |
+| `models.response` | string | Model for synthesising formatted context responses. |
+| `models.reflection` | string | Model for reflection operations (`reflect` endpoint). |
+| `models.background` | string | Model for background reconciliation and cross-layer linking. |
+| `models.embedding` | string | Embedding model. Must produce 1536-dimension vectors in this release. |
+| `providers.openai` | string | OpenAI API key for this Context. Overrides the server-wide default. |
+| `providers.anthropic` | string | Anthropic API key for this Context. |
+
+### Provider API key visibility
+
+Provider API keys are **write-only** on the API surface. The read projection for a Context replaces the key values with a `providers_configured` summary:
+
+```json
+{
+  "config": {
+    "providers_configured": ["openai", "anthropic"]
+  }
+}
+```
+
+The raw key values never appear in read responses.
+
+### Patching config
+
+Send only the fields you want to change. Unset fields are left unchanged (deep merge):
+
+```http
+PATCH /api/v1/contexts/acme-prod
+Content-Type: application/json
+Authorization: Bearer mgmt-...
+
+{
+  "config": {
+    "token_limit": 2000000,
+    "models": {
+      "reflection": "anthropic/claude-opus-4-7"
+    }
+  }
+}
+```
+
+## Extraction tuning
+
+Additional per-Context settings control extraction behaviour:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `extraction.stage1_threshold` | float | `0.7` | Confidence threshold below which Stage 2 runs |
+| `extraction.max_entities_per_turn` | integer | `20` | Maximum entities extracted per turn |
+| `extraction.ontology_strict` | boolean | `false` | Reject entities/attributes not in the ontology |
+
+## Cache settings
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `cache.semantic_ttl_seconds` | integer | `3600` | TTL for semantic response cache entries |
+| `cache.semantic_threshold` | float | `0.97` | Cosine similarity threshold for cache hits |
+
+## Rate limiting
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `rate_limit.requests_per_minute` | integer | `600` | Maximum requests per minute per Context |
+| `rate_limit.tokens_per_minute` | integer | `100000` | Maximum tokens per minute per Context (LLM calls) |
+
+## Defaults reference
+
+When a per-Context field is not set, the server-wide default applies. The effective configuration for a Context is always visible at:
+
+```http
+GET /api/v1/contexts/{id}
+```
+
+The response includes the `config` object with all effective values merged – Context-level overrides where set, server-wide defaults elsewhere.

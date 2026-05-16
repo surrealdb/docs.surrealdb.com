@@ -1,0 +1,144 @@
+---
+position: 1
+title: Tracing
+description: "Decision, retrieval, and response traces."
+---
+
+# Tracing
+
+Every Spectron operation – memory recall, knowledge search, turn ingestion, reflection – produces a `decision_trace` record. Traces are the observability backbone: they answer "why did the system return this?" and provide a complete audit log of every LLM call.
+
+## What gets traced
+
+| Operation | Trace fields |
+|---|---|
+| Memory recall (`/context`) | Query, resolution tier, contributing sources, token cost, duration |
+| Knowledge search | Query, mode, top-k results, scores, token cost |
+| Turn ingestion | Entities/attributes extracted, reconciliation decisions, token cost |
+| Reflection | Query, synthesis output, evidence sources, token cost |
+| Semantic cache hit | Query, matched query, similarity score (no LLM cost) |
+
+## `decision_trace` record
+
+```surql
+DEFINE TABLE decision_trace SCHEMAFULL;
+DEFINE FIELD query        ON decision_trace TYPE string;
+DEFINE FIELD tier         ON decision_trace TYPE string;
+DEFINE FIELD scope        ON decision_trace TYPE object FLEXIBLE;
+DEFINE FIELD sources      ON decision_trace TYPE array<string>;
+DEFINE FIELD token_cost   ON decision_trace TYPE int;
+DEFINE FIELD duration_ms  ON decision_trace TYPE int;
+DEFINE FIELD api_key_id   ON decision_trace TYPE string;
+DEFINE FIELD session_id   ON decision_trace TYPE option<string>;
+DEFINE FIELD turn_id      ON decision_trace TYPE option<string>;
+DEFINE FIELD created_at   ON decision_trace TYPE datetime DEFAULT time::now() READONLY;
+```
+
+| Field | Description |
+|---|---|
+| `query` | The original query or operation description |
+| `tier` | Resolution tier: `direct`, `cache`, `hybrid`, or `full_context` |
+| `scope` | The scope used (after applying the key's floor) |
+| `sources` | IDs of memory chunks, knowledge chunks, or entities that contributed |
+| `token_cost` | Total tokens consumed by any LLM calls in this operation |
+| `duration_ms` | Wall-clock duration from request to response |
+| `api_key_id` | The ID of the key that made the request |
+| `session_id` | Associated session, if applicable |
+| `turn_id` | Associated turn, if applicable |
+
+## Querying traces via REST
+
+```http
+GET /v1/{context_id}/traces?scope[org]=acme&limit=100
+```
+
+Filter by scope, key, session, or time range:
+
+```http
+GET /v1/{context_id}/traces?api_key_id=cak_01HF...&since=2026-05-01T00:00:00Z&limit=50
+```
+
+Get a single trace:
+
+```http
+GET /v1/{context_id}/traces/{trace_id}
+```
+
+Get aggregate statistics:
+
+```http
+GET /v1/{context_id}/traces/stats?scope[org]=acme&since=2026-05-01T00:00:00Z
+```
+
+Response includes total calls, total tokens, average duration, tier distribution, and per-key breakdowns.
+
+## Trace IDs in responses
+
+Every REST response and MCP tool result includes a `trace_id` field. This makes it easy to correlate an agent's action with the trace record:
+
+```json
+{
+  "context": "Alice – CTO at Acme Corp.",
+  "tier": "direct",
+  "trace_id": "decision_trace:01HF3X..."
+}
+```
+
+Pass the `trace_id` to the trace endpoint to retrieve full detail:
+
+```http
+GET /v1/{context_id}/traces/decision_trace:01HF3X...
+```
+
+## Using traces for debugging
+
+When an agent returns an incorrect or unexpected answer, traces let you see exactly why:
+
+1. Get the `trace_id` from the response
+2. Fetch the trace: `GET /v1/{context_id}/traces/{trace_id}`
+3. Inspect the `tier` – was it a direct lookup, a cache hit, or hybrid retrieval?
+4. Inspect the `sources` – which memory or knowledge chunks contributed?
+5. Check whether the contributing sources are correct
+
+If the answer came from a stale cache hit, use the semantic cache invalidation endpoint to clear it. If the wrong entity was matched, inspect the entity's attributes and their `source_turn` links to find the origin.
+
+## Querying via SurrealDB directly
+
+Traces live in the Context's bound database as `decision_trace` records. You can query them directly with SurrealQL:
+
+```surql
+-- Token usage by key over the last 7 days
+SELECT api_key_id, math::sum(token_cost) AS total_tokens
+FROM decision_trace
+WHERE created_at > time::now() - 7d
+GROUP BY api_key_id
+ORDER BY total_tokens DESC;
+
+-- Slowest operations
+SELECT query, tier, duration_ms, created_at
+FROM decision_trace
+ORDER BY duration_ms DESC
+LIMIT 20;
+
+-- Cache hit rate
+SELECT
+    tier,
+    count() AS count
+FROM decision_trace
+WHERE created_at > time::now() - 1d
+GROUP BY tier;
+```
+
+## Trace retention
+
+Traces accumulate over time. The lifecycle decay pass (configurable via `PATCH /api/v1/contexts/{id}`) prunes traces older than the configured retention window. Default retention is 90 days. Set a shorter window for high-volume deployments:
+
+```json
+{
+  "config": {
+    "trace_retention_days": 30
+  }
+}
+```
+
+For compliance requirements, export traces to an external store before they are pruned using the SurrealDB export tools or a scheduled query.

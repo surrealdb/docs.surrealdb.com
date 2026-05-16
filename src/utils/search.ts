@@ -1,5 +1,6 @@
 import type { SearchResult, SearchResultItem } from "@surrealdb/docs-search-common";
 import { applyPathFallback } from "./path";
+import type { ProductId } from "./product";
 
 export type { SearchResult, SearchResultItem };
 
@@ -42,8 +43,13 @@ function parseRetryAfter(header: string | null): number | null {
     return null;
 }
 
-export async function searchDocs(query: string, signal: AbortSignal): Promise<SearchResult[]> {
+export async function searchDocs(
+    query: string,
+    signal: AbortSignal,
+    product?: ProductId,
+): Promise<SearchResult[]> {
     const params = new URLSearchParams({ q: query });
+    if (product) params.set("product", product);
     const endpoint = applyPathFallback(`/docs/api/search?${params}`);
 
     let res: Response;
