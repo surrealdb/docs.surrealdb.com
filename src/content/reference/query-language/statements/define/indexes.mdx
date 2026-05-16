@@ -1,7 +1,7 @@
 ---
 position: 11
 title: DEFINE INDEX
-description: "SurrealDB uses indexes to help optimize query performance. An index can consist of one or more fields in a table and can enforce a uniqueness constraint."
+description: "SurrealDB uses indexes to help optimize query performance. An index can consist of one or more fields in a table and can enforce a uniqueness constraint — including HNSW and DISKANN vector indexes."
 ---
 
 > [!NOTE]
@@ -37,7 +37,8 @@ The `@special_clause` part of the statement is an optional part in which an inde
 UNIQUE
 | COUNT
 | FULLTEXT ANALYZER @analyzer [ BM25 [(@k1, @b)] ] [ HIGHLIGHTS ]
-| HNSW DIMENSION @dimension [ TYPE @type ] [DIST @distance] [ EFC @efc ] [ M @m ]
+| HNSW DIMENSION @dimension [ TYPE @type ] [ DIST @distance ] [ EFC @efc ] [ M @m ]
+| DISKANN DIMENSION @dimension [ TYPE @type ] [ DIST @distance ] [ DEGREE @degree ] [ L_BUILD @l_build ] [ ALPHA @alpha ] [ HASHED_VECTOR ]
 ```
 
   </TabItem>
@@ -260,6 +261,10 @@ When defining a vector index with [HNSW](#hnsw-hierarchical-navigable-small-worl
 > [!NOTE]
 > In SurrealDB the default type for vectors is `F64`.
 
+<Since v="v3.1.0" />
+
+[DISKANN](#diskann-disk-based-approximate-nearest-neighbours) indexes accept a **narrower** set of element types: `F32`, `F16`, `I8`, and `U8` only, and only a subset of distance metrics — see the [DISKANN](#diskann-disk-based-approximate-nearest-neighbours) section below.
+
 For example, to define a vector index with 64-bit signed integers, you can use the following query:
 
 ```surql
@@ -302,6 +307,45 @@ Used to determine the maximum level ll for a new element during its insertion in
 <Since v="v3.0.0" />
 
 HNSW vector search uses a bounded memory cache by default, reducing memory spikes and improving stability under load. The default size for the cache is 256 MiB, and can be modified via the `SURREAL_HNSW_CACHE_SIZE` [environment variable](/docs/reference/cli/surrealdb-cli/environment-variables).
+
+### DISKANN (disk-based approximate nearest neighbours)
+
+<Since v="v3.1.0" />
+
+[DiskANN](https://arxiv.org/abs/1907.01668)-style indexes provide **on-disk** approximate nearest-neighbour graphs. They are aimed at **very large** embedding sets where keeping the full graph in RAM (as with HNSW) is impractical: vectors and graph structure are persisted in the key-value store and paged through a bounded cache, trading some latency for a much larger working set.
+
+> [!NOTE]
+> DISKANN indexes are **not supported on WASM** targets. Use HNSW or brute-force KNN for browser / embedded WASM builds.
+
+#### Syntax and defaults
+
+The clause mirrors HNSW: `DISKANN DIMENSION …` followed by optional `TYPE`, `DIST`, tuning knobs, and `HASHED_VECTOR`.
+
+```surql
+DEFINE INDEX diskann_pts ON pts FIELDS point DISKANN DIMENSION 4 DIST EUCLIDEAN TYPE F32;
+-- Same index with defaults written out explicitly:
+-- DEFINE INDEX diskann_pts ON pts FIELDS point DISKANN DIMENSION 4 DIST EUCLIDEAN TYPE F32 DEGREE 64 L_BUILD 100 ALPHA 1.2;
+```
+
+| Clause | Default | Notes |
+| --- | --- | --- |
+| `DIST` | `EUCLIDEAN` | Only `EUCLIDEAN`, `COSINE`, `INNER_PRODUCT`, and `COSINE_NORMALIZED` are valid for DISKANN. |
+| `TYPE` | `F32` | Must be one of `F32`, `F16`, `I8`, `U8`. `COSINE_NORMALIZED` further requires `F32` or `F16`. |
+| `DEGREE` | `64` | Target maximum graph degree (`> 0`). |
+| `L_BUILD` | `100` | Construction search-list size (`> 0`). |
+| `ALPHA` | `1.2` | DiskANN pruning parameter. |
+| `HASHED_VECTOR` | off | Same semantics as for HNSW — hash-stabilised vector–document keys. |
+
+Queries use the **same** KNN operator shape as HNSW: `<|K, EF|>` (approximate) or `<|K, DIST|>` when the distance matches the index, letting the optimiser pick the DISKANN graph. The second number in the approximate form bounds the dynamic candidate list during search (analogous to HNSW `EF`).
+
+#### Choosing HNSW or DISKANN
+
+| Concern | Prefer HNSW | Prefer DISKANN |
+| --- | --- | --- |
+| Working set size | Fits comfortably in memory with headroom for the HNSW cache | Much larger than RAM; cold data should stay on disk |
+| Latency profile | Lowest latency when the graph is hot in cache | Extra I/O; better for throughput to cost on huge corpora |
+| Vector element types | Full set (`F64` … `I16` in docs above) | Quantised-friendly types (`F32`, `F16`, `I8`, `U8`) |
+| Deployment target | Includes WASM | Server / native binaries only |
 
 ### Brute Force method
 
