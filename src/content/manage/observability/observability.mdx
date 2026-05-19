@@ -1,0 +1,132 @@
+---
+position: 2
+title: Observability (metrics and Prometheus)
+description: Unified OpenTelemetry metrics, `GET /metrics`, scraper authentication, naming, migration, and behaviour common to Community and Enterprise.
+---
+
+# Observability (metrics and Prometheus)
+
+For server log output (stderr, files, JSON, sockets, slow-query lines), see [Logging](/docs/manage/observability/logging).
+
+Use the tabs below depending on your server version. For OTLP (push), process intervals, and legacy SemConv instruments on the wire, see [Telemetry (OTLP)](/docs/manage/observability/telemetry). For SurrealDS metrics, audit and slow-query file sinks, and OTLP log export opt-ins, see [Enterprise observability](/docs/manage/observability/enterprise-observability).
+
+<Tabs>
+<TabItem label="Before SurrealDB 3.1">
+
+Prior to SurrealDB 3.1, operators often saw overlapping metric paths: built-in Prometheus exposition could run alongside a separate OpenTelemetry pipeline oriented around HTTP/RPC semantic conventions. The same request could therefore be reflected more than once, under different scopes and label keys (for example `http.server.*` / `rpc.server.*` versus `surrealdb.*`-style families).
+
+Many deployments also emitted parallel families for the same logical signal — aggregate counters or histograms plus higher-cardinality “dimensional” variants (names with a `*_dim_*` segment, or separate `*_errors_total` series). Dashboards and alerts had to choose which family to query, and mixing them could double-count.
+
+Edition (`community` vs `enterprise`) could appear on meter scope identifiers (for example in `otel_scope_name` after export to Prometheus). That tied dashboards to build flavour at the scope level and made renames risky.
+
+Tenant context (namespace, database, user, and similar) could be attached to labels in more ad hoc ways across recording sites, so you should treat unauthenticated `/metrics` scrapes as potentially sensitive in multi-tenant layouts unless you had a deliberate proxy or allowlist in front of the endpoint.
+
+For the OTLP side of the same era (push interval, `http.server.*` / `rpc.server.*` instruments, deprecated variables), use the Before SurrealDB 3.1 tab on [Telemetry (OTLP)](/docs/manage/observability/telemetry).
+
+When you upgrade to 3.1 or later, replan dashboards and alerts using the migration material in [`doc/OBSERVABILITY.md`](https://github.com/surrealdb/surrealdb/blob/main/doc/OBSERVABILITY.md) in the open-source repository (and the Enterprise companion, if you run SurrealDB Enterprise).
+
+</TabItem>
+
+<TabItem label="SurrealDB 3.1 and later">
+
+SurrealDB exposes a single, unified observability surface backed by OpenTelemetry. Every metric is recorded once and fanned out to whichever exporters you configure:
+
+- **Prometheus (pull)** — text exposition at `GET /metrics` (scrapers call your server). The usual path if you already run Prometheus.
+- **OTLP (push)** — when `SURREAL_TELEMETRY_PROVIDER=otlp` is set, the process pushes metrics, traces, and (when enabled) log records to a collector.
+
+**SurrealDB Enterprise** can additionally attach durable **audit** and **slow-query** pipelines and **SurrealDS** cluster metrics; OTLP export of audit and slow-query **log** records is **opt-in** per pipeline. See [Enterprise observability](/docs/manage/observability/enterprise-observability).
+
+For OTLP configuration, push intervals, process gauges, and backward-compatible HTTP/RPC instruments, see [Telemetry (OTLP)](/docs/manage/observability/telemetry).
+
+To inspect async tasks and scheduling inside the Tokio runtime, see [Tokio console](/docs/manage/observability/tokio-console).
+
+## Reference material alongside the engine
+
+Three angles are maintained in-tree next to the binaries you run:
+
+- **Community / open source** — [`doc/OBSERVABILITY.md`](https://github.com/surrealdb/surrealdb/blob/main/doc/OBSERVABILITY.md) and [`doc/TELEMETRY.md`](https://github.com/surrealdb/surrealdb/blob/main/doc/TELEMETRY.md) in the [surrealdb repository](https://github.com/surrealdb/surrealdb) (diagrams, migration tables, allowlists, catalogue-level detail).
+- **Enterprise** — extended `doc/OBSERVABILITY.md` in the Enterprise distribution (edition **[C]** / **[E]** markers, audit and slow-query knobs, SurrealDS catalogue, and cloud tiering guidance).
+
+On this site, the same split is covered by this page, [Telemetry (OTLP)](/docs/manage/observability/telemetry), and [Enterprise observability](/docs/manage/observability/enterprise-observability).
+
+## Unified model (summary)
+
+```text
+HTTP / WS / Executor → ExecutionObserver → FanOutObserver
+                                            ├── MetricsObserver         (labelled surrealdb.*)
+                                            ├── DsMetrics               (Enterprise, when active)
+                                            ├── AuditObserver           (Enterprise, when configured)
+                                            └── SlowQueryObserver       (Enterprise, when configured)
+                                                       │
+                                                       ▼
+                                            SdkMeterProvider + SdkLoggerProvider
+                                                       │
+                                       ┌───────────────┼────────────────┐
+                                       ▼               ▼                ▼
+                          Prometheus text       OTLP metrics push   OTLP logs / traces push
+                          exporter (/metrics)
+```
+
+Metrics are recorded once in labelled form. A single `surrealdb.statement` counter, for example, carries `statement_type`, `outcome`, `namespace`, `database`, and `user` in **Community and Enterprise**; unresolved tenant context appears as a `"-"` sentinel so series stay stable. Build flavour (`community` vs `enterprise`) is exposed on the OpenTelemetry **resource** as `service.edition` (for example on `target_info` in Prometheus) — use that attribute for edition-aware dashboards instead of filtering on meter scope alone.
+
+When no exporter is configured, the fan-out short-circuits so the hot path stays cheap.
+
+## Naming (summary)
+
+Instruments use dotted OpenTelemetry-style names (for example `surrealdb.statement.duration`) under signal-domain scopes (`surrealdb.statement`, `surrealdb.query`, …). The Prometheus text exporter maps those to underscore names with conventional `_total`, `_seconds`, and `_bytes` suffixes. Attribute keys with dots are sanitised for Prometheus.
+
+Many historical Prometheus series names and label shapes changed in SurrealDB 3.1. Dashboards that pre-date that release should be updated using the migration table in [`doc/OBSERVABILITY.md`](https://github.com/surrealdb/surrealdb/blob/main/doc/OBSERVABILITY.md) (and the Enterprise companion for **[E]**-only series).
+
+## Metrics on or off
+
+| Switch | Default | Effect |
+| --- | --- | --- |
+| `SURREAL_METRICS_ENABLED` | `true` | When `false`, the `/metrics` route is not mounted |
+| `SURREAL_TELEMETRY_PROVIDER` | unset | Set to `otlp` to enable the OTLP push pipeline (metrics, logs, traces) |
+| `SURREAL_TELEMETRY_DISABLE_METRICS` | `false` | When `true`, suppresses the OTLP metrics reader (logs and traces unaffected) |
+| `SURREAL_TELEMETRY_DISABLE_TRACING` | `false` | When `true`, suppresses the OTLP trace exporter only |
+
+When metrics are disabled, `/metrics` returns 404.
+
+## Collecting `/metrics` and security
+
+Anonymous scrapes only receive families on a public allowlist (aggregate process signals). Root credentials unlock the full Prometheus surface for that process; namespace and database users are not treated as authenticated for this endpoint. Dimensional families such as `surrealdb_statement_total` are intentionally excluded from anonymous output because they carry tenant labels — use OTLP or an authenticated scrape for those. See [`doc/OBSERVABILITY.md`](https://github.com/surrealdb/surrealdb/blob/main/doc/OBSERVABILITY.md) for the `PUBLIC_METRICS` list and security discussion.
+
+## Audit and slow-query (summary)
+
+**Community** builds do not ship the enterprise audit and slow-query file pipelines or their pipeline self-metrics on Prometheus.
+
+**Enterprise** can write tamper-aware NDJSON to disk **and** optionally emit the same redacted records as OpenTelemetry logs when `SURREAL_AUDIT_OTEL_EXPORT=true` / `SURREAL_SLOW_QUERY_OTEL_EXPORT=true` (both default `false`). Redaction runs on the executor thread before the queue so every sink sees the same scrubbed payload. See [Enterprise observability](/docs/manage/observability/enterprise-observability) and `SURREAL_AUDIT_*` / `SURREAL_SLOW_QUERY_*` in [Environment variables](/docs/reference/cli/surrealdb-cli/environment-variables).
+
+## Multi-tenant guidance
+
+Treat `/metrics` as operator-only in multi-tenant deployments: avoid exposing the main listener to untrusted scrapers, prefer disabling metrics if you cannot isolate the endpoint, and never give tenants root credentials used for the authenticated metric view.
+
+## Local development
+
+Compare anonymous and authenticated scrapes:
+
+```bash
+curl http://127.0.0.1:8000/metrics
+curl -u root:root http://127.0.0.1:8000/metrics
+```
+
+Disable metrics entirely:
+
+```bash
+SURREAL_METRICS_ENABLED=false surreal start ...
+```
+
+Push metrics, logs, and traces to a local collector:
+
+```bash
+SURREAL_TELEMETRY_PROVIDER=otlp \
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
+surreal start ...
+```
+
+For OTLP-focused setup and version tabs, see [Telemetry (OTLP)](/docs/manage/observability/telemetry). For catalogue-level detail, use the in-repository `doc/OBSERVABILITY.md` / `doc/TELEMETRY.md` files linked above (and the Enterprise `doc/OBSERVABILITY.md` where applicable). For every instrument name, label, and alert hint on this site, see the [Metrics reference](/docs/manage/observability/metrics).
+
+</TabItem>
+
+</Tabs>

@@ -8,6 +8,7 @@ import {
 } from "@surrealdb/ui";
 import { Boxes } from "~/components/Boxes";
 import { ContentTabItem, ContentTabs } from "~/components/ContentTabs";
+import { Edition } from "~/components/Edition";
 import { IconBox } from "~/components/IconBox";
 import { Version } from "~/components/Version";
 import { getIconScope } from "~/lib/icon-scope";
@@ -33,6 +34,7 @@ export function registerMarkdownComponents() {
             return <SurrealistMini config={{ query, url }} />;
         },
         Version: (props: { sdk?: string; prefix?: string }) => <Version {...props} />,
+        Edition,
         IconBox,
         Boxes,
         Since: ({ v, prefix, ...props }: SinceProps) => (

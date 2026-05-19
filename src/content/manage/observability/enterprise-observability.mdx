@@ -1,0 +1,148 @@
+---
+position: 4
+title: Enterprise observability
+description: Metrics, logs, and traces in SurrealDB Enterprise versus Community — OTLP opt-ins, audit and slow-query pipelines, and SurrealDS cluster instruments.
+---
+
+# Enterprise observability
+
+SurrealDB **Community** and **Enterprise** share one unified observability implementation in the server: the same labelled metric families, the same `GET /metrics` path, and the same OTLP push pipeline when enabled. **Enterprise** adds optional durability and cluster depth on top:
+
+- **SurrealDS cluster instruments** (`surrealdb.ds.*`) — consensus, networking, recovery, and garbage collection when you run the distributed datastore path.
+- **Audit and slow-query pipelines** — bounded queues, file sinks with rotation and optional hash chaining, and pipeline self-metrics (`surrealdb.audit.*`, `surrealdb.slow_query.*`) when those sinks are configured.
+- **OpenTelemetry logs for audit and slow-query** — the same redacted records can be emitted as OTel log records, but **only when you opt in** with `SURREAL_AUDIT_OTEL_EXPORT=true` and/or `SURREAL_SLOW_QUERY_OTEL_EXPORT=true` (default `false` so sensitive payloads stay on the file sink unless you choose otherwise).
+
+Throughout this page, markers mean:
+
+- **[C]** — Registered in every build that exposes metrics (Community and Enterprise).
+- **[E]** — Registered only when running a **SurrealDB Enterprise** binary with the relevant feature enabled.
+
+For Prometheus pull behaviour, naming rules, the public `PUBLIC_METRICS` allowlist, and multi-tenant guidance common to both editions, see [Observability (metrics and Prometheus)](/docs/manage/observability/observability). For OTLP push, intervals, and legacy HTTP/RPC instruments, see [Telemetry (OTLP)](/docs/manage/observability/telemetry).
+
+## Pipeline overview
+
+```text
+HTTP / WS / Executor → ExecutionObserver → FanOutObserver
+                                            ├── MetricsObserver         (labelled surrealdb.*)         [C]
+                                            ├── DsMetrics               (surrealdb.ds.*)               [E]
+                                            ├── AuditObserver           (audit → file + optional OTel)  [E]
+                                            └── SlowQueryObserver       (slow-query → file + optional OTel) [E]
+                                                       │
+                                            SdkMeterProvider + SdkLoggerProvider
+                                                       │
+                                       ┌───────────────┼────────────────┐
+                                       ▼               ▼                ▼
+                          Prometheus text       OTLP metrics push   OTLP logs / traces push
+                          exporter (/metrics)
+```
+
+`ExecutionObserver` short-circuits when no observer in the chain has work, so a process with neither `/metrics` nor OTLP configured avoids hot-path cost. Build flavour is carried on the OpenTelemetry **resource** as `service.edition` (`community` or `enterprise`), for example on `target_info` in Prometheus — filter dashboards on that attribute rather than on meter scope names.
+
+## `/metrics` versus OTLP
+
+| Pipeline | Trigger | Transport | Authentication | What is exposed |
+| --- | --- | --- | --- | --- |
+| Prometheus pull | `SURREAL_METRICS_ENABLED=true` (default) | `GET /metrics` on the main HTTP port (`text/plain; version=0.0.4`) | Root credentials unlock the full surface. Anonymous scrapers receive only the **public allowlist** (aggregate process gauges). | Every instrument the running binary registers. |
+| OTLP push | `SURREAL_TELEMETRY_PROVIDER=otlp` | gRPC to `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4317`). Push cadence: `OTEL_METRIC_EXPORT_INTERVAL` (ms, default `60000`). | TLS and client authentication are the collector’s responsibility. | Same metrics as an authenticated Prometheus view, plus traces and (when configured) audit and slow-query **log** records. |
+
+Disabling pieces:
+
+| Switch | Default | Effect |
+| --- | --- | --- |
+| `SURREAL_METRICS_ENABLED` | `true` | When `false`, `/metrics` is not mounted (404). |
+| `SURREAL_TELEMETRY_PROVIDER` | unset | Set to `otlp` to start OTLP exporters. |
+| `SURREAL_TELEMETRY_DISABLE_METRICS` | `false` | Skips only the OTLP **metrics** reader; logs and traces can still push. |
+| `SURREAL_TELEMETRY_DISABLE_TRACING` | `false` | Skips only the OTLP **trace** exporter. |
+
+## Community versus Enterprise (at a glance)
+
+| Concern | Community | Enterprise |
+| --- | --- | --- |
+| Labelled `surrealdb.*` statement, query, transaction, RPC, HTTP, session, auth, network, live query, process, storage | Yes [C] | Yes [C] |
+| Slow-query **counter** (`surrealdb.slow_query.*`) vs threshold | `SURREAL_SLOW_QUERY_METRIC_THRESHOLD_MS` (default 1000 ms; `0` disables) | Same [C] |
+| SurrealDS `surrealdb.ds.*` cluster metrics | Not emitted | Emitted when the DS runtime is active and a metrics reader exists [E] |
+| Durable **audit** / **slow-query** file sinks | Not available | `SURREAL_AUDIT_*`, `SURREAL_SLOW_QUERY_*` [E] |
+| Pipeline self-metrics (`surrealdb_audit_*`, `surrealdb_slow_query_*`) | Not registered | Registered when the matching pipeline is configured [E] |
+| OTel log export for audit / slow-query records | N/A (no enterprise pipelines) | Opt-in per pipeline: `SURREAL_AUDIT_OTEL_EXPORT`, `SURREAL_SLOW_QUERY_OTEL_EXPORT` [E] |
+| Per-tenant rollup scope `surrealdb.tenant` | Reserved for future low-cardinality rollups | Same; **no instruments are registered there yet**. Use proxy-side filtering on dimensional families for customer-visible views today. |
+
+## Configuration highlights (Enterprise)
+
+### Core switches ([C])
+
+These apply to every build:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SURREAL_METRICS_ENABLED` | `true` | Mount `/metrics`. |
+| `SURREAL_TELEMETRY_PROVIDER` | unset | `otlp` enables OTLP push. |
+| `SURREAL_TELEMETRY_DISABLE_METRICS` | `false` | Skip OTLP metrics only. |
+| `SURREAL_TELEMETRY_DISABLE_TRACING` | `false` | Skip OTLP traces only. |
+| `SURREAL_SLOW_QUERY_METRIC_THRESHOLD_MS` | `1000` | Statements slower than this also increment the slow-query counter; `0` disables that counter. |
+| `SURREAL_PROCESS_METRICS_REFRESH_INTERVAL` | `5` | Seconds between process memory/CPU gauge refreshes (minimum 1). |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP gRPC endpoint. |
+| `OTEL_METRIC_EXPORT_INTERVAL` | `60000` | OTLP metric push interval (ms). |
+
+### Audit log ([E])
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `SURREAL_AUDIT_SINK` | `none` | `none` or `file`. |
+| `SURREAL_AUDIT_FILE_PATH` | — | Required for `file`; parent directory must exist; file mode `0600` on Unix. |
+| `SURREAL_AUDIT_FSYNC_EVERY` | `0` | Mid-stream fsync cadence; rotation and graceful shutdown always flush. |
+| `SURREAL_AUDIT_HASH_CHAIN` | `false` | Tamper-evident chaining; **requires** `SURREAL_AUDIT_FSYNC_EVERY=1`. |
+| `SURREAL_AUDIT_INCLUDE_SQL` | `false` | Include full SQL on statement records. |
+| `SURREAL_AUDIT_OVERFLOW` | `block` | `drop` or `block` when the queue is full; compliance deployments usually keep `block`. |
+| `SURREAL_AUDIT_OTEL_EXPORT` | `false` | Also emit each record as an OTel log (opt-in). |
+
+### Slow-query log ([E])
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `SURREAL_SLOW_QUERY_SINK` | `none` | Same pattern as audit. |
+| `SURREAL_SLOW_QUERY_THRESHOLD_MS` | — | Required when the sink is enabled. |
+| `SURREAL_SLOW_QUERY_INCLUDE_SQL` | `true` | SQL in slow-query records (turn off for throughput-sensitive deployments). |
+| `SURREAL_SLOW_QUERY_OVERFLOW` | `drop` | Defaults to **drop** (triage data); audit defaults to **block**. |
+| `SURREAL_SLOW_QUERY_OTEL_EXPORT` | `false` | OTel log export for slow-query records (opt-in). |
+
+Redaction (`SURREAL_AUDIT_REDACT_*` / `SURREAL_SLOW_QUERY_REDACT_*`) runs on the executor thread **before** the queue so the file sink and OTel path see the same scrubbed text. Full knob lists live with the rest of the server [environment variables](/docs/reference/cli/surrealdb-cli/environment-variables).
+
+### SurrealDS tuning ([E])
+
+Large clusters expose saturation through `surrealdb.ds.*` and logs. Typical operator levers include inbound byte budgets, handler caps, read/write operation caps, and consensus timeouts. If you deploy on Kubernetes, pair metrics with the environment-variable reference in your platform runbook.
+
+## Audit and slow-query records ([E])
+
+Records flow in parallel:
+
+1. **File sink** — optional NDJSON with rotation; optional hash chain for tamper evidence.
+2. **OpenTelemetry logs** — only when the matching `SURREAL_*_OTEL_EXPORT` flag is `true`.
+
+Severity rules differ slightly between audit event kinds and slow-query (slow-query is always treated as a degraded path — typically **WARN**). Monitor **`surrealdb_audit_dropped`**, **`surrealdb_slow_query_dropped`**, **`surrealdb_audit_append_errors`**, and **`surrealdb_slow_query_append_errors`**: any sustained non-zero rate means **lost or failed** records.
+
+## Recommended exposure tiers (operators)
+
+When you front `/metrics` with a proxy or expose metrics to customers:
+
+1. **Always safe without authentication** — matches the built-in public allowlist (`surrealdb_build_info`, process gauges, `target_info`, `otel_scope_info`).
+2. **Customer-visible** — only after the proxy **filters** dimensional series to that customer’s `namespace` / `database`. Strip `user` before showing outside trusted operator contexts.
+3. **Operator-only** — `surrealdb.ds.*`, pipeline self-metrics, `surrealdb_auth_*`, storage backend detail, RPC method detail, and similar. Scrape these on a private interface with root credentials.
+
+## Migration from older Prometheus names
+
+Legacy series names were collapsed into labelled families in SurrealDB 3.1. The same migration table applies to Community and Enterprise; see [Observability (metrics and Prometheus)](/docs/manage/observability/observability) for the summary, [Telemetry (OTLP)](/docs/manage/observability/telemetry) for wire-format and deprecation notes, and the [Metrics reference](/docs/manage/observability/metrics#migration-from-30) for the full migration table.
+
+## Local checks
+
+```bash
+curl http://127.0.0.1:8000/metrics
+curl -u root:root http://127.0.0.1:8000/metrics
+```
+
+Enterprise-only metrics (`surrealdb_ds_*`, audit/slow-query pipeline gauges) appear only in the authenticated view when those subsystems are active.
+
+## Pipeline and configuration references
+
+- [Audit logging](/docs/manage/observability/audit-logging) — record shape, rotation, overflow semantics, hash chaining, redaction.
+- [Slow-query logging](/docs/manage/observability/slow-query-logging) — triage pipeline mirroring the audit observer.
+- [Configuration](/docs/manage/observability/configuration) — all `SURREAL_AUDIT_*` and `SURREAL_SLOW_QUERY_*` variables and the compliance checklist.
