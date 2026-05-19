@@ -5,11 +5,14 @@ import { vikeContentCollectionPlugin } from "vike-content-collection";
 import { vikeSitemap } from "vike-sitemap-generator";
 import { defineConfig } from "vite";
 
+import { viteDevRedirects } from "./plugins/vite-dev-redirects";
+
 loadEnvFile(".env.shared");
 
 export default defineConfig({
     base: "/docs",
     plugins: [
+        viteDevRedirects(),
         vike(),
         react(),
         vikeContentCollectionPlugin({
