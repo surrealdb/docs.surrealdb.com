@@ -89,15 +89,15 @@ function exploreTutorialsThematicRedirects(): Redirect[] {
 }
 
 /** Former learn/context Spectron walkthrough → Spectron docs quickstart. */
-function learnContextToSpectronRedirects(): Redirect[] {
-    const to = "/docs/spectron/quickstarts/surrealist-dashboard";
-    return [
-        { source: "/docs/learn/context", destination: to, statusCode: 301 },
-        { source: "/docs/learn/context/:path*", destination: to, statusCode: 301 },
-        { source: "/learn/context", destination: to, statusCode: 301 },
-        { source: "/learn/context/:path*", destination: to, statusCode: 301 },
-    ];
-}
+// function learnContextToSpectronRedirects(): Redirect[] {
+//     const to = "/docs/spectron/quickstarts/surrealist-dashboard";
+//     return [
+//         { source: "/docs/learn/context", destination: to, statusCode: 301 },
+//         { source: "/docs/learn/context/:path*", destination: to, statusCode: 301 },
+//         { source: "/learn/context", destination: to, statusCode: 301 },
+//         { source: "/learn/context/:path*", destination: to, statusCode: 301 },
+//     ];
+// }
 
 /** Index “Running” section (formerly /self-hosted). */
 function runningFromSelfHostedRedirects(): Redirect[] {
@@ -165,7 +165,7 @@ export const docsRedirects: Redirect[] = [
     ...exploreTutorialsThematicRedirects(),
     ...sdkRedirects(),
     ...legacyMigratingRedirects(),
-    ...learnContextToSpectronRedirects(),
+    // ...learnContextToSpectronRedirects(),
     ...deploymentObservabilityToManageRedirects(),
     ...runningFromSelfHostedRedirects(),
 ];
