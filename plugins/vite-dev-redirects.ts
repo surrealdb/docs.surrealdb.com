@@ -9,7 +9,11 @@ const SKIP_PREFIXES = ["/@", "/assets/", "/__vite", "/favicon"];
  * Applies the same redirect rules as vercel.ts during `vike dev` and `vike preview`.
  * Vercel reads redirects at deploy time; Vite does not.
  */
-export function viteDevRedirects(): Plugin {
+export function viteDevRedirects(mode: string): Plugin {
+    if (mode === "production") {
+        return { name: "vite-dev-redirects" };
+    }
+
     return {
         name: "vite-dev-redirects",
         configureServer(server) {
