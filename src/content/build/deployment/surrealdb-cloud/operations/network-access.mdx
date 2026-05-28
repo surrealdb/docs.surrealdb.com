@@ -29,7 +29,7 @@ In your SurrealDB Cloud dashboard, you can easily configure and preview network 
 
 To allow outgoing HTTP requests from your instance, you'll need to enable network access capability and configure allowed network patterns. Here's how to do it:
 
-1.	Open the Network Access Section:In the SurrealDB Cloud dashboard, click on the **configure instance** button to open the instance configuration drawer. Here, you’ll find the **network access** option (set to Deny by default) to specify allowed and denied network patterns.
+1. Open the Network Access Section: In the SurrealDB Cloud dashboard, click on the **Manage instance** button to open the instance configuration drawer. Here, you’ll find the **Network access** option (set to Deny by default) to specify allowed and denied network patterns.
 
 2.	Set Allowed and Denied Patterns:
     - Enter the domains, IP addresses, you wish to allow in the **Allowed by default** field.
