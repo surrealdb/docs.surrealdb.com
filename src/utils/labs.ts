@@ -1,5 +1,5 @@
 export const labCategories = [
-    "Code repositories",
+    "Source code",
     "Videos",
     "Blogposts",
     "Documentation",

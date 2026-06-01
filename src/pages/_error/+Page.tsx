@@ -45,12 +45,7 @@ export default function Page() {
                 maw="460px"
             >
                 <Title order={2}>{title}</Title>
-                <Text
-                    c="dimmed"
-                    fz="lg"
-                >
-                    {message}
-                </Text>
+                <Text fz="lg">{message}</Text>
                 <Box>
                     <Anchor
                         href="/"

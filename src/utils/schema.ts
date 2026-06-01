@@ -18,6 +18,7 @@ export type PageSchema = output<typeof pageSchema>;
 
 export const labSchema = strictObject({
     title: string(),
+    description: string().optional(),
     url: string().optional(),
     category: _enum(labCategories),
     author: literal("surrealdb").or(

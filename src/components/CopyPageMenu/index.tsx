@@ -80,9 +80,11 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
         <Menu
             shadow="md"
             width={280}
-            position="bottom-end"
             withinPortal
             trigger="click-hover"
+            transitionProps={{
+                transition: "scale-y",
+            }}
         >
             <Menu.Target>
                 <Button
@@ -103,7 +105,11 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                     bdrs="xs"
                     leftSection={
                         <ThemeIcon>
-                            <Icon path={iconCopy} />
+                            <Icon
+                                path={iconCopy}
+                                opacity={1}
+                                size="lg"
+                            />
                         </ThemeIcon>
                     }
                     onClick={handleCopyMarkdown}
@@ -127,7 +133,11 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                     bdrs="xs"
                     leftSection={
                         <ThemeIcon>
-                            <Icon path={iconChatGPT} />
+                            <Icon
+                                path={iconChatGPT}
+                                opacity={1}
+                                size="lg"
+                            />
                         </ThemeIcon>
                     }
                     rightSection={
@@ -157,7 +167,11 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                     bdrs="xs"
                     leftSection={
                         <ThemeIcon>
-                            <Icon path={iconClaude} />
+                            <Icon
+                                path={iconClaude}
+                                opacity={1}
+                                size="lg"
+                            />
                         </ThemeIcon>
                     }
                     rightSection={

@@ -1,7 +1,7 @@
 ---
 position: 4
 title: Vector indexes
-description: Choose brute force or HNSW vector indexes, tune DIMENSION and distance metrics, and use the query cheat sheet with vector::distance::knn().
+description: "Choose brute force, HNSW, or DISKANN vector indexes, tune DIMENSION and distance metrics, and use the query cheat sheet with vector::distance::knn()."
 ---
 
 # Vector indexes
@@ -16,20 +16,30 @@ The brute force approach for finding the nearest neighbour is generally preferre
 
 - Small datasets / limited query vectors: For applications with small datasets, the overhead of building and maintaining an index might outweigh its benefits. In such cases, the brute force approach is optimal.
 - Guaranteed accuracy: Since the brute force method compares the query vector against every vector in the dataset, it guarantees finding the exact nearest vectors based on the chosen distance metric (like Euclidean, Manhattan, etc.).
-- Benchmarking models: The brute force approach can be used as a reference to help benchmark the performance of other approximate alternatives like HNSW.
+- Benchmarking models: The brute force approach can be used as a reference to help benchmark the performance of other approximate alternatives like HNSW or DISKANN.
 
 While brute force can give you exact results, it's computationally expensive for large datasets.
 
 In most cases, you do not need a 100% exact match, and you can give it up for faster, high-dimensional searches to find the approximate nearest neighbour to a query vector.
 
-This is where Vector indexes come in.
+This is where vector indexes come in.
 
-In SurrealDB, you can perform a vector search using a [Hierarchical Navigable Small World](https://en.wikipedia.org/wiki/Hierarchical_navigable_small_world) (HNSW) index, a state-of-the-art algorithm for approximate nearest neighbour search in high-dimensional spaces. It is a [proximity graph-based index](/docs/reference/query-language/statements/define/indexes#hnsw-hierarchical-navigable-small-world) that offers a balance between search efficiency and accuracy.
+## HNSW and DISKANN
+
+SurrealDB offers two **approximate** graph indexes for k-nearest-neighbour search:
+
+| Index | Best for | Storage |
+| --- | --- | --- |
+| [HNSW](https://en.wikipedia.org/wiki/Hierarchical_navigable_small_world) ([`DEFINE INDEX … HNSW`](/docs/reference/query-language/statements/define/indexes#hnsw-hierarchical-navigable-small-world)) | Low-latency ANN when the graph fits comfortably in memory with headroom for the bounded vector cache | In-memory hot graph + persistence |
+| [DISKANN](https://arxiv.org/abs/1907.01668) ([`DEFINE INDEX … DISKANN`](/docs/reference/query-language/statements/define/indexes#diskann-disk-based-approximate-nearest-neighbours)) *(SurrealDB 3.1+)* | Very large corpora where RAM cannot hold the full graph — optimises for **disk-resident** graphs and quantisation-friendly types | On-disk graph with caching (not on **WASM** targets) |
+
+Both are [proximity graph](/docs/reference/query-language/statements/define/indexes#hnsw-hierarchical-navigable-small-world)-style indexes. Queries use the same [`<|K, …|>` KNN operator shapes](/docs/reference/query-language/language-primitives/operators#knn); the optimiser picks the index when distances and types line up.
 
 ## Vector search cheat sheet
 
-- HNSW: efficient approximation for high dimensions or large datasets
-- Brute force: when you don’t define an index, or you want exact nearest neighbours, or when you provide a distance function to the query
+- **HNSW** — efficient in-memory approximation for high dimensions or large in-RAM datasets.
+- **DISKANN** — disk-oriented approximation for embeddings that exceed practical memory for a pure HNSW graph.
+- **Brute force** — when you do not define an index, when you want exact nearest neighbours, or when you pass an explicit distance function to the query that does not route to your index.
 
 ### HNSW index
 
@@ -57,6 +67,26 @@ DEFINE INDEX hnsw_idx ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F
 
 For more details, see the [`DEFINE INDEX` statement](/docs/reference/query-language/statements/define/indexes#hnsw-hierarchical-navigable-small-world) documentation.
 
+### DISKANN index
+
+<Since v="v3.1.0" />
+
+| Parameter  | Default   | Options | Description |
+| ---------- | --------- | ------- | ----------- |
+| DIMENSION  |           |         | Vector dimension |
+| DIST       | EUCLIDEAN | EUCLIDEAN, COSINE, INNER_PRODUCT, COSINE_NORMALIZED | Distance (narrower set than HNSW) |
+| TYPE       | F32       | F32, F16, I8, U8 | Element encoding (`COSINE_NORMALIZED` requires `F32` or `F16`) |
+| DEGREE     | 64        | > 0     | Target maximum graph degree |
+| L_BUILD    | 100       | > 0     | Construction search-list size |
+| ALPHA      | 1.2       |         | DiskANN pruning parameter |
+| HASHED_VECTOR | off    |         | Optional hash-stabilised vector keys |
+
+```surql
+DEFINE INDEX diskann_idx ON pts FIELDS point DISKANN DIMENSION 4 DIST COSINE TYPE F32;
+```
+
+See [`DEFINE INDEX` → DISKANN](/docs/reference/query-language/statements/define/indexes#diskann-disk-based-approximate-nearest-neighbours) for platform notes (including **no WASM support**).
+
 ### Querying
 
 ```surql
@@ -76,6 +106,8 @@ WHERE point
     $vector;
 ```
 
+With a DISKANN index defined on `point`, the same `<|K, EF|>` approximate form applies; the second number bounds the dynamic candidate list for search (see the [KNN operator](/docs/reference/query-language/language-primitives/operators#knn)).
+
 | Functions                                 |     |
 | ------------------------------------------------ | --- |
 | `vector::distance::knn()`                        | reuses the value computed during the query
@@ -90,22 +122,22 @@ WHERE point
 
 **WHERE statement**
 
-| Query                   | HNSW index |
-| ----------------------- | ---------- |
-| `<\|2\|>`               | uses distance function defined in index
-| `<\|2, EUCLIDEAN\|>`    | brute force method
-| `<\|2, COSINE\|>`       | brute force method
-| `<\|2, MANHATTAN\|>`    | brute force method
-| `<\|2, MINKOWSKI, 3\|>` | brute force method (third param is [𝑝](#notes))
-| `<\|2, CHEBYSHEV\|>`    | brute force method
-| `<\|2, HAMMING\|>`      | brute force method
-| `<\|2, 10\|>`           | second param is effort*
+| Query                   | HNSW index | DISKANN index |
+| ----------------------- | ---------- | --------------- |
+| `<\|2\|>`               | uses distance function defined in index | same when the index distance matches |
+| `<\|2, EUCLIDEAN\|>`    | brute force method | brute force method |
+| `<\|2, COSINE\|>`       | brute force method | brute force method |
+| `<\|2, MANHATTAN\|>`    | brute force method | brute force method |
+| `<\|2, MINKOWSKI, 3\|>` | brute force method (third param is [𝑝](#notes)) | brute force method |
+| `<\|2, CHEBYSHEV\|>`    | brute force method | brute force method |
+| `<\|2, HAMMING\|>`      | brute force method | brute force method |
+| `<\|2, 10\|>`           | second param is effort* | same approximate form — second value bounds the candidate list |
 
-*effort: Tells HNSW how far to go in trying to find the exact response. HNSW is approximate, and may miss some vectors.
+\* **effort** — for HNSW and DISKANN, the second number in `<|K, N|>` tells the engine how far to search along the graph. Both algorithms are approximate and may miss some vectors.
 
 ### Notes
 
-- Verify index utilization in queries using the [`EXPLAIN FULL` clause](/docs/reference/query-language/statements/select#the-explain-clause). E.g: `SELECT id FROM pts WHERE point <|10|> [2,3,4,5] EXPLAIN FULL;`
+- Verify index utilisation in queries using the [`EXPLAIN FULL` clause](/docs/reference/query-language/statements/select#the-explain-clause). E.g: `SELECT id FROM pts WHERE point <|10|> [2,3,4,5] EXPLAIN FULL;`
 - 𝑝 values: (more about 𝑝 in [Minkowski distance](https://en.wikipedia.org/wiki/Minkowski_distance))
   - 2<sup>0</sup> = 1 → manhattan/diamond ◇
   - 2<sup>1</sup> = 2 → euclidean/circle ○

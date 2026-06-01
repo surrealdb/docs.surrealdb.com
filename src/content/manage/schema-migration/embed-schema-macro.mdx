@@ -1,0 +1,107 @@
+---
+position: 8
+title: embed_schema! macro
+description: "The embed_schema! macro bakes your .surql schema files into the Rust binary at compile time, so schema is always in sync with the application that ships it."
+---
+
+# `embed_schema!` macro
+
+The `embed_schema!` macro reads your `database/schema/` directory at compile time and generates a Rust module containing the SQL for every `.surql` file it finds. Because the schema is compiled into the binary, there are no external files to deploy and the schema version is always tied to the application version.
+
+Add the macros crate to your dependencies:
+
+```toml
+[dependencies]
+surrealkit = { version = "0.6.2", default-features = false }
+surrealkit-macros = "0.6.2"
+```
+
+## Basic usage
+
+Call the macro at the crate root (typically `main.rs` or `lib.rs`):
+
+```rust
+surrealkit::embed_schema!();
+```
+
+This generates an `embedded_schema` module. Call `sync` on it after connecting to apply any outstanding schema changes:
+
+```rust
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let db = surrealkit::connect(
+        &surrealkit::DbCfg::from_env(None, &Default::default())?
+    ).await?;
+
+    embedded_schema::sync(&db).await?;
+
+    // application startup continues here
+    Ok(())
+}
+```
+
+`sync` behaves identically to `surrealkit sync` from the CLI: it applies new or changed definitions and prunes any that have been removed, using the `__entity` metadata table to track state.
+
+## What the macro generates
+
+Given a `database/schema/` directory with these files:
+
+```
+database/schema/
+├── users.surql
+└── orders.surql
+```
+
+The macro generates roughly:
+
+```rust
+mod embedded_schema {
+    use surrealkit::EmbeddedSchemaFile;
+
+    static FILES: &[EmbeddedSchemaFile] = &[
+        EmbeddedSchemaFile {
+            path: "database/schema/users.surql",
+            sql: "DEFINE TABLE user SCHEMAFULL; ...",
+        },
+        EmbeddedSchemaFile {
+            path: "database/schema/orders.surql",
+            sql: "DEFINE TABLE order SCHEMAFULL; ...",
+        },
+    ];
+
+    pub async fn sync(db: &surrealdb::Surreal<impl surrealdb::Connection>)
+        -> anyhow::Result<()>
+    {
+        surrealkit::run_sync_embedded(db, FILES).await
+    }
+}
+```
+
+You can call `run_sync_embedded_with_opts` directly if you need to customise sync behaviour:
+
+```rust
+use surrealkit::{SyncOpts, run_sync_embedded_with_opts};
+
+embedded_schema::sync_with_opts(
+    &db,
+    &SyncOpts {
+        prune: false,
+        ..Default::default()
+    },
+).await?;
+```
+
+## Compile-time rebuild behaviour
+
+Cargo re-runs the macro whenever a `.surql` file in `database/schema/` changes, because the macro registers each file with `include_str!`. This means schema changes always produce a fresh build, and there is no risk of shipping stale SQL.
+
+## When to use the macro vs runtime loading
+
+|-| `embed_schema!` | `run_sync_embedded` |
+|---|---|---|
+| Schema location | Compiled into binary | Loaded from files at runtime |
+| Deployment | No schema files needed | Schema directory must be present |
+| Dev iteration | Rebuild required on change | Files can be swapped without rebuild |
+| Best for | Production builds, Docker images | Development, mounted volumes |
+
+For most production deployments `embed_schema!` is the right choice. For local development or environments that mount schema as a volume, `run_sync_embedded` with files loaded at runtime is more convenient.

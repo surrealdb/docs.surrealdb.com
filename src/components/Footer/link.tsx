@@ -7,12 +7,12 @@ interface FooterLinkProps extends PropsWithChildren<AnchorProps> {
 
 export function FooterLink({ children, href, ...props }: FooterLinkProps) {
     const isExternal = href.startsWith("http");
+
     return (
         <Anchor
             href={href}
             target={isExternal ? "_blank" : undefined}
             rel={isExternal ? "noopener noreferrer external" : undefined}
-            c="dimmed"
             fz={12}
             {...props}
         >

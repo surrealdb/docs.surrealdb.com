@@ -5,11 +5,14 @@ import { vikeContentCollectionPlugin } from "vike-content-collection";
 import { vikeSitemap } from "vike-sitemap-generator";
 import { defineConfig } from "vite";
 
+import { viteDevRedirects } from "./plugins/vite-dev-redirects";
+
 loadEnvFile(".env.shared");
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
     base: "/docs",
     plugins: [
+        viteDevRedirects(mode),
         vike(),
         react(),
         vikeContentCollectionPlugin({
@@ -74,4 +77,4 @@ export default defineConfig({
         port: 4321,
         host: true,
     },
-});
+}));

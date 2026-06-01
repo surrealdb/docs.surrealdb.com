@@ -1,10 +1,15 @@
 import type { VersionFetcher } from "./types";
 
-export function createGitHubFetcher(owner: string, repo: string): VersionFetcher {
+export function createSurrealDbVersionFetcher(): VersionFetcher {
     return async () => {
-        const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/latest`);
-        const data = await res.json();
-        return data?.tag_name ?? "unknown";
+        const res = await fetch("https://version.surrealdb.com");
+
+        if (!res.ok) {
+            return "unknown";
+        }
+
+        const version = (await res.text()).trim();
+        return version || "unknown";
     };
 }
 

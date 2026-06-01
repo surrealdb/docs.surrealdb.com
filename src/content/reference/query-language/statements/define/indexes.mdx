@@ -1,7 +1,7 @@
 ---
 position: 11
 title: DEFINE INDEX
-description: "SurrealDB uses indexes to help optimize query performance. An index can consist of one or more fields in a table and can enforce a uniqueness constraint."
+description: "SurrealDB uses indexes to help optimize query performance. An index can consist of one or more fields in a table and can enforce a uniqueness constraint — including HNSW and DISKANN vector indexes."
 ---
 
 > [!NOTE]
@@ -37,7 +37,8 @@ The `@special_clause` part of the statement is an optional part in which an inde
 UNIQUE
 | COUNT
 | FULLTEXT ANALYZER @analyzer [ BM25 [(@k1, @b)] ] [ HIGHLIGHTS ]
-| HNSW DIMENSION @dimension [ TYPE @type ] [DIST @distance] [ EFC @efc ] [ M @m ]
+| HNSW DIMENSION @dimension [ TYPE @type ] [ DIST @distance ] [ EFC @efc ] [ M @m ]
+| DISKANN DIMENSION @dimension [ TYPE @type ] [ DIST @distance ] [ DEGREE @degree ] [ L_BUILD @l_build ] [ ALPHA @alpha ] [ HASHED_VECTOR ]
 ```
 
   </TabItem>
@@ -162,6 +163,22 @@ value = "NONE"
 DEFINE INDEX test ON user FIELDS account, email UNIQUE;
 ```
 
+#### Array-element composite indexes <Since v="v3.1.0" />
+
+From SurrealDB 3.1.0, a composite index can lead with an **array-element** column (`tags.*`) so containment predicates combine with ordering on a trailing column without a full table scan. This supports patterns such as `WHERE tags CONTAINS 'x' ORDER BY age DESC LIMIT N` and the multi-value forms `CONTAINSANY` / `ANYINSIDE` on array fields.
+
+```surql
+DEFINE INDEX tag_age ON article FIELDS tags.*, age;
+
+-- Bounded index walk (check with EXPLAIN FULL)
+SELECT * FROM article
+WHERE tags CONTAINS 'release-notes'
+ORDER BY age DESC
+LIMIT 10;
+```
+
+`CONTAINSALL` / `ALLINSIDE` may still apply a residual filter above the union when intersection semantics require it. See [operators](/docs/reference/query-language/language-primitives/operators) and [`EXPLAIN`](/docs/reference/query-language/statements/explain) to confirm the planner choice.
+
 ### Count index
 
 <Since v="v3.0.0" />
@@ -232,7 +249,7 @@ DEFINE INDEX userNameIndex ON TABLE user COLUMNS name FULLTEXT ANALYZER example_
 ```
 
 - `SEARCH` or `FULLTEXT`: By using the `SEARCH` keyword, you enable full-text search on the specified column.
-- `ANALYZER ascii`: Uses a custom [analyzer](/docs/reference/query-language/statements/define/analyzer) called `example_ascii` which uses the class tokenizier and `ascii` filter to analyzing the text input.
+- `ANALYZER ascii`: Uses a custom [analyzer](/docs/reference/query-language/statements/define/analyzer) called `example_ascii` which uses the class tokenizier and `ascii` filter to analysing the text input.
 - `BM25`: Ranking algorithm used for relevance scoring.
 - `HIGHLIGHTS`: Allows keyword highlighting in search results output when using the [`search::highlight`](/docs/reference/query-language/functions/database-functions/search#searchhighlight) function
 - `FIELDS`: a full-text search index can only be used on one field at a time. To use full-text search on more than one field, use a separate `DEFINE INDEX` statement for each one.
@@ -259,6 +276,10 @@ When defining a vector index with [HNSW](#hnsw-hierarchical-navigable-small-worl
 
 > [!NOTE]
 > In SurrealDB the default type for vectors is `F64`.
+
+<Since v="v3.1.0" />
+
+[DISKANN](#diskann-disk-based-approximate-nearest-neighbours) indexes accept a **narrower** set of element types: `F32`, `F16`, `I8`, and `U8` only, and only a subset of distance metrics — see the [DISKANN](#diskann-disk-based-approximate-nearest-neighbours) section below.
 
 For example, to define a vector index with 64-bit signed integers, you can use the following query:
 
@@ -302,6 +323,45 @@ Used to determine the maximum level ll for a new element during its insertion in
 <Since v="v3.0.0" />
 
 HNSW vector search uses a bounded memory cache by default, reducing memory spikes and improving stability under load. The default size for the cache is 256 MiB, and can be modified via the `SURREAL_HNSW_CACHE_SIZE` [environment variable](/docs/reference/cli/surrealdb-cli/environment-variables).
+
+### DISKANN (disk-based approximate nearest neighbours)
+
+<Since v="v3.1.0" />
+
+[DiskANN](https://arxiv.org/abs/1907.01668)-style indexes provide **on-disk** approximate nearest-neighbour graphs. They are aimed at **very large** embedding sets where keeping the full graph in RAM (as with HNSW) is impractical: vectors and graph structure are persisted in the key-value store and paged through a bounded cache, trading some latency for a much larger working set.
+
+> [!NOTE]
+> DISKANN indexes are **not supported on WASM** targets. Use HNSW or brute-force KNN for browser / embedded WASM builds.
+
+#### Syntax and defaults
+
+The clause mirrors HNSW: `DISKANN DIMENSION …` followed by optional `TYPE`, `DIST`, tuning knobs, and `HASHED_VECTOR`.
+
+```surql
+DEFINE INDEX diskann_pts ON pts FIELDS point DISKANN DIMENSION 4 DIST EUCLIDEAN TYPE F32;
+-- Same index with defaults written out explicitly:
+-- DEFINE INDEX diskann_pts ON pts FIELDS point DISKANN DIMENSION 4 DIST EUCLIDEAN TYPE F32 DEGREE 64 L_BUILD 100 ALPHA 1.2;
+```
+
+| Clause | Default | Notes |
+| --- | --- | --- |
+| `DIST` | `EUCLIDEAN` | Only `EUCLIDEAN`, `COSINE`, `INNER_PRODUCT`, and `COSINE_NORMALIZED` are valid for DISKANN. |
+| `TYPE` | `F32` | Must be one of `F32`, `F16`, `I8`, `U8`. `COSINE_NORMALIZED` further requires `F32` or `F16`. |
+| `DEGREE` | `64` | Target maximum graph degree (`> 0`). |
+| `L_BUILD` | `100` | Construction search-list size (`> 0`). |
+| `ALPHA` | `1.2` | DiskANN pruning parameter. |
+| `HASHED_VECTOR` | off | Same semantics as for HNSW — hash-stabilised vector–document keys. |
+
+Queries use the **same** KNN operator shape as HNSW: `<|K, EF|>` (approximate) or `<|K, DIST|>` when the distance matches the index, letting the optimiser pick the DISKANN graph. The second number in the approximate form bounds the dynamic candidate list during search (analogous to HNSW `EF`).
+
+#### Choosing HNSW or DISKANN
+
+| Concern | Prefer HNSW | Prefer DISKANN |
+| --- | --- | --- |
+| Working set size | Fits comfortably in memory with headroom for the HNSW cache | Much larger than RAM; cold data should stay on disk |
+| Latency profile | Lowest latency when the graph is hot in cache | Extra I/O; better for throughput to cost on huge corpora |
+| Vector element types | Full set (`F64` … `I16` in docs above) | Quantised-friendly types (`F32`, `F16`, `I8`, `U8`) |
+| Deployment target | Includes WASM | Server / native binaries only |
 
 ### Brute Force method
 
@@ -407,7 +467,7 @@ DEFINE INDEX OVERWRITE example ON example FIELDS example;
 
 <Since v="v2.0.0" />
 
-Building indexes can be lengthy and may time out before they're completed. Use the `CONCURRENTLY` option to build the index without blocking operations. The statement will return immediately, allowing you to monitor the index-building progress by executing the [INFO](/docs/reference/query-language/statements/info) statement.
+Building indexes can be lengthy and may time out before they're completed. Without `CONCURRENTLY`, `DEFINE INDEX` blocks until the index is fully built (or the build fails). The `CONCURRENTLY` clause can be used when you need the statement to return immediately while indexing continues in the background. This allows other operations to keep running while the index builds, during which you can monitor progress with [INFO FOR INDEX](/docs/reference/query-language/statements/info#index-information).
 
 ```surql
 -- Create an INDEX concurrently
