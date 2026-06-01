@@ -1,0 +1,79 @@
+---
+position: 3
+title: Transactions and isolation
+description: "How SurrealDB transactions work, the isolation guarantees they provide under concurrency, and what application developers should plan for."
+---
+
+# Transactions and isolation
+
+SurrealDB is ACID-compliant, meaning that work inside a transaction either commits as a whole or rolls back with no partial effect. This page describes the **isolation** guarantees that apply when many clients read and write at the same time, a part of ACID that is often left implicit in but matters when you design concurrent applications.
+
+For syntax and examples of manual multi-statement transactions, see [How transactions work](/docs/learn/querying/concepts-and-guides/transactions) and the [BEGIN](/docs/reference/query-language/statements/begin), [COMMIT](/docs/reference/query-language/statements/commit), and [CANCEL](/docs/reference/query-language/statements/cancel) statement references.
+
+## Snapshot isolation
+
+Every SurrealDB transaction runs under **snapshot isolation**. When a transaction starts, it sees a consistent point-in-time view of the database. That snapshot stays stable for the lifetime of the transaction, meaning that reads inside the transaction do not observe concurrent writes from other transactions until commit.
+
+SurrealDB does not offer weaker isolation levels. You cannot downgrade to read committed or read uncommitted.
+
+On commit, the engine checks for **write–write conflicts**. If two concurrent transactions modified the same key, the later commit fails with a transaction conflict error and must be retried. There is no silent last-writer-wins merge at the storage layer.
+
+These semantics apply across deployment models and storage backends: embedded and server, single-node and distributed, RocksDB, SurrealKV, SurrealMX, and browser IndexedDB. The query layer enforces the same isolation contract regardless of which engine persists the keys underneath.
+
+## What you get in practice
+
+Snapshot isolation with write–write conflict detection on commit gives you strong protection against the anomalies most application developers worry about:
+
+| Anomaly | Protected? | Notes |
+| --- | --- | --- |
+| Dirty reads | Yes | A transaction never reads uncommitted data from another transaction. |
+| Non-repeatable reads | Yes | Re-reading the same data inside a transaction returns the same values. |
+| Lost updates (same key) | Yes | Concurrent writes to the same key cannot both commit; one transaction must retry. |
+| Write skew | No | See [write skew](#write-skew) below. |
+
+In database terms, snapshot isolation sits between read committed and serialisable. It matches the default repeatable-read behaviour familiar from PostgreSQL and the default isolation level in MySQL (InnoDB `REPEATABLE READ`), with the important caveat that SurrealDB does not provide serialisable isolation.
+
+## Default and manual transactions
+
+By default, **each SurrealQL statement runs in its own transaction**. A single `CREATE`, `UPDATE`, or `SELECT` is atomic on its own.
+
+When several statements must succeed or fail together, they can be executed in a manual transaction:
+
+```surql
+BEGIN TRANSACTION;
+UPDATE account:one SET balance -= 100;
+UPDATE account:two SET balance += 100;
+COMMIT TRANSACTION;
+```
+
+If any statement in the transaction fails, or you [CANCEL](/docs/reference/query-language/statements/cancel), all changes in that transaction are rolled back. Use [THROW](/docs/reference/query-language/statements/throw) to abort a transaction when needed.
+
+Client SDKs expose the same model through transaction handles. See the transactions guide for your language under [SDKs](/docs/languages/overview).
+
+## Write–write conflicts and retries
+
+When a commit fails because another transaction wrote the same key first, SurrealDB returns a **transaction conflict** error. Your application (or client retry logic) should run the transaction again.
+
+This is normal under concurrent load, not a sign of data corruption. At scale, rising conflict rates show up in metrics such as `surrealdb_transaction_conflicts_total` — see [Observability](/docs/manage/observability/metrics) for monitoring guidance.
+
+Design tip: keep transactions short and touch the fewest keys necessary. Long-running transactions that overlap on hot keys see more conflicts.
+
+## Write skew
+
+Snapshot isolation does not prevent **write skew**. Write skew occurs when two transactions can each read overlapping state, make independent decisions, and both commit even though their combined effect breaks an invariant.
+
+An everyday example of write skew is one in which two doctors each check a schedule, see that only one shift is booked, and both book themselves. Each "transaction" read a consistent snapshot (the data in the schedule as of the last "write"), but together they overbooked the day.
+
+If write skew matters for your workload, encode the invariant inside the transaction with **explicit record-level guards**: read and update every record your rule depends on (for example, the shared counter or `schedule` record), or use conditional updates so a concurrent change causes the transaction to fail and retry.
+
+## ACID at a glance
+
+| Property | In SurrealDB |
+| --- | --- |
+| **Atomicity** | A transaction’s statements commit together or roll back together. |
+| **Consistency** | Schema, permissions, and statement semantics apply on every commit; you define business invariants in SurrealQL and application code. |
+| **Isolation** | Snapshot isolation on all storage backends; write–write conflicts abort on commit. |
+| **Durability** | Committed data persists according to your storage engine and sync settings — see [File-backed storage](/docs/running/file-backed) and [Deployment](/docs/build/deployment). |
+
+Some features deliberately step outside the triggering transaction’s ACID boundary — for example, [`ASYNC` events](/docs/reference/query-language/statements/define/event#async-events) run after commit in a separate transaction. Use them only when that trade-off is acceptable.
+
