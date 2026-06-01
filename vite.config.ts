@@ -9,10 +9,10 @@ import { viteDevRedirects } from "./plugins/vite-dev-redirects";
 
 loadEnvFile(".env.shared");
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
     base: "/docs",
     plugins: [
-        viteDevRedirects(),
+        viteDevRedirects(mode),
         vike(),
         react(),
         vikeContentCollectionPlugin({
@@ -79,4 +79,4 @@ export default defineConfig({
         port: 4321,
         host: true,
     },
-});
+}));
