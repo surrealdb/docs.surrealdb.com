@@ -1,315 +1,268 @@
 ---
 position: 2
 title: REST API
-description: "End-user HTTP endpoints grouped by surface."
+description: "End-user HTTP endpoints on the unified Spectron substrate."
 ---
 
 # REST API
 
-The Spectron REST API has two surfaces:
+Spectron exposes two HTTP surfaces from the **api** role:
 
-- **End-user API** (`/v1/{context_id}/...`) – session management, memory operations, knowledge retrieval. Authenticated with an agent or supervisor key.
-- **Management API** (`/api/v1/...`) – Context and key lifecycle. Authenticated with a management key. See [Management API](/docs/spectron/reference/management-api).
+| Surface | Prefix | Authentication |
+| --- | --- | --- |
+| **End-user API** | `/api/v1/{context_id}/...` | Context API key in the `API-KEY` header |
+| **Management API** | `/api/v1/...` (no context id in path) | Management key in the `API-KEY` header |
 
-All requests and responses use JSON unless noted. Authentication uses bearer tokens: `Authorization: Bearer <key>`.
+Both surfaces share the same host and port (default `http://localhost:9090`). **MCP** is served at `/mcp` on the same listener.
+
+See [Management API](/docs/spectron/reference/management-api) for Context and key lifecycle.
+
+## Authentication
+
+Every request must include your API key in the **`API-KEY`** header (no `Bearer` prefix):
+
+```http
+API-KEY: <your-key>
+```
+
+Optional idempotent writes accept:
+
+```http
+Idempotency-Key: <opaque-string>
+```
+
+The same key within 24 hours returns the stored response; a different body with the same key returns `409 Conflict`.
 
 ## Base URL
 
 ```
-https://<your-spectron-host>/v1/{context_id}
+https://<host>/api/v1/{context_id}
 ```
 
-Replace `{context_id}` with your Context identifier (e.g. `acme-prod`).
+Replace `{context_id}` with the identifier you chose at bootstrap (for example `dev` or `acme-prod`).
+
+## Unified verbs
+
+| Verb | Method and path | Purpose |
+| --- | --- | --- |
+| **Remember** | `POST /api/v1/{ctx}/facts` | Single fact or turn; `infer` controls extraction |
+| **Remember (bulk)** | `POST /api/v1/{ctx}/facts/batch` | Whole conversation in one request |
+| **Upload** | `POST /api/v1/{ctx}/documents` | Byte ingest; async parse → chunk → extract → embed |
+| **Recall** | `POST /api/v1/{ctx}/query` | Unified four-tier router over facts and passages |
+| **Chat** | `POST /api/v1/{ctx}/chat` | Spectron-as-agent (composed over facts + query + LLM) |
+
+Document-only retrieval remains under `POST /api/v1/{ctx}/documents/query`. Formatted prompt blocks use `POST /api/v1/{ctx}/context`.
 
 ---
 
-## Sessions
+## Facts (remember)
 
-### Create a session
+### Single fact
 
 ```http
-POST /v1/{context_id}/sessions
+POST /api/v1/{context_id}/facts
+API-KEY: <key>
 Content-Type: application/json
 
 {
-  "scope": { "org": "acme", "user": "alice" },
-  "metadata": { "source": "chat-ui", "channel": "web" }
+  "text": "King Charles III became head of state of the United Kingdom in September 2022.",
+  "infer": "full",
+  "scope": ["org=acme", "user=alice"]
 }
 ```
 
-**Response `201`:**
-```json
-{
-  "id": "sess_01HF...",
-  "scope": [{ "key": "org", "value": "acme" }, { "key": "user", "value": "alice" }],
-  "metadata": { "source": "chat-ui" },
-  "created_at": "2026-05-12T10:00:00Z"
-}
-```
+`infer` values: `full` (LLM extraction, default), `triples` (caller-supplied structured triples), `preview` (dry run), `none` (literal store).
 
-### Get a session
+### Batch conversation
+
+Preferred path for multi-turn ingest (replaces per-turn `POST .../sessions/{id}/turns` for new integrations):
 
 ```http
-GET /v1/{context_id}/sessions/{session_id}
-```
-
-### List sessions
-
-```http
-GET /v1/{context_id}/sessions?scope[org]=acme&limit=20
-```
-
-### Add a turn
-
-```http
-POST /v1/{context_id}/sessions/{session_id}/turns
+POST /api/v1/{context_id}/facts/batch
+API-KEY: <key>
 Content-Type: application/json
+Idempotency-Key: conv-01HF...
 
 {
-  "role": "user",
-  "content": "I was just promoted to CTO."
+  "messages": [
+    { "role": "user", "content": "I was just promoted to CTO.", "ts": "2026-05-12T10:00:00Z" },
+    { "role": "assistant", "content": "Congratulations!", "ts": "2026-05-12T10:00:05Z" }
+  ],
+  "scope": ["org=acme", "user=alice"],
+  "session_id": "sess_01HF..."
 }
 ```
 
-**Response `200`:** Returns the structured extraction diff – entities created or updated, attributes added or superseded, relations recorded, instructions captured, uncertainties flagged.
-
-```json
-{
-  "turn_id": "turn:01HF...",
-  "entities": [
-    { "id": ["Person", "alice"], "name": "Alice", "type": "Person", "action": "updated" }
-  ],
-  "attributes": [
-    {
-      "entity": ["Person", "alice"],
-      "key": "role",
-      "value": "CTO",
-      "action": "superseded",
-      "supersedes": { "value": "VP Engineering", "valid_until": "2026-05-12T10:01:00Z" }
-    }
-  ],
-  "relations": [],
-  "instructions": [],
-  "uncertainties": [],
-  "trace_id": "decision_trace:01HF..."
-}
-```
-
-### Close a session
-
-```http
-DELETE /v1/{context_id}/sessions/{session_id}
-```
-
-Closes the session. Memory extracted during the session is retained. Returns `204 No Content`.
+Returns a structured extraction diff (entities, attributes, relations, instructions, uncertainties) plus `trace_id`.
 
 ---
 
-## Memory operations
+## Sessions (episodic introspection)
 
-### Recall context
+Sessions remain for browsing transcripts and session-scoped state. **Writes** should prefer `/facts` or `/facts/batch`; `POST .../sessions/{session_id}/turns` still exists for compatibility but is not the recommended ingest path.
 
 ```http
-POST /v1/{context_id}/context
+POST   /api/v1/{context_id}/sessions
+GET    /api/v1/{context_id}/sessions/{session_id}
+DELETE /api/v1/{context_id}/sessions/{session_id}
+GET    /api/v1/{context_id}/sessions/{session_id}/turns
+GET    /api/v1/{context_id}/sessions/{session_id}/context
+```
+
+Create session body:
+
+```json
+{
+  "scope": ["org=acme", "user=alice"],
+  "metadata": { "source": "chat-ui" }
+}
+```
+
+---
+
+## Recall and context
+
+### Ranked hits (`/query`)
+
+```http
+POST /api/v1/{context_id}/query
 Content-Type: application/json
 
 {
   "query": "What is Alice's role?",
-  "scope": { "org": "acme", "user": "alice" },
-  "k": 10
+  "limit": 10,
+  "scope": ["org=acme", "user=alice"]
 }
 ```
 
-**Response `200`:**
-```json
-{
-  "context": "Alice – CTO at Acme Corp; previously VP Engineering (until May 2026).",
-  "tier": "direct",
-  "items": [
-    { "type": "attribute", "entity": "Person/alice", "key": "role", "value": "CTO", "score": 0.98 }
-  ],
-  "query_ms": 12,
-  "trace_id": "decision_trace:..."
-}
-```
+Response includes `tier` (`direct`, `cache`, `hybrid`, or `full_context`), `hits`, `query_ms`, and `trace_id`.
 
-The `tier` field indicates how the result was resolved: `direct` (exact attribute match), `cache` (semantic response cache hit), `hybrid` (vector + BM25 + graph retrieval), or `full_context` (LLM synthesis over the full scope).
-
-### Get structured state
+### Formatted context block (`/context`)
 
 ```http
-GET /v1/{context_id}/sessions/{session_id}/state
-```
-
-Or for a scope:
-
-```http
-POST /v1/{context_id}/state
-Content-Type: application/json
-
-{ "scope": { "org": "acme", "user": "alice" } }
-```
-
-Returns a complete snapshot of entities, attributes, relations, instructions, and uncertainties for the given scope.
-
-### Get state diff
-
-```http
-GET /v1/{context_id}/sessions/{session_id}/state/diff?since_turn={turn_id}
-```
-
-Returns what changed since the specified turn.
-
-### Get profile
-
-```http
-GET /v1/{context_id}/profile?scope[org]=acme&scope[user]=alice
-```
-
-Returns a structured profile suitable for injecting into a system prompt:
-
-```json
-{
-  "identity": [{ "key": "name", "value": "Alice" }, { "key": "role", "value": "CTO" }],
-  "knowledge": [{ "key": "editor", "value": "Neovim" }],
-  "context": [{ "key": "current_task", "value": "Reviewing Q3 roadmap" }],
-  "instructions": [{ "label": "tone", "description": "Concise and direct" }]
-}
-```
-
-### Reflect
-
-```http
-POST /v1/{context_id}/reflect
+POST /api/v1/{context_id}/context
 Content-Type: application/json
 
 {
-  "query": "What patterns emerged from support tickets this week?",
-  "scope": { "org": "acme", "project": "support" },
-  "persist": true
+  "query": "What is Alice's role?",
+  "limit": 10,
+  "scope": ["org=acme", "user=alice"]
 }
 ```
 
-`persist: true` requires a supervisor key. Stores the reflection output as new experiential memory attributes.
+Returns a string suitable for LLM system-prompt injection.
 
-### Forget
+### Chat (SSE optional)
 
 ```http
-POST /v1/{context_id}/forget
+POST /api/v1/{context_id}/chat
 Content-Type: application/json
 
 {
-  "query": "anything about Alice's previous role",
-  "scope": { "user": "alice" }
+  "message": "Summarise what you know about me",
+  "scope": ["org=acme", "user=alice"],
+  "session_id": "sess_01HF..."
 }
 ```
 
-Sets `valid_until` on matching attributes. Does not physically delete records.
+Use `Accept: text/event-stream` for streaming replies.
 
 ---
 
-## Knowledge
-
-### Upload a document
+## State, profile, entities
 
 ```http
-POST /v1/{context_id}/knowledge
-Content-Type: multipart/form-data
-
-file=@policy.pdf
-title=Returns Policy
-scope[org]=acme
+POST /api/v1/{context_id}/state
+GET  /api/v1/{context_id}/profile
+GET  /api/v1/{context_id}/entities
+GET  /api/v1/{context_id}/entities/{entity_type}/{entity_name}
+GET  /api/v1/{context_id}/entities/{entity_type}/{entity_name}/history/{key}
+DELETE /api/v1/{context_id}/entities/{entity_type}/{entity_name}
 ```
 
-Returns `202 Accepted` with the document ID and initial status.
+Tri-temporal reads accept `asOf`, `atInstant`, `validFrom`, and `validUntil` query parameters on entity GETs.
 
-### Get document status
+---
+
+## Reflection, lifecycle, maintenance
 
 ```http
-GET /v1/{context_id}/knowledge/{document_id}
+POST /api/v1/{context_id}/reflect
+POST /api/v1/{context_id}/forget
+POST /api/v1/{context_id}/lifecycle/expire
+POST /api/v1/{context_id}/lifecycle/decay
+POST /api/v1/{context_id}/elaborate
+POST /api/v1/{context_id}/consolidate
+POST /api/v1/{context_id}/fsck
 ```
 
-### Query knowledge
+`reflect` runs on-demand synthesis; `persist` on the body stores lower-trust derived facts when permitted by key type.
+
+---
+
+## Documents (upload)
 
 ```http
-POST /v1/{context_id}/knowledge/query
-Content-Type: application/json
-
-{
-  "query": "return window for unopened items",
-  "mode": "hybrid",
-  "k": 5,
-  "scope": { "org": "acme" }
-}
+POST   /api/v1/{context_id}/documents
+GET    /api/v1/{context_id}/documents
+GET    /api/v1/{context_id}/documents/{id}
+GET    /api/v1/{context_id}/documents/{id}/raw
+GET    /api/v1/{context_id}/documents/{id}/chunks
+DELETE /api/v1/{context_id}/documents/{id}
+POST   /api/v1/{context_id}/documents/query
+GET    /api/v1/{context_id}/documents/keywords
+POST   /api/v1/{context_id}/documents/recompute-links
 ```
 
-**Modes:** `vector`, `bm25`, `hybrid` (default), `hybrid_graph`.
+Upload uses `multipart/form-data`; processing is asynchronous via the job queue.
 
-### List documents
+---
+
+## Traces and audit
 
 ```http
-GET /v1/{context_id}/knowledge?status=ready&scope[org]=acme&limit=20
+GET /api/v1/{context_id}/traces
+GET /api/v1/{context_id}/traces/stats
+GET /api/v1/{context_id}/traces/{trace_id}
+GET /api/v1/{context_id}/inspect
+GET /api/v1/{context_id}/audit
 ```
 
-### Delete a document
+---
+
+## Scopes and principals
 
 ```http
-DELETE /v1/{context_id}/knowledge/{document_id}
+GET  /api/v1/{context_id}/scopes
+POST /api/v1/{context_id}/scopes
+POST /api/v1/{context_id}/scopes/forget
+POST /api/v1/{context_id}/scope-grants
+
+GET  /api/v1/{context_id}/principals
+POST /api/v1/{context_id}/principals
+GET  /api/v1/{context_id}/principals/{principal_id}/effective
 ```
 
-Removes the document, all its chunks, keyword edges, and the object-store bytes.
+See [Scope as security boundary](/docs/spectron/self-hosting/security/scope-as-security-boundary).
 
-### Knowledge nodes
+---
+
+## Health
 
 ```http
-GET    /v1/{context_id}/knowledge/nodes
-POST   /v1/{context_id}/knowledge/nodes/batch
-POST   /v1/{context_id}/knowledge/nodes/search
-GET    /v1/{context_id}/knowledge/nodes/{kind}/{slug}
-DELETE /v1/{context_id}/knowledge/nodes/{kind}/{slug}
+GET /api/v1/health
 ```
 
-See [Knowledge nodes](/docs/spectron/knowledge/ingestion/knowledge-nodes) for the batch upsert and search payload formats.
+Unauthenticated liveness check.
 
 ---
 
 ## Connectors
 
-```http
-POST   /v1/{context_id}/connectors
-PUT    /v1/{context_id}/connectors/{id}
-DELETE /v1/{context_id}/connectors/{id}
-POST   /v1/{context_id}/connectors/{id}/sync
-GET    /v1/{context_id}/connectors/{id}/status
-GET    /v1/{context_id}/connectors
-```
-
-See [Connectors overview](/docs/spectron/knowledge/connectors/overview) for payload formats.
+Not available yet. See [Connectors overview](/docs/spectron/knowledge/connectors/overview).
 
 ---
 
-## Entities (direct access)
+## Errors
 
-```http
-GET  /v1/{context_id}/entities/{type}/{name}
-PUT  /v1/{context_id}/entities/{type}/{name}
-GET  /v1/{context_id}/entities?type=Person&scope[org]=acme
-```
-
-### Attributes
-
-```http
-GET    /v1/{context_id}/entities/{type}/{name}/attributes
-POST   /v1/{context_id}/entities/{type}/{name}/attributes
-PATCH  /v1/{context_id}/entities/{type}/{name}/attributes/{key}
-```
-
----
-
-## Pagination
-
-List endpoints support cursor-based pagination via `cursor` and `limit` query parameters. Responses include `next_cursor` and `has_more` fields.
-
-## Error format
-
-All errors follow [RFC 7807 Problem Details](/docs/spectron/reference/errors).
+All errors follow [RFC 7807 problem details](/docs/spectron/reference/errors).
