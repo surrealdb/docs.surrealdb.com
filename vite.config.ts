@@ -4,7 +4,7 @@ import vike from "vike/plugin";
 import { vikeContentCollectionPlugin } from "vike-content-collection";
 import { vikeSitemap } from "vike-sitemap-generator";
 import { defineConfig } from "vite";
-
+import { vercel } from "vite-plugin-vercel/vite";
 import { viteDevRedirects } from "./plugins/vite-dev-redirects";
 
 loadEnvFile(".env.shared");
@@ -15,6 +15,7 @@ export default defineConfig(({ mode }) => ({
         viteDevRedirects(mode),
         vike(),
         react(),
+        vercel(),
         vikeContentCollectionPlugin({
             contentDir: "src/content",
             lastModified: true,
