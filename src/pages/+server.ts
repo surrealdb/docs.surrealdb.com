@@ -1,11 +1,11 @@
-import vike from "@vikejs/hono";
+import vike, { type App } from "@vikejs/hono";
 import { Hono } from "hono";
 import type { Server } from "vike/types";
 
 const BASE = "/docs";
 
 const app = new Hono();
-vike(app);
+vike(app as unknown as App);
 
 const honoFetch = app.fetch.bind(app);
 
