@@ -10,72 +10,79 @@ import { viteDevRedirects } from "./plugins/vite-dev-redirects";
 loadEnvFile(".env.shared");
 
 export default defineConfig(({ mode }) => ({
-    base: "/docs",
-    plugins: [
-        viteDevRedirects(mode),
-        vike(),
-        react(),
-        vercel(),
-        vikeContentCollectionPlugin({
-            contentDir: "src/content",
-            lastModified: true,
-            drafts: {
-                field: "draft",
-                includeDrafts: false,
-            },
-        }),
-        vikeSitemap({
-            baseUrl: "https://surrealdb.com/docs",
-            robots: true,
-            priority: (url, { urls }) => {
-                if (url === "/") return 1.0;
+	base: "/docs",
+	plugins: [
+		viteDevRedirects(mode),
+		vike(),
+		react(),
+		vercel(),
+		vikeContentCollectionPlugin({
+			contentDir: "src/content",
+			lastModified: true,
+			drafts: {
+				field: "draft",
+				includeDrafts: false,
+			},
+		}),
+		vikeSitemap({
+			baseUrl: "https://surrealdb.com/docs",
+			robots: true,
+			priority: (url, { urls }) => {
+				if (url === "/") return 1.0;
 
-                const hasChildren = urls.some((u) => u !== url && u.startsWith(`${url}/`));
+				const hasChildren = urls.some((u) => u !== url && u.startsWith(`${url}/`));
 
-                if (/^\/surrealdb(\/|$)/.test(url)) return hasChildren ? 0.9 : 0.8;
-                if (/^\/surrealql(\/|$)/.test(url)) return hasChildren ? 0.9 : 0.8;
-                if (/^\/sdk\//.test(url)) return hasChildren ? 0.8 : 0.7;
-                if (/^\/\d+\.x\/sdk\//.test(url)) return 0.4;
+				if (/^\/surrealdb(\/|$)/.test(url)) return hasChildren ? 0.9 : 0.8;
+				if (/^\/surrealql(\/|$)/.test(url)) return hasChildren ? 0.9 : 0.8;
+				if (/^\/sdk\//.test(url)) return hasChildren ? 0.8 : 0.7;
+				if (/^\/\d+\.x\/sdk\//.test(url)) return 0.4;
 
-                return hasChildren ? 0.7 : 0.6;
-            },
-            changefreq: [
-                { match: "/", changefreq: "weekly" },
-                { match: /^\/surrealdb/, changefreq: "weekly" },
-                { match: /^\/surrealql/, changefreq: "weekly" },
-                { match: /^\/sdk\//, changefreq: "weekly" },
-                { match: /^\/cloud/, changefreq: "weekly" },
-                { match: /^\/\d+\.x\//, changefreq: "weekly" },
-            ],
-            exclude: [/^\/404$/, /^\/500$/],
-            trailingSlash: false,
-        }),
-    ],
-    resolve: {
-        dedupe: ["react", "react-dom", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
-        tsconfigPaths: true,
-    },
-    build: {
-        sourcemap: true,
-        minify: true,
-        cssMinify: true,
-    },
-    ssr: {
-        noExternal: ["@surrealdb/ui", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
-        external: ["vike-content-collection"],
-    },
-    css: {
-        modules: {
-            localsConvention: "dashesOnly" as const,
-        },
-        preprocessorOptions: {
-            scss: {
-                additionalData: "@use '@surrealdb/ui/mixins' as *;",
-            },
-        },
-    },
-    server: {
-        port: 4321,
-        host: true,
-    },
+				return hasChildren ? 0.7 : 0.6;
+			},
+			changefreq: [
+				{ match: "/", changefreq: "weekly" },
+				{ match: /^\/surrealdb/, changefreq: "weekly" },
+				{ match: /^\/surrealql/, changefreq: "weekly" },
+				{ match: /^\/sdk\//, changefreq: "weekly" },
+				{ match: /^\/cloud/, changefreq: "weekly" },
+				{ match: /^\/\d+\.x\//, changefreq: "weekly" },
+			],
+			exclude: [/^\/404$/, /^\/500$/],
+			trailingSlash: false,
+		}),
+	],
+	resolve: {
+		dedupe: ["react", "react-dom", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
+		tsconfigPaths: true,
+	},
+	build: {
+		sourcemap: true,
+		minify: true,
+		cssMinify: true,
+	},
+	ssr: {
+		noExternal: ["@surrealdb/ui", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
+		external: ["vike-content-collection"],
+	},
+	environments: {
+		vercel_node: {
+			resolve: {
+				noExternal: ["@surrealdb/ui", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
+			},
+		},
+	},
+	css: {
+		modules: {
+			localsConvention: "dashesOnly" as const,
+		},
+		preprocessorOptions: {
+			scss: {
+				additionalData: "@use '@surrealdb/ui/mixins' as *;",
+			},
+		},
+	},
+	server: {
+		port: 4321,
+		host: true,
+	},
 }));
