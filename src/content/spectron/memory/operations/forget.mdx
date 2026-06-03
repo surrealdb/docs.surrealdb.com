@@ -1,112 +1,109 @@
 ---
 position: 3
 title: Forgetting memories
-description: "How to soft-delete memories by natural-language query or by entity."
+description: "How to retire or permanently erase memories — default forget, purge, and scoped erasure."
 ---
 
 # Forgetting memories
 
-Spectron uses soft deletion rather than hard deletion for memory records. When you forget something, the record is not removed from the database – its `valid_until` timestamp is set to the current time, which excludes it from all future retrieval. The original data remains in place for audit, provenance tracing, and point-in-time queries.
+Spectron distinguishes **retiring** memory (the agent stops using it) from **erasing** memory (the content is removed for compliance). Most day-to-day use is retirement; erasure is explicit and grant-gated.
 
-This design reflects the temporal nature of memory: facts do not cease to have existed, they cease to be currently valid.
+All forget operations require the **`forget`** grant on the caller’s API key for the relevant scope. Keys with only read/write access cannot forget.
 
-## Semantic forget
+## Semantic forget (default — retire, do not erase)
 
-The most natural way to remove memory is with a natural-language statement. Spectron runs a similarity search against the attribute store, identifies the attributes that match your description, and sets `valid_until = now()` on each match.
+Describe what to remove in natural language. Spectron finds matching entities, facts, relations, and conversational chunks by semantic similarity, then **expires** them. Expired memory:
 
-```python
-deleted = await memory.forget(
-    "anything about my old job",
-    scope={"org": "acme", "user": "alice"},
-)
-
-print(deleted.count)   # number of attributes soft-deleted
-print(deleted.matched) # list of matched attribute summaries
-```
-
-```typescript
-import { Spectron } from "@spectron/sdk";
-
-const client = new Spectron({ apiKey: "sk-..." });
-const memory = client.memory({ contextId: "ctx_01jt4kx..." });
-
-const deleted = await memory.forget("anything about my old job", {
-    scope: { org: "acme", user: "alice" },
-});
-
-console.log(deleted.count);
-console.log(deleted.matched);
-```
-
-### REST
+- Does **not** appear in **`/query`**, **`/profile`**, **`/state`**, or chat context going forward.
+- **Does** remain in storage so you can audit what was retired and when, or review point-in-time history.
 
 ```http
 POST /api/v1/{context_id}/forget
 Content-Type: application/json
+API-KEY: sk-...
 
 {
-  "query": "anything about my old job",
-  "scope": { "org": "acme", "user": "alice" }
+  "query": "anything about my old job"
 }
 ```
 
 ```json
 {
-  "count": 3,
-  "matched": [
-    { "entity": "entity:[\"Person\", \"alice_chen\"]", "key": "previous_employer", "value": "StartupCo" },
-    { "entity": "entity:[\"Person\", \"alice_chen\"]", "key": "previous_role", "value": "Staff Engineer" },
-    { "entity": "entity:[\"Person\", \"alice_chen\"]", "key": "years_at_previous_employer", "value": "4" }
-  ]
+  "deleted": 3
 }
 ```
 
-The `matched` list lets you confirm what was affected before proceeding. If the results are not what you expected, you can inspect the matched attributes and refine your query. The soft-delete is immediate – there is no dry-run mode – but if you need to reverse it, a management-tier principal can clear the `valid_until` value to restore the attributes.
+The response counts how many records were expired. Scope is enforced by the API key’s grants — you cannot forget outside the scopes your key is allowed to write (and forget) within.
 
-## Surgical entity delete
-
-To target a specific entity precisely, use the entities delete method:
-
-```python
-await memory.entities.delete("Person", "christian_battaglia")
+```bash
+spectron forget "anything about my old job" \
+  --url "$SPECTRON_URL" --api-key "$SPECTRON_API_KEY" --context-id "$SPECTRON_CONTEXT_ID"
 ```
 
-```typescript
-await memory.entities.delete({ type: "Person", name: "christian_battaglia" });
-```
+## Entity delete (default — retire one entity)
 
-### REST
+To target a specific entity by type and name:
 
 ```http
-DELETE /api/v1/{context_id}/entities/{type}/{name}
+DELETE /api/v1/{context_id}/entities/{entity_type}/{entity_name}
 ```
 
-This soft-deletes the entity and all its attributes by setting `valid_until = now()` on each record. It does not delete the entity from the database – it expires it. Subsequent retrieval queries will not surface any attribute belonging to that entity.
+This expires the entity and its active facts and relations. Like semantic forget, it is a **soft** retirement by default — the entity no longer surfaces in retrieval, but the retired records remain stored.
 
-## What soft-delete preserves
+## Purge — permanent erasure (compliance)
 
-Setting `valid_until` rather than deleting records preserves several important properties:
+When you must guarantee that content no longer exists in the memory substrate — for example a **right-to-erasure** request — use the same **`POST /forget`** endpoint with **`purge: true`**, or the CLI **`--purge`** flag.
 
-**Temporal validity**: Spectron supports point-in-time queries. A record with `valid_until = 2026-05-12T10:00:00Z` was true up to that timestamp and false thereafter. This distinction matters for audit trails and for understanding how an agent's knowledge evolved over time.
+```http
+POST /api/v1/{context_id}/forget
+Content-Type: application/json
+API-KEY: sk-...
 
-**Provenance**: Every attribute carries a `source_turn` reference. If you need to understand why an agent behaved a certain way in a past session, the source data is still present even after the attribute has been logically expired.
+{
+  "query": "anything about my old job",
+  "purge": true
+}
+```
 
-**Instruction history**: Instructions given by users are stored with an `active` boolean. Deactivating an instruction (which is what forget does when it matches an instruction record) preserves the fact that the user issued it, for how long it was active, and when it was revoked.
+With **`purge: true`**, Spectron permanently removes the matched entities, their fact history (including prior corrections), related relations, and linked conversational chunks. After a successful purge, that content is not recoverable from memory storage.
 
-## Forget versus purge
+**Audit note:** the trace graph may still record that a forget call occurred (who, when, which operation) without retaining the deleted content itself. Plan your compliance story around both memory erasure and trace retention policies.
 
-Soft-delete is available to any principal with write access to the relevant scope. **Hard deletion** – physically removing records from the database – is a management-tier operation only, available through the management API.
+Purging is **opt-in**. Omitting **`purge`** (or setting it to **`false`**) keeps supersession history even after the current values are expired — the default path for ordinary agent memory management.
 
-| Operation | Who can perform it | What it does |
-|---|---|---|
-| `memory.forget()` | Any write-scoped principal | Sets `valid_until` on matched attributes |
-| `entities.delete()` | Any write-scoped principal | Sets `valid_until` on entity and all its attributes |
-| Management purge | Management principal only | Permanently removes records from the database |
+## Scoped forget — erase a whole subtree
 
-The management purge is intended for compliance use cases (right-to-erasure requests, data retention enforcement) where you need to guarantee that the data no longer exists anywhere in the system. For ordinary agent memory management, soft-delete is always sufficient.
+To remove **everything** tagged under a scope path (a user branch, team, or project subtree), use:
 
-## How forget interacts with extraction
+```http
+POST /api/v1/{context_id}/scopes/forget
+Content-Type: application/json
+API-KEY: sk-...
 
-If a turn is added to a session after a forget operation, and the turn contains information that matches what was forgotten, the extraction pipeline will create new attributes for the new information. Forget operates on the current state of the attribute store – it does not prevent future extraction of similar content.
+{
+  "path": "user/alice/"
+}
+```
 
-For example, if you forget "my old job" and then a subsequent turn includes "I used to work at StartupCo", the extraction pipeline will re-extract that fact and store it as a new attribute with a fresh `valid_from` timestamp.
+This **hard-deletes** all memory and knowledge records whose scope touches that subtree — entities, facts, sessions, documents, chunks, and related index state. It requires the **`forget`** grant over that subtree. The response reports how many rows were erased.
+
+Use scoped forget for GDPR-style deletion when a principal’s entire branch must go, not just a single fact.
+
+## Choosing the right operation
+
+| Goal | Operation | Erases from storage? |
+| --- | --- | --- |
+| Agent should stop mentioning something | **`POST /forget`** (default) or **`DELETE /entities/...`** | No — expired, still auditable |
+| User’s erasure request for specific topics | **`POST /forget`** with **`purge: true`** | Yes — matched content removed |
+| Delete everything for a user/team scope | **`POST /scopes/forget`** | Yes — entire subtree removed |
+
+## After forget — extraction can bring facts back
+
+Forget operates on what is stored **now**. If a later conversation turn mentions the same information again, extraction may create **new** memory for it. If you need a topic to stay gone, combine forget with product-level controls (do not re-ingest, block the source, or purge again).
+
+## Related reading
+
+- [Reconciliation and supersession](/docs/spectron/memory/reasoning-model/reconciliation-and-supersession) — why corrections keep history by default
+- [Tri-temporal model](/docs/spectron/architecture/tri-temporal-model) — time-travel and belief history
+- [Scope as security boundary](/docs/spectron/self-hosting/security/scope-as-security-boundary) — **`forget`** grants
+- [REST API](/docs/spectron/reference/rest-api)
