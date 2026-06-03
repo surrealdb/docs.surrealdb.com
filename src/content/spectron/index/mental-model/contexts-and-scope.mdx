@@ -1,0 +1,130 @@
+---
+position: 2
+title: Contexts and scope
+description: "How Contexts isolate tenants and how scope tags partition memory within a Context."
+---
+
+# Contexts and scope
+
+Spectron uses two complementary mechanisms:
+
+- **Contexts** — hard isolation between separate products or deployments (each with its own database and keys).
+- **Scope** — tags on memory **records** that partition data within a Context (org, user, project, and so on).
+
+**Scope is not the same as permissions.** Scope says *which bucket a fact belongs to*. [Principals and grants](/docs/spectron/self-hosting/security/principals) say *who may read or write* at which scope paths. Together they define what each caller can trust to see. A principal may **delegate** grants to another principal, but only up to what they already hold — you cannot grant access you do not have.
+
+## Contexts
+
+A **Context** is the fundamental unit of isolation. Each Context maps to its own SurrealDB `(namespace, database)` pair holding documents, turns, entities, traces, and configuration. Nothing crosses Context boundaries.
+
+Typical reasons for separate Contexts:
+
+- Separate products with no shared memory
+- Distinct business units
+- Test versus production environments
+
+Contexts are created through the management API:
+
+```http
+POST /api/v1/contexts/{context_id}
+Content-Type: application/json
+
+{
+  "namespace": "acme",
+  "database": "prod",
+  "description": "Customer support agent for Acme Corp"
+}
+```
+
+API keys are issued **per Context** — a key for `acme-prod` cannot access another Context.
+
+## Scope tags (data partitioning)
+
+Within a Context, every memory record carries **scope tags** — arbitrary key-value pairs describing where the fact belongs:
+
+```json
+{ "org": "acme", "user": "alice", "project": "checkout" }
+```
+
+You choose dimensions that match your app: `org`, `user`, `team`, `project`, `region`, `env`, and so on.
+
+### Subset matching
+
+Recall uses **subset matching**: a record is visible when its tags are contained in the query scope.
+
+```
+record scope ⊆ query scope → accessible
+```
+
+**⊆** means “is contained in” — every tag on the record must appear on the query with the same value. Extra tags on the query are fine.
+
+| Record scope | Query scope | Accessible? |
+| --- | --- | --- |
+| `{}` | `{org: "acme", user: "alice"}` | Yes – empty scope matches any query |
+| `{org: "acme"}` | `{org: "acme", user: "alice"}` | Yes – `{org}` ⊆ `{org, user}` |
+| `{org: "acme", user: "alice"}` | `{org: "acme"}` | No – user-specific memory hidden from org-only query |
+| `{org: "acme", user: "alice"}` | `{org: "acme", user: "alice"}` | Yes – equal |
+| `{org: "other"}` | `{org: "acme", user: "alice"}` | No – different org |
+
+Org-wide facts (scoped only to `{org: "acme"}`) appear in user-level queries; user-specific facts do not appear in org-only queries.
+
+### Example queries
+
+**As a specific user:**
+
+```json
+{ "scope": ["org=acme", "user=alice"] }
+```
+
+Matches records tagged `{}`, `{org}`, `{user}`, or `{org, user}`.
+
+**At org level:**
+
+```json
+{ "scope": ["org=acme"] }
+```
+
+Matches `{}` or `{org}` only — not Alice’s private preferences.
+
+## Permissions and delegation
+
+Scope tags partition **data**. **Grants** partition **access**:
+
+- A principal receives verbs (`read`, `write`, `grant`, …) on a scope path.
+- Granting to someone else can only convey **part or all of what you already have** — not broader access.
+- API keys bind a principal to a scope **floor**; the server clamps requests that try to escalate.
+
+See [Scope as security boundary](/docs/spectron/self-hosting/security/scope-as-security-boundary) and [API keys and delegation](/docs/spectron/self-hosting/security/api-keys-and-delegation).
+
+## Geographic scope
+
+Scope dimensions can include **geometry** (points, polygons) for territory-based partitioning — e.g. a service region polygon. Spatial predicates compose with semantic and graph signals in the same [ranker](/docs/spectron/architecture/coherence-retrieval-and-tiers).
+
+## Use cases
+
+**Multi-tenancy:** One Context, one API key per customer org scoped to `{org: "<id>"}`.
+
+**Per-user isolation:** Tag interactions with `user: "<id>"` so personal memory stays private unless the query includes that user.
+
+**Shared org knowledge:** Tag policies with `{org: "acme"}` only; tag personal notes with `{org: "acme", user: "alice"}`.
+
+**Project context:** Add `project` so project-specific instructions surface only in that project’s scope.
+
+## Labels, lens, and scope views (reads)
+
+Recall and context endpoints accept optional parameters beyond flat scope tags:
+
+- **`labels`** — descriptive `key=value` tags (for example `subject=alice`) that **filter** results within what scope and permissions already allow. Labels help you find facts *about* something; they do not grant access by themselves.
+- **`lens`** — hierarchical scope paths that narrow which region of memory a query considers.
+- **`scope_view`** — controls how broadly results are folded **within** the caller’s grant:
+  - **`strict`** (default) — the caller’s own read region only.
+  - **`crossTeam`** — also includes facts shared inbound from other principals where shared-read grants exist.
+  - **`merged`** — intended to fold in same-fact records stored at narrower scopes while preserving provenance. Accepted on the wire; behaviour may still match `strict` until fully enabled.
+
+None of these widen past a principal’s grant. See [REST API](/docs/spectron/reference/rest-api) for `/query` and `/context` request fields.
+
+## Related reading
+
+- [Scope as security boundary](/docs/spectron/self-hosting/security/scope-as-security-boundary)
+- [API keys and delegation](/docs/spectron/self-hosting/security/api-keys-and-delegation)
+- [Principals](/docs/spectron/self-hosting/security/principals)
