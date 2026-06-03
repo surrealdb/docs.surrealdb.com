@@ -21,7 +21,10 @@ Create a `compose.yaml` file in a new directory:
 services:
   surrealdb:
     image: surrealdb/surrealdb:latest
-    command: start --log info --user root --pass root file:/data/surreal.db
+    working_dir: /data
+    environment:
+      SURREAL_PATH: rocksdb://surrealdb
+    command: start --log info --user root --pass secret
     volumes:
       - surrealdb-data:/data
     ports:
@@ -56,6 +59,33 @@ volumes:
   surrealdb-data:
   spectron-objects:
 ```
+
+## Storage paths
+
+The compose file uses two different path schemes for **two different systems**:
+
+| Setting | Used by | Purpose |
+| --- | --- | --- |
+| `working_dir: /data` + `SURREAL_PATH: rocksdb://surrealdb` | **SurrealDB** | On-disk database files. **`working_dir` must match the volume mount** (`/data` here). RocksDB creates a **`surrealdb` directory** inside that mount — not a single `.db` file. |
+| `file:///var/docs/spectron/objects` | **Spectron** (`SPECTRON_OBJECT_STORE_URL`) | Object store for uploaded document originals. Unrelated to SurrealDB's database path. |
+
+Spectron connects to the running SurrealDB server over **`ws://surrealdb:8000`** — a network client URL, not a storage path.
+
+### Troubleshooting: “read-only filesystem” or RocksDB directory errors
+
+SurrealDB path slashes are easy to mistype. The form **`rocksdb://…`** (two slashes) is **relative to `working_dir`**. Forms like **`rocksdb:/…`** or **`rocksdb:///…`** are **absolute** paths on the container filesystem.
+
+If you see *Failed to create RocksDB directory* or a read-only filesystem error, you may have accidentally used an absolute path (often by dropping a slash from `rocksdb://` → `rocksdb:/…`), so SurrealDB tries to write under `/` instead of your mounted volume.
+
+| Path | Meaning |
+| --- | --- |
+| `rocksdb://surrealdb` with `working_dir: /data` | Database at **`/data/surrealdb`** (this compose file) |
+| `rocksdb:/data/surrealdb` | Absolute **`/data/surrealdb`** (works if `/data` is mounted, but easier to typo) |
+| `rocksdb:/surrealdb` | Absolute **`/surrealdb`** at filesystem root — usually fails with permission or read-only errors |
+
+Keep **`working_dir` and the volume mount in sync**. If you change the mount from `/data` to something else, update `working_dir` to match.
+
+See [SurrealDB file-backed storage](https://surrealdb.com/docs/running/file-backed) for the full path rules.
 
 ## Environment file
 
@@ -197,7 +227,6 @@ SurrealDB should be upgraded separately. Follow SurrealDB's upgrade guide before
 The configuration above is suitable for development and small internal deployments. For production, review the following before going live:
 
 - Replace `file:///var/docs/spectron/objects` with an S3 or GCS URL so object storage is not tied to the container's local filesystem.
-- Run SurrealDB in clustered mode (TiKV-backed) or use SurrealDB Cloud for high availability.
 - Place Spectron behind a TLS-terminating reverse proxy (Nginx, Caddy, or a cloud load balancer).
 - Store all secrets in a secrets manager rather than a plain `.env` file.
 - Set `SPECTRON_MAX_UPLOAD_BYTES` to match your upload policy.
