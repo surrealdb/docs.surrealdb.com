@@ -26,7 +26,14 @@ export class FileCache {
         }
 
         const freshValue = await getFreshValue();
-        await this.write(key, freshValue);
+
+        // Write failures (e.g. read-only filesystem in serverless environments)
+        // are non-fatal — the fresh value is returned regardless.
+        try {
+            await this.write(key, freshValue);
+        } catch {
+            // intentionally ignored
+        }
 
         return freshValue;
     }
@@ -81,10 +88,13 @@ export class FileCache {
 
         const moduleDirectory = dirname(fileURLToPath(import.meta.url));
         const projectRoot = resolve(moduleDirectory, "../..");
+
+        // On Vercel the function directory is read-only; /tmp is the only
+        // writable location available at runtime.
         const baseDirectory =
             process.env.GITHUB_WORKSPACE ??
             process.env.INIT_CWD ??
-            (process.cwd() === "/" ? projectRoot : process.cwd());
+            (process.env.VERCEL ? "/tmp" : process.cwd() === "/" ? projectRoot : process.cwd());
 
         return resolve(baseDirectory, this.cacheDirectoryName);
     }

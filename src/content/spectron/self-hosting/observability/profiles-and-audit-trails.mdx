@@ -1,0 +1,84 @@
+---
+position: 2
+title: Profiles and audit trails
+description: "Provenance, traces, and operational audit events."
+---
+
+# Profiles and audit trails
+
+Spectron provides an audit story by linking memory back to principals, sessions, and turns — and by recording reads, writes, and denials in queryable substrate state.
+
+## Provenance chain
+
+Every entity, attribute, relation, instruction, and uncertainty carries provenance — where it came from, which turn or document produced it, and how trusted the source is. In practice you can always ask:
+
+> “Why does the system believe X?” → attribute → source turn or document → session → scope + API key
+
+See [Provenance and traceability](/docs/spectron/mental-model/provenance-and-traceability) for the `source` object fields.
+
+## Three trace kinds
+
+| Kind | When | Audit value |
+| --- | --- | --- |
+| **`decision_trace`** | Reconciliation on ingest or derived writes | What was extracted, superseded, or flagged uncertain; which principal acted (and any **on-behalf-of** target) |
+| **`retrieval_trace`** | Ranked reads (`/query`, `/context`, …) | Which candidates were considered, fused scores, and what was returned |
+| **`response_trace`** | `/chat` and `/reflect` | Prompt assembly, model response, token cost; **`reused_from`** when a prior answer was reused |
+
+Trace listing is scope-gated like memory reads: **`manage`** holders see all traces; other callers see traces within their read grant. See [Tracing](/docs/spectron/self-hosting/observability/tracing).
+
+## Operational audit events
+
+Alongside the trace graph, Spectron emits structured audit events for:
+
+- Read operations and administrative actions traces do not fully describe on their own
+- Destructive operations such as **`forget`**
+- Scope-vocabulary registration and deletion
+- Background jobs (decay, elaboration, consolidation, garbage collection)
+- **Denied** authorisation — every refused read or write is recorded so “access blocked” is distinguishable from “no matching data”
+
+Wire these events into your SIEM or log pipeline for long-term retention beyond trace table pruning.
+
+## Attribute history API
+
+```http
+GET /api/v1/{context_id}/entities/{type}/{name}/attributes/{key}/history
+```
+
+Returns the supersession chain for an attribute — current value, prior values, and the turns or documents that caused each change.
+
+## Key-level activity
+
+Each API key records **`last_used_at`** on every authenticated request. For write-heavy auditing, query **`decision_trace`** records by principal or session scope. For read auditing, use **`retrieval_trace`** listing or exported audit events.
+
+```surql
+-- Recent reconciliation activity in a tenant scope
+SELECT *
+FROM decision_trace
+WHERE scope.org = "acme"
+  AND created_at > time::now() - 7d
+ORDER BY created_at DESC
+LIMIT 100;
+```
+
+## Compliance use cases
+
+**Right to erasure (GDPR Article 17):** Use **`forget`** for targeted removal; confirm no current attributes remain at the user’s scope. Supersession history may be retained unless you pass a purge flag where policy allows.
+
+**Data lineage:** Follow provenance from any attribute to the originating turn content or document chunk.
+
+**Access reviews:** Combine trace listing (who retrieved what), decision traces (who wrote what), and denied-authorisation audit events (who was blocked).
+
+## Exporting audit data
+
+Export trace tables from SurrealDB before retention pruning:
+
+```bash
+surreal export \
+  --conn ws://localhost:8000 \
+  --user root --pass secret \
+  --ns spectron_acme --db prod \
+  --table decision_trace \
+  audit-export-$(date +%Y%m%d).ndjson
+```
+
+Schedule regular exports if your compliance window exceeds per-Context trace retention defaults.

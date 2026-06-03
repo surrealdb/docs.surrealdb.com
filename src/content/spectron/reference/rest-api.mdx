@@ -1,0 +1,302 @@
+---
+position: 2
+title: REST API
+description: "End-user HTTP endpoints on the unified Spectron substrate."
+---
+
+# REST API
+
+Spectron exposes two HTTP surfaces from the **api** role:
+
+| Surface | Prefix | Authentication |
+| --- | --- | --- |
+| **End-user API** | `/api/v1/{context_id}/...` | Context API key in the `API-KEY` header |
+| **Management API** | `/api/v1/...` (no context id in path) | Management key in the `API-KEY` header |
+
+Both surfaces share the same host and port (default `http://localhost:9090`). **MCP** is served at `/mcp` on the same listener.
+
+See [Management API](/docs/spectron/reference/management-api) for Context and key lifecycle.
+
+## Authentication
+
+Every request must include your API key in the **`API-KEY`** header (no `Bearer` prefix):
+
+```http
+API-KEY: <your-key>
+```
+
+Optional idempotent writes accept:
+
+```http
+Idempotency-Key: <opaque-string>
+```
+
+Optional **delegated identity** on a single request (depth 1, intersected with the target principal’s grants):
+
+```http
+X-Spectron-On-Behalf-Of: <principal-id>
+```
+
+Use this when an agent acts for another principal — for example a supervisor tool calling on behalf of a user. The effective authority is always the **intersection** of the caller’s key, the caller’s grants, and the target’s grants; delegation cannot widen access.
+
+The same `Idempotency-Key` within 24 hours returns the stored response; a different body with the same key returns `409 Conflict`.
+
+## Base URL
+
+```
+https://<host>/api/v1/{context_id}
+```
+
+Replace `{context_id}` with the identifier you chose at bootstrap (for example `dev` or `acme-prod`).
+
+## Unified verbs
+
+| Verb | Method and path | Purpose |
+| --- | --- | --- |
+| **Remember** | `POST /api/v1/{ctx}/facts` | Single fact or turn; `infer` controls extraction |
+| **Remember (bulk)** | `POST /api/v1/{ctx}/facts/batch` | Whole conversation in one request |
+| **Upload** | `POST /api/v1/{ctx}/documents` | Byte ingest; async parse → chunk → extract → embed |
+| **Recall** | `POST /api/v1/{ctx}/query` | Unified four-tier router over facts and passages |
+| **Chat** | `POST /api/v1/{ctx}/chat` | Spectron-as-agent (composed over facts + query + LLM) |
+
+Document-only retrieval remains under `POST /api/v1/{ctx}/documents/query`. Formatted prompt blocks use `POST /api/v1/{ctx}/context`.
+
+---
+
+## Facts (remember)
+
+### Single fact
+
+```http
+POST /api/v1/{context_id}/facts
+API-KEY: <key>
+Content-Type: application/json
+
+{
+  "text": "King Charles III became head of state of the United Kingdom in September 2022.",
+  "infer": "full",
+  "scope": ["org=acme", "user=alice"]
+}
+```
+
+`infer` values: `full` (LLM extraction, default), `triples` (caller-supplied structured triples), `preview` (dry run), `none` (literal store).
+
+When supplying triples or structured entities, `memory_category` on entities, attributes, and relations must be one of **`identity`**, **`knowledge`**, or **`context`**. Invalid values are rejected with `400 Bad Request`. Instructions and uncertainties use their own tables; episodic material lives on sessions and turns.
+
+### Batch conversation
+
+Preferred path for multi-turn ingest (replaces per-turn `POST .../sessions/{id}/turns` for new integrations):
+
+```http
+POST /api/v1/{context_id}/facts/batch
+API-KEY: <key>
+Content-Type: application/json
+Idempotency-Key: conv-01HF...
+
+{
+  "messages": [
+    { "role": "user", "content": "I was just promoted to CTO.", "ts": "2026-05-12T10:00:00Z" },
+    { "role": "assistant", "content": "Congratulations!", "ts": "2026-05-12T10:00:05Z" }
+  ],
+  "scope": ["org=acme", "user=alice"],
+  "session_id": "sess_01HF..."
+}
+```
+
+Returns a structured extraction diff (entities, attributes, relations, instructions, uncertainties) plus `trace_id`.
+
+---
+
+## Sessions (episodic introspection)
+
+Sessions remain for browsing transcripts and session-scoped state. **Writes** should use `/facts` or `/facts/batch`.
+
+```http
+POST   /api/v1/{context_id}/sessions
+GET    /api/v1/{context_id}/sessions/{session_id}
+DELETE /api/v1/{context_id}/sessions/{session_id}
+GET    /api/v1/{context_id}/sessions/{session_id}/turns
+GET    /api/v1/{context_id}/sessions/{session_id}/context
+```
+
+Create session body:
+
+```json
+{
+  "scope": ["org=acme", "user=alice"],
+  "metadata": { "source": "chat-ui" }
+}
+```
+
+---
+
+## Recall and context
+
+### Ranked hits (`/query`)
+
+```http
+POST /api/v1/{context_id}/query
+Content-Type: application/json
+
+{
+  "query": "What is Alice's role?",
+  "limit": 10,
+  "scope": ["org=acme", "user=alice"],
+  "labels": ["subject=alice"],
+  "lens": ["org/acme/user/alice/"],
+  "scope_view": "strict"
+}
+```
+
+| Field | Purpose |
+| --- | --- |
+| `scope` | Scope paths the caller wants to read within (clamped to the key’s grant). |
+| `labels` | Descriptive `key=value` tags that **filter** hits within the allowed region — labels never widen access on their own. |
+| `lens` | Hierarchical scope paths that narrow **which region** of memory the query considers. |
+| `scope_view` | How broadly to fold results within the grant: `strict` (default — caller’s region only), `crossTeam` (also include inbound cross-principal shared reads), or `merged` (also fold in same-fact records at narrower scopes). |
+
+Response includes `tier` (`direct`, `cache`, `hybrid`, or `full_context`), `hits`, `query_ms`, and `trace_id`.
+
+### Formatted context block (`/context`)
+
+```http
+POST /api/v1/{context_id}/context
+Content-Type: application/json
+
+{
+  "query": "What is Alice's role?",
+  "limit": 10,
+  "scope": ["org=acme", "user=alice"]
+}
+```
+
+Returns a string suitable for LLM system-prompt injection.
+
+### Chat (SSE optional)
+
+```http
+POST /api/v1/{context_id}/chat
+Content-Type: application/json
+
+{
+  "message": "Summarise what you know about me",
+  "scope": ["org=acme", "user=alice"],
+  "session_id": "sess_01HF..."
+}
+```
+
+Use `Accept: text/event-stream` for streaming replies.
+
+---
+
+## State, profile, entities
+
+```http
+POST /api/v1/{context_id}/state
+GET  /api/v1/{context_id}/profile
+GET  /api/v1/{context_id}/entities
+GET  /api/v1/{context_id}/entities/{entity_type}/{entity_name}
+GET  /api/v1/{context_id}/entities/{entity_type}/{entity_name}/history/{key}
+DELETE /api/v1/{context_id}/entities/{entity_type}/{entity_name}
+```
+
+Tri-temporal reads accept `asOf`, `atInstant`, `validFrom`, and `validUntil` query parameters on entity GETs.
+
+---
+
+## Reflection, lifecycle, maintenance
+
+```http
+POST /api/v1/{context_id}/reflect
+POST /api/v1/{context_id}/forget
+POST /api/v1/{context_id}/lifecycle/expire
+POST /api/v1/{context_id}/lifecycle/decay
+POST /api/v1/{context_id}/elaborate
+POST /api/v1/{context_id}/consolidate
+POST /api/v1/{context_id}/fsck
+```
+
+`reflect` runs on-demand synthesis; `persist` on the body stores lower-trust derived facts when permitted by key type.
+
+---
+
+## Documents (upload)
+
+```http
+POST   /api/v1/{context_id}/documents
+GET    /api/v1/{context_id}/documents
+GET    /api/v1/{context_id}/documents/{id}
+GET    /api/v1/{context_id}/documents/{id}/raw
+GET    /api/v1/{context_id}/documents/{id}/chunks
+DELETE /api/v1/{context_id}/documents/{id}
+POST   /api/v1/{context_id}/documents/query
+GET    /api/v1/{context_id}/documents/keywords
+POST   /api/v1/{context_id}/documents/recompute-links
+```
+
+Upload uses `multipart/form-data`; processing is asynchronous via the job queue.
+
+### Document query (`/documents/query`)
+
+Document-only ranked retrieval accepts the same **`mode`** values as unified recall (`vector`, `bm25`, `hybrid`, `hybrid_graph`). When using graph-density reranking, optional **`graph_edges`** selects which structural signals contribute. Each value must be a recognised edge kind — unknown values return `400 Bad Request`:
+
+| Value | Signal |
+| --- | --- |
+| `knowledge_has_keyword` | Keyword overlap between documents |
+| `section_match` | Section-heading similarity |
+| `document_link` | Cross-document link density |
+| `document_summary` | Document-level summary similarity |
+| `keyword_cooccurrence` | Keyword PMI co-occurrence in the corpus |
+
+Responses may include `hybrid_graph` on individual hits when several signals combine; that label describes evidence in the result, not an input filter.
+
+---
+
+## Traces and audit
+
+```http
+GET /api/v1/{context_id}/traces
+GET /api/v1/{context_id}/traces/stats
+GET /api/v1/{context_id}/traces/{trace_id}
+GET /api/v1/{context_id}/inspect
+GET /api/v1/{context_id}/audit
+```
+
+---
+
+## Scopes and principals
+
+```http
+GET  /api/v1/{context_id}/scopes
+POST /api/v1/{context_id}/scopes
+POST /api/v1/{context_id}/scopes/forget
+POST /api/v1/{context_id}/scope-grants
+
+GET  /api/v1/{context_id}/principals
+POST /api/v1/{context_id}/principals
+GET  /api/v1/{context_id}/principals/{principal_id}/effective
+```
+
+See [Scope as security boundary](/docs/spectron/self-hosting/security/scope-as-security-boundary).
+
+---
+
+## Health
+
+```http
+GET /api/v1/health
+```
+
+Unauthenticated liveness check.
+
+---
+
+## Connectors
+
+Not available yet. See [Connectors overview](/docs/spectron/knowledge/connectors/overview).
+
+---
+
+## Errors
+
+All errors follow [RFC 7807 problem details](/docs/spectron/reference/errors).
