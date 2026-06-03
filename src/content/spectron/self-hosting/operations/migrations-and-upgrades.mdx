@@ -1,0 +1,126 @@
+---
+position: 4
+title: Migrations and upgrades
+description: "Schema migrations and upgrade playbooks."
+---
+
+# Migrations and upgrades
+
+Spectron bundles schema migrations into the binary and applies them automatically. This page explains how migrations work and what to expect during version upgrades.
+
+## How migrations work
+
+Each Context database is created from a single greenfield schema file bundled into the server binary:
+
+| Migration file | Contents |
+|---|---|
+| `V1__schema.surql` | Full Context schema: scope and principals, documents and chunks, entities and attributes, sessions and turns, traces, idempotency, and background-job metadata |
+
+Pre-launch, Spectron rebuilds dev Contexts from scratch rather than applying incremental migration chains. After public launch, new schema changes will ship as `V2__…`, `V3__…`, and so on in an append-only sequence.
+
+### When migrations run
+
+Migrations run in two scenarios:
+
+1. **Context creation** – when `POST /api/v1/contexts/{id}` is called, the schema is applied to the new database from scratch.
+2. **Server startup** – at startup, Spectron checks each registered Context for pending migrations and applies them automatically.
+
+Applied migrations are tracked in a `_migrations` table inside each Context database:
+
+```surql
+SELECT * FROM _migrations ORDER BY applied_at ASC;
+```
+
+### Migration safety
+
+Spectron migrations are **additive only** – they add new tables, fields, and indexes. They never drop tables or rename fields. This ensures that a rollback is always safe: if you downgrade to a previous version, the extra tables and fields are simply unused.
+
+## Upgrading Spectron
+
+### Rolling upgrades
+
+Spectron is a **horizontally scalable application server** – all durable state lives in SurrealDB. A rolling upgrade works as follows:
+
+1. Deploy the new Spectron binary (or container image) alongside the running version.
+2. The new version starts up and applies any pending migrations to all registered Contexts.
+3. Route traffic to the new version.
+4. Shut down the old version.
+
+Because replicas do not cache durable state in-process, you do not need to drain in-flight requests beyond what your load balancer already provides. In-flight document processing jobs are stored in SurrealDB and will be picked up by workers on the new version.
+
+### Single-instance upgrades
+
+For single-server deployments:
+
+1. Take a SurrealDB backup of all Context databases (see [Backups and retention](/docs/spectron/self-hosting/operations/backups-and-retention)).
+2. Stop the Spectron service.
+3. Replace the binary or pull the new container image.
+4. Start the service and watch logs for migration completion.
+5. Run smoke tests against a non-production Context before routing production traffic.
+
+### Verifying migration success
+
+After upgrade, confirm migrations applied:
+
+```surql
+SELECT * FROM _migrations ORDER BY applied_at ASC;
+```
+
+You should see `V1__schema.surql` (and any newer versions shipped with your binary). If a migration fails, Spectron logs the error and refuses to serve requests for the affected Context until the schema is consistent.
+
+## Version compatibility
+
+| Spectron version | SurrealDB version | Notes |
+|---|---|---|
+| Current | 3.1.x | Required for vector indexes and record types used by the schema |
+
+Always upgrade SurrealDB and Spectron together according to the release notes for your distribution.
+
+Because migrations are additive, the old version continues to function correctly against a migrated database – it simply ignores the new tables and fields it does not know about.
+
+### Docker upgrade
+
+```bash
+docker pull ghcr.io/surrealdb/spectron:latest
+docker compose down
+docker compose up -d
+docker compose logs spectron | grep -i migration
+```
+
+### Kubernetes upgrade
+
+Update the image tag in your deployment manifest, then roll out:
+
+```bash
+kubectl set image deployment/spectron spectron=ghcr.io/surrealdb/spectron:latest
+kubectl rollout status deployment/spectron
+```
+
+Each new pod applies pending migrations on startup before serving traffic.
+
+### Bare metal / systemd upgrade
+
+Replace the `spectrond` binary (see [Bare metal](/docs/spectron/self-hosting/deployment/bare-metal)), then restart the service:
+
+```bash
+sudo systemctl restart spectrond
+journalctl -u spectrond -f
+```
+
+## Downgrading
+
+Since migrations are additive, you can safely downgrade to a previous Spectron version. The extra tables and fields added by the newer version are ignored. No data loss occurs.
+
+## Backup before major upgrades
+
+Before upgrading, take a SurrealDB backup of each Context database:
+
+```bash
+surreal export \
+  --conn ws://localhost:8000 \
+  --user root --pass secret \
+  --ns acme --db prod \
+  pre-upgrade-backup-$(date +%Y%m%d).surql
+```
+
+Store the backup externally. The full backup and restore workflow is in [Backups and retention](/docs/spectron/self-hosting/operations/backups-and-retention).

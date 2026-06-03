@@ -1,0 +1,85 @@
+---
+position: 1
+title: Architecture overview
+description: "How Spectron's components fit together in a self-hosted deployment."
+---
+
+# Architecture overview
+
+A self-hosted Spectron deployment has three durable dependencies plus up to four **roles** of the `spectrond` binary:
+
+```
+[Agent / SDK / MCP client]
+        │
+        ▼
+[spectrond api]  ── /api/v1/{ctx}/*  (end-user)
+              ├── /api/v1/contexts/* (management, optional separate bind)
+              └── /mcp
+        │
+        ├──────────────────┬─────────────────────┐
+        ▼                  ▼                     ▼
+[spectrond worker]  [spectrond scheduler]   [Object store]
+(job queue)         (periodic tasks)        (raw document bytes)
+        │
+        ▼
+[SurrealDB]
+  control-plane namespace + per-Context databases
+```
+
+## Horizontally scalable application tier
+
+Each **`spectrond`** role keeps no durable in-process state: restarts and replica scaling do not lose memory, because memory lives in SurrealDB and the object store. Scale **api** and **worker** behind a load balancer; no sticky sessions.
+
+| Role | Responsibility |
+| --- | --- |
+| **api** | REST, MCP, optional demo UI |
+| **worker** | Document pipeline, extraction jobs, embeddings |
+| **scheduler** | Elaboration, consolidation, decay, connector-less periodic sweeps |
+| **management** | Context and key CRUD (can be colocated or split) |
+| **dev** | All of the above in one process for local use |
+
+## SurrealDB layout
+
+- **Control plane** — Context registry, API key metadata, global configuration (shared across roles).
+- **Per-Context database** — Sessions, turns, entities, attributes, relations, documents, chunks, traces, job queue records for that tenant.
+
+For a single-node SurrealDB deployment in Docker or Kubernetes, set **`working_dir` / `workingDir`** to match the volume mount and use **`SURREAL_PATH=rocksdb://…`** (relative to that directory) — see [Docker deployment](/docs/spectron/self-hosting/deployment/docker#storage-paths). Spectron itself only needs a **`ws://` or `wss://`** endpoint; it does not open the RocksDB path directly. See also [SurrealDB file-backed storage](https://surrealdb.com/docs/running/file-backed).
+
+You can inspect substrate data with any SurrealDB client; Spectron enforces scope in application code.
+
+## Object store
+
+Raw upload files land in S3, GCS, Azure Blob, or **`file:///`** (local object store). Parsed chunks and extracted graph records live in SurrealDB.
+
+| Backend | URL example |
+| --- | --- |
+| Local | `file:///absolute/path` |
+| Amazon S3 | `s3://bucket/prefix?region=us-east-1` |
+| Google Cloud Storage | `gs://bucket/prefix` |
+| Azure | `az://container/prefix` |
+
+See [Storage and scaling](/docs/spectron/self-hosting/deployment/storage-and-scaling).
+
+## Unified graph
+
+Authoritative **documents** and experiential **facts** share one reconciler and one recall router. Document and turn extraction both write `entity` / `attribute` / `relation` records distinguished by `source.kind`.
+
+## Job queue
+
+Uploads and heavy extraction enqueue work in SurrealDB. **Worker** replicas compete for jobs with record-level locking so each job runs once.
+
+## Required configuration
+
+At minimum:
+
+- SurrealDB `--connection-string` (`endpoint;user;pass`)
+- `--embeddings-api-key` (or per-Context provider config after bootstrap)
+- `--object-store-url` for document upload
+
+Per-Context model and budget settings are stored on the Context record and editable via management REST or CLI.
+
+## Client binary
+
+The **`spectron`** CLI is a thin HTTP client over the same `/api/v1/{context_id}/...` surface as the SDKs. It does not embed the database engine.
+
+See [Self-hosted quickstart](/docs/spectron/quickstarts/self-hosted) for a minimal bring-up sequence.

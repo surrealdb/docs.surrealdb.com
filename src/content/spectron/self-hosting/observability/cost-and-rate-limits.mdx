@@ -1,0 +1,197 @@
+---
+position: 3
+title: Cost and rate limits
+description: "Token budgets, tier breakdowns, and rate limiting."
+---
+
+# Cost and rate limits
+
+Spectron makes LLM calls during extraction, query resolution, and reflection. Each Context can have a token budget and per-minute rate limits to control costs and prevent runaway usage.
+
+## Token tracking
+
+Every LLM call is tracked in the `decision_trace` table. The `token_cost` field records the total tokens (input + output) consumed by each operation.
+
+### Querying token usage
+
+```surql
+-- Total tokens by operation tier this month
+SELECT tier, math::sum(token_cost) AS tokens, count() AS calls
+FROM decision_trace
+WHERE created_at > time::now() - 30d
+GROUP BY tier
+ORDER BY tokens DESC;
+
+-- Daily token burn
+SELECT
+    time::format(created_at, "%Y-%m-%d") AS day,
+    math::sum(token_cost) AS tokens
+FROM decision_trace
+WHERE created_at > time::now() - 30d
+GROUP BY day
+ORDER BY day ASC;
+
+-- Top consumers by API key
+SELECT api_key_id, math::sum(token_cost) AS tokens
+FROM decision_trace
+WHERE created_at > time::now() - 7d
+GROUP BY api_key_id
+ORDER BY tokens DESC
+LIMIT 10;
+```
+
+### Token breakdown by stage
+
+| Stage | Model used | Typical cost |
+|---|---|---|
+| Turn extraction (Stage 1) | `models.extraction` | 200–800 tokens per turn |
+| Turn extraction (Stage 2) | `models.extraction_strong` | 500–2000 tokens per turn |
+| Query understanding | `models.query_understanding` | 50–200 tokens per query |
+| Response synthesis | `models.response` | 200–1500 tokens per query |
+| Reflection | `models.reflection` | 500–5000 tokens per reflection |
+| Embedding | `models.embedding` | ~100 tokens per chunk |
+
+Stage 2 extraction only runs when Stage 1 confidence falls below the configured threshold. Setting the threshold higher reduces Stage 2 usage at the cost of lower extraction precision on complex turns.
+
+## Setting a token limit
+
+Set a monthly token limit per Context via the management API:
+
+```http
+PATCH /api/v1/contexts/{context_id}
+Content-Type: application/json
+
+{
+  "config": {
+    "token_limit": 1000000
+  }
+}
+```
+
+When the limit is reached, new extraction and synthesis requests return `429 Too Many Requests`. Read-only operations (direct attribute lookups, cache hits) that do not involve LLM calls are not blocked.
+
+Set `token_limit: null` to remove the limit.
+
+### Monitoring approaching limits
+
+Query the current month's usage relative to the limit:
+
+```http
+GET /api/v1/contexts/{context_id}/usage
+```
+
+```json
+{
+  "token_limit": 1000000,
+  "token_usage_current_month": 743200,
+  "token_usage_pct": 74.3,
+  "period_start": "2026-05-01T00:00:00Z",
+  "period_end": "2026-06-01T00:00:00Z"
+}
+```
+
+## Rate limiting
+
+Rate limits are enforced per Context at two levels:
+
+| Limit | Default | Config field |
+|---|---|---|
+| Requests per minute | 600 | `rate_limit.requests_per_minute` |
+| LLM tokens per minute | 100,000 | `rate_limit.tokens_per_minute` |
+
+When the per-minute token limit is hit, new LLM-requiring requests return `429` until the window resets. Direct lookups and cache hits are not counted against the token rate limit.
+
+Configure limits:
+
+```http
+PATCH /api/v1/contexts/{context_id}
+Content-Type: application/json
+
+{
+  "config": {
+    "rate_limit": {
+      "requests_per_minute": 1200,
+      "tokens_per_minute": 200000
+    }
+  }
+}
+```
+
+## Reducing costs
+
+### Cache tuning
+
+The semantic response cache serves repeated or similar queries without LLM synthesis. Increase the cache TTL to reduce synthesis calls:
+
+```json
+{
+  "config": {
+    "cache": {
+      "semantic_ttl_seconds": 7200,
+      "semantic_threshold": 0.97
+    }
+  }
+}
+```
+
+Lowering the similarity threshold (e.g. to 0.94) allows more queries to hit the cache at the cost of slightly lower freshness guarantees.
+
+### Extraction stage tuning
+
+Reduce Stage 2 extraction by raising the confidence threshold at which Stage 2 is triggered. A value of `0.9` means Stage 2 only runs when Stage 1 is less than 90% confident:
+
+```json
+{
+  "config": {
+    "extraction": {
+      "stage1_threshold": 0.9
+    }
+  }
+}
+```
+
+### Model selection
+
+Assign cheaper models to latency-sensitive stages:
+
+```json
+{
+  "config": {
+    "models": {
+      "extraction": "openai/gpt-4o-mini",
+      "query_understanding": "openai/gpt-4o-mini",
+      "response": "openai/gpt-4o-mini",
+      "reflection": "openai/gpt-4o",
+      "background": "openai/gpt-4o-mini"
+    }
+  }
+}
+```
+
+Reserve the stronger (more expensive) model for reflection, where synthesis quality matters most and latency is less critical.
+
+### Retention policies
+
+Context-category memories auto-expire after `retention_days`. Expiring stale context reduces the number of memory items retrieved and embedded at query time, lowering synthesis token usage:
+
+```json
+{
+  "config": {
+    "retention_days": 30
+  }
+}
+```
+
+## Per-tenant billing in multi-tenant deployments
+
+In shared-Context deployments, track per-tenant token consumption via scope:
+
+```surql
+SELECT scope.org AS tenant, math::sum(token_cost) AS monthly_tokens
+FROM decision_trace
+WHERE created_at > time::now() - 30d
+GROUP BY scope.org
+ORDER BY monthly_tokens DESC;
+```
+
+Use this to implement per-tenant billing or to enforce per-tenant token budgets at the application layer.

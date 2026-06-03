@@ -4,7 +4,7 @@ Shared helpers, hooks, API functions, and caching utilities.
 
 ## Key modules
 
-- `categories.ts` — loads `_category_.json` files for sidebar structure
+- `categories.ts` — loads `__category.json` files for sidebar structure
 - `helpers.ts` — general-purpose utility functions
 - `images.ts` — image URL resolution and processing
 - `markdown.ts` — markdown parsing helpers

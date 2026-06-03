@@ -33,6 +33,7 @@ export default defineConfig(({ mode }) => ({
 
                 if (/^\/surrealdb(\/|$)/.test(url)) return hasChildren ? 0.9 : 0.8;
                 if (/^\/surrealql(\/|$)/.test(url)) return hasChildren ? 0.9 : 0.8;
+                if (/^\/spectron(\/|$)/.test(url)) return hasChildren ? 0.9 : 0.8;
                 if (/^\/sdk\//.test(url)) return hasChildren ? 0.8 : 0.7;
                 if (/^\/\d+\.x\/sdk\//.test(url)) return 0.4;
 
@@ -42,6 +43,7 @@ export default defineConfig(({ mode }) => ({
                 { match: "/", changefreq: "weekly" },
                 { match: /^\/surrealdb/, changefreq: "weekly" },
                 { match: /^\/surrealql/, changefreq: "weekly" },
+                { match: /^\/spectron/, changefreq: "weekly" },
                 { match: /^\/sdk\//, changefreq: "weekly" },
                 { match: /^\/cloud/, changefreq: "weekly" },
                 { match: /^\/\d+\.x\//, changefreq: "weekly" },
@@ -55,7 +57,7 @@ export default defineConfig(({ mode }) => ({
         tsconfigPaths: true,
     },
     build: {
-        sourcemap: true,
+        sourcemap: false,
         minify: true,
         cssMinify: true,
     },
