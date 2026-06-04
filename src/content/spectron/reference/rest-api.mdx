@@ -47,7 +47,22 @@ The same `Idempotency-Key` within 24 hours returns the stored response; a differ
 https://<host>/api/v1/{context_id}
 ```
 
-Replace `{context_id}` with the identifier you chose at bootstrap (for example `dev` or `acme-prod`).
+Replace `{context_id}` with the identifier you chose at bootstrap (for example `dev` or `docs_test`).
+
+## Scope paths on the wire
+
+**Scope** on read and write requests is an array of **hierarchical slash paths** — for example `org/acme/user/alice` (a trailing `/` is optional). The legacy `org=acme` shape is rejected.
+
+Register paths before first use:
+
+```bash
+spectron scopes create org/acme
+spectron scopes create org/acme/user/alice
+```
+
+See [Contexts and scope](/docs/spectron/mental-model/contexts-and-scope).
+
+JSON responses use **camelCase** field names (`queryMs`, `sessionId`, `traceId`, …).
 
 ## Unified verbs
 
@@ -75,11 +90,13 @@ Content-Type: application/json
 {
   "text": "King Charles III became head of state of the United Kingdom in September 2022.",
   "infer": "full",
-  "scope": ["org=acme", "user=alice"]
+  "scope": ["org/acme/user/alice"]
 }
 ```
 
 `infer` values: `full` (LLM extraction, default), `triples` (caller-supplied structured triples), `preview` (dry run), `none` (literal store).
+
+**Response (`infer: full`):** nested **`extraction`** (entities, attributes, relations, …), plus `sessionId`, `turnId`, and `mode`. **`infer: none`** returns `chunkId`, `sessionId`, and `turnId` for the literal memory chunk.
 
 When supplying triples or structured entities, `memory_category` on entities, attributes, and relations must be one of **`identity`**, **`knowledge`**, or **`context`**. Invalid values are rejected with `400 Bad Request`. Instructions and uncertainties use their own tables; episodic material lives on sessions and turns.
 
@@ -98,15 +115,15 @@ Idempotency-Key: conv-01HF...
     { "role": "user", "content": "I was just promoted to CTO.", "ts": "2026-05-12T10:00:00Z" },
     { "role": "assistant", "content": "Congratulations!", "ts": "2026-05-12T10:00:05Z" }
   ],
-  "scope": ["org=acme", "user=alice"],
+  "scope": ["org/acme/user/alice"],
   "session_id": "sess_01HF...",
   "extract": "whole_conversation"
 }
 ```
 
-`extract` controls batch extraction strategy: **`per_message`** (default) runs extraction per turn; **`whole_conversation`** sends the full transcript in one LLM pass.
+`extract` controls batch extraction strategy: **`whole_conversation`** (default) runs one LLM pass over the full transcript; **`per_message`** runs extraction once per message.
 
-Returns a structured extraction diff (entities, attributes, relations, instructions, uncertainties) plus `trace_id`.
+Returns **`extractions`** (one extraction result per message or one for the whole conversation), **`sessionId`**, and **`turnIds`**.
 
 ---
 
@@ -126,7 +143,7 @@ Create session body:
 
 ```json
 {
-  "scope": ["org=acme", "user=alice"],
+  "scope": ["org/acme/user/alice"],
   "metadata": { "source": "chat-ui" }
 }
 ```
@@ -144,9 +161,9 @@ Content-Type: application/json
 {
   "query": "What is Alice's role?",
   "limit": 10,
-  "scope": ["org=acme", "user=alice"],
+  "scope": ["org/acme/user/alice"],
   "labels": ["subject=alice"],
-  "lens": ["org/acme/user/alice/"],
+  "lens": ["org/acme/user/alice"],
   "scope_view": "strict"
 }
 ```
@@ -158,7 +175,7 @@ Content-Type: application/json
 | `lens` | Optional hierarchical paths that **filter by involvement** within the grant — hits must touch the lens node(s), but need not match an exact clause size. |
 | `scope_view` | How broadly to fold results within the grant: `strict` (default — caller’s region only), `crossTeam` (also include inbound cross-principal shared reads), or `merged` (also fold in same-fact records at narrower scopes). |
 
-Response includes `tier` (`direct`, `cache`, `hybrid`, or `full_context`), `hits` (each with `source` as a **`ResultKind`** — for example `entity`, `attribute`, `passage`, `document`), `query_ms`, and `trace_id`.
+Response includes `tier` (`direct`, `cache`, `hybrid`, or `full_context`), `hits` (each with **`source`** as a **`ResultKind`**: `entity`, `attribute`, `memory_chunk`, `chunk`, or `section`), **`queryMs`**, and inline **`trace`** (with **`traceId`** for `GET .../traces/{id}`).
 
 ### Formatted context block (`/context`)
 
@@ -169,7 +186,7 @@ Content-Type: application/json
 {
   "query": "What is Alice's role?",
   "limit": 10,
-  "scope": ["org=acme", "user=alice"]
+  "scope": ["org/acme/user/alice"]
 }
 ```
 
@@ -183,7 +200,7 @@ Content-Type: application/json
 
 {
   "message": "Summarise what you know about me",
-  "scope": ["org=acme", "user=alice"],
+  "scope": ["org/acme/user/alice"],
   "session_id": "sess_01HF..."
 }
 ```
@@ -219,9 +236,9 @@ POST /api/v1/{context_id}/consolidate
 POST /api/v1/{context_id}/fsck
 ```
 
-`reflect` runs on-demand synthesis and returns a **`trace_id`** (`response_trace`); `persist` on the body stores lower-trust derived facts when permitted by key type.
+`reflect` runs on-demand synthesis and returns **`traceId`** (correlate with `GET .../traces/{id}`); `persist` on the body stores lower-trust derived facts when permitted by key type.
 
-`consolidate` responses reference **`decision_trace`** outcomes with per-record **`DecisionKind`** values: `create`, `update`, or `supersede`.
+`consolidate` responses reference per-record **`DecisionKind`** values: `create`, `update`, or `supersede`.
 
 ---
 
@@ -269,7 +286,7 @@ GET /api/v1/{context_id}/audit
 
 **`/traces/stats`** accepts `scope[…]`, `since`, and **`windowHours`** (rolling window for operational counters). The response includes aggregate counts and health signals for retrieval, decision, and response traces in the window.
 
-**`/audit`** returns structured audit records with a **`TraceKind`** discriminator (`retrieval_trace`, `decision_trace`, or `response_trace`) linking back to graph-resident traces where applicable.
+**`/audit`** returns **`rows`** with a **`kind`** filter (`decision`, `retrieval`, or `response`) and **`traceId`** linking back to graph-resident traces. Query with `?kind=decision&limit=50`.
 
 ---
 

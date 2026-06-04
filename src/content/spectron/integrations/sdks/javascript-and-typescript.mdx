@@ -36,19 +36,19 @@ Requests send **`API-KEY: <secret>`** — not `Authorization: Bearer`.
 await client.facts.create({
   text: "Alice was promoted to CTO.",
   infer: "full",
-  scope: ["org=acme", "user=alice"],
+  scope: ["org/acme/user/alice"],
 });
 
 const hits = await client.query({
   query: "What is Alice's role?",
   limit: 10,
-  scope: ["org=acme", "user=alice"],
+  scope: ["org/acme/user/alice"],
 });
 
 const block = await client.context({
   query: "What is Alice's role?",
   limit: 10,
-  scope: ["org=acme", "user=alice"],
+  scope: ["org/acme/user/alice"],
 });
 ```
 
@@ -60,7 +60,7 @@ await client.facts.createBatch({
     { role: "user", content: "I was promoted to CTO." },
     { role: "assistant", content: "Congratulations!" },
   ],
-  scope: ["org=acme", "user=alice"],
+  scope: ["org/acme/user/alice"],
   idempotencyKey: "thread-1",
 });
 ```
@@ -69,7 +69,7 @@ await client.facts.createBatch({
 
 ```typescript
 await client.documents.upload({ file: buffer, filename: "policy.pdf" });
-await client.chat({ message: "Summarise Alice's role", scope: ["org=acme", "user=alice"] });
+await client.chat({ message: "Summarise Alice's role", scope: ["org/acme/user/alice"] });
 ```
 
 ## Vercel AI SDK adapter
