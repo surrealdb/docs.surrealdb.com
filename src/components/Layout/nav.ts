@@ -260,8 +260,7 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
 export const SPECTRON_NAV_LINKS: NavEntry[] = [
     /** Label is display-only; target is the `spectron/index` hub at `/spectron`. */
     { label: "Get started", href: "/docs/spectron" },
-    { label: "Knowledge", href: "/docs/spectron/knowledge" },
-    { label: "Memory", href: "/docs/spectron/memory" },
+    { label: "Memory & knowledge", href: "/docs/spectron/agent-memory" },
     { label: "Integrations", href: "/docs/spectron/integrations" },
     { label: "Self-hosting", href: "/docs/spectron/self-hosting" },
     { label: "Cookbooks", href: "/docs/spectron/cookbooks" },

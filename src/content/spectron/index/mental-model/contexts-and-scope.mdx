@@ -40,51 +40,46 @@ API keys are issued **per Context** — a key for `acme-prod` cannot access anot
 
 ## Scope tags (data partitioning)
 
-Within a Context, every memory record carries **scope tags** — arbitrary key-value pairs describing where the fact belongs:
+Within a Context, memory records carry **scope** as an **OR of conjunctive clauses** — each clause names one or more hierarchical scope paths that must **all** apply together (AND within the clause, OR across clauses). Typical single-owner facts use one clause; **co-ownership** uses multiple clauses so more than one principal can read the same record.
 
-```json
-{ "org": "acme", "user": "alice", "project": "checkout" }
-```
+You still choose dimensions that match your app: `org`, `user`, `team`, `project`, `region`, `env`, and so on — expressed as paths like `org/acme/user/alice/`.
 
-You choose dimensions that match your app: `org`, `user`, `team`, `project`, `region`, `env`, and so on.
+### How visibility works
 
-### Subset matching
+On each read, Spectron resolves your **grant** into the scope nodes you may cover, then finds which **scope-set clauses** on each record are fully satisfied. A record is visible when **at least one** clause matches (fail-closed: empty or unmatched scope sees nothing).
 
-Recall uses **subset matching**: a record is visible when its tags are contained in the query scope.
+For the common case — a single clause with one or two tags — behaviour matches intuitive **subset** semantics:
 
-```
-record scope ⊆ query scope → accessible
-```
-
-**⊆** means “is contained in” — every tag on the record must appear on the query with the same value. Extra tags on the query are fine.
-
-| Record scope | Query scope | Accessible? |
+| Record clause (simplified) | Query / grant covers | Visible? |
 | --- | --- | --- |
-| `{}` | `{org: "acme", user: "alice"}` | Yes – empty scope matches any query |
-| `{org: "acme"}` | `{org: "acme", user: "alice"}` | Yes – `{org}` ⊆ `{org, user}` |
-| `{org: "acme", user: "alice"}` | `{org: "acme"}` | No – user-specific memory hidden from org-only query |
-| `{org: "acme", user: "alice"}` | `{org: "acme", user: "alice"}` | Yes – equal |
-| `{org: "other"}` | `{org: "acme", user: "alice"}` | No – different org |
+| `{org/acme}` only | `{org/acme, user/alice}` | Yes — org-wide fact visible in user queries |
+| `{org/acme, user/alice}` | `{org/acme}` only | No — user-specific fact hidden from org-only reads |
+| `{org/acme, user/alice}` | `{org/acme, user/alice}` | Yes |
+| `{org/other}` | `{org/acme, user/alice}` | No |
 
-Org-wide facts (scoped only to `{org: "acme"}`) appear in user-level queries; user-specific facts do not appear in org-only queries.
+**Co-ownership:** a document deduplicated across two uploaders may carry **two clauses** — one per owner — so both can read the same content-addressed file without a separate copy.
+
+Org-wide facts appear in user-level queries; user-specific facts do not appear in org-only queries.
 
 ### Example queries
 
 **As a specific user:**
 
 ```json
-{ "scope": ["org=acme", "user=alice"] }
+{ "scope": ["org/acme/user/alice"] }
 ```
 
-Matches records tagged `{}`, `{org}`, `{user}`, or `{org, user}`.
+Matches org-wide facts at `org/acme` and user-specific facts at `org/acme/user/alice` when your grant covers both.
 
 **At org level:**
 
 ```json
-{ "scope": ["org=acme"] }
+{ "scope": ["org/acme"] }
 ```
 
-Matches `{}` or `{org}` only — not Alice’s private preferences.
+Matches org-wide memory only — not Alice’s private rows unless your grant includes her path.
+
+Register paths before first use: `spectron scopes create org/acme/user/alice`.
 
 ## Permissions and delegation
 
@@ -115,7 +110,7 @@ Scope dimensions can include **geometry** (points, polygons) for territory-based
 Recall and context endpoints accept optional parameters beyond flat scope tags:
 
 - **`labels`** — descriptive `key=value` tags (for example `subject=alice`) that **filter** results within what scope and permissions already allow. Labels help you find facts *about* something; they do not grant access by themselves.
-- **`lens`** — hierarchical scope paths that narrow which region of memory a query considers.
+- **`lens`** — optional hierarchical scope paths that **filter by involvement** within your grant. A lens of `region/eu` returns every readable clause that **includes** `eu` — for example both `{eu}` and `{eu, macbook}` — rather than shrinking your access region to exact `{eu}` matches only.
 - **`scope_view`** — controls how broadly results are folded **within** the caller’s grant:
   - **`strict`** (default) — the caller’s own read region only.
   - **`crossTeam`** — also includes facts shared inbound from other principals where shared-read grants exist.

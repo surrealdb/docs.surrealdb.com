@@ -1,0 +1,68 @@
+---
+position: 2
+title: Reconciliation and supersession
+description: "How Spectron deduplicates entities, detects conflicts, and tracks corrections with full history."
+---
+
+# Reconciliation and supersession
+
+Extracted data is not written directly to memory. A **reconciliation** pass compares new extractions against what is already stored: matching entities, detecting conflicts, and deciding whether a new value replaces an old one or coexists alongside it.
+
+## Reconciliation in brief
+
+### Entity matching
+
+Spectron tries to attach new extractions to **existing entities** in the same scope (by name, alias, and semantic similarity) instead of creating duplicates. New attributes and relations land on the matched entity when a match is found.
+
+### Attribute conflicts
+
+When the same entity and key already have a value in the **same scope** and the new value differs, Spectron treats it as a conflict. What happens depends on where the existing value came from:
+
+- **Experiential-only conflict** — the new value **supersedes** the old. The previous value is closed with a **`valid_until`** timestamp and remains in history.
+- **Authoritative conflict** — curated knowledge (documents, operator upserts) is **not** modified. The user’s assertion is stored in experiential memory with full provenance, and the clash is surfaced (for example via **`uncertainty`** records). See [Authority when pillars meet](/docs/spectron/agent-memory/reasoning/authority-hierarchy).
+
+Spectron does **not** use last-write-wins. Concurrent updates reconcile in **one ACID transaction** per write; cross-provenance clashes become **`uncertainty`**, same-stream updates **supersede**, and writes below the **confidence floor** cannot silently overwrite stronger beliefs.
+
+### Scope-aware coexistence
+
+Different scopes may legitimately hold different values for the same key — an org default and a user override, or the same person in two organisations. Conflict detection runs **within one scope**. Cross-scope differences are independent records, not supersessions.
+
+### Invalidation
+
+When a user explicitly negates a fact (“I no longer work there”, “forget my old address”), reconciliation **closes** matching active attributes with **`valid_until`** rather than deleting them. History and audit trails stay intact.
+
+## The supersession chain
+
+When a fact changes over time, Spectron keeps a **chain** of values — each link records what it replaced and what replaced it. Only the **current** head of the chain is returned by default queries; earlier values remain available for history and point-in-time reads.
+
+Example: Alice’s role moves from COO → CEO → CTO. Each step opens a new value with **`valid_from`** set to the correction time and closes the previous one with **`valid_until`**. Nothing is erased.
+
+## Querying current and historical state
+
+Use the public API rather than ad hoc database queries:
+
+- **Current beliefs** — **`POST /query`** or **`GET /profile`** for a scope; entity GETs return active attributes.
+- **History for one key** — **`GET /api/v1/{context_id}/entities/{type}/{name}/history/{key}`** returns the supersession chain.
+- **Point in time** — entity reads accept **`asOf`**, **`atInstant`**, **`validFrom`**, and **`validUntil`** query parameters. See [Tri-temporal model](/docs/spectron/architecture/tri-temporal-model) and the [REST API](/docs/spectron/reference/rest-api).
+
+## Correction versus coexistence
+
+**Correction** — same scope, new value replaces old reality (role change, corrected name). Supersession applies.
+
+**Coexistence** — same key, different scopes, both valid in their contexts. Neither record supersedes the other.
+
+## History by default — and forget when you need removal
+
+For **corrections and supersession**, Spectron keeps a full chain of past values. Nothing is erased: earlier beliefs stay in the store so you can audit, recover from a bad correction, or answer “what did we believe in January?”
+
+That default does **not** mean users can never remove data. When someone asks to forget something, Spectron supports two distinct levels:
+
+| Intent | What happens | Typical use |
+| --- | --- | --- |
+| **Stop using this in the agent** (default) | Matching memories are **expired** — they no longer appear in recall, query, profile, or chat context, but remain stored for audit and point-in-time review. | “Forget my old job”, entity delete, routine privacy tidying. |
+| **Remove it for compliance** (explicit opt-in) | The same match is **permanently erased**, including correction history for the affected entities. | Right-to-erasure requests, retention policy enforcement. |
+| **Erase a whole scope subtree** | Everything tagged under a scope path is **hard-deleted** across memory and knowledge. | GDPR-style deletion for a user or team branch. |
+
+Default forget and entity delete are **soft**: the agent behaves as if the information is gone, while operators can still inspect what was retired. Compliance paths require an explicit **`purge`** flag on **`POST /forget`**, or **`POST /scopes/forget`** for subtree erasure — both need the **`forget`** grant on the relevant scope. Audit traces may still record that a forget operation ran, without retaining the forgotten content itself.
+
+See [Forgetting memories](/docs/spectron/agent-memory/operations/forget) for request shapes and CLI equivalents.

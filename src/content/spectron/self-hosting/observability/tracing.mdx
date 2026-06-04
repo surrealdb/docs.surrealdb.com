@@ -18,28 +18,45 @@ See [Traces and memory evolution](/docs/spectron/architecture/traces-and-evoluti
 
 ## Trace IDs in responses
 
-Every REST response and MCP tool result includes a **`trace_id`**. Pass it to the trace endpoint for the one-hop neighbourhood around that operation:
+Trace correlation IDs appear on the wire in **camelCase**, depending on the endpoint:
+
+| Endpoint | Where to find the ID |
+| --- | --- |
+| `POST /query`, `POST /context` | **`trace.traceId`** on the response |
+| `POST /reflect` | **`traceId`** on the response |
+| `GET /audit` | **`traceId`** on each row in **`rows`** |
+
+Pass the ID to the trace endpoint:
 
 ```http
-GET /api/v1/{context_id}/traces/{trace_id}
+GET /api/v1/{context_id}/traces/{traceId}
 ```
 
-Example response footer:
+Example **`/query`** footer:
 
 ```json
 {
   "tier": "hybrid",
-  "trace_id": "retrieval_trace:01HF3X..."
+  "queryMs": 42,
+  "trace": {
+    "traceId": "jj3AnFO3Mi1WxFO6",
+    "resolutionTier": "hybrid",
+    "latencyMs": 42
+  }
 }
 ```
+
+Graph-resident trace **tables** in SurrealDB use snake_case names (`retrieval_trace`, `decision_trace`, `response_trace`). **`GET /audit?kind=decision`** uses the wire enum values `decision`, `retrieval`, and `response`.
 
 ## Listing and filtering traces
 
 ```http
 GET /api/v1/{context_id}/traces?scope[org]=acme&limit=100
 GET /api/v1/{context_id}/traces?since=2026-05-01T00:00:00Z&limit=50
-GET /api/v1/{context_id}/traces/stats?scope[org]=acme&since=2026-05-01T00:00:00Z
+GET /api/v1/{context_id}/traces/stats?scope[org]=acme&windowHours=24
 ```
+
+**`/traces/stats`** returns operational aggregates for the requested scope and time window — use **`windowHours`** for rolling windows (defaults apply when omitted).
 
 **Access control:** holders of **`manage`** see every trace in a Context. Other callers see only traces whose session scope falls within their read grant — trace listing follows the same boundary model as memory reads.
 
@@ -47,8 +64,8 @@ GET /api/v1/{context_id}/traces/stats?scope[org]=acme&since=2026-05-01T00:00:00Z
 
 When an agent returns an unexpected answer:
 
-1. Read **`trace_id`** from the response.
-2. Fetch the trace and check **`tier`** — direct lookup, response reuse, hybrid retrieval, or full-context escalation.
+1. Read **`trace.traceId`** (from `/query`) or **`traceId`** (from `/reflect` or `/audit`).
+2. Fetch `GET .../traces/{traceId}` and check **`resolutionTier`** — direct lookup, response reuse, hybrid retrieval, or full-context escalation.
 3. For reads, follow **`retrieval_trace`** edges to see which entities, attributes, and passages were considered versus returned.
 4. For recent writes, follow **`decision_trace`** to see supersession, uncertainty flags, and source kinds.
 5. For `/chat`, inspect **`response_trace`** for token cost and whether **`reused_from`** indicates a cache hit.
@@ -58,6 +75,8 @@ If a stale response-reuse hit is suspect, invalidate dependent facts or tune reu
 ## Operational audit events
 
 Alongside the trace graph, Spectron emits structured **audit events** for operations traces do not fully capture on their own — including destructive deletes, scope-vocabulary changes, background jobs, and **denied** authorisation attempts. Denied reads and writes are always recorded so security reviews can distinguish “no data matched” from “access was refused”.
+
+**`GET /audit`** returns records with a **`TraceKind`** filter (`decision`, `retrieval`, or `response`) when correlating operational audit with graph-resident traces.
 
 For compliance exports, combine trace listing, SurrealDB export of trace tables, and your log pipeline’s capture of audit events. See [Profiles and audit trails](/docs/spectron/self-hosting/observability/profiles-and-audit-trails).
 

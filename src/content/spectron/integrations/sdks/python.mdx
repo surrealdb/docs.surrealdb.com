@@ -43,7 +43,7 @@ Authentication uses the **`API-KEY`** header on every request (handled by the cl
 result = await client.facts.create(
     text="Alice was promoted to CTO.",
     infer="full",
-    scope=["org=acme", "user=alice"],
+    scope=["org/acme/user/alice"],
 )
 ```
 
@@ -55,7 +55,7 @@ result = await client.facts.create_batch(
         {"role": "user", "content": "I was promoted to CTO."},
         {"role": "assistant", "content": "Congratulations!"},
     ],
-    scope=["org=acme", "user=alice"],
+    scope=["org/acme/user/alice"],
     idempotency_key="conv-01HF...",
 )
 ```
@@ -66,13 +66,13 @@ result = await client.facts.create_batch(
 hits = await client.query(
     query="What is Alice's role?",
     limit=10,
-    scope=["org=acme", "user=alice"],
+    scope=["org/acme/user/alice"],
 )
 
 block = await client.context(
     query="What is Alice's role?",
     limit=10,
-    scope=["org=acme", "user=alice"],
+    scope=["org/acme/user/alice"],
 )
 ```
 
@@ -90,7 +90,7 @@ doc = await client.documents.upload(
 ```python
 reply = await client.chat(
     message="Summarise what you know about Alice",
-    scope=["org=acme", "user=alice"],
+    scope=["org/acme/user/alice"],
 )
 ```
 
