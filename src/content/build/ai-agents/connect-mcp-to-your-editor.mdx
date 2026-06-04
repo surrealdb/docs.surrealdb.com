@@ -1,0 +1,214 @@
+---
+position: 3
+title: Connect MCP to your coding assistant
+description: "Step-by-step tutorial — wire Cursor, VS Code, or Claude Desktop to SurrealDB's built-in MCP server."
+---
+
+# Connect MCP to your coding assistant
+
+<Since v="v3.1.0" />
+
+This tutorial walks you through connecting a coding assistant to SurrealDB using the [Model Context Protocol (MCP)](https://modelcontextprotocol.io). If MCP is new to you: it is a standard way for a coding assistant to call **tools** exposed by a server. SurrealDB's built-in MCP server publishes tools such as `query`, `select`, and `use` so your assistant can run SurrealQL and inspect schema without you copying SQL into a separate client.
+
+For the full tool list, limits, and security model, see [Model Context Protocol (MCP)](/docs/build/ai-agents/mcp). This page focuses on getting a working setup you can verify in a few minutes.
+
+> [!NOTE]
+> SurrealDB 3.1+ includes MCP in the main binary. Third-party MCP servers listed on [Surreal Labs](/docs/labs) (for example [surrealdb-mcp-server on GitHub](https://github.com/nsxdavid/surrealdb-mcp-server)) are separate projects; this tutorial uses the **built-in** server only.
+
+## Choose your setup
+
+Both `surreal start` (to start a SurrealDB server) and `surreal mcp` (to start a SurrealDB MCP server) expose the same tools (`query`, `select`, `use`, …). Pick based on **who shares the database** and **how auth should work**. See [When to use `surreal mcp` vs `surreal start`](/docs/build/ai-agents/mcp#when-to-use-surreal-mcp-vs-surreal-start) for the full comparison.
+
+| Situation | Use | Editor config |
+| --- | --- | --- |
+| Learning MCP or solo local dev | **`surreal mcp`** (stdio) | `command` + `args` |
+| Agent should use the same DB as your app or team | **`surreal start`** → **`/mcp`** (HTTP) | `url` + auth headers |
+| Database runs on SurrealDB Cloud or a remote host | **`surreal start`** → **`/mcp`** (HTTP) | `url` + auth headers |
+
+**Stdio** launches an embedded database in the same process as the MCP server — no separate terminal, no port, owner-level access. **HTTP** connects to a server you already run, with normal login and the option of least-privilege users.
+
+> [!WARNING]
+> Stdio MCP runs every tool call with owner-level access. Use it only on a machine you trust. Do not expose `surreal mcp` to untrusted users. See the [security checklist](/docs/build/ai-agents/mcp#security-checklist) before production HTTP deployments.
+
+## Prerequisites
+
+1. [Install SurrealDB](/docs/running/installation) and confirm the binary is on your `PATH`.
+
+If `surreal` is not on your `PATH`, use the full path from `which surreal` (macOS/Linux) or `where surreal` (Windows) as `command`.
+
+2. **An MCP-capable editor** — Cursor, VS Code (1.99+ with Copilot agent mode or another MCP client), or Claude Desktop.
+
+3. **Optional smoke test** — run the server manually once to confirm it starts:
+
+```bash
+surreal mcp --user root --pass secret --ns main --db main memory
+```
+
+You should see a log line that the MCP server is starting over stdio. Press Ctrl+C to stop; your editor will launch this command for you.
+
+## Path A — Local stdio (Cursor)
+
+This is the fastest path: the editor spawns `surreal mcp` as a child process and talks to it over stdin/stdout.
+
+### Step 1 — Create or edit your MCP config
+
+**Cursor** reads `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project). Add a `surrealdb` entry:
+
+```json
+{
+  "mcpServers": {
+    "surrealdb": {
+      "command": "surreal",
+      "args": ["mcp", "--user", "root", "--pass", "secret", "--ns", "main", "--db", "main", "memory"]
+    }
+  }
+}
+```
+
+> [!NOTE]
+> `--user` and `--pass` create the root user on a **new** datastore (same semantics as [`surreal start`](/docs/reference/cli/surrealdb-cli/commands/start)). Stdio MCP still runs every tool call as **owner** — these flags do not authenticate each MCP request. They are not needed for throwaway in-memory use if the `--unauthenticated` flag is passed in when starting up the server, but recommended when you persist to disk or may later open the same path with `surreal start` and HTTP `/mcp`. For project-level config, prefer an `env` block (`SURREAL_USER`, `SURREAL_PASS`) instead of literals in `args` so you do not commit passwords.
+
+**Persist data between sessions** by replacing `memory` with a [file-backed path](/docs/reference/cli/surrealdb-cli/commands/start#datastore-configuration):
+
+```json
+"args": ["mcp", "--user", "root", "--pass", "secret", "--ns", "main", "--db", "main", "rocksdb://tmp/surreal-mcp"]
+```
+
+Create the directory first, or pick a path under your project. See [`surreal mcp`](/docs/reference/cli/surrealdb-cli/commands/mcp) for other storage backends.
+
+### Step 2 — Restart Cursor and verify
+
+1. Open **Settings → Features → MCP** (or **Cursor Settings → MCP**).
+2. Confirm **surrealdb** appears with a green / connected indicator.
+3. Open chat and ask: **"What MCP tools do you have for SurrealDB?"**
+
+You should see tools including `query`, `select`, `create`, `insert`, `update`, `delete`, `list`, `use`, and `info`.
+
+### Step 3 — First end-to-end task
+
+Paste a prompt like this:
+
+> Using the SurrealDB MCP tools, create a `task` table with fields `title` (string) and `done` (bool). Insert two tasks — one done, one not. Then list tasks where `done` is false and show me the result.
+
+The assistant should call MCP tools (often `query` or the CRUD helpers) against namespace **`main`** and database **`main`** as configured in your `args`. If something fails, check [Troubleshooting](#troubleshooting) below.
+
+## Other editors (stdio)
+
+<Tabs>
+
+<TabItem label="Claude Desktop">
+
+Config file (macOS): `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "surrealdb": {
+      "command": "surreal",
+      "args": ["mcp", "--user", "root", "--pass", "secret", "--ns", "main", "--db", "main", "memory"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop completely after saving. In a new chat, ask what MCP tools are available.
+
+</TabItem>
+
+<TabItem label="VS Code">
+
+VS Code uses a `servers` object and a `type` field. Workspace config: `.vscode/mcp.json`
+
+```json
+{
+  "servers": {
+    "surrealdb": {
+      "type": "stdio",
+      "command": "surreal",
+      "args": ["mcp", "--user", "root", "--pass", "secret", "--ns", "main", "--db", "main", "memory"]
+    }
+  }
+}
+```
+
+Enable Copilot agent mode (`github.copilot.chat.agent.enabled`) or use another MCP-compatible extension. Reload the window after editing the config.
+
+</TabItem>
+
+</Tabs>
+
+## Path B — HTTP (`surreal start`)
+
+Use this when SurrealDB already runs as a service and you want authenticated, network-accessible MCP.
+
+### Step 1 — Start the server
+
+```bash
+surreal start --user root --pass secret --bind 127.0.0.1:8000 memory
+```
+
+MCP is available at **`http://127.0.0.1:8000/mcp`** on the same listener as the REST API.
+
+### Step 2 — Configure your editor
+
+**Cursor** example (global `~/.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "surrealdb": {
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": {
+        "Authorization": "Basic <base64-encoded username:password>"
+      }
+    }
+  }
+}
+```
+
+Replace the header value with Base64-encoded credentials for your SurrealDB user (for example `root:secret` during local dev). In production, prefer a least-privilege `DEFINE USER` and TLS in front of the server — see [MCP security](/docs/build/ai-agents/mcp#security-checklist).
+
+**VS Code** uses the same URL but wraps it in `servers`:
+
+```json
+{
+  "servers": {
+    "surrealdb": {
+      "type": "http",
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": {
+        "Authorization": "Basic <base64-encoded username:password>"
+      }
+    }
+  }
+}
+```
+
+After connecting, run the same verification prompt as in Path A.
+
+## What your assistant can do
+
+Once connected, the assistant can use the published tools documented on the [MCP overview](/docs/build/ai-agents/mcp#published-tools). Typical workflows:
+
+- **Explore** — `list` namespaces, databases, and tables; `info` for schema detail.
+- **Context** — `use` to select namespace and database (stdio already sets `--ns` / `--db`, but `use` still helps when switching).
+- **Read and write** — `query` for arbitrary SurrealQL, or `select` / `create` / `insert` / `update` / `delete` / `relate` for structured operations.
+
+Permissions match those for the [`/sql`](/docs/reference/rest-api/http-protocol#post-sql) endpoint: table `PERMISSIONS`, user roles, and server capability flags all apply.
+
+## Troubleshooting
+
+| Symptom | Things to check |
+| --- | --- |
+| Red / disconnected in MCP settings | Is `surreal` on `PATH`? Try the full path in `command`. Run `surreal mcp --user root --pass secret --ns main --db main memory` manually for errors. |
+| Tools list empty | Restart the editor after editing MCP config. Confirm SurrealDB version is 3.1+. |
+| Query timeout | Default tool timeout is 60 seconds (`SURREAL_MCP_QUERY_TIMEOUT_SECS`). Large scans may need a narrower query. |
+| Result truncated | Output is capped (default 256 KiB). Paginate or aggregate in SurrealQL. See [MCP configuration](/docs/build/ai-agents/mcp#configuration). |
+| Permission errors on HTTP | User lacks rights for the operation. Sign in with appropriate credentials or adjust `DEFINE USER` / `PERMISSIONS`. |
+
+## Next steps
+
+- [Model Context Protocol (MCP)](/docs/build/ai-agents/mcp) — transports, tools, environment variables, security
+- [`surreal mcp` CLI reference](/docs/reference/cli/surrealdb-cli/commands/mcp)
+- [Agent Skills](/docs/build/ai-agents/agent-skills) — teach assistants SurrealQL patterns alongside MCP
+- [Why SurrealDB for AI agents](/docs/build/ai-agents) — memory, retrieval, and agent architecture
