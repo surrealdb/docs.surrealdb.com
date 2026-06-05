@@ -10,8 +10,8 @@ Spectron exposes two HTTP surfaces from the **api** role:
 
 | Surface | Prefix | Authentication |
 | --- | --- | --- |
-| **End-user API** | `/api/v1/{context_id}/...` | Context API key in the `API-KEY` header |
-| **Management API** | `/api/v1/...` (no context id in path) | Management key in the `API-KEY` header |
+| **End-user API** | `/api/v1/{context_id}/...` | Context API key as `Authorization: Bearer` |
+| **Management API** | `/api/v1/...` (no context id in path) | Management key as `Authorization: Bearer` |
 
 Both surfaces share the same host and port (default `http://localhost:9090`). **MCP** is served at `/mcp` on the same listener.
 
@@ -19,10 +19,10 @@ See [Management API](/docs/spectron/reference/management-api) for Context and ke
 
 ## Authentication
 
-Every request must include your API key in the **`API-KEY`** header (no `Bearer` prefix):
+Every request must include your API key as a Bearer token:
 
 ```http
-API-KEY: <your-key>
+Authorization: Bearer <your-key>
 ```
 
 Optional idempotent writes accept:
@@ -39,7 +39,7 @@ X-Spectron-On-Behalf-Of: <principal-id>
 
 Use this when an agent acts for another principal — for example a supervisor tool calling on behalf of a user. The effective authority is always the **intersection** of the caller’s key, the caller’s grants, and the target’s grants; delegation cannot widen access.
 
-The same `Idempotency-Key` within 24 hours returns the stored response; a different body with the same key returns `409 Conflict`.
+The same `Idempotency-Key` (scoped to context + principal) within 24 hours returns the stored response. A different body with the same key, or a duplicate request while the first is still in flight, returns `409 Conflict`. Failed writes release the reservation so a retry can re-run.
 
 ## Base URL
 
@@ -84,7 +84,7 @@ Document-only retrieval remains under `POST /api/v1/{ctx}/documents/query`. Form
 
 ```http
 POST /api/v1/{context_id}/facts
-API-KEY: <key>
+Authorization: Bearer <key>
 Content-Type: application/json
 
 {
@@ -106,7 +106,7 @@ Preferred path for multi-turn ingest (replaces per-turn `POST .../sessions/{id}/
 
 ```http
 POST /api/v1/{context_id}/facts/batch
-API-KEY: <key>
+Authorization: Bearer <key>
 Content-Type: application/json
 Idempotency-Key: conv-01HF...
 
@@ -135,9 +135,11 @@ Sessions remain for browsing transcripts and session-scoped state. **Writes** sh
 POST   /api/v1/{context_id}/sessions
 GET    /api/v1/{context_id}/sessions/{session_id}
 DELETE /api/v1/{context_id}/sessions/{session_id}
-GET    /api/v1/{context_id}/sessions/{session_id}/turns
+GET    /api/v1/{context_id}/sessions/{session_id}/turns?limit=100&offset=0
 GET    /api/v1/{context_id}/sessions/{session_id}/context
 ```
+
+`list_turns` paginates: **`limit`** defaults to 100 (max 500); **`offset`** skips rows. The CLI `sessions show` / `transcript` commands page through turns automatically.
 
 Create session body:
 
@@ -174,6 +176,10 @@ Content-Type: application/json
 | `labels` | Descriptive `key=value` tags that **filter** hits within the allowed region — labels never widen access on their own. |
 | `lens` | Optional hierarchical paths that **filter by involvement** within the grant — hits must touch the lens node(s), but need not match an exact clause size. |
 | `scope_view` | How broadly to fold results within the grant: `strict` (default — caller’s region only), `crossTeam` (also include inbound cross-principal shared reads), or `merged` (also fold in same-fact records at narrower scopes). |
+| `include` | Which result families to return: `facts` (entities and attributes) and/or `passages` (document chunks and sections). Default: both. Omitted or empty means no narrowing. Filters the **response** only — retrieval and trace reinforcement still see the full candidate set. |
+| `mode` | Closed set: `hybrid`, `vector`, `bm25`, or `graph`. Invalid values return `400`. |
+
+**`limit`** on `/query` and **`k`** on document query are capped (default max 1000; operator-tunable — see [Configuration](/docs/spectron/reference/configuration#request-and-list-limits)).
 
 Response includes `tier` (`direct`, `cache`, `hybrid`, or `full_context`), `hits` (each with **`source`** as a **`ResultKind`**: `entity`, `attribute`, `memory_chunk`, `chunk`, or `section`), **`queryMs`**, and inline **`trace`** (with **`traceId`** for `GET .../traces/{id}`).
 
@@ -260,7 +266,9 @@ Upload uses `multipart/form-data`; processing is asynchronous via the job queue.
 
 ### Document query (`/documents/query`)
 
-Document-only ranked retrieval accepts the same **`mode`** values as unified recall (`vector`, `bm25`, `hybrid`, `hybrid_graph`). When using graph-density reranking, optional **`graph_edges`** selects which structural signals contribute. Each value must be a recognised edge kind — unknown values return `400 Bad Request`:
+Document-only ranked retrieval accepts the same **`mode`** values as unified recall (`vector`, `bm25`, `hybrid`, `hybrid_graph`). Optional flags **`useHyde`** and **`decomposeQuery`** are honoured when a request-path LLM is configured: HyDE embeds a hypothetical answer for the vector leg (BM25 and reranking still use the raw query); decomposition fans out sub-questions and merges deduplicated hits. Both degrade gracefully to single-query retrieval on failure.
+
+When using graph-density reranking, optional **`graph_edges`** selects which structural signals contribute. Each value must be a recognised edge kind — unknown values return `400 Bad Request`:
 
 | Value | Signal |
 | --- | --- |
@@ -296,7 +304,9 @@ GET /api/v1/{context_id}/audit
 GET  /api/v1/{context_id}/scopes
 POST /api/v1/{context_id}/scopes
 POST /api/v1/{context_id}/scopes/forget
-POST /api/v1/{context_id}/scope-grants
+POST /api/v1/{context_id}/scope-grants   # returns 501 — cross-principal sharing not yet implemented
+
+GET  /api/v1/verbs                       # management API — grant verb catalog
 
 GET  /api/v1/{context_id}/principals
 POST /api/v1/{context_id}/principals

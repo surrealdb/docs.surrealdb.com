@@ -30,7 +30,7 @@ const client = createSpectronClient({
 });
 ```
 
-Uses **`API-KEY`** header authentication (not `Authorization: Bearer`).
+Uses **`Authorization: Bearer`** header authentication.
 
 ## Core operations
 
