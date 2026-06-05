@@ -28,7 +28,7 @@ const client = createSpectronClient({
 });
 ```
 
-Requests send **`API-KEY: <secret>`** — not `Authorization: Bearer`.
+Requests send **`Authorization: Bearer <secret>`**. Generated clients attach the header automatically from `apiKey`.
 
 ## Remember and recall
 

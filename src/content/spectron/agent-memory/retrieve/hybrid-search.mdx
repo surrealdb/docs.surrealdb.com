@@ -145,6 +145,8 @@ Each hit in the result contains:
 
 ## Advanced options
 
+These flags are honoured on **`POST /documents/query`** and the MCP recall path when a request-path LLM provider is configured. On failure or when no LLM is attached, Spectron falls back to single-query retrieval without error.
+
 ### HyDE (Hypothetical Document Embeddings)
 
 When `use_hyde=True`, Spectron generates a hypothetical answer to the query using the configured response model, then embeds that hypothetical answer rather than the raw query string. This improves recall for queries phrased as questions rather than document-like statements, at the cost of one LLM call per query.

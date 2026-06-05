@@ -29,7 +29,7 @@ client = SpectronClient(
 )
 ```
 
-Authentication uses the **`API-KEY`** header on every request (handled by the client). Do not prefix the key with `Bearer`.
+Authentication uses the **`Authorization: Bearer`** header on every request (handled by the client).
 
 | Setting | Environment variable | Example |
 | --- | --- | --- |
