@@ -166,7 +166,9 @@ Content-Type: application/json
   "scope": ["org/acme/user/alice"],
   "labels": ["subject=alice"],
   "lens": ["org/acme/user/alice"],
-  "scope_view": "strict"
+  "scope_view": "strict",
+  "as_of": "2025-02-01T00:00:00Z",
+  "source": "ingest-cli"
 }
 ```
 
@@ -178,6 +180,8 @@ Content-Type: application/json
 | `scope_view` | How broadly to fold results within the grant: `strict` (default — caller’s region only), `crossTeam` (also include inbound cross-principal shared reads), or `merged` (also fold in same-fact records at narrower scopes). |
 | `include` | Which result families to return: `facts` (entities and attributes) and/or `passages` (document chunks and sections). Default: both. Omitted or empty means no narrowing. Filters the **response** only — retrieval and trace reinforcement still see the full candidate set. |
 | `mode` | Closed set: `hybrid`, `vector`, `bm25`, or `graph`. Invalid values return `400`. |
+| `as_of` | Known-time filter — recall what the system would have believed at this instant (supersession walk by `created_at`, not valid-time). Omitted means current state. |
+| `source` | Free-form label recorded on the retrieval trace for audit replay; does not affect ranking. |
 
 **`limit`** on `/query` and **`k`** on document query are capped (default max 1000; operator-tunable — see [Configuration](/docs/spectron/reference/configuration#request-and-list-limits)).
 
@@ -266,7 +270,7 @@ Upload uses `multipart/form-data`; processing is asynchronous via the job queue.
 
 ### Document query (`/documents/query`)
 
-Document-only ranked retrieval accepts the same **`mode`** values as unified recall (`vector`, `bm25`, `hybrid`, `hybrid_graph`). Optional flags **`useHyde`** and **`decomposeQuery`** are honoured when a request-path LLM is configured: HyDE embeds a hypothetical answer for the vector leg (BM25 and reranking still use the raw query); decomposition fans out sub-questions and merges deduplicated hits. Both degrade gracefully to single-query retrieval on failure.
+Document-only ranked retrieval accepts the same **`mode`** values as unified recall (`vector`, `bm25`, `hybrid`, `hybrid_graph`). Optional flags **`useHyde`**, **`decomposeQuery`**, and **`useReranker`** are honoured when configured: HyDE embeds a hypothetical answer for the vector leg; decomposition fans out sub-questions; reranking rescores top candidates with a cross-encoder when `SPECTRON_RERANKER_URL` is set (see [Configuration](/docs/spectron/reference/configuration#reranker-optional)). All degrade gracefully when the backing provider is absent.
 
 When using graph-density reranking, optional **`graph_edges`** selects which structural signals contribute. Each value must be a recognised edge kind — unknown values return `400 Bad Request`:
 
@@ -293,6 +297,33 @@ GET /api/v1/{context_id}/audit
 ```
 
 **`/traces/stats`** accepts `scope[…]`, `since`, and **`windowHours`** (rolling window for operational counters). The response includes aggregate counts and health signals for retrieval, decision, and response traces in the window.
+
+**Scope gate:** callers with **`grant:manage`** or legacy unscoped keys see Context-wide aggregates. Scope-enforcing keys receive a **zeroed** stats view for regions outside their grant, mirroring trace listing so that cross-principal usage metadata does not leak.
+
+---
+
+## Self-service keys and `/me`
+
+Members who hold a brokered or admin-minted key can manage their own keys on the data-plane API without a management credential:
+
+```http
+GET    /api/v1/{context_id}/me
+POST   /api/v1/{context_id}/keys
+GET    /api/v1/{context_id}/keys
+DELETE /api/v1/{context_id}/keys/{name}
+POST   /api/v1/{context_id}/keys/{name}/rotate
+```
+
+**`GET /me`** returns caller introspection: principal identity, principal grants, the key’s attenuating grants, effective grants, and `delegatedPrincipalId` when delegating. Ungated — members deliberately lack `grant:manage`, so admin-side principal endpoints are not sufficient.
+
+**`POST /keys`** mints a key for the caller’s **own** principal. Optional **`grants`** only **attenuate** (narrow) per verb; widening returns `400`. Returns the plaintext secret once.
+
+Per-Context policy (see [Configuration](/docs/spectron/reference/configuration)):
+
+- **`allow_self_service_keys`** — set `false` to require Cloud-brokered keys only.
+- **`max_token_ttl_seconds`** — server-side TTL clamp on every mint path (management, broker, self-service).
+
+See [API keys and delegation](/docs/spectron/self-hosting/security/api-keys-and-delegation#self-service-keys-and-cloud-brokerage).
 
 **`/audit`** returns **`rows`** with a **`kind`** filter (`decision`, `retrieval`, or `response`) and **`traceId`** linking back to graph-resident traces. Query with `?kind=decision&limit=50`.
 
