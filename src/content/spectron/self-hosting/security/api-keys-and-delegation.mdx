@@ -10,12 +10,21 @@ Spectron uses API keys for all authenticated operations. Keys carry a scope floo
 
 ## Creating keys
 
-Keys are created via the management API or `spectronctl`. Each key requires:
+Keys are created via the management API (operator), Cloud-brokered access tokens, or member self-service. Each data-plane key is **bound to a principal** and carries grant regions per verb.
 
-- **Principal type**: the kind of caller the key represents (`agent`, `supervisor`, `management`)
-- **Scope floor**: the minimum scope that all operations using this key must satisfy
-- **Name**: a human-readable label for auditing
-- **Expiry** (optional): a timestamp after which the key is automatically rejected
+Management mint (requires management key):
+
+```http
+POST /api/v1/contexts/{context_id}/principals/{principal_id}/keys/{key_name}
+```
+
+See [Management API](/docs/spectron/reference/management-api#api-keys) for the full control-plane surface.
+
+Each key requires:
+
+- **Principal binding** — the principal whose grants the key inherits (optional body **`grants`** only attenuate)
+- **Name** — a human-readable label unique within the Context
+- **Expiry** (optional) — via `?ttl_seconds=` on mint or rotate
 
 ```python
 import spectron
@@ -56,6 +65,47 @@ console.log(key.plaintext); // sk-…  (shown once only)
 | `agent` | An individual agent. Reads and writes memory within its scope floor. |
 | `supervisor` | Reads memory across all agents within its org scope. Typically used for reflection and cross-agent queries. |
 | `management` | Full administrative access to the context: key management, configuration, lifecycle operations. |
+
+---
+
+## Self-service keys and Cloud brokerage
+
+Two flows share the same key substrate:
+
+**Cloud-broker** (management API) — for Surrealist and Cloud proxies that must mint a per-member, a short-lived key in one round-trip without escalating every user to admin:
+
+```http
+POST /api/v1/contexts/{context_id}/access-tokens
+Authorization: Bearer <management-key>
+
+{
+  "external_id": "surreal-cloud:usr_01HF…",
+  "display_name": "Alice",
+  "ttl_seconds": 3600,
+  "grants": {
+    "memory:read": [{ "org": "acme", "user": "alice" }],
+    "memory:write": [{ "org": "acme", "user": "alice" }]
+  }
+}
+```
+
+**`ttl_seconds` is required.** Re-broker before expiry; there are no refresh tokens.
+
+**Self-service** (data-plane API) — once a member holds a brokered or admin-minted key, they manage their own keys without admin access:
+
+```http
+GET  /api/v1/{context_id}/me
+POST /api/v1/{context_id}/keys
+GET  /api/v1/{context_id}/keys
+DELETE /api/v1/{context_id}/keys/{name}
+POST /api/v1/{context_id}/keys/{name}/rotate
+```
+
+**`GET /me`** returns principal identity, grants, effective grants, and delegation state. **`POST /keys`** mints for the caller’s own principal; optional **`grants`** only **attenuate** (narrow) — widening returns `400`. Self-service mutating routes reject legacy and delegated callers.
+
+Operators can disable self-mint with **`config.allow_self_service_keys: false`** or cap TTLs with **`config.max_token_ttl_seconds`** (see [Configuration](/docs/spectron/reference/configuration#key-policy)).
+
+There is no separate `key:create` grant verb — self-mint is safe by construction because attenuation can only narrow access, and gating it would be circular (you need a key to mint a key).
 
 ---
 

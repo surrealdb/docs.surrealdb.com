@@ -56,6 +56,8 @@ Content-Type: application/json
 {
   "namespace": "acme",
   "database": "prod",
+  "admin_external_id": "surreal-cloud:usr_01HF…",
+  "admin_display_name": "Alice Admin",
   "config": {
     "token_limit": 1000000,
     "models": {
@@ -70,6 +72,8 @@ Content-Type: application/json
 ```
 
 Creates the Context, provisions the SurrealDB namespace and database, and applies schema migrations. Returns `201 Created`.
+
+When **`admin_external_id`** is set, Spectron seeds an initial **`principal:admin`** bound to that opaque, issuer-qualified identity (for example `surreal-cloud:<user_id>`) with full `/*` grants — so a Cloud proxy can create a Context and immediately resolve the org owner without a follow-up principal call. **`admin_display_name`** is an optional human-readable label. Omit both fields to keep the generic admin principal.
 
 **Response:**
 ```json
@@ -145,84 +149,103 @@ Authorization: Bearer <management-key>
 
 > **Breaking change (v3 preview):** legacy verb names (`read`, `write`, `forget`, …) are rejected on new Contexts. Existing deployments must re-bootstrap or migrate grant maps.
 
-## API keys
+## Principals and external identity
 
-### List keys for a Context
-
-```http
-GET /api/v1/contexts/{context_id}/keys
-```
-
-**Response:**
-```json
-{
-  "keys": [
-    {
-      "id": "cak_01HF...",
-      "name": "app-agent",
-      "principal": "agent",
-      "scope_floor": { "org": "acme" },
-      "created_at": "2026-01-15T10:00:00Z",
-      "last_used_at": "2026-05-12T09:15:00Z"
-    }
-  ]
-}
-```
-
-The secret is never returned after creation.
-
-### Create a key
+Principals are the data-plane identity Spectron authorises. Create one with an optional **`external_id`** so upstream systems (SurrealDB Cloud, OIDC, on-prem IdP) can resolve “which principal is this user?” without a side mapping table:
 
 ```http
-POST /api/v1/contexts/{context_id}/keys
+POST /api/v1/contexts/{context_id}/principals
 Content-Type: application/json
 
 {
-  "name": "app-agent",
-  "principal": "agent",
-  "scope_floor": { "org": "acme" }
+  "display_name": "Alice",
+  "external_id": "surreal-cloud:usr_01HF…",
+  "grants": {
+    "memory:read": [{ "org": "acme", "user": "alice" }],
+    "memory:write": [{ "org": "acme", "user": "alice" }]
+  }
 }
 ```
 
-**Response (secret shown once):**
-```json
+When **`external_id`** is present, create is **create-or-get**: a repeat call with the same issuer-qualified id returns the existing principal unchanged (even if `display_name` differs). Without `external_id`, each call mints a fresh principal. The value is opaque to Spectron — qualify it with your issuer prefix.
+
+## API keys
+
+Data-plane keys are always **bound to a principal**. Mint them under that principal; unbound or enforcement-off keys are no longer supported.
+
+### Mint a key (principal-nested)
+
+```http
+POST /api/v1/contexts/{context_id}/principals/{principal_id}/keys/{key_name}?ttl_seconds=2592000
+Content-Type: application/json
+
 {
-  "id": "cak_01HF...",
-  "name": "app-agent",
-  "principal": "agent",
-  "scope_floor": { "org": "acme" },
-  "secret": "sk-acme-prod-...",
-  "created_at": "2026-05-12T10:00:00Z"
+  "grants": {
+    "memory:read": [{ "org": "acme", "agent": "planner" }]
+  }
 }
 ```
+
+Optional **`grants`** in the body **attenuate** (narrow) the principal’s grants per verb (intersect only — widening returns `400`). Omit grants to inherit the principal’s full region. The secret is returned once.
+
+Duplicate key names within a Context return **`409 Conflict`** (names are unique per Context, not per principal).
+
+### List keys for a principal
+
+```http
+GET /api/v1/contexts/{context_id}/principals/{principal_id}/keys
+```
+
+### Rotate or delete (principal-nested)
+
+```http
+POST   /api/v1/contexts/{context_id}/principals/{principal_id}/keys/{key_name}/rotate?ttl_seconds=2592000
+DELETE /api/v1/contexts/{context_id}/principals/{principal_id}/keys/{key_name}
+```
+
+On nested rotate/delete, a key that does not exist, is unbound, or belongs to a **different** principal returns **`404`** (no cross-principal leakage).
+
+### Context-wide operator views
+
+Flat list endpoints remain for operators auditing all keys in a Context:
+
+```http
+GET    /api/v1/contexts/{context_id}/keys
+DELETE /api/v1/contexts/{context_id}/keys/{key_name}
+POST   /api/v1/contexts/{context_id}/keys/{key_name}/rotate?ttl_seconds=2592000
+```
+
+The secret is never returned after creation except on mint and rotate.
 
 **Principal types:**
 
 | Principal | Capabilities |
 |---|---|
 | `agent` | Create sessions, add turns, recall context, search knowledge. Cannot persist reflections or manage keys. |
-| `supervisor` | All agent capabilities plus persisting reflections at the supervisor's scope floor. |
+| `supervisor` | All agent capabilities plus persisting reflections within the supervisor’s grant region. |
 
-### Rotate a key
+### Cloud-brokered access tokens
 
-```http
-POST /api/v1/contexts/{context_id}/keys/{key_name}/rotate?ttl_seconds=2592000
-```
-
-Generates a new secret for the named key. The key **id**, principal binding, grants, and `created_at` are preserved — only the stored hash changes. The old secret is invalidated immediately. Returns the new secret (shown once).
-
-| Query param | Behaviour |
-| --- | --- |
-| `ttl_seconds` omitted | Inherit current expiry |
-| `ttl_seconds=N` | Reset expiry to now + N seconds |
-
-### Delete a key
+For Surrealist and other Cloud proxies that must mint a **short-lived, member-scoped** key in one round-trip without handing every member a management key:
 
 ```http
-DELETE /api/v1/contexts/{context_id}/keys/{key_id}
+POST /api/v1/contexts/{context_id}/access-tokens
+Content-Type: application/json
+
+{
+  "external_id": "surreal-cloud:usr_01HF…",
+  "display_name": "Alice",
+  "ttl_seconds": 3600,
+  "grants": {
+    "memory:read": [{ "org": "acme", "user": "alice" }],
+    "memory:write": [{ "org": "acme", "user": "alice" }]
+  }
+}
 ```
 
-Revokes the key immediately. Returns `204 No Content`.
+Composes **create-or-get principal by `external_id`**, optional grant re-assertion, and **mint a bound key**. **`ttl_seconds` is required** — brokered tokens cannot be unbounded. Re-broker before expiry; there are no refresh tokens. The plaintext secret is returned once.
+
+Member-facing **self-service** key management (after a brokered or admin-minted key is held) lives on the [REST API](/docs/spectron/reference/rest-api#self-service-keys-and-me) — not the management API.
 
 ## Knowledge upload (management-only)
 
