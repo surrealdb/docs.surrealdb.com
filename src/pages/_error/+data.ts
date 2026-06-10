@@ -15,7 +15,7 @@ export default function data(pageContext: PageContext) {
         return null;
     }
 
-    const parent = getParentPathname(pageContext.urlOriginal);
+    const parent = getParentPathname(pageContext.urlPathname);
 
     if (parent) {
         throw redirect(parent, 302);

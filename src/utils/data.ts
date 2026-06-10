@@ -20,7 +20,8 @@ export interface PageData {
 
 /** One path segment up (e.g. `/a/b` → `/a`). */
 export function getParentPathname(pathname: string): string | null {
-    const trimmed = pathname.replace(/\/+$/, "");
+    const pathOnly = pathname.includes("://") ? new URL(pathname).pathname : pathname;
+    const trimmed = pathOnly.replace(/\/+$/, "");
 
     if (trimmed === "" || trimmed === "/") {
         return null;
@@ -57,7 +58,7 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
     const entry = getCollectionEntry(id, path);
 
     if (!entry) {
-        const parent = getParentPathname(context.urlOriginal);
+        const parent = getParentPathname(context.urlPathname);
 
         if (parent) {
             throw redirect(parent, 302);
