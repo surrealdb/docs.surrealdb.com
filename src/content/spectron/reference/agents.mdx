@@ -1,0 +1,234 @@
+---
+position: 1
+title: Agent guide (AGENTS.md)
+description: "Instructions for coding agents integrating with Spectron — copy into Cursor rules or skills."
+---
+
+# Agent guide (AGENTS.md)
+
+This page is written for **coding agents** (Cursor, Claude Code, Copilot, and similar) building on Spectron. Humans can read it too, but the tone is imperative: what to do, what not to do, and where the sharp edges are.
+
+**Use it as a Cursor skill:** copy this file into `.cursor/rules/spectron.mdc`, add it as a project rule, or save it under `.cursor/skills/spectron/SKILL.md` with a short `description` in the frontmatter so the agent loads it when working on Spectron integrations.
+
+Full product docs can be found at [Spectron documentation](/docs/spectron). This guide is the minimum viable canon for “vibe coding” without reading all of it.
+
+---
+
+## What Spectron is
+
+Spectron is a **memory and knowledge layer for AI agents** backed by SurrealDB. You send turns and documents in; Spectron extracts structured facts (entities, attributes, relations), reconciles contradictions, and retrieves context for later queries.
+
+Two streams share **one graph**:
+
+- **Experiential** — chat turns, sessions, reflections.
+- **Authoritative** — uploaded documents and curated knowledge.
+
+When they disagree, Spectron records **uncertainty** — it does not silently pick a winner.
+
+---
+
+## Authentication
+
+Every request uses a Bearer token:
+
+```http
+Authorization: Bearer sk-…
+```
+
+Do **not** use `API-KEY`, `X-API-Key`, or query-string secrets.
+
+- **Data-plane keys** — bound to a **principal** with grant regions. Used for `/api/v1/{context_id}/…` routes.
+- **Management keys** — control plane only (`/api/v1/contexts/…`). Never embed in client apps or MCP configs shipped to end users.
+
+Context id is in the **URL path**, not a header (except MCP — see below).
+
+---
+
+## Scope and grants
+
+Memory is partitioned by **scope** — hierarchical paths like `org/acme/user/alice`. Every read and write is clamped to the caller’s **effective grants**.
+
+Grant verbs (always `noun:verb`):
+
+| Verb | Use for |
+| --- | --- |
+| `memory:read` | Recall, query, chat, document GET/list |
+| `memory:write` | Turns, fact writes, document upload |
+| `memory:forget` | Forget, entity delete, scoped erasure |
+| `scope:read` | List scope names (no data access) |
+| `scope:create` | Register scope paths |
+| `scope:delete` | Remove scope paths |
+| `grant:manage` | Grant/revoke on principals |
+
+**Rules agents must respect:**
+
+1. Pass **`scope`** on reads/writes when the user or session is scoped — never assume Context-wide access.
+2. **`labels`** and **`lens`** filter within the grant; they **never widen** access.
+3. Delegation uses **`X-Spectron-On-Behalf-Of: <principal_id>`** (depth 1 only). Effective authority is the **intersection** of caller and target grants.
+4. Legacy flat verbs (`read`, `write`, …) are **rejected**.
+
+Introspect the caller without admin access:
+
+```http
+GET /api/v1/{context_id}/me
+```
+
+---
+
+## Core HTTP surfaces
+
+Base path: `/api/v1/{context_id}/…`
+
+| Goal | Method | Path |
+| --- | --- | --- |
+| Structured recall | `POST` | `/query` |
+| LLM-ready context string | `POST` | `/context` |
+| Managed chat loop | `POST` | `/chat` or `/sessions/{id}/chat` |
+| Record a turn | `POST` | `/sessions/{id}/turns` |
+| Upload document | `POST` | `/documents` (multipart) |
+| Document-only search | `POST` | `/documents/query` |
+| On-demand reflection | `POST` | `/reflect` |
+| Semantic forget (preview or apply) | `POST` | `/forget` — use `dryRun: true` to preview |
+| Trace detail | `GET` | `/traces/{trace_id}` |
+
+### `/query` essentials
+
+```json
+{
+  "query": "What is Alice's role?",
+  "scope": ["org/acme/user/alice"],
+  "limit": 10,
+  "include": ["facts", "passages"],
+  "as_of": "2025-02-01T00:00:00Z",
+  "source": "my-app"
+}
+```
+
+- **`as_of`** — known-time recall (what we believed then). Distinct from valid-time on entities.
+- **`source`** — audit label on the retrieval trace only; does not change ranking.
+- **`mode`** — `hybrid`, `vector`, `bm25`, or `graph` only; invalid values → `400`.
+- Response includes **`tier`**, **`hits`**, inline **`trace`**, and **`queryMs`**.
+
+### Sessions
+
+Create a session, append turns, or let Spectron run the full loop:
+
+```http
+POST /api/v1/{context_id}/sessions
+POST /api/v1/{context_id}/sessions/{session_id}/turns
+POST /api/v1/{context_id}/sessions/{session_id}/chat
+```
+
+Use **`session.turn()` + `session.context()`** when you need your own LLM, tools, or streaming. Use **`session.chat()`** when Spectron should retrieve, call the response model, and persist the reply.
+
+---
+
+## MCP (Cursor, Claude Desktop, …)
+
+Remote MCP endpoint (hosted): `https://api.spectron.dev/mcp`
+
+Headers:
+
+```json
+{
+  "Authorization": "Bearer <api-key>",
+  "X-Spectron-Context": "<context_id>"
+}
+```
+
+Optional scope default: `X-Spectron-Scope: org/acme,project=foo`
+
+Seven tools: `memory_store`, `memory_recall`, `memory_forget`, `knowledge_search`, `knowledge_upload`, `session_turn`, `context` (names may vary slightly — check [MCP tools](/docs/spectron/reference/mcp-tools)).
+
+**Limits:** `k` / `limit` on `recall` and `context` defaults to **10** and is capped at **50** (`SPECTRON_MAX_QUERY_K`, clamp-down only). The retrieval candidate pool is internal (`SPECTRON_RETRIEVAL_POOL_SIZE`, default 256) and is not widened by raising `k`. Oversized `k` returns **`400`** before retrieval runs.
+
+**Errors:** operation failures use `isError: true` with `structuredContent.error.status` (same codes as REST). JSON-RPC `error` is for protocol faults only. See [MCP error handling](/docs/spectron/reference/mcp-tools#error-handling).
+
+Install helper:
+
+```bash
+npx install-mcp spectron --client cursor --context <context_id>
+```
+
+See [Cursor](/docs/spectron/integrations/mcp-server/coding-assistants/cursor).
+
+---
+
+## SDKs
+
+Prefer an official SDK over raw HTTP when available:
+
+```python
+from surrealdb import Spectron
+
+memory = Spectron(context="acme-prod", api_key=os.environ["SPECTRON_API_KEY"])
+await memory.sessions.create(scope={"org": "acme", "user": "alice"})
+```
+
+```javascript
+import { Spectron } from "@surrealdb/spectron";
+
+const memory = new Spectron({ context: "acme-prod", apiKey: process.env.SPECTRON_API_KEY });
+```
+
+Model assignment is **per Context** for LLM stages; **embedding is deployment-fixed** — do not try to set `models.embedding` in config patches.
+
+---
+
+## Keys: minting patterns
+
+| Who | How |
+| --- | --- |
+| Operator | `POST /api/v1/contexts/{ctx}/principals/{principal_id}/keys/{name}` (management key) |
+| Cloud proxy | `POST /api/v1/contexts/{ctx}/access-tokens` with `external_id` + required `ttl_seconds` |
+| Member | `POST /api/v1/{ctx}/keys` after holding a brokered key (self-service; grants may only **attenuate**) |
+
+Unbound or “scoped mint in body” key routes are **removed**. Always bind keys to a principal.
+
+Rotate in place:
+
+```http
+POST /api/v1/{context_id}/keys/{name}/rotate?ttl_seconds=2592000
+```
+
+---
+
+## Common agent mistakes
+
+1. **No scope on writes** — facts land in the wrong region or get rejected.
+2. **Treating labels as scope** — `labels=["team=platform"]` filters; it does not grant access.
+3. **Using management keys in the app** — use principal-bound data-plane keys.
+4. **Expecting embedding config per Context** — set `SPECTRON_MODEL_EMBEDDING` on the server; reindex after model changes.
+5. **Ignoring `memory_updates` / trace** — when debugging wrong answers, fetch `GET …/traces/{traceId}` and check `resolutionTier`.
+6. **Assuming last-write-wins** — contradictions become **`uncertainty`** records; design UIs accordingly.
+7. **Idempotent retries without idempotency keys** — duplicate writes may return **`409`**; use idempotency headers where documented.
+8. **`use_reranker: true` without server reranker** — requires `SPECTRON_RERANKER_URL` + `SPECTRON_RERANKER_MODEL` or it falls back to bi-encoder order.
+9. **MCP JSON-RPC errors for business failures** — not-found and auth failures return **`isError: true`** with `error.status`, not JSON-RPC `-32603`.
+10. **`POST /forget` without checking dry run** — pass **`dryRun: true`** (or `spectron forget --dry-run`) to preview; omitting it expires records immediately.
+11. **Per-Context OCR/STT config** — multimodal HTTP providers are **deployment env vars** (`SPECTRON_OCR_*`, `SPECTRON_CLIP_*`, `SPECTRON_STT_*`), not Context patch fields.
+
+---
+
+## Idempotency and errors
+
+Errors are [RFC 7807 problem details](/docs/spectron/reference/errors). Typical codes:
+
+- **`401`** — missing/invalid/expired key
+- **`403`** — grant does not cover requested scope
+- **`400`** — invalid `mode`, grant widening, or limit exceeded
+- **`409`** — duplicate key name or idempotency conflict
+
+---
+
+## What to read next
+
+| Topic | Doc |
+| --- | --- |
+| REST surface | [REST API](/docs/spectron/reference/rest-api) |
+| Control plane | [Management API](/docs/spectron/reference/management-api) |
+| Scope model | [Contexts and scope](/docs/spectron/mental-model/contexts-and-scope) |
+| Retrieval tiers | [Coherence, retrieval, and cost tiers](/docs/spectron/architecture/coherence-retrieval-and-tiers) |
+| Keys and Cloud brokerage | [API keys and delegation](/docs/spectron/self-hosting/security/api-keys-and-delegation) |
+| MCP schemas | [MCP tools](/docs/spectron/reference/mcp-tools) |
+
+Spectron is designed to be auditable, so **verify against traces** before changing application logic when behaviour seems wrong.

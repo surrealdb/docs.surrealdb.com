@@ -74,6 +74,16 @@ OCR (optical character recognition) recognises printed and handwritten text in i
 
 OCR is available with `text_plus_ocr`, `multimodal_balanced`, and `multimodal_full` profiles.
 
+### Scanned and low-text PDFs
+
+When a PDF has **no extractable text layer** (image-only / scanned pages), Spectron rasterises pages and runs OCR when the **`local-ml-providers`** feature and an OCR provider are configured. Without OCR, ingest **fails loudly** with an actionable error — the document never lands in **`ready`** with an empty body.
+
+For **partially scanned** PDFs (a sparse text layer on some pages), a low-text trigger rasterises and OCRs all pages when the recovered text exceeds what the native layer provided — all-or-nothing per document, not per-page splicing.
+
+### Embedded PDF images
+
+PDFs with embedded JPEG images (including common filter chains such as ASCII85/Hex + DCTDecode) extract image bytes and run the same OCR, vision, and CLIP path as standalone image uploads. OCR and vision text is folded into the chunk spine before embedding; visual embeddings land on **`image_chunk`** rows linked to the page's **`knowledge_section`**.
+
 ```python
 doc = await memory.knowledge.upload(
     file=open("scanned-invoice.pdf", "rb"),
@@ -129,22 +139,21 @@ Video caption extraction is the most resource-intensive stage and is therefore o
 
 ## HTTP provider integration
 
-By default, Spectron uses its built-in OCR and speech-to-text providers. For deployments that have existing OCR or STT infrastructure, you can configure a custom HTTP endpoint that Spectron will call in place of the built-in provider:
+By default, Spectron uses built-in or feature-gated local OCR and speech-to-text providers. For deployments with existing multimodal infrastructure, configure **deployment-level** HTTP endpoints via environment variables (same pattern as `SPECTRON_RERANKER_*`):
 
-```python
-await memory.config.providers(
-    ocr_endpoint="https://ocr.internal.example.com/v1/extract",
-    stt_endpoint="https://stt.internal.example.com/v1/transcribe",
-)
-```
+| Modality | Variables |
+| --- | --- |
+| OCR | `SPECTRON_OCR_URL`, `SPECTRON_OCR_MODEL`, `SPECTRON_OCR_API_KEY` (optional) |
+| CLIP (visual embeddings) | `SPECTRON_CLIP_URL`, `SPECTRON_CLIP_MODEL`, `SPECTRON_CLIP_API_KEY` (optional) |
+| Speech-to-text | `SPECTRON_STT_URL`, `SPECTRON_STT_MODEL`, `SPECTRON_STT_API_KEY` (optional) |
 
-Spectron posts the raw file bytes to these endpoints and expects a JSON response with the extracted text:
+When a URL is set, its **`_MODEL`** is required and Spectron calls the endpoint at ingest time (worker role). HTTP providers take precedence over local fallbacks. CLIP output must match the **512-dim** image embedding width — dimension mismatch is rejected at embed time.
 
-```json
-{ "text": "Recognised content here…" }
-```
+**Vision LLMs:** under **`multimodal_full`**, image understanding runs when the worker resolves an extraction LLM for the Context — per-Context **`models.extraction`** and provider keys apply even without a deployment-wide default LLM. Vision descriptions are appended to the document body **before chunking** (same spine as OCR text). OpenAI and Anthropic providers send image content blocks when media is attached.
 
-Custom endpoints must be reachable from the Spectron server and must respond within 60 seconds. Authentication headers can be configured per endpoint through the same provider configuration object.
+**Per-Context ingest LLM:** document jobs resolve the extraction LLM from the Context config on each run (shared budget-enforced resolver with maintenance jobs). A Context with its own provider key but no deployment-wide `SPECTRON_LLM_PROVIDER` still gets ingest-time extraction and vision when configured.
+
+See [Configuration](/docs/spectron/reference/configuration#multimodal-providers-optional) for the full variable list.
 
 ## Checking pipeline progress
 
