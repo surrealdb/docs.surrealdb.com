@@ -57,7 +57,8 @@ await db.RawQuery(sql, params)
 
 ```csharp
 // Assign the variable on the connection
-var @params = new Dictionary<string, object> { { "table", "person" } };
+var @params = new Dictionary<string, object> { { "table",
+    "person" } };
 var result = await db.RawQuery("CREATE person; SELECT * FROM type::table($table);", @params);
 
 // Get the first result from the first query

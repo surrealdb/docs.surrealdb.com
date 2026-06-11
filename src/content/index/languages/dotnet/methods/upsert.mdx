@@ -52,7 +52,8 @@ await db.Upsert<T>(data)
 ```csharp
 var person = new Person
 {
-    Id = ("person", "tobie"), // Id is mandatory to apply create or update
+        Id = ("person", "tobie"),
+        // Id is mandatory to apply create or update
     Name = "Tobie",
     Settings = new Settings
     {

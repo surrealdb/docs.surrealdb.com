@@ -23,9 +23,11 @@ FOR $npc IN SELECT * FROM npc {
     -- Give each npc 20 random interactions
     FOR $_ IN 0..20 {
       -- Looks for a random NPC, use array::complement to filter out self
-      LET $counterpart = rand::enum(array::complement((SELECT * FROM npc), [$npc]));
+      LET $counterpart = rand::enum(array::complement((SELECT *
+        FROM npc), [$npc]));
       -- See if they have a relation yet
-      LET $existing = SELECT * FROM knows WHERE in = $npc.id AND out = $counterpart.id;
+      LET $existing = SELECT * FROM knows WHERE in = $npc.id
+        AND out = $counterpart.id;
       -- If relation exists, increase 'greeted' by one
       IF !!$existing {
         UPDATE $existing SET greeted += 1;
@@ -127,7 +129,8 @@ FOR $npc IN SELECT * FROM npc {
     -- Give each npc 20 random interactions
     FOR $_ IN 0..20 {
       -- Looks for a random NPC, use array::complement to filter out self
-      LET $counterpart = rand::enum(array::complement((SELECT * FROM npc), [$npc]));
+      LET $counterpart = rand::enum(array::complement((SELECT *
+        FROM npc), [$npc]));
       RELATE $npc->greeted->$counterpart;
     };
 };

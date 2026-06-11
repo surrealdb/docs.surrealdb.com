@@ -74,7 +74,8 @@ await db.Relate(table, @in, @out, data)
 ### Example usage
 
 ```csharp
-var data = new WroteRelation { CreatedAt = DateTime.UtcNow, NumberOfPages = 14 };
+var data = new WroteRelation { CreatedAt = DateTime.UtcNow,
+    NumberOfPages = 14 };
 
 await db.Relate<WroteRelation, WroteRelation>(
     "wrote",
