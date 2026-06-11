@@ -29,6 +29,8 @@ const ICON_ENTRIES: IconEntry[] = [
     ["DarkDotnet", "dark", "dotnet"],
     ["LightPhp", "light", "php"],
     ["DarkPhp", "dark", "php"],
+    ["LightSwift", "light", "swift"],
+    ["DarkSwift", "dark", "swift"],
     ["LightReact", "light", "reactjs"],
     ["DarkReact", "dark", "reactjs"],
     ["LightSolid", "light", "solidjs"],
