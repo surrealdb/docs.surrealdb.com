@@ -170,7 +170,8 @@ We will configure the record access like this:
 ```surql title="Scope definition"
 DEFINE ACCESS user ON DATABASE TYPE RECORD
 	SIGNIN (
-		SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(password, $password)
+		SELECT * FROM user WHERE email = $email
+		  AND crypto::argon2::compare(password, $password)
 	)
 	SIGNUP (
 		CREATE user CONTENT {
