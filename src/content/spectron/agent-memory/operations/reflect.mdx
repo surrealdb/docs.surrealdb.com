@@ -141,7 +141,7 @@ This prevents agents from writing to scopes they do not own. An agent operating 
 ```python
 risks = await memory.reflect(
     query="What risks are present in this project that we haven't explicitly discussed?",
-    scope={"org": "acme", "project": "platform-migration"},
+    scope=["org/acme/project/platform-migration"],
     persist=True,
 )
 ```
@@ -151,7 +151,7 @@ risks = await memory.reflect(
 ```python
 patterns = await memory.reflect(
     query="What conversational patterns appear most often in deals that closed this quarter?",
-    scope={"org": "acme", "team": "sales"},
+    scope=["org/acme/team/sales"],
     persist=True,
 )
 ```
@@ -161,7 +161,7 @@ patterns = await memory.reflect(
 ```python
 gaps = await memory.reflect(
     query="Which questions did I fail to answer confidently this week, and what knowledge would have helped?",
-    scope={"org": "acme", "user": "support-agent-01"},
+    scope=["org/acme/user/support-agent-01"],
     persist=True,
 )
 ```
