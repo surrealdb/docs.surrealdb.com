@@ -1,5 +1,5 @@
 ---
-position: 4
+position: 5
 title: Rollouts
 description: "Rollouts provide a controlled, phased migration workflow for shared and production SurrealDB databases, with review, staged execution, and rollback support."
 ---
@@ -98,14 +98,34 @@ surrealkit rollout lint 20260302153045__add_customer_indexes --user root \
 
 This is useful in CI to catch manifest errors before they reach a shared environment.
 
+### repair
+
+If `rollout complete` (or `rollback`) is killed mid-flight, the `__rollout` row can be left in an intermediate state (`running_complete`, `running_rollback`, or `running_start`) even though the schema changes have already been applied. Re-running `complete` or `rollback` will not always heal the metadata, because the underlying SQL steps are already done, and the stuck rollout blocks any new one from starting.
+
+Use `repair` to finish the metadata transition without re-running any SQL:
+
+```bash
+surrealkit rollout repair 20260302153045__add_customer_indexes --user root --pass secret
+```
+
+The behaviour depends on the stuck state:
+
+| Stuck state | Repair result |
+|---|---|
+| `running_complete` | Flips to `completed` and restores the target entities |
+| `running_rollback` | Flips to `rolled_back` and restores the source entities |
+| `running_start` | Flips to `failed`; re-run `start` (idempotent) or `rollback` |
+
+Repair never re-executes per-step SQL. It only reconciles the `__rollout` and `__entity` tables so subsequent `sync` and `plan` runs see a clean state.
+
 ## Rollout state machine
 
 Each rollout transitions through the following states, recorded in the `__rollout` table:
 
 ```
-planned → running_start → ready_to_complete → completed
-                       ↘
-                        rolled_back
+planned → running_start → ready_to_complete → running_complete → completed
+                                       │
+                                       └── running_rollback → rolled_back
 ```
 
 | State | Meaning |
@@ -113,8 +133,13 @@ planned → running_start → ready_to_complete → completed
 | `planned` | Manifest exists; neither start nor complete has run |
 | `running_start` | Start phase is in progress or was interrupted |
 | `ready_to_complete` | Start phase completed successfully |
-| `completed` | Both phases completed |
-| `rolled_back` | Start phase was reversed |
+| `running_complete` | Complete phase is in progress or was interrupted |
+| `completed` | Both phases completed (terminal) |
+| `running_rollback` | Rollback is in progress or was interrupted |
+| `rolled_back` | Start phase was reversed (terminal) |
+| `failed` | A phase failed; recover with `rollback` or `repair` |
+
+`completed` and `rolled_back` are terminal. The `running_*` states and `failed` are stuck states left by an interrupted run; recover them with [`repair`](#repair). Only one rollout may be in a non-terminal state at a time.
 
 ## Artifacts
 
