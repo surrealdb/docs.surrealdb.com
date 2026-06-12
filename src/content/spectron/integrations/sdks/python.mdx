@@ -6,92 +6,141 @@ description: "Using Spectron from Python applications and agents."
 
 # Python SDK
 
-The published package is **`surrealdb-spectron`** — a client generated from Spectron’s OpenAPI specification, wrapped with an ergonomic façade. Types such as **`MemoryCategory`** and graph edge kinds stay aligned with the server because both sides share the same spec.
+The Spectron client ships **inside the main SurrealDB Python package** (`surrealdb`). Install one package and import `Spectron` or `AsyncSpectron` alongside the database driver.
+
+> **Package naming:** On [PyPI](https://pypi.org), the Spectron client ships in the **`surrealdb`** package alongside the database driver — use **`pip install surrealdb`**. The bare name **`spectron`** belongs to an unrelated project; do not install it for SurrealDB Spectron.
 
 ## Installation
 
 ```bash
-pip install surrealdb-spectron
+pip install surrealdb
 ```
 
-Python 3.10+ recommended. Regenerate from the repo spec with `clients/python/generate.sh` when developing Spectron itself.
+Python 3.10+ recommended.
 
-## Configuration
+## Clients
+
+`Spectron` is synchronous (uses `requests`). `AsyncSpectron` is async (uses `aiohttp`). Both expose the same method names — add `await` on the async client.
 
 ```python
-import os
-from surrealdb_spectron import SpectronClient  # exact import may match generated module
+from surrealdb import Spectron, AsyncSpectron
 
-client = SpectronClient(
-    base_url=os.environ["SPECTRON_URL"],       # http://localhost:9090
-    api_key=os.environ["SPECTRON_API_KEY"],
-    context_id=os.environ["SPECTRON_CONTEXT_ID"],
-)
+with Spectron(
+    context="acme-prod",
+    endpoint="https://api.spectron.example",
+    api_key="sk-spec-...",
+) as memory:
+    memory.remember("Alice was promoted to CTO.")
+    hits = memory.recall("What is Alice's role?", k=10)
+    for hit in hits.hits:
+        print(hit.score, hit.text)
+
+async with AsyncSpectron(
+    context="acme-prod",
+    endpoint="https://api.spectron.example",
+    api_key="sk-spec-...",
+) as memory:
+    await memory.remember("Alice was promoted to CTO.")
+    hits = await memory.recall("What is Alice's role?", k=10)
 ```
 
-Authentication uses the **`Authorization: Bearer`** header on every request (handled by the client).
+Both clients are pinned to one context and call `/api/v1/{context}/…`. Pass `context`, `endpoint`, and `api_key` explicitly — the SDK does **not** read environment variables.
 
-| Setting | Environment variable | Example |
+## Scope
+
+On the wire, scope is a **ScopeSet**: an ordered array of slash-path strings (for example `["org/acme/user/alice"]`). Register paths with `spectron scopes create` before first use — see [Contexts and scope](/docs/spectron/mental-model/contexts-and-scope).
+
+The Python client accepts:
+
+- A single path: `scope="org/acme/user/alice"`
+- A list of paths: `scope=["org/acme/user/alice"]`
+
+| Argument | Default | Description |
 | --- | --- | --- |
-| Server URL | `SPECTRON_URL` | `http://localhost:9090` |
-| Context key | `SPECTRON_API_KEY` | from `spectrond bootstrap` |
-| Context id | `SPECTRON_CONTEXT_ID` | `dev` |
+| `context` | required | Context id, e.g. `"acme-prod"`. |
+| `endpoint` | required | Spectron host URL, e.g. `"https://api.spectron.example"`. |
+| `api_key` | required | Bearer token (`Authorization: Bearer …`). |
+| `timeout` | `30.0` | Per-request timeout in seconds. |
+| `max_retries` | `3` | Retries for GETs and idempotent writes. |
 
 ## Remember (facts)
 
 ```python
-result = await client.facts.create(
-    text="Alice was promoted to CTO.",
-    infer="full",
-    scope=["org/acme/user/alice"],
-)
-```
+memory.remember("Alice was promoted to CTO.", infer="full", scope=["org/acme/user/alice"])
+memory.remember("Q3 board notes", labels=["topic=board"], memory_category="context")
 
-Bulk conversation ingest:
-
-```python
-result = await client.facts.create_batch(
-    messages=[
+memory.remember_many(
+    [
         {"role": "user", "content": "I was promoted to CTO."},
         {"role": "assistant", "content": "Congratulations!"},
     ],
+    extract="whole_conversation",
     scope=["org/acme/user/alice"],
-    idempotency_key="conv-01HF...",
 )
 ```
 
-## Recall
+`remember` and `remember_many` send an `Idempotency-Key` header (derived from method, path, body, and a 30-second bucket) so safe retries collapse server-side.
+
+## Recall and context
 
 ```python
-hits = await client.query(
-    query="What is Alice's role?",
-    limit=10,
+result = memory.recall(
+    "What is Alice's role?",
+    k=10,
+    mode="hybrid",
     scope=["org/acme/user/alice"],
 )
 
-block = await client.context(
-    query="What is Alice's role?",
-    limit=10,
+block = memory.query_context(
+    "What is Alice's role?",
+    k=10,
     scope=["org/acme/user/alice"],
 )
 ```
+
+Optional filters include `labels`, `lens`, `scope_view` (`strict` | `merged` | `crossTeam`), temporal bounds (`as_of`, `valid_from`, …), and geo `location`.
 
 ## Documents
 
 ```python
-doc = await client.documents.upload(
-    file_path="./policy.pdf",
+upload = memory.documents.upload(
+    "policy.pdf",
+    content_type="application/pdf",
     title="Returns policy",
 )
+doc = memory.documents.get(upload.id)
+hits = memory.documents.query("refund window", k=5, mode="hybrid")
+chunks = memory.documents.chunks(upload.id)
+memory.documents.keywords.search("returns policy", k=10)
 ```
 
-## Chat
+## Chat (including streaming)
 
 ```python
-reply = await client.chat(
-    message="Summarise what you know about Alice",
-    scope=["org/acme/user/alice"],
-)
+reply = memory.chat("Summarise what you know about Alice", scope=["user/alice"])
+print(reply.reply)
+
+for chunk in memory.chat("Summarise what you know about Alice", stream=True):
+    if chunk.delta:
+        print(chunk.delta, end="", flush=True)
+    if chunk.done:
+        print("\n[trace]", chunk.trace_id)
+```
+
+## Other verbs and namespaces
+
+Top-level methods: `consolidate`, `reflect`, `elaborate`, `forget`, `state`, `whoami`, `profile`, `inspect`, `audit`, `health`.
+
+Grouped resources: `memory.documents`, `memory.sessions`, `memory.entities`, `memory.scopes`, `memory.principals`, `memory.keys`, `memory.traces`, `memory.lifecycle`.
+
+→ Full method tables: [Python SDK reference](/docs/spectron/reference/sdk-python)
+
+## Response types
+
+Typed dataclasses include `RememberResponse`, `RecallResponse`, `RecallHit`, `ChatResponse`, `Document`, `Chunk`, `StateResponse`, and others. Import from `surrealdb.spectron` when you need explicit types:
+
+```python
+from surrealdb.spectron import RecallResponse, RecallHit
 ```
 
 ## Harness adapter (zero prompt change)
@@ -99,20 +148,18 @@ reply = await client.chat(
 For LangChain-style apps that should auto-record every turn:
 
 ```bash
-pip install spectron-langchain
+pip install surrealdb spectron-langchain
 ```
 
-See [LangChain](/docs/spectron/integrations/frameworks/langchain). The adapter posts to `/facts/batch` with platform-derived idempotency keys.
+→ [LangChain](/docs/spectron/integrations/frameworks/langchain)
 
 ## CLI alternative
 
-The **`spectron`** binary exposes the same operations without installing the SDK:
+The **`spectron`** binary exposes the same operations without the SDK:
 
 ```bash
 spectron remember "Alice was promoted to CTO."
 spectron recall "What is Alice's role?" --json
 ```
 
-See [CLI reference](/docs/spectron/reference/cli) and [REST API](/docs/spectron/reference/rest-api).
-
-> Method names on the generated client follow OpenAPI operation ids and may differ slightly from the examples above. When in doubt, run `spectron-gen-spec` and inspect `doc/spec/` or use the CLI as the contract reference.
+→ [CLI reference](/docs/spectron/reference/cli) · [REST API](/docs/spectron/reference/rest-api)

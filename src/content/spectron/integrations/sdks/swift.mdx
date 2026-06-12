@@ -1,0 +1,181 @@
+---
+position: 3
+title: Swift SDK
+description: "Using Spectron from Swift applications and agents."
+---
+
+# Swift SDK
+
+The `Spectron` client is shipped alongside the SurrealDB Swift SDK in the [surrealdb.swift](https://github.com/surrealdb/surrealdb.swift) package. It is a separate product that talks to Spectron's memory and knowledge API, built on Swift async/await and `URLSession` with a swappable `HTTPClient` for testing. The client is `Sendable`.
+
+## Installation
+
+Add the `Spectron` product to your target's dependencies:
+
+```swift
+.product(name: "Spectron", package: "surrealdb.swift")
+```
+
+Then import it:
+
+```swift
+import Spectron
+```
+
+See the [SurrealDB Swift SDK installation guide](/docs/languages/swift/installation) for how to add the package itself.
+
+## Configuration
+
+```swift
+let memory = try Spectron(
+    context: "acme-prod",
+    endpoint: "https://api.spectron.example",
+    apiKey: "sk-spec-..."
+)
+```
+
+Authentication uses the `Authorization: Bearer` header on every request (handled by the client). Functionality is organised into three namespaces: **`documents`**, **`memory`** (sessions, entities, facts) and governance (**`scopes`**, **`principals`**, **`keys`**). Common operations are also exposed directly on the client.
+
+## Remember (facts)
+
+Ingest structured memories as explicit triples:
+
+```swift
+_ = try await memory.remember(
+    triples: [
+        Triple(
+            entity: TripleEntity(type: "Person", name: "tobie"),
+            key: "role",
+            value: "CTO",
+            memoryCategory: .identity
+        )
+    ],
+    infer: .triples
+)
+```
+
+Bulk conversation ingest:
+
+```swift
+_ = try await memory.rememberMany(
+    [
+        BatchMessage(role: .user, content: "I work at SurrealDB"),
+        BatchMessage(role: .assistant, content: "Noted.")
+    ],
+    extract: .wholeConversation
+)
+```
+
+## Recall
+
+```swift
+let hits = try await memory.query("What role does Christian have?", k: 10)
+let block = try await memory.context("brief on tobie", k: 10)
+```
+
+## Documents
+
+Upload multipart documents with optional metadata, then query them:
+
+```swift
+let doc = try await memory.documents.upload(
+    file: .fileURL(URL(fileURLWithPath: "returns.pdf"), filename: nil, mimeType: "application/pdf"),
+    title: "Returns Policy",
+    source: "https://example.com/returns"
+)
+
+let results = try await memory.documents.query(
+    "what is the return window for unopened items?",
+    mode: .hybridGraph,
+    k: 10,
+    threshold: 0.5
+)
+
+_ = try await memory.documents.list(status: .ready, mimeType: "application/pdf")
+try await memory.documents.delete(doc.id)
+```
+
+## Sessions
+
+Sessions bundle conversation turns and provide context for retrieval:
+
+```swift
+let session = try await memory.sessions.create(scope: ["user/tobie"])
+
+_ = try await session.ingest(text: "I just got promoted to CTO", role: .user)
+
+let ctx = try await session.context("What is Tobie's role?")
+let reply = try await myLLM.chat(system: ctx.context, user: userMessage)
+_ = try await session.ingest(text: reply, role: .assistant)
+
+try await session.close()
+```
+
+## Chat
+
+Run the managed chat loop with context retrieval and persistence:
+
+```swift
+let reply = try await memory.chat("What do you know about me?", sessionId: session.id)
+```
+
+Stream responses incrementally over Server-Sent Events:
+
+```swift
+for try await chunk in try await memory.chatStream("Summarise what you know about me") {
+    if chunk.done {
+        print("\n[trace: \(chunk.traceId ?? "")]")
+    } else {
+        print(chunk.delta, terminator: "")
+    }
+}
+```
+
+## Entities
+
+```swift
+_ = try await memory.entities.list(type: "Person")
+_ = try await memory.entities.get(type: "Person", name: "christian_battaglia")
+_ = try await memory.entities.history(type: "Person", name: "christian_battaglia", key: "role")
+try await memory.entities.delete(type: "Person", name: "christian_battaglia")
+```
+
+## Governance
+
+Manage scopes, principals and self-service API keys:
+
+```swift
+// Scopes
+_ = try await memory.scopes.register(path: "org/anneal", displayName: "Anneal")
+
+// Principals
+_ = try await memory.principals.grant(principalId: "agent:reader", path: "org/anneal", verbs: ["read"])
+
+// API keys (the secret is returned only at creation)
+let minted = try await memory.keys.create(name: "ci", grants: ["org/anneal": ["read"]], ttlSeconds: 3600)
+```
+
+## Delegation
+
+Act as another principal by passing `onBehalfOf:`, which is sent as the `X-Spectron-On-Behalf-Of` header. Writes also carry an `Idempotency-Key` header for safe retry deduplication.
+
+```swift
+let docs = try await memory.documents.list(onBehalfOf: "agent:reader")
+let me = try await memory.whoami(onBehalfOf: "agent:reader")
+```
+
+## Error handling
+
+All failures throw `SpectronError`, whose `kind` maps the HTTP status to `.base`, `.auth`, `.scope`, `.notFound`, `.validation`, `.rateLimit` or `.server`:
+
+```swift
+do {
+    _ = try await memory.documents.get("doc:missing")
+} catch let error as SpectronError where error.isNotFound {
+    print(error.status, error.title)
+} catch let error as SpectronError where error.isRateLimit {
+    print("retry after", error.retryAfter ?? 0, "seconds")
+}
+```
+
+See the [Swift SDK reference](/docs/spectron/reference/sdk-swift) and [REST API](/docs/spectron/reference/rest-api) for the full contract.

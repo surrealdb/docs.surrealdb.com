@@ -524,14 +524,14 @@ await db.unset("user_id")
 
 ### `.query()` {#query}
 
-Runs a set of [SurrealQL](/docs/reference/query-language) statements against the database.
+Runs a set of [SurrealQL](/docs/reference/query-language) statements against the database. Returns an awaitable (async) or lazy (sync) builder.
 
 ```python title="Method Syntax"
 db.query(query, vars)
 ```
 
 > [!IMPORTANT]
-> When multiple statements are provided, `.query()` returns only the first statement's result. If you need results from all statements, use [`.query_raw()`](#query-raw) instead.
+> **Behaviour change in v3.0.** `.query()` now surfaces every statement result. When the server returns a single statement result it returns the result directly; when it returns multiple results it returns a `tuple[Value, ...]`. This fixes the silent-discard behaviour reported in [issue #232](https://github.com/surrealdb/surrealdb.py/issues/232).
 
 <table>
     <thead>
@@ -555,26 +555,44 @@ db.query(query, vars)
     </tbody>
 </table>
 
-**Returns:** [`Value`](/docs/languages/python/api/types/#value)
+**Returns:** [`Value`](/docs/languages/python/api/types/#value) for a single-statement query, otherwise `tuple[Value, ...]` of statement results.
+
+The returned object also exposes `.into(cls)` which maps the N statement results positionally onto the fields of a dataclass (or any class accepting keyword arguments).
 
 #### Examples
 
-```python title="Synchronous"
-result = db.query(
-    "SELECT * FROM users WHERE age > $min_age",
-    {"min_age": 18},
-)
-```
-
-```python title="Asynchronous"
+```python title="Single statement (async)"
 result = await db.query(
     "SELECT * FROM users WHERE age > $min_age",
     {"min_age": 18},
 )
 ```
 
-```python title="Without variables"
-result = db.query("SELECT * FROM users")
+```python title="Multi-statement returns tuple"
+people, count = await db.query(
+    "SELECT * FROM person; SELECT count() FROM person GROUP ALL"
+)
+```
+
+```python title="Map results onto a dataclass"
+from dataclasses import dataclass
+
+@dataclass
+class Stats:
+    people: list
+    count: list
+
+stats = await db.query(
+    "SELECT * FROM person; SELECT count() FROM person GROUP ALL"
+).into(Stats)
+```
+
+```python title="Synchronous lazy builder"
+# The sync builder auto-executes when consumed (indexed, iterated, compared, etc.).
+# For fire-and-forget statements call .execute() explicitly.
+people = db.query("SELECT * FROM users")
+print(len(people))
+db.query("DELETE temp_data;").execute()
 ```
 
 ### `.query_raw()` {#query-raw}
@@ -631,6 +649,16 @@ raw = await db.query_raw(
 ---
 
 ## CRUD methods
+
+> [!IMPORTANT]
+> **v3.0 builder pattern.** `.create()`, `.update()`, `.upsert()`, `.delete()`, and `.insert()` return an awaitable (async) or lazy (sync) builder. The builder exposes chainable clause methods that map directly to SurrealQL clauses:
+>
+> - `.content(data)` -> `... CONTENT $data`
+> - `.replace(data)` -> `... REPLACE $data`
+> - `.merge(data)`   -> `... MERGE $data`
+> - `.patch(data)`   -> `... PATCH $data`
+>
+> Calling `.create(record, data)` is sugar for `.create(record).content(data)`. The standalone `.merge()`, `.patch()`, and `.insert_relation()` methods from v2.x have been removed.
 
 ### `.select()` {#select}
 
@@ -822,95 +850,31 @@ await db.upsert(RecordID("users", "john"), {
 })
 ```
 
-### `.merge()` {#merge}
+### `.merge` clause {#merge}
 
-Merges the given data into an existing record. Existing fields not present in `data` are preserved.
-
-```python title="Method Syntax"
-db.merge(record, data)
-```
-
-<table>
-    <thead>
-        <tr>
-            <th>Parameter</th>
-            <th>Type</th>
-            <th>Description</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td><code>record</code> <Label label="required" /></td>
-            <td><code><a href="/docs/languages/python/api/types/#recordidtype">RecordIdType</a></code></td>
-            <td>The table name or <code>RecordID</code> to merge into.</td>
-        </tr>
-        <tr>
-            <td><code>data</code> <Label label="optional" /></td>
-            <td><code><a href="/docs/languages/python/api/types/#value">Value</a> | None</code></td>
-            <td>The data to merge. Defaults to <code>None</code>.</td>
-        </tr>
-    </tbody>
-</table>
-
-**Returns:** [`Value`](/docs/languages/python/api/types/#value)
-
-#### Examples
+`.merge(data)` is a builder clause method - chain it on `.update()`, `.upsert()`, or `.create()`. It compiles to `... MERGE $data` and preserves any existing fields not present in `data`.
 
 ```python title="Synchronous"
-db.merge(RecordID("users", "john"), {
-    "age": 32,
-})
+db.update(RecordID("users", "john")).merge({"age": 32})
 ```
 
 ```python title="Asynchronous"
-await db.merge(RecordID("users", "john"), {
-    "age": 32,
-})
+await db.update(RecordID("users", "john")).merge({"age": 32})
 ```
 
-### `.patch()` {#patch}
+### `.patch` clause {#patch}
 
-Applies JSON Patch operations to a record.
-
-```python title="Method Syntax"
-db.patch(record, data)
-```
-
-<table>
-    <thead>
-        <tr>
-            <th>Parameter</th>
-            <th>Type</th>
-            <th>Description</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td><code>record</code> <Label label="required" /></td>
-            <td><code><a href="/docs/languages/python/api/types/#recordidtype">RecordIdType</a></code></td>
-            <td>The table name or <code>RecordID</code> to patch.</td>
-        </tr>
-        <tr>
-            <td><code>data</code> <Label label="optional" /></td>
-            <td><code><a href="/docs/languages/python/api/types/#value">Value</a> | None</code></td>
-            <td>A list of JSON Patch operations. Defaults to <code>None</code>.</td>
-        </tr>
-    </tbody>
-</table>
-
-**Returns:** [`Value`](/docs/languages/python/api/types/#value)
-
-#### Examples
+`.patch(data)` is a builder clause method - chain it on `.update()`, `.upsert()`, or `.create()`. It compiles to `... PATCH $data` and applies JSON Patch operations.
 
 ```python title="Synchronous"
-db.patch(RecordID("users", "john"), [
+db.update(RecordID("users", "john")).patch([
     {"op": "replace", "path": "/email", "value": "new@example.com"},
     {"op": "add", "path": "/verified", "value": True},
 ])
 ```
 
 ```python title="Asynchronous"
-await db.patch(RecordID("users", "john"), [
+await db.update(RecordID("users", "john")).patch([
     {"op": "replace", "path": "/email", "value": "new@example.com"},
 ])
 ```
@@ -1005,12 +969,40 @@ db.insert("users", [
 await db.insert("users", {"name": "Alice", "email": "alice@example.com"})
 ```
 
-### `.insert_relation()` {#insert-relation}
+### Inserting relations {#insert-relation}
 
-Inserts one or more relation records into a relation table.
+The standalone `.insert_relation()` method from v2.x has been removed. Use `.insert(table, data, relation=True)` or chain `.relation()` on the insert builder to issue an `INSERT RELATION INTO` statement.
+
+```python title="Synchronous"
+db.insert("likes", {
+    "in": RecordID("users", "alice"),
+    "out": RecordID("posts", "post1"),
+}, relation=True)
+
+# Or via the builder:
+db.insert("likes").relation().content({
+    "in": RecordID("users", "alice"),
+    "out": RecordID("posts", "post1"),
+})
+```
+
+```python title="Asynchronous"
+await db.insert("likes", {
+    "in": RecordID("users", "alice"),
+    "out": RecordID("posts", "post1"),
+}, relation=True)
+```
+
+---
+
+## Calling functions
+
+### `.run()` {#run}
+
+Calls a SurrealDB function and returns its result. The function name typically uses the `fn::` prefix for user-defined functions or namespace prefixes for built-ins.
 
 ```python title="Method Syntax"
-db.insert_relation(table, data)
+db.run(name, args, version)
 ```
 
 <table>
@@ -1023,14 +1015,19 @@ db.insert_relation(table, data)
     </thead>
     <tbody>
         <tr>
-            <td><code>table</code> <Label label="required" /></td>
-            <td><code>str | Table</code></td>
-            <td>The relation table to insert into.</td>
+            <td><code>name</code> <Label label="required" /></td>
+            <td><code>str</code></td>
+            <td>The fully-qualified function name, e.g. <code>"fn::increment"</code>.</td>
         </tr>
         <tr>
-            <td><code>data</code> <Label label="required" /></td>
-            <td><code><a href="/docs/languages/python/api/types/#value">Value</a></code></td>
-            <td>A single relation dict or a list of relation dicts. Each must include <code>in</code> and <code>out</code> fields.</td>
+            <td><code>args</code> <Label label="optional" /></td>
+            <td><code>list[<a href="/docs/languages/python/api/types/#value">Value</a>] | None</code></td>
+            <td>Positional arguments forwarded to the function.</td>
+        </tr>
+        <tr>
+            <td><code>version</code> <Label label="optional" /></td>
+            <td><code>str | None</code></td>
+            <td>Optional function version selector.</td>
         </tr>
     </tbody>
 </table>
@@ -1040,18 +1037,11 @@ db.insert_relation(table, data)
 #### Examples
 
 ```python title="Synchronous"
-db.insert_relation("likes", {
-    "in": RecordID("users", "alice"),
-    "out": RecordID("posts", "post1"),
-    "created_at": "2025-01-01T00:00:00Z",
-})
+result = db.run("fn::increment", [1])
 ```
 
 ```python title="Asynchronous"
-await db.insert_relation("likes", {
-    "in": RecordID("users", "alice"),
-    "out": RecordID("posts", "post1"),
-})
+greeting = await db.run("fn::greet", ["world"])
 ```
 
 ---
@@ -1471,7 +1461,7 @@ with Surreal("ws://localhost:8000") as db:
     )
     print("Affordable:", cheap)
 
-    db.merge(RecordID("products", products[0]["id"].id), {"stock": 50})
+    db.update(RecordID("products", products[0]["id"].id)).merge({"stock": 50})
 
     db.delete(RecordID("products", products[1]["id"].id))
 ```

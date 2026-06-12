@@ -113,15 +113,19 @@ body:text {
   CREATE space:home CONTENT { name: 'Home' };
   
   -- Create containers
-  LET $c_living = CREATE container CONTENT { name: 'Living room' } RETURN id;
+  LET $c_living = CREATE container CONTENT { name: 'Living room' } \
+    RETURN id;
   LET $c_desk = CREATE container CONTENT { name: 'Work desk' } RETURN id;
   LET $c_box = CREATE container CONTENT { name: 'Box 1' } RETURN id;
-  LET $c_box_2 = CREATE container CONTENT { name: 'Small box 2' } RETURN id;
+  LET $c_box_2 = CREATE container CONTENT { name: 'Small box 2' } \
+    RETURN id;
   
-  RELATE $c_box_2->is_in->$c_box SET time = { updatedAt: time::now() };
+  RELATE $c_box_2->is_in->$c_box SET time = { updatedAt: time::now() \
+    };
   RELATE $c_box->is_in->$c_desk SET time = { updatedAt: time::now() };
   RELATE $c_desk->is_in->$c_living SET time = { updatedAt: time::now() };
-  RELATE $c_living->is_in->space:home SET time = { updatedAt: time::now() };
+  RELATE $c_living->is_in->space:home SET time = { updatedAt: \
+    time::now() };
   
   -- Create an item
   LET $item = CREATE item CONTENT {
@@ -148,7 +152,8 @@ body:text {
       }
   } RETURN id;
   
-  RELATE $item2->is_in->$c_box_2 SET time = { updatedAt: time::now() };
+  RELATE $item2->is_in->$c_box_2 SET time = { updatedAt: time::now() \
+    };
   RELATE $item2->tagged->tag:electronics;
   
 }

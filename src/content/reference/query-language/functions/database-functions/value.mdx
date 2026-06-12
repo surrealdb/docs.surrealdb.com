@@ -137,7 +137,9 @@ value = "[{ op: 'change', path: '/company', value: '@@ -2,8 +2,10 @@
 
 */
 
-{ company: 'SurrealDB' }.diff({ company: 'SurrealDB!!', latest_version: '3.1', location: city:london });
+{ company: 'SurrealDB' }.diff({ company: 'SurrealDB!!',
+  latest_version: '3.1',
+  location: city:london });
 ```
 
 ```surql title="Response"

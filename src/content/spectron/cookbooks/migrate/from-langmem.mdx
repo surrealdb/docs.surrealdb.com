@@ -47,17 +47,21 @@ results = await memory.asearch("communication style")
 ### Spectron equivalent
 
 ```python
-from spectron import SpectronClient
+from surrealdb import AsyncSpectron
 
-client = SpectronClient(
-    base_url="https://spectron.example.com",
-    api_key=os.environ["SPECTRON_AGENT_KEY"],
+client = AsyncSpectron(
+    context="dev",
+    endpoint="https://spectron.example.com",
+    api_key="sk-...",
 )
 
-async with client.sessions.create(scope={"user": "alice"}) as session:
-    await session.remember("Alice prefers concise, technical answers.")
-    results = await session.recall("communication style", top_k=5)
-    print(results.formatted)
+await client.remember(
+    "Alice prefers concise, technical answers.",
+    scope=["user/alice"],
+)
+results = await client.recall("communication style", k=5, scope=["user/alice"])
+for hit in results.hits:
+    print(hit.text)
 ```
 
 ## Key differences
@@ -68,7 +72,7 @@ async with client.sessions.create(scope={"user": "alice"}) as session:
 
 **Conflict handling**: LangMem stores all memories and relies on the retrieval layer to resolve conflicts via recency ranking. Spectron detects contradictions and supersedes old attribute values, maintaining a correct, single current value with a history chain.
 
-**Namespace vs scope**: LangMem uses a tuple namespace `("user", "alice")`. Spectron uses hierarchical scope paths like `user/alice/` (or flat `user=alice` in wire examples). For single-clause scopes, org-wide queries still surface org-tagged memory while hiding user-specific records — see [Contexts and scope](/docs/spectron/mental-model/contexts-and-scope).
+**Namespace vs scope**: LangMem uses a tuple namespace `("user", "alice")`. Spectron uses hierarchical slash paths like `["user/alice"]`. For single-clause scopes, org-wide queries surface org-tagged memory while hiding user-specific records — see [Contexts and scope](/docs/spectron/mental-model/contexts-and-scope).
 
 **Categorisation**: Spectron's memory categories map loosely to LangMem memory types:
 - LangMem `semantic` → Spectron `knowledge` (facts, preferences)
@@ -81,29 +85,21 @@ Spectron ships a LangChain memory adapter (planned). Until it is released, use t
 
 ```python
 from langchain_core.messages import SystemMessage
-from spectron import SpectronClient
+from surrealdb import AsyncSpectron
 
-client = SpectronClient(...)
+client = AsyncSpectron(context="dev", endpoint="...", api_key="...")
 
 class SpectronMemory:
-    def __init__(self, client: SpectronClient, scope: dict):
+    def __init__(self, client: AsyncSpectron, scope: dict):
         self.client = client
         self.scope = scope
-        self._session = None
-    
-    async def __aenter__(self):
-        self._session = await self.client.sessions.create(scope=self.scope).__aenter__()
-        return self
-    
-    async def __aexit__(self, *args):
-        await self._session.__aexit__(*args)
     
     async def load_context(self, query: str) -> str:
-        ctx = await self._session.recall(query=query, top_k=5)
-        return ctx.formatted
+        results = await self.client.recall(query, k=5, scope=self.scope)
+        return "\n".join(hit.text for hit in results.hits)
     
     async def save_turn(self, role: str, content: str):
-        await self._session.add_turn(role=role, content=content)
+        await self.client.remember(f"{role}: {content}", scope=self.scope)
 
 # Usage in a LangGraph node
 async def agent_node(state, memory: SpectronMemory):
@@ -127,7 +123,7 @@ memory = ConversationBufferMemory()
 chain = ConversationChain(llm=llm, memory=memory)
 
 # After: Spectron-based
-async with client.sessions.create(scope={"user": user_id}) as session:
+async with client.sessions.create(scope=[f"user/{user_id}"]) as session:
     # At turn start, recall relevant context
     context = await session.recall(query=user_message, top_k=5)
     

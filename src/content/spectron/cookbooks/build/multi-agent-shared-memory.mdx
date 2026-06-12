@@ -22,24 +22,29 @@ There are two common patterns for multi-agent memory sharing:
 The simplest approach – all agents are given the same scope when creating sessions. Memory written by one agent is immediately visible to others operating in the same scope.
 
 ```python
-from spectron import SpectronClient
+from surrealdb import AsyncSpectron
 
-SHARED_SCOPE = {"org": "acme", "project": "market-research-q3"}
+client = AsyncSpectron(
+    context="acme-prod",
+    endpoint="https://spectron.example.com",
+    api_key="sk-...",
+)
+
+SHARED_SCOPE = ["org/acme/project/market-research-q3"]
 
 # Agent A: data collection agent
-async with client.sessions.create(scope=SHARED_SCOPE) as session_a:
-    await session_a.remember(
-        content="Competitor X launched a new pricing tier at $299/mo targeting SMBs.",
-        memory_category="knowledge",
-    )
+await client.remember(
+    "Competitor X launched a new pricing tier at $299/mo targeting SMBs.",
+    scope=SHARED_SCOPE,
+)
 
 # Agent B: analysis agent – sees Agent A's memory
-async with client.sessions.create(scope=SHARED_SCOPE) as session_b:
-    context = await session_b.recall(
-        query="recent competitor pricing changes",
-        top_k=5,
-    )
-    # context.items includes Agent A's finding
+results = await client.recall(
+    "recent competitor pricing changes",
+    k=5,
+    scope=SHARED_SCOPE,
+)
+# results.hits includes Agent A's finding
 ```
 
 ### Read/write access control
@@ -51,10 +56,10 @@ To prevent worker agents from writing to shared memory (read-only readers), issu
 A supervisor agent orchestrates several workers. Each worker operates in its own user/agent scope, but the supervisor aggregates their findings into a shared project scope.
 
 ```python
-SUPERVISOR_SCOPE = {"org": "acme", "project": "research-pipeline"}
+SUPERVISOR_SCOPE = ["org/acme/project/research-pipeline"]
 
-async def run_worker(topic: str, worker_id: str, client: SpectronClient) -> str:
-    worker_scope = {**SUPERVISOR_SCOPE, "agent": worker_id}
+async def run_worker(topic: str, worker_id: str, client: AsyncSpectron) -> str:
+    worker_scope = [*SUPERVISOR_SCOPE, f"agent/{worker_id}"]
     async with client.sessions.create(scope=worker_scope) as session:
         # Worker researches its topic
         context = await session.recall(query=topic, top_k=5)
@@ -70,7 +75,7 @@ async def run_worker(topic: str, worker_id: str, client: SpectronClient) -> str:
         )
         return reflection.summary
 
-async def supervisor(client: SpectronClient):
+async def supervisor(client: AsyncSpectron):
     topics = ["pricing trends", "competitor features", "customer sentiment"]
     
     # Run workers concurrently
@@ -96,7 +101,7 @@ async def supervisor(client: SpectronClient):
 
 ## Scope hierarchy
 
-Spectron resolves **scope visibility** from OR-of-AND clauses on each record. For typical single-owner tags, a query at scope `{org: "acme"}` retrieves org-wide memory and shared org facts, but not another user’s private record info unless your grant covers them.
+Spectron resolves **scope visibility** from OR-of-AND clauses on each record. For typical single-owner tags, a query at scope `["org/acme"]` retrieves org-wide memory and shared org facts, but not another user’s private record info unless your grant covers them.
 
 ```
 {org: "acme"}                    ← visible to all org agents
@@ -171,26 +176,21 @@ The persisted reflection becomes part of the shared scope's long-term memory and
 ## JavaScript example
 
 ```javascript
-import { SpectronClient } from "spectron";
+import { Spectron } from "@surrealdb/spectron";
 
-const client = new SpectronClient({
-    baseUrl: process.env.SPECTRON_BASE_URL,
-    apiKey: process.env.SPECTRON_AGENT_KEY,
+const client = new Spectron({
+    endpoint: process.env.SPECTRON_ENDPOINT!,
+    context: "acme-prod",
+    apiKey: process.env.SPECTRON_API_KEY!,
 });
 
 const sharedScope = { org: "acme", project: "market-research-q3" };
 
-// Worker writes a finding
-const workerSession = await client.sessions.create({ scope: { ...sharedScope, agent: "worker-1" } });
-await workerSession.remember({
-    content: "Competitor X raised prices by 20% in Q2.",
-    memoryCategory: "knowledge",
-});
-await workerSession.close();
+await client.remember(
+    "Competitor X raised prices by 20% in Q2.",
+    { scope: [...sharedScope, `agent/worker-1`] },
+);
 
-// Supervisor reads all findings
-const supervisorSession = await client.sessions.create({ scope: sharedScope });
-const ctx = await supervisorSession.recall({ query: "competitor pricing", topK: 10 });
-console.log(ctx.formatted);
-await supervisorSession.close();
+const results = await client.recall("competitor pricing", { k: 10, scope: sharedScope });
+console.log(results.hits);
 ```

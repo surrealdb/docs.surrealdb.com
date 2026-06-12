@@ -71,7 +71,9 @@ In addition, using the correct memory allocator can greatly improve the performa
 In your project's `Cargo.toml` file, ensure that the `allocator` feature is enabled on the `surrealdb` dependency:
 
 ```toml
-surrealdb = { version = "2", features = ["allocator", "storage-mem", "storage-surrealkv", "storage-rocksdb", "protocol-http", "protocol-ws", "rustls"] }
+surrealdb = { version = "2", features = ["allocator", "storage-mem", \
+  "storage-surrealkv", "storage-rocksdb", "protocol-http", \
+  "protocol-ws", "rustls"] }
 ```
 
 When running SurrealDB within your Rust code, ensure that the asynchronous runtime is configured correctly, making use
@@ -193,7 +195,8 @@ DEFINE FIELD data_length ON person VALUE random_data.len();
 DEFINE FIELD is_short ON person VALUE random_data.len() < 10;
 
 -- Fill up the database a bit with 10,000 records
-CREATE |person:10000| SET random_data = rand::string(1000) RETURN NONE;
+CREATE |person:10000|
+  SET random_data = rand::string(1000) RETURN NONE;
 -- Add one outlier with short random_data
 CREATE person:one SET random_data = "HI!" RETURN NONE;
 
@@ -386,7 +389,8 @@ CREATE user SET email = "bob@bob.com";
 ```
 
 ```surql title="Output"
-"Database index `email_index` already contains 'bob@bob.com', with record `user:g7s070gqvh3lj7fdp26w`"
+"Database index `email_index` already contains 'bob@bob.com',
+  with record `user:g7s070gqvh3lj7fdp26w`"
 ```
 
 An `UPSERT` statement works like a `CREATE` statement in this case as well, except that if the value for `email` is already present, it will modify the existing record instead of creating a new one. An `UPSERT` will only fail in this case if a user attempts to upsert to a certain record ID (like `user:bob` instead of just the `user` table) when another record holds this value.

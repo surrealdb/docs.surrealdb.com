@@ -73,7 +73,8 @@ RETURN function() {
 	const posts = fetch('https://jsonplaceholder.typicode.com/posts');
 
 	// Update post with ID 1
-	const updated = fetch('https://jsonplaceholder.typicode.com/posts/1', {
+	const updated = fetch('https://jsonplaceholder.typicode.com/posts/1',
+	  {
 		method: 'PUT',
 		body: JSON.stringify({
 			id: 1,
@@ -193,7 +194,8 @@ RETURN function() {
 	const nested = await surrealdb.value("$obj.nested");
 
 	// Filter properties from an array
-	const fromArray = await surrealdb.value("$arr[WHERE value > 3].value");
+	const fromArray = await surrealdb.value("$arr[WHERE value >
+	  3].value");
 
 	return { something, nested, fromArray };
 }
