@@ -1,25 +1,37 @@
 ---
 position: 1
 title: Using SurrealKit as a library
-description: "Embed SurrealKit directly in a Rust application to connect to SurrealDB, sync schema at startup, and seed data without running the CLI."
+description: "Embed SurrealKit directly in a Rust application to connect to SurrealDB, sync schema at startup, run rollouts, and seed data without the CLI."
 ---
 
 # Using SurrealKit as a library
 
-SurrealKit is available as a Rust crate so you can drive connections, schema sync, and seeding from application code rather than the CLI. This is useful for applications that want to own their own database setup, for example applying schema on startup without a separate migration step.
+SurrealKit is published as a Rust crate, so you can drive connections, schema sync, rollouts, and seeding from application code rather than the CLI. This suits applications that apply schema inside their own process at startup, for example with an embedded SurrealDB backend (RocksDB, SpeeDB) or when running SurrealDB in the same binary during tests.
 
 ## Adding the dependency
 
 ```toml
 [dependencies]
-surrealkit = { version = "0.6.2", default-features = false }
+surrealkit = "0.7"
 ```
 
-Disabling default features keeps the binary smaller by excluding CLI-only dependencies.
+## Sync vs rollout
+
+SurrealKit gives you two ways to get schema into a database. Pick based on whether the database is disposable or shared.
+
+|-| Sync | Rollout |
+|---|---|---|
+| Mental model | Declarative *desired state*: "make the database match this schema" | Staged, reviewable *migration* with an explicit undo |
+| Applies | All changed files, idempotently | Ordered steps across `start` / `complete` / `rollback` phases |
+| Removes objects | Automatically (prune) | Only in the `complete` phase, via explicit steps |
+| Reversible | No | Yes (`rollback`) |
+| Use when | Dev, test, CI, single-owner or embedded databases | Shared and production databases needing expand → contract and a rollback path |
+
+The two work together: use **sync** for everyday schema, and use a **rollout** when a change needs to land safely while old and new code run side by side.
 
 ## Connecting
 
-`DbCfg::from_env` reads the same environment variables as the CLI (`SURREALDB_HOST`, `SURREALDB_NAMESPACE`, etc.):
+`DbCfg` reads connection details from the same environment variables as the CLI (`SURREALDB_HOST`, `SURREALDB_NAMESPACE`, and so on), with optional overrides. `connect` builds the `surrealdb::Surreal` client and authenticates:
 
 ```rust
 use surrealkit::{DbCfg, DbOverrides, connect};
@@ -37,87 +49,200 @@ let cfg = DbCfg::from_env(None, &DbOverrides {
 })?;
 ```
 
-## Syncing schema at startup
+### In-process SurrealDB
 
-### Compile-time embedding
-
-The `embed_schema!` macro reads your `database/schema/` directory at compile time and bakes the SQL into the binary. No schema files need to ship alongside the executable.
+For an embedded SurrealDB engine (`mem://`, `rocksdb://`, `speedb://`), construct a `Surreal` client directly and pass it to any library function:
 
 ```rust
-surrealkit::embed_schema!();
+use surrealdb::engine::any::connect;
+use surrealdb::opt::Config;
+use surrealdb::opt::capabilities::Capabilities;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let db = surrealkit::connect(
-        &surrealkit::DbCfg::from_env(None, &Default::default())?
-    ).await?;
+let db = connect(("mem://", Config::new().capabilities(Capabilities::all()))).await?;
+db.use_ns("main").use_db("main").await?;
+```
 
-    embedded_schema::sync(&db).await?;
+## Syncing schema
+
+Use the [`Sync`] builder to apply a slice of schema files to the database. By default it prunes objects that are no longer present and stops on the first error (`prune = true`, `fail_fast = true`):
+
+```rust
+use surrealkit::{EmbeddedSchemaFile, Sync, Surreal};
+use surrealkit::engine::any::Any;
+
+static SCHEMA: &[EmbeddedSchemaFile] = &[EmbeddedSchemaFile {
+    path: "database/schema/person.surql",
+    sql:  "DEFINE TABLE person SCHEMALESS;",
+}];
+
+async fn run(db: &Surreal<Any>) -> anyhow::Result<()> {
+    // Defaults: prune = true, fail_fast = true.
+    Sync::embedded(SCHEMA).run(db).await?;
     Ok(())
 }
 ```
 
-The macro generates an `embedded_schema` module. Calling `sync` on it applies any changed definitions and prunes removed ones, the same as `surrealkit sync` from the CLI.
-
-### Runtime sync from files
-
-If you prefer to load schema files at runtime (useful during development or in environments where the schema directory is mounted separately):
+The builder methods customise behaviour before calling `run`:
 
 ```rust
-use surrealkit::{EmbeddedSchemaFile, run_sync_embedded};
-
-static SCHEMA: &[EmbeddedSchemaFile] = &[
-    EmbeddedSchemaFile {
-        path: "database/schema/users.surql",
-        sql: "DEFINE TABLE user SCHEMAFULL;",
-    },
-    EmbeddedSchemaFile {
-        path: "database/schema/orders.surql",
-        sql: "DEFINE TABLE order SCHEMAFULL;",
-    },
-];
-
-run_sync_embedded(&db, SCHEMA).await?;
+Sync::embedded(SCHEMA)
+    .prune(false)               // don't remove objects missing from SCHEMA
+    .allow_all_statements(true) // permit non-DEFINE statements (INSERT/UPDATE/…)
+    .allow_shared_prune(true)   // permit pruning on a shared database
+    .dry_run(true)              // report what would change without applying
+    .run(db)
+    .await?;
 ```
 
-### Sync with custom options
+`Sync` runs setup internally and reads nothing from the filesystem. To embed your `.surql` files at compile time instead of hand-writing the slice, use the [`embed_schema!` macro](/docs/manage/schema-migration/embed-schema-macro).
 
-`run_sync_embedded_with_opts` gives full control over sync behaviour:
+### `EmbeddedSchemaFile`: `path` vs `sql`
+
+The two fields serve different purposes:
+
+- **`path` is a stable tracking key**, not a path that must exist on disk. SurrealKit stores it in its metadata tables to identify the file, detect content changes, and prune files that disappear. Keep it stable across releases: renaming it makes SurrealKit treat the old key as deleted and the new one as added.
+- **`sql` is the content** that gets applied. Changing `sql` while holding `path` constant is exactly what triggers a re-apply on the next sync.
+
+## Rollouts
+
+Rollouts are defined entirely in code, with no TOML or `.surql` files on disk required. Build a spec with [`RolloutSpec::builder`] and drive it with the [`Rollout`] facade.
+
+### Status lifecycle
+
+```text
+planned → running_start → ready_to_complete → running_complete → completed
+                                   │
+                                   └── running_rollback → rolled_back
+```
+
+`completed` and `rolled_back` are terminal. `failed` and the `running_*` states are stuck states from an interrupted run; recover them with [`Rollout::abandon`] (or the CLI [`repair`](/docs/manage/schema-migration/rollouts) command). Only one rollout may be in a non-terminal state at a time.
+
+### Lifecycle example
 
 ```rust
-use surrealkit::{SyncOpts, run_sync_embedded_with_opts};
+use surrealkit::{
+    Rollout, RolloutSpec, RolloutStep, RolloutPhase, RolloutCompatibility,
+    EmbeddedSchemaFile, EntityKey, EntityKind, Surreal,
+};
+use surrealkit::engine::any::Any;
 
-run_sync_embedded_with_opts(
-    &db,
-    SCHEMA,
-    &SyncOpts {
-        watch: false,
-        debounce_ms: 0,
-        dry_run: false,
-        fail_fast: true,
-        prune: true,
-        allow_shared_prune: false,
-    },
-).await?;
+// The desired schema once the rollout completes (used to compute the managed
+// catalog). Pass `&[]` if your steps fully describe the entity changes.
+static TARGET: &[EmbeddedSchemaFile] = &[EmbeddedSchemaFile {
+    path: "database/schema/account.surql",
+    sql:  "DEFINE TABLE account SCHEMAFULL;",
+}];
+
+async fn run(db: &Surreal<Any>) -> anyhow::Result<()> {
+    let spec = RolloutSpec::builder("20260604__add_account")
+        .name("Add account table")
+        .compatibility(RolloutCompatibility::Phased)
+        // Expand: add the new table (non-destructive).
+        .step(RolloutStep::apply_schema(
+            "create_account", RolloutPhase::Start,
+            "DEFINE TABLE account SCHEMAFULL;",
+        ))
+        // Backfill during complete. run_sql must be safe to re-run.
+        .step(RolloutStep::run_sql(
+            "backfill", RolloutPhase::Complete,
+            "UPDATE account SET active = true WHERE active = NONE;",
+        ))
+        // Undo the expand phase on rollback.
+        .step(RolloutStep::remove_entities(
+            "undo", RolloutPhase::Rollback,
+            vec![EntityKey { kind: EntityKind::Table, scope: None, name: "account".into() }],
+        ))
+        .build();
+
+    let rollout = Rollout::new(spec, TARGET);
+
+    rollout.start(db).await?;        // expand (blocks if another rollout is active)
+    // ... deploy new code, drain traffic ...
+    rollout.complete(db).await?;     // contract, or call rollout.rollback(db).await?
+    Ok(())
+}
 ```
 
-| Option | Default | Description |
-|---|---|---|
-| `watch` | `false` | Re-sync on file changes |
-| `debounce_ms` | `0` | Debounce delay for watch mode |
-| `dry_run` | `false` | Print changes without applying them |
-| `fail_fast` | `false` | Stop on first error |
-| `prune` | `true` | Remove definitions not present in schema files |
-| `allow_shared_prune` | `false` | Permit pruning on a shared database |
+### Step actions
+
+Each [`RolloutStep`] carries exactly one action, built with a constructor, so invalid combinations cannot be represented:
+
+| Constructor | What it does |
+|---|---|
+| `RolloutStep::apply_schema(id, phase, sql)` | Apply inline DDL (`OVERWRITE` is injected; safe to retry) |
+| `RolloutStep::run_sql(id, phase, sql)` | Run data-mutation SQL (must be safe to re-run) |
+| `RolloutStep::assert_sql(id, phase, sql, expect)` | Assert a query's output equals `expect` |
+| `RolloutStep::remove_entities(id, phase, entities)` | `REMOVE … IF EXISTS` the given objects |
+
+Entities are identified with `EntityKey { kind: EntityKind, scope, name }`, where `EntityKind` is an enum (`Table`, `Field`, `Index`, `Module`, and so on) rather than a string.
+
+### Recovering a stuck rollout
+
+If a process dies mid-rollout, the rollout is left in a `running_*` or `failed` state and blocks new rollouts. Inspect the recorded state, then recover it:
+
+```rust
+use surrealkit::{Rollout, RolloutSpec, Surreal};
+use surrealkit::engine::any::Any;
+
+async fn run(db: &Surreal<Any>, spec: RolloutSpec) -> anyhow::Result<()> {
+    // Inspect the recorded state.
+    let rollout = Rollout::new(spec, &[]);
+    if let Some(report) = rollout.status(db).await? {
+        println!("{:?}: {:?}", report.status, report.last_error);
+    }
+
+    // Last resort: force a wedged rollout to a terminal state so a new one can
+    // start. This does NOT revert schema changes already applied. Reconcile
+    // those with a fresh sync or a follow-up rollout.
+    Rollout::abandon(db, "20260604__add_account").await?;
+    Ok(())
+}
+```
 
 ## Seeding
 
-`seed_from_dir` runs all `.surql` files in a directory against the database, in filename order:
+[`seed`] runs the `.surql` files in a project's `seed/` directory (lexicographic order), applying template variables:
 
 ```rust
-use surrealkit::seed_from_dir;
+use surrealkit::{seed, TemplateVars, Surreal};
+use surrealkit::engine::any::Any;
 
-seed_from_dir(&db, std::path::Path::new("database/seed")).await?;
+async fn run(db: &Surreal<Any>) -> anyhow::Result<()> {
+    seed(db, "database", &TemplateVars::default()).await?;
+    Ok(())
+}
 ```
 
-This is the programmatic equivalent of `surrealkit seed`.
+The second argument is the project folder (the directory containing `seed/`), matching the CLI's `--folder` / `SURREALDB_FOLDER`.
+
+## Template variables
+
+`${VAR}` placeholders in schema, seed, or rollout SQL are substituted from a [`TemplateVars`] map before execution. Lookups are case-insensitive, and an undefined variable is an error naming the missing key and file. Pass them via `Sync::vars(...)`, `Rollout::vars(...)`, or the `seed` argument:
+
+```rust
+use surrealkit::{Sync, TemplateVars};
+
+let mut vars = TemplateVars::default();
+vars.insert("schema_prefix", "acme");
+
+Sync::embedded(SCHEMA).vars(vars).run(db).await?;
+```
+
+See [Template variables](/docs/manage/schema-migration/template-variables) for the full resolution rules.
+
+## Metadata tables
+
+SurrealKit maintains two internal tables in your namespace and database, created automatically:
+
+| Table | Purpose |
+|---|---|
+| `__entity` | Tracks every schema object SurrealKit manages (content hash, tracking key) |
+| `__rollout` | Tracks rollout execution state (see the status lifecycle above) |
+
+## Next steps
+
+- [Library usage example](/docs/manage/schema-migration/library/example): full worked sync and rollout programs
+- [`embed_schema!` macro](/docs/manage/schema-migration/embed-schema-macro): bake schema into the binary at compile time
+- [Type generation](/docs/manage/schema-migration/typegen): generate JSON and TypeScript types from the live schema
+</content>
+</invoke>
