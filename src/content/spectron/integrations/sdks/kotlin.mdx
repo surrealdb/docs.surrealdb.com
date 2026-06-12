@@ -1,0 +1,189 @@
+---
+position: 3
+title: Kotlin SDK
+description: "Using Spectron from Kotlin applications and agents on JVM, Android, and iOS."
+---
+
+# Kotlin SDK
+
+The Spectron client for Kotlin ships inside the [SurrealDB Kotlin SDK](/docs/languages/kotlin/index) — there is no separate package. It lives in the `com.surrealdb.kotlin.spectron` package and talks to Spectron's HTTP API directly, independently of the SurrealDB RPC engine. Like the rest of the Kotlin SDK, it is [Kotlin Multiplatform](https://kotlinlang.org/docs/multiplatform.html) (JVM, Android, iOS) and every method is a `suspend` function.
+
+> [!NOTE]
+> The Kotlin SDK is in early development (`0.1.0-SNAPSHOT`) and the Spectron client is not yet released. The APIs below are provisional.
+
+## Installation
+
+Add the Kotlin SDK to your project as described in the [installation guide](/docs/languages/kotlin/installation):
+
+```kotlin
+dependencies {
+    implementation("com.surrealdb:kotlin:0.1.0-SNAPSHOT")
+}
+```
+
+## Configuration
+
+Construct a [`Spectron`](/docs/spectron/reference/sdk-kotlin) client with a context id, an API key, and your endpoint. Authentication uses the **`Authorization: Bearer`** header on every request.
+
+```kotlin
+import com.surrealdb.kotlin.spectron.Spectron
+
+val memory = Spectron(
+    contextId = "acme-prod",
+    apiKey = "sk-spec-...",
+    endpoint = "https://api.spectron.example",
+)
+```
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `contextId` | required | The context to operate in, e.g. `"acme-prod"`. |
+| `apiKey` | required | Bearer token. Mutable — takes effect on the next request. |
+| `endpoint` | required | Base URL, e.g. `"https://api.spectron.example"`. |
+| `timeout` | `30s` | Per-request timeout. |
+| `maxRetries` | `3` | GET-only retries on 5xx and connection errors. |
+| `httpClient` | platform default | Optional Ktor `HttpClient` to inject. |
+| `json` | lenient | Optional `kotlinx.serialization` `Json` instance. |
+
+Wrap calls in a coroutine — for example `runBlocking { ... }` from a synchronous caller — and call `memory.close()` when finished.
+
+## Remember (facts)
+
+Store a free-form fact (extracted server-side) or caller-supplied triples.
+
+```kotlin
+import com.surrealdb.kotlin.spectron.model.InferMode
+
+// Free-form fact, extracted server-side.
+memory.remember("Christian was promoted to CTO", infer = InferMode.FULL)
+```
+
+```kotlin
+import com.surrealdb.kotlin.spectron.model.Triple
+import com.surrealdb.kotlin.spectron.model.TripleEntity
+
+// Caller-supplied triples, no LLM.
+memory.remember(
+    triples = listOf(
+        Triple(entity = TripleEntity("christian", "Person"), key = "role", value = "CTO"),
+    ),
+    infer = InferMode.TRIPLES,
+)
+```
+
+Ingest a whole conversation in one call with `rememberMany`:
+
+```kotlin
+import com.surrealdb.kotlin.spectron.model.BatchMessage
+import com.surrealdb.kotlin.spectron.model.TurnRole
+
+memory.rememberMany(
+    messages = listOf(
+        BatchMessage("I was promoted to CTO.", role = TurnRole.USER),
+        BatchMessage("Congratulations!", role = TurnRole.ASSISTANT),
+    ),
+    scope = listOf("org/acme/user/alice"),
+)
+```
+
+## Recall
+
+```kotlin
+val result = memory.recall("What role does Christian have?", k = 10, mode = "hybrid")
+result.hits.forEach { println("${it.score} ${it.text}") }
+
+// Assemble a ready-to-use context block.
+memory.queryContext("brief on tobie", k = 10)
+```
+
+## Documents
+
+Upload a document (pass a `ByteArray`), then query across passages.
+
+```kotlin
+val doc = memory.documents.upload(
+    file = bytes,
+    filename = "returns.pdf",
+    contentType = "application/pdf",
+    title = "Returns Policy",
+)
+
+memory.documents.get(doc.id)
+memory.documents.list(status = "ready", mimeType = "application/pdf")
+```
+
+```kotlin
+import com.surrealdb.kotlin.spectron.model.QueryMode
+
+val hits = memory.documents.query(
+    "what is the return window for unopened items?",
+    mode = QueryMode.HYBRID_GRAPH,
+    k = 10,
+)
+```
+
+## Chat
+
+Run a server-driven turn (retrieve, generate, and persist) in one call.
+
+```kotlin
+val reply = memory.chat("What do you know about me?", sessionId = session.id)
+println(reply.reply)
+```
+
+## Sessions
+
+Create a session handle and either let Spectron drive the turn or drive it yourself.
+
+```kotlin
+import com.surrealdb.kotlin.spectron.model.TurnRole
+
+val session = memory.sessions.create(scope = listOf("user/tobie"))
+
+// Server-driven turn scoped to the session.
+val reply = session.chat("What do you know about me?")
+
+// Or drive the turns yourself.
+session.remember("I just got promoted to CTO", role = TurnRole.USER)
+val ctx = session.context("What is Tobie's role?")
+```
+
+## Scopes and acting on behalf of others
+
+Scopes are hierarchical slash-path strings. Build them with the `scopePaths` helper:
+
+```kotlin
+import com.surrealdb.kotlin.spectron.scopePaths
+
+scopePaths("team" to "eng", "org" to "acme") // ["team/eng", "org/acme"]
+```
+
+Every method accepts an optional `onBehalfOf`, which sends the `X-Spectron-On-Behalf-Of` header so a privileged caller can act as another principal:
+
+```kotlin
+memory.recall("open incidents", onBehalfOf = "alpha-bot")
+memory.documents.list(status = "ready", onBehalfOf = "alpha-bot")
+```
+
+## Error handling
+
+All failures throw a subclass of `SpectronException`. See the [Kotlin SDK reference](/docs/spectron/reference/sdk-kotlin#errors) for the full exception → status mapping and [Errors and retries](/docs/spectron/integrations/sdks/errors-and-retries).
+
+```kotlin
+import com.surrealdb.kotlin.spectron.SpectronNotFoundException
+import com.surrealdb.kotlin.spectron.SpectronRateLimitException
+
+try {
+    memory.documents.get("doc:missing")
+} catch (e: SpectronNotFoundException) {
+    println("${e.status}: ${e.title}")
+} catch (e: SpectronRateLimitException) {
+    println("retry after ${e.retryAfter}")
+}
+```
+
+## Learn more
+
+- [Kotlin SDK reference](/docs/spectron/reference/sdk-kotlin) for package layout and the full surface
+- [SurrealDB Kotlin SDK](/docs/languages/kotlin/index) for the database client in the same package
+- [REST API](/docs/spectron/reference/rest-api) for the underlying HTTP surface
