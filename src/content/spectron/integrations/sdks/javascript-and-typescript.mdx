@@ -73,6 +73,8 @@ const block = await client.context("What is Alice's role?", { k: 10 });
 const doc = await client.documents.upload({
   file: documentFile,
   title: "Returns policy",
+  scope: ["org/acme/team/eng"],
+  labels: ["team=eng"],
 });
 
 await client.chat("Summarise what you know about Alice", {
