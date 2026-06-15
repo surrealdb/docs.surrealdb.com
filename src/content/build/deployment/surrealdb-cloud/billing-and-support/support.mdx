@@ -58,7 +58,7 @@ For account or billing-related issues, you can reach out to the support team by 
 
 ## Community support
 
-Join our [Discord](https://discord.gg/surrealdb) community to connect with knowledgeable users and get help with your questions. Within the `#surreal-cloud` channel you can troubleshoot issues, ask for tips or chat with other SurrealDB Cloud users. 
+Join our [Discord](https://discord.gg/surrealdb) community to connect with knowledgeable users and get help with your questions. Within the `#surrealdb-cloud` channel you can troubleshoot issues, ask for tips or chat with other SurrealDB Cloud users. 
 
 Our team is active in the server too and can escalate more complex issues if needed.
 
