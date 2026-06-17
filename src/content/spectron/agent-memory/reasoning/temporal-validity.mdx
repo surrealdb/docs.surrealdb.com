@@ -23,7 +23,7 @@ Together these fields power current-state reads, point-in-time reconstruction, a
 
 **History** — walk the supersession chain for a key to see every value it took, in order.
 
-**Temporal language in chat** — when a turn says “I became CEO in January 2025”, “last week I moved to Berlin”, or “I used to live in Berlin”, extraction sets or adjusts validity bounds where it can. **Relative phrases** (“last week”, “three weeks ago”) resolve against the **turn’s spoken time**, not wall-clock ingest time — the same anchoring documents get from `authored_at`. Unresolved dates may become **`uncertainty`** records instead of guessed timestamps.
+**Temporal language in chat** — when a turn says “I became CEO in January 2025”, “last week I moved to Berlin”, or “I used to live in Berlin”, extraction sets or adjusts validity bounds where it can. **Relative phrases** (“last week”, “three weeks ago”) resolve against the **turn’s spoken time**, not wall-clock ingest time — the same anchoring documents get from `authored_at` or caller-supplied **`observed_at`** / **`observedAt`** on ingest. Unresolved dates may become **`uncertainty`** records instead of guessed timestamps.
 
 ## How it differs from deletion
 
@@ -48,10 +48,37 @@ Two situations set **`valid_until`**:
 
 **Expiry** — a fact ends without a replacement (a promotion that lapses, a time-boxed assignment, an instruction that was revoked). **`valid_until`** is set directly — at extraction when temporal language supplies an end date, or via **`POST /forget`** / lifecycle operations when you expire memory explicitly.
 
+## Narrative playback and spoiler safety
+
+Agents that ingest an entire canon at once — every chapter of a novel, every episode of a series, every film in a franchise — **know things the user has not reached yet**. That is a problem for:
+
+- **Serial fiction** — a reader on chapter 8 of *Dr Jekyll and Mr Hyde* must not learn that Hyde and Jekyll are the same person before the reveal page.
+- **Episodic or franchise media** — a viewer on *The Empire Strikes Back* in release order must not be told Vader is Luke's father before that scene; someone watching in chronological order (I → II → III) needs a **different** spoiler boundary entirely, as the spoiler for the viewer in this case is that Anakin becomes a villain.
+- **Long-running book series** — a *Wheel of Time* reader on book three should not get answers that depend on book twelve.
+
+The fix is not to omit later material from ingest. Ingest everything, but stamp **when each fact entered the reader's timeline**, then query **`asOf`** the user's current position.
+
+| User position | On ingest | On recall |
+| --- | --- | --- |
+| "I've read up to page *N*" | `observed_at` / `observedAt` per page or chapter (a synthetic timeline, not wall-clock) | `asOf` = that page's stamp |
+| "I'm on episode 5 of my chosen order" | One stamp per episode in **viewing order** (release, chronological, or machete) | `asOf` = stamp for episode 5 |
+| "Show me chapter 3 only" | `labels: ["chapter=3"]` on upload | `labels: ["chapter=3"]` (often with `include: ["passages"]`) |
+
+**`asOf` gates the knowledge graph** — attributes **and relations**. A `same_as` edge between two characters only appears once the ingest stamp for the reveal page has passed. Earlier queries see separate entities with no link.
+
+> [!NOTE]
+> Raw **passages** keep wall-clock upload time. Spoiler guarantees on structured answers use the entity/attribute/relation view (`GET /entities/...?asOf=...`, or `/query` with `asOf`). For passage-level navigation ("what's on page 3?"), pair **`labels`** with `include: ["passages"]`. **`lens`** narrows by scope region at every tier (facts and passages).
+
+See the [spoiler-safe narrative memory](/docs/spectron/cookbooks/patterns/spoiler-safe-narrative-memory) cookbook for franchises, non-chronological viewing orders, and page-by-page ingest recipes.
+
+## Caller-supplied known time
+
+When each unit of a serial (page, chapter, episode, policy revision) should appear on a **known-time axis** distinct from when you ran the import, pass **`observed_at`** on `POST /facts` (or **`observedAt`** in document upload metadata). Spectron stamps derived facts with that instant as their **known time** (`created_at`), so **`asOf`** queries reconstruct what the system would have believed at that point in the narrative — not at bulk-import time.
+
 ## Reading validity through the API
 
 - **`GET /entities/{type}/{name}`** — active attributes for an entity; optional temporal query params on the request.
 - **`GET /entities/{type}/{name}/history/{key}`** — ordered supersession history for one key.
-- **`POST /query`** with **`as_of`** — belief-level recall at a past instant.
+- **`POST /query`** with **`asOf`** — belief-level recall at a past instant. **`asOf` now gates relations** as well as attributes: a relationship is visible only when its known time and validity interval include the requested instant.
 
 Field-level schema detail lives in [Data model and schema](/docs/spectron/reference/data-model-and-schema) for operators who manage SurrealDB directly.

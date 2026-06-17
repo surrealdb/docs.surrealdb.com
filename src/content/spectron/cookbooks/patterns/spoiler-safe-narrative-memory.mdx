@@ -1,0 +1,122 @@
+---
+position: 6
+title: Spoiler-safe narrative memory
+description: "Ingest full canon; answer only as far as the user has read or watched."
+---
+
+# Spoiler-safe narrative memory
+
+Spectron can hold an entire story — novel, series, franchise, training curriculum released in modules — while an agent answers **only from what the user has reached so far**. The pattern combines three ideas you already have elsewhere in the docs:
+
+1. **`observed_at` / `observedAt` on ingest** — stamp each chapter, page, or episode with a synthetic **known time** on the narrative axis (not wall-clock import time).
+2. **`asOf` on recall** — the user's current position ("I'm on chapter 8", "I've finished episode V") selects which stamped facts and **relations** are visible.
+3. **`labels` and `lens`** (optional) — navigate by `chapter=3` / `page=5`, or narrow a query to a scope region without changing permissions.
+
+See [Temporal validity](/docs/spectron/agent-memory/reasoning/temporal-validity#narrative-playback-and-spoiler-safety) for the model; this page is the recipe.
+
+## When to use it
+
+| Scenario | Why bulk ingest breaks | What you gate |
+| --- | --- | --- |
+| Novel with a late reveal | Hyde/Jekyll-style identity twist | Relation edges and attributes stamped at the reveal |
+| TV or film franchise | Viewing order ≠ story chronology | Per-episode stamps in **the order the user chose** |
+| Long book series | Reader is on book 3 of 14 | `asOf` at book 3's end — later books ingested but hidden |
+| Policy / curriculum modules | User certified on module 2 only | Module-scoped stamps + labels |
+
+## Worked example: *Dr Jekyll and Mr Hyde*
+
+*The Strange Case of Dr Jekyll and Mr Hyde* is a useful mental model: the whole plot is a single-entity reveal. Ingest each chapter (or page) with its own synthetic `observedAt`, monotonically increasing through the book. Stamp the Hyde↔Jekyll `same_as` relation only when you ingest the reveal chapter.
+
+- Query with **`asOf`** at “chapter 8” → Hyde and Jekyll stay separate in the graph; no spoiler link.
+- Query with **`asOf`** at “book finished” → the `same_as` edge is visible.
+
+Same reader, same permissions — only the **`asOf`** instant changes.
+
+## Franchise and non-chronological orders
+
+Release order and story order are different problems with the same mechanism: **stamps follow discovery order, not calendar dates**.
+
+**Star Wars (release order IV → V → VI, then I → II → III)**
+
+Ingest each film with `observedAt` (or per-scene triples with `observed_at`) on a timeline that matches **when a release-order viewer learns each fact**. "Darth Vader is Luke's father" gets a stamp after *Empire* — not after *A New Hope*. A separate reader profile watching I → II → III first would use a different stamp sequence on the same ingested records (or separate scope paths per viewing track), because for this viewer there is no spoiler in Episode V that Anakin Skywalker and Darth Vader are the same person. However, a viewer following this path does have a reveal in Episode III that Anakin is no longer a hero, a fact that a user watching in release order would already be aware of when viewing the prequels.
+
+**Wheel of Time (reader on book 3)**
+
+Ingest all books if you want one substrate, but stamp facts extracted from book *N* with monotonically increasing known times per book (or per chapter). Recall with `asOf` set to "end of book 3" so prophecies, deaths, and alliances from later books stay out of answers.
+
+```http
+POST /api/v1/{context_id}/facts
+Content-Type: application/json
+
+{
+  "text": "… excerpt from The Dragon Reborn …",
+  "infer": "full",
+  "scopes": [["org/my-app/reader/alice"]],
+  "observed_at": "2000-10-15T00:00:00Z",
+  "labels": ["book=3", "chapter=12"]
+}
+```
+
+```http
+POST /api/v1/{context_id}/query
+Content-Type: application/json
+
+{
+  "query": "Who is Rand al'Thor allied with?",
+  "k": 10,
+  "asOf": "2000-10-15T00:00:00Z",
+  "lens": [["org/my-app/reader/alice"]],
+  "labels": ["book=3"]
+}
+```
+
+Adjust the synthetic timeline to your ordering scheme; the important part is that **later books never share an earlier stamp**.
+
+## Document ingest (page-by-page)
+
+For PDFs or markdown split into pages:
+
+```bash
+spectron documents upload ./chapters/ch08.txt \
+  --scope org/my-app/reader/alice \
+  --label chapter=8 --label page=5 \
+  --as-of 1886-03-01T00:00:00Z
+```
+
+Metadata JSON equivalent:
+
+```json
+{
+  "title": "Dr Jekyll and Mr Hyde — ch. 8",
+  "scopes": [["org/my-app/reader/alice"]],
+  "labels": ["chapter=8", "page=5"],
+  "observedAt": "1886-03-01T00:00:00Z"
+}
+```
+
+Then query with matching `asOf` and optional `labels` for passage-only navigation.
+
+## Composing narrowings
+
+On a single full-access reader you can combine three independent slices:
+
+| Narrowing | Question | Mechanism |
+| --- | --- | --- |
+| Time | How far have I read? | `asOf` — gates facts and relations by known time |
+| Scope lens | Limit this query to chapters 1–8 | `lens: [["chapter/1"], …]` — involvement filter within grant |
+| Labels | What's on page 3? | `labels: ["page=3"]` — row filter; use with `include: ["passages"]` for text |
+
+Use time for **spoiler boundaries on the graph**; use labels for **locating** content within what time already allows.
+
+## Limits to know
+
+- **Passages** are not reading-time-gated by `asOf` alone — they retain upload-time metadata. Rely on the structured graph for spoiler-safe *answers*, or filter passages with **`labels`**.
+- **`asOf` on `/query`** walks known-time on attributes and relations; pair with [Temporal validity](/docs/spectron/agent-memory/reasoning/temporal-validity) for `valid_from` / `valid_until` on in-world dates.
+- Response caching is bypassed when temporal filters are present — correct for narrative playback, slightly higher latency.
+
+## Related reading
+
+- [Storing memories](/docs/spectron/agent-memory/ingest/experiential/remember) — `observed_at` and `--as-of` on the CLI
+- [Uploading documents](/docs/spectron/agent-memory/ingest/authoritative/uploading-documents) — `observedAt` in upload metadata
+- [Recalling memories](/docs/spectron/agent-memory/retrieve/recall) — `asOf` and `occurredAt` on hits
+- [Contexts and scope](/docs/spectron/mental-model/contexts-and-scope) — `lens` and labels

@@ -49,9 +49,16 @@ https://<host>/api/v1/{context_id}
 
 Replace `{context_id}` with the identifier you chose at bootstrap (for example `dev` or `docs_test`).
 
-## Scope paths on the wire
+## Scope selectors on the wire
 
-**Scope** on read and write requests is an array of **hierarchical slash paths** — for example `org/acme/user/alice` (a trailing `/` is optional).
+Scope on requests is a **DNF selector** (`ScopeSets`): an OR of conjunctive clauses, each clause an AND of hierarchical slash paths (for example `org/acme/user/alice`; a trailing `/` is optional).
+
+| Direction | Field | Shape |
+| --- | --- | --- |
+| Write (facts, sessions, uploads) | **`scopes`** | `[[\"org/acme/user/alice\"]]` — legacy alias **`scope`** still accepted |
+| Read (`/query`, `/context`) | **`lens`** | Same DNF shape; filters by involvement within the caller’s grant |
+
+A flat `["a", "b"]` means **a OR b**. For **a AND b** in one clause, nest: `[["a", "b"]]`. Single-path tagging is unchanged in practice — `[["org/acme/user/alice"]]` or a bare string.
 
 Register paths before first use:
 
@@ -90,11 +97,14 @@ Content-Type: application/json
 {
   "text": "King Charles III became head of state of the United Kingdom in September 2022.",
   "infer": "full",
-  "scope": ["org/acme/user/alice"]
+  "scopes": [["org/acme/user/alice"]],
+  "observed_at": "2022-09-08T12:00:00Z"
 }
 ```
 
 `infer` values: `full` (LLM extraction, default), `triples` (caller-supplied structured triples), `preview` (dry run), `none` (literal store).
+
+Optional **`observed_at`** (RFC 3339) sets the **known time** (`created_at`) of derived facts. Use when ingesting serial narrative — novels, episodes, franchise films — so **`asOf`** recall matches how far the user has read or watched, not when you bulk-imported the corpus. In the example above, this would be useful to replay a narrative in which a user or character is unaware of the fact until the date indicated. See [Narrative playback and spoiler safety](/docs/spectron/agent-memory/reasoning/temporal-validity#narrative-playback-and-spoiler-safety). Omitted means wall-clock ingest time.
 
 **Response (`infer: full`):** nested **`extraction`** (entities, attributes, relations, …), plus `sessionId`, `turnId`, and `mode`. **`infer: none`** returns `chunkId`, `sessionId`, and `turnId` for the literal memory chunk.
 
@@ -115,7 +125,7 @@ Idempotency-Key: conv-01HF...
     { "role": "user", "content": "I was just promoted to CTO.", "ts": "2026-05-12T10:00:00Z" },
     { "role": "assistant", "content": "Congratulations!", "ts": "2026-05-12T10:00:05Z" }
   ],
-  "scope": ["org/acme/user/alice"],
+  "scopes": [["org/acme/user/alice"]],
   "session_id": "sess_01HF...",
   "extract": "whole_conversation"
 }
@@ -145,7 +155,7 @@ Create session body:
 
 ```json
 {
-  "scope": ["org/acme/user/alice"],
+  "scopes": [["org/acme/user/alice"]],
   "metadata": { "source": "chat-ui" }
 }
 ```
@@ -162,31 +172,29 @@ Content-Type: application/json
 
 {
   "query": "What is Alice's role?",
-  "limit": 10,
-  "scope": ["org/acme/user/alice"],
+  "k": 10,
+  "lens": [["org/acme/user/alice"]],
   "labels": ["subject=alice"],
-  "lens": ["org/acme/user/alice"],
   "scope_view": "strict",
-  "as_of": "2025-02-01T00:00:00Z",
+  "asOf": "2025-02-01T00:00:00Z",
   "source": "ingest-cli"
 }
 ```
 
 | Field | Purpose |
 | --- | --- |
-| `scope` | Scope paths the caller wants to read within (clamped to the key’s grant). |
+| `lens` | DNF scope selector narrowing the read region (clamped to the key’s grant). |
 | `labels` | Descriptive `key=value` tags that **filter** hits within the allowed region — labels never widen access on their own. |
-| `lens` | Optional hierarchical paths that **filter by involvement** within the grant — hits must touch the lens node(s), but need not match an exact clause size. |
 | `scope_view` | How broadly to fold results within the grant: `strict` (default — caller’s region only), `crossTeam` (cross-principal shared reads), or `merged` (same-fact records at narrower scopes). **`crossTeam`** and **`merged`** resolve like **`strict`**. None widen past the caller’s grant. |
 | `include` | Which result families to return: `facts` (entities and attributes) and/or `passages` (document chunks and sections). Default: both. Omitted or empty means no narrowing. Filters the **response** only — retrieval and trace reinforcement still see the full candidate set. |
 | `mode` | Closed set: `hybrid`, `vector`, `bm25`, or `graph`. Invalid values return `400`. |
-| `as_of` | Known-time filter — recall what the system would have believed at this instant (supersession walk by `created_at`, not valid-time). Omitted means current state. |
+| `asOf` | Known-time filter — recall what the system would have believed at this instant (supersession walk by `created_at` for attributes; relations are gated by `created_at` and open validity). Omitted means current state. |
 | `includeDuplicates` | When `false` (default), passage chunks flagged as near-duplicates (`duplicate_of` set) are excluded from fused chunk recall so the same text does not occupy multiple ranks. Set `true` to include them (parity with `/documents/query`). |
 | `source` | Free-form label recorded on the retrieval trace for audit replay; does not affect ranking. |
 
-**`limit`** on `/query` and **`k`** on document query default to **10** and are capped at **50** (operator-tunable downward only — see [Configuration](/docs/spectron/reference/configuration#request-and-list-limits)). The internal retrieval pool is fixed separately from `k`.
+**`k`** on `/query` and document query default to **10** and are capped at **50** (operator-tunable downward only — see [Configuration](/docs/spectron/reference/configuration#request-and-list-limits)). The internal retrieval pool is fixed separately from `k`.
 
-Response includes `tier` (`direct`, `cache`, `hybrid`, or `full_context`), `hits` (each with **`source`** as a **`ResultKind`**: `entity`, `attribute`, `memory_chunk`, `chunk`, or `section`), **`queryMs`**, and inline **`trace`** (with **`traceId`** for `GET .../traces/{id}`).
+Response includes `tier` (`direct`, `cache`, `hybrid`, or `full_context`), `hits` (each with **`source`** as a **`ResultKind`**: `entity`, `attribute`, `memory_chunk`, `chunk`, or `section`; optional **`occurredAt`** — known time of the underlying row for temporal resolution), **`queryMs`**, and inline **`trace`** (with **`traceId`** for `GET .../traces/{id}`).
 
 ### Formatted context block (`/context`)
 
@@ -196,8 +204,8 @@ Content-Type: application/json
 
 {
   "query": "What is Alice's role?",
-  "limit": 10,
-  "scope": ["org/acme/user/alice"]
+  "k": 10,
+  "lens": [["org/acme/user/alice"]]
 }
 ```
 
@@ -211,7 +219,7 @@ Content-Type: application/json
 
 {
   "message": "Summarise what you know about me",
-  "scope": ["org/acme/user/alice"],
+  "scopes": [["org/acme/user/alice"]],
   "session_id": "sess_01HF..."
 }
 ```
@@ -275,17 +283,26 @@ The `metadata` part is JSON. Optional fields:
 
 | Field | Purpose |
 | --- | --- |
-| `title`, `source`, `mime_type`, `filename` | Display and provenance |
-| `scope` | `ScopeSet` (slash-path strings) **narrower than** the caller's `memory:write` region — same semantics as `remember`. Out-of-region scope returns **`403`**. Omit to tag the document with the caller's full write region. |
+| `title`, `source`, `mimeType`, `filename` | Display and provenance |
+| `scopes` | DNF scope selector **narrower than** the caller's `memory:write` region — same semantics as `remember`. Out-of-region scope returns **`403`**. Omit to tag the document with the caller's full write region. Legacy alias **`scope`**. |
 | `labels` | Descriptive `key=value` tags stamped on the document and its chunks (not on reconciled graph rows). Keys must not start with `_` (`400`); count caps return **`409`**. |
+| `observedAt` | Optional RFC 3339 known time for derived facts — stamp each page or episode on a narrative timeline so `asOf` queries stay spoiler-safe ([cookbook](/docs/spectron/cookbooks/patterns/spoiler-safe-narrative-memory)). Omitted means facts date to ingest time. |
 
 ```http
 POST /api/v1/{context_id}/documents
 Content-Type: multipart/form-data
 
 file=<binary>
-metadata={"title":"Returns Policy","scope":["org/acme/team/eng"],"labels":["team=eng"]}
+metadata={"title":"Returns Policy","scopes":[["org/acme/team/eng"]],"labels":["team=eng"],"observedAt":"2024-01-15T00:00:00Z"}
 ```
+
+### List documents
+
+```http
+GET /api/v1/{context_id}/documents?pageSize=20&mimeType=application/pdf
+```
+
+Query parameters use **camelCase** (`pageSize`, `mimeType`). Pagination is **zero-indexed** (`page=0` is the first page).
 
 ### Document query (`/documents/query`)
 
