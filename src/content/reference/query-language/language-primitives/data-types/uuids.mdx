@@ -28,9 +28,11 @@ skip-uuid = true
 
 [[test.results]]
 value = "u'a8f30d8b-db67-47ec-8b38-ef703e05ad1b'"
+skip-uuid = true
 
 [[test.results]]
 value = "u'a8f30d8b-db67-47ec-8b38-ef703e05ad1b'"
+skip-uuid = true
 
 */
 
