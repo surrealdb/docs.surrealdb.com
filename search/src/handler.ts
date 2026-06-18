@@ -22,6 +22,33 @@ import type { RawSearchHit, SearchResult, SearchResultItem } from "./types";
 export const MAX_QUERY_LENGTH = 500;
 
 // ──────────────────────────────────────────────────────────
+// Product scoping
+//
+// The search index is shared across products, but the UX is
+// product-scoped: every Spectron page lives under /docs/spectron,
+// everything else is SurrealDB. Filtering happens HERE — before
+// boosting, grouping, the relevance threshold, and the result cap
+// — so the much larger SurrealDB corpus can't crowd the smaller
+// Spectron product out of the global top-N. (This previously ran
+// in the API wrapper after the cap, which starved Spectron
+// results: a Spectron query could return few or zero hits even
+// when relevant Spectron pages existed.)
+// ──────────────────────────────────────────────────────────
+
+const SPECTRON_PATH_PREFIX = "/docs/spectron";
+
+export type SearchProduct = "surrealdb" | "spectron";
+
+function isSpectronPath(path: string): boolean {
+    return path === SPECTRON_PATH_PREFIX || path.startsWith(`${SPECTRON_PATH_PREFIX}/`);
+}
+
+function matchesProduct(hit: RawSearchHit, product: SearchProduct): boolean {
+    const spectron = isSpectronPath(hit.page_path || hit.url || "");
+    return product === "spectron" ? spectron : !spectron;
+}
+
+// ──────────────────────────────────────────────────────────
 // SurrealQL hybrid search query
 //
 // Runs four sub-queries and fuses them with RRF. The query
@@ -31,10 +58,12 @@ export const MAX_QUERY_LENGTH = 500;
 // ──────────────────────────────────────────────────────────
 const SEARCH_SQL = /* surql */ `
     -- ── Page vector search ──
-    -- Finds the 30 pages whose embeddings are closest to the
-    -- query embedding. The <|30,100|> syntax means: return 30
-    -- neighbours, exploring up to 100 candidates in the HNSW
-    -- graph (higher = more accurate but slower).
+    -- Finds the 60 pages whose embeddings are closest to the
+    -- query embedding. The <|60,240|> syntax means: return 60
+    -- neighbours, exploring up to 240 candidates in the HNSW
+    -- graph (higher = more accurate but slower). The pool is kept
+    -- generous because results are product-filtered downstream, and
+    -- the smaller product (Spectron) must not be crowded out.
     LET $page_vs = (
         SELECT
             id,
@@ -48,9 +77,9 @@ const SEARCH_SQL = /* surql */ `
             content,
             vector::distance::knn() AS distance
         FROM page
-        WHERE embedding <|30,100|> $qvec
+        WHERE embedding <|60,240|> $qvec
         ORDER BY distance ASC
-        LIMIT 30
+        LIMIT 60
     );
 
     -- ── Page full-text search ──
@@ -88,7 +117,7 @@ const SEARCH_SQL = /* surql */ `
             OR description @3@ $query
             OR content @4@ $query
         ORDER BY ft_score DESC
-        LIMIT 30
+        LIMIT 60
     );
 
     -- ── Section vector search ──
@@ -107,9 +136,9 @@ const SEARCH_SQL = /* surql */ `
             content,
             vector::distance::knn() AS distance
         FROM section
-        WHERE embedding <|30,100|> $qvec
+        WHERE embedding <|60,240|> $qvec
         ORDER BY distance ASC
-        LIMIT 30
+        LIMIT 60
     );
 
     -- ── Section full-text search ──
@@ -138,7 +167,7 @@ const SEARCH_SQL = /* surql */ `
             OR breadcrumb @1@ $query
             OR content @2@ $query
         ORDER BY ft_score DESC
-        LIMIT 30
+        LIMIT 60
     );
 
     -- ── Reciprocal Rank Fusion ──
@@ -147,8 +176,8 @@ const SEARCH_SQL = /* surql */ `
     -- across all lists the result appears in.
     --   arg 1: array of ranked lists to fuse
     --   arg 2: k=60 (smoothing constant, standard RRF default)
-    --   arg 3: limit=80 (max candidates to consider)
-    LET $fused = search::rrf([$page_ft, $page_vs, $section_ft, $section_vs], 60, 80);
+    --   arg 3: limit=160 (max candidates to consider)
+    LET $fused = search::rrf([$page_ft, $page_vs, $section_ft, $section_vs], 60, 160);
 
     RETURN (
         SELECT
@@ -207,21 +236,23 @@ function isTokenPrefix(shorter: string[], longer: string[]): boolean {
 // ──────────────────────────────────────────────────────────
 
 /**
- * Non-SDK doc collections get a small ranking boost because
- * generic queries like "authentication" should prefer the
- * core concept page over an SDK API reference page that
- * happens to mention auth as one of many methods.
+ * SDK / client-library reference lives under `/docs/languages/` (the
+ * per-language API docs in the `index` collection). Generic queries
+ * like "authentication" should prefer a core concept page over an SDK
+ * API reference page that merely mentions the term as one of many
+ * methods, so every non-SDK page gets a small boost.
+ *
+ * The documentation restructure (#1699) folded the former standalone
+ * SDK collections (`doc-sdk-*`) into `index/languages/*`, so this is
+ * now matched by URL prefix rather than by collection id.
  */
-const CORE_COLLECTIONS = new Set([
-    "doc-surrealdb",
-    "doc-surrealql",
-    "doc-tutorials",
-    "doc-cloud",
-    "doc-surrealist",
-    "doc-surrealml",
-    "doc-surrealkv",
-    "doc-integrations",
-]);
+const SDK_REFERENCE_URL_PREFIX = "/docs/languages/";
+
+/** True for any hit that is not an SDK/client-library reference page. */
+function isCoreDoc(hit: RawSearchHit): boolean {
+    const path = hit.page_path || hit.url || "";
+    return !path.startsWith(SDK_REFERENCE_URL_PREFIX);
+}
 
 /**
  * Detects whether the user is comparing two concepts and
@@ -304,10 +335,10 @@ function boostResults(hits: RawSearchHit[], query: string): RawSearchHit[] {
             boost *= 1.1;
         }
 
-        // Prefer core docs over SDK API reference pages for
-        // general queries. SDK-specific queries still rank well
-        // because they'll have stronger BM25/vector base scores.
-        if (hit.collection && CORE_COLLECTIONS.has(hit.collection)) {
+        // Prefer core docs over SDK/client-library reference pages for
+        // general queries. SDK-specific queries still rank well because
+        // they'll have stronger BM25/vector base scores.
+        if (isCoreDoc(hit)) {
             boost *= 1.15;
         }
 
@@ -492,6 +523,56 @@ function stripQuestionPrefix(query: string): string {
     return q;
 }
 
+// ──────────────────────────────────────────────────────────
+// Domain synonym expansion (BM25 only)
+//
+// BM25 is purely lexical: a query for "perms" never matches a
+// page that only says "permissions". We append a small, curated
+// set of SurrealDB-specific synonyms to the BM25 query so common
+// aliases and acronyms still retrieve the right pages. Expansion
+// is applied ONLY to the keyword query — the vector embedding
+// uses the original wording and already handles paraphrase.
+//
+// Keep this map small and high-precision: every added term widens
+// recall but slightly dilutes BM25 scoring.
+// ──────────────────────────────────────────────────────────
+
+const SYNONYMS: Record<string, string[]> = {
+    sql: ["surrealql"],
+    surrealql: ["sql"],
+    perms: ["permissions"],
+    perm: ["permission"],
+    auth: ["authentication"],
+    authz: ["authorisation", "permissions"],
+    authn: ["authentication"],
+    js: ["javascript"],
+    ts: ["typescript"],
+    rel: ["relate"],
+    fts: ["full-text", "search"],
+    db: ["database"],
+    "record id": ["recordid"],
+    recordid: ["record"],
+};
+
+function expandSynonyms(query: string): string {
+    const lower = query.toLowerCase();
+    const tokens = tokenise(query);
+    const additions: string[] = [];
+
+    for (const [term, synonyms] of Object.entries(SYNONYMS)) {
+        // Multi-word keys are matched as substrings; single-word
+        // keys must match a whole token to avoid spurious hits.
+        const present = term.includes(" ") ? lower.includes(term) : tokens.includes(term);
+        if (!present) continue;
+
+        for (const synonym of synonyms) {
+            if (!lower.includes(synonym)) additions.push(synonym);
+        }
+    }
+
+    return additions.length > 0 ? `${query} ${additions.join(" ")}` : query;
+}
+
 /**
  * Normalises a raw search query into a canonical form suitable
  * for use as a CDN cache key. Two queries that normalise to the
@@ -581,12 +662,16 @@ function groupByPage(hits: RawSearchHit[], query: string): SearchResult[] {
 // Main entry point
 // ──────────────────────────────────────────────────────────
 
-export async function handleSearch(query: string): Promise<SearchResult[]> {
+export async function handleSearch(
+    query: string,
+    product?: SearchProduct,
+): Promise<SearchResult[]> {
     const connection = await getDb();
 
-    // Strip question words for BM25 but embed the original
-    // query — the vector model understands natural language.
-    const ftQuery = stripQuestionPrefix(query);
+    // Strip question words and expand domain synonyms for BM25, but
+    // embed the original query — the vector model understands
+    // natural language and paraphrase natively.
+    const ftQuery = expandSynonyms(stripQuestionPrefix(query));
     const qvec = await embed(query);
 
     // The query returns 6 results (5 LET statements + 1 RETURN),
@@ -598,7 +683,11 @@ export async function handleSearch(query: string): Promise<SearchResult[]> {
         )
         .collect();
 
-    const boosted = boostResults(hits, query);
+    // Filter by product BEFORE boosting/grouping/threshold so the
+    // relevance cutoff and result cap apply within the product.
+    const scoped = product ? hits.filter((hit) => matchesProduct(hit, product)) : hits;
+
+    const boosted = boostResults(scoped, query);
     const grouped = groupByPage(boosted, query);
     return applyRelevanceThreshold(grouped);
 }

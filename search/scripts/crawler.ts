@@ -22,33 +22,81 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { type AnyNode, type BlockNode, parseMarkdown, type Root, visit } from "@surrealdb/ui";
 import matter from "gray-matter";
-import {
-    abstractDoc,
-    type DocCollection,
-    docCollections,
-    urlForCollection,
-    versionedSdks,
-} from "../../src/content/config";
 import type { CrawledEntry, CrawledPage, CrawledSection } from "../src/types";
 
 const CONTENT_DIR = join(import.meta.dirname, "../../src/content");
+
+// A content collection is any directory under src/content/ that
+// contains a +Content.ts file (the vike-content-collection marker).
+// The collection id is its path relative to src/content/, e.g.
+// "learn/security" or "reference/query-language".
+const COLLECTION_MARKER = "+Content.ts";
+
+// Collections excluded from search indexing. "labs-items" uses a
+// different schema (labSchema) and is rendered as a listing rather
+// than as doc pages, so it has no per-entry doc URLs to index.
+const EXCLUDED_COLLECTIONS = new Set<string>(["labs-items"]);
+
+// URL prefix overrides. A page's URL is derived as
+// `/docs/<prefix>/<slug>`, where the prefix defaults to the
+// collection id — mirroring `resolveDataFromCollection` in
+// src/utils/data.ts, where `prefix = urlPrefix ?? id`. The entries
+// below override that default and must stay in sync with the
+// `urlPrefix` argument passed in each collection's +data.ts.
+const URL_PREFIX_OVERRIDES: Record<string, string> = {
+    // Served from the docs root (/docs/<slug>).
+    index: "",
+    // Served from /docs/spectron rather than /docs/spectron/index.
+    "spectron/index": "spectron",
+};
+
+/** The site is served under a `/docs` base path (see vite.config.ts). */
+const URL_BASE = "/docs";
 
 interface CategoryMeta {
     title: string;
     position: number;
 }
 
-// Versioned SDK collections (e.g. "doc-sdk-javascript-1x") are
-// skipped because only the latest version should be indexed.
-const VERSIONED_COLLECTION_IDS = new Set(
-    Object.entries(versionedSdks).flatMap(([sdk, config]) =>
-        config ? config.versions.map((v) => `doc-sdk-${sdk}-${v.replace(".", "")}`) : [],
-    ),
-);
+/** Frontmatter fields the crawler needs. Full validation happens at
+ *  build time via the collection's `pageSchema`, so we read loosely. */
+interface PageFrontmatter {
+    title?: string;
+    description?: string;
+}
 
 // ──────────────────────────────────────────────────────────
 // Filesystem helpers
 // ──────────────────────────────────────────────────────────
+
+/**
+ * Discovers all content collections by walking src/content/ for
+ * directories containing a +Content.ts marker. Collections never
+ * nest inside one another, so recursion stops once a marker is
+ * found. Excluded collections are filtered out.
+ */
+async function discoverCollections(): Promise<string[]> {
+    const collections: string[] = [];
+
+    async function scan(dir: string) {
+        const entries = await readdir(dir, { withFileTypes: true });
+
+        if (entries.some((e) => e.isFile() && e.name === COLLECTION_MARKER)) {
+            const id = relative(CONTENT_DIR, dir);
+            if (!EXCLUDED_COLLECTIONS.has(id)) collections.push(id);
+            return;
+        }
+
+        for (const entry of entries) {
+            if (entry.isDirectory()) {
+                await scan(join(dir, entry.name));
+            }
+        }
+    }
+
+    await scan(CONTENT_DIR);
+    return collections.sort();
+}
 
 /** Recursively yields all .md and .mdx file paths in a directory. */
 async function* walkMarkdown(dir: string): AsyncGenerator<string> {
@@ -228,14 +276,14 @@ function splitAtHeadings(
 // and the page title, producing strings like:
 //   "SurrealQL > Statements > DEFINE > TABLE"
 //
-// URLs are built from the collection's URL prefix (defined in
-// src/content/config.ts) and the file's slug:
-//   collection "doc-surrealql" + slug "statements/select"
-//   → "/docs/surrealql/statements/select"
+// URLs are built from the collection's URL prefix (the collection
+// id by default, see URL_PREFIX_OVERRIDES) and the file's slug:
+//   collection "reference/query-language" + slug "statements/select"
+//   → "/docs/reference/query-language/statements/select"
 // ──────────────────────────────────────────────────────────
 
 function buildBreadcrumb(
-    collection: DocCollection,
+    collection: string,
     slug: string,
     categories: Map<string, CategoryMeta>,
     pageLabel: string,
@@ -279,9 +327,9 @@ function buildSlug(filePath: string, collectionDir: string): string {
     return slug;
 }
 
-function buildUrl(collection: DocCollection, slug: string): string {
-    const base = urlForCollection[collection as keyof typeof urlForCollection];
-    const segments = ["/docs", base, slug].filter(Boolean);
+function buildUrl(collection: string, slug: string): string {
+    const prefix = URL_PREFIX_OVERRIDES[collection] ?? collection;
+    const segments = [URL_BASE, prefix, slug].filter(Boolean);
     return segments.join("/");
 }
 
@@ -315,13 +363,22 @@ function createAnchorDeduplicator(): (raw: string) => string {
     };
 }
 
+// Version token mixed into every content hash. Bump it whenever the
+// embedding strategy changes (model, content truncation length, embed
+// text structure) so the incremental indexer treats all existing
+// records as changed and re-embeds them once. "c8000" = 8000-char
+// content limit (see EMBED_CONTENT_LIMIT in search/src/embed.ts).
+const EMBED_VERSION = "v2-c8000";
+
 /**
  * SHA-256 hash used for incremental indexing — if the hash
  * hasn't changed since last index, we skip re-embedding and
- * re-upserting the record to save OpenAI API calls.
+ * re-upserting the record to save OpenAI API calls. EMBED_VERSION
+ * is folded in so embedding-strategy changes force a re-index.
  */
 function contentHash(...parts: string[]): string {
     const hash = createHash("sha256");
+    hash.update(EMBED_VERSION);
     for (const part of parts) hash.update(part);
     return hash.digest("hex");
 }
@@ -336,28 +393,16 @@ function contentHash(...parts: string[]): string {
 // ──────────────────────────────────────────────────────────
 
 export async function* crawl(): AsyncGenerator<CrawledEntry> {
-    for (const collection of docCollections) {
-        // Skip versioned SDK collections (e.g. 1.x docs) — only
-        // the latest version is indexed.
-        if (VERSIONED_COLLECTION_IDS.has(collection)) continue;
+    const collections = await discoverCollections();
 
+    for (const collection of collections) {
         const collectionDir = join(CONTENT_DIR, collection);
-
-        let dirExists = true;
-        try {
-            await readdir(collectionDir);
-        } catch {
-            dirExists = false;
-        }
-
-        if (!dirExists) continue;
-
         const categories = await loadCategoryMap(collectionDir);
 
         for await (const filePath of walkMarkdown(collectionDir)) {
             const raw = await readFile(filePath, "utf-8");
             const { data: frontmatter, content: body } = matter(raw);
-            const parsed = abstractDoc.parse(frontmatter);
+            const parsed = frontmatter as PageFrontmatter;
 
             const slug = buildSlug(filePath, collectionDir);
             const ast = parseMarkdown(body);

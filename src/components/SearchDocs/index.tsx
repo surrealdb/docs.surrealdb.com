@@ -70,6 +70,16 @@ export function SearchDocs(props: UnstyledButtonProps) {
                 search_product: product,
             });
 
+            // Surface queries that find nothing so content gaps are
+            // measurable rather than inferred from missing clicks.
+            if (results.length === 0) {
+                window.dataLayer?.push({
+                    event: "search_no_results",
+                    search_term: debouncedSearch,
+                    search_product: product,
+                });
+            }
+
             return results;
         },
         enabled: debouncedSearch.length > 0,

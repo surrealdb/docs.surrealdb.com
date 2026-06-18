@@ -18,12 +18,18 @@
 
 -- Tokeniser chain: split on whitespace (blank), unicode class
 -- boundaries (class), camelCase transitions (camel), and
--- punctuation (punct). The snowball(english) filter then stems
--- tokens ("running" → "run", "tables" → "tabl") so that
--- morphological variants match each other.
+-- punctuation (punct). Filters run in order: ascii folds accented
+-- characters to their plain form ("café" → "cafe") so accented
+-- input still matches, then snowball(english) stems tokens
+-- ("running" → "run", "tables" → "tabl") so morphological variants
+-- match each other.
+--
+-- NOTE: changing this analyzer only takes effect once the schema is
+-- re-applied (`bun run search:schema`) AND records are re-indexed so
+-- the full-text indexes are rebuilt with the new token stream.
 DEFINE ANALYZER OVERWRITE simple
     TOKENIZERS blank, class, camel, punct
-    FILTERS snowball(english);
+    FILTERS ascii, snowball(english);
 
 -- ────────────────────────────────────────────────────────────
 -- PAGE table
