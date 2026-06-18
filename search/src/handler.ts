@@ -207,21 +207,23 @@ function isTokenPrefix(shorter: string[], longer: string[]): boolean {
 // ──────────────────────────────────────────────────────────
 
 /**
- * Non-SDK doc collections get a small ranking boost because
- * generic queries like "authentication" should prefer the
- * core concept page over an SDK API reference page that
- * happens to mention auth as one of many methods.
+ * SDK / client-library reference lives under `/docs/languages/` (the
+ * per-language API docs in the `index` collection). Generic queries
+ * like "authentication" should prefer a core concept page over an SDK
+ * API reference page that merely mentions the term as one of many
+ * methods, so every non-SDK page gets a small boost.
+ *
+ * The documentation restructure (#1699) folded the former standalone
+ * SDK collections (`doc-sdk-*`) into `index/languages/*`, so this is
+ * now matched by URL prefix rather than by collection id.
  */
-const CORE_COLLECTIONS = new Set([
-    "doc-surrealdb",
-    "doc-surrealql",
-    "doc-tutorials",
-    "doc-cloud",
-    "doc-surrealist",
-    "doc-surrealml",
-    "doc-surrealkv",
-    "doc-integrations",
-]);
+const SDK_REFERENCE_URL_PREFIX = "/docs/languages/";
+
+/** True for any hit that is not an SDK/client-library reference page. */
+function isCoreDoc(hit: RawSearchHit): boolean {
+    const path = hit.page_path || hit.url || "";
+    return !path.startsWith(SDK_REFERENCE_URL_PREFIX);
+}
 
 /**
  * Detects whether the user is comparing two concepts and
@@ -304,10 +306,10 @@ function boostResults(hits: RawSearchHit[], query: string): RawSearchHit[] {
             boost *= 1.1;
         }
 
-        // Prefer core docs over SDK API reference pages for
-        // general queries. SDK-specific queries still rank well
-        // because they'll have stronger BM25/vector base scores.
-        if (hit.collection && CORE_COLLECTIONS.has(hit.collection)) {
+        // Prefer core docs over SDK/client-library reference pages for
+        // general queries. SDK-specific queries still rank well because
+        // they'll have stronger BM25/vector base scores.
+        if (isCoreDoc(hit)) {
             boost *= 1.15;
         }
 
