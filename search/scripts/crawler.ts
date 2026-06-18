@@ -363,13 +363,22 @@ function createAnchorDeduplicator(): (raw: string) => string {
     };
 }
 
+// Version token mixed into every content hash. Bump it whenever the
+// embedding strategy changes (model, content truncation length, embed
+// text structure) so the incremental indexer treats all existing
+// records as changed and re-embeds them once. "c8000" = 8000-char
+// content limit (see EMBED_CONTENT_LIMIT in search/src/embed.ts).
+const EMBED_VERSION = "v2-c8000";
+
 /**
  * SHA-256 hash used for incremental indexing — if the hash
  * hasn't changed since last index, we skip re-embedding and
- * re-upserting the record to save OpenAI API calls.
+ * re-upserting the record to save OpenAI API calls. EMBED_VERSION
+ * is folded in so embedding-strategy changes force a re-index.
  */
 function contentHash(...parts: string[]): string {
     const hash = createHash("sha256");
+    hash.update(EMBED_VERSION);
     for (const part of parts) hash.update(part);
     return hash.digest("hex");
 }

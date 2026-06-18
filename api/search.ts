@@ -2,7 +2,7 @@ import {
     handleSearch,
     MAX_QUERY_LENGTH,
     normaliseQuery,
-    type SearchResult,
+    type SearchProduct,
 } from "@surrealdb/docs-search-common";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
@@ -22,27 +22,15 @@ const CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400";
 
 // Products are isolated at the URL prefix level: every Spectron
 // page lives under /docs/spectron, every SurrealDB page does not.
-// We filter results in the API wrapper so the search index can
-// stay shared while UX is fully product-scoped.
-const SPECTRON_PATH_PREFIX = "/docs/spectron";
-
-const PRODUCTS = ["surrealdb", "spectron"] as const;
+// The product is passed to handleSearch, which filters the search
+// index (shared across products) before applying the relevance
+// threshold and result cap — so each product gets its full quota
+// of results rather than whatever survives a global cut.
+const PRODUCTS = ["surrealdb", "spectron"] as const satisfies readonly SearchProduct[];
 type ProductId = (typeof PRODUCTS)[number];
 
 function isProductId(value: string): value is ProductId {
     return (PRODUCTS as readonly string[]).includes(value);
-}
-
-function isSpectronUrl(url: string | undefined): boolean {
-    if (!url) return false;
-    return url === SPECTRON_PATH_PREFIX || url.startsWith(`${SPECTRON_PATH_PREFIX}/`);
-}
-
-function filterByProduct(results: SearchResult[], product: ProductId): SearchResult[] {
-    if (product === "spectron") {
-        return results.filter((result) => isSpectronUrl(result.url));
-    }
-    return results.filter((result) => !isSpectronUrl(result.url));
 }
 
 function setCors(res: VercelResponse) {
@@ -105,8 +93,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     try {
-        const allResults = await handleSearch(query);
-        const results = filterByProduct(allResults, product);
+        const results = await handleSearch(query, product);
         res.setHeader("Cache-Control", CACHE_CONTROL);
         return res.status(200).json({ success: true, results });
     } catch (err) {

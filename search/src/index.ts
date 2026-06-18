@@ -1,5 +1,6 @@
 export { connectDb, getDb } from "./db";
 export { buildEmbedText, embed, embedBatch } from "./embed";
+export type { SearchProduct } from "./handler";
 export { handleSearch, MAX_QUERY_LENGTH, normaliseQuery } from "./handler";
 export type {
     CrawledEntry,
