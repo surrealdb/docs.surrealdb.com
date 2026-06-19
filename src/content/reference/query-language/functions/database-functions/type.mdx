@@ -750,7 +750,7 @@ value = "1..2"
 value = "1..10"
 
 [[test.results]]
-value = "'Expected a range but cannot convert [1, 9, 4] into a range'"
+error = "Could not cast into `range` using input `[1, 9, 4]`"
 
 */
 

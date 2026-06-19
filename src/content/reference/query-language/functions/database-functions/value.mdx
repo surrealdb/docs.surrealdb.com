@@ -54,6 +54,9 @@ The output of this function is usually based on the value passed into the closur
 [[test.results]]
 value = "'SurrealDB 3.0'"
 
+[[test.results]]
+value = "'Something else'"
+
 */
 
 'SurrealDB'.chain(|$n| $n + ' 3.0');

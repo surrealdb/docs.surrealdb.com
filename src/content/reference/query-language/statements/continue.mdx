@@ -37,7 +37,7 @@ Skipping an iteration of a loop unless a certain condition is met:
 /**[test]
 
 [[test.results]]
-value = "NONE"
+error = "The table 'person' does not exist"
 
 */
 

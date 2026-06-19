@@ -74,7 +74,7 @@ RETURN count(true);
 /**[test]
 
 [[test.results]]
-value = "false"
+value = "0"
 
 */
 
@@ -85,6 +85,9 @@ RETURN count(10 > 15);
 
 ```surql
 /**[test]
+
+[[test.results]]
+value = "5"
 
 [[test.results]]
 value = "5"
