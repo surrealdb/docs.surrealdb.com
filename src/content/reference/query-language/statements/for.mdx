@@ -55,7 +55,7 @@ The following query shows the `FOR` statement being used update a property on ev
 /**[test]
 
 [[test.results]]
-value = "NONE"
+error = "The table 'person' does not exist"
 
 */
 

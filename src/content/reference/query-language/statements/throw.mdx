@@ -35,7 +35,7 @@ The following query shows example usage of this statement.
 /**[test]
 
 [[test.results]]
-error = "'An error occurred: some error message'"
+error = "An error occurred: some error message"
 
 */
 

@@ -215,6 +215,9 @@ The following example shows this function, and its output, when used in a [`RETU
 [[test.results]]
 value = "'39f0160c946c4c53702112d6ef3eea7957ea8e1c78787a482a89f8b0a8860a20ecd543432e4a187d9fdcd1c415cf61008e51a7e8bf2f22ac77e458789c9cdccc'"
 
+[[test.results]]
+value = "'39f0160c946c4c53702112d6ef3eea7957ea8e1c78787a482a89f8b0a8860a20ecd543432e4a187d9fdcd1c415cf61008e51a7e8bf2f22ac77e458789c9cdccc'"
+
 */
 
 RETURN crypto::sha512("tobie");
