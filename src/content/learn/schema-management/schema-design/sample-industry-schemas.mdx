@@ -231,6 +231,194 @@ CREATE change_order SET contract = contract:one, amount = 500, description = "Hi
 SELECT * FROM contract;
 ```
 
+### Procure-to-pay (SAP-aligned starter)
+
+Oil-and-gas-style **procure-to-pay** flow: WBS cost objects, purchase orders, vendor invoices, and payment terms (due on receipt through Net 45 and beyond). Each business object carries an **`sap_*`** external key so rows synced from **SAP PS / MM / FI-AP** can upsert without replacing SAP as the system of record. Continues the **`project`** and **`vendor`** tables from [Supply chain and contract management](#supply-chain-and-contract-management) above, or run this snippet on its own.
+
+SAP payment terms are master data (arbitrary net days, cash discounts, calendar rules). Here you can store a normalised **`net_due`** [`duration`](/docs/reference/query-language/language-primitives/data-types/durations) for queries, and treat **`code`** as the authoritative key from SAP. Document-number **`ASSERT`** patterns below are deliberately generic (ten-digit numeric). Assertions on prefixes (for example that PO ranges must start with `45`) can be tightened once your connector documents a specific number range.
+
+Demonstrates [literal unions](/docs/reference/query-language/language-primitives/data-types/literals), [`duration`](/docs/reference/query-language/language-primitives/data-types/durations), [graph relations](/docs/reference/query-language/statements/relate) with [`ENFORCED`](/docs/reference/query-language/statements/define/table#using-enforced-to-ensure-that-related-records-exist) endpoints, [record references](/docs/reference/query-language/language-primitives/record-references), [field assertions](/docs/reference/query-language/statements/define/field#asserting-rules-on-fields) on relation `in` / `out`, and [events](/docs/reference/query-language/statements/define/event) for lifecycle rules.
+
+```surql
+DEFINE TABLE project SCHEMAFULL;
+DEFINE FIELD name ON project TYPE string ASSERT string::len($value) > 3;
+
+DEFINE TABLE vendor SCHEMAFULL;
+DEFINE FIELD name ON vendor TYPE string ASSERT string::len($value) > 3;
+
+DEFINE TABLE payment_terms SCHEMAFULL;
+DEFINE FIELD code ON payment_terms TYPE string ASSERT $value.len() IN 1..=10;
+DEFINE FIELD net_due ON payment_terms TYPE duration;
+DEFINE FIELD description ON payment_terms TYPE string;
+DEFINE INDEX payment_terms_code ON payment_terms FIELDS code UNIQUE;
+
+DEFINE FIELD sap_vendor_number ON vendor TYPE option<string> ASSERT $value IS NONE OR $value = /[0-9]{10}/;
+DEFINE FIELD default_payment_terms ON vendor TYPE option<record<payment_terms>>;
+
+DEFINE TABLE wbs_element SCHEMAFULL;
+DEFINE FIELD sap_id ON wbs_element TYPE string ASSERT $value.len() IN 1..=24;
+DEFINE FIELD project ON wbs_element TYPE record<project> REFERENCE ON DELETE REJECT;
+DEFINE FIELD parent ON wbs_element TYPE option<record<wbs_element>>;
+DEFINE FIELD name ON wbs_element TYPE string ASSERT $value.len() > 0;
+DEFINE INDEX wbs_sap_id ON wbs_element FIELDS sap_id UNIQUE;
+
+-- Graph: WBS hierarchy and project membership (dual-write with record fields above)
+DEFINE TABLE wbs_of SCHEMAFULL TYPE RELATION IN wbs_element OUT project ENFORCED;
+ALTER FIELD IN ON wbs_of ASSERT IN.project = out;
+ALTER FIELD out ON wbs_of ASSERT in.project = out;
+
+DEFINE TABLE wbs_child_of SCHEMAFULL TYPE RELATION IN wbs_element OUT wbs_element ENFORCED;
+ALTER FIELD IN ON wbs_child_of ASSERT IN  != out
+AND in.project = out.project
+AND in.parent = out;
+ALTER FIELD out ON wbs_child_of ASSERT in != out
+AND in.project = out.project
+AND in.parent = out;
+
+DEFINE TABLE purchase_order SCHEMAFULL;
+-- Ten-digit numeric document numbers are common; add a prefix (e.g. /^45/) per deployment.
+DEFINE FIELD sap_po_number ON purchase_order TYPE string ASSERT $value = /[0-9]{10}/;
+DEFINE FIELD vendor ON purchase_order TYPE record<vendor> REFERENCE ON DELETE REJECT;
+DEFINE FIELD currency ON purchase_order TYPE "CAD" | "USD" | "EUR";
+DEFINE FIELD status ON purchase_order TYPE "open" | "closed" | "cancelled" DEFAULT "open";
+DEFINE FIELD issued_at ON purchase_order TYPE datetime;
+DEFINE INDEX po_sap_number ON purchase_order FIELDS sap_po_number UNIQUE;
+
+DEFINE TABLE ordered_from SCHEMAFULL TYPE RELATION IN purchase_order OUT vendor ENFORCED;
+ALTER FIELD IN ON ordered_from ASSERT IN.vendor = out;
+ALTER FIELD out ON ordered_from ASSERT in.vendor = out;
+
+DEFINE TABLE po_line SCHEMAFULL;
+DEFINE FIELD purchase_order ON po_line TYPE record<purchase_order> REFERENCE ON DELETE CASCADE;
+DEFINE FIELD line_number ON po_line TYPE int ASSERT $value IN 0..=9990;
+DEFINE FIELD description ON po_line TYPE string ASSERT $value.len() > 0;
+DEFINE FIELD amount_cents ON po_line TYPE int ASSERT $value >= 100;
+DEFINE FIELD wbs ON po_line TYPE record<wbs_element> REFERENCE ON DELETE REJECT;
+DEFINE INDEX po_line_key ON po_line FIELDS purchase_order, line_number UNIQUE;
+
+DEFINE TABLE charges SCHEMAFULL TYPE RELATION IN po_line OUT wbs_element ENFORCED;
+ALTER FIELD IN ON charges ASSERT IN.wbs = out;
+ALTER FIELD out ON charges ASSERT in.wbs = out;
+
+DEFINE TABLE vendor_invoice SCHEMAFULL;
+DEFINE FIELD sap_doc_number ON vendor_invoice TYPE string ASSERT $value = /[0-9]{10}/;
+DEFINE FIELD purchase_order ON vendor_invoice TYPE record<purchase_order> REFERENCE ON DELETE REJECT;
+DEFINE FIELD vendor ON vendor_invoice TYPE record<vendor> ASSERT vendor = purchase_order.vendor;
+DEFINE FIELD amount_cents ON vendor_invoice TYPE int ASSERT $value >= 100;
+DEFINE FIELD payment_terms ON vendor_invoice TYPE record<payment_terms>;
+DEFINE FIELD baseline_date ON vendor_invoice TYPE datetime;
+DEFINE FIELD due_date ON vendor_invoice TYPE datetime ASSERT $value >= baseline_date;
+DEFINE FIELD status ON vendor_invoice TYPE "parked" | "approved" | "paid" | "blocked" DEFAULT "parked";
+DEFINE INDEX invoice_sap_number ON vendor_invoice FIELDS sap_doc_number UNIQUE;
+
+DEFINE TABLE invoices SCHEMAFULL TYPE RELATION IN vendor_invoice OUT purchase_order ENFORCED;
+ALTER FIELD IN ON invoices ASSERT IN.purchase_order = out
+AND in.vendor = out.vendor;
+ALTER FIELD out ON invoices ASSERT in.purchase_order = out
+AND in.vendor = out.vendor;
+
+DEFINE EVENT po_must_have_lines ON purchase_order
+    WHEN $event = "UPDATE"
+    AND $before.status != "closed"
+    AND $after.status = "closed"
+    THEN {
+        LET $lines = (
+            SELECT id
+            FROM po_line
+            WHERE purchase_order = $after.id
+        );
+        IF $lines.len() = 0 {
+            THROW "Cannot close a purchase order with no lines";
+        };
+    };
+
+CREATE payment_terms:net30 SET
+    code = "NT30",
+    net_due = 30d,
+    description = "Net 30 days";
+CREATE payment_terms:net27 SET
+    code = "Z027",
+    net_due = 27d,
+    description = "Net 27 days";
+CREATE payment_terms:payrcpt SET
+    code = "Z000",
+    net_due = 0d,
+    description = "Due on receipt";
+
+CREATE project:pad3 SET name = "Pad 3 expansion";
+CREATE wbs_element:pad3 SET
+    sap_id = "EP-24-PAD3",
+    project = project:pad3,
+    name = "Pad 3 package";
+CREATE wbs_element:pad3_civil SET
+    sap_id = "EP-24-PAD3-CIVIL",
+    project = project:pad3,
+    parent = wbs_element:pad3,
+    name = "Civil & earthworks";
+
+RELATE wbs_element:pad3 -> wbs_of -> project:pad3;
+RELATE wbs_element:pad3_civil -> wbs_of -> project:pad3;
+RELATE wbs_element:pad3_civil -> wbs_child_of -> wbs_element:pad3;
+
+CREATE vendor:welding SET
+    name = "Northern Weld Services Ltd",
+    sap_vendor_number = "0000100042",
+    default_payment_terms = payment_terms:net30;
+CREATE vendor:small SET
+    name = "Camp Catering Co-op",
+    sap_vendor_number = "0000100891",
+    default_payment_terms = payment_terms:payrcpt;
+
+CREATE purchase_order:450001 SET
+    sap_po_number = "4500000123",
+    vendor = vendor:welding,
+    currency = "CAD",
+    issued_at = d'2026-05-15';
+RELATE purchase_order:450001 -> ordered_from -> vendor:welding;
+
+CREATE po_line:line10 SET
+    purchase_order = purchase_order:450001,
+    line_number = 10,
+    description = "Structural welding — pipe rack",
+    amount_cents = 18500000,
+    wbs = wbs_element:pad3_civil;
+RELATE po_line:line10 -> charges -> wbs_element:pad3_civil;
+
+CREATE vendor_invoice:510001 SET
+    sap_doc_number = "5100000456",
+    purchase_order = purchase_order:450001,
+    vendor = vendor:welding,
+    amount_cents = 9250000,
+    payment_terms = payment_terms:net30,
+    baseline_date = d'2026-06-01',
+    due_date = d'2026-07-01',
+    status = "approved";
+RELATE vendor_invoice:510001 -> invoices -> purchase_order:450001;
+
+-- Record fields (connector / tabular queries)
+SELECT *,
+purchase_order.{sap_po_number, status, vendor: vendor.name} AS po
+FROM po_line
+WHERE wbs = wbs_element:pad3_civil;
+
+-- Graph: lines charging a WBS, then their POs and vendor
+SELECT
+    name,
+    sap_id,
+    <-charges<-po_line.{ line_number, amount_cents, sap_po_number: purchase_order.sap_po_number } AS lines,
+    ->wbs_child_of->wbs_element.{ name, sap_id } AS parent_wbs
+FROM wbs_element:pad3_civil;
+
+SELECT
+    sap_doc_number,
+    amount_cents / 100 AS amount_dollars,
+    due_date,
+    status
+FROM vendor_invoice
+WHERE status IN ["parked", "approved"]
+ORDER BY due_date;
+```
+
 ### HSSE (health, safety, security, environment) incidents
 
 Incident reporting and investigation schema using [graph relationships](/docs/learn/data-models/graph/overview). Models safety events as edges between employees and projects with severity classification and role identification. Demonstrates graph-style data modeling for complex incident tracking and analysis.
