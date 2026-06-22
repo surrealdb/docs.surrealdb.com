@@ -124,6 +124,7 @@ GraphEdgeScan
 IfElse
 IndexCountScan
 IndexScan
+KnnScan
 Let
 Limit
 ProjectValue
@@ -203,3 +204,34 @@ LIMIT 2;
                         
                         Total rows: 0"
 ```
+
+### Filtered KNN and the `predicate` attribute on `KnnScan`
+
+<Since v="v3.1.5" />
+
+When a [K-nearest neighbours search](/docs/reference/query-language/language-primitives/operators#knn) over an indexed vector field is combined with an additional non-KNN condition, the planner pushes that residual condition *into* the index search. Non-matching candidates are rejected during the graph traversal, before they can occupy one of the `K` result slots, rather than being filtered out after the neighbours have been retrieved.
+
+This behaviour can be seen by appending the `EXPLAIN` clause to the end of a query to show its plan. Here, the `KnnScan` operator surfaces this pushed-down condition as a `predicate` attribute, in the same way that `TableScan` exposes its own `predicate`.
+
+```surql
+DEFINE INDEX idx_pt ON pts FIELDS point HNSW DIMENSION 4;
+INSERT INTO pts [
+	{ point: [1, 2, 3, 4], flag: true },
+	{ point: [4, 3, 2, 1], flag: false },
+	{ point: [3, 3, 3, 3], flag: true }
+];
+
+EXPLAIN SELECT id, flag, vector::distance::knn() AS distance FROM pts
+	WHERE flag = true AND point <|2,40|> [2, 3, 4, 5]
+	ORDER BY distance;
+```
+
+```surql title="Output"
+'SelectProject [ctx: Db] [projections: id, flag, distance]
+    SortByKey [ctx: Db] [sort_keys: distance ASC]
+        Compute [ctx: Db] [fields: distance = vector::distance::knn(...)]
+            Filter [ctx: Db] [predicate: flag = true]
+                KnnScan [ctx: Db] [index: idx_pt, k: 2, ef: 40, dimension: 4, predicate: flag = true]'
+```
+
+The `KnnScan` line shows that the index `idx_pt` is searched for `k: 2` neighbours with an exploration factor of `ef: 40` (the two values of the `<|2,40|>` operator), and that the `flag = true` condition is applied *inside* the search as a `predicate`. The same condition also appears on the `Filter` line above; the difference is that the `predicate` on `KnnScan` is what causes non-matching candidates to be discarded *during* the search rather than only afterwards. Without an extra condition the `predicate` attribute is absent. DISKANN indexes use the same `KnnScan` operator and render an identical line.

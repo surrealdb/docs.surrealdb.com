@@ -184,3 +184,86 @@ SELECT * FROM person WHERE email='tobie@surrealdb.com' EXPLAIN FULL;
 	total_rows: 1
 }
 ```
+
+### K-nearest neighbours (KNN) searches
+
+<Since v="v3.1.5" />
+
+When a [KNN search](/docs/reference/query-language/language-primitives/operators#knn) over an indexed vector field is combined with an additional non-KNN condition, that condition is pushed *into* the index search so that non-matching candidates are rejected during the search rather than afterwards. The plan shows this as a `predicate` attribute on the `KnnScan` operator. To display the query plan, add the `EXPLAIN` clause to the end of a query as shown in the example below.
+
+```surql title="Filtered KNN"
+DEFINE INDEX idx_pt ON pts FIELDS point HNSW DIMENSION 4;
+INSERT INTO pts [
+	{ point: [1, 2, 3, 4], flag: true },
+	{ point: [4, 3, 2, 1], flag: false },
+	{ point: [3, 3, 3, 3], flag: true }
+];
+
+SELECT id, flag, vector::distance::knn() AS distance FROM pts
+	WHERE flag = true AND point <|2,40|> [2, 3, 4, 5]
+	ORDER BY distance EXPLAIN;
+```
+
+```surql title="Output"
+{
+	attributes: {
+		projections: 'id, flag, distance'
+	},
+	children: [
+		{
+			attributes: {
+				sort_keys: 'distance ASC'
+			},
+			children: [
+				{
+					attributes: {
+						fields: 'distance = vector::distance::knn(...)'
+					},
+					children: [
+						{
+							attributes: {
+								predicate: 'flag = true'
+							},
+							children: [
+								{
+									attributes: {
+										dimension: '4',
+										ef: '40',
+										index: 'idx_pt',
+										k: '2',
+										predicate: 'flag = true'
+									},
+									context: 'Db',
+									operator: 'KnnScan'
+								}
+							],
+							context: 'Db',
+							expressions: [
+								{
+									role: 'predicate',
+									sql: 'flag = true'
+								}
+							],
+							operator: 'Filter'
+						}
+					],
+					context: 'Db',
+					expressions: [
+						{
+							role: 'distance',
+							sql: 'vector::distance::knn(...)'
+						}
+					],
+					operator: 'Compute'
+				}
+			],
+			context: 'Db',
+			operator: 'SortByKey'
+		}
+	],
+	context: 'Db',
+	operator: 'SelectProject'
+}
+```
+
+The innermost `KnnScan` operator carries the `predicate: 'flag = true'` attribute — the condition that is evaluated inside the index search. The same condition also appears on the `Filter` operator above it. Adding `EXPLAIN FULL` includes per-operator `metrics`. The query plan is identical for a DISKANN index. For a guided walkthrough, see [Filtering through vector search](/docs/learn/data-models/vector-search/similarity-search#how-the-filter-is-applied).
