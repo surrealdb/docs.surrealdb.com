@@ -128,10 +128,7 @@ function NavDropdown({ label, sections }: NavMenuGroup) {
                     </Flex>
                 </Anchor>
             </Menu.Target>
-            <Menu.Dropdown
-                bdrs="xs"
-                bg="obsidian.7"
-            >
+            <Menu.Dropdown bdrs="xs">
                 {sections.map((section, sectionIndex) => (
                     <Fragment key={section.heading}>
                         {section.heading && (

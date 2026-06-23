@@ -55,7 +55,6 @@ export function ProductSwitcher({ current }: ProductSwitcherProps) {
             </Menu.Target>
             <Menu.Dropdown
                 bdrs="xs"
-                bg="obsidian.7"
                 p="xs"
             >
                 {PRODUCT_ORDER.map((id) => (
@@ -109,7 +108,7 @@ function ProductMenuItem({ product, active }: ProductMenuItemProps) {
                 {product.label}
             </Text>
             <Text
-                c="slate.3"
+                c="dimmed"
                 lineClamp={2}
                 fz="xs"
             >
@@ -167,7 +166,7 @@ export function ProductSwitcherMobile({ current }: ProductSwitcherMobileProps) {
                                     </Text>
                                     <Text
                                         fz="xs"
-                                        c="slate.3"
+                                        c="dimmed"
                                         lineClamp={2}
                                     >
                                         {product.description}
