@@ -35,7 +35,7 @@ def main():
         ConnectOptions(
             namespace=Optional(String("test")),
             database=Optional(String("test")),
-            access_token=Optional(String("Basic cm9vdDpyb290")),  # root:root
+            access_token=Optional(String("Basic cm9vdDpyb290")),  # root:secret
         ),
     )
 

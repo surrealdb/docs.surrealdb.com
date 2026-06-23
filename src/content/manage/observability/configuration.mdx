@@ -313,11 +313,11 @@ A short list of the SurrealDS networking and consensus knobs that operators rout
 The minimum needed to scrape metrics from a local server during development:
 
 ```bash
-surreal start --user root --pass root memory
+surreal start --user root --pass secret
 # Anonymous: only the public allowlist
 curl http://127.0.0.1:8000/metrics
 # Authenticated: the full surface
-curl -u root:root http://127.0.0.1:8000/metrics
+curl -u root:secret http://127.0.0.1:8000/metrics
 ```
 
 To push to a local OpenTelemetry collector (for example a Grafana / Tempo / Loki / Prometheus docker-compose stack):
@@ -325,7 +325,7 @@ To push to a local OpenTelemetry collector (for example a Grafana / Tempo / Loki
 ```bash
 SURREAL_TELEMETRY_PROVIDER=otlp \
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
-surreal start --user root --pass root memory
+surreal start --user root --pass secret
 ```
 
 To disable the endpoint entirely (useful when running with a third-party agent that scrapes via OTLP only):
