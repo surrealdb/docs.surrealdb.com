@@ -5,90 +5,126 @@ const ICON_BASE = "~/assets/img/icon";
 type IconEntry = [variableName: string, theme: "light" | "dark", filename: string];
 
 // FIXME This is in dire need of a refactor and all images should be revised
-
 const ICON_ENTRIES: IconEntry[] = [
-    ["LightRust", "light", "rust"],
-    ["DarkRust", "dark", "rust"],
-    ["LightJavaScript", "light", "javascript"],
-    ["DarkJavaScript", "dark", "javascript"],
-    ["LightJavascript", "light", "javascript"],
-    ["DarkJavascript", "dark", "javascript"],
-    ["LightTypescript", "light", "typescript"],
-    ["DarkTypescript", "dark", "typescript"],
-    ["LightNodejs", "light", "nodejs"],
-    ["DarkNodejs", "dark", "nodejs"],
-    ["LightWasm", "light", "webassembly"],
-    ["DarkWasm", "dark", "webassembly"],
-    ["LightJava", "light", "java"],
-    ["DarkJava", "dark", "java"],
-    ["LightGolang", "light", "golang"],
-    ["DarkGolang", "dark", "golang"],
-    ["LightPython", "light", "python"],
-    ["DarkPython", "dark", "python"],
-    ["LightDotnet", "light", "dotnet"],
-    ["DarkDotnet", "dark", "dotnet"],
-    ["LightPhp", "light", "php"],
-    ["DarkPhp", "dark", "php"],
-    ["LightSwift", "light", "swift"],
-    ["DarkSwift", "dark", "swift"],
-    ["LightReact", "light", "reactjs"],
-    ["DarkReact", "dark", "reactjs"],
-    ["LightSolid", "light", "solidjs"],
-    ["DarkSolid", "dark", "solidjs"],
-    ["LightVue", "light", "vuejs"],
-    ["DarkVue", "dark", "vuejs"],
-    ["LightNext", "light", "nextjs"],
-    ["DarkNext", "dark", "nextjs"],
-    ["LightAngular", "light", "angular"],
-    ["DarkAngular", "dark", "angular"],
-    ["LightSvelte", "light", "svelte"],
-    ["DarkSvelte", "dark", "svelte"],
-    ["LightCloud", "light", "cloud"],
-    ["DarkCloud", "dark", "cloud"],
-    ["LightKubernetes", "light", "kubernetes"],
-    ["DarkKubernetes", "dark", "kubernetes"],
-    ["LightGoogle", "light", "google"],
-    ["DarkGoogle", "dark", "google"],
-    ["LightAmazon", "light", "amazon"],
-    ["DarkAmazon", "dark", "amazon"],
-    ["LightAzure", "light", "azure"],
-    ["DarkAzure", "dark", "azure"],
-    ["LightLaravel", "light", "laravel"],
-    ["DarkLaravel", "dark", "laravel"],
-    ["LightSymfony", "light", "symfony"],
-    ["DarkSymfony", "dark", "symfony"],
     ["LightActixLogo", "light", "actix"],
     ["DarkActixLogo", "dark", "actix"],
-    ["LightAxumLogo", "light", "axum"],
-    ["DarkAxumLogo", "dark", "axum"],
-    ["LightRerunLogo", "light", "rerun"],
-    ["DarkRerunLogo", "dark", "rerun"],
-    ["LightRocketLogo", "light", "rocket"],
-    ["DarkRocketLogo", "dark", "rocket"],
+
+    ["LightAmazon", "light", "amazon"],
+    ["DarkAmazon", "dark", "amazon"],
+
+    ["LightAngular", "light", "angular"],
+    ["DarkAngular", "dark", "angular"],
+
     ["AppleLightLogo", "light", "apple"],
     ["AppleDarkLogo", "dark", "apple"],
-    ["WindowsLightLogo", "light", "windows"],
-    ["WindowsDarkLogo", "dark", "windows"],
-    ["LinuxLightLogo", "light", "linux"],
-    ["LinuxDarkLogo", "dark", "linux"],
-    ["LightQL", "light", "ql"],
-    ["DarkQL", "dark", "ql"],
+
+    ["LightAxumLogo", "light", "axum"],
+    ["DarkAxumLogo", "dark", "axum"],
+
+    ["LightAzure", "light", "azure"],
+    ["DarkAzure", "dark", "azure"],
+
     ["LightCloud", "light", "cloud"],
     ["DarkCloud", "dark", "cloud"],
+
+    ["LightDotnet", "light", "dotnet"],
+    ["DarkDotnet", "dark", "dotnet"],
+
+    ["LightGolang", "light", "golang"],
+    ["DarkGolang", "dark", "golang"],
+
+    ["LightGoogle", "light", "google"],
+    ["DarkGoogle", "dark", "google"],
+
     ["LightGQL", "light", "gql"],
     ["DarkGQL", "dark", "gql"],
+
     ["LightIntegrations", "light", "integrations"],
     ["DarkIntegrations", "dark", "integrations"],
+
+    ["LightJava", "light", "java"],
+    ["DarkJava", "dark", "java"],
+
+    ["LightJavaScript", "light", "javascript"],
+    ["DarkJavaScript", "dark", "javascript"],
+
+    ["LightJavascript", "light", "javascript"],
+    ["DarkJavascript", "dark", "javascript"],
+
+    ["LightKubernetes", "light", "kubernetes"],
+    ["DarkKubernetes", "dark", "kubernetes"],
+
     ["LightKV", "light", "kv"],
     ["DarkKV", "dark", "kv"],
+
+    ["LightLaravel", "light", "laravel"],
+    ["DarkLaravel", "dark", "laravel"],
+
+    ["LinuxLightLogo", "light", "linux"],
+    ["LinuxDarkLogo", "dark", "linux"],
+
     ["LightML", "light", "ml"],
     ["DarkML", "dark", "ml"],
+
+    ["LightNext", "light", "nextjs"],
+    ["DarkNext", "dark", "nextjs"],
+
+    ["LightNodejs", "light", "nodejs"],
+    ["DarkNodejs", "dark", "nodejs"],
+
+    ["LightPhp", "light", "php"],
+    ["DarkPhp", "dark", "php"],
+
+    ["LightPython", "light", "python"],
+    ["DarkPython", "dark", "python"],
+
+    ["LightQL", "light", "ql"],
+    ["DarkQL", "dark", "ql"],
+
+    ["LightReact", "light", "reactjs"],
+    ["DarkReact", "dark", "reactjs"],
+
+    ["LightRerunLogo", "light", "rerun"],
+    ["DarkRerunLogo", "dark", "rerun"],
+
+    ["LightRocketLogo", "light", "rocket"],
+    ["DarkRocketLogo", "dark", "rocket"],
+
+    ["LightRust", "light", "rust"],
+    ["DarkRust", "dark", "rust"],
+
+    ["LightSolid", "light", "solidjs"],
+    ["DarkSolid", "dark", "solidjs"],
+
     ["LightSurrealDB", "light", "surrealdb"],
     ["DarkSurrealDB", "dark", "surrealdb"],
+
     ["LightSurrealist", "light", "surrealist"],
     ["DarkSurrealist", "dark", "surrealist"],
+
+    ["LightSvelte", "light", "svelte"],
+    ["DarkSvelte", "dark", "svelte"],
+
+    ["LightSwift", "light", "swift"],
+    ["DarkSwift", "dark", "swift"],
+
+    ["LightSymfony", "light", "symfony"],
+    ["DarkSymfony", "dark", "symfony"],
+
     ["LightTutorials", "light", "tutorials"],
     ["DarkTutorials", "dark", "tutorials"],
+
+    ["LightTypescript", "light", "typescript"],
+    ["DarkTypescript", "dark", "typescript"],
+
+    ["LightVue", "light", "vuejs"],
+    ["DarkVue", "dark", "vuejs"],
+
+    ["LightWasm", "light", "webassembly"],
+    ["DarkWasm", "dark", "webassembly"],
+
+    ["WindowsLightLogo", "light", "windows"],
+    ["WindowsDarkLogo", "dark", "windows"],
 ];
 
 let cachedScope: Record<string, string> | undefined;
