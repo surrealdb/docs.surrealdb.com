@@ -1,0 +1,132 @@
+---
+position: 2
+title: Plugins
+description: Use any Better Auth plugin with the SurrealDB adapter and call the SurrealQL helper functions generated for the organisation plugin.
+---
+
+# Plugins
+
+The `@surrealdb/better-auth` adapter works with all Better Auth plugins. Pass them in the `plugins` array of your Better Auth configuration:
+
+```typescript
+import { betterAuth } from 'better-auth';
+import { organization } from 'better-auth/plugins/organization';
+import { twoFactor } from 'better-auth/plugins/two-factor';
+import { admin } from 'better-auth/plugins/admin';
+import { Surreal } from 'surrealdb';
+import { surrealAdapter } from '@surrealdb/better-auth';
+
+const db = new Surreal();
+await db.connect('ws://localhost:8000/rpc');
+await db.use({ namespace: 'myapp', database: 'production' });
+
+export const auth = betterAuth({
+    database: surrealAdapter({ db }),
+    plugins: [
+        organization(),
+        twoFactor(),
+        admin(),
+    ],
+});
+```
+
+A wider example combining several plugins:
+
+```typescript
+import { betterAuth } from 'better-auth';
+import { admin } from 'better-auth/plugins/admin';
+import { anonymous } from 'better-auth/plugins/anonymous';
+import { bearer } from 'better-auth/plugins/bearer';
+import { magicLink } from 'better-auth/plugins/magic-link';
+import { multiSession } from 'better-auth/plugins/multi-session';
+import { organization } from 'better-auth/plugins/organization';
+import { twoFactor } from 'better-auth/plugins/two-factor';
+import { username } from 'better-auth/plugins/username';
+import { Surreal } from 'surrealdb';
+import { surrealAdapter } from '@surrealdb/better-auth';
+
+const db = new Surreal();
+await db.connect('ws://localhost:8000/rpc');
+await db.use({ namespace: 'myapp', database: 'production' });
+
+export const auth = betterAuth({
+    secret: process.env.BETTER_AUTH_SECRET!,
+    baseURL: process.env.BETTER_AUTH_URL ?? 'http://localhost:3000',
+    emailAndPassword: { enabled: true },
+    database: surrealAdapter({ db }),
+    plugins: [
+        organization({
+            teams: { enabled: true },
+            dynamicAccessControl: { enabled: true },
+        }),
+        twoFactor(),
+        admin(),
+        bearer(),
+        username(),
+        magicLink({
+            sendMagicLink: async ({ email, url }) => {
+                // send an email containing the magic link url
+            },
+        }),
+        anonymous(),
+        multiSession(),
+    ],
+});
+```
+
+> [!IMPORTANT]
+> Each plugin may add new tables. Re-run [schema generation](/docs/build/integrations/authentication/better-auth/getting-started#schema-generation) after adding plugins to produce the updated DDL, or use `schemaMode: 'schemaless'` to accept the new fields without regenerating.
+
+## SurrealDB helper functions
+
+When you use the `organization` plugin (with or without the `teams` option), schema generation also emits a set of `fn::*` SurrealQL functions you can call directly in your own queries, [rules, and permissions](/docs/reference/query-language/statements/define/table#defining-permissions). These functions are defined with `IF NOT EXISTS`, so re-running the generated schema is safe.
+
+### `fn::auth::organization::*`
+
+These functions are emitted when the `organization` plugin is active.
+
+| Function | Signature | Returns | Description |
+|---|---|---|---|
+| `fn::auth::organization::member_of` | `(userId: string, organizationId: string)` | `bool` | True if the user is a member of the organisation. |
+| `fn::auth::organization::get_role` | `(userId: string, organizationId: string)` | `option<string>` | The member's role (`"owner"`, `"admin"`, `"member"`), or `NONE` if not a member. |
+| `fn::auth::organization::has_role` | `(userId: string, organizationId: string, minRole: string)` | `bool` | True if the user's role is equal to or senior to `minRole` (owner > admin > member). |
+| `fn::auth::organization::members` | `(organizationId: string)` | `array` | All `members` records for the organisation. |
+| `fn::auth::organization::teams` | `(organizationId: string)` | `array` | All `teams` records for the organisation (requires `teams: { enabled: true }`). |
+| `fn::auth::organization::has_permission` | `(userId: string, organizationId: string, resource: string, action: string)` | `bool` | True if the user's role has a custom permission for the given resource and action (requires `dynamicAccessControl`). |
+
+```surql
+-- Check if a user belongs to an organisation
+IF fn::auth::organization::member_of($userId, $organizationId) {
+    -- allow access
+};
+
+-- Require at least admin-level access
+IF fn::auth::organization::has_role($userId, $organizationId, "admin") {
+    -- perform a privileged operation
+};
+
+-- Get a user's role string
+LET $role = fn::auth::organization::get_role($userId, $organizationId);
+
+-- List all members
+LET $members = fn::auth::organization::members($organizationId);
+```
+
+### `fn::auth::team::*`
+
+These functions are emitted when `teams: { enabled: true }` is set on the `organization` plugin.
+
+| Function | Signature | Returns | Description |
+|---|---|---|---|
+| `fn::auth::team::member_of` | `(userId: string, teamId: string)` | `bool` | True if the user is a member of the team. |
+| `fn::auth::team::members` | `(teamId: string)` | `array` | All `teamMembers` records for the team. |
+
+```surql
+-- Check team membership
+IF fn::auth::team::member_of($userId, $teamId) {
+    -- allow team-scoped access
+};
+
+-- List all team members
+LET $members = fn::auth::team::members($teamId);
+```
