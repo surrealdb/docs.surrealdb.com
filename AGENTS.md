@@ -1,14 +1,18 @@
-# SurrealDB Frontend AGENTS.md
+# SurrealDB Docs
 
-## Tech stack
+Documentation site for SurrealDB, built with Vike (React), Vite, Mantine v8,
+`@surrealdb/ui`, and SCSS modules. Content is managed with
+vike-content-collection (Zod-validated markdown collections).
 
-- **Framework**: Vike (React) with Vite
-- **Content**: vike-content-collection (Zod-validated markdown collections)
-- **UI**: Mantine v8 (`@mantine/core`, `@mantine/hooks`) and SurrealDB UI Kit
-  (`@surrealdb/ui`)
-- **Styles**: SCSS modules, Mantine theme (from `@surrealdb/ui`)
-- **Linting**: Biome
-- **Auth**: Auth0
+## Commands
+
+```bash
+bun run dev   # start dev server
+bun run qa    # apply code quality formatting
+bun run qc    # check code quality
+```
+
+Always run `bun run qa` then `bun run qc` before finishing any task.
 
 ## References
 
@@ -18,30 +22,118 @@
 - [Auth0](https://auth0.com/llms.txt): Authentication
 - [vike-content-collection](https://raw.githubusercontent.com/welpie21/vike-content-collection/refs/heads/main/llms-full.txt): Content Collection API
 
-## Content collections (vike-content-collection)
+## Code conventions
 
-Content is managed through vike-content-collection. Schemas, slugs, and
-collection metadata live in `src/content/config.ts`. Each collection has a
-`+Content.ts` file in `src/content/<collection>/` that references the shared
-config.
+### SOLID principles
+
+Apply SOLID where it fits:
+
+- **Single Responsibility** — one reason to change per module, component, or function.
+- **Open/Closed** — extend through composition and props, not by modifying existing code.
+- **Liskov Substitution** — interchangeable components must not break consumers.
+- **Interface Segregation** — focused prop interfaces and types; avoid catch-all types.
+- **Dependency Inversion** — depend on abstractions (types, interfaces, callbacks).
+
+### UI and components
+
+- Prefer Mantine (`@mantine/core`) and `@surrealdb/ui` before creating new components.
+- Use `<Box>` instead of `<div>`. Semantic elements: `<Box component="section|nav|main|footer">`.
+- Use `<Anchor>` instead of `<a>`.
+- Prefer Mantine styling props (`mt`, `fz`, `gap`, `display`) over custom CSS.
+- SCSS modules: `style.module.scss`, kebab-case class names, imported as `import classes from "./style.module.scss"`.
+- Inline `style` only for truly dynamic values.
+- Shared UI that could benefit other SurrealDB frontends belongs in `@surrealdb/ui`, not here.
+
+### Language
+
+All user-facing text uses **British English** spelling (`-ise`, `-our`, `-re`, `-ogue`).
+
+## Documentation voice
+
+The docs site mixes reference material, SDK guides, tutorials, and operational
+content. The voice is consistent across them:
+
+**Tone.** Neutral and instructional. State what something does, when to use it,
+and what to watch out for. Explain rationale where it helps (security trade-offs,
+precision loss, scope rules) without editorialising or selling.
+
+**Structure.** Lead with purpose: one or two sentences on what the page covers
+and who it is for. Reference pages put syntax or API surface near the top, then
+work through examples. Guides and quickstarts use prerequisites, numbered steps,
+and expected output. Troubleshooting pages follow symptom → cause → resolution.
+
+**Prose style.** Short paragraphs, mostly declarative sentences. Define terms on
+first use. Prefer concrete claims ("datetimes drop from nanoseconds to
+milliseconds") over vague importance ("crucial for modern workflows"). Use
+tables when comparing options (codecs, deployment modes, auth methods). Link to
+related pages inline rather than duplicating full explanations.
+
+**Examples.** Runnable code with realistic data. SurrealQL reference pages often
+include inline test assertions and response blocks. SDK pages show imports,
+configuration, and the trade-off when an option changes behaviour. Tutorials
+include verification steps so readers can confirm the setup worked.
+
+**Callouts.** Use `> [!NOTE]`, `> [!WARNING]`, and `> [!IMPORTANT]` for
+exceptions, security caveats, and breaking or easy-to-miss details.
+
+**What to avoid.** Promotional language, tutorial-script openers ("Let's dive
+in"), padded significance, and first-person opinion in reference material.
+Match existing pages in the same section when unsure.
+
+## Writing new documentation
+
+Two agent skills in `.agents/skills/` support content work, and should both be used
+when writing new documentation or updating existing articles in the following order:
+
+### technical-writing
+
+Use this skill to determine how to structure individual articles and decide which content to include.
+
+Follow the skill for audience-appropriate depth, heading hierarchy, worked
+examples, completeness (edge cases, error handling), and consistency with
+surrounding docs. Draft in the voice described above.
+
+### humanizer
+
+Use after drafting in order to remove AI writing patterns and make the prose more natural and human-written.
+
+Do **not** run humanizer over:
+
+- SurrealQL syntax blocks, railroad diagrams, or mostly-code reference pages
+- Frontmatter, tables of parameters, or generated API listings
+- Text where neutral precision is the point (security warnings, error catalogues)
+
+Humanizer removes AI writing patterns (significance inflation, rule-of-three
+padding, em dashes, chatbot framing) while preserving meaning. For docs, keep
+the neutral reference tone; do not add casual voice or first-person editorial.
+
+### Typical workflow
+
+1. Draft with technical-writing.
+2. Humanize explanatory prose.
+3. Check British English and links.
+4. `bun run qa` and `bun run qc`.
+
+## Content collections
+
+Schemas, slugs, and collection metadata live in `src/content/config.ts`. Each
+collection has a `+Content.ts` file in `src/content/<collection>/`.
 
 ### Plugin configuration (`vite.config.ts`)
 
-- `contentDir`: `"src/content"` — where `+Content.ts` files are scanned
-- `lastModified`: `true` — populates `lastModified` from git history
+- `contentDir`: `"src/content"`
+- `lastModified`: `true`
 - `drafts.field`: `"draft"`, `includeDrafts`: `false`
 - `ssr.external`: includes `"vike-content-collection"`
 
 ### Collections
-
-There are two kinds of collections:
 
 | Kind | Schema          | Collections                                                                                                                                         |
 | ---- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Docs | `abstractDoc`   | `doc-surrealdb`, `doc-cloud`, `doc-surrealist`, `doc-surrealml`, `doc-surrealkv`, `doc-surrealql`, `doc-integrations`, `doc-tutorials`, `doc-sdk-*` |
 | Labs | `labCollection` | `labs-items`                                                                                                                                        |
 
-Every `+Content.ts` follows the same pattern:
+Every `+Content.ts`:
 
 ```ts
 import { abstractDoc, contentSlug } from "../config";
@@ -52,20 +144,15 @@ export const Content = {
 };
 ```
 
-### Schemas (in `src/content/config.ts`)
+### Schemas (`src/content/config.ts`)
 
-- **`abstractDoc`** — `title`, `description`, `position`,
-  `no_page_headings`, `no_sidebar` (all optional, strict
-  object)
-- **`labCollection`** — `title` (required), `url`, `category`, `author`,
-  `topics`, `languages`
-- **`contentSlug`** — custom slug function that strips the collection prefix
-  from the file path and removes trailing `/index`
+- **`abstractDoc`** — `title`, `description`, `position`, `no_page_headings`, `no_sidebar` (all optional, strict object)
+- **`labCollection`** — `title` (required), `url`, `category`, `author`, `topics`, `languages`
+- **`contentSlug`** — strips the collection prefix from the file path and removes trailing `/index`
 
 ### URL mapping
 
-`urlForCollection` in `src/content/config.ts` maps collection names to URL
-prefixes:
+`urlForCollection` maps collection names to URL prefixes:
 
 - `doc-surrealdb` → `/surrealdb`
 - `doc-sdk-javascript` → `/sdk/javascript`
@@ -73,147 +160,50 @@ prefixes:
 
 ### Adding content
 
-1. Create a `.md` file in the appropriate `src/content/<collection>/` folder.
-2. Add YAML frontmatter matching the collection's schema.
-3. For docs, sidebar ordering uses `position` in frontmatter and
-   `__category.json` files in subdirectories.
+1. Create a `.md` or `.mdx` file in the appropriate `src/content/<collection>/` folder.
+2. Add YAML frontmatter matching the collection schema.
+3. For docs, sidebar ordering uses `position` in frontmatter and `__category.json` files in subdirectories.
 
-### Data loading pattern (`+data.ts`)
+When adding a new doc collection, also update redirect logic in
+`aws/viewer-request/index.js`.
 
-All doc pages follow the same pattern:
+## Data loading and rendering
 
-1. Resolve collection ID and slug from the URL
-   (`getCollectionPartsFromURL` from `src/utils/collection.ts`)
+Doc pages follow this pattern in `+data.ts`:
+
+1. Resolve collection ID and slug from the URL (`getCollectionPartsFromURL` from `src/utils/collection.ts`)
 2. Call `getCollectionEntry(id, slug)` — throw 404 if not found
-3. Parse markdown with `resolveMarkdown(entry.content)` from
-   `src/utils/markdown.tsx` (not `renderEntry`)
-4. Build sidebar with `getSidebarItemsFromCollection(id)` from
-   `src/utils/sidebar.ts`
+3. Parse markdown with `resolveMarkdown(entry.content)` from `src/utils/markdown.tsx` (not `renderEntry`)
+4. Build sidebar with `getSidebarItemsFromCollection(id)` from `src/utils/sidebar.ts`
 5. Return `{ ast, headings, sidebar, contentPath }`
 
-Labs uses `sortCollection(getCollection("labs-items"), "title", "asc")` to list
-entries sorted by title.
+Labs listing: `sortCollection(getCollection("labs-items"), "title", "asc")`.
 
-### APIs used from vike-content-collection
+Markdown pipeline (`resolveMarkdown` in `src/utils/markdown.tsx`):
 
-- `getCollection` — prerender lists, sidebar building, labs listing
-- `getCollectionEntry` — single doc/SDK page lookup, sitemap lastmod
-- `sortCollection` — labs listing sort
-- `vikeContentCollectionPlugin` — Vite plugin with `lastModified: true`
-
-### APIs not used (and why)
-
-- `renderEntry` / `extractHeadings` — rendering uses `@surrealdb/ui`'s
-  `parseMarkdown` which produces an AST consumed by `RenderMarkdown`, not HTML
-- `getBreadcrumbs` — breadcrumbs are sidebar-based, not collection-hierarchy
-  based
-- `getAdjacentEntries` — prev/next navigation follows sidebar tree order with
-  `__category.json`, not a simple metadata sort
-- `getEntryUrl` — collection names (`doc-surrealdb`) don't match URL paths
-  (`/surrealdb`); the project uses `urlForCollection` for mapping
-- `getCollectionTree` — sidebar uses `__category.json` for structure
-
-### Rendering
-
-Markdown is rendered through `@surrealdb/ui`'s `parseMarkdown` which produces
-an AST consumed by `RenderMarkdown`. The pipeline lives in
-`src/utils/markdown.tsx` (`resolveMarkdown`):
-
-1. `parseMarkdown` → AST
+1. `parseMarkdown` → AST (via `@surrealdb/ui`)
 2. Strip leading H1
-3. `resolveAstImages` — resolve image URLs
-4. `extractHeadings` — extract headings from the AST (custom, uses
-   `github-slugger`)
+3. `resolveAstImages`
+4. `extractHeadings` (custom, uses `github-slugger`)
 
-### Sidebar generation
+Sidebar: `getSidebarItemsFromCollection` in `src/utils/sidebar.ts` builds trees
+from `getCollection(id)` plus `__category.json` via `getCategories` in
+`src/lib/categories.ts`.
 
-`getSidebarItemsFromCollection` in `src/utils/sidebar.ts` builds nested sidebar
-trees from `getCollection(id)` plus `__category.json` files loaded via
-`getCategories` from `src/lib/categories.ts`.
+Prerendering: each doc section has `+onBeforePrerenderStart.ts` mapping
+collection entries to URL paths.
 
-### Prerendering
+Sitemap lastmod: `vite.config.ts` uses `getCollectionEntry` for content pages;
+falls back to `getLastModFromGit` elsewhere.
 
-Each doc section has `+onBeforePrerenderStart.ts` that maps all collection
-entries to URL paths:
+### vike-content-collection APIs
 
-```ts
-export default function onBeforeRenderStart() {
-    return getCollection("doc-surrealdb").map((entry) =>
-        entry.slug === "index" ? "/surrealdb" : `/surrealdb/${entry.slug}`,
-    );
-}
-```
+**Used:** `getCollection`, `getCollectionEntry`, `sortCollection`, `vikeContentCollectionPlugin`
 
-### Sitemap lastmod
+**Not used:**
 
-`vite.config.ts` uses `getCollectionEntry` to look up content entries by URL
-and returns `entry.lastModified` for sitemap generation. Falls back to
-`getLastModFromGit` for non-content pages.
-
-### Important: when adding a new doc collection
-
-The comment in `src/content/config.ts` warns: when adding a new doc, you
-**must** also update redirect logic in `aws/viewer-request/index.js`.
-
-## UI and components
-
-### Prefer existing components
-
-- **Mantine**: Prefer Mantine components and styling props. Use the docs as
-  reference: [Mantine Core](https://mantine.dev/core/package/).
-- **SurrealDB UI Kit**: Use components and assets from `@surrealdb/ui` where
-  possible (e.g. `Icon`, pictos, brand assets, `RenderMarkdown`, `useSwitch`,
-  `clsx`, `Spacer`). Check the package exports before introducing alternatives
-  or new abstractions.
-
-### Avoid creating new components when not needed
-
-- Prefer composing Mantine and `@surrealdb/ui` rather than adding new custom
-  components.
-- If a new component would be shared across SurrealDB frontends, suggest adding
-  it to the SurrealDB UI Kit instead of implementing it only in this repo.
-
-## Layout and semantics
-
-- **No raw `<div>`**: Use Mantine’s `<Box>` for generic layout/containers.
-- **Semantic elements**: Use `<Box component="element">` for semantics, e.g.
-  `<Box component="section">`, `<Box component="footer">`,
-  `<Box component="main">`, `<Box component="nav">`
-- **Links**: Use `<Anchor>` instead of `<a>` for links.
-
-## Styling
-
-- **Prefer Mantine styling props** over custom CSS when possible, e.g.
-  `mt="xl"`, `fz="sm"`, `display="flex"`, `gap="md"`.
-- **Prefer SCSS modules** over inline styles. Name modules `style.module.scss`
-  and import as:
-  ```ts
-  import classes from "./style.module.scss";
-  ```
-- Class names in CSS should be in kebab-case, and are automatically converted to
-  camelCase when used in JavaScript.
-- Use `className={classes.xyz}` for module-driven layout and visuals; keep
-  inline styles only when necessary (e.g. dynamic values).
-
-## Tips
-
-- Use `bun run qa` to run the linter and formatter without making changes.
-- Use `bun run qau` to run the linter and formatter and make changes.
-
-## Summary
-
-### Do's
-
-- Use Mantine + `@surrealdb/ui` first
-- Use `<Box>` and `<Box component="…">`
-- Use Mantine props (`mt`, `fz`, etc.)
-- Use SCSS modules `style.module.scss`
-- Suggest UI Kit for shared components
-
-### Don'ts
-
-- Add new components without checking existing ones
-- Use plain `<div>`, `<section>`, etc.
-- Reach for inline `style` or one-off CSS when props suffice
-- Rely on inline styles for static styling
-- Implement shared UI only in this repo
+- `renderEntry` / `extractHeadings` — rendering uses `@surrealdb/ui`'s `parseMarkdown` + `RenderMarkdown`
+- `getBreadcrumbs` — sidebar-based breadcrumbs
+- `getAdjacentEntries` — prev/next follows `__category.json` tree order
+- `getEntryUrl` — URLs come from `urlForCollection`
+- `getCollectionTree` — sidebar uses `__category.json`
