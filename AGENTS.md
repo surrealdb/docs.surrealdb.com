@@ -82,18 +82,12 @@ Match existing pages in the same section when unsure.
 
 ## Writing new documentation
 
-Two agent skills in `.agents/skills/` support content work. Use them at different
-stages:
+Two agent skills in `.agents/skills/` support content work, and should both be used
+when writing new documentation or updating existing articles in the following order:
 
 ### technical-writing
 
-Use when **creating or substantially restructuring** documentation:
-
-- New pages, major rewrites, or new top-level sections
-- API and SDK method reference
-- Tutorials, quickstarts, and step-by-step guides
-- Concept pages that need prerequisites, examples, and cross-links
-- Troubleshooting and operational guides
+Use this skill to determine how to structure individual articles and decide which content to include.
 
 Follow the skill for audience-appropriate depth, heading hierarchy, worked
 examples, completeness (edge cases, error handling), and consistency with
@@ -101,13 +95,7 @@ surrounding docs. Draft in the voice described above.
 
 ### humanizer
 
-Use **after drafting**, especially when the prose was AI-assisted or reads
-generic:
-
-- Intros, explanations, and narrative sections in learn, explore, build, and
-  SDK concept pages
-- Tutorial copy between code blocks
-- Any passage that feels padded, promotional, or formulaic
+Use after drafting in order to remove AI writing patterns and make the prose more natural and human-written.
 
 Do **not** run humanizer over:
 
@@ -119,8 +107,12 @@ Humanizer removes AI writing patterns (significance inflation, rule-of-three
 padding, em dashes, chatbot framing) while preserving meaning. For docs, keep
 the neutral reference tone; do not add casual voice or first-person editorial.
 
-**Typical workflow:** draft with technical-writing → humanize explanatory prose
-→ check British English and links → `bun run qa` and `bun run qc`.
+### Typical workflow
+
+1. Draft with technical-writing.
+2. Humanize explanatory prose.
+3. Check British English and links.
+4. `bun run qa` and `bun run qc`.
 
 ## Content collections
 
