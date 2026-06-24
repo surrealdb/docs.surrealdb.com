@@ -1,8 +1,8 @@
 # AI Code Review Checklist
 
 Use this document when reviewing changes to the SurrealDB docs codebase. Work
-through each section and flag anything that does not conform. See `CLAUDE.md`
-for quick-reference conventions and `AGENTS.md` for full architectural detail.
+through each section and flag anything that does not conform. See `AGENTS.md`
+for conventions, documentation voice, and architectural detail.
 
 ---
 
@@ -132,10 +132,9 @@ introduction of them:
 
 ## Key files reference
 
-| File                      | Purpose                         |
-| ------------------------- | ------------------------------- |
-| `CLAUDE.md`               | Quick-reference conventions     |
-| `AGENTS.md`               | Full architecture detail        |
+| File                      | Purpose                                              |
+| ------------------------- | ---------------------------------------------------- |
+| `AGENTS.md`               | Conventions, documentation voice, architecture       |
 | `src/content/config.ts`   | Content schemas and URL mapping |
 | `src/utils/markdown.tsx`  | Markdown rendering pipeline     |
 | `src/utils/sidebar.ts`    | Sidebar tree building           |
