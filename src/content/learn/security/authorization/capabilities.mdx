@@ -97,7 +97,7 @@ List of options for allowing capabilities:
                 --allow-experimental
             </td>
             <td colspan="2" scope="row" data-label="Description">
-                Allow the usage of one or more experimental features. Possible values are `surrealism` and `files`, separated by a comma.
+                Allow the usage of one or more experimental features. Possible values are `files`, `surrealism`, and `opengql`, separated by a comma. See <a href="/docs/reference/cli/surrealdb-cli/commands/start#experimental-capabilities">experimental capabilities</a> for which tag enables each feature.
             </td>
             <td scope="row" data-label="Default">
                 None

@@ -107,13 +107,13 @@ The `/metrics` endpoint is mounted by default. Anonymous scrapers receive only t
 
 ```bash
 # Start the server (Community example)
-surreal start --user root --pass root memory
+surreal start --user root --pass secret
 
 # Anonymous scrape — public allowlist only
 curl http://127.0.0.1:8000/metrics
 
 # Operator scrape — full surface, including labelled families
-curl -u root:root http://127.0.0.1:8000/metrics
+curl -u root:secret http://127.0.0.1:8000/metrics
 ```
 
 To turn the endpoint off entirely:
