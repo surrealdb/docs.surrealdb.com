@@ -51,6 +51,9 @@ const ICON_ENTRIES: IconEntry[] = [
     ["LightJavascript", "light", "javascript"],
     ["DarkJavascript", "dark", "javascript"],
 
+    ["LightKotlin", "light", "kotlin"],
+    ["DarkKotlin", "dark", "kotlin"],
+
     ["LightKubernetes", "light", "kubernetes"],
     ["DarkKubernetes", "dark", "kubernetes"],
 
@@ -65,6 +68,9 @@ const ICON_ENTRIES: IconEntry[] = [
 
     ["LightML", "light", "ml"],
     ["DarkML", "dark", "ml"],
+
+    ["LightMojo", "light", "mojo"],
+    ["DarkMojo", "dark", "mojo"],
 
     ["LightNext", "light", "nextjs"],
     ["DarkNext", "dark", "nextjs"],
