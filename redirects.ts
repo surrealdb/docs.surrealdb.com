@@ -153,6 +153,44 @@ function legacyMigratingRedirects(): Redirect[] {
     return out;
 }
 
+/**
+ * PHP SDK docs restructure: the previous flat v1 pages moved under
+ * /languages/php/v1/. Exact rules (including the camelCase → kebab-case renames)
+ * are listed before the prefix rules so they match first.
+ */
+function phpV1Redirects(): Redirect[] {
+    const exact: [string, string][] = [
+        ["/languages/php/setup", "/languages/php/v1/installation"],
+        ["/languages/php/data-types", "/languages/php/v1/concepts/data-types"],
+        ["/languages/php/methods/queryRaw", "/languages/php/v1/methods/query-raw"],
+        ["/languages/php/methods/insertRelation", "/languages/php/v1/methods/insert-relation"],
+    ];
+    const prefixes: [string, string][] = [
+        ["/languages/php/core", "/languages/php/v1/concepts"],
+        ["/languages/php/methods", "/languages/php/v1/methods"],
+    ];
+
+    const out: Redirect[] = [];
+
+    for (const [from, to] of exact) {
+        out.push(
+            { source: `/docs${from}`, destination: `/docs${to}`, statusCode: 301 },
+            { source: from, destination: `/docs${to}`, statusCode: 301 },
+        );
+    }
+
+    for (const [from, to] of prefixes) {
+        out.push(
+            { source: `/docs${from}`, destination: `/docs${to}`, statusCode: 301 },
+            { source: `/docs${from}/:path*`, destination: `/docs${to}/:path*`, statusCode: 301 },
+            { source: from, destination: `/docs${to}`, statusCode: 301 },
+            { source: `${from}/:path*`, destination: `/docs${to}/:path*`, statusCode: 301 },
+        );
+    }
+
+    return out;
+}
+
 /** Shared with vercel.ts (production) and the Vite dev server (local). */
 export const docsRedirects: Redirect[] = [
     { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
@@ -164,6 +202,7 @@ export const docsRedirects: Redirect[] = [
     ...legacyPrefixRedirects("tutorials", "explore/tutorials"),
     ...exploreTutorialsThematicRedirects(),
     ...sdkRedirects(),
+    ...phpV1Redirects(),
     ...legacyMigratingRedirects(),
     // ...learnContextToSpectronRedirects(),
     ...deploymentObservabilityToManageRedirects(),
