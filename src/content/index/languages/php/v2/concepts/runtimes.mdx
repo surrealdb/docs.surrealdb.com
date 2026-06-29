@@ -1,0 +1,145 @@
+---
+position: 8
+title: Runtimes and workers
+description: Configure your PHP environment (PHP-FPM, OpenSwoole, or FrankenPHP) so live queries and other long-lived connections run without blocking your application.
+---
+
+# Runtimes and workers
+
+By default the SDK runs on the standard synchronous PHP runtime. That suits request and response work: connect, run a query, return a result. Long-lived operations such as [live queries](/docs/languages/php/v2/concepts/live-queries) block the process that runs them until they end, so they need a runtime and worker setup that keeps the rest of your application responsive.
+
+This page covers three setups: PHP-FPM with dedicated workers, OpenSwoole, and FrankenPHP.
+
+## Selecting a runtime
+
+The `Runtime` helper returns a `DriverOptions` preset that you pass to `new Surreal(...)`. It wires up the matching scheduler and transports.
+
+```php
+use SurrealDB\SDK\Surreal;
+use SurrealDB\SDK\Runtime\Runtime;
+
+$db = new Surreal(Runtime::sync());   // default, synchronous
+$db = new Surreal(Runtime::swoole()); // OpenSwoole coroutines
+$db = new Surreal(Runtime::amp());    // Amp / Revolt event loop
+```
+
+The Swoole and Amp presets rely on optional packages, so install the matching dependency (listed under `suggest` in the SDK's `composer.json`) before using them.
+
+> [!NOTE]
+> A live query blocks whichever process runs its loop. Whatever runtime you choose, do not open a live query inside a normal web request. Run it in a dedicated worker.
+
+## PHP-FPM
+
+PHP-FPM is the common setup behind Nginx or Apache. Its pool serves web requests, and each worker handles one request at a time on the synchronous runtime. That is fine for queries and mutations, but a live query would hold a worker open indefinitely and eventually exhaust the pool.
+
+Keep PHP-FPM for the web tier, and run live queries in separate, long-running CLI workers.
+
+### Sizing the web pool
+
+Tune the pool in your PHP-FPM config (for example `www.conf`) so the web tier has enough workers for your traffic.
+
+```ini
+pm = dynamic
+pm.max_children = 20
+pm.start_servers = 4
+pm.min_spare_servers = 2
+pm.max_spare_servers = 8
+```
+
+### Running live query workers
+
+Put the live query loop in a CLI script.
+
+```php title="worker.php"
+require __DIR__ . '/vendor/autoload.php';
+
+use SurrealDB\SDK\Surreal;
+use SurrealDB\SDK\Connection\ConnectOptions;
+
+$db = new Surreal();
+$db->connect('ws://127.0.0.1:8000/rpc', new ConnectOptions(
+    namespace: 'surrealdb',
+    database: 'docs',
+));
+
+[$queryId] = $db->run('LIVE SELECT * FROM person');
+
+foreach ($db->live($queryId) as $message) {
+    // handle $message->action and $message->value
+}
+```
+
+Run several copies under a process manager so that one worker blocked on a live query never affects the others. With [Supervisor](http://supervisord.org), the `numprocs` setting controls how many processes run in parallel.
+
+```ini title="/etc/supervisor/conf.d/surreal-live.conf"
+[program:surreal-live]
+command=php /var/www/app/worker.php
+numprocs=4
+process_name=%(program_name)s_%(process_num)02d
+autostart=true
+autorestart=true
+stopwaitsecs=10
+```
+
+A systemd template unit achieves the same. Define `surreal-live@.service`, then start as many instances as you need with `systemctl start surreal-live@{1..4}`.
+
+## OpenSwoole
+
+[OpenSwoole](https://openswoole.com) adds a coroutine runtime, so a single process can drive many concurrent tasks, including live queries, on an event loop without blocking.
+
+Install the extension with PECL and enable it in your `php.ini`.
+
+```bash
+pecl install openswoole
+```
+
+Run your code inside a coroutine context and use the Swoole preset. The preset enables OpenSwoole's runtime hooks so the SDK's connection becomes non-blocking.
+
+```php
+use OpenSwoole\Coroutine as Co;
+use SurrealDB\SDK\Surreal;
+use SurrealDB\SDK\Connection\ConnectOptions;
+use SurrealDB\SDK\Runtime\Runtime;
+
+Co::run(function (): void {
+    $db = new Surreal(Runtime::swoole());
+    $db->connect('ws://127.0.0.1:8000/rpc', new ConnectOptions(
+        namespace: 'surrealdb',
+        database: 'docs',
+    ));
+
+    [$queryId] = $db->run('LIVE SELECT * FROM person');
+
+    foreach ($db->live($queryId) as $message) {
+        // other coroutines keep running while this waits
+    }
+});
+```
+
+In an OpenSwoole HTTP server, set the number of worker processes with the `worker_num` server setting.
+
+## FrankenPHP
+
+[FrankenPHP](https://frankenphp.dev) runs PHP as a long-lived application server. In worker mode the app stays booted between requests, and the Amp / Revolt event loop lets the SDK process live queries without blocking. Install `revolt/event-loop` and the Amp packages (see the SDK's `composer.json` suggestions), then use the Amp preset.
+
+```php
+use SurrealDB\SDK\Surreal;
+use SurrealDB\SDK\Runtime\Runtime;
+
+$db = new Surreal(Runtime::amp());
+```
+
+Enable [worker mode](https://frankenphp.dev/docs/worker/) and set the worker count in your `Caddyfile` or through the environment variable. The trailing number is the number of workers.
+
+```bash
+FRANKENPHP_CONFIG="worker ./public/index.php 4"
+```
+
+> [!NOTE]
+> For Laravel applications, [Laravel Octane](https://laravel.com/docs/octane) runs your app on Swoole, FrankenPHP, or RoadRunner with a configurable `--workers` count. See the [Laravel integration](/docs/languages/php/ecosystem/laravel).
+
+## Learn more
+
+- [Live queries](/docs/languages/php/v2/concepts/live-queries) for the subscription API
+- [Connecting to SurrealDB](/docs/languages/php/v2/concepts/connecting-to-surrealdb) for connection setup
+- [Utilities](/docs/languages/php/v2/api/utilities#driveroptions) for the `DriverOptions` the presets configure
