@@ -80,7 +80,7 @@ Reporting "no schema found" based solely on `web_fetch` or `curl` leads to false
 - No orphan pages
 
 **Crawl Budget Issues** (for large sites)
-- Parameterized URLs under control
+- Parameterised URLs under control
 - Faceted navigation handled properly
 - Infinite scroll with pagination fallback
 - Session IDs not in URLs
