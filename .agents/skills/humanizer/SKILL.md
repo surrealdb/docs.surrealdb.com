@@ -301,13 +301,30 @@ Before returning the final rewrite, scan it for `—` and `–`. Any hit means t
 
 ### 17. Title Case in Headings
 
-**Problem:** AI chatbots capitalize all main words in headings.
+**Problem:** AI chatbots capitalize all main words in headings (Title Case).
+
+**SurrealDB docs convention:** sentence case for multi-word subheaders; fully
+capitalised single-word subheaders.
+
+| Pattern | Correct | Incorrect |
+| ------- | ------- | --------- |
+| Single word | `#### Parameters` | `#### parameters` |
+| Multiple words | `### Complete examples` | `### Complete Examples` |
+| Numbered | `### 3. Don't reuse transactions` | `### 3. don't reuse transactions` |
+| Names / acronyms | `### Basic API calls` | `### Basic api calls` |
 
 **Before:**
 > ## Strategic Negotiations And Global Partnerships
+> ### Custom Functions
+> ### 3. don't reuse transactions
 
 **After:**
 > ## Strategic negotiations and global partnerships
+> ### Custom functions
+> ### 3. Don't reuse transactions
+
+Keep acronyms, product names, SDK types, and SurrealQL keywords capitalised where
+appropriate (`API`, `SurrealQL`, `RecordId`, `INSERT`).
 
 
 ### 18. Emojis
