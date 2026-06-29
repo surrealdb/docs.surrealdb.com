@@ -1,6 +1,9 @@
 import {
-    extractHeaders,
-    parseMarkdown,
+    extractHeadings,
+    type ImageDescriptor,
+    type MarkdownComponents,
+    markdownSourceFromString,
+    parseMarkdownTree,
     RailroadDiagram,
     Since,
     type SinceProps,
@@ -12,31 +15,76 @@ import { Edition } from "~/components/Edition";
 import { IconBox } from "~/components/IconBox";
 import { Version } from "~/components/Version";
 import { getIconScope } from "~/lib/icon-scope";
-import { resolveAstImages } from "./image-urls";
+import { getImageUrl } from "./image-urls";
 
-export function resolveMarkdown(markdown: string) {
-    const ast = parseMarkdown(markdown);
+export type DocHeading = ReturnType<typeof extractHeadings>[number];
 
-    if (ast.children[0]?.type === "heading" && ast.children[0].depth === 1) {
-        ast.children.shift();
+function stripLeadingH1(markdown: string): string {
+    const tree = parseMarkdownTree(markdown);
+    const source = markdownSourceFromString(markdown);
+    const first = tree.topNode.firstChild;
+
+    if (!first?.name.startsWith("ATXHeading")) {
+        return markdown;
     }
 
-    const headings = extractHeaders(ast);
+    const level = Number.parseInt(first.name.slice("ATXHeading".length), 10);
+    if (level !== 1) {
+        return markdown;
+    }
 
-    resolveAstImages(ast);
-
-    return { ast, headings };
+    const line = source.lineAt(first.from);
+    return source.slice(line.to, source.length).replace(/^\n+/, "");
 }
 
-export function registerMarkdownComponents() {
+/** Replace icon scope identifiers with quoted URL strings for JSX JSON attributes. */
+function injectIconScope(markdown: string): string {
+    const scope = getIconScope();
+    let result = markdown;
+
+    for (const [name, url] of Object.entries(scope)) {
+        if (typeof url !== "string") continue;
+        result = result.replace(new RegExp(`\\b${name}\\b`, "g"), JSON.stringify(url));
+    }
+
+    return result;
+}
+
+export function resolveMarkdown(markdown: string) {
+    const content = injectIconScope(stripLeadingH1(markdown));
+    const tree = parseMarkdownTree(content);
+    const source = markdownSourceFromString(content);
+    const headings = extractHeadings(tree, source);
+
+    return { content, headings };
+}
+
+export function resolveImageDescriptor(node: ImageDescriptor): ImageDescriptor {
+    if (node.src.startsWith("@ui/")) {
+        const resolved = getImageUrl(node.src);
+        return {
+            ...node,
+            src: resolved ?? node.src,
+            darkSrc: undefined,
+        };
+    }
+
+    return {
+        ...node,
+        src: getImageUrl(node.src) ?? node.src,
+        darkSrc: node.darkSrc ? (getImageUrl(node.darkSrc) ?? node.darkSrc) : node.darkSrc,
+    };
+}
+
+export function registerMarkdownComponents(): MarkdownComponents {
     return {
         SurrealistMini: ({ query, url }: { query?: string; url?: string }) => {
             return <SurrealistMini config={{ query, url }} />;
         },
         Version: (props: { sdk?: string; prefix?: string }) => <Version {...props} />,
         Edition,
-        IconBox,
-        Boxes,
+        IconBox: { component: IconBox, block: true },
+        Boxes: { component: Boxes, block: true, preserveNewlines: false },
         Since: ({ v, prefix, ...props }: SinceProps) => (
             <Since
                 v={v}
@@ -44,7 +92,7 @@ export function registerMarkdownComponents() {
                 {...props}
             />
         ),
-        Tabs: ContentTabs,
+        Tabs: { component: ContentTabs, block: true },
         TabItem: ContentTabItem,
         RailroadDiagram: (props: { ast: string }) => (
             <RailroadDiagram
@@ -52,11 +100,5 @@ export function registerMarkdownComponents() {
                 ast={JSON.parse(props.ast)}
             />
         ),
-    };
-}
-
-export function getMarkdownScope(): Record<string, unknown> {
-    return {
-        ...getIconScope(),
     };
 }

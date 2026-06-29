@@ -11,8 +11,9 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { Icon, iconSidebar } from "@surrealdb/ui";
-import { useEffect, useRef } from "react";
+import { type CSSProperties, useEffect, useRef } from "react";
 import { usePageContext } from "vike-react/usePageContext";
+import globulesImg from "~/assets/img/globules.webp";
 import { PageContentActions } from "~/components/ContentActions";
 import { PageAside } from "~/components/PageAside";
 import type { PageData } from "~/utils/data";
@@ -52,7 +53,15 @@ export function DefaultLayout({
     }, [urlPathname]);
 
     return (
-        <div className={classes.layout}>
+        <Box
+            className={classes.layout}
+            style={
+                {
+                    "--bg-image": `url(${globulesImg})`,
+                    "--bg-opacity": 0.15,
+                } as CSSProperties
+            }
+        >
             <Header
                 navLinks={navLinks}
                 opened={menuOpened}
@@ -177,6 +186,6 @@ export function DefaultLayout({
                     </Group>
                 </Container>
             </Group>
-        </div>
+        </Box>
     );
 }

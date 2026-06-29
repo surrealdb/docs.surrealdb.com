@@ -1,5 +1,7 @@
 import { Container, Drawer, Stack } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
+import type { CSSProperties } from "react";
+import globulesImg from "~/assets/img/globules.webp";
 import { Footer } from "~/components/Footer";
 import { Header, MobileNav } from "./header";
 import type { NavEntry } from "./nav";
@@ -18,6 +20,12 @@ export function FullWidthLayout({ children, navLinks }: FullWidthLayoutProps) {
         <Stack
             className={classes.fullWidthLayout}
             gap={0}
+            style={
+                {
+                    "--bg-image": `url(${globulesImg})`,
+                    "--bg-opacity": 0.15,
+                } as CSSProperties
+            }
         >
             <Header
                 navLinks={navLinks}

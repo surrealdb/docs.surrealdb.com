@@ -1,10 +1,10 @@
 import { Anchor, Avatar, Badge, Box, Group, Image, Paper, Text, Title } from "@mantine/core";
 import {
-    pictoCurlyBraces,
-    pictoFile,
-    pictoInbox,
-    pictoPlay,
-    pictoQuestion,
+    pictoCurlyBracesGradient,
+    pictoFileGradient,
+    pictoInboxGradient,
+    pictoPlayGradient,
+    pictoQuestionGradient,
     Spacer,
 } from "@surrealdb/ui";
 import placeholderAvatar from "~/assets/img/labs-authors/placeholder.png";
@@ -39,11 +39,11 @@ export interface LabCardProps {
 }
 
 const CATEGORY_IMAGES: Record<string, string> = {
-    "Source code": pictoCurlyBraces,
-    Videos: pictoPlay,
-    Blogposts: pictoInbox,
-    Documentation: pictoFile,
-    "Learning resources": pictoQuestion,
+    "Source code": pictoCurlyBracesGradient,
+    Videos: pictoPlayGradient,
+    Blogposts: pictoInboxGradient,
+    Documentation: pictoFileGradient,
+    "Learning resources": pictoQuestionGradient,
 };
 
 function getAuthorAvatarUrl(slug: string): string | undefined {

@@ -51,6 +51,7 @@ export function IconBox({
 
     const resolvedLightSrc = (lightSrc && getImageUrl(lightSrc)) || lightSrc;
     const resolvedDarkSrc = (darkSrc && getImageUrl(darkSrc)) || darkSrc;
+    const unifiedSrc = resolvedLightSrc && !resolvedDarkSrc ? resolvedLightSrc : undefined;
 
     const content = (
         <>
@@ -64,23 +65,35 @@ export function IconBox({
                     align="center"
                     wrap="nowrap"
                 >
-                    {resolvedLightSrc && (
+                    {unifiedSrc ? (
                         <Image
-                            src={resolvedLightSrc}
+                            src={unifiedSrc}
                             alt={title ?? "Icon"}
                             w={24}
-                            className={classes.lightIcon}
+                            className={classes.unifiedIcon}
                             data-only-icon={onlyIcon || undefined}
                         />
-                    )}
-                    {resolvedDarkSrc && (
-                        <Image
-                            src={resolvedDarkSrc}
-                            alt={title ?? "Icon"}
-                            w={24}
-                            className={classes.darkIcon}
-                            data-only-icon={onlyIcon || undefined}
-                        />
+                    ) : (
+                        <>
+                            {resolvedLightSrc && (
+                                <Image
+                                    src={resolvedLightSrc}
+                                    alt={title ?? "Icon"}
+                                    w={24}
+                                    className={classes.lightIcon}
+                                    data-only-icon={onlyIcon || undefined}
+                                />
+                            )}
+                            {resolvedDarkSrc && (
+                                <Image
+                                    src={resolvedDarkSrc}
+                                    alt={title ?? "Icon"}
+                                    w={24}
+                                    className={classes.darkIcon}
+                                    data-only-icon={onlyIcon || undefined}
+                                />
+                            )}
+                        </>
                     )}
                     {(title || subtitle) && (
                         <Stack gap={0}>
