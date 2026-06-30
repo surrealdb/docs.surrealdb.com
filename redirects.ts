@@ -153,6 +153,16 @@ function legacyMigratingRedirects(): Redirect[] {
     return out;
 }
 
+/** Database functions overview merged into the section index. */
+function databaseFunctionsOverviewRedirects(): Redirect[] {
+    const from = "/reference/query-language/functions/database-functions/overview";
+    const to = "/reference/query-language/functions/database-functions";
+    return [
+        { source: `/docs${from}`, destination: `/docs${to}`, statusCode: 301 },
+        { source: from, destination: to, statusCode: 301 },
+    ];
+}
+
 /** Shared with vercel.ts (production) and the Vite dev server (local). */
 export const docsRedirects: Redirect[] = [
     { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
@@ -168,6 +178,7 @@ export const docsRedirects: Redirect[] = [
     // ...learnContextToSpectronRedirects(),
     ...deploymentObservabilityToManageRedirects(),
     ...runningFromSelfHostedRedirects(),
+    ...databaseFunctionsOverviewRedirects(),
 ];
 
 export type ResolvedRedirect = { destination: string; statusCode: number };
