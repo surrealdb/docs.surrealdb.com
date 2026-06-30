@@ -169,7 +169,7 @@ export function DefaultLayout({
                                 </Title>
                                 <CopyPageMenu contentPath={data.contentPath} />
                             </Group>
-                            {data.description && <Text fz="lg">{data.description}</Text>}
+                            {data.description && <Text fz="xl">{data.description}</Text>}
                             <Box
                                 mt="xl"
                                 component="main"

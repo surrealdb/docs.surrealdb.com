@@ -1,4 +1,3 @@
-import { Box } from "@mantine/core";
 import { MarkdownViewer } from "@surrealdb/ui";
 import { useData } from "vike-react/useData";
 import type { PageData } from "~/utils/data";
@@ -8,14 +7,14 @@ export function DocMarkdown() {
     const { content } = useData<PageData>();
 
     return (
-        <Box className="flag-markdown">
-            <MarkdownViewer
-                content={content}
-                jsxMode="render"
-                components={registerMarkdownComponents()}
-                onImage={resolveImageDescriptor}
-                p={0}
-            />
-        </Box>
+        <MarkdownViewer
+            content={content}
+            jsxMode="render"
+            components={registerMarkdownComponents()}
+            onImage={resolveImageDescriptor}
+            fz={15}
+            lh="sm"
+            p={0}
+        />
     );
 }
