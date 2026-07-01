@@ -161,6 +161,7 @@ function databaseFunctionsOverviewRedirects(): Redirect[] {
         { source: `/docs${from}`, destination: `/docs${to}`, statusCode: 301 },
         { source: from, destination: to, statusCode: 301 },
     ];
+}
 /** PHP SDK split into versioned folders: legacy v1 paths → /languages/php/v1/*. */
 function phpVersionedRedirects(): Redirect[] {
     const moves: [string, string][] = [
