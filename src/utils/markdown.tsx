@@ -6,7 +6,6 @@ import {
     parseMarkdownTree,
     RailroadDiagram,
     Since,
-    type SinceProps,
     SurrealistMini,
 } from "@surrealdb/ui";
 import { Boxes } from "~/components/Boxes";
@@ -76,29 +75,27 @@ export function resolveImageDescriptor(node: ImageDescriptor): ImageDescriptor {
     };
 }
 
+const SurrealistMiniComponent = ({ query, url }: { query?: string; url?: string }) => {
+    return <SurrealistMini config={{ query, url }} />;
+};
+
+const RailroadDiagramComponent = (props: { ast: string }) => {
+    return <RailroadDiagram ast={JSON.parse(props.ast)} />;
+};
+
 export function registerMarkdownComponents(): MarkdownComponents {
     return {
-        SurrealistMini: ({ query, url }: { query?: string; url?: string }) => {
-            return <SurrealistMini config={{ query, url }} />;
-        },
-        Version: (props: { sdk?: string; prefix?: string }) => <Version {...props} />,
-        Edition,
+        // Block-level components
         IconBox: { component: IconBox, block: true },
         Boxes: { component: Boxes, block: true, preserveNewlines: false },
-        Since: ({ v, prefix, ...props }: SinceProps) => (
-            <Since
-                v={v}
-                prefix={prefix}
-                {...props}
-            />
-        ),
-        Tabs: { component: ContentTabs, block: true },
-        TabItem: ContentTabItem,
-        RailroadDiagram: (props: { ast: string }) => (
-            <RailroadDiagram
-                {...props}
-                ast={JSON.parse(props.ast)}
-            />
-        ),
+        Tabs: { component: ContentTabs, block: true, preserveNewlines: false },
+        TabItem: { component: ContentTabItem, block: true },
+        SurrealistMini: { component: SurrealistMiniComponent, block: true },
+
+        // Inline components
+        Version,
+        Edition,
+        Since,
+        RailroadDiagram: RailroadDiagramComponent,
     };
 }

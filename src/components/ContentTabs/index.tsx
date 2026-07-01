@@ -1,4 +1,5 @@
 import { Tabs as MantineTabs } from "@mantine/core";
+import { MarkdownContent } from "@surrealdb/ui";
 import { Children, isValidElement, type ReactNode, useCallback, useEffect, useState } from "react";
 import classes from "./style.module.scss";
 
@@ -120,5 +121,5 @@ export function ContentTabs({ groupId, syncKey, children }: ContentTabsProps) {
 }
 
 export function ContentTabItem({ children }: Record<string, unknown>) {
-    return <>{children as ReactNode}</>;
+    return <MarkdownContent>{children as ReactNode}</MarkdownContent>;
 }
