@@ -1,16 +1,15 @@
-import type { Heading, Root } from "@surrealdb/ui";
 import { redirect, render } from "vike/abort";
 import type { PageContext } from "vike/types";
 import { type CollectionMap, getCollection, getCollectionEntry } from "vike-content-collection";
 import { useConfig } from "vike-react/useConfig";
-import { resolveMarkdown } from "./markdown";
+import { type DocHeading, resolveMarkdown } from "./markdown";
 import { getSuffixedMetaTitle } from "./meta";
 import { buildNavigation, type NavSection } from "./navigation";
 import { getProductFromPath } from "./product";
 
 export interface PageData {
-    ast: Root;
-    headings: Heading[];
+    content: string;
+    headings: DocHeading[];
     navigation: NavSection[];
     contentPath: string;
     breadcrumbs: string[];
@@ -79,7 +78,7 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
     });
 
     const navigation = buildNavigation(id, prefix);
-    const { ast, headings } = resolveMarkdown(entry.content);
+    const { content, headings } = resolveMarkdown(entry.content);
     const contentPath = entry.filePath.replace(/.*\/content\//, "");
 
     const curPath: string[] = [];
@@ -97,7 +96,7 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
     }
 
     return {
-        ast,
+        content,
         headings,
         navigation,
         contentPath,

@@ -20,3 +20,20 @@ export const sdkFetcherRegistry: Record<string, VersionFetcher> = {
     golang: createGoProxyFetcher("github.com/surrealdb/surrealdb.go"),
     java: createMavenFetcher("com.surrealdb", "surrealdb"),
 };
+
+export async function invokeFetcherWithTimeout(
+    sdkName: string,
+    ...args: Parameters<VersionFetcher>
+): Promise<ReturnType<VersionFetcher>> {
+    const fetcher = sdkFetcherRegistry[sdkName];
+
+    if (!fetcher) {
+        throw new Error(`SDK fetcher not found for: ${sdkName}`);
+    }
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Fetcher timed out after 1s")), 1000),
+    );
+
+    return Promise.race([fetcher(...args), timeoutPromise]) as ReturnType<VersionFetcher>;
+}

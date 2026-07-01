@@ -1,29 +1,27 @@
 import {
-    type AnyNode,
     brandDocker,
-    pictoAI,
-    pictoAtom,
-    pictoClisdb,
-    pictoCurlyBraces,
-    pictoEmbeddedDevices,
-    pictoGraph,
-    pictoHTTP,
-    pictoIntegrations,
-    pictoOnDisk,
-    pictoPadlockClosed,
-    pictoPath,
-    pictoQL,
-    pictoSDBCloud,
-    pictoSignal,
-    pictoSpectron,
-    pictoSpeed,
-    pictoSurrealism,
-    pictoSurrealist,
-    pictoTutorials,
-    pictoUpdate,
-    pictoVectorSearch,
-    type Root,
-    visit,
+    pictoAIGradient,
+    pictoAtomGradient,
+    pictoClisdbGradient,
+    pictoCurlyBracesGradient,
+    pictoEmbeddedDevicesGradient,
+    pictoGraphGradient,
+    pictoHTTPGradient,
+    pictoIntegrationsGradient,
+    pictoOnDiskGradient,
+    pictoPadlockClosedGradient,
+    pictoPathGradient,
+    pictoQLGradient,
+    pictoSDBCloudGradient,
+    pictoSignalGradient,
+    pictoSpectronGradient,
+    pictoSpeedGradient,
+    pictoSurrealDBGradient,
+    pictoSurrealismGradient,
+    pictoSurrealistGradient,
+    pictoTutorialsGradient,
+    pictoUpdateGradient,
+    pictoVectorSearchGradient,
 } from "@surrealdb/ui";
 import { getImageUrl as getBundledImageUrl } from "~/lib/images";
 
@@ -32,27 +30,50 @@ const UI_PREFIX = "@ui/";
 const UI_ASSETS: Record<string, string> = {
     brandDocker,
 
-    pictoAI,
-    pictoAtom,
-    pictoClisdb,
-    pictoCurlyBraces,
-    pictoEmbeddedDevices,
-    pictoGraph,
-    pictoHTTP,
-    pictoIntegrations,
-    pictoOnDisk,
-    pictoPadlockClosed,
-    pictoPath,
-    pictoQL,
-    pictoSDBCloud,
-    pictoSignal,
-    pictoSpectron,
-    pictoSpeed,
-    pictoSurrealism,
-    pictoSurrealist,
-    pictoTutorials,
-    pictoUpdate,
-    pictoVectorSearch,
+    pictoAI: pictoAIGradient,
+    pictoAIGradient,
+    pictoAtom: pictoAtomGradient,
+    pictoAtomGradient,
+    pictoClisdb: pictoClisdbGradient,
+    pictoClisdbGradient,
+    pictoCurlyBraces: pictoCurlyBracesGradient,
+    pictoCurlyBracesGradient,
+    pictoEmbeddedDevices: pictoEmbeddedDevicesGradient,
+    pictoEmbeddedDevicesGradient,
+    pictoGraph: pictoGraphGradient,
+    pictoGraphGradient,
+    pictoHTTP: pictoHTTPGradient,
+    pictoHTTPGradient,
+    pictoIntegrations: pictoIntegrationsGradient,
+    pictoIntegrationsGradient,
+    pictoOnDisk: pictoOnDiskGradient,
+    pictoOnDiskGradient,
+    pictoPadlockClosed: pictoPadlockClosedGradient,
+    pictoPadlockClosedGradient,
+    pictoPath: pictoPathGradient,
+    pictoPathGradient,
+    pictoQL: pictoQLGradient,
+    pictoQLGradient,
+    pictoSDBCloud: pictoSDBCloudGradient,
+    pictoSDBCloudGradient,
+    pictoSignal: pictoSignalGradient,
+    pictoSignalGradient,
+    pictoSpectron: pictoSpectronGradient,
+    pictoSpectronGradient,
+    pictoSpeed: pictoSpeedGradient,
+    pictoSpeedGradient,
+    pictoSurrealDB: pictoSurrealDBGradient,
+    pictoSurrealDBGradient,
+    pictoSurrealism: pictoSurrealismGradient,
+    pictoSurrealismGradient,
+    pictoSurrealist: pictoSurrealistGradient,
+    pictoSurrealistGradient,
+    pictoTutorials: pictoTutorialsGradient,
+    pictoTutorialsGradient,
+    pictoUpdate: pictoUpdateGradient,
+    pictoUpdateGradient,
+    pictoVectorSearch: pictoVectorSearchGradient,
+    pictoVectorSearchGradient,
 };
 
 /**
@@ -110,19 +131,4 @@ export function getImageUrl(
     }
 
     return imageId;
-}
-
-export function resolveAstImages(ast: Root | AnyNode) {
-    visit(ast, "image", (node) => {
-        if (node.src.startsWith(UI_PREFIX)) {
-            const key = node.src.slice(UI_PREFIX.length);
-            node.src = UI_ASSETS[key] ?? node.src;
-            node.darkSrc = undefined;
-        } else {
-            node.src = getImageUrl(node.src) ?? node.src;
-            if (node.darkSrc) {
-                node.darkSrc = getImageUrl(node.darkSrc) ?? node.darkSrc;
-            }
-        }
-    });
 }

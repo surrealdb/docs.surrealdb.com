@@ -2,7 +2,7 @@
 // Content crawler
 //
 // Walks every markdown file in src/content/, parses it into
-// an AST, and emits two kinds of entries:
+// a Lezer syntax tree, and emits two kinds of entries:
 //
 //   • Page  — one per file, with the full plain-text content
 //   • Section — one per H2 heading, with the text between
@@ -20,9 +20,16 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { type AnyNode, type BlockNode, parseMarkdown, type Root, visit } from "@surrealdb/ui";
+import {
+    extractHeadings,
+    type MarkdownSource,
+    markdownSourceFromString,
+    parseMarkdownTree,
+} from "@surrealdb/ui";
 import matter from "gray-matter";
 import type { CrawledEntry, CrawledPage, CrawledSection } from "../src/types";
+
+type MarkdownNode = NonNullable<ReturnType<typeof parseMarkdownTree>["topNode"]["firstChild"]>;
 
 const CONTENT_DIR = join(import.meta.dirname, "../../src/content");
 
@@ -157,71 +164,102 @@ async function loadCategoryMap(collectionDir: string): Promise<Map<string, Categ
 }
 
 // ──────────────────────────────────────────────────────────
-// AST → plain text extraction
+// Syntax tree → plain text extraction
 //
-// We walk the markdown AST to extract readable text, skipping
-// HTML nodes and JSX components (which are UI-only and would
-// pollute search content). Code blocks are also skipped in the
-// section-level extraction.
+// We walk the markdown tree to extract readable text, skipping
+// HTML/JSX blocks (UI-only) and fenced code blocks.
 // ──────────────────────────────────────────────────────────
 
-const SKIP_TYPES = new Set(["html", "mdxJsxTextElement", "mdxJsxFlowElement", "jsxComponent"]);
+const SKIP_MARKS = new Set([
+    "EmphasisMark",
+    "StrikethroughMark",
+    "CodeMark",
+    "LinkMark",
+    "URL",
+    "LinkTitle",
+    "LinkLabel",
+    "HeaderMark",
+    "HardBreak",
+    "Comment",
+]);
 
-function stripHtmlTags(text: string): string {
-    return text.replace(/<[^>]+>/g, " ");
+function headingLevel(name: string): number {
+    if (name.startsWith("ATXHeading")) {
+        const lvl = Number.parseInt(name.slice("ATXHeading".length), 10);
+        return Number.isFinite(lvl) ? lvl : 0;
+    }
+    if (name.startsWith("SetextHeading")) {
+        const lvl = Number.parseInt(name.slice("SetextHeading".length), 10);
+        return Number.isFinite(lvl) ? lvl : 0;
+    }
+    return 0;
 }
 
-/** Extracts readable text from a single AST node, skipping HTML/JSX. */
-function extractText(node: AnyNode | Root): string {
-    if (SKIP_TYPES.has(node.type)) {
-        return "";
-    }
-
-    if ("value" in node && typeof node.value === "string") {
-        return stripHtmlTags(node.value);
-    }
-
-    if ("children" in node && Array.isArray(node.children)) {
-        const joined = (node.children as (AnyNode | Root)[]).map(extractText).join(" ");
-        return stripHtmlTags(joined).replace(/\s+/g, " ").trim();
-    }
-
-    return "";
+function readTagName(node: MarkdownNode, source: MarkdownSource): string | null {
+    const text = source.slice(node.from, node.to).trim();
+    const match = /^<\/?([A-Za-z][\w-]*)/.exec(text);
+    return match?.[1] ?? null;
 }
 
-/**
- * Converts block-level AST nodes to plain text. Collects text
- * and inline code values but skips fenced code blocks entirely
- * — code examples add noise to search without semantic value.
- *
- * Each block node (paragraph, list item, etc.) is processed
- * separately and joined with newlines so that text from
- * adjacent blocks doesn't run together (e.g. a heading
- * followed by a paragraph won't produce "SELECT statementThe
- * SELECT statement can be used...").
- */
-function blockNodesToPlainText(nodes: BlockNode[]): string {
-    const blocks: string[] = [];
+function isJsxNode(node: MarkdownNode, source: MarkdownSource): boolean {
+    if (node.name !== "HTMLTag" && node.name !== "SelfClosingTag") return false;
+    const tag = readTagName(node, source);
+    return tag ? /^[A-Z]/.test(tag) : false;
+}
 
-    for (const node of nodes) {
-        const parts: string[] = [];
+function shouldSkipNode(node: MarkdownNode, source: MarkdownSource): boolean {
+    if (node.name === "FencedCode" || node.name === "HTMLBlock") return true;
+    return isJsxNode(node, source);
+}
 
-        visit({ type: "root", children: [node] } as Root, (child) => {
-            switch (child.type) {
-                case "text":
-                    parts.push(child.value);
-                    break;
-                case "inlineCode":
-                    parts.push(child.value);
-                    break;
-                case "code":
-                    // Skip fenced code blocks
-                    return false;
+function collectPlainText(node: MarkdownNode, source: MarkdownSource): string {
+    const parts: string[] = [];
+
+    function walk(current: MarkdownNode): void {
+        if (shouldSkipNode(current, source)) return;
+
+        if (current.name === "Text" || current.name === "Escape") {
+            parts.push(source.slice(current.from, current.to));
+            return;
+        }
+
+        if (SKIP_MARKS.has(current.name)) return;
+
+        if (current.name === "InlineCode") {
+            let child = current.firstChild;
+            while (child) {
+                if (child.name === "CodeText") {
+                    parts.push(source.slice(child.from, child.to));
+                }
+                child = child.nextSibling;
             }
-        });
+            return;
+        }
 
-        const text = parts.join("").trim();
+        let child = current.firstChild;
+        while (child) {
+            walk(child);
+            child = child.nextSibling;
+        }
+    }
+
+    walk(node);
+    return parts.join("").replace(/\s+/g, " ").trim();
+}
+
+function blockNodeToPlainText(node: MarkdownNode, source: MarkdownSource): string {
+    if (shouldSkipNode(node, source)) return "";
+    return collectPlainText(node, source);
+}
+
+function documentToPlainText(body: string, source: MarkdownSource): string {
+    const blocks: string[] = [];
+    let child = parseMarkdownTree(body).topNode.firstChild;
+
+    while (child) {
+        const text = blockNodeToPlainText(child, source);
         if (text) blocks.push(text);
+        child = child.nextSibling;
     }
 
     return blocks
@@ -230,34 +268,24 @@ function blockNodesToPlainText(nodes: BlockNode[]): string {
         .trim();
 }
 
-function astToPlainText(ast: Root): string {
-    return blockNodesToPlainText(ast.children);
+function getTopLevelBlocks(body: string): MarkdownNode[] {
+    const blocks: MarkdownNode[] = [];
+    let child = parseMarkdownTree(body).topNode.firstChild;
+
+    while (child) {
+        blocks.push(child);
+        child = child.nextSibling;
+    }
+
+    return blocks;
 }
 
-// ──────────────────────────────────────────────────────────
-// Section splitting
-//
-// Pages are split at H2 boundaries so each major section can
-// be indexed and deep-linked independently. Content before
-// the first H2 is only captured at the page level. Only H2
-// headings are used (not H3+) to keep sections at a useful
-// granularity.
-// ──────────────────────────────────────────────────────────
+function splitAtHeadings(body: string): { heading: MarkdownNode; nodes: MarkdownNode[] }[] {
+    const sections: { heading: MarkdownNode; nodes: MarkdownNode[] }[] = [];
+    let current: { heading: MarkdownNode; nodes: MarkdownNode[] } | null = null;
 
-function splitAtHeadings(
-    ast: Root,
-): { heading: BlockNode & { type: "heading" }; nodes: BlockNode[] }[] {
-    const sections: {
-        heading: BlockNode & { type: "heading" };
-        nodes: BlockNode[];
-    }[] = [];
-    let current: {
-        heading: BlockNode & { type: "heading" };
-        nodes: BlockNode[];
-    } | null = null;
-
-    for (const node of ast.children) {
-        if (node.type === "heading" && node.depth === 2) {
+    for (const node of getTopLevelBlocks(body)) {
+        if (headingLevel(node.name) === 2) {
             if (current) sections.push(current);
             current = { heading: node, nodes: [] };
         } else if (current) {
@@ -405,11 +433,12 @@ export async function* crawl(): AsyncGenerator<CrawledEntry> {
             const parsed = frontmatter as PageFrontmatter;
 
             const slug = buildSlug(filePath, collectionDir);
-            const ast = parseMarkdown(body);
+            const source = markdownSourceFromString(body);
+            const tree = parseMarkdownTree(body);
             const pageUrl = buildUrl(collection, slug);
             const pageLabel = parsed.title ?? slug.split("/").pop() ?? "";
             const breadcrumb = buildBreadcrumb(collection, slug, categories, pageLabel);
-            const pageContent = astToPlainText(ast);
+            const pageContent = documentToPlainText(body, source);
             const description = parsed.description ?? "";
             const title = pageLabel;
 
@@ -432,13 +461,20 @@ export async function* crawl(): AsyncGenerator<CrawledEntry> {
 
             // Split the page at H2 headings into sections that can
             // be individually searched and deep-linked.
-            const sections = splitAtHeadings(ast);
+            const sections = splitAtHeadings(body);
             const deduplicateAnchor = createAnchorDeduplicator();
+            const headingEntries = extractHeadings(tree, source, { depths: [2] });
 
-            for (const section of sections) {
-                const sectionTitle = extractText(section.heading);
+            for (const [index, section] of sections.entries()) {
+                const sectionTitle =
+                    headingEntries[index]?.text ?? collectPlainText(section.heading, source);
                 const anchor = deduplicateAnchor(sectionTitle);
-                const sectionContent = blockNodesToPlainText(section.nodes);
+                const sectionContent = section.nodes
+                    .map((node) => blockNodeToPlainText(node, source))
+                    .filter(Boolean)
+                    .join("\n\n")
+                    .replace(/\n{3,}/g, "\n\n")
+                    .trim();
                 const sectionBreadcrumb = `${breadcrumb} > ${sectionTitle}`;
                 const sectionId = `${pageId}#${anchor}`;
 
