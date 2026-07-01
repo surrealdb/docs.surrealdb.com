@@ -57,6 +57,21 @@ Capabilities denied specifically prevail over those allowed specifically:
 - Running with `--deny-funcs crypto --allow-funcs md5` will deny all functions of the `crypto` including `crypto::md5`.
 - Running with `--allow-funcs crypto --deny-funcs md5` will allow all functions of the `crypto` family except for `crypto::md5`.
 
+## Server versus client configuration
+
+Capability flags on [`surreal start`](/docs/reference/cli/surrealdb-cli/commands/start) configure the **running database instance**. That is what enforces permissions when clients connect over HTTP, WebSocket, RPC, or [`surreal sql`](/docs/reference/cli/surrealdb-cli/commands/sql) to a remote endpoint.
+
+[`surreal sql`](/docs/reference/cli/surrealdb-cli/commands/sql) accepts the same flags, but they apply differently:
+
+| How you connect | Configure capabilities on |
+| --- | --- |
+| Remote server (`ws://`, `http://`, …) | **`surreal start`** (or server env vars) |
+| Embedded storage (`memory`, `rocksdb://…`, …) | **`surreal sql`** |
+
+When using a remote server, flags on `surreal sql` do **not** enable or disable execution-time checks such as [`eval::*`](/docs/reference/query-language/functions/database-functions/eval), arbitrary-query gates, or experimental features. They can still affect **REPL line parsing** before a query is sent.
+
+See [Capabilities and remote connections](/docs/reference/cli/surrealdb-cli/commands/sql#capabilities-and-remote-connections) for detail.
+
 ## List
 
 List of options for allowing capabilities:
@@ -97,7 +112,18 @@ List of options for allowing capabilities:
                 --allow-experimental
             </td>
             <td colspan="2" scope="row" data-label="Description">
-                Allow the usage of one or more experimental features. Possible values are `files`, `surrealism`, and `opengql`, separated by a comma. See <a href="/docs/reference/cli/surrealdb-cli/commands/start#experimental-capabilities">experimental capabilities</a> for which tag enables each feature.
+                Allow the usage of one or more experimental features. Possible values are `files`, `surrealism`, and `gql`, separated by a comma. See <a href="/docs/reference/cli/surrealdb-cli/commands/start#experimental-capabilities">experimental capabilities</a> for which tag enables each feature.
+            </td>
+            <td scope="row" data-label="Default">
+                None
+            </td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Option">
+                --allow-eval-query [&lt;target&gt;,...]
+            </td>
+            <td colspan="2" scope="row" data-label="Description">
+                Allow the <code>eval::surql</code> and <code>eval::gql</code> functions for certain user groups (<code>guest</code>, <code>record</code>, <code>system</code>). Denied for everyone by default, even under <code>--allow-all</code>. Cannot bypass <code>--deny-arbitrary-query</code> for the same subject. See <a href="#eval-queries">eval queries</a>.
             </td>
             <td scope="row" data-label="Default">
                 None
@@ -181,6 +207,17 @@ List of options for denying capabilities:
             </td>
             <td scope="row" data-label="Default">
                 False
+            </td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Option">
+                --deny-eval-query [&lt;target&gt;,...]
+            </td>
+            <td colspan="2" scope="row" data-label="Description">
+                Deny the <code>eval::surql</code> and <code>eval::gql</code> functions for certain user groups (<code>guest</code>, <code>record</code>, <code>system</code>). Specifically denied groups prevail over allowed groups. See <a href="#eval-queries">eval queries</a>.
+            </td>
+            <td scope="row" data-label="Default">
+                None
             </td>
         </tr>
         <tr>
@@ -314,8 +351,28 @@ It is **strongly recommended** that you deny by default by defining specific `--
 
 <Since v="v2.2.0" />
 
-The `--allow-arbitrary-query` and `--deny-arbitrary-query` allows database administrators to allow or deny arbitrary quering by either guest, record or system users, or a combination of those. This capability settings affects the following:  [/sql endpoint](/docs/reference/rest-api/http#sql), [/key endpoints](/docs/reference/rest-api/http#get-table), [/graphql endpoint](/docs/reference/rest-api/http#graphql) and [RPC methods](/docs/reference/rest-api/rpc) `use`, `select`, `create`, `update`, `merge`, `patch`, `delete`, `relate`, `insert`, `insert_relation`, `query` and `graphql`.
+The `--allow-arbitrary-query` and `--deny-arbitrary-query` allows database administrators to allow or deny arbitrary quering by either guest, record or system users, or a combination of those. This capability settings affects the following:  [/sql endpoint](/docs/reference/rest-api/http#sql), [/key endpoints](/docs/reference/rest-api/http#get-table), [/graphql endpoint](/docs/reference/rest-api/http#graphql), [/gql endpoint](/docs/reference/rest-api/http-protocol#gql), [RPC methods](/docs/reference/rest-api/rpc) `use`, `select`, `create`, `update`, `merge`, `patch`, `delete`, `relate`, `insert`, `insert_relation`, `query`, `gql`, and `graphql`, and the [`eval::*`](/docs/reference/query-language/functions/database-functions/eval) functions.
 
 Endpoints that do not accept arbitrary queries such as [`/version`](/docs/reference/rest-api/http#version) and [authentication endpoints](/docs/reference/rest-api/http#signin) are not affected.
 
 The `--deny-arbitrary-query` flag is often preceded with a [`DEFINE API`](/docs/reference/query-language/statements/define/api) statement to set up certain endpoints that users can use to access database resources in place of arbitrary queries.
+
+## Eval queries
+
+<Since v="v3.2.0" />
+
+The [`eval::surql`](/docs/reference/query-language/functions/database-functions/eval) and [`eval::gql`](/docs/reference/query-language/functions/database-functions/eval) functions evaluate query strings at runtime. They are controlled by **`--allow-eval-query`** and **`--deny-eval-query`**, with subject groups `guest`, `record`, and `system`.
+
+Unlike most capabilities, **eval is denied for every subject by default**, including when you pass `--allow-all`. You must opt in explicitly:
+
+```bash
+surreal start --allow-eval-query
+```
+
+Arbitrary queries are **allowed by default** on the server, so you do not need `--allow-arbitrary-query` for eval unless you have restricted arbitrary queries (for example with `--deny-arbitrary-query` or `--deny-all`). If a subject is denied arbitrary queries — a common pattern alongside [`DEFINE API`](/docs/reference/query-language/statements/define/api) — **`eval` is denied for that subject too**, even when `--allow-eval-query` includes them. `eval` cannot bypass arbitrary-query lockdown.
+
+Deny rules at the same specificity prevail over allow rules. A record user calling an owner-defined function that invokes `eval` is still checked as `record` — auth limiting never escalates the subject.
+
+Configure `--allow-eval-query` on **`surreal start`** when clients connect to a remote instance. It is not required on `surreal sql` for remote connections — only for [embedded REPL sessions](/docs/reference/cli/surrealdb-cli/commands/sql#capabilities-and-remote-connections).
+
+`eval::gql` additionally requires the **`gql` experimental capability**. See [Eval functions](/docs/reference/query-language/functions/database-functions/eval) and [Representations and codecs](/docs/learn/querying/concepts-and-guides/representations-and-codecs).

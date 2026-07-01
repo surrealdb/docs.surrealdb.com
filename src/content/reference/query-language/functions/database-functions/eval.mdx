@@ -1,0 +1,279 @@
+---
+position: 9
+title: Eval
+description: Evaluate a SurrealQL or ISO GQL query string at runtime inside the caller's transaction, gated by dedicated capabilities.
+---
+
+# Eval functions
+
+<Since v="v3.2.0" />
+
+> [!NOTE]
+> `eval::*` is **denied for every subject by default**, including under [`--allow-all`](/docs/learn/security/authorization/capabilities). You must explicitly enable it with [`--allow-eval-query`](/docs/learn/security/authorization/capabilities#eval-queries) **and** satisfy the [arbitrary-query](/docs/learn/security/authorization/capabilities#arbitrary-queries) gate for the same subject. See [Security](#security) below.
+
+The `eval::*` functions run a **query supplied as a string** inside the **caller's open transaction and session context**. They are intended for workloads where the query text is only known at runtime — for example, analytical queries stored in a table, where you want to blend [ISO GQL](/docs/learn/querying/gql/overview) and SurrealQL in one transaction, or to learn SurrealQL or rewrite existing queries from another graph database.
+
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Function</th>
+      <th scope="col">Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td scope="row" data-label="Function"><a href="#evalgql"><code>eval::gql()</code></a></td>
+      <td scope="row" data-label="Description">Evaluate a nested ISO GQL query and return its result</td>
+    </tr>
+    <tr>
+      <td scope="row" data-label="Function"><a href="#evalsurql"><code>eval::surql()</code></a></td>
+      <td scope="row" data-label="Description">Evaluate a nested SurrealQL statement and return its value</td>
+    </tr>
+  </tbody>
+</table>
+
+For how `eval::*` fits with encoding, parsing, and other representation transforms, see [Representations and codecs](/docs/learn/querying/concepts-and-guides/representations-and-codecs).
+
+## `eval::gql`
+
+Evaluates an [ISO GQL](/docs/learn/querying/gql/overview) query string. One GQL query may lower to several internal statements. Unlike `eval::surql`, it is not limited to a single SurrealQL statement.
+
+```surql title="API DEFINITION"
+eval::gql(query: string, bindings: option<object>) -> any
+```
+
+`eval::gql` requires the **`gql` experimental capability** (same as [`POST /gql`](/docs/reference/rest-api/http-protocol#gql)) and runs on the streaming query engine. Queries that include GQL **mutations** (`INSERT`, `SET`, `REMOVE`, `DELETE`) participate in the caller's write transaction — see [GQL mutations](/docs/learn/querying/gql/mutations).
+
+Enable both capabilities on the server, for example:
+
+```bash
+surreal start --user root --pass secret --allow-experimental gql --allow-eval-query
+```
+
+GQL syntax is **Cypher-like**: parenthesised **node patterns** `(variable:label)`, arrow **edge patterns** `-[variable:type]->`, a mandatory **`MATCH`** clause, and **`RETURN`** for projection. See [Notable syntax differences from openCypher](/docs/learn/querying/gql/overview#notable-syntax-differences-from-opencypher) before pasting Neo4j queries verbatim.
+
+### Sample graph
+
+The following queries create a number of `person` and `city` records, followed by `INSERT RELATION` to join them together. The following `eval::gql` queries assume this seed data when indicating output.
+
+```surql title="Seed data"
+CREATE person:1 SET name = 'A', age = 30, active = true, city = 'London';
+CREATE person:2 SET name = 'B', age = 20, active = false, city = 'Paris';
+CREATE person:3 SET name = 'C', city = 'London';
+CREATE city:1 SET name = 'London';
+INSERT RELATION INTO knows [
+	{ id: knows:k12, in: person:1, out: person:2, since: 2021 },
+	{ id: knows:k21, in: person:2, out: person:1, since: 2018 },
+	{ id: knows:k23, in: person:2, out: person:3, since: 2020 },
+	{ id: knows:k1c, in: person:1, out: city:1, since: 2019 },
+	{ id: knows:k31, in: person:3, out: person:1 }
+];
+```
+
+| GQL pattern | Meaning in SurrealDB |
+| --- | --- |
+| `(n:person)` | Rows in table `person` bound to variable `n` |
+| `-[k:knows]->` | Directed edges in relation table `knows` (`in` / `out` record IDs) |
+| `n.name` | Field `name` on the bound record |
+| `$min` | Parameter — pass via the optional `bindings` object |
+
+### Match nodes by label
+
+`MATCH` finds graph patterns; `RETURN` projects columns (like `SELECT`).
+
+```surql
+eval::gql("MATCH (n:person) RETURN n.name AS name ORDER BY name");
+-- [{ name: 'A' }, { name: 'B' }, { name: 'C' }]
+```
+
+### Filter on node properties
+
+`WHERE` filters rows after the pattern matches. Missing properties (person `C` has no `age`) are treated as unknown and excluded from comparisons.
+
+```surql
+eval::gql("MATCH (n:person) WHERE n.age < 25 RETURN n.name AS name ORDER BY name");
+-- { name: 'B' }
+```
+
+### Traverse a typed edge
+
+Chain node and edge patterns to walk the graph. Label both endpoints as `:person` to ignore the `person → city` edge.
+
+```surql
+eval::gql(
+	"MATCH (a:person)-[k:knows]->(b:person) WHERE k.since > 2020 RETURN a.name, b.name ORDER BY a.name"
+);
+-- { 'a.name': 'A', 'b.name': 'B' }
+```
+
+### Optional match
+
+`OPTIONAL MATCH` keeps every anchor row from the preceding `MATCH` even when the optional pattern misses — similar to a left outer join.
+
+```surql
+eval::gql(
+	"MATCH (a:person) OPTIONAL MATCH (a)-[k:knows]->(b:city) RETURN a.name AS name, b.name AS city ORDER BY name"
+);
+-- [
+--   { city: 'London', name: 'A' },
+--   { city: NONE, name: 'B' },
+--   { city: NONE, name: 'C' }
+-- ]
+```
+
+Only person `A` has a `knows` edge to the `city` node; everyone else still appears with `city: NONE`.
+
+### Aggregate with GROUP BY
+
+Count outgoing **person → person** `knows` edges per person.
+
+```surql
+eval::gql(
+	"MATCH (a:person)-[:knows]->(b:person) RETURN a.name AS name, count(*) AS friends GROUP BY a.name ORDER BY name"
+);
+-- [{ friends: 1, name: 'A' }, { friends: 2, name: 'B' }, { friends: 1, name: 'C' }]
+```
+
+### Multi-hop paths
+
+In ISO GQL on SurrealDB, variable-length hops are a **postfix quantifier on the edge**, not Cypher's `*1..3` inside the brackets:
+
+```surql
+-- From A, who is reachable in 1–2 `knows` hops (staying on `:person` nodes)?
+eval::gql(
+	"MATCH (a:person)-[:knows]->{1,2}(b:person) WHERE a.name = 'A' RETURN a.name AS source, b.name AS target ORDER BY target"
+);
+-- [
+--   { source: 'A', target: 'A' },
+--   { source: 'A', target: 'B' },
+--   { source: 'A', target: 'C' }
+-- ]
+```
+
+One hop reaches `B`; two hops loop back to `A` via `B` or reach `C` via `B`.
+
+### Parameters
+
+GQL parameters can be passed as the second argument to this function.
+
+```surql
+eval::gql(
+	"MATCH (n:person) WHERE n.age > $min RETURN n.name AS name ORDER BY name",
+	{ min: 25 }
+);
+-- { name: 'A' }
+```
+
+Bindings are **isolated** from the caller's scope (same as `eval::surql`); only keys you pass in the object are visible inside the GQL query.
+
+> [!NOTE]
+> When a GQL query returns a single record, `eval::gql` yields that record as an object; multiple records are returned as an array.
+
+For more patterns — path search (`ALL SHORTEST`), comma-separated joins, and side-by-side SurrealQL — see [Sample GQL and SurrealQL queries](/docs/learn/querying/gql/sample-queries).
+
+## `eval::surql`
+
+Evaluates a **single** SurrealQL statement and returns its value. To run several statements, wrap them in a block `{ ... }` — the block's final value is returned.
+
+```surql title="API DEFINITION"
+eval::surql(query: string, bindings: option<object>) -> any
+```
+
+```surql
+-- Simple expression
+eval::surql("RETURN 1 + 1");
+-- 2
+
+-- Caller bindings become $parameters inside the nested query
+eval::surql("RETURN $a + $b", { a: 2, b: 3 });
+-- 5
+
+-- Multiple statements: use a block
+eval::surql("{ LET $x = 10; RETURN $x * 2 }");
+-- 20
+```
+
+Nested writes run in the **caller's transaction**:
+
+```surql
+eval::surql("CREATE person:1 SET name = 'A'");
+SELECT name FROM person;
+-- [{ name: 'A' }]
+```
+
+The evaluated query runs in an **isolated scope**: parameters visible at the call site are not inherited — only keys you pass in the bindings object are bound.
+
+```surql
+LET $secret = 42;
+eval::surql("RETURN $secret ?? 'isolated'");
+-- 'isolated'
+```
+
+## Notes on using eval:: functions
+
+### Rejected inputs
+
+The following are rejected inside `eval::*`:
+
+- **Transaction and session control** — `BEGIN`, `CANCEL`, `COMMIT`, `USE`, `LIVE`, `KILL`, `OPTION`, `SHOW`, and access statements.
+- **Bare multi-statement SurrealQL** in `eval::surql` — use `{ ... }` instead of semicolon-separated top-level statements.
+- **Protected binding names** — caller bindings cannot overwrite reserved parameters such as `$session`.
+- **Excessive nesting** — recursive `eval` calls share the engine's computation depth limit.
+
+### Security
+
+Every `eval::*` call is checked against the **current execution auth** (guest, record, or system). Auth limiting in [`DEFINE FUNCTION`](/docs/reference/query-language/statements/define/function) bodies never **raises** the subject — a record-scoped caller that invokes an owner-defined function which calls `eval` is still evaluated as `record`.
+
+All of the following must pass:
+
+| Gate | Purpose |
+| --- | --- |
+| [`allow-funcs` / `deny-funcs`](/docs/learn/security/authorization/capabilities) | The `eval` function family must be permitted |
+| [`deny-arbitrary-query`](/docs/learn/security/authorization/capabilities#arbitrary-queries) (and related allow rules) | `eval` counts as an arbitrary query — denied subjects cannot use `eval` to bypass `/sql` or API lockdown |
+| [`allow-eval-query` / `deny-eval-query`](/docs/learn/security/authorization/capabilities#eval-queries) | Dedicated opt-in for `eval::surql` and `eval::gql` |
+
+`eval` cannot grant a subject more query power than arbitrary-query policy allows — including when called from inside a `DEFINE FUNCTION` or [`DEFINE API`](/docs/reference/query-language/statements/define/api) handler. You do **not** need `--allow-arbitrary-query` for eval on a default server; you **do** need `--allow-eval-query`.
+
+For `eval::gql`, the **`gql` experimental capability** must also be enabled.
+
+### Enabling on the server
+
+`eval::*` is enforced by the **database engine** that executes your query, not by the client you type into.
+
+#### Remote server (`surreal start` + `surreal sql`)
+
+When the REPL connects over `ws://`, `http://`, or similar, pass capability flags on **`surreal start`** only. The same flags on `surreal sql` do not enable or disable `eval` at runtime.
+
+```bash
+# Terminal 1 — start the server with eval enabled for system users
+surreal start --user root --pass secret --allow-experimental gql --allow-eval-query
+
+# Terminal 2 — no --allow-eval-query needed on the client
+surreal sql -e ws://localhost:8000 --user root --pass secret
+```
+
+Environment variable equivalent on the **server** process:
+
+```bash
+export SURREAL_CAPS_ALLOW_EVAL_QUERY=system
+```
+
+If you use `--deny-arbitrary-query` (for example to steer record users toward [`DEFINE API`](/docs/reference/query-language/statements/define/api) only), add matching `--allow-arbitrary-query` entries for any subject that should call `eval`.
+
+#### Embedded engine (`surreal sql` only)
+
+When you open the REPL against embedded storage (`memory`, `rocksdb://…`, …) without a separate `surreal start` process, configure capabilities on **`surreal sql`** instead:
+
+```bash
+surreal sql --user root --pass secret --allow-experimental gql --allow-eval-query
+```
+
+See [Capabilities and remote connections](/docs/reference/cli/surrealdb-cli/commands/sql#capabilities-and-remote-connections) for the full remote versus embedded model.
+
+See [`SURREAL_CAPS_ALLOW_EVAL_QUERY`](/docs/reference/cli/surrealdb-cli/environment-variables) and [`SURREAL_CAPS_DENY_EVAL_QUERY`](/docs/reference/cli/surrealdb-cli/environment-variables) in the environment variable reference.
+
+## See also
+
+- [Representations and codecs](/docs/learn/querying/concepts-and-guides/representations-and-codecs) — when to use `eval::*` versus encode, parse, or analyse functions
+- [GQL overview](/docs/learn/querying/gql/overview) — ISO GQL on the wire and via `eval::gql`
+- [Capabilities](/docs/learn/security/authorization/capabilities) — full capability model

@@ -93,17 +93,17 @@ for kw in similar:
 
 ## BM25 full-text search
 
-Spectron indexes all chunk text in a full-text index using the `spectron_analyzer`. The analyser applies two tokenisation passes:
+Spectron indexes all chunk text in a full-text index using the `spectron_analyzer`. The analyzer applies two tokenisation passes:
 
-- **Blank tokeniser**: splits on whitespace only, preserving punctuation within tokens (useful for product codes like `MLWK3LL/A`)
-- **Class tokeniser**: splits on character class boundaries (letter/digit transitions), which separates alphanumeric identifiers without requiring spaces
+- **Blank tokenizer**: splits on whitespace only, preserving punctuation within tokens (useful for product codes like `MLWK3LL/A`)
+- **Class tokenizer**: splits on character class boundaries (letter/digit transitions), which separates alphanumeric identifiers without requiring spaces
 
 Both passes feed through two token filters:
 
 - **Lowercase**: case-normalisation for consistent matching
 - **Snowball**: English stemming (e.g. `returning` → `return`, `purchases` → `purchas`)
 
-This combination means that BM25 matches both exact-cased identifiers (via blank tokeniser) and inflected natural-language terms (via class tokeniser + Snowball).
+This combination means that BM25 matches both exact-cased identifiers (via blank tokenizer) and inflected natural-language terms (via class tokenizer + Snowball).
 
 BM25 is invoked automatically when you use `mode="bm25"` or `mode="hybrid"` in the query endpoint. The BM25 score contributes to the RRF fusion in hybrid mode.
 
