@@ -3,16 +3,12 @@ import {
     type ImageDescriptor,
     type MarkdownComponents,
     markdownSourceFromString,
+    mergeMarkdownComponents,
     parseMarkdownTree,
-    RailroadDiagram,
-    Since,
-    SurrealistMini,
 } from "@surrealdb/ui";
 import { Boxes } from "~/components/Boxes";
-import { ContentTabItem, ContentTabs } from "~/components/ContentTabs";
 import { Edition } from "~/components/Edition";
 import { IconBox } from "~/components/IconBox";
-import { Version } from "~/components/Version";
 import { getIconScope } from "~/lib/icon-scope";
 import { getImageUrl } from "./image-urls";
 
@@ -61,6 +57,7 @@ export function resolveMarkdown(markdown: string) {
 export function resolveImageDescriptor(node: ImageDescriptor): ImageDescriptor {
     if (node.src.startsWith("@ui/")) {
         const resolved = getImageUrl(node.src);
+
         return {
             ...node,
             src: resolved ?? node.src,
@@ -75,27 +72,10 @@ export function resolveImageDescriptor(node: ImageDescriptor): ImageDescriptor {
     };
 }
 
-const SurrealistMiniComponent = ({ query, url }: { query?: string; url?: string }) => {
-    return <SurrealistMini config={{ query, url }} />;
-};
-
-const RailroadDiagramComponent = (props: { ast: string }) => {
-    return <RailroadDiagram ast={JSON.parse(props.ast)} />;
-};
-
 export function registerMarkdownComponents(): MarkdownComponents {
-    return {
-        // Block-level components
+    return mergeMarkdownComponents({
         IconBox: { component: IconBox, block: true },
         Boxes: { component: Boxes, block: true, preserveNewlines: false },
-        Tabs: { component: ContentTabs, block: true, preserveNewlines: false },
-        TabItem: { component: ContentTabItem, block: true },
-        SurrealistMini: { component: SurrealistMiniComponent, block: true },
-
-        // Inline components
-        Version,
-        Edition,
-        Since,
-        RailroadDiagram: RailroadDiagramComponent,
-    };
+        Edition: { component: Edition },
+    });
 }
