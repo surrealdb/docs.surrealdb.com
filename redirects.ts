@@ -153,6 +153,15 @@ function legacyMigratingRedirects(): Redirect[] {
     return out;
 }
 
+/** Database functions overview merged into the section index. */
+function databaseFunctionsOverviewRedirects(): Redirect[] {
+    const from = "/reference/query-language/functions/database-functions/overview";
+    const to = "/reference/query-language/functions/database-functions";
+    return [
+        { source: `/docs${from}`, destination: `/docs${to}`, statusCode: 301 },
+        { source: from, destination: to, statusCode: 301 },
+    ];
+}
 /** PHP SDK split into versioned folders: legacy v1 paths → /languages/php/v1/*. */
 function phpVersionedRedirects(): Redirect[] {
     const moves: [string, string][] = [
@@ -215,6 +224,7 @@ export const docsRedirects: Redirect[] = [
     // ...learnContextToSpectronRedirects(),
     ...deploymentObservabilityToManageRedirects(),
     ...runningFromSelfHostedRedirects(),
+    ...databaseFunctionsOverviewRedirects(),
     ...phpVersionedRedirects(),
 ];
 
