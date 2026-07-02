@@ -1,15 +1,26 @@
 import type { Redirect } from "@vercel/config/v1";
 
 /**
+ * Browser-facing docs URLs always live under `/docs` on surrealdb.com (www rewrites
+ * `/docs/*` to the docs deployment without that prefix). Redirect targets must keep
+ * `/docs` or the client will leave the docs app and hit the marketing site.
+ */
+function docsPath(path: string): string {
+    const normalized = path.startsWith("/") ? path : `/${path}`;
+    return normalized.startsWith("/docs") ? normalized : `/docs${normalized}`;
+}
+
+/**
  * Legacy path prefixes from src-old (see src-old/content/config.ts urlForCollection)
  * → new information-architecture paths under src/content + src/pages.
  */
 function legacyPrefixRedirects(from: string, to: string): Redirect[] {
+    const destination = docsPath(to);
     return [
-        { source: `/docs/${from}`, destination: `/${to}`, statusCode: 302 },
-        { source: `/docs/${from}/:path*`, destination: `/${to}/:path*`, statusCode: 302 },
-        { source: `/${from}`, destination: `/${to}`, statusCode: 302 },
-        { source: `/${from}/:path*`, destination: `/${to}/:path*`, statusCode: 302 },
+        { source: `/docs/${from}`, destination, statusCode: 302 },
+        { source: `/docs/${from}/:path*`, destination: `${destination}/:path*`, statusCode: 302 },
+        { source: `/${from}`, destination, statusCode: 302 },
+        { source: `/${from}/:path*`, destination: `${destination}/:path*`, statusCode: 302 },
     ];
 }
 
@@ -28,60 +39,25 @@ function sdkRedirects(): Redirect[] {
     ];
     for (const v of versions) {
         out.push(
-            { source: `/docs/${v}/sdk/:sdk`, destination: "/languages/:sdk", statusCode: 302 },
+            {
+                source: `/docs/${v}/sdk/:sdk`,
+                destination: "/docs/languages/:sdk",
+                statusCode: 302,
+            },
             {
                 source: `/docs/${v}/sdk/:sdk/:path*`,
-                destination: "/languages/:sdk/:path*",
+                destination: "/docs/languages/:sdk/:path*",
                 statusCode: 302,
             },
-            { source: `/${v}/sdk/:sdk`, destination: "/languages/:sdk", statusCode: 302 },
+            {
+                source: `/${v}/sdk/:sdk`,
+                destination: "/docs/languages/:sdk",
+                statusCode: 302,
+            },
             {
                 source: `/${v}/sdk/:sdk/:path*`,
-                destination: "/languages/:sdk/:path*",
+                destination: "/docs/languages/:sdk/:path*",
                 statusCode: 302,
-            },
-        );
-    }
-    return out;
-}
-
-/** Flat tutorial URLs → thematic subfolders under explore/tutorials/tutorials/. */
-function exploreTutorialsThematicRedirects(): Redirect[] {
-    const moves: [string, string][] = [
-        ["tutorials/auth0-integration", "tutorials/authentication/auth0-integration"],
-        ["tutorials/aws-cognito-integration", "tutorials/authentication/aws-cognito-integration"],
-        ["tutorials/build-an-ai-agent", "tutorials/ai-and-agents/build-an-ai-agent"],
-        ["tutorials/gen-ai-chatbot", "tutorials/ai-and-agents/gen-ai-chatbot"],
-        [
-            "tutorials/how-to-build-a-knowledge-graph-for-ai",
-            "tutorials/ai-and-agents/how-to-build-a-knowledge-graph-for-ai",
-        ],
-        ["tutorials/minimal-langchain", "tutorials/ai-and-agents/minimal-langchain"],
-        [
-            "tutorials/build-a-real-time-presence-app",
-            "tutorials/realtime-applications/build-a-real-time-presence-app",
-        ],
-        ["tutorials/connect-via-ngrok", "tutorials/integration-and-tooling/connect-via-ngrok"],
-        ["tutorials/http-via-postman", "tutorials/integration-and-tooling/http-via-postman"],
-        ["tutorials/github-actions", "tutorials/integration-and-tooling/github-actions"],
-        ["tutorials/define-a-schema", "tutorials/schema-and-search/define-a-schema"],
-        [
-            "tutorials/semantic-search-in-rust",
-            "tutorials/schema-and-search/semantic-search-in-rust",
-        ],
-    ];
-    const out: Redirect[] = [];
-    for (const [from, to] of moves) {
-        out.push(
-            {
-                source: `/docs/explore/tutorials/${from}`,
-                destination: `/docs/explore/tutorials/${to}`,
-                statusCode: 301,
-            },
-            {
-                source: `/explore/tutorials/${from}`,
-                destination: `/explore/tutorials/${to}`,
-                statusCode: 301,
             },
         );
     }
@@ -108,8 +84,8 @@ function runningFromSelfHostedRedirects(): Redirect[] {
             destination: "/docs/running/:path*",
             statusCode: 301,
         },
-        { source: "/self-hosted", destination: "/running", statusCode: 301 },
-        { source: "/self-hosted/:path*", destination: "/running/:path*", statusCode: 301 },
+        { source: "/self-hosted", destination: "/docs/running", statusCode: 301 },
+        { source: "/self-hosted/:path*", destination: "/docs/running/:path*", statusCode: 301 },
     ];
 }
 
@@ -211,14 +187,13 @@ function phpVersionedRedirects(): Redirect[] {
 
 /** Shared with vercel.ts (production) and the Vite dev server (local). */
 export const docsRedirects: Redirect[] = [
-    { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
+    { source: "/start", destination: "/docs/what-is-surrealdb", statusCode: 302 },
     ...legacyPrefixRedirects("surrealql", "reference/query-language"),
     ...legacyPrefixRedirects("cloud", "manage/cloud"),
     ...legacyPrefixRedirects("surrealist", "explore/surrealist"),
     ...legacyPrefixRedirects("surrealml", "explore/ml-models"),
     ...legacyPrefixRedirects("integrations", "build/integrations"),
     ...legacyPrefixRedirects("tutorials", "explore/tutorials"),
-    ...exploreTutorialsThematicRedirects(),
     ...sdkRedirects(),
     ...legacyMigratingRedirects(),
     // ...learnContextToSpectronRedirects(),
