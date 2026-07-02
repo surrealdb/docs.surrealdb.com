@@ -239,11 +239,36 @@ Requirements for the filtered fast path:
 
 If the `WHERE` clause is not an exact match, SurrealDB falls back to a full table scan, filter, and count.
 
-#### Count index vs standard index for counts
+#### When to use which
 
-A standard index (a B-tree index) can also accelerate filtered counts when it fully covers the `WHERE` clause — for example, `DEFINE INDEX … FIELDS status` for `WHERE status = "active" GROUP ALL`. You do not need both a B-tree and a `COUNT WHERE` index for the same predicate; either can enable `IndexCountScan`.
+For many applications, a **standard B-tree index** (`FIELDS` / `COLUMNS`) is the default for filtered counts. Recent planner improvements let a covering B-tree use the same `IndexCountScan` fast path as a `COUNT WHERE` index, so the two often perform similarly at query time.
 
-Choose `COUNT WHERE` when you want fast filtered counts without maintaining a separate B-tree on that field. Choose a B-tree when you also need the field for lookups, sorting, or other predicates.
+That does **not** make count indexes obsolete, however, as they solve a narrower problem and have a smaller storage footprint.
+
+* If you would add `DEFINE INDEX … FIELDS status` anyway, a separate `COUNT WHERE status = "active"` index is usually redundant. In this case, a standard B-tree is preferred.
+
+* When to use `COUNT WHERE` instead: materialised cardinality for a fixed condition you do not want to back with a B-tree; compound predicates without a covering index; or a dedicated counter separate from lookup indexes.
+
+The following chart sums up a few use cases and when to prefer one vs. the other.
+
+| Goal | Prefer |
+| --- | --- |
+| `count() … GROUP ALL` with no `WHERE` | Nothing extra required; `CountScan` counts record keys. Unconditional `COUNT` is optional. |
+| `count() … WHERE field = value GROUP ALL` on a field you already filter on | `FIELDS field` B-tree (also supports `SELECT`, `ORDER BY`, and other predicates) |
+| Many per-value counts on the same field | One B-tree on that field |
+| One fixed combined predicate (`IN`, `AND`, etc.) counted repeatedly | `COUNT WHERE` with the **exact** same expression in the query |
+| Fast counts for a predicate but **no** B-tree on those fields | `COUNT WHERE` |
+| Compound `WHERE` with no covering composite B-tree | `COUNT WHERE` with the exact compound condition |
+
+#### Storage footprint
+
+Count indexes and B-tree indexes store different shapes of data, so size is not the same even when query performance is similar.
+
+A **B-tree index** stores one entry per indexed record: encoded field value(s) plus the record id in the key. Storage grows **with the number of rows** in the table (O(n) for that index).
+
+A **`COUNT WHERE` index** does not store per-row field keys. It appends small **delta entries** (`IndexCountKey`) when rows enter or leave the predicate, then **compacts** them into a single aggregate entry in the background. In steady state, footprint is usually **much smaller** than a B-tree on the same field, often a handful of keys rather than one per row.
+
+So `COUNT WHERE` can be attractive when you need fast filtered counts **without** paying the per-row storage of a B-tree if it will not be used for anything else.
 
 To compare indexed and non-indexed performance, the `WITH NOINDEX` clause can be used.
 
@@ -271,7 +296,33 @@ SELECT count() FROM person
 
 In the above example, it does not also speed up `WHERE status = "active" GROUP ALL` or other subsets.
 
+For separate per-status totals, one `FIELDS status` B-tree is usually simpler than one `COUNT WHERE` index per value. See [When to use which](/docs/reference/query-language/statements/define/indexes#when-to-use-which).
+
 Use [`EXPLAIN ANALYZE`](/docs/reference/query-language/statements/explain) to confirm `IndexCountScan` is selected. If the query `WHERE` differs even slightly from the index condition, SurrealDB falls back to a full scan.
+
+#### Other `COUNT` syntax notes
+
+```surql
+-- Other clauses like `COMMENT` are fine
+DEFINE INDEX idx ON users COUNT
+    COMMENT "Users are expected to grow substantially so index the count"
+    CONCURRENTLY;
+
+-- Conditional count indexes
+DEFINE INDEX active_users ON users COUNT WHERE status = "active" CONCURRENTLY;
+
+-- But not `FIELD`
+DEFINE INDEX idx2 ON person FIELD name;
+```
+
+```surql title="Output"
+'There was a problem with the database: Parse error: Unexpected token `FIELD`, expected Eof
+ --> [1:29]
+  |
+1 | DEFINE INDEX idx2 ON person FIELD name;
+  |                             ^^^^^ 
+'
+```
 
 ### Full-text search (`FULLTEXT`) index
 
