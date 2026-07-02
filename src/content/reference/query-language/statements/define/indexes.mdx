@@ -35,7 +35,7 @@ The `@special_clause` part of the statement is an optional part in which an inde
 
 ```syntax title="Special index clauses"
 UNIQUE
-| COUNT
+| COUNT [ WHERE @condition ]
 | FULLTEXT ANALYZER @analyzer [ BM25 [(@k1, @b)] ] [ HIGHLIGHTS ]
 | HNSW DIMENSION @dimension [ TYPE @type ] [ DIST @distance ] [ EFC @efc ] [ M @m ]
 | DISKANN DIMENSION @dimension [ TYPE @type ] [ DIST @distance ] [ DEGREE @degree ] [ L_BUILD @l_build ] [ ALPHA @alpha ] [ HASHED_VECTOR ]
@@ -183,7 +183,18 @@ LIMIT 10;
 
 <Since v="v3.0.0" />
 
-An index using the `COUNT` clause is used to maintain a count of the number of records in a table. This is used together with the `count()` function and `GROUP ALL` inside a query. Without a count index, the `count()` function will iterate through the records of a table when it is called.
+A count index maintains a running count of records on a table. It is used with `count()` and `GROUP ALL` in a query. SurrealDB stores incremental count deltas and compacts them in the background.
+
+Count indexes come in two forms:
+
+- **`COUNT`** — counts every record in the table. Used with `SELECT count() FROM <table> GROUP ALL` (no `WHERE`).
+- **`COUNT WHERE <condition>`** — counts only records that match the condition. Used with `SELECT count() FROM <table> WHERE <condition> GROUP ALL` when the query `WHERE` clause **exactly matches** the index condition.
+
+As a count index is declared on a table as a whole, it cannot use the `FIELDS` / `COLUMNS` clause.
+
+#### Full-table counts
+
+For `SELECT count() FROM <table> GROUP ALL`, SurrealDB already uses a `CountScan` fast path that counts record keys in storage without deserialising every row. An unconditional `COUNT` index is optional here; it can reduce work further once count deltas have been compacted, but a freshly built index on a large existing table may hold millions of delta entries until compaction runs.
 
 ```surql
 DEFINE INDEX idx ON indexed_reading COUNT;
@@ -202,26 +213,65 @@ SELECT count() FROM reading GROUP ALL;
 SELECT count() FROM indexed_reading GROUP ALL;
 ```
 
-As a count index is declared on a table as a whole, it cannot use the `FIELDS` / `COLUMNS` clause.
+#### Filtered counts (`COUNT WHERE`)
+
+Use `COUNT WHERE` when you repeatedly need `SELECT count() … WHERE … GROUP ALL` and do not want to scan and deserialise every record. The planner uses `IndexCountScan` when the query `WHERE` matches the index condition exactly (same expression as written in `DEFINE INDEX`).
 
 ```surql
--- Other clauses like `COMMENT` are fine
-DEFINE INDEX idx ON users COUNT
-    COMMENT "Users are expected to grow substantially so index the count"
-    CONCURRENTLY;
+DEFINE TABLE item SCHEMALESS;
+DEFINE INDEX item_active_count ON item COUNT WHERE status = "active";
 
--- But not `FIELD`
-DEFINE INDEX idx2 ON person FIELD name;
+CREATE item:a SET status = "active";
+CREATE item:b SET status = "active";
+CREATE item:c SET status = "inactive";
+
+SELECT count() FROM item WHERE status = "active" GROUP ALL;
+
+EXPLAIN ANALYZE SELECT count() FROM item WHERE status = "active" GROUP ALL;
 ```
 
-```surql title="Output"
-'There was a problem with the database: Parse error: Unexpected token `FIELD`, expected Eof
- --> [1:29]
-  |
-1 | DEFINE INDEX idx2 ON person FIELD name;
-  |                             ^^^^^ 
-'
+Requirements for the filtered fast path:
+
+- `GROUP ALL` must be present.
+- The query `WHERE` must match the index condition exactly (not a broader or different predicate).
+- The index build must be complete (`INFO FOR INDEX …` shows `ready`).
+- Field-level `SELECT` permissions on fields in the condition must not block index-only counting.
+
+If the `WHERE` clause is not an exact match, SurrealDB falls back to a full table scan, filter, and count.
+
+#### Count index vs standard index for counts
+
+A standard index (a B-tree index) can also accelerate filtered counts when it fully covers the `WHERE` clause — for example, `DEFINE INDEX … FIELDS status` for `WHERE status = "active" GROUP ALL`. You do not need both a B-tree and a `COUNT WHERE` index for the same predicate; either can enable `IndexCountScan`.
+
+Choose `COUNT WHERE` when you want fast filtered counts without maintaining a separate B-tree on that field. Choose a B-tree when you also need the field for lookups, sorting, or other predicates.
+
+To compare indexed and non-indexed performance, the `WITH NOINDEX` clause can be used.
+
+```surql
+-- Slow path: scan every record
+SELECT count() FROM item WITH NOINDEX WHERE status = "active" GROUP ALL;
+
+-- Fast path: count index deltas (or B-tree keys if a covering index exists)
+SELECT count() FROM item WHERE status = "active" GROUP ALL;
 ```
+
+#### Multiple conditions
+
+As each `COUNT WHERE` index tracks one fixed predicate, it does not accelerate several different counts unless each query repeats the **exact** condition stored in the index.
+
+```surql
+DEFINE INDEX openish_count ON person COUNT
+    WHERE status IN ["active", "non-active", "delayed"];
+
+-- Fast only when the WHERE matches the index exactly
+SELECT count() FROM person
+    WHERE status IN ["active", "non-active", "delayed"]
+    GROUP ALL;
+```
+
+In the above example, it does not also speed up `WHERE status = "active" GROUP ALL` or other subsets.
+
+Use [`EXPLAIN ANALYZE`](/docs/reference/query-language/statements/explain) to confirm `IndexCountScan` is selected. If the query `WHERE` differs even slightly from the index condition, SurrealDB falls back to a full scan.
 
 ### Full-text search (`FULLTEXT`) index
 
