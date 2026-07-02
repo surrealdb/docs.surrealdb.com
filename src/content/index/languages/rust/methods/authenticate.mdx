@@ -134,6 +134,184 @@ let new_token = db.authenticate(token).refresh().await?;
 
 This pairs with the access and refresh model configured via [`DEFINE ACCESS`](/docs/reference/query-language/statements/define/access/record) (token duration, refresh behaviour, and scope depend on your statement).
 
+The following example demonstrates how to use a refresh token for a user and how the same user is authenticated throughout:
+
+```rust
+// Two dependencies:
+// cargo add surrealdb --features kv-mem tokio
+
+use surrealdb::{
+    Error, Surreal,
+    engine::local::Mem,
+    opt::{Config, auth::Record},
+    types::{SurrealValue, ToSql, Value},
+};
+
+const NAMESPACE: &str = "ns";
+const DATABASE: &str = "db";
+const ACCESS: &str = "account";
+const EMAIL: &str = "jane@example.com";
+const PASSWORD: &str = "password123";
+
+// What you persist across app restarts
+// (access JWT stays in RAM only)
+#[derive(Debug, SurrealValue)]
+struct PersistedSession {
+    namespace: String,
+    database: String,
+    access_method: String,
+    refresh: String,
+}
+
+// Signin / signup credentials
+// flattened into the RPC payload by `Record`
+#[derive(Debug, SurrealValue)]
+struct EmailPassword {
+    email: String,
+    pass: String,
+}
+
+#[derive(Debug, SurrealValue)]
+struct RefreshOnly {
+    refresh: String,
+}
+
+fn truncate(token: &str) -> &str {
+    &token[..token.len().min(24)]
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    let db = Surreal::new::<Mem>(Config::default()).await?;
+    db.use_ns("ns").use_db("db").await?;
+
+    // Schema setup
+    db.query(
+        "
+        DEFINE ACCESS account ON DATABASE TYPE RECORD
+            SIGNUP (
+                CREATE user SET email = $email, pass = crypto::argon2::generate($pass)
+            )
+            SIGNIN (
+                SELECT * FROM user
+                WHERE email = $email AND crypto::argon2::compare(pass, $pass)
+            )
+            WITH REFRESH
+            DURATION FOR SESSION 1d FOR TOKEN 1h;
+        ",
+    )
+    .await?
+    .check()?;
+
+    // First sign up a user
+    let _ = db
+        .signup(Record {
+            namespace: NAMESPACE.into(),
+            database: DATABASE.into(),
+            access: ACCESS.into(),
+            params: EmailPassword {
+                email: EMAIL.into(),
+                pass: PASSWORD.into(),
+            },
+        })
+        .await;
+
+    // Sign in with same email + password used to sign in
+    let token = db
+        .signin(Record {
+            namespace: NAMESPACE.into(),
+            database: DATABASE.into(),
+            access: ACCESS.into(),
+            params: EmailPassword {
+                email: EMAIL.into(),
+                pass: PASSWORD.into(),
+            },
+        })
+        .await?;
+
+    println!(
+        "Signed in.\n   access JWT:  {}...\n   refresh JWT: {}...",
+        truncate(token.access.as_insecure_token()),
+        truncate(token.refresh.as_ref().unwrap().as_insecure_token())
+    );
+
+    let old_access = token.access.as_insecure_token().to_string();
+
+    // Use the access token on this connection
+    // (refresh is ignored here)
+    db.authenticate(token.access.clone()).await?;
+    let me = db
+        .query("RETURN $auth")
+        .await?
+        .take::<Option<Value>>(0)?
+        .into_value()
+        .to_sql_pretty();
+    println!("Authenticated as: {me:?}");
+
+    //  Refresh — pass the full Token (access + refresh)
+    //
+    //  Server decodes the access JWT without checking expiry
+    //  to recover ns/db/ac/id, then validates the refresh grant.
+    //  Old refresh is single-use so is revoked,
+    //  and a new pair is returned.
+    let refreshed = db.authenticate(token).refresh().await?;
+
+    assert_ne!(old_access, refreshed.access.as_insecure_token());
+    println!(
+        "Refreshed.   \n   new access:  {}...\n   new refresh: {}...",
+        truncate(refreshed.access.as_insecure_token()),
+        truncate(refreshed.refresh.as_ref().unwrap().as_insecure_token())
+    );
+
+    // Persist refresh only (simulate writing to disk)
+    let persisted = PersistedSession {
+        namespace: NAMESPACE.into(),
+        database: DATABASE.into(),
+        access_method: ACCESS.into(),
+        refresh: refreshed
+            .refresh
+            .as_ref()
+            .unwrap()
+            .as_insecure_token()
+            .to_string(),
+    };
+    let json = persisted.into_value();
+    println!("\nPersisted session:\n{}", json.clone().to_sql_pretty());
+
+    // Simulate app restart: no access JWT in memory,
+    // only persisted refresh
+    db.invalidate().await?;
+
+    let loaded = PersistedSession::from_value(json).unwrap();
+
+    let cold_token = db
+        .signin(Record {
+            namespace: loaded.namespace,
+            database: loaded.database,
+            access: loaded.access_method,
+            params: RefreshOnly {
+                refresh: loaded.refresh,
+            },
+        })
+        .await?;
+
+    db.authenticate(cold_token.access.clone()).await?;
+    let me_again = db
+        .query("RETURN $auth")
+        .await?
+        .take::<Option<Value>>(0)?
+        .unwrap()
+        .to_sql_pretty();
+    println!("After cold-start refresh signin: {me_again:?}");
+
+    // Refresh again on the warm path
+    let _ = db.authenticate(cold_token).refresh().await?;
+    println!("Second refresh OK.");
+
+    Ok(())
+}
+```
+
 ### See also
 
 * [`Authenticate::refresh` on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Authenticate.html#method.refresh)
