@@ -232,6 +232,7 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
         label: "Reference",
         sections: [
             {
+                heading: "Core",
                 items: [
                     {
                         label: "Query language",
@@ -240,16 +241,81 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         icon: iconText,
                     },
                     {
-                        label: "CLI tools",
-                        href: "/docs/reference/cli",
-                        description: "CLI install, backup, and ops.",
-                        icon: iconWrench,
-                    },
-                    {
                         label: "REST API",
                         href: "/docs/reference/rest-api",
                         description: "HTTP API for queries and admin.",
                         icon: iconAPI,
+                    },
+                    {
+                        label: "CLI tool",
+                        href: "/docs/reference/cli",
+                        description: "CLI install, backup, and ops.",
+                        icon: iconWrench,
+                    },
+                ],
+            },
+            {
+                heading: "SDKs",
+                items: [
+                    {
+                        label: "Rust",
+                        href: "/docs/reference/rust",
+                        description: "Async client and embedded engine.",
+                        icon: iconBraces,
+                    },
+                    {
+                        label: "JavaScript",
+                        href: "/docs/reference/javascript",
+                        description: "Browser, Node, and WASM client.",
+                        icon: iconBraces,
+                    },
+                    {
+                        label: "Go",
+                        href: "/docs/reference/golang",
+                        description: "Server-side client for Go.",
+                        icon: iconBraces,
+                    },
+                    {
+                        label: ".NET",
+                        href: "/docs/reference/dotnet",
+                        description: "C# client and embedded engine.",
+                        icon: iconBraces,
+                    },
+                    {
+                        label: "Java",
+                        href: "/docs/reference/java",
+                        description: "Client library for the JVM.",
+                        icon: iconBraces,
+                    },
+                    {
+                        label: "Kotlin",
+                        href: "/docs/reference/kotlin",
+                        description: "Idiomatic Kotlin client.",
+                        icon: iconBraces,
+                    },
+                    {
+                        label: "PHP",
+                        href: "/docs/reference/php",
+                        description: "Client for PHP applications.",
+                        icon: iconBraces,
+                    },
+                    {
+                        label: "Mojo",
+                        href: "/docs/reference/mojo",
+                        description: "Client for the Mojo language.",
+                        icon: iconBraces,
+                    },
+                    {
+                        label: "Python",
+                        href: "/docs/reference/python",
+                        description: "Sync and async Python client.",
+                        icon: iconBraces,
+                    },
+                    {
+                        label: "Swift",
+                        href: "/docs/reference/swift",
+                        description: "Native client for Swift.",
+                        icon: iconBraces,
                     },
                 ],
             },

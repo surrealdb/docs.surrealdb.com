@@ -88,17 +88,6 @@ function exploreTutorialsThematicRedirects(): Redirect[] {
     return out;
 }
 
-/** Former learn/context Spectron walkthrough → Spectron docs quickstart. */
-// function learnContextToSpectronRedirects(): Redirect[] {
-//     const to = "/docs/spectron/quickstarts/surrealist-dashboard";
-//     return [
-//         { source: "/docs/learn/context", destination: to, statusCode: 301 },
-//         { source: "/docs/learn/context/:path*", destination: to, statusCode: 301 },
-//         { source: "/learn/context", destination: to, statusCode: 301 },
-//         { source: "/learn/context/:path*", destination: to, statusCode: 301 },
-//     ];
-// }
-
 /** Index “Running” section (formerly /self-hosted). */
 function runningFromSelfHostedRedirects(): Redirect[] {
     return [
@@ -209,6 +198,127 @@ function phpVersionedRedirects(): Redirect[] {
     return out;
 }
 
+/**
+ * SDK reference split: the per-language SDK documentation moved out of the
+ * `Start > Languages` section (`/languages/<sdk>/*`) into dedicated reference
+ * docs (`/reference/<sdk>/*`). The single getting-started page for each SDK
+ * stays in Start at `/languages/<sdk>` (see `sdkGettingStartedRedirects`), so
+ * the bare `/languages/<sdk>` roots are deliberately absent below.
+ *
+ * Each tuple is `[from, to, kind]`. `exact` maps a single page; `prefix` maps a
+ * folder and everything beneath it.
+ */
+function sdkReferenceRedirects(): Redirect[] {
+    const moves: [string, string, "exact" | "prefix"][] = [
+        ["languages/rust/methods", "reference/rust/methods", "prefix"],
+        ["languages/rust/concepts", "reference/rust/concepts", "prefix"],
+        ["languages/rust/embedding", "reference/rust/embedding", "exact"],
+        ["languages/rust/frameworks", "reference/rust/frameworks", "prefix"],
+        ["languages/rust/overview", "reference/rust", "exact"],
+        ["languages/javascript/engines", "reference/javascript/engines", "prefix"],
+        ["languages/javascript/concepts", "reference/javascript/concepts", "prefix"],
+        ["languages/javascript/api", "reference/javascript/api", "prefix"],
+        ["languages/javascript/frameworks", "reference/javascript/frameworks", "prefix"],
+        ["languages/javascript/installation", "reference/javascript/installation", "exact"],
+        ["languages/javascript/overview", "reference/javascript", "exact"],
+        ["languages/golang/concepts", "reference/golang/concepts", "prefix"],
+        ["languages/golang/embedding", "reference/golang/embedding", "exact"],
+        ["languages/golang/api", "reference/golang/api", "prefix"],
+        ["languages/golang/installation", "reference/golang/installation", "exact"],
+        ["languages/dotnet/methods", "reference/dotnet/methods", "prefix"],
+        ["languages/dotnet/core", "reference/dotnet/core", "prefix"],
+        ["languages/dotnet/data-types", "reference/dotnet/data-types", "exact"],
+        ["languages/dotnet/embedding", "reference/dotnet/embedding", "exact"],
+        ["languages/dotnet/installation", "reference/dotnet/installation", "exact"],
+        ["languages/java/concepts", "reference/java/concepts", "prefix"],
+        ["languages/java/api", "reference/java/api", "prefix"],
+        ["languages/java/installation", "reference/java/installation", "exact"],
+        ["languages/kotlin/concepts", "reference/kotlin/concepts", "prefix"],
+        ["languages/kotlin/api", "reference/kotlin/api", "prefix"],
+        ["languages/kotlin/installation", "reference/kotlin/installation", "exact"],
+        ["languages/php/v1", "reference/php/v1", "exact"],
+        ["languages/php/v1/methods", "reference/php/v1/methods", "prefix"],
+        ["languages/php/v1/concepts", "reference/php/v1/concepts", "prefix"],
+        ["languages/php/v1/installation", "reference/php/v1/installation", "exact"],
+        ["languages/php/libraries", "reference/php/libraries", "prefix"],
+        ["languages/php/v2", "reference/php/v2", "exact"],
+        ["languages/php/v2/migration", "reference/php/v2/migration", "exact"],
+        ["languages/php/v2/concepts", "reference/php/v2/concepts", "prefix"],
+        ["languages/php/v2/api", "reference/php/v2/api", "prefix"],
+        ["languages/php/v2/installation", "reference/php/v2/installation", "exact"],
+        ["languages/php/frameworks", "reference/php/frameworks", "prefix"],
+        ["languages/mojo/methods", "reference/mojo/methods", "prefix"],
+        ["languages/mojo/concepts", "reference/mojo/concepts", "prefix"],
+        ["languages/mojo/installation", "reference/mojo/installation", "exact"],
+        ["languages/python/concepts", "reference/python/concepts", "prefix"],
+        ["languages/python/api", "reference/python/api", "prefix"],
+        ["languages/python/installation", "reference/python/installation", "exact"],
+        ["languages/swift/methods", "reference/swift/methods", "prefix"],
+        ["languages/swift/data-types", "reference/swift/data-types", "exact"],
+        ["languages/swift/concepts", "reference/swift/concepts", "prefix"],
+        ["languages/swift/installation", "reference/swift/installation", "exact"],
+    ];
+
+    const out: Redirect[] = [];
+
+    for (const [from, to, kind] of moves) {
+        out.push(
+            { source: `/docs/${from}`, destination: `/docs/${to}`, statusCode: 301 },
+            { source: `/${from}`, destination: `/docs/${to}`, statusCode: 301 },
+        );
+
+        if (kind === "prefix") {
+            out.push(
+                {
+                    source: `/docs/${from}/:path*`,
+                    destination: `/docs/${to}/:path*`,
+                    statusCode: 301,
+                },
+                { source: `/${from}/:path*`, destination: `/docs/${to}/:path*`, statusCode: 301 },
+            );
+        }
+    }
+
+    return out;
+}
+
+/**
+ * Each SDK's getting-started page is now a single page at `/languages/<sdk>`
+ * (previously a folder with a `start` child). PHP keeps only its v1 stable
+ * getting-started page in Start; the v2 alpha guide moved into the PHP
+ * reference docs under the "Versions" section. The old "SDK languages"
+ * overview page was removed; its URL now points at an SDK getting-started
+ * page (the sidebar lists every SDK, and community clients live on the new
+ * "Community SDKs" page).
+ */
+function sdkGettingStartedRedirects(): Redirect[] {
+    const moves: [string, string][] = [
+        ["languages/overview", "languages/javascript"],
+        ["languages/dotnet/start", "languages/dotnet"],
+        ["languages/golang/start", "languages/golang"],
+        ["languages/java/start", "languages/java"],
+        ["languages/javascript/start", "languages/javascript"],
+        ["languages/kotlin/start", "languages/kotlin"],
+        ["languages/mojo/start", "languages/mojo"],
+        ["languages/python/start", "languages/python"],
+        ["languages/rust/start", "languages/rust"],
+        ["languages/swift/start", "languages/swift"],
+        ["languages/php/v1/start", "languages/php"],
+        ["languages/php/v2/start", "reference/php/versions/v2-alpha"],
+    ];
+
+    const out: Redirect[] = [];
+
+    for (const [from, to] of moves) {
+        out.push(
+            { source: `/docs/${from}`, destination: `/docs/${to}`, statusCode: 301 },
+            { source: `/${from}`, destination: `/docs/${to}`, statusCode: 301 },
+        );
+    }
+
+    return out;
+}
+
 /** Shared with vercel.ts (production) and the Vite dev server (local). */
 export const docsRedirects: Redirect[] = [
     { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
@@ -221,11 +331,12 @@ export const docsRedirects: Redirect[] = [
     ...exploreTutorialsThematicRedirects(),
     ...sdkRedirects(),
     ...legacyMigratingRedirects(),
-    // ...learnContextToSpectronRedirects(),
     ...deploymentObservabilityToManageRedirects(),
     ...runningFromSelfHostedRedirects(),
     ...databaseFunctionsOverviewRedirects(),
     ...phpVersionedRedirects(),
+    ...sdkReferenceRedirects(),
+    ...sdkGettingStartedRedirects(),
 ];
 
 export type ResolvedRedirect = { destination: string; statusCode: number };

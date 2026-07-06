@@ -1,0 +1,616 @@
+---
+position: 15
+title: query
+description: The .query() method for the SurrealDB Rust SDK runs one or more SurrealQL statements against the database.
+---
+
+
+# `query()`
+
+<Tabs>
+
+<TabItem label="3.x">
+
+Runs one or more SurrealQL statements against the database.
+
+```rust title="Method Syntax"
+db.query(query)
+```
+
+### Arguments
+<table>
+    <thead>
+        <tr>
+            <th colspan="2" scope="col">Argument</th>
+            <th colspan="2" scope="col">Type</th>
+            <th colspan="2" scope="col">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td colspan="2" scope="row" data-label="Argument">
+                <code>query</code>
+            </td>
+            <td colspan="2" scope="row" data-label="Type">
+                <code>query</code>
+            </td>
+            <td colspan="2" scope="row" data-label="Description">
+                Specifies the SurrealQL statements.
+            </td>
+        </tr>
+    </tbody>
+</table>
+
+### Example usage
+
+The `.query()` method serves as a default way to pass queries into the Rust SDK. The simplest usage of this method is by passing in a `&str` and returning an `IndexedResults`.
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb::opt::auth::Root;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("ws://localhost:8000").await?;
+
+    db.signin(Root {
+        username: "root".to_string(),
+        password: "secret".to_string(),
+    })
+    .await?;
+
+    db.use_ns("main").use_db("main").await?;
+
+    let query = r#"
+        LET $data = ["J. Jonah Jameson", "James Earl Jones"];
+        RETURN $data.map(|$name| {
+            LET $names = $name.split(' ');
+            {
+                first_name:  $names[0],
+                middle_name: $names[1],
+                last_name:   $names[2]
+            }
+        });
+    "#;
+
+    let result = db.query(query).await?;
+    println!("Number of statements: {}", result.num_statements());
+    dbg!(result);
+    Ok(())
+}
+```
+
+The `.take()` method can be used to pull out one of the responses into a deserialized format. Note that in the next example the `LET` statement is the first statement received by the database, and thus `.take(1)` is used to grab the output of the second statement to deserialize into a `Person` struct.
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb::opt::auth::Root;
+use surrealdb_types::SurrealValue;
+
+#[derive(Debug, SurrealValue)]
+struct Person {
+    first_name: String,
+    middle_name: String,
+    last_name: String,
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("ws://localhost:8000").await?;
+
+    db.signin(Root {
+        username: "root".to_string(),
+        password: "secret".to_string(),
+    })
+    .await?;
+
+    db.use_ns("main").use_db("main").await?;
+
+    let query = r#"
+    LET $data = ["J. Jonah Jameson", "James Earl Jones"];
+    RETURN $data.map(|$name| {
+    LET $names = $name.split(' ');
+    {
+       first_name:  $names[0],
+       middle_name: $names[1],
+       last_name:   $names[2]
+    }
+    });"#;
+
+    let mut result = db.query(query).await?;
+    let people: Vec<Person> = result.take(1)?;
+    dbg!(people);
+    Ok(())
+}
+```
+
+The return value from this method is `Result<Response, Error>`. A `Result::Ok(Response)` only means that the query or queries were successfully executed, but does not mean that each query contained in the `Response` was successful.
+
+Take the following code for example which contains one successful query, followed by one with incorrect syntax (an integer where a string is expected).
+
+```rust
+use surrealdb::engine::any::connect;
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    let res = db.query("
+        LET $x = 9;
+        LET $x: string = 9") // valid SurrealQL but wrong type
+        .await;
+    println!("{res:?}");
+}
+```
+
+The `.query()` method returns an `Ok(IndexedResults)`, showing that the database was able to understand and process the queries, even though the latter returned an error.
+
+```
+Ok(IndexedResults { results: {0: (DbResultStats { execution_time: Some(392.875µs), query_type: Some(Other) }, Ok(None)), 1: (DbResultStats { execution_time: Some(426.042µs), query_type: Some(Other) }, Err(InternalError("Tried to set `$x`, but couldn't coerce value: Expected `string` but found `9`")))}, live_queries: {} })
+```
+
+But if the function contains input that the database is unable to parse into a query in the first place, an `Err` will be returned for the entire `.query()` call.
+If the `string` syntax is changed to something nonsensical like `Hi how are you?`, the database is unable to process the query in the first place and `.query()` will return an `Err` for the whole call.
+
+```rust
+use surrealdb::engine::any::connect;
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    let res = db.query("
+        LET $x = 9;
+        Hi how are you?;") // invalid SurrealQL
+        .await;
+    println!("{res:?}");
+}
+```
+
+```
+Err(ParseError("Parse error: Unexpected token `an identifier`, expected Eof\n --> [3:12]\n  |\n3 | Hi how are you?;\n  |    ^^^\n"))
+```
+
+The `IndexedResults` struct contains helper metods such as `.check()` to check for errors, or `.take_errors()` which removes the errors from the main `IndexedResults`.
+
+```rust
+use surrealdb::engine::any::connect;
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    db.use_ns("ns").use_db("db").await.unwrap();
+    let mut res = db
+        .query(
+        "LET $x = 9;
+        LET $x: string = 9;
+        LET $x: bool = 9;
+        CREATE person",
+        )
+        .await
+        .unwrap();
+
+    println!("Errors: {:?}\n", res.take_errors());
+    println!("Successes: {:?}", res);
+}
+```
+
+Output:
+
+```
+Errors: {2: InternalError("Tried to set `$x`, but couldn't coerce value: Expected `bool` but found `9`"), 1: InternalError("Tried to set `$x`, but couldn't coerce value: Expected `string` but found `9`")}
+
+Successes: IndexedResults { results: {0: (DbResultStats { execution_time: Some(301.375µs), query_type: Some(Other) }, Ok(None)), 3: (DbResultStats { execution_time: Some(2.278083ms), query_type: Some(Other) }, Ok(Array(Array([Object(Object({"id": RecordId(RecordId { table: Table("person"), key: String("yq7gxgm3ffkr4kibumeb") })}))]))))}, live_queries: {} }
+```
+
+### Per-statement stats (`.with_stats()`)
+
+The [`.with_stats()`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Query.html#method.with_stats) method can be used on the query builder before awaiting the future. The awaited value is [`WithStats<IndexedResults>`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.WithStats.html), which wraps the usual [`IndexedResults`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.IndexedResults.html) so each `.take(...)` can return both [`Stats`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Stats.html) (including execution time) and the deserialized statement result.
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb::types::Value;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("memory").await?;
+    db.use_ns("ns").use_db("db").await?;
+
+    let mut response = db
+        .query("CREATE person:ada SET name = 'Ada'; SELECT * FROM person;")
+        .with_stats()
+        .await?;
+
+    if let Some((stats, res)) = response.take(1) {
+        let records: Vec<Value> = res?;
+        println!("time = {:?}, records = {:?}", stats.execution_time, records);
+    }
+    Ok(())
+}
+```
+
+See [`WithStats::take`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.WithStats.html#method.take) on Docs.rs for the supported `.take` shapes (statement index, nested paths, and tuples).
+
+### Stream `LIVE SELECT` output (`.stream()`) {#live-select-stream}
+
+After awaiting `.query(...)`, [`IndexedResults::stream`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.IndexedResults.html#method.stream) turns the live-query slot at a given statement index into a [`QueryStream`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.QueryStream.html). Pass a statement index (`0`, `1`, …), or pass `()` to merge every `LIVE SELECT` in that response. The stream yields [`Notification`](https://docs.rs/surrealdb/latest/surrealdb/struct.Notification.html) values (or raw [`Value`](https://docs.rs/surrealdb/latest/surrealdb/types/enum.Value.html)) and implements [`futures::Stream`](https://docs.rs/futures/latest/futures/stream/trait.Stream.html). This can be polled with the [`StreamExt`](https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html) trait from the `futures` crate.
+
+If you prefer not to embed `LIVE SELECT` in SurrealQL, the same live subscription can be started with [`db.select(resource).live()`](/docs/reference/rust/methods/select-live) on top of [`select()`](/docs/reference/rust/methods/select); both approaches yield a stream of notifications.
+
+```rust
+use futures::StreamExt;
+use surrealdb::engine::any::connect;
+use surrealdb::opt::auth::Root;
+use surrealdb::types::Value;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("ws://localhost:8000").await?;
+    db.use_ns("main").use_db("main").await?;
+    db.signin(Root {
+        username: "root".into(),
+        password: "secret".into(),
+    })
+    .await?;
+
+    // Use 2 or 3 instead of () to only LIVE SELECT
+    // either person or cat
+    let mut response = db
+        .query(
+            "DEFINE TABLE IF NOT EXISTS person SCHEMALESS;
+            DEFINE TABLE IF NOT EXISTS cat SCHEMALESS;
+             LIVE SELECT * FROM person;
+             LIVE SELECT * FROM cat;",
+        )
+        .await?;
+    let mut stream = response.stream::<Value>(())?;
+
+    while let Some(item) = stream.next().await {
+        let notification = item?;
+        println!("{:?}", notification);
+    }
+    Ok(())
+}
+```
+
+To test the live stream, either log in using Surrealist or the CLI using the `surreal sql --user root --pass secret` command in another terminal window. You should see notifications similar to the following whenever a new record is created from the `person` or `cat` table, but not for others.
+
+```bash
+Notification { query_id: Uuid(3bad02bb-fd1e-402b-9a43-5b3eae88f279), action: Create, data: Object(Object({"id": RecordId(RecordId { table: Table("person"), key: String("zhby5ibqh8b2hfyyao30") })})) }
+Notification { query_id: Uuid(829d7ec7-d67c-47ef-bd7c-8b3e10b8d149), action: Create, data: Object(Object({"id": RecordId(RecordId { table: Table("cat"), key: String("cgu921pkfco7uk7ajeym") })})) }
+```
+
+### Security when using the .query() method
+
+As the `.query()` method can be used to pass any SurrealQL query on to the database, it is an easy go-to when using complex queries. However, be sure to keep [the following best practices in mind](/docs/learn/security/best-practices/security-best-practices#query-safety) when doing so.
+
+<blockquote>
+When using SurrealDB as a traditional backend database, your application will usually build SurrealQL queries that may need to contain some untrusted input, such as that provided by the users of your application. To do so, SurrealDB offers bind as a method to query, which should always be used when including untrusted input into queries. Otherwise, SurrealDB will be unable to separate the actual query syntax from the user input, resulting in the well-known SQL injection vulnerabilities. This practice is known as prepared statements or parameterised queries.
+</blockquote>
+
+Thus, instead of using user input to directly construct a string:
+
+```rust
+let bad_sql = format!("
+CREATE {user_input};
+SELECT * FROM {user_input};");
+```
+
+You can insert a parameter using SurrealQL's `$` parameter syntax,
+
+```rust
+let sql = "
+    CREATE person;
+    SELECT * FROM type::table($table);
+";
+```
+
+And then apply the `.bind()` method to pass the parameter in.
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb::opt::auth::Root;
+use surrealdb_types::{RecordId, SurrealValue};
+
+#[derive(Debug, SurrealValue)]
+struct Person {
+    id: RecordId,
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("ws://localhost:8000").await?;
+
+    db.signin(Root {
+        username: "root".to_string(),
+        password: "secret".to_string(),
+    })
+    .await?;
+
+    db.use_ns("main").use_db("main").await?;
+
+    let sql = "
+        CREATE person;
+        SELECT * FROM type::table($table);
+    ";
+    let mut result = db.query(sql).bind(("table", "person")).await?;
+    // Get the first result from the first query
+    let created: Option<Person> = result.take(0)?;
+    dbg!(created);
+    // Get all of the results from the second query
+    let people: Vec<Person> = result.take(1)?;
+    dbg!(people);
+    Ok(())
+}
+```
+
+### See also
+
+* [.query() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.query)
+* [`Query::with_stats`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Query.html#method.with_stats), [`WithStats`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.WithStats.html), [`IndexedResults::stream`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.IndexedResults.html#method.stream)
+* [Live queries via `select().live()`](/docs/reference/rust/methods/select-live) (alternative to [`LIVE SELECT`](#live-select-stream) in this page)
+
+</TabItem>
+
+<TabItem label="2.x">
+
+Runs one or more SurrealQL statements against the database.
+
+```rust title="Method Syntax"
+db.query(query)
+```
+
+### Arguments
+<table>
+    <thead>
+        <tr>
+            <th colspan="2" scope="col">Argument</th>
+            <th colspan="2" scope="col">Type</th>
+            <th colspan="2" scope="col">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td colspan="2" scope="row" data-label="Argument">
+                <code>query</code>
+            </td>
+            <td colspan="2" scope="row" data-label="Type">
+                <code>query</code>
+            </td>
+            <td colspan="2" scope="row" data-label="Description">
+                Specifies the SurrealQL statements.
+            </td>
+        </tr>
+    </tbody>
+</table>
+
+### Example usage
+
+The `.query()` method serves as a default way to pass queries into the Rust SDK. The simplest usage of this method is by passing in a `&str` and returning a [`Response`](https://docs.rs/surrealdb/latest/surrealdb/struct.Response.html).
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb::opt::auth::Root;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("ws://localhost:8000").await?;
+
+    db.signin(Root {
+        username: "root",
+        password: "secret",
+    })
+    .await?;
+
+    db.use_ns("ns").use_db("db").await?;
+
+    let query = r#"
+        LET $data = ["J. Jonah Jameson", "James Earl Jones"];
+        RETURN $data.map(|$name| {
+            LET $names = $name.split(' ');
+            {
+                first_name:  $names[0],
+                middle_name: $names[1],
+                last_name:   $names[2]
+            }
+        });
+    "#;
+
+    let result = db.query(query).await?;
+    println!("Number of statements: {}", result.num_statements());
+    dbg!(result);
+    Ok(())
+}
+```
+
+The `.take()` method can be used to pull out one of the responses into a deserialized format. Note that in the next example the `LET` statement is the first statement received by the database, and thus `.take(1)` is used to grab the output of the second statement to deserialize into a `Person` struct.
+
+```rust
+use serde::Deserialize;
+use surrealdb::engine::any::connect;
+use surrealdb::opt::auth::Root;
+
+#[derive(Debug, Deserialize)]
+struct Person {
+    first_name: String,
+    middle_name: String,
+    last_name: String,
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("ws://localhost:8000").await?;
+
+    db.signin(Root {
+        username: "root",
+        password: "secret",
+    })
+    .await?;
+
+    db.use_ns("ns").use_db("db").await?;
+
+    let query = r#"
+    LET $data = ["J. Jonah Jameson", "James Earl Jones"];
+    RETURN $data.map(|$name| {
+    LET $names = $name.split(' ');
+    {
+       first_name:  $names[0],
+       middle_name: $names[1],
+       last_name:   $names[2]
+    }
+    });"#;
+
+    let mut result = db.query(query).await?;
+    let people: Vec<Person> = result.take(1)?;
+    dbg!(people);
+    Ok(())
+}
+```
+
+The return value from this method is `Result<Response, Error>`. A `Result::Ok(Response)` only means that the query or queries were successfully executed, but does not mean that each query contained in the `Response` was successful.
+
+Take the following code for example which contains one successful query, followed by one with incorrect syntax (an integer where a string is expected).
+
+```rust
+use surrealdb::engine::any::connect;
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    let res = db.query("
+        LET $x = 9;
+        LET $x: string = 9") // valid SurrealQL but wrong type
+        .await;
+    println!("{res:?}");
+}
+```
+
+The `.query()` method returns an `Ok(Response)`, showing that the database was able to understand and process the queries, even though the latter returned an error.
+
+```
+Ok(Response { results: {0: (Stats { execution_time: Some(197.875µs) }, Ok(None)), 1: (Stats { execution_time: Some(207.625µs) }, Err(Db(SetCheck { value: "9", name: "x", check: "string" })))}, live_queries: {} })
+```
+
+But if the function contains input that the database is unable to parse into a query in the first place, an `Err` will be returned for the entire `.query()` call.
+If the `string` syntax is changed to something nonsensical like `Hi how are you?`, the database is unable to process the query in the first place and `.query()` will return an `Err` for the whole call.
+
+```rust
+use surrealdb::engine::any::connect;
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    let res = db.query("
+        LET $x = 9;
+        Hi how are you?;") // invalid SurrealQL
+        .await;
+    println!("{res:?}");
+}
+```
+
+```
+Err(Db(InvalidQuery(RenderedError { errors: ["Unexpected token `an identifier`, expected Eof"], snippets: [Snippet { source: "LET $x = 9; Hi how are you?", truncation: None, location: Location { line: 1, column: 16 }, offset: 15, length: 3, label: None, kind: Error }] })))
+```
+
+The `Response` struct contains helper metods such as [`.check()`](https://docs.rs/surrealdb/latest/surrealdb/struct.Response.html#method.check) to check for errors, or [`.take_errors()`](https://docs.rs/surrealdb/latest/surrealdb/struct.Response.html#method.take_errors) which removes the errors from the main `Response`.
+
+```rust
+use surrealdb::engine::any::connect;
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    db.use_ns("ns").use_db("db").await.unwrap();
+    let mut res = db
+        .query(
+        "LET $x = 9;
+        LET $x: string = 9;
+        LET $x: bool = 9;
+        CREATE person",
+        )
+        .await
+        .unwrap();
+
+    println!("Errors: {:?}\n", res.take_errors());
+    println!("Successes: {:?}", res);
+}
+```
+
+Output:
+
+```
+Errors: {1: Db(SetCheck { value: "9", name: "x", check: "string" }), 2: Db(SetCheck { value: "9", name: "x", check: "bool" })}
+
+Successes: Response { results: {0: (Stats { execution_time: Some(143.458µs) }, Ok(None)), 3: (Stats { execution_time: Some(1.463583ms) }, Ok(Array(Array([Object(Object({"id": RecordId(RecordId { table: "person", key: String("aokn0fp36pmqlxprjhre") })}))]))))}, live_queries: {} }
+```
+
+### Security when using the .query() method
+
+As the `.query()` method can be used to pass any SurrealQL query on to the database, it is an easy go-to when using complex queries. However, be sure to keep [the following best practices in mind](/docs/learn/security/best-practices/security-best-practices#query-safety) when doing so.
+
+<blockquote>
+When using SurrealDB as a traditional backend database, your application will usually build SurrealQL queries that may need to contain some untrusted input, such as that provided by the users of your application. To do so, SurrealDB offers bind as a method to query, which should always be used when including untrusted input into queries. Otherwise, SurrealDB will be unable to separate the actual query syntax from the user input, resulting in the well-known SQL injection vulnerabilities. This practice is known as prepared statements or parameterised queries.
+</blockquote>
+
+Thus, instead of using user input to directly construct a string:
+
+```rust
+let bad_sql = format!("
+CREATE {user_input};
+SELECT * FROM {user_input};");
+```
+
+You can insert a parameter using SurrealQL's `$` parameter syntax,
+
+```rust
+let sql = "
+    CREATE person;
+    SELECT * FROM type::table($table);
+";
+```
+
+And then apply the `.bind()` method to pass the parameter in.
+
+```rust
+use serde::Deserialize;
+use surrealdb::engine::any::connect;
+use surrealdb::opt::auth::Root;
+use surrealdb::RecordId;
+
+#[derive(Debug, Deserialize)]
+struct Person {
+    id: RecordId,
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("ws://localhost:8000").await?;
+
+    db.signin(Root {
+        username: "root",
+        password: "secret",
+    })
+    .await?;
+
+    db.use_ns("ns").use_db("db").await?;
+
+    let sql = "
+        CREATE person;
+        SELECT * FROM type::table($table);
+    ";
+    let mut result = db.query(sql).bind(("table", "person")).await?;
+    // Get the first result from the first query
+    let created: Option<Person> = result.take(0)?;
+    dbg!(created);
+    // Get all of the results from the second query
+    let people: Vec<Person> = result.take(1)?;
+    dbg!(people);
+    Ok(())
+}
+```
+
+### See also
+
+* [.query() method on Docs.rs](https://docs.rs/surrealdb/latest/surrealdb/struct.Surreal.html#method.query)
+
+</TabItem>
+
+</Tabs>
