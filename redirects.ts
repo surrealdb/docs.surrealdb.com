@@ -153,6 +153,62 @@ function legacyMigratingRedirects(): Redirect[] {
     return out;
 }
 
+/** Database functions overview merged into the section index. */
+function databaseFunctionsOverviewRedirects(): Redirect[] {
+    const from = "/reference/query-language/functions/database-functions/overview";
+    const to = "/reference/query-language/functions/database-functions";
+    return [
+        { source: `/docs${from}`, destination: `/docs${to}`, statusCode: 301 },
+        { source: from, destination: to, statusCode: 301 },
+    ];
+}
+/** PHP SDK split into versioned folders: legacy v1 paths → /languages/php/v1/*. */
+function phpVersionedRedirects(): Redirect[] {
+    const moves: [string, string][] = [
+        ["languages/php/setup", "languages/php/v1/installation"],
+        ["languages/php/data-types", "languages/php/v1/concepts/data-types"],
+        ["languages/php/core/initialization", "languages/php/v1/concepts/connecting"],
+        ["languages/php/core/authentication", "languages/php/v1/concepts/authentication"],
+        ["languages/php/core/data-querying", "languages/php/v1/concepts/executing-queries"],
+        ["languages/php/core", "languages/php/v1"],
+        ["languages/php/methods/insertRelation", "languages/php/v1/methods/insert-relation"],
+        ["languages/php/methods/queryRaw", "languages/php/v1/methods/query-raw"],
+    ];
+    const out: Redirect[] = [];
+
+    for (const [from, to] of moves) {
+        out.push(
+            { source: `/docs/${from}`, destination: `/docs/${to}`, statusCode: 301 },
+            { source: `/${from}`, destination: `/docs/${to}`, statusCode: 301 },
+        );
+    }
+
+    out.push(
+        {
+            source: "/docs/languages/php/methods",
+            destination: "/docs/languages/php/v1/methods",
+            statusCode: 301,
+        },
+        {
+            source: "/docs/languages/php/methods/:path*",
+            destination: "/docs/languages/php/v1/methods/:path*",
+            statusCode: 301,
+        },
+        {
+            source: "/languages/php/methods",
+            destination: "/docs/languages/php/v1/methods",
+            statusCode: 301,
+        },
+        {
+            source: "/languages/php/methods/:path*",
+            destination: "/docs/languages/php/v1/methods/:path*",
+            statusCode: 301,
+        },
+    );
+
+    return out;
+}
+
 /** Shared with vercel.ts (production) and the Vite dev server (local). */
 export const docsRedirects: Redirect[] = [
     { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
@@ -168,6 +224,8 @@ export const docsRedirects: Redirect[] = [
     // ...learnContextToSpectronRedirects(),
     ...deploymentObservabilityToManageRedirects(),
     ...runningFromSelfHostedRedirects(),
+    ...databaseFunctionsOverviewRedirects(),
+    ...phpVersionedRedirects(),
 ];
 
 export type ResolvedRedirect = { destination: string; statusCode: number };

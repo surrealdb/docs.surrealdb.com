@@ -7,6 +7,7 @@ type StatusString =
     | "future"
     | "in development"
     | "coming soon"
+    | "alpha"
     | "beta"
     | "complete"
     | "available"
@@ -26,6 +27,7 @@ const STATUS_COLORS: Record<string, string> = {
     complete: "green",
     available: "green",
     beta: "yellow",
+    alpha: "orange",
     "coming soon": "orange",
     "in development": "orange",
     future: "gray",

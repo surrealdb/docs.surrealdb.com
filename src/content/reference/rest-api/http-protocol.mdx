@@ -50,6 +50,10 @@ You can use the HTTP endpoints to perform the following actions:
             <td scope="row" data-label="Description">Checks the status of the database server and storage engine</td>
         </tr>
         <tr>
+            <td scope="row" data-label="Function"><a href="#ready"><code>GET /ready</code></a></td>
+            <td scope="row" data-label="Description">Checks whether the instance has finished startup and is ready to serve traffic</td>
+        </tr>
+        <tr>
             <td scope="row" data-label="Function"><a href="#version"><code>GET /version</code></a></td>
             <td scope="row" data-label="Description">Returns the version of the SurrealDB database server</td>
         </tr>
@@ -115,7 +119,7 @@ You can use the HTTP endpoints to perform the following actions:
         </tr>
         <tr>
             <td scope="row" data-label="Function"><a href="#gql"><code>POST /gql</code></a></td>
-            <td scope="row" data-label="Description">Runs read-only ISO GQL (OpenGQL) graph pattern queries</td>
+            <td scope="row" data-label="Description">Runs ISO GQL graph pattern queries (`MATCH … RETURN …`, plus `INSERT` / `SET` / `REMOVE` / `DELETE`)</td>
         </tr>
         <tr>
             <td scope="row" data-label="Function"><a href="#graphql"><code>POST /graphql</code></a></td>
@@ -152,7 +156,7 @@ curl -I http://localhost:8000/status
 HTTP/1.1 200 OK
 vary: origin, access-control-request-method, access-control-request-headers
 access-control-allow-origin: *
-surreal-version: surrealdb/3.0.0-beta
+surreal-version: surrealdb/3.0.0
 server: SurrealDB
 x-request-id: fdb9bcdb-b085-4da0-80ef-a61105c432f9
 content-length: 0
@@ -175,11 +179,42 @@ curl -I http://localhost:8000/health
 HTTP/1.1 200 OK
 vary: origin, access-control-request-method, access-control-request-headers
 access-control-allow-origin: *
-surreal-version: surrealdb/3.0.0-beta
+surreal-version: surrealdb/3.0.0
 server: SurrealDB
 x-request-id: 66938ec2-ad7c-4afb-928d-683e7a75433a
 content-length: 0
 date: Tue, 03 Feb 2026 02:15:08 GMT
+```
+
+<br />
+
+## `GET /ready` {#ready}
+
+<Since v="v3.2.0" />
+
+This HTTP RESTful endpoint is the startup and readiness probe. It returns `200` once deferred startup work (such as import and credential initialisation) has completed and, when a heartbeat budget is configured, the node's cluster heartbeat is fresh. It returns `503` while still starting up or when the heartbeat is stale, and `500` if the heartbeat cannot be read.
+
+Contrast with [`GET /status`](#status) (process and listener liveness only) and [`GET /health`](#health) (storage backend reachability only). Query and auth endpoints are gated with `503` until startup completes, while `/ready` stays reachable throughout so orchestrators can distinguish *starting* from *failed*.
+
+The CLI [`surreal isready`](/docs/reference/cli/surrealdb-cli/commands/isready) command calls this endpoint.
+
+```bash title="Request"
+curl -I http://localhost:8000/ready
+```
+
+```bash title="Sample output (ready)"
+HTTP/1.1 200 OK
+vary: origin, access-control-request-method, access-control-request-headers
+access-control-allow-origin: *
+surreal-version: surrealdb/3.2.0
+server: SurrealDB
+content-length: 0
+```
+
+```bash title="Sample output (still starting)"
+HTTP/1.1 503 Service Unavailable
+retry-after: 1
+content-length: 0
 ```
 
 <br />
@@ -195,7 +230,7 @@ curl http://localhost:8000/version
 ```
 
 ```bash title="Sample output"
-surrealdb-3.0.0-beta
+surrealdb-3.0.0
 ```
 
 
@@ -1733,10 +1768,13 @@ As of SurrealDB 3.0.4, imports via the [`surreal import`](/docs/reference/cli/su
 
 <Since v="v3.2.0" />
 
-The GQL endpoint runs **read-only** [ISO GQL (OpenGQL)](/docs/learn/querying/gql/overview) graph pattern queries (`MATCH … RETURN …`) against your existing tables and `RELATE` edges.
+The GQL endpoint runs [ISO GQL](/docs/learn/querying/gql/overview) graph pattern queries against your existing tables and `RELATE` edges — `MATCH … RETURN` reads and data-modifying `INSERT`, `SET`, `REMOVE`, and `DELETE` ([GQL mutations](/docs/learn/querying/gql/mutations)).
 
 > [!WARNING]
-> OpenGQL is **experimental**. Enable it at server start with [`--allow-experimental=opengql`](/docs/reference/cli/surrealdb-cli/commands/start#experimental-capabilities) (or `SURREAL_CAPS_ALLOW_EXPERIMENTAL=opengql`). `--allow-all` does **not** enable it. If the capability is off, expect **403**.
+> GQL is **experimental**. Enable it at server start with [`--allow-experimental gql`](/docs/reference/cli/surrealdb-cli/commands/start#experimental-capabilities) (or `SURREAL_CAPS_ALLOW_EXPERIMENTAL=gql`). `--allow-all` does **not** enable it. If the capability is off, expect **403**.
+
+> [!NOTE]
+> This endpoint is **not** [GraphQL](/docs/learn/querying/graphql/overview). GraphQL queries belong on [`POST /graphql`](#graphql).
 
 > [!NOTE]
 > This HTTP endpoint expects the HTTP body to be a **single raw GQL query** (UTF-8 text), not JSON-wrapped. Use [`POST /sql`](#sql) for SurrealQL.
@@ -1797,7 +1835,7 @@ Pass GQL parameters through **WebSocket RPC** (`method: "gql"`, second element o
 ### Example usage
 
 > [!NOTE]
-> The `-u` in the example below is a shorthand used by curl to send an Authorization header (name and password), in this case assuming the username `root` and password `secret`. The server must have been started with `--allow-experimental=opengql`.
+> The `-u` in the example below is a shorthand used by curl to send an Authorization header (name and password), in this case assuming the username `root` and password `secret`. The server must have been started with `--allow-experimental gql`.
 
 ```bash title="Request"
 curl -X POST -u "root:secret" -H "Surreal-NS: main" -H "Surreal-DB: main" \
@@ -1820,15 +1858,16 @@ curl -X POST -u "root:secret" -H "Surreal-NS: main" -H "Surreal-DB: main" \
 ]
 ```
 
-Parse errors return **HTTP 400** with an error payload. See [GQL via HTTP](/docs/learn/querying/gql/via-http) for enabling OpenGQL, seeding data, and RPC examples.
+Parse errors return **HTTP 400** with an error payload. See [GQL via HTTP](/docs/learn/querying/gql/via-http) for enabling GQL, seeding data, and RPC examples.
 
 <br />
 
 ## `POST /graphql` {#graphql}
 
-<Since v="v2.0.0" />
-
 The GraphQL endpoint enables use of GraphQL queries to interact with your data.
+
+> [!NOTE]
+> This endpoint is **not** [ISO GQL](/docs/learn/querying/gql/overview). GQL `MATCH` queries belong on [`POST /gql`](#gql).
 
 > [!NOTE]
 > This HTTP endpoint expects the HTTP body to be a GraphQL query.

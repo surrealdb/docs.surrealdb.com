@@ -48,6 +48,36 @@ Apply SOLID where it fits:
 
 All user-facing text uses **British English** spelling (`-ise`, `-our`, `-re`, `-ogue`).
 
+### Headings and subheaders
+
+Use **sentence case** for multi-word headings (`##`, `###`, `####`). Do not use
+Title Case on every main word.
+
+| Pattern | Rule | Examples |
+| ------- | ---- | -------- |
+| Single word | Capitalise the word | `## Syntax`, `#### Parameters`, `#### Returns` |
+| Multiple words | Capitalise the **first word only**; lowercase the rest | `## Type parameters`, `### Complete examples`, `### Default response` |
+| Numbered lists | Same as multiple words — capitalise the first word after the number | `### 3. Don't reuse transactions`, `## 1. Install the SDK` |
+
+**Keep capitalised** where they are names, not prose:
+
+- Acronyms and protocols: `API`, `HTTP`, `JSON`, `UUID`, `SQL`
+- Product and language names: `SurrealDB`, `SurrealQL`, `JavaScript`
+- SDK types and identifiers: `RecordId`, `DateTime`, `ApiPromise`
+- SurrealQL keywords when cited literally: `INSERT`, `CREATE`, `LIVE SELECT`
+
+**Avoid** AI-style Title Case in subheaders:
+
+- ~~`### Custom Functions`~~ → `### Custom functions`
+- ~~`### Basic API Calls`~~ → `### Basic API calls`
+- ~~`### Type-Safe Record IDs`~~ → `### Type-safe record IDs`
+
+Hyphenated compounds follow sentence case on the second part unless it is a proper
+name: `Full-text search`, `Type-safe queries`, `Half-open ranges`.
+
+Code-block `title="…"` labels on fenced blocks should follow the same rules when
+they describe the example (e.g. `title="Method syntax"`, not `title="Method Syntax"`).
+
 ## Documentation voice
 
 The docs site mixes reference material, SDK guides, tutorials, and operational

@@ -272,6 +272,12 @@ curl -X GET "https://api.example.com/api/v1/users?page=1&limit=20" \
 
 **Structure**:
 - Use hierarchical headings (H1, H2, H3)
+- **Subheader capitalisation** (SurrealDB docs convention):
+  - Single word: capitalise (`#### Parameters`, `## Syntax`)
+  - Multiple words: sentence case — first word only (`## Type parameters`, `### Complete examples`)
+  - Numbered: capitalise first word after the number (`### 3. Don't reuse transactions`)
+  - Keep acronyms, product names, SDK types, and SurrealQL keywords capitalised (`API`, `RecordId`, `INSERT`)
+  - Avoid Title Case on every main word (`### Custom functions`, not `### Custom Functions`)
 - Break content into sections
 - Use lists for multiple items
 - Use tables for structured data

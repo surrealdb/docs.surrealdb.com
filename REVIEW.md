@@ -13,11 +13,21 @@ for conventions, documentation voice, and architectural detail.
 - [ ] `bun run qts` (TypeScript `--noEmit`) reports no type errors.
 - [ ] No secrets, `.env` values, or credentials are included in the diff.
 
-## 2. Language
+## 2. Language and headings
 
 - [ ] All user-facing text uses **British English** spelling:
   `-ise` (not `-ize`), `-our` (not `-or`), `-re` (not `-er`),
   `-ogue` (not `-og`).
+- [ ] **Subheaders** (`##`–`####`) follow sentence case (see `AGENTS.md`):
+  - Single-word headings are capitalised (`#### Parameters`, `## Syntax`).
+  - Multi-word headings capitalise the first word only (`## Type parameters`,
+    `### Complete examples`).
+  - Numbered headings capitalise the first word after the number
+    (`### 3. Don't reuse transactions`).
+  - Acronyms, product names, SDK types, and SurrealQL keywords stay capitalised
+    where appropriate (`API`, `RecordId`, `INSERT`).
+  - No Title Case on every main word (`### Custom functions`, not
+    `### Custom Functions`).
 
 ## 3. SOLID principles
 
