@@ -72,7 +72,7 @@ function SidebarSection({ section }: { section: NavSection }) {
                 gap="sm"
                 mt="lg"
                 mb="sm"
-                px="md"
+                px="sm"
             >
                 {icon && (
                     <Icon
