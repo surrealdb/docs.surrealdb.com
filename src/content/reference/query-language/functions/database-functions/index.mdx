@@ -21,7 +21,7 @@ The table below lists all of SurrealDB's function modules, grouped by purpose an
 <table>
 	<thead>
 		<tr>
-			<th scope="col" class="w-40">
+			<th scope="col">
 				Function
 			</th>
 			<th scope="col">Description and Example</th>

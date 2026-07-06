@@ -109,7 +109,7 @@ export function Sidebar({ navigation, versionSelector, ...props }: SidebarProps)
     return (
         <Stack
             pb="sm"
-            mah="calc(100vh - 56px - 1rem)"
+            mah="calc(100vh - 56px)"
             gap={0}
             {...props}
         >

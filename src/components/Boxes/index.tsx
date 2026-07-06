@@ -6,7 +6,6 @@ interface BoxesProps {
     columns?: 2 | 3;
     wider?: boolean;
     children?: ReactNode;
-    class?: string;
 }
 
 export function Boxes({ columns = 2, wider, children }: BoxesProps) {
