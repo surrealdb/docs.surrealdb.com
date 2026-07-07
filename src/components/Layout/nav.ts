@@ -21,11 +21,11 @@ import {
     iconProgressClock,
     iconQuery,
     iconRoutes,
+    iconSandbox,
     iconSidekick,
     iconSpectron,
     iconSurrealist,
     iconTable,
-    iconText,
     iconTransfer,
     iconVideo,
     iconWrench,
@@ -39,7 +39,8 @@ export interface NavItem {
 export interface NavMenuItem {
     label: string;
     href: string;
-    description: string;
+    description?: string;
+    external?: boolean;
     icon: string;
 }
 
@@ -74,25 +75,25 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                     {
                         label: "Querying",
                         href: "/docs/learn/querying",
-                        description: "SurrealQL and live result handling.",
+                        description: "Mutate and query your data.",
                         icon: iconQuery,
                     },
                     {
                         label: "Schema management",
                         href: "/docs/learn/schema-management",
-                        description: "Namespaces, tables, and indexes.",
+                        description: "Define namespaces, tables, and indexes.",
                         icon: iconTable,
                     },
                     {
                         label: "Data models",
                         href: "/docs/learn/data-models",
-                        description: "Documents, graphs, vectors, time series.",
+                        description: "Model documents, graphs, vectors, and more.",
                         icon: iconBraces,
                     },
                     {
                         label: "Security",
                         href: "/docs/learn/security",
-                        description: "Authentication, scopes, and permissions.",
+                        description: "Configure authentication, scopes, and access.",
                         icon: iconAuthKeyhole,
                     },
                 ],
@@ -103,13 +104,14 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                     {
                         label: "Spectron",
                         href: "/docs/spectron",
-                        description: "LLM memory and tool context patterns.",
+                        description: "The AI memory and knowledge layer.",
                         icon: iconSpectron,
+                        external: true,
                     },
                     {
                         label: "Extensions",
                         href: "/docs/learn/extensions",
-                        description: "Functions, procedures, and plugins.",
+                        description: "Extend SurrealDB with functions and plugins.",
                         icon: iconPlugin,
                     },
                 ],
@@ -125,13 +127,13 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                     {
                         label: "Deployment",
                         href: "/docs/build/deployment",
-                        description: "Cloud, edge, and on-premises.",
+                        description: "Deploy to the cloud, edge, or on-premises.",
                         icon: iconRoutes,
                     },
                     {
                         label: "Embedding SurrealDB",
                         href: "/docs/build/embedding",
-                        description: "Native and WebAssembly embedding.",
+                        description: "Embed the engine natively or with WebAssembly.",
                         icon: iconMemory,
                     },
                 ],
@@ -142,13 +144,13 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                     {
                         label: "Migrating",
                         href: "/docs/build/migrating",
-                        description: "Import data and schemas from elsewhere.",
+                        description: "Import data and schemas from other databases.",
                         icon: iconTransfer,
                     },
                     {
                         label: "Integrations",
                         href: "/docs/build/integrations",
-                        description: "SDKs, frameworks, and connectors.",
+                        description: "Connect SDKs, frameworks, and tools.",
                         icon: iconIntegration,
                     },
                 ],
@@ -159,7 +161,7 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                     {
                         label: "AI agents",
                         href: "/docs/build/ai-agents",
-                        description: "Design patterns for AI agents.",
+                        description: "Build AI agents on SurrealDB.",
                         icon: iconSidekick,
                     },
                 ],
@@ -175,13 +177,13 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                     {
                         label: "SurrealDB Cloud",
                         href: "/docs/manage/cloud",
-                        description: "Hosted instances and Cloud console.",
+                        description: "Run hosted instances from the Cloud console.",
                         icon: iconCloud,
                     },
                     {
                         label: "Self-hosted",
                         href: "/docs/manage/self-hosted",
-                        description: "Clusters, backups, your infrastructure.",
+                        description: "Run your own clusters and infrastructure.",
                         icon: iconOffice,
                     },
                 ],
@@ -192,7 +194,7 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                     {
                         label: "Observability",
                         href: "/docs/manage/observability",
-                        description: "Metrics, OTLP, logging, audit and slow-query pipelines.",
+                        description: "Monitor metrics, logs, and slow queries.",
                         icon: iconRoutes,
                     },
                     {
@@ -214,7 +216,7 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                     {
                         label: "Surrealist UI",
                         href: "/docs/explore/surrealist",
-                        description: "Official SurrealDB IDE.",
+                        description: "Explore data in the official SurrealDB IDE.",
                         icon: iconSurrealist,
                     },
                 ],
@@ -225,13 +227,13 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                     {
                         label: "Tutorials & demos",
                         href: "/docs/explore/tutorials",
-                        description: "Hands-on walkthroughs and demos.",
+                        description: "Follow hands-on walkthroughs and demos.",
                         icon: iconVideo,
                     },
                     {
                         label: "SurrealDB Labs",
                         href: "/docs/labs",
-                        description: "Preview features and lab notes.",
+                        description: "Preview experimental features and lab notes.",
                         icon: iconAtom,
                     },
                 ],
@@ -245,21 +247,21 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                 heading: "Core",
                 items: [
                     {
-                        label: "Query language",
+                        label: "SurrealQL",
                         href: "/docs/reference/query-language",
-                        description: "Syntax, statements, and builtins.",
-                        icon: iconText,
+                        description: "Explore the official SurrealQL query language.",
+                        icon: iconSandbox,
                     },
                     {
                         label: "REST API",
                         href: "/docs/reference/rest-api",
-                        description: "HTTP API for queries and admin.",
+                        description: "Call the HTTP API for queries and admin.",
                         icon: iconAPI,
                     },
                     {
                         label: "CLI tool",
                         href: "/docs/reference/cli",
-                        description: "CLI install, backup, and ops.",
+                        description: "Install, back up, and manage from the CLI.",
                         icon: iconWrench,
                     },
                 ],
@@ -270,61 +272,51 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                     {
                         label: "Rust",
                         href: "/docs/reference/rust",
-                        description: "Async client and embedded engine.",
                         icon: iconLangRust,
                     },
                     {
                         label: "JavaScript",
                         href: "/docs/reference/javascript",
-                        description: "Browser, Node, and WASM client.",
                         icon: iconLangJavaScript,
                     },
                     {
                         label: "Go",
                         href: "/docs/reference/golang",
-                        description: "Server-side client for Go.",
                         icon: iconLangGo,
                     },
                     {
                         label: ".NET",
                         href: "/docs/reference/dotnet",
-                        description: "C# client and embedded engine.",
                         icon: iconLangDotNet,
                     },
                     {
                         label: "Java",
                         href: "/docs/reference/java",
-                        description: "Client library for the JVM.",
                         icon: iconLangJava,
                     },
                     {
                         label: "Kotlin",
                         href: "/docs/reference/kotlin",
-                        description: "Idiomatic Kotlin client.",
                         icon: iconLangKotlin,
                     },
                     {
                         label: "PHP",
                         href: "/docs/reference/php",
-                        description: "Client for PHP applications.",
                         icon: iconLangPHP,
                     },
                     {
                         label: "Mojo",
                         href: "/docs/reference/mojo",
-                        description: "Client for the Mojo language.",
                         icon: iconLangMojo,
                     },
                     {
                         label: "Python",
                         href: "/docs/reference/python",
-                        description: "Sync and async Python client.",
                         icon: iconLangPython,
                     },
                     {
                         label: "Swift",
                         href: "/docs/reference/swift",
-                        description: "Native client for Swift.",
                         icon: iconLangSwift,
                     },
                 ],
