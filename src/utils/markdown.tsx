@@ -15,6 +15,27 @@ import { getImageUrl } from "./image-urls";
 
 export type DocHeading = ReturnType<typeof extractHeadings>[number];
 
+// Same pattern as @surrealdb/ui CodeBlock: strip leading language-test block comments.
+const LANGUAGE_TEST_COMMENT =
+    /^(?:[ \t]*\r?\n)*(?:\/\*\*([\s\S]*?)\*\/(?:[ \t]*\r?\n)*)?([ \t]*[^\r\n][\s\S]*)$/;
+
+const FENCED_CODE_BLOCK = /(```[^\n]*\n)([\s\S]*?)(```)/g;
+
+function stripLanguageTestComment(code: string): string {
+    const match = code.match(LANGUAGE_TEST_COMMENT);
+    if (!match) {
+        return code;
+    }
+
+    return match[2] ?? code;
+}
+
+function stripLanguageTestComments(markdown: string): string {
+    return markdown.replace(FENCED_CODE_BLOCK, (_match, fence, body, closing) => {
+        return `${fence}${stripLanguageTestComment(body)}${closing}`;
+    });
+}
+
 function stripLeadingH1(markdown: string): string {
     const tree = parseMarkdownTree(markdown);
     const source = markdownSourceFromString(markdown);
@@ -55,7 +76,7 @@ function injectIconScope(markdown: string): string {
 }
 
 export function resolveMarkdown(markdown: string) {
-    const content = injectIconScope(stripLeadingH1(markdown));
+    const content = injectIconScope(stripLanguageTestComments(stripLeadingH1(markdown)));
     const tree = parseMarkdownTree(content);
     const source = markdownSourceFromString(content);
     const headings = extractHeadings(tree, source);
