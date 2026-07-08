@@ -12,8 +12,9 @@ import {
     Menu,
     Stack,
     Text,
+    ThemeIcon,
 } from "@mantine/core";
-import { Icon, iconChevronDown, iconChevronRight, ThemedImage } from "@surrealdb/ui";
+import { Icon, iconChevronDown, iconOpen, ThemedImage } from "@surrealdb/ui";
 import { Fragment, useState } from "react";
 import { ClientOnly } from "vike-react/ClientOnly";
 import { usePageContext } from "vike-react/usePageContext";
@@ -49,23 +50,54 @@ function normalizeHref(href: string) {
     return href.replace(/^\/docs/, "").replace(/\/$/, "") || "/";
 }
 
-function useIsNavActive(entry: NavEntry) {
+function entryHrefs(entry: NavEntry): string[] {
+    return isMenuGroup(entry) ? flattenMenuItems(entry).map((item) => item.href) : [entry.href];
+}
+
+/**
+ * Resolves the single nav href that owns the current page.
+ *
+ * Each candidate href is matched against the current path and the most
+ * specific (longest) match wins, so overlapping entries — e.g. a section
+ * hub and one of its sub-pages — never both light up.
+ *
+ * The root entry (`/docs/`, normalising to `/`) is the "Start" catch-all:
+ * its sub-pages are unprefixed (`/docs/architecture`, not `/docs/start/…`),
+ * so prefix matching can't claim them. Instead it acts as the fallback for
+ * any docs page no other entry owns.
+ */
+function useActiveHref(navLinks: NavEntry[]): string | null {
     const { urlPathname } = usePageContext();
     const pathname = normalizeHref(urlPathname);
 
-    if (isMenuGroup(entry)) {
-        return flattenMenuItems(entry).some((item) => {
-            const href = normalizeHref(item.href);
-            return pathname === href || pathname.startsWith(`${href}/`);
-        });
+    let activeHref: string | null = null;
+    let activeLength = -1;
+
+    for (const entry of navLinks) {
+        for (const href of entryHrefs(entry)) {
+            const normalized = normalizeHref(href);
+            const matches =
+                normalized === "/"
+                    ? pathname === "/"
+                    : pathname === normalized || pathname.startsWith(`${normalized}/`);
+
+            if (matches && normalized.length > activeLength) {
+                activeHref = href;
+                activeLength = normalized.length;
+            }
+        }
     }
 
-    const href = normalizeHref(entry.href);
-    return pathname === href || pathname.startsWith(`${href}/`);
+    if (activeHref) return activeHref;
+
+    const root = navLinks.find(
+        (entry): entry is NavItem => !isMenuGroup(entry) && normalizeHref(entry.href) === "/",
+    );
+    return root?.href ?? null;
 }
 
-function NavLink({ label, href }: NavItem) {
-    const active = useIsNavActive({ label, href });
+function NavLink({ label, href, activeHref }: NavItem & { activeHref: string | null }) {
+    const active = href === activeHref;
 
     return (
         <Anchor
@@ -84,8 +116,12 @@ function NavLink({ label, href }: NavItem) {
     );
 }
 
-function NavDropdown({ label, sections }: NavMenuGroup) {
-    const active = useIsNavActive({ label, sections });
+function NavDropdown({
+    label,
+    sections,
+    activeHref,
+}: NavMenuGroup & { activeHref: string | null }) {
+    const active = flattenMenuItems({ label, sections }).some((item) => item.href === activeHref);
     const [hover, setHover] = useState(false);
 
     return (
@@ -93,13 +129,12 @@ function NavDropdown({ label, sections }: NavMenuGroup) {
             opened={hover}
             onChange={setHover}
             shadow="lg"
-            offset={4}
-            width={250}
+            offset={18}
             position="bottom-start"
             withinPortal
             trigger="click-hover"
             transitionProps={{
-                transition: "scale-y",
+                transition: "pop-top-left",
             }}
         >
             <Menu.Target>
@@ -128,46 +163,82 @@ function NavDropdown({ label, sections }: NavMenuGroup) {
                     </Flex>
                 </Anchor>
             </Menu.Target>
-            <Menu.Dropdown bdrs="xs">
-                {sections.map((section, sectionIndex) => (
-                    <Fragment key={section.heading}>
-                        {section.heading && (
-                            <Menu.Label
-                                className={classes.navLinkLabel}
-                                mt={sectionIndex > 0 ? "lg" : undefined}
+            <Menu.Dropdown
+                bdrs="md"
+                className={classes.navDropdown}
+            >
+                <Flex className={classes.navSections}>
+                    {sections.map((section) => {
+                        const wide = section.items.length > 5;
+
+                        return (
+                            <Box
+                                key={section.heading}
+                                className={classes.navSection}
+                                data-wide={wide || undefined}
                             >
-                                {section.heading}
-                            </Menu.Label>
-                        )}
-                        {section.items.map((item) => (
-                            <Menu.Item
-                                key={item.href}
-                                component="a"
-                                href={item.href}
-                                className={classes.navItem}
-                                bdrs="xs"
-                                p="sm"
-                                color="slate"
-                                leftSection={
-                                    <Icon
-                                        path={item.icon}
-                                        className={classes.navItemIcon}
-                                        opacity={1}
-                                        size="lg"
-                                    />
-                                }
-                                rightSection={
-                                    <Icon
-                                        path={iconChevronRight}
-                                        opacity={0.2}
-                                    />
-                                }
-                            >
-                                {item.label}
-                            </Menu.Item>
-                        ))}
-                    </Fragment>
-                ))}
+                                {section.heading && (
+                                    <Text
+                                        component="div"
+                                        className={classes.navSectionLabel}
+                                        ff="monospace"
+                                        fz="sm"
+                                    >
+                                        {section.heading}
+                                    </Text>
+                                )}
+                                <Box
+                                    className={classes.navSectionItems}
+                                    data-wide={wide || undefined}
+                                >
+                                    {section.items.map((item) => {
+                                        const itemActive = item.href === activeHref;
+                                        return (
+                                            <Menu.Item
+                                                key={item.href}
+                                                component="a"
+                                                href={item.href}
+                                                className={classes.navItem}
+                                                data-active={itemActive || undefined}
+                                                aria-current={itemActive ? "page" : undefined}
+                                                leftSection={
+                                                    <ThemeIcon
+                                                        variant={itemActive ? "gradient" : "light"}
+                                                    >
+                                                        <Icon
+                                                            path={item.icon}
+                                                            size="lg"
+                                                        />
+                                                    </ThemeIcon>
+                                                }
+                                                rightSection={
+                                                    item.external ? (
+                                                        <Icon path={iconOpen} />
+                                                    ) : undefined
+                                                }
+                                            >
+                                                <Text
+                                                    component="span"
+                                                    className={classes.navItemLabel}
+                                                >
+                                                    {item.label}
+                                                </Text>
+                                                {item.description && (
+                                                    <Text
+                                                        component="span"
+                                                        className={classes.navItemDescription}
+                                                    >
+                                                        {item.description}
+                                                    </Text>
+                                                )}
+                                            </Menu.Item>
+                                        );
+                                    })}
+                                </Box>
+                            </Box>
+                        );
+                    })}
+                </Flex>
             </Menu.Dropdown>
         </Menu>
     );
@@ -186,6 +257,7 @@ export interface HeaderProps {
 
 export function Header({ navLinks, opened, onToggle }: HeaderProps) {
     const product = useCurrentProduct();
+    const activeHref = useActiveHref(navLinks);
 
     return (
         <Box
@@ -235,9 +307,15 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                             key={entry.label}
                         >
                             {isMenuGroup(entry) ? (
-                                <NavDropdown {...entry} />
+                                <NavDropdown
+                                    {...entry}
+                                    activeHref={activeHref}
+                                />
                             ) : (
-                                <NavLink {...entry} />
+                                <NavLink
+                                    {...entry}
+                                    activeHref={activeHref}
+                                />
                             )}
                         </Box>
                     ))}
@@ -286,6 +364,7 @@ export interface MobileNavProps {
 
 export function MobileNav({ navLinks }: MobileNavProps) {
     const product = useCurrentProduct();
+    const activeHref = useActiveHref(navLinks);
 
     return (
         <Stack
@@ -297,57 +376,68 @@ export function MobileNav({ navLinks }: MobileNavProps) {
             <ProductSwitcherMobile current={product.id} />
             <Divider />
             <Stack gap="xs">
-                {navLinks.map((entry, i) => (
-                    <Fragment key={entry.label}>
-                        {i > 0 && <Divider />}
-                        {isMenuGroup(entry) ? (
-                            <MantineNavLink
-                                label={entry.label}
-                                childrenOffset={16}
-                                bdrs="xs"
-                                py="sm"
-                            >
-                                {entry.sections.map((section, sectionIndex) => (
-                                    <Fragment key={section.heading}>
-                                        <Text
-                                            component="div"
-                                            className={classes.navLinkLabel}
-                                            mt={sectionIndex > 0 ? "md" : undefined}
-                                        >
-                                            {section.heading}
-                                        </Text>
-                                        {section.items.map((item) => (
-                                            <MantineNavLink
-                                                key={item.href}
-                                                label={item.label}
-                                                href={item.href}
-                                                component="a"
-                                                py="sm"
-                                                bdrs="xs"
-                                                leftSection={
-                                                    <Icon
-                                                        path={item.icon}
-                                                        className={classes.navItemIcon}
-                                                        opacity={1}
-                                                        size="md"
-                                                    />
-                                                }
-                                            />
-                                        ))}
-                                    </Fragment>
-                                ))}
-                            </MantineNavLink>
-                        ) : (
-                            <MantineNavLink
-                                label={entry.label}
-                                href={entry.href}
-                                component="a"
-                                bdrs="xs"
-                                py="sm"
-                            />
-                        )}
-                    </Fragment>
-                ))}
+                {navLinks.map((entry, i) => {
+                    const groupActive =
+                        isMenuGroup(entry) &&
+                        flattenMenuItems(entry).some((item) => item.href === activeHref);
+
+                    return (
+                        <Fragment key={entry.label}>
+                            {i > 0 && <Divider />}
+                            {isMenuGroup(entry) ? (
+                                <MantineNavLink
+                                    label={entry.label}
+                                    childrenOffset={16}
+                                    bdrs="xs"
+                                    py="sm"
+                                    active={groupActive}
+                                    defaultOpened={groupActive}
+                                >
+                                    {entry.sections.map((section, sectionIndex) => (
+                                        <Fragment key={section.heading}>
+                                            <Text
+                                                component="div"
+                                                className={classes.navLinkLabel}
+                                                mt={sectionIndex > 0 ? "md" : undefined}
+                                            >
+                                                {section.heading}
+                                            </Text>
+                                            {section.items.map((item) => (
+                                                <MantineNavLink
+                                                    key={item.href}
+                                                    label={item.label}
+                                                    description={item.description}
+                                                    href={item.href}
+                                                    component="a"
+                                                    py="sm"
+                                                    bdrs="xs"
+                                                    active={item.href === activeHref}
+                                                    leftSection={
+                                                        <Icon
+                                                            path={item.icon}
+                                                            className={classes.navItemIcon}
+                                                            opacity={1}
+                                                            size="md"
+                                                        />
+                                                    }
+                                                />
+                                            ))}
+                                        </Fragment>
+                                    ))}
+                                </MantineNavLink>
+                            ) : (
+                                <MantineNavLink
+                                    label={entry.label}
+                                    href={entry.href}
+                                    component="a"
+                                    bdrs="xs"
+                                    py="sm"
+                                    active={entry.href === activeHref}
+                                />
+                            )}
+                        </Fragment>
+                    );
+                })}
             </Stack>
         </Stack>
     );
