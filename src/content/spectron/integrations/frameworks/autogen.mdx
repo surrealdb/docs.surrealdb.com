@@ -1,0 +1,85 @@
+---
+position: 11
+title: AutoGen
+description: "Adding Spectron memory to Microsoft AutoGen agents with the Spectron SDK."
+---
+
+# AutoGen
+
+[AutoGen](https://microsoft.github.io/autogen/) builds conversational and multi-agent systems in Python. Spectron gives those agents long-term memory: recall relevant facts before a turn and store new ones after. There is no dedicated adapter. The [Python SDK](/docs/spectron/integrations/sdks/python) (`surrealdb`) exposes the memory operations you register as agent tools.
+
+> [!NOTE]
+> This is an integration guide. It wires the Spectron SDK into AutoGen's tool interface; adapt the function-registration calls to your installed AutoGen version.
+
+## Installation
+
+```bash
+pip install autogen-agentchat autogen-ext[openai] surrealdb
+```
+
+```bash
+export SPECTRON_ENDPOINT="https://api.spectron.example"
+export SPECTRON_CONTEXT="acme-prod"
+export SPECTRON_API_KEY="sk-spec-..."
+```
+
+## Memory as agent tools
+
+Wrap the Spectron client in plain functions and pass them to the agent. AutoGen calls them like any other tool:
+
+```python
+import os
+from autogen_agentchat.agents import AssistantAgent
+from autogen_ext.models.openai import OpenAIChatCompletionClient
+from surrealdb import Spectron
+
+memory = Spectron(
+    endpoint=os.environ["SPECTRON_ENDPOINT"],
+    context=os.environ["SPECTRON_CONTEXT"],
+    api_key=os.environ["SPECTRON_API_KEY"],
+)
+scope = ["org/acme/user/alice"]
+
+def remember(text: str) -> str:
+    """Store a durable fact for later recall."""
+    memory.remember(text, scope=scope)
+    return "stored"
+
+def recall(query: str) -> str:
+    """Retrieve relevant memory for a query."""
+    return memory.query_context(query, k=8, scope=scope)
+
+agent = AssistantAgent(
+    name="assistant",
+    model_client=OpenAIChatCompletionClient(model="gpt-4o"),
+    tools=[remember, recall],
+    system_message="Use recall before answering and remember anything worth keeping.",
+)
+```
+
+## Recall around a run
+
+To keep memory out of the agent's tool list, recall before the run and inject the context into the system message, then store the exchange yourself:
+
+```python
+block = memory.query_context(user_message, k=8, scope=scope)
+agent = AssistantAgent(
+    name="assistant",
+    model_client=OpenAIChatCompletionClient(model="gpt-4o"),
+    system_message=f"You are a helpful assistant.\n\n## Memory\n{block}",
+)
+# after the run
+memory.remember_many(
+    [{"role": "user", "content": user_message}, {"role": "assistant", "content": reply}],
+    scope=scope,
+)
+```
+
+## Scope per user
+
+Pass a `scope` on every call to isolate memory. A scope is a slash path or an array of paths, for example `["org/acme/user/alice"]`. Register paths with `spectron scopes create` before first use.
+
+## Next steps
+
+- [Python SDK](/docs/spectron/integrations/sdks/python): the full client surface
+- [MCP server](/docs/spectron/integrations/mcp-server/install): if your host speaks MCP instead

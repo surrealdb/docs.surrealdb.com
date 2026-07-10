@@ -1,0 +1,134 @@
+---
+position: 1
+title: Vercel AI SDK
+description: "Spectron memory for the Vercel AI SDK, via language-model middleware and a tool set."
+---
+
+# Vercel AI SDK
+
+`@surrealdb/vercel-ai` integrates Spectron with the [Vercel AI SDK](https://ai-sdk.dev). Keep using your own model provider (`@ai-sdk/openai`, `@ai-sdk/anthropic`, and so on) with `generateText` / `streamText`, and let Spectron transparently:
+
+- **inject** relevant long-term memory (and the user's profile) into the prompt before generation, and
+- **store** each user and assistant exchange afterwards,
+
+plus an optional **tool set** so the model can query memory on demand mid-generation.
+
+The API is `createSpectron()` → `.middleware()` / `.tools()`.
+
+## Installation
+
+```bash
+npm i @surrealdb/vercel-ai ai @surrealdb/spectron
+# plus your model provider, e.g.
+npm i @ai-sdk/openai
+```
+
+`ai` (v7) is a peer dependency; you bring your own model provider.
+
+## Setup
+
+`createSpectron()` reads credentials from the environment by default:
+
+| Variable | Description |
+| --- | --- |
+| `SPECTRON_ENDPOINT` | API endpoint origin |
+| `SPECTRON_API_KEY` | Bearer API key |
+| `SPECTRON_CONTEXT` | Context id |
+
+```typescript
+import { createSpectron } from "@surrealdb/vercel-ai";
+
+// From the environment, bound to one user by default.
+const spectron = createSpectron({ defaultScopes: "user/tobie" });
+
+// Or pass config / a preconstructed client explicitly:
+import { Spectron } from "@surrealdb/vercel-ai";
+const spectron = createSpectron({
+    client: new Spectron({ endpoint, apiKey, context }),
+});
+```
+
+## Middleware
+
+Wrap your model with `wrapLanguageModel`. The middleware fetches memory for the latest user message, injects it as a system message, then stores the exchange after generation:
+
+```typescript
+import { openai } from "@ai-sdk/openai";
+import { generateText, wrapLanguageModel } from "ai";
+import { createSpectron } from "@surrealdb/vercel-ai";
+
+const spectron = createSpectron({ defaultScopes: "user/tobie" });
+
+const model = wrapLanguageModel({
+    model: openai("gpt-4o"),
+    middleware: spectron.middleware({ sessionId: "session-123" }),
+});
+
+const { text } = await generateText({
+    model,
+    prompt: "What should I focus on today?",
+});
+```
+
+`streamText` works identically. The middleware wraps the stream, accumulates the reply, and stores it once the stream finishes.
+
+### Middleware options
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `scopes` | `defaultScopes` | DNF scope selector for reads and writes, for example `"user/tobie"`. |
+| `sessionId` | n/a | Session to attach retrieved context and stored turns to. |
+| `injectHistory` | `true` | Inject retrieved memory before generation. |
+| `store` | `true` | Store the user and assistant exchange after generation. |
+| `retrieval` | `"context"` | `"context"` (server-formatted), `"recall"` (raw hits), or `false`. |
+| `k` | `8` | Max hits / context breadth to retrieve. |
+| `includeProfile` | `true` | Inject the user's profile. |
+| `onError` | no-op | Called on memory errors; generation still proceeds. |
+
+> [!NOTE]
+> Memory operations are fail-open: if Spectron is unreachable, the middleware falls back to a plain LLM call rather than throwing.
+
+When you already pass a full `messages` array, turn `store` off (or set `retrieval: false` / `injectHistory: false`) to avoid duplicating history.
+
+## Tools
+
+`spectron.tools()` returns a Vercel AI SDK `ToolSet` the model can call during generation, bound to the same scope and session you pass:
+
+```typescript
+import { generateText, stepCountIs } from "ai";
+
+const { text } = await generateText({
+    model,
+    tools: spectron.tools({ sessionId: "session-123" }),
+    stopWhen: stepCountIs(3),
+    prompt: "Based on our past conversations, what do I care about most?",
+});
+```
+
+| Tool | What it does |
+| --- | --- |
+| `spectron_recall` | Semantic recall of facts and passages for a query. |
+| `spectron_context` | Server-formatted context text for a query. |
+| `spectron_reflect` | Synthesise over memory, optionally persisting the conclusion. |
+| `spectron_remember` | Persist a fact or observation for future recall. |
+| `spectron_forget` | Forget memories matching a query. |
+| `spectron_profile` | The user's attributes, preferences, and instructions. |
+| `spectron_inspect` | Resolve an entity, attribute, relation, or trace reference. |
+
+## Scopes
+
+Scopes bind reads and writes to a region of memory (a DNF selector). A bare string is a single path:
+
+```typescript
+spectron.middleware({ scopes: "user/tobie" });           // one user
+spectron.middleware({ scopes: ["team/eng", "user/x"] }); // OR of two
+```
+
+## Direct client access
+
+`spectron.client` is the underlying `@surrealdb/spectron` client for anything not wrapped here: documents, sessions, entities, `chat`, and so on. See the [JavaScript SDK](/docs/spectron/integrations/sdks/javascript-and-typescript) for the full surface.
+
+## Next steps
+
+- [JavaScript SDK](/docs/spectron/integrations/sdks/javascript-and-typescript): using Spectron directly with the TypeScript SDK
+- [Chat sessions](/docs/spectron/agent-memory/sessions/chat-sessions): how Spectron manages conversation sessions
