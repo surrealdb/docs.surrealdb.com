@@ -1,18 +1,118 @@
 ---
-position: 4
+position: 2
 title: CrewAI
-description: "CrewAI integration status."
+description: "CrewAI integration for Spectron, with memory tools and automatic per-task memory."
 ---
 
 # CrewAI
 
-> **Status:** No CrewAI adapter is available yet. This page is a placeholder.
+Spectron gives [CrewAI](https://www.crewai.com/) agents persistent, provenance-first memory. The integration offers two approaches that compose: tools an agent calls explicitly, and automatic memory that recalls before each task, writes back after it, and consolidates when the crew finishes, without changing your agents or tasks.
 
-## Recommended approach today
+Package: **`spectron-integration-crewai`** (PyPI). It pulls in CrewAI and the Spectron SDK (`surrealdb[spectron]`).
 
-- Use the **Python SDK** (`surrealdb`) or REST from crew tools / task callbacks to **`/facts/batch`** and **`/query`**.
-- Scope each crew or user with slash paths (`org/acme`, `org/acme/agent/researcher`, …). Register paths with `spectron scopes create` before use.
+## Requirements
 
-See [Storing memories](/docs/spectron/agent-memory/ingest/experiential/remember) and [Recalling memories](/docs/spectron/agent-memory/retrieve/recall).
+- Python 3.10+
+- CrewAI 1.5+
+- Spectron access: endpoint, context, and API key
 
-A future harness adapter would mirror crew message history into batch ingest with stable idempotency keys, similar to `spectron-langchain`.
+## Installation
+
+```bash
+pip install spectron-integration-crewai
+```
+
+## Environment
+
+| Variable | Purpose |
+| --- | --- |
+| `SPECTRON_ENDPOINT` | Server URL |
+| `SPECTRON_CONTEXT` | Context id |
+| `SPECTRON_API_KEY` | Context API key (keep it in `.env`, not source) |
+| `SPECTRON_DEFAULT_SCOPE` | Optional. Scope for writes and lens for reads, for example `user/tobie`. |
+| `SPECTRON_TOP_K` | Optional. Memories recalled per query (default `5`). |
+
+You can also pass any of these directly to `SpectronMemory(...)` or `SpectronConfig(...)` instead of using the environment.
+
+## Memory as tools
+
+Attach the Spectron tools and let the agent decide when to use memory:
+
+```python
+from crewai import Agent, Task, Crew
+from spectron_crewai import get_spectron_tools
+
+agent = Agent(
+    role="Research Analyst",
+    goal="Answer questions using long-term memory",
+    backstory="You recall what you have learned before and store new findings.",
+    tools=get_spectron_tools(scope="user/tobie"),
+    verbose=True,
+)
+
+task = Task(
+    description="What do we know about Tobie's role? Store any new facts you learn.",
+    expected_output="A short summary.",
+    agent=agent,
+)
+
+Crew(agents=[agent], tasks=[task]).kickoff()
+```
+
+To isolate memory per user or session, use the sessionized factory:
+
+```python
+from spectron_crewai import get_sessionized_spectron_tools
+
+tools = get_sessionized_spectron_tools("user-123")
+```
+
+The tools map onto Spectron operations: `spectron_recall`, `spectron_remember`, `spectron_context`, `spectron_forget`, `spectron_reflect`, and `spectron_upload`.
+
+## Automatic memory
+
+Enable automatic memory once and run the crew as usual. Recall happens before each task, write-back runs on a background thread after each task, and consolidation runs when the crew finishes:
+
+```python
+from crewai import Agent, Task, Crew
+from spectron_crewai import SpectronMemory
+
+memory = SpectronMemory(default_scope="user/tobie")
+memory.attach(verbose=True)   # register the event listener
+
+agent = Agent(
+    role="Travel Planning Specialist",
+    goal="Plan trips that respect the traveller's known preferences",
+    backstory="You remember past trips and preferences.",
+    tools=memory.tools(),     # optional: also expose the explicit tools
+)
+
+task = Task(
+    description="Plan a weekend trip for Tobie.",
+    expected_output="A day-by-day plan.",
+    agent=agent,
+)
+
+Crew(agents=[agent], tasks=[task]).kickoff()
+memory.close()                # flush background writes on shutdown
+```
+
+`SpectronMemory` is also usable directly:
+
+```python
+memory.remember("Tobie prefers window seats", scope="user/tobie")
+hits = memory.recall("seat preference", scope="user/tobie")
+answer = memory.context("What are Tobie's travel preferences?")
+```
+
+> [!NOTE]
+> Spectron is exposed as tools and an event-driven memory layer rather than as a CrewAI `StorageBackend`. CrewAI's built-in storage is embedding-centric: it hands the store a vector, never the query text, whereas Spectron embeds and ranks server-side across semantic, lexical, graph, and temporal signals.
+
+## Reliability
+
+Writes run on a background daemon thread, so tasks never block on Spectron I/O. Every call is wrapped: failures are logged and degrade to an empty or error result rather than raising into the crew loop, and a circuit breaker disables memory for the rest of the process after repeated failures or an authentication error.
+
+## When to use MCP or the SDK instead
+
+- For an MCP-native host, prefer the [MCP server](/docs/spectron/integrations/mcp-server/install).
+- To call Spectron directly outside CrewAI, use the [Python SDK](/docs/spectron/integrations/sdks/python).

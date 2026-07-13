@@ -1,0 +1,119 @@
+---
+position: 6
+title: Mastra
+description: "Spectron memory provider and tools for Mastra, plus the SurrealDB storage adapter."
+---
+
+# Mastra
+
+`@surrealdb/mastra-ai` is the SurrealDB integration for [Mastra](https://mastra.ai). It ships two things that can be used separately or together: a **storage adapter** backed by a SurrealDB instance you run, and a **Spectron memory provider** backed by the hosted Spectron service.
+
+## Requirements
+
+- Bun 1+ or Node.js 22+
+- `@mastra/core` 1.31.0+
+- For the storage adapter: SurrealDB v3
+- For Spectron memory: a Spectron endpoint, context, and API key
+
+## Installation
+
+```bash
+bun add @surrealdb/mastra-ai
+```
+
+The Spectron client ships with `zod`; install it alongside when you use the Spectron subpath:
+
+```bash
+bun add zod
+```
+
+## Spectron memory provider
+
+`SpectronMemory` works standalone, with no database required. Verbatim message history is kept in-process while Spectron handles fact extraction, semantic recall, and the user profile. Every Spectron call is guarded, so a service outage degrades to verbatim-only behaviour rather than breaking the agent loop:
+
+```typescript
+import { Agent } from "@mastra/core/agent";
+import { anthropic } from "@ai-sdk/anthropic";
+import { SpectronMemory } from "@surrealdb/mastra-ai/spectron";
+
+const agent = new Agent({
+    name: "assistant",
+    instructions: "You are a helpful assistant with long-term memory.",
+    model: anthropic("claude-sonnet-4-5"),
+    memory: new SpectronMemory({
+        endpoint: process.env.SPECTRON_ENDPOINT!,
+        context: process.env.SPECTRON_CONTEXT!,
+        apiKey: process.env.SPECTRON_API_KEY!,
+    }),
+});
+```
+
+Pass a Mastra `storage` to keep durable verbatim threads, messages, and working memory in SurrealDB, with Spectron layered on as the intelligence tier:
+
+```typescript
+import { SurrealDBStore } from "@surrealdb/mastra-ai";
+
+const store = new SurrealDBStore({ id: "spectron-demo", url: "ws://localhost:8000", username: "root", password: "root" });
+await store.init();
+
+const memory = new SpectronMemory({
+    endpoint: process.env.SPECTRON_ENDPOINT!,
+    context: process.env.SPECTRON_CONTEXT!,
+    apiKey: process.env.SPECTRON_API_KEY!,
+    storage: store, // durable verbatim history; omit to keep it in-process
+});
+```
+
+## Spectron tools
+
+Let an agent call Spectron explicitly to store, recall, forget, fetch context, and search documents:
+
+```typescript
+import { Spectron, createSpectronTools } from "@surrealdb/mastra-ai/spectron";
+
+const client = new Spectron({
+    endpoint: process.env.SPECTRON_ENDPOINT!,
+    context: process.env.SPECTRON_CONTEXT!,
+    apiKey: process.env.SPECTRON_API_KEY!,
+});
+
+const agent = new Agent({
+    name: "assistant",
+    instructions: "Use spectronRecall before answering questions about the user.",
+    model: anthropic("claude-sonnet-4-5"),
+    tools: createSpectronTools(client),
+});
+```
+
+The toolset is `spectronRemember`, `spectronRecall`, `spectronForget`, `spectronContext`, and `spectronSearchDocuments`. Document helpers `ingestDocument` and `searchDocuments` cover RAG.
+
+> [!NOTE]
+> Isolation is soft under a shared API key: `resourceId` maps to Spectron scopes and labels, not a hard tenant boundary. Use `client.onBehalfOf(principal)` for stronger isolation. One client is pinned to one Spectron context.
+
+## SurrealDB storage adapter
+
+Used on its own, `SurrealDBStore` covers conversation memory, workflow suspend/resume snapshots, scoring, observability, and native HNSW vector search against a SurrealDB instance you run:
+
+```typescript
+import { Mastra } from "@mastra/core/mastra";
+import { SurrealDBStore } from "@surrealdb/mastra-ai";
+
+const store = new SurrealDBStore({
+    id: "my-store",
+    url: "ws://localhost:8000",
+    username: "root",
+    password: "root",
+    namespace: "mastra",
+    database: "my_app",
+});
+
+const mastra = new Mastra({ agents: { assistant }, storage: store });
+await store.init();
+```
+
+It also accepts token auth or a pre-connected `Surreal` instance.
+
+## When to use MCP or the SDK instead
+
+- For an MCP-native host, use the [MCP server](/docs/spectron/integrations/mcp-server/install).
+- To call Spectron directly, use the [JavaScript SDK](/docs/spectron/integrations/sdks/javascript-and-typescript).

@@ -1,0 +1,120 @@
+---
+position: 4
+title: Google ADK
+description: "Spectron memory as tools for Google's Agent Development Kit."
+---
+
+# Google ADK
+
+Spectron gives [Google ADK](https://github.com/google/adk-python) agents persistent memory that survives restarts and separate conversations. The package wraps Spectron's memory verbs as ADK tools; Spectron handles entity extraction, knowledge-graph storage, temporal facts, and hybrid retrieval.
+
+Package: **`spectron-google-adk`** (PyPI). It pulls in `google-adk` and `surrealdb`.
+
+## Installation
+
+```bash
+pip install spectron-google-adk
+```
+
+To run against a live Spectron instance:
+
+```bash
+pip install "spectron-google-adk" "surrealdb[spectron]"
+```
+
+## Environment
+
+The Spectron SDK does not read the environment itself. You pass the values in explicitly, or use `SpectronConfig.from_env()` to read them for you:
+
+```bash
+export SPECTRON_CONTEXT="acme-prod"
+export SPECTRON_ENDPOINT="https://api.spectron.example"
+export SPECTRON_API_KEY="sk-spec-..."
+export GOOGLE_API_KEY="your-google-api-key"   # used by the ADK model
+```
+
+## Quickstart
+
+`SpectronToolset` extends ADK's `BaseToolset`, so an ADK `Runner` closes it on shutdown:
+
+```python
+import asyncio
+from google.adk.agents import Agent
+from google.adk.runners import InMemoryRunner
+from spectron_google_adk import SpectronToolset
+
+async def main():
+    toolset = SpectronToolset(
+        context="acme-prod",
+        endpoint="https://api.spectron.example",
+        api_key="sk-spec-...",
+    )
+
+    agent = Agent(
+        model="gemini-2.5-flash",
+        name="assistant",
+        description="An assistant with persistent memory.",
+        instruction="Store durable facts with remember and look things up with recall.",
+        tools=[toolset],
+    )
+
+    runner = InMemoryRunner(agent=agent)
+    try:
+        await runner.run_debug("Remember: Acme Corp, healthcare, 1.2M dollar contract.")
+        events = await runner.run_debug("What healthcare contracts do we have?")
+        for event in events:
+            if event.is_final_response() and event.content:
+                for part in event.content.parts:
+                    if part.text:
+                        print(part.text)
+    finally:
+        await runner.close()
+        await toolset.close()
+
+asyncio.run(main())
+```
+
+## Two ways to build tools
+
+**`SpectronToolset`** (recommended) owns the client and manages its lifecycle. Add it as a single item in the `tools` list:
+
+```python
+toolset = SpectronToolset(config=SpectronConfig.from_env())
+agent = Agent(model="gemini-2.5-flash", name="assistant", tools=[toolset])
+```
+
+**`get_spectron_tools`** returns a plain list of tools for quick scripts. Pass your own `client` to control its lifecycle:
+
+```python
+from surrealdb import AsyncSpectron
+from spectron_google_adk import get_spectron_tools
+
+client = AsyncSpectron(context="acme-prod", endpoint="...", api_key="sk-...")
+tools = get_spectron_tools(client=client)
+```
+
+## Session and tenant isolation
+
+Bind a `session_id` (and optionally a `scope`) when you build the tools. Both are fixed at build time and are not exposed to the model, so an agent cannot read or write outside its slice of memory:
+
+```python
+toolset = SpectronToolset(config=config, session_id="user-123")
+```
+
+Two agents built with the same `session_id` share memory; different session ids stay isolated.
+
+## Choosing which verbs to expose
+
+All verbs are available by default. Pass `include=[...]` to narrow them, for example a collector agent that can only write and a researcher that can only read:
+
+```python
+collector = SpectronToolset(config=config, include=["remember"])
+researcher = SpectronToolset(config=config, include=["recall", "reflect"])
+```
+
+The verbs are `remember`, `recall`, `forget`, `reflect`, `chat`, `consolidate`, `elaborate`, `query_context`, `inspect`, and `state`. Every tool returns a JSON-safe dict with a `status` of `"success"` or `"error"`, so a failed request reaches the model as data rather than failing the agent turn.
+
+## When to use MCP or the SDK instead
+
+- For an MCP-native host, use the [MCP server](/docs/spectron/integrations/mcp-server/install).
+- To call Spectron directly, use the [Python SDK](/docs/spectron/integrations/sdks/python).

@@ -1,0 +1,136 @@
+---
+position: 5
+title: Go SDK
+description: "Using Spectron from Go applications and agents."
+---
+
+# Go SDK
+
+The Spectron client ships **inside** the SurrealDB Go SDK, in the `spectron` package of [`surrealdb.go`](https://github.com/surrealdb/surrealdb.go). It is a typed REST client whose types track the Spectron OpenAPI specification. Every method takes a `context.Context`, and a `*spectron.Client` is safe for concurrent use.
+
+## Installation
+
+```bash
+go get github.com/surrealdb/surrealdb.go/spectron
+```
+
+```go
+import "github.com/surrealdb/surrealdb.go/spectron"
+```
+
+## Client construction
+
+A `*spectron.Client` is pinned to a single context and calls `/api/v1/{context}/...`:
+
+```go
+client, err := spectron.New(
+    "acme-prod",                    // context id
+    "https://api.spectron.example", // endpoint
+    "sk-spec-...",                  // api key
+    spectron.WithTimeout(30*time.Second),
+    spectron.WithMaxRetries(3),
+)
+if err != nil {
+    return err
+}
+defer client.Close()
+```
+
+| Argument | Required | Notes |
+| --- | --- | --- |
+| `contextID` | Yes | Context id, for example `"acme-prod"`. |
+| `endpoint` | Yes | Full URL of the Spectron host. Trailing slashes are trimmed. |
+| `apiKey` | Yes | Bearer token, sent as `Authorization: Bearer <key>`. The SDK never reads environment variables. |
+
+## Remember and recall
+
+```go
+ctx := context.Background()
+
+client.Remember(ctx, &spectron.RememberRequest{
+    Text:   "Acme acquired Beta",
+    Scopes: spectron.ScopeSets{{"team/acme"}},
+    Infer:  spectron.InferFull,
+})
+
+client.RememberMany(ctx, &spectron.RememberManyRequest{
+    Messages: []spectron.BatchMessage{
+        {Role: spectron.RoleUser, Content: "I just got promoted to CTO"},
+        {Role: spectron.RoleAssistant, Content: "Congratulations!"},
+    },
+    Extract: spectron.ExtractWholeConversation,
+})
+
+res, err := client.Recall(ctx, &spectron.RecallRequest{
+    Query: "what role do I have at Acme",
+    K:     10,
+    Mode:  spectron.MemoryModeHybrid,
+})
+for _, hit := range res.Hits {
+    fmt.Println(hit.Score, hit.Source, hit.Text)
+}
+```
+
+`Remember` and `RememberMany` send an `Idempotency-Key` header derived from the method, path, body, and a 30-second bucket, so a retry within the bucket collapses onto the previous attempt server-side.
+
+## Chat
+
+```go
+reply, _ := client.Chat(ctx, &spectron.ChatRequest{Message: "what's my role?"})
+fmt.Println(reply.Reply)
+
+// Streaming via Go 1.23 range-over-func.
+for chunk, err := range client.ChatStream(ctx, &spectron.ChatRequest{Message: "what's my role?"}) {
+    if err != nil {
+        return err
+    }
+    fmt.Print(chunk.Delta)
+    if chunk.Done {
+        fmt.Println("\n[trace]", chunk.TraceID)
+        break
+    }
+}
+```
+
+## Documents and sub-clients
+
+Grouped operations live under sub-client accessors:
+
+```go
+f, _ := os.Open("returns.pdf")
+defer f.Close()
+
+doc, err := client.Documents().Upload(ctx, f,
+    spectron.WithFilename("returns.pdf"),
+    spectron.WithContentType("application/pdf"),
+)
+fmt.Println(doc.ID, doc.Status)
+```
+
+| Accessor | Methods |
+| --- | --- |
+| `Documents()` | `Upload`, `Reprocess`, `List`, `Get`, `Delete`, `Chunks`, `FetchRaw`, `Query`, `RecomputeLinks`, keyword helpers |
+| `Entities()` | `List`, `Get`, `Delete`, `History` |
+| `Sessions()` | `Create`, `Delete`, `Context`, `Turns` |
+| `Scopes()` | `List`, `Register`, `Delete`, `Forget`, `Grants` |
+| `Principals()` | `List`, `Get`, `Effective`, `Grant`, `Revoke` |
+| `Keys()` | `Create`, `List`, `Delete`, `Rotate` |
+| `Traces()` | `List`, `Get`, `Stats` |
+
+Top-level verbs also include `Forget`, `QueryContext`, `Consolidate`, `Reflect`, `Elaborate`, `Inspect`, `State`, `Profile`, `Whoami`, and `Health`.
+
+## Errors
+
+Failures wrap `*spectron.APIError` and match sentinel errors such as `spectron.ErrNotFound`:
+
+```go
+_, err := client.Recall(ctx, &spectron.RecallRequest{Query: "x"})
+if errors.Is(err, spectron.ErrNotFound) {
+    var api *spectron.APIError
+    if errors.As(err, &api) {
+        fmt.Printf("not found (trace=%s)\n", api.TraceID)
+    }
+}
+```
+
+`GET` requests and idempotent writes retry on connection errors and 5xx responses (default 3 attempts); other writes do not. See the [REST API](/docs/spectron/reference/rest-api) for the full contract.

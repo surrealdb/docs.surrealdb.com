@@ -1,0 +1,102 @@
+---
+position: 3
+title: Cloudflare Workers AI
+description: "Using Spectron memory from a Cloudflare Worker alongside Workers AI models."
+---
+
+# Cloudflare Workers AI
+
+A Cloudflare Worker can run a model with [Workers AI](https://developers.cloudflare.com/workers-ai/) and back it with Spectron memory in the same request. The [JavaScript SDK](/docs/spectron/integrations/sdks/javascript-and-typescript) (`@surrealdb/spectron`) uses platform `fetch` and ships no runtime dependencies, so it runs on the Workers runtime unchanged.
+
+> [!NOTE]
+> This is an integration guide. There is no first-party Cloudflare package; the code wires the Spectron SDK into a Worker. It applies equally to the [Cloudflare Agents SDK](https://developers.cloudflare.com/agents/): construct the client the same way inside your agent.
+
+## Installation
+
+```bash
+npm install @surrealdb/spectron
+```
+
+Store the Spectron API key as a secret rather than in `wrangler.toml`:
+
+```bash
+npx wrangler secret put SPECTRON_API_KEY
+```
+
+Bind Workers AI in `wrangler.toml`:
+
+```toml
+[ai]
+binding = "AI"
+
+[vars]
+SPECTRON_ENDPOINT = "https://api.spectron.example"
+SPECTRON_CONTEXT = "acme-prod"
+```
+
+## Worker with memory
+
+Recall context, run a Workers AI model with that context, then store the exchange:
+
+```typescript
+import { Spectron } from "@surrealdb/spectron";
+
+interface Env {
+    AI: Ai;
+    SPECTRON_ENDPOINT: string;
+    SPECTRON_CONTEXT: string;
+    SPECTRON_API_KEY: string;
+}
+
+export default {
+    async fetch(request: Request, env: Env): Promise<Response> {
+        const { userId, message } = await request.json();
+        const scope = [`org/acme/user/${userId}`];
+
+        const spectron = new Spectron({
+            endpoint: env.SPECTRON_ENDPOINT,
+            context: env.SPECTRON_CONTEXT,
+            apiKey: env.SPECTRON_API_KEY,
+        });
+
+        // 1. Recall relevant memory as a context block.
+        const memory = await spectron.context(message, { scope, k: 8 });
+
+        // 2. Run a Workers AI model with the context injected.
+        const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+            messages: [
+                { role: "system", content: `You are a helpful assistant.\n\n## Memory\n${memory}` },
+                { role: "user", content: message },
+            ],
+        });
+
+        // 3. Store the exchange for next time.
+        await spectron.rememberMany(
+            [
+                { role: "user", content: message },
+                { role: "assistant", content: result.response },
+            ],
+            { scope },
+        );
+
+        return Response.json({ text: result.response });
+    },
+};
+```
+
+## Latency and subrequests
+
+Each Spectron call is an outbound `fetch`, which counts against the Worker's subrequest limit. Two calls per turn (`context` then `rememberMany`) is typical. To keep the response fast, move the write off the critical path with `ctx.waitUntil`:
+
+```typescript
+ctx.waitUntil(spectron.rememberMany(turns, { scope }));
+```
+
+## Scope per user or session
+
+Pass a `scope` on every call to isolate memory. A scope is a slash path or an array of paths, for example `["org/acme/user/alice"]`. Register paths with `spectron scopes create` before first use.
+
+## Next steps
+
+- [JavaScript SDK](/docs/spectron/integrations/sdks/javascript-and-typescript): the full client surface
+- [REST API](/docs/spectron/integrations/surfaces/rest): calling Spectron over HTTP without the SDK

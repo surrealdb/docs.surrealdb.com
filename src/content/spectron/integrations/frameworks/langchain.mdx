@@ -1,45 +1,128 @@
 ---
 position: 1
 title: LangChain
-description: "LangChain harness adapter for Spectron."
+description: "LangChain and LangGraph integration for Spectron, with retrievers, agent tools, and a LangGraph store."
 ---
 
 # LangChain
 
-Spectron ships a **harness adapter** that records LangChain conversations into the substrate via `POST /api/v1/{context_id}/facts/batch` — without changing your chain prompts.
+SurrealDB ships an official integration for the [LangChain.js](https://js.langchain.com) and [LangGraph.js](https://langchain-ai.github.io/langgraphjs/) ecosystems. It wraps the [`@surrealdb/spectron`](https://www.npmjs.com/package/@surrealdb/spectron) client so a chain or agent can retrieve from Spectron's knowledge base, expose memory as tools, and read memory through a LangGraph store.
 
-Package: **`spectron-langchain`** (PyPI). It depends on LangChain in your app, not bundled inside the adapter.
+The integration is TypeScript. Python applications call Spectron through the [Python SDK](/docs/spectron/integrations/sdks/python) or the [REST API](/docs/spectron/integrations/surfaces/rest) instead.
+
+## Packages
+
+| Package | What it provides |
+| --- | --- |
+| `@surrealdb/langchain-core` | Shared SurrealDB client, config, schema and filter helpers, and the Spectron HTTP client |
+| `@surrealdb/langchain` | `VectorStore`, hybrid `Retriever`, `SpectronRetriever`, agent tools, and a persisting chat model wrapper |
+| `@surrealdb/langgraph` | LangGraph `BaseCheckpointSaver`, `BaseStore`, and the Spectron-backed `SpectronStore` |
+
+## Requirements
+
+- Node.js 22+ or Bun 1+
+- Spectron access: endpoint, context, and API key
 
 ## Installation
 
 ```bash
-pip install surrealdb spectron-langchain
+bun add @surrealdb/langchain @surrealdb/langgraph @surrealdb/spectron
 ```
 
-## Environment
+## Configure the client
 
-| Variable | Purpose |
-| --- | --- |
-| `SPECTRON_BASE_URL` or `SPECTRON_URL` | Server URL |
-| `SPECTRON_API_KEY` | Context API key |
-| `SPECTRON_CONTEXT` or `SPECTRON_CONTEXT_ID` | Context id |
+Construct a client directly, or resolve one from the environment:
 
-Auth uses **`Authorization: Bearer`**. Idempotency keys are derived from the platform conversation identity (24h dedupe per context + principal).
+```typescript
+import { Spectron } from "@surrealdb/langchain-core";
 
-## Usage pattern
+const spectron = new Spectron({
+    context: "acme-prod",
+    apiKey: process.env.SPECTRON_API_KEY!,
+    endpoint: process.env.SPECTRON_ENDPOINT!,
+});
+```
 
-The adapter implements LangChain memory / callback hooks so each user and assistant message is batched to Spectron after the turn completes. Recall for prompt injection uses the same `/query` or `/context` endpoints as the REST API.
+`resolveSpectron` reads `SPECTRON_ENDPOINT`, `SPECTRON_API_KEY`, and `SPECTRON_CONTEXT`, throwing a clear error if any is missing:
 
-See the LangChain adapter package README for class names and constructor options.
+```typescript
+import { resolveSpectron } from "@surrealdb/langchain-core";
 
-## When to use MCP instead
+const spectron = resolveSpectron({}); // all three from the environment
+```
 
-If the host is Claude Desktop, Cursor, or another MCP-native client, prefer **`spectron mcp`** — no Python adapter required.
+| Field | Required | Notes |
+| --- | --- | --- |
+| `context` | Yes | Context id, for example `"acme-prod"`. Pins every request to `/api/v1/{context}/…`. |
+| `apiKey` | Yes | Bearer token, sent as `Authorization: Bearer …`. |
+| `endpoint` | Yes | Spectron API origin, no trailing slash. There is no implicit default host. |
 
-## When to use the SDK instead
+## Retrieval
 
-If your application calls Spectron explicitly (not only through LangChain’s memory interface), use **`surrealdb`** directly. See [Python SDK](/docs/spectron/integrations/sdks/python).
+`SpectronRetriever` turns knowledge-base hits into LangChain `Document`s, with the chunk text as `pageContent` and document, chunk, score, and graph metadata in `metadata`:
 
-## npm / TypeScript
+```typescript
+import { SpectronRetriever } from "@surrealdb/langchain/retrievers";
 
-There is no first-party `@spectron/langchain` package in the repo today. TypeScript agents should use **`@surrealdb/spectron-vercel-ai`** or the REST API.
+const retriever = new SpectronRetriever({
+    client: spectron,
+    mode: "hybrid_graph", // "vector" | "bm25" | "hybrid" | "hybrid_graph"
+    k: 8,
+});
+
+const docs = await retriever.invoke("what is the return policy?");
+```
+
+## Agent tools
+
+Two `StructuredTool`s wire Spectron into an agent. Both accept either an instantiated `client` or a plain config object resolved from `SPECTRON_*` environment variables:
+
+```typescript
+import { SpectronQueryTool, SpectronReflectTool } from "@surrealdb/langchain/tools";
+
+const tools = [
+    new SpectronQueryTool({ client: spectron }),
+    new SpectronReflectTool({ client: spectron }),
+];
+```
+
+`SpectronQueryTool` takes `{ query, k?, mode?, filter? }` and returns a compact JSON array of hits. `SpectronReflectTool` takes `{ query, persist? }` and returns the reflection.
+
+## LangGraph store
+
+`SpectronStore` is a read-oriented `BaseStore` adapter. Reads delegate to Spectron; writes are not supported, because Spectron persists memory through sessions and reflections rather than raw key/value puts:
+
+```typescript
+import { SpectronStore } from "@surrealdb/langgraph/spectron_store";
+
+const store = new SpectronStore({ spectron });
+
+await store.get(["Person"], "tobie"); // → entities.get
+await store.search(["Person"], { query: "who is tobie?", limit: 5 }); // → recall
+```
+
+| Method | Backed by | Supported |
+| --- | --- | --- |
+| `get` | `entities.get` | Yes |
+| `search` | `recall` | Yes (requires `query`) |
+| `put` / `delete` / `listNamespaces` | n/a | Throws |
+
+## Vector store without Spectron
+
+`@surrealdb/langchain` also exposes a `VectorStore` backed by SurrealDB's native HNSW index, for RAG against a SurrealDB instance you run yourself rather than the hosted Spectron service:
+
+```typescript
+import { OpenAIEmbeddings } from "@langchain/openai";
+import { VectorStore } from "@surrealdb/langchain";
+
+const store = await VectorStore.initialize(new OpenAIEmbeddings(), {
+    surreal: { url: "ws://localhost:8000", username: "root", password: "root", namespace: "app", database: "rag" },
+    tableName: "documents",
+    dimensions: 1536,
+});
+```
+
+## When to use MCP or the SDK instead
+
+- If the host is Claude, Cursor, or another MCP-native client, prefer the [MCP server](/docs/spectron/integrations/mcp-server/install), with no adapter required.
+- If your application calls Spectron directly rather than through LangChain, use the [JavaScript SDK](/docs/spectron/integrations/sdks/javascript-and-typescript).
