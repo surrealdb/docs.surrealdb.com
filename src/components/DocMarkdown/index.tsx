@@ -11,7 +11,7 @@ export function DocMarkdown() {
             content={content}
             jsxMode="render"
             components={registerMarkdownComponents()}
-            onImage={resolveImageDescriptor}
+            onResolveMedia={resolveImageDescriptor}
             fz={15}
             lh="sm"
             p={0}

@@ -45,10 +45,35 @@ for (const [path, module] of Object.entries(imageModules)) {
     }
 }
 
+/** Alternate map keys for a path that was not found by direct lookup. */
+function imageMapCandidates(imagePath: string): string[] {
+    if (imagePath.startsWith("~/assets/")) {
+        const rest = imagePath.slice("~/assets/".length);
+        return [`../assets/${rest}`, `/assets/${rest}`, rest];
+    }
+
+    if (imagePath.startsWith("@assets")) {
+        const rest = imagePath.slice("@assets".length).replace(/^\//, "");
+        return [`../assets/${rest}`, `/assets/${rest}`, `~/assets/${rest}`, rest];
+    }
+
+    if (imagePath.startsWith("/assets/")) {
+        const rest = imagePath.slice("/assets/".length);
+        return [`../assets/${rest}`, `~/assets/${rest}`, rest];
+    }
+
+    if (imagePath.startsWith("../assets/")) {
+        const rest = imagePath.slice("../assets/".length);
+        return [`~/assets/${rest}`, `/assets/${rest}`, rest];
+    }
+
+    return [];
+}
+
 /**
  * Get the URL for an image by various path formats.
  * Supports:
- * - @assets paths: "~/assets/img/pages/events/webinar/2026-02-04.png"
+ * - ~/assets paths: "~/assets/img/pages/events/webinar/2026-02-04.png"
  * - /assets paths: "/assets/img/pages/events/webinar/2026-02-04.png"
  * - Relative paths: "img/pages/events/webinar/2026-02-04.png"
  * - Filenames (for ambassadors/headshots): "abhishek-das.png"
@@ -65,24 +90,15 @@ export function getImageUrl(imagePath: string | undefined): string | undefined {
         return imagePath;
     }
 
-    // Check if it's already in our map
-    if (imageMap[imagePath]) {
-        return imageMap[imagePath];
+    const direct = imageMap[imagePath];
+    if (direct) {
+        return direct;
     }
 
-    // Try converting @assets to /assets and check
-    if (imagePath.startsWith("@assets")) {
-        const publicPath = imagePath.replace("@assets", "/assets");
-        if (imageMap[publicPath]) {
-            return imageMap[publicPath];
-        }
-    }
-
-    // Try converting /assets to @assets and check
-    if (imagePath.startsWith("/assets")) {
-        const assetsPath = imagePath.replace("/assets", "@assets");
-        if (imageMap[assetsPath]) {
-            return imageMap[assetsPath];
+    for (const candidate of imageMapCandidates(imagePath)) {
+        const url = imageMap[candidate];
+        if (url) {
+            return url;
         }
     }
 

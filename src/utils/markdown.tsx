@@ -1,7 +1,7 @@
 import {
     extractHeadings,
-    type ImageDescriptor,
     type MarkdownComponents,
+    type MediaDescriptor,
     markdownSourceFromString,
     mergeMarkdownComponents,
     parseMarkdownTree,
@@ -84,7 +84,7 @@ export function resolveMarkdown(markdown: string) {
     return { content, headings };
 }
 
-export function resolveImageDescriptor(node: ImageDescriptor): ImageDescriptor {
+export function resolveImageDescriptor(node: MediaDescriptor): MediaDescriptor {
     if (node.src.startsWith("@ui/")) {
         const resolved = getImageUrl(node.src);
 
