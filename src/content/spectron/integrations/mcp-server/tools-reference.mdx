@@ -6,22 +6,25 @@ description: "Complete reference for all seven Spectron MCP tools."
 
 # MCP tools reference
 
-Spectron exposes seven tools over the Model Context Protocol at `/mcp`. All tools use the same **`Authorization: Bearer`** authentication as the REST API. Point the MCP URL at `https://<your-context-host>/mcp` on SurrealDB Cloud.
+Spectron exposes seven tools over the Model Context Protocol at `/mcp`: **`remember`**, **`recall`**, **`context`**, **`reflect`**, **`forget`**, **`upload`**, and **`inspect`**. All tools use the same **`Authorization: Bearer`** authentication as the REST API. Point the MCP URL at `https://<your-context-host>/mcp` on SurrealDB Cloud.
+
+> [!NOTE]
+> Older docs used names such as `memory_store`, `memory_recall`, and `knowledge_search`. Those prefixes are retired — use the short names above.
 
 > [!NOTE]
 > REST-aligned responses use **camelCase** (`queryMs`, `traceId`, `trace.traceId`). **Scope** arguments are slash paths (for example `org/acme/user/alice`). Register paths with `spectron scopes create` before use.
 
 ## Common fields
 
-Tool responses correlate with graph-resident traces via **`traceId`** or **`trace.traceId`** (depending on the underlying endpoint). Use `GET .../traces/{traceId}` for the full record.
+Tool responses correlate with graph-resident traces via **`traceId`** or **`trace.traceId`** (depending on the underlying endpoint). Use `GET .../traces/{traceId}` for the full record, or MCP **`inspect`** with `ref: "trace:<id>"`.
 
 Every tool accepts an optional **`context_id`**. When omitted, the server uses the Context bound to the bearer API key. An explicit `context_id` that does not match that binding returns **`401`**.
 
 ---
 
-## `memory_store`
+## `remember`
 
-Store a conversational exchange. Spectron auto-classifies the content, reconciles new facts against existing memory, and persists structured records to the **experiential** graph.
+Store a conversational exchange or free-text fact. Spectron auto-classifies content, reconciles against existing memory, and persists structured records.
 
 **REST equivalent:** `POST /api/v1/{context_id}/facts`
 
@@ -29,59 +32,62 @@ Store a conversational exchange. Spectron auto-classifies the content, reconcile
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `role` | `"user"` \| `"assistant"` | Yes | Who produced the content |
-| `content` | string | Yes | The message text to extract memory from |
-| `session_id` | string | No | Existing session to append to. A new session is created if omitted. |
-| `scope` | string[] | No | Slash paths (for example `["org/acme/user/alice"]`). |
+| `text` | string | Yes | Content to remember |
+| `session_id` | string | No | Existing session to append to |
+| `scope` | string[] or nested arrays | No | DNF write selector within `memory:write` |
+| `labels` | string[] | No | Descriptive `key=value` labels |
+| `infer` | `"full"` \| `"preview"` \| `"none"` | No | Default `full` |
+| `context_id` | string | No | Omit to use the bearer key's Context |
 
 ### Output
 
-| Field | Type | Description |
-|---|---|---|
-| `turn_id` | string | ID of the turn record created |
-| `session_id` | string | Session the turn was appended to |
-| `entities` | array | Entities extracted from the content |
-| `attributes` | array | Attributes extracted and persisted |
-| `relations` | array | Relations between entities |
-| `instructions` | array | Imperative instructions extracted (e.g. "always respond in bullet points") |
-| `uncertainties` | array | Uncertain or unverifiable claims flagged during extraction |
-| `corrections` | array | Values that supersede previously stored attributes |
-| `traceId` | string | Trace record ID |
+Structured diff: entities, attributes, relations, instructions, uncertainties, corrections, plus a stand-in `trace_id`.
 
 ### Example
 
-An LLM invokes this tool at the end of a conversation turn:
-
 ```
-Tool: memory_store
+Tool: remember
 Input: {
-  "role": "user",
-  "content": "I just got promoted to VP of Engineering and I'm moving to Singapore next month.",
+  "text": "I just got promoted to VP of Engineering and I'm moving to Singapore next month.",
   "scope": ["org/acme/user/alice"]
-}
-
-Output: {
-  "turn_id": "turn:01jt4kx...",
-  "session_id": "session:01jt4ky...",
-  "entities": [
-    { "id": "Person/alice", "label": "Alice" }
-  ],
-  "attributes": [
-    { "entity": "Person/alice", "key": "role", "value": "VP of Engineering", "category": "identity" },
-    { "entity": "Person/alice", "key": "city", "value": "Singapore", "category": "identity", "valid_from": "2026-06-01" }
-  ],
-  "relations": [],
-  "instructions": [],
-  "corrections": [],
-  "traceId": "trace:01jt4m..."
 }
 ```
 
 ---
 
-## `memory_recall`
+## `recall`
 
-Retrieve relevant context for a query from **experiential** memory and **authoritative** knowledge in one call. Returns a pre-formatted context string designed for direct injection into an LLM system prompt.
+Unified search over experiential facts and document passages. Returns ranked hits (not a synthesised answer).
+
+**REST equivalent:** `POST /api/v1/{context_id}/query`
+
+### Input
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `query` | string | Yes | Natural-language question |
+| `k` | integer | No | Hit count (default 10, max 50) |
+| `mode` | string | No | `vector` \| `bm25` \| `graph` \| `hybrid` |
+| `lens` | string[] or nested arrays | No | DNF read lens |
+| `labels` | string[] | No | Optional filters |
+| `context_id` | string | No | Omit to use the bearer key's Context |
+
+### Example
+
+```
+Tool: recall
+Input: {
+  "query": "What role does Alice have?",
+  "k": 10,
+  "lens": ["org/acme"]
+}
+```
+
+---
+
+## `context`
+
+Assemble a markdown context block for prompt injection (profile + relevant facts).
 
 **REST equivalent:** `POST /api/v1/{context_id}/context`
 
@@ -89,54 +95,16 @@ Retrieve relevant context for a query from **experiential** memory and **authori
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `query` | string | Yes | Natural-language query describing what context to retrieve |
-| `k` | integer | No | Maximum number of memory hits to include (default: 10) |
-| `scope` | string[] | No | Slash paths to filter the query. |
-
-### Output
-
-| Field | Type | Description |
-|---|---|---|
-| `context` | string | Formatted context block for system prompt injection |
-| `tier` | string | Resolution tier used: `"direct"`, `"cache"`, `"hybrid"`, or `"full_context"` |
-| `queryMs` | integer | Time taken to resolve the query in milliseconds |
-| `traceId` | string | Trace record ID |
-
-### Example
-
-```
-Tool: memory_recall
-Input: {
-  "query": "What do I know about Alice's current situation?",
-  "scope": ["org/acme/user/alice"]
-}
-
-Output: {
-  "context": "### Alice\n- Role: VP of Engineering (updated 2026-05-12)\n- City: Singapore (from 2026-06-01)\n- Organisation: Acme Corp\n- Preference: Concise answers, no filler phrases",
-  "tier": "direct",
-  "queryMs": 3,
-  "traceId": "trace:01jt4n..."
-}
-```
-
-The `context` string can be placed directly in a system prompt:
-
-```
-You are a helpful assistant.
-
-## Memory
-### Alice
-- Role: VP of Engineering (updated 2026-05-12)
-...
-```
+| `query` | string | Yes | What context to assemble |
+| `lens` | string[] or nested arrays | No | DNF read lens |
+| `labels` | string[] | No | Optional filters |
+| `context_id` | string | No | Omit to use the bearer key's Context |
 
 ---
 
-## `memory_reflect`
+## `reflect`
 
-Synthesise patterns and insights from existing memories. Useful for periodic summarisation, generating user briefs, or deriving higher-order facts from accumulated context.
-
-Pass `persist: true` to write the derived attributes back to **experiential** memory as durable facts.
+Synthesise insights across memory. Optionally persist with `persist: true`.
 
 **REST equivalent:** `POST /api/v1/{context_id}/reflect`
 
@@ -144,217 +112,31 @@ Pass `persist: true` to write the derived attributes back to **experiential** me
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `prompt` | string | Yes | A directive describing what patterns or insights to look for (e.g. "What are the recurring themes in this user's goals?") |
-| `scope` | string[] | No | Slash paths to reflect over |
-| `persist` | boolean | No | If `true`, saves derived attributes to **experiential** memory (default: `false`) |
-| `k` | integer | No | Number of memory records to consider during reflection (default: 20) |
-
-### Output
-
-| Field | Type | Description |
-|---|---|---|
-| `reflection` | string | Synthesised insights in natural language |
-| `evidence` | array | Memory records used as evidence for the reflection |
-| `persisted_attributes` | array | Attributes written to **experiential** memory if `persist` was `true` |
-| `traceId` | string | Trace record ID |
-
-### Example
-
-```
-Tool: memory_reflect
-Input: {
-  "prompt": "What career themes emerge from this user's history?",
-  "scope": ["org/acme/user/alice"],
-  "persist": true
-}
-
-Output: {
-  "reflection": "Alice consistently moves toward technical leadership roles and has a pattern of relocating for career advancement. Recent trajectory: engineer → CTO → VP of Engineering with international moves.",
-  "evidence": [...],
-  "persisted_attributes": [
-    { "entity": "Person/alice", "key": "career_theme", "value": "technical leadership progression" }
-  ],
-  "traceId": "trace:01jt4p..."
-}
-```
+| `query` | string | Yes | Synthesis question |
+| `persist` | boolean | No | Default `false` |
+| `context_id` | string | No | Omit to use the bearer key's Context |
 
 ---
 
-## `memory_profile`
+## `forget`
 
-Return the aggregated profile for the current principal. The profile groups identity facts, dynamic context, preferences, and active instructions into a single object suitable for direct system prompt injection.
+Soft-delete attributes that match a natural-language query. Use `purge: true` for permanent erasure including history.
 
-**REST equivalent:** `GET /api/v1/{context_id}/profile`
+**REST equivalent:** `POST /api/v1/{context_id}/forget`
 
 ### Input
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `scope` | string[] | No | Slash paths identifying the principal. |
-
-### Output
-
-| Field | Type | Description |
-|---|---|---|
-| `identity` | object | Static identity facts (name, role, organisation, etc.) |
-| `dynamic` | object | Recently updated contextual facts (current project, mood, focus area) |
-| `preferences` | object | Stated preferences (language, response style, format) |
-| `instructions` | array | Active imperative instructions to apply during the session |
-| `traceId` | string | Trace record ID |
-
-### Example
-
-```
-Tool: memory_profile
-Input: {
-  "scope": ["org/acme/user/alice"]
-}
-
-Output: {
-  "identity": {
-    "name": "Alice",
-    "role": "VP of Engineering",
-    "organisation": "Acme Corp",
-    "city": "Singapore"
-  },
-  "dynamic": {
-    "current_project": "Platform v3",
-    "focus": "Hiring for the Singapore office"
-  },
-  "preferences": {
-    "response_style": "concise",
-    "language": "British English"
-  },
-  "instructions": [
-    "Always respond in bullet points when listing more than three items",
-    "Do not include filler phrases such as 'Great question!'"
-  ],
-  "traceId": "trace:01jt4q..."
-}
-```
-
----
-
-## `knowledge_search`
-
-Search the **authoritative** knowledge base only (documents, structured records, connector-synced content). Does not include conversational memory. Returns ranked results with chunk text, score, and source metadata.
-
-**REST equivalent:** `POST /api/v1/{context_id}/query` (or `POST .../documents/query` for authoritative passages only)
-
-### Input
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `query` | string | Yes | Natural-language search query |
-| `mode` | string | No | Retrieval mode: `"vector"`, `"bm25"`, `"hybrid"` (default), or `"hybrid_graph"` |
-| `k` | integer | No | Number of results to return (default: 10) |
-| `threshold` | number | No | Minimum relevance score (0–1); results below this are excluded |
-| `scope` | string[] | No | Slash paths to filter results |
-
-### Retrieval modes
-
-| Mode | Description |
-|---|---|
-| `vector` | Dense semantic search using HNSW index. Best for conceptual similarity. |
-| `bm25` | Sparse keyword search. Best for exact terminology, product names, and codes. |
-| `hybrid` | Combines vector and BM25 with Reciprocal Rank Fusion. Recommended default. |
-| `hybrid_graph` | Hybrid retrieval extended with graph density re-ranking. Best for multi-hop relational queries. |
-
-### Output
-
-| Field | Type | Description |
-|---|---|---|
-| `results` | array | Ranked result objects |
-| `results[].chunk_text` | string | The text of the matched chunk |
-| `results[].score` | number | Relevance score (0–1) |
-| `results[].document_title` | string | Title of the source document |
-| `results[].document_id` | string | ID of the source document |
-| `results[].chunk_id` | string | ID of the specific chunk |
-| `results[].metadata` | object | Additional metadata attached during ingestion |
-| `traceId` | string | Trace record ID |
-
-### Example
-
-```
-Tool: knowledge_search
-Input: {
-  "query": "what is the refund policy for subscription plans?",
-  "mode": "hybrid",
-  "k": 5,
-  "scope": ["org/acme"]
-}
-
-Output: {
-  "results": [
-    {
-      "chunk_text": "Subscription plans may be cancelled at any time. Refunds are issued on a pro-rata basis for the unused portion of the current billing period, provided the cancellation request is submitted within 14 days of the renewal date.",
-      "score": 0.94,
-      "document_title": "Acme Billing Policies v3",
-      "document_id": "document:01jt4r...",
-      "chunk_id": "chunk:01jt4s...",
-      "metadata": { "version": "3.0", "last_reviewed": "2026-03-01" }
-    }
-  ],
-  "traceId": "trace:01jt4t..."
-}
-```
-
----
-
-## `knowledge_get`
-
-Fetch a specific document, chunk, or knowledge node by its ID. Returns the full record without re-ranking or scoring. Use this when you already know which resource you need.
-
-**REST equivalent:** `GET /api/v1/{context_id}/documents/{id}`
-
-### Input
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `id` | string | Yes | The ID of the document, chunk, or knowledge node to retrieve |
-
-### Output
-
-The returned object shape depends on the record type:
-
-**Document:**
-
-| Field | Type | Description |
-|---|---|---|
-| `id` | string | Document ID |
-| `title` | string | Document title |
-| `content_type` | string | MIME type |
-| `metadata` | object | Metadata attached during ingestion |
-| `created_at` | string | ISO 8601 datetime |
-
-**Chunk:**
-
-| Field | Type | Description |
-|---|---|---|
-| `id` | string | Chunk ID |
-| `document_id` | string | Parent document ID |
-| `text` | string | Chunk text |
-| `position` | integer | Position within the document |
-
-### Example
-
-```
-Tool: knowledge_get
-Input: { "id": "chunk:01jt4s..." }
-
-Output: {
-  "id": "chunk:01jt4s...",
-  "document_id": "document:01jt4r...",
-  "text": "Subscription plans may be cancelled at any time...",
-  "position": 4
-}
-```
+| `query` | string | Yes | What to stop believing |
+| `purge` | boolean | No | Also erase supersession history |
+| `context_id` | string | No | Omit to use the bearer key's Context |
 
 ---
 
 ## `upload`
 
-Upload a document to the knowledge layer. Accepts base64-encoded bytes (MCP-friendly); the backend chunks, embeds, and indexes asynchronously.
+Upload a document (base64). Processing is asynchronous — poll with `inspect` or REST.
 
 **REST equivalent:** `POST /api/v1/{context_id}/documents`
 
@@ -362,25 +144,14 @@ Upload a document to the knowledge layer. Accepts base64-encoded bytes (MCP-frie
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `context_id` | string | No | Spectron context id. Omit to use the Context bound to the bearer key. |
-| `bytes_base64` | string | Yes | Document bytes, RFC 4648 base64 |
+| `bytes_base64` | string | Yes | Document bytes (RFC 4648) |
 | `title` | string | No | Display title |
-| `source` | string | No | Provenance tag |
-| `mime_type` | string | No | Declared MIME type |
+| `source` | string | No | Provenance string |
+| `mime_type` | string | No | MIME type |
 | `filename` | string | No | Original filename |
-| `scope` | string[] | No | DNF scope selector — slash paths **narrower than** the caller's `memory:write` region. Use nested arrays for AND clauses; a flat multi-element array is OR. Prefer **`scopes`** on new integrations. |
-| `labels` | string[] | No | `key=value` tags stamped on document-owned rows |
-| `observedAt` | string | No | Optional RFC 3339 known time for facts derived from this upload |
-
-### Output
-
-| Field | Type | Description |
-|---|---|---|
-| `id` | string | Document id |
-| `status` | string | Pipeline status (`queued`, `extracting`, …) |
-| `content_hash` | string | BLAKE3 content hash |
-| `deduplicated` | boolean | `true` when bytes matched an existing document |
-| `version` | integer | Document version (incremented on reprocess) |
+| `scopes` | nested arrays | No | DNF write selector (`scope` alias accepted) |
+| `labels` | string[] | No | Labels on the document |
+| `context_id` | string | No | Omit to use the bearer key's Context |
 
 ### Example
 
@@ -389,60 +160,37 @@ Tool: upload
 Input: {
   "bytes_base64": "aGVsbG8=",
   "title": "Team handbook",
-  "scope": ["org/acme/team/eng"],
+  "scopes": [["org/acme/team/eng"]],
   "labels": ["team=eng"]
-}
-
-Output: {
-  "id": "doc:01jt4u…",
-  "status": "queued",
-  "content_hash": "blake3:…",
-  "deduplicated": false,
-  "version": 1
 }
 ```
 
 ---
 
-## `memory_forget`
+## `inspect`
 
-Semantically soft-delete memories matching a natural-language description. Spectron identifies relevant entities and attributes, marks them as deleted, and returns the count of records removed.
+Look up an entity, trace, or document by typed reference.
 
-**REST equivalent:** `POST /api/v1/{context_id}/forget`
+**REST equivalents:** `GET .../entities/...`, `GET .../traces/{id}`, `GET .../documents/{id}`
 
 ### Input
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `description` | string | Yes | Natural-language description of what to forget (e.g. "anything about Alice's previous employer") |
-| `scope` | string[] | No | Slash paths to restrict the deletion to |
-
-### Output
-
-| Field | Type | Description |
-|---|---|---|
-| `deleted_count` | integer | Number of records soft-deleted |
-| `traceId` | string | Trace record ID |
+| `ref` | string | Yes | `entity:<Type>/<Name>`, `trace:<id>`, or `document:<id>` |
+| `context_id` | string | No | Omit to use the bearer key's Context |
 
 ### Example
 
 ```
-Tool: memory_forget
+Tool: inspect
 Input: {
-  "description": "Alice's previous job title and employer",
-  "scope": ["org/acme/user/alice"]
-}
-
-Output: {
-  "deleted_count": 3,
-  "traceId": "trace:01jt4u..."
+  "ref": "document:01hx9…"
 }
 ```
 
-Soft-deleted records are excluded from all future retrieval but retained in the database for audit purposes. They can be permanently purged via the management API.
-
 ---
 
-## Error handling
+## Errors
 
 Operation failures return **`isError: true`** tool results with `structuredContent.error.status` mirroring REST (404, 403, 429, 401, 500). JSON-RPC **`error`** is reserved for protocol faults (bad params, unknown tool). Auth and missing-Context failures are masked as **401**. See [MCP tools — error handling](/docs/spectron/reference/mcp-tools#error-handling).
