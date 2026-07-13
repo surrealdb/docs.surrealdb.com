@@ -10,22 +10,26 @@ Spectron can ingest more than text. Images, audio recordings, and video files ar
 
 ## Ingestion profiles
 
-The `profile` parameter on the upload endpoint controls which extraction modalities are applied. Four profiles are available:
+`Context.config.ingestion_profile` selects which provider-bearing stages run. Profiles are monotonic (each richer profile is a strict superset). Stages whose provider is absent are skipped, not errored.
 
-| Profile | Description |
-|---|---|
-| `text_only` | Extracts text from plain-text, markdown, HTML, JSON, and PDF documents. No OCR or visual processing. Default. |
-| `text_plus_ocr` | All of `text_only`, plus OCR for images and scanned PDFs. |
-| `multimodal_balanced` | OCR for images and PDFs, CLIP visual embeddings for images, speech-to-text transcript for audio and video. |
-| `multimodal_full` | All available modalities – OCR, CLIP embeddings, transcription, and per-frame captioning for video. |
+| Profile | Text + chunks + embeds | Keywords + sections + doc links | OCR + speech-to-text | CLIP + vision caption + audio/video |
+|---|---|---|---|---|
+| `TextOnly` | Yes | No | No | No |
+| `TextPlusKeyword` | Yes | Yes | No | No |
+| `StandardMultimodal` | Yes | Yes | Yes | No |
+| `MultimodalFull` | Yes | Yes | Yes | Yes |
 
-Specify the profile at upload time:
+**Default: `MultimodalFull`.** Uploaded images and audio get content understanding (vision caption, CLIP, audio embeddings) when the backing providers are configured. Dial down to `StandardMultimodal`, `TextPlusKeyword`, or `TextOnly` to reduce cost.
+
+Wire names are PascalCase as in the table (`MultimodalFull`, not `MultimodalFull`).
+
+Specify the profile on the Context configuration (or at upload when your client supports it):
 
 ```python
 doc = await memory.knowledge.upload(
     file=open("product-diagram.png", "rb"),
     title="Product Architecture Diagram",
-    profile="multimodal_balanced",
+    profile="StandardMultimodal",
     scope=["org/acme"],
 )
 ```
@@ -34,7 +38,7 @@ doc = await memory.knowledge.upload(
 const doc = await memory.knowledge.upload({
     file: imageFile,
     title: "Product Architecture Diagram",
-    profile: "multimodal_balanced",
+    profile: "StandardMultimodal",
     scope: ["org/acme"],
 });
 ```
@@ -72,7 +76,7 @@ const doc = await memory.knowledge.upload({
 
 OCR (optical character recognition) recognises printed and handwritten text in images and scanned PDFs. The recognised text is extracted, split into chunks, and embedded in exactly the same way as text from a native PDF or HTML document. Chunks derived from OCR carry a `source: "ocr"` annotation in their metadata.
 
-OCR is available with `text_plus_ocr`, `multimodal_balanced`, and `multimodal_full` profiles.
+OCR is available with `StandardMultimodal` and `MultimodalFull` profiles.
 
 ### Scanned and low-text PDFs
 
@@ -88,7 +92,7 @@ PDFs with embedded JPEG images (including common filter chains such as ASCII85/H
 doc = await memory.knowledge.upload(
     file=open("scanned-invoice.pdf", "rb"),
     title="Invoice 1042",
-    profile="text_plus_ocr",
+    profile="StandardMultimodal",
     scope=["org/acme"],
 )
 ```
@@ -112,7 +116,7 @@ An `audio_chunk` segment looks like:
 
 This lets your application link a retrieved fact back to the precise moment in a recording – useful for surfacing relevant clips or timestamped citations.
 
-Transcription is available with `multimodal_balanced` and `multimodal_full` profiles.
+Transcription is available with `StandardMultimodal` and `MultimodalFull` profiles.
 
 Transcript segments participate in **vector recall** alongside text chunks (same embedding model and ranker leg). A query can return an `audio_chunk` hit with the segment text and timestamps even when the parent document chunk spine phrased the content differently.
 
@@ -122,7 +126,7 @@ When a document is **reprocessed**, previous `audio_chunk` and `image_chunk` row
 doc = await memory.knowledge.upload(
     file=open("support-call.mp3", "rb"),
     title="Support Call 2026-05-12",
-    profile="multimodal_balanced",
+    profile="StandardMultimodal",
     scope=["org/acme/user/alice"],
 )
 ```
@@ -131,15 +135,15 @@ The pipeline status will pass through `transcribing` before reaching `ready`.
 
 ## CLIP visual embeddings
 
-For image content processed under `multimodal_balanced` or `multimodal_full`, Spectron generates a CLIP visual embedding alongside any OCR text. CLIP embeddings capture the semantic content of the image independently of its textual labels, enabling retrieval by visual similarity.
+For image content processed under `MultimodalFull`, Spectron generates a CLIP visual embedding alongside any OCR text. CLIP embeddings capture the semantic content of the image independently of its textual labels, enabling retrieval by visual similarity.
 
 When a query is issued against a context that includes images, the CLIP embeddings participate in the vector search alongside text embeddings. A query such as "product dimension diagram" can retrieve a relevant engineering drawing even if that drawing contains no recognisable text.
 
 ## Video captions
 
-Under `multimodal_full`, Spectron generates per-frame captions for video documents. Captions are indexed as additional text chunks associated with the video document. This allows text-based queries to retrieve video content described by the visual scene, not only by the spoken transcript.
+Under `MultimodalFull`, Spectron generates per-frame captions for video documents. Captions are indexed as additional text chunks associated with the video document. This allows text-based queries to retrieve video content described by the visual scene, not only by the spoken transcript.
 
-Video caption extraction is the most resource-intensive stage and is therefore opt-in, available only with `multimodal_full`.
+Video caption extraction is the most resource-intensive stage and is therefore opt-in, available only with `MultimodalFull`.
 
 ## HTTP provider integration
 
@@ -153,7 +157,7 @@ By default, Spectron uses built-in or feature-gated local OCR and speech-to-text
 
 When a URL is set, its **`_MODEL`** is required and Spectron calls the endpoint at ingest time (worker role). HTTP providers take precedence over local fallbacks. CLIP output must match the **512-dim** image embedding width — dimension mismatch is rejected at embed time.
 
-**Vision LLMs:** under **`multimodal_full`**, image understanding runs when the worker resolves an extraction LLM for the Context — per-Context **`models.extraction`** and provider keys apply even without a deployment-wide default LLM. Vision descriptions are appended to the document body **before chunking** (same spine as OCR text). OpenAI and Anthropic providers send image content blocks when media is attached.
+**Vision LLMs:** under **`MultimodalFull`**, image understanding runs when the worker resolves an extraction LLM for the Context — per-Context **`models.extraction`** and provider keys apply even without a deployment-wide default LLM. Vision descriptions are appended to the document body **before chunking** (same spine as OCR text). OpenAI and Anthropic providers send image content blocks when media is attached.
 
 **Per-Context ingest LLM:** document jobs resolve the extraction LLM from the Context config on each run (shared budget-enforced resolver with maintenance jobs). A Context with its own provider key but no deployment-wide `SPECTRON_LLM_PROVIDER` gets ingest-time extraction and vision when configured.
 
@@ -180,7 +184,7 @@ while True:
     await asyncio.sleep(3)
 ```
 
-Example output for a video document processed with `multimodal_full`:
+Example output for a video document processed with `MultimodalFull`:
 
 ```
 Stage: queued

@@ -6,11 +6,19 @@ description: "Schema migrations and upgrade playbooks."
 
 # Migrations and upgrades
 
-Spectron bundles schema migrations into the binary and applies them automatically. This page explains how migrations work and what to expect during version upgrades.
+Spectron bundles per-Context schema migrations into the binary and applies them automatically. This page explains how migrations work and what to expect during version upgrades.
 
 ## How migrations work
 
-Each Context database is created from schema bundled into the server binary. Migrations are **append-only** — applied automatically on context creation and on server startup. Applied versions are tracked in each Context database.
+Each Context database is created from schema bundled into the server binary. Migrations are **append-only** — applied on context creation and, for existing Contexts, rolled out after a binary upgrade by the **scheduler** and **workers** (not as a blocking startup sweep).
+
+1. Every role rolls to a binary that embeds migrations `V1…Vn`.
+2. The elected **scheduler** ticks periodically and, for each Context whose `schema_version` is behind the binary's latest, enqueues a `context_migrate` job.
+3. A **worker** takes a per-Context migration lease, runs the pending migrations, and stamps `schema_version` monotonically.
+
+Rollout time therefore scales with the job queue, not with a single-pod startup loop. Management API / gRPC **`GET /migrations`** (and the equivalent gRPC RPC) expose a version histogram, Contexts still behind, and DLQ entries so operators can watch catch-up.
+
+Applied versions are tracked in each Context database. Cadenced per-Context maintenance (consolidate, elaborate, and similar) waits until that Context's migrations are ready.
 
 Most upgrades are **additive** (new tables, fields, indexes). A minority include **destructive** steps (dropping retired tables or fields). Always take a SurrealDB backup before upgrading production Contexts.
 
@@ -25,25 +33,25 @@ Downgrading after a destructive migration is not supported — the older binary 
 Spectron is a **horizontally scalable application server** – all durable state lives in SurrealDB. A rolling upgrade works as follows:
 
 1. Deploy the new Spectron binary (or container image) alongside the running version.
-2. The new version starts up and applies any pending migrations to all registered Contexts.
-3. Route traffic to the new version.
-4. Shut down the old version.
+2. Route traffic to the new version. The scheduler begins detecting behind Contexts; workers apply pending migrations asynchronously.
+3. Watch **`GET /migrations`** (or logs) until the behind set is empty before relying on schema that only the new version understands.
+4. Shut down the old version when traffic and migration catch-up look healthy.
 
 Because replicas do not cache durable state in-process, you do not need to drain in-flight requests beyond what your load balancer already provides. In-flight document processing jobs are stored in SurrealDB and will be picked up by workers on the new version.
 
 ### Single-instance upgrades
 
-For single-server deployments:
+For single-server deployments (api + worker + scheduler in one process or compose stack):
 
 1. Take a SurrealDB backup of all Context databases (see [Backups and retention](/docs/spectron/self-hosting/operations/backups-and-retention)).
 2. Stop the Spectron service.
 3. Replace the binary or pull the new container image.
-4. Start the service and watch logs for migration completion.
+4. Start the service and watch logs / **`GET /migrations`** until Contexts reach the new schema version.
 5. Run smoke tests against a non-production Context before routing production traffic.
 
 ### Verifying migration success
 
-After upgrade, check server logs for migration completion. If a migration fails, Spectron logs the error and refuses to serve requests for the affected Context until the schema is consistent.
+After upgrade, confirm Contexts are at the binary's latest schema version via **`GET /migrations`** or server logs. Failed migrations land on the job DLQ; Spectron will not treat that Context as migration-ready until the schema is consistent and the job succeeds.
 
 ## Version compatibility
 
@@ -74,7 +82,7 @@ kubectl set image deployment/spectron \
 kubectl rollout status deployment/spectron
 ```
 
-Each new pod applies pending migrations on startup before serving traffic.
+Pods come up without blocking on a full-fleet migration sweep. The scheduler enqueues catch-up jobs; workers apply them. Confirm the behind set empties via **`GET /migrations`**.
 
 ### Bare metal / systemd upgrade
 
