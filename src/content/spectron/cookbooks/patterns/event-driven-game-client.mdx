@@ -1,0 +1,269 @@
+---
+position: 7
+title: Event-driven game client
+description: "Pipe RPG or simulation events into Spectron with epistemic labels and careful extraction."
+---
+
+# Event-driven game client
+
+This page details how Spectron can sit behind a **listener**: a small companion process that receives events from a game engine, simulator, or other non-chat source, then calls Spectron to remember and (optionally) think aloud. This allows the player or game testers to receive extra information about the current situation in a role-playing game or to simulate the thoughts of the main character during a quest.
+
+This cookbook turns that pattern into concrete advice for RPG-style and simulation clients: which events to send, how to label them, and how to keep extraction from inventing a denser world than the player has actually inhabited.
+
+You do not replace the game. The engine stays the source of truth for physics and UI. Spectron holds what the hero (or operator) has learned, heard, read, and done, and can answer in an inner-voice or coach mode via `/chat`.
+
+## Architecture
+
+```text
+Game / engine
+    │  event hooks (talk, travel, read, combat, …)
+    ▼
+Listener (HTTP or IPC)
+    ├── chronicle / local UI (optional)
+    ├── POST /facts     — remember with labels + infer mode
+    ├── POST /documents — seed lore, long texts
+    └── POST /chat      — short reflections, greetings, musings
+```
+
+Keep the listener thin:
+
+1. Translate engine payloads into a small, stable event schema.
+2. Decide whether each event should reach Spectron (many clicks are noise).
+3. Wrap writes with epistemic and authority labels so extraction does not treat every noun as lived truth.
+4. Call `/chat` only when you want prose in a known voice, not for every tick.
+
+## Design the event surface first
+
+The best way to generate meaningful output from Spectron is to pipe it events that most closely mimic the experience of the character in a game in the way it would be experienced in real life. For example, while a game engine might emit exact tile location of a character at every step, an actual character in such a setting would only be aware of vague relative movement. The following shows the types of events that are a good fit to pass on to Spectron:
+
+| Event family | Typical meaning | Usually remember? | Usually `/chat`? |
+| --- | --- | --- | --- |
+| Conversation open / line / choice / close | Spoken testimony | Yes (transcript snapshot) | Greeting / farewell |
+| Travel bursts (quantised) | Path and place | Occasionally | Soft location muse |
+| Examine / look | Label only | Often no (local chronicle only) | Rarely |
+| Container open (glimpse) | Seen, not taken | Yes, as **observed** | Rarely |
+| Book / scroll / sign | Written glance | Yes, as **read** | Optional thought |
+| Combat / sleep / death | State change | Yes, short fact | Death / wake thought |
+| Party join / leave | Companions | Yes | Short reaction |
+| Map / sextant reading | Geography reading | Yes, as written | Optional |
+| Item take / drop / bark | Theft, protest, chase | Yes when distinct from glance | Strong reaction once |
+
+It is preferable to only transmit events that take place via active player interaction. For example, examine events (“a tree”, “a crate”) can flood a live session if they are transmitted simply through running through a map, but can be good to pass on if they require a specific action such as a mouse click. Opening a chest without taking anything is different: one short “looked inside, did not take” fact is often worth remembering later.
+
+Assign every actor a **stable id** from the engine (`npc_id`, character key) and keep appearance labels (“a guard”, “shopkeeper”) separate until dialogue reveals a personal name. Many game engines have specific names for NPCs that can leak identity the hero has not earned yet, or even nicknames that are used as inside jokes for the developers when building the game.
+
+## Epistemic framing: lived, spoken, written, read
+
+Extraction with `infer=full` will build an entity graph from whatever prose you send. That helps for armour tables and goes wrong on parody legalese or flavour text. Stamp each write so you can tell how the hero knows.
+
+Suggested `labels` (key=value tags on `/facts` and document metadata):
+
+| Label | Use when |
+| --- | --- |
+| `source=game` | Came from the engine listener |
+| `kind=conversation\|book\|sign\|travel\|combat\|container\|…` | Event family |
+| `authority=lived\|spoken\|written\|seen` | Deed vs hearsay vs document vs glance |
+| `epistemic=read\|heard\|observed\|done` | How knowledge arrived |
+| `era=…` | Optional chapter / prior-campaign pack |
+
+Wrap the remembered body so the extractor cannot miss the frame:
+
+```http
+POST /api/v1/{context_id}/facts
+Authorization: Bearer <api_key>
+Content-Type: application/json
+
+{
+  "text": "Epistemic frame: the hero has just READ this document in the game.\nThis is a glance, not a deed. Do not invent participation in activities named only on the page.\nDo not explode parody legalese into a dense entity graph; prefer one short summary of what the paper claims.\n\nTitle: \"Bill of Underwater Scavenging…\"\nFull text:\n…",
+  "infer": "full",
+  "memory_category": "knowledge",
+  "labels": [
+    "source=game",
+    "kind=book",
+    "authority=written",
+    "epistemic=read"
+  ]
+}
+```
+
+Contrast with a deed:
+
+```json
+{
+  "text": "The hero entered combat outdoors at dawn under clear weather.",
+  "infer": "full",
+  "labels": ["source=game", "kind=combat", "authority=lived", "epistemic=done"]
+}
+```
+
+Or spoken testimony after a conversation closes:
+
+```json
+{
+  "text": "Conversation with npc_id=21 (appeared as \"shopkeeper\").\nTranscript:\n…\nUse a personal name only if the transcript shows it was revealed.",
+  "infer": "full",
+  "memory_category": "context",
+  "labels": ["source=game", "kind=conversation", "authority=spoken", "epistemic=heard"]
+}
+```
+
+Container glimpse (opened, not looted):
+
+```json
+{
+  "text": "Epistemic frame: the hero OPENED a container and looked inside.\nThis is a glimpse, not ownership. Do not invent that the hero took, stole, or now owns these items.\n\nContainer: \"oak chest\". Contents seen: a dagger, three gold coins.\nPrefer third person: the hero looked inside the oak chest and saw …",
+  "infer": "full",
+  "labels": [
+    "source=game",
+    "kind=container",
+    "authority=seen",
+    "epistemic=observed"
+  ]
+}
+```
+
+Note that while labels guide filtering and intent, they are not a substitute for clear prose. Putting `epistemic=read` on a fact whose body says “the hero engages in underwater scavenging” still invites the wrong graph. State the frame in plain language and on labels.
+
+## Relation direction vs spoken wording
+
+NPC dialogue often puts the organisation in the subject seat even when the durable fact runs the other way.
+
+Example line:
+
+> “The guild is the philosophical society devoted to the teachings of a truly great man named Batlin.”
+
+`infer=full` can emit `the_guild->is_devoted_to->batlin` because that follows English syntax. Canonically you usually want **Batlin founded / leads the guild**, and devotion (if kept) to point at **teachings** or a philosophy node, not at collapsing “teachings of Batlin” into the person.
+
+When faction lore matters:
+
+- Prefer a short normalisation in the remembered body (“Batlin founded the guild. Members follow his triad.”) so extraction sees the leadership edge.
+- Or `infer=none` for a hand-written summary of key lore talks.
+- Avoid expecting soft predicates like `is_devoted_to` to stand in for `founded_by` / `led_by` / `member_of`.
+
+## High-value spoken facts
+
+Passwords, personal names revealed in dialogue, and “who runs this place” lines are easy for players to need hours later.
+
+In the remember body for a closed conversation:
+
+- Call out discovery lines in plain language after the transcript (“The clerk revealed the gate password is Nightjar.”).
+- Prefer third person for the durable store: “The shopkeeper said the blacksmith’s son is called Rowan.”
+- Do not rely on `/chat` alone to cement those facts; chat may hedge or under-enumerate until the operator escalates.
+
+Guest registers and other written lists retrieve well as *names on a page*. Spoken “I run the inn” often fails to join to that place unless both land in memory with an explicit place link in prose.
+
+## Choose `infer` deliberately
+
+| Mode | When to use for game clients |
+| --- | --- |
+| `full` (default) | Short facts, dialogue summaries, combat/sleep, travel notes where structure helps |
+| `none` | You already wrote the prose you want embedded; skip graph extraction (good fallback for long seed text) |
+| Document upload | Multi-kilobyte background lore, quest packs, manuals — not a single synchronous `/facts?infer=full` paste |
+
+Long prior-campaign notes and world books should go through [Documents (upload)](/docs/spectron/reference/rest-api#documents-upload).
+
+## Quantise noisy streams
+
+Tile steps, mouse-overs, and ambient weather can generate thousands of events per hour. Spectron does not need each one.
+
+- Batch travel into one fact with heading and **net** displacement (not every step, and not gait or stride words that extraction turns into creature attributes).
+- Attach a light ambient snapshot (time of day, indoor/outdoor, weather) to meaningful events only.
+- Deduplicate repeating sign or book opens if the engine fires twice for one click.
+- Prefer place names and map readings for “where am I?” over repeating tile telemetry in `/chat` prompts.
+
+That keeps the graph about journeys and places, not pathfinding samples.
+
+## Chat for voice, facts for truth
+
+`/chat` is for short reflections in a product voice (inner monologue, coach, companion). `/facts` and documents are for what should persist.
+
+Typical split in an RPG listener:
+
+| Moment | Persist (`/facts` or documents) | Reflect (`/chat`) |
+| --- | --- | --- |
+| Talk starts | Optional ambient | Briefing: what I already know about this npc_id |
+| Mid-talk quiz (manual/map) | Optional after answer is known | Short thought; prefer an injected answer over hoping retrieval finds book lore |
+| Talk ends | Transcript + discovery note | Farewell thought |
+| Sign / book | Written / read fact | Optional one-line “where might I be?” |
+| Container glimpse | Seen-not-taken fact | Usually nothing |
+| Death / dungeon | Lived fact | Strong emotion once |
+| Every examine | Usually nothing | Nothing |
+
+## Seed memory once
+
+Before the live loop, upload a small prior-memory pack (previous campaigns, faction primers, geography the hero already lived) as documents labelled `kind=prior_memory`, `authority=lived`, `era=…`. Prefer document upload over many `infer=full` facts. Optionally write a single identity fact that matches the **Surrealist** surface you will use, and keep the mind-chat speaker rule in the listener prompt, so the two UIs do not fight over who “I” is.
+
+Do not put prior-campaign titles into the mind’s standing voice string if those campaigns were never uploaded. Chat consolidation and pretrained lore can invent “I finished those quests” without a document trail.
+
+## Reliability notes from the field
+
+Listener clients are often fire-and-forget from the engine. A few lessons that are easy to miss:
+
+1. **Finish the HTTP exchange.** On some platforms, closing the socket immediately after `send` without reading the response can drop the body before Spectron accepts the write. Wait for the status line, or use an HTTP client that does.
+2. **Context id ≠ display name.** API paths need the opaque Context id from Surrealist or the management API, not the friendly name you typed in the UI.
+3. **Grants.** A key that can `/chat` but not write memory produces a mind that talks and never learns. Mint keys with the write capabilities your loop needs.
+4. **Show write errors.** Surface status and response body in the listener UI; “N failed” without the message wastes debugging time. Opaque `{"message":"unknown error"}` bodies are common on hard failures; log request time and payload type so server logs can be matched later.
+5. **Graph vs chat.** Entities marked observed (animals, props) may exist in the graph while `/chat` denies them until the prompt or retrieval path treats them as nearby or recently seen. Prefer third-person observe facts with a place name, not only soft `current_situation` edges.
+
+## Minimal remember helper
+
+```python
+import os
+import httpx
+
+SPECTRON = os.environ["SPECTRON_BASE_URL"].rstrip("/")
+CTX = os.environ["SPECTRON_CONTEXT_ID"]
+KEY = os.environ["SPECTRON_API_KEY"]
+
+def remember(
+    text: str,
+    *,
+    labels: list[str],
+    infer: str = "full",
+    memory_category: str | None = "context",
+) -> None:
+    body = {
+        "text": text,
+        "infer": infer,
+        "labels": labels,
+    }
+    if memory_category:
+        body["memory_category"] = memory_category
+    r = httpx.post(
+        f"{SPECTRON}/api/v1/{CTX}/facts",
+        headers={
+            "Authorization": f"Bearer {KEY}",
+            "api-version": "1",
+            "Content-Type": "application/json",
+        },
+        json=body,
+        timeout=60.0,
+    )
+    r.raise_for_status()
+
+# Example: book glance
+remember(
+    "Epistemic frame: the hero has just READ this scroll.\n"
+    "Summarise what it claims; do not invent that the hero took part.\n\n"
+    + scroll_text,
+    labels=[
+        "source=game",
+        "kind=book",
+        "authority=written",
+        "epistemic=read",
+    ],
+    memory_category="knowledge",
+)
+```
+
+## Checklist
+
+- [ ] Event enum is small; noise stays local
+- [ ] Stable actor ids; appearance labels are not personal names
+- [ ] Every write carries `kind` + `authority` + `epistemic` (or equivalent)
+- [ ] High-value spoken lines are restated after the transcript
+- [ ] Long lore uses documents; short moments use `/facts`
+- [ ] Prior memory is third person on documents; chat speaker is per surface
+- [ ] Travel and similar streams are quantised (net displacement)
+- [ ] `/chat` prompts declare the speaker for that UI; strip citation markers if needed
+- [ ] HTTP client waits for accept; errors are visible
