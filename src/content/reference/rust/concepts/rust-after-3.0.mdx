@@ -492,13 +492,36 @@ async fn main() {
 
 ## Enum and struct attributes
 
-The `SurrealValue` trait can be customised using the `surreal` attribute. These are used in a similar way to [Serde attributes](https://serde.rs/attributes.html), though created in order to interact with SurrealQL in particular and thus often somewhat different.
+The `SurrealValue` derive uses its own `#[surreal(...)]` attribute namespace. It is **inspired by** [Serde](https://serde.rs/attributes.html) (familiar names, similar enum tagging ideas), but it is **not** Serde and does **not** inherit `#[serde(...)]` attributes.
 
-The currently available attributes are as follows.
+In SurrealDB 2.x, many SDK types used Serde’s `Serialize` / `Deserialize` derives. In 3.0, conversion goes through `SurrealValue` and a dedicated derive macro. If you previously reached for Serde docs to customise field names or flattening, use the matching `#[surreal(...)]` form below instead. Putting `#[serde(flatten)]` on a `SurrealValue` type has no effect on that derive.
+
+### Relationship to Serde
+
+| Idea | Serde | `SurrealValue` (`#[surreal(...)]`) |
+| --- | --- | --- |
+| Rename one field / variant | `rename = "..."` | `rename = "..."` |
+| Rename all fields / variants | `rename_all = "..."` | `rename_all = "..."` (same case strings as Serde) |
+| Flatten nested object | `flatten` | `flatten` |
+| Enum tagging | `tag` / `content` / `untagged` | `tag` / `content` / `untagged` |
+| Missing field default | `default` / `default = "path"` | `default` / `default = "path"` (also on the container) |
+| Catch-all unit variant | `other` | `other` |
+| Skip a field | `skip`, `skip_serializing`, `skip_serializing_if` | Not supported on ordinary fields today |
+| Conditionally omit enum payload | (use field `skip_serializing_if`) | `skip_content` / `skip_content_if = "..."` on tagged enums |
+| Serde-only types | (n/a) | `wrap` for `Serialize + Deserialize` types that do not implement `SurrealValue` |
+| Tuple struct as array | (n/a) | `tuple` |
+| Literal substitute for a unit | (n/a) | `value = ...` |
+
+Supported `rename_all` values match Serde’s usual set: `lowercase`, `UPPERCASE`, `PascalCase`, `camelCase`, `snake_case`, `SCREAMING_SNAKE_CASE`, `kebab-case`, `SCREAMING-KEBAB-CASE`. An explicit `rename` on a field or variant wins over the container `rename_all`.
+
+> [!NOTE]
+> `#[surreal(uppercase)]` and `#[surreal(lowercase)]` on enums are legacy aliases for `rename_all = "UPPERCASE"` and `rename_all = "lowercase"`. Prefer `rename_all` in new code. Do not combine them with `rename_all` on the same enum.
+
+The attributes below are the ones the derive currently recognises.
 
 ### `surreal(default)`
 
-The `surreal(default)` attribute is used to default to certain values when these values are not present when deserializing. The `Default` trait is required to use this.
+The `surreal(default)` attribute fills in values when fields are missing during deserialization. On a struct container, missing fields come from the type’s `Default` implementation. On a single field, use `#[surreal(default)]` for `<T as Default>::default()`, or `#[surreal(default = "path")]` for a custom function path.
 
 ```rust
 use surrealdb::engine::any::connect;
@@ -597,9 +620,65 @@ Before rename: { num: 555 }
 After rename: { user_num: 555 }
 ```
 
+### `surreal(rename_all)`
+
+Apply a case transform to every field name on a struct, or every variant name on an enum, unless a field or variant sets its own `rename`.
+
+```rust
+use surrealdb_types::{SurrealValue, ToSql};
+
+#[derive(SurrealValue)]
+#[surreal(rename_all = "camelCase")]
+struct UserProfile {
+    full_name: String,
+    years_old: i64,
+}
+
+fn main() {
+    let profile = UserProfile {
+        full_name: "Ada".into(),
+        years_old: 36,
+    };
+    // { fullName: 'Ada', yearsOld: 36 }
+    println!("{}", profile.into_value().to_sql());
+}
+```
+
+### `surreal(flatten)`
+
+Merge a nested object’s fields into the parent object instead of nesting them under one key. This is the Surreal equivalent of Serde’s `#[serde(flatten)]`.
+
+```rust
+use surrealdb_types::{SurrealValue, ToSql};
+
+#[derive(SurrealValue)]
+struct Coords {
+    x: i64,
+    y: i64,
+}
+
+#[derive(SurrealValue)]
+struct Point {
+    name: String,
+    #[surreal(flatten)]
+    coords: Coords,
+}
+
+fn main() {
+    let point = Point {
+        name: "origin".into(),
+        coords: Coords { x: 0, y: 0 },
+    };
+    // { name: 'origin', x: 0, y: 0 }
+    println!("{}", point.into_value().to_sql());
+}
+```
+
+`flatten` cannot be combined with `rename` on the same field: there is no single key left to rename.
+
 ### `surreal(uppercase)` and `surreal(lowercase)`
 
-These two attributes are similar to `surreal(rename)` except that they apply to the casing of enum variants.
+These two attributes are legacy aliases for `rename_all = "UPPERCASE"` and `rename_all = "lowercase"` on enums. Prefer `rename_all` when writing new types.
 
 ```rust
 use surrealdb_types::{SurrealValue, ToSql};
@@ -777,6 +856,66 @@ fn main() {
 ```title="Output"
 Before content: { Debug: 'User1' }
 After content: { log_level: 'Debug', user: 'User1' }
+```
+
+### `surreal(skip_content)` and `surreal(skip_content_if)`
+
+On enums that use adjacent tagging (`tag` plus `content`), these control whether the content field is written (and whether it may be absent when reading).
+
+They are the closest Surreal analogues to Serde’s `skip_serializing_if`, but they apply to the **enum content field**, not to arbitrary struct fields.
+
+| Attribute | Effect |
+| --- | --- |
+| `skip_content` | Never emit the content field for that enum or variant |
+| `skip_content_if = "path"` | Emit content only when the predicate returns false (for example `Value::is_empty`) |
+
+```rust
+use surrealdb_types::{SurrealValue, ToSql, Value};
+
+#[derive(SurrealValue)]
+#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+enum ApiStatus {
+    Ok,
+    Error { message: String },
+}
+
+fn main() {
+    // Unit variant: content omitted when empty
+    // { kind: 'Ok' }
+    println!("{}", ApiStatus::Ok.into_value().to_sql());
+
+    // Named variant: content present when there is data
+    // { kind: 'Error', details: { message: 'boom' } }
+    println!(
+        "{}",
+        ApiStatus::Error {
+            message: "boom".into()
+        }
+        .into_value()
+        .to_sql()
+    );
+}
+```
+
+You can also put `skip_content` or `skip_content_if` on individual variants. They only apply to enums that already declare a `tag` (with or without `content`).
+
+### `surreal(other)`
+
+On a **unit** variant, `other` marks a deserialization catch-all: if no other variant matches, that variant is chosen instead of returning an error. At most one variant per enum should use it. It cannot be combined with `rename` or `value` on the same variant.
+
+```rust
+use surrealdb_types::SurrealValue;
+
+#[derive(Debug, PartialEq, SurrealValue)]
+#[surreal(untagged)]
+enum WireFlag {
+    #[surreal(value = true)]
+    On,
+    #[surreal(value = false)]
+    Off,
+    #[surreal(other)]
+    Unknown,
+}
 ```
 
 ### `surreal(value)`
