@@ -159,7 +159,7 @@ Notes on the arguments and output of this function:
   - When merging field data from the per‑list rows, keeps the first non‑null value encountered in the order the lists were supplied, or the last one if there are several fields with the same key.
   - Sorts by `linear_score` descending and truncates to limit.
 - **Output:**
-  - Array of merged result objects, each containing original fields and an added fuse_score.
+  - Array of merged result objects, each containing original fields and an added `linear_score`.
 
 ```surql
 /**[test]
@@ -326,7 +326,7 @@ See [this paper](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf) for 
   - When merging field data from the per‑list rows, keeps the first non‑null value encountered in the order the lists were supplied, or the last one if there are several fields with the same key.
   - Sorts by `rff_score` descending and truncates to limit.
 - **Output:**
-  - Array of merged result objects, each containing original fields and an added fuse_score.
+  - Array of merged result objects, each containing original fields and an added `rrf_score`.
 
 ```surql
 /**[test]
