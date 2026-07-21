@@ -167,7 +167,7 @@ export function DefaultLayout({
                                 >
                                     {data.title}
                                 </Title>
-                                <CopyPageMenu contentPath={data.contentPath} />
+                                <CopyPageMenu />
                             </Group>
                             {data.description && <Text fz="xl">{data.description}</Text>}
                             <Box

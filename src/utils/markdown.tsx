@@ -36,7 +36,7 @@ function stripLanguageTestComments(markdown: string): string {
     });
 }
 
-function stripLeadingH1(markdown: string): string {
+export function stripLeadingH1(markdown: string): string {
     const tree = parseMarkdownTree(markdown);
     const source = markdownSourceFromString(markdown);
     const first = tree.topNode.firstChild;
