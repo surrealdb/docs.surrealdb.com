@@ -43,6 +43,4 @@ To allow outgoing HTTP requests from your instance, you'll need to enable networ
 
 Learn more about network access in the video tutorial below:
 
-<iframe width="100%" src="https://www.youtube.com/embed/EUp5PxbzvV4?si=ezt6HhQuhhqHu9tU" title="
-Network capabilities in SurrealDB Cloud " frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" style={{ aspectRatio: 1.7, paddingTop: '20px' }}
-	class="mt-8" allowfullscreen></iframe>
+<YouTube code="EUp5PxbzvV4?si=ezt6HhQuhhqHu9tU" />

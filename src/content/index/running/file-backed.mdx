@@ -45,6 +45,8 @@ After running the above command, you should see the SurrealDB server start up su
 
 ```text
 surreal start --user root --pass secret --bind 0.0.0.0:8080 rocksdb://mydatabase.db
+```
+```text title="Output"
 2025-08-30T15:06:34.788739Z  INFO surreal::dbs: ✅🔒 Authentication is enabled 🔒✅
 2025-08-30T15:06:34.788821Z  INFO surrealdb::kvs::ds: Starting kvs store in file:mydatabase.db
 2025-08-30T15:06:34.788859Z  INFO surrealdb::kvs::ds: Started kvs store in file:mydatabase.db

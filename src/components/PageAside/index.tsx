@@ -1,11 +1,12 @@
 import { Anchor, Box, Flex, Stack, Text } from "@mantine/core";
-import { type Heading, Icon, iconText } from "@surrealdb/ui";
+import { Icon, iconText } from "@surrealdb/ui";
 import { useEffect, useState } from "react";
+import type { DocHeading } from "~/utils/markdown";
 import classes from "./style.module.scss";
 export const GITHUB_BASE = "https://github.com/surrealdb/docs.surrealdb.com/edit/main/src/content/";
 export const GITHUB_ISSUES = "https://github.com/surrealdb/docs.surrealdb.com/issues/new";
 
-function useActiveHeading(headings: Heading[]): string | null {
+function useActiveHeading(headings: DocHeading[]): string | null {
     const [activeId, setActiveId] = useState<string | null>(null);
 
     useEffect(() => {
@@ -35,7 +36,7 @@ function useActiveHeading(headings: Heading[]): string | null {
 }
 
 export interface PageAsideProps {
-    headings: Heading[];
+    headings: DocHeading[];
 }
 
 export function PageAside({ headings }: PageAsideProps) {

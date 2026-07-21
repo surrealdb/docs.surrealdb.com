@@ -165,13 +165,13 @@ await management.contexts.ingest(
 )
 ```
 
-After ingestion, the agent can retrieve from authoritative knowledge via `knowledge_search` (MCP) or `session.knowledge_search()` (SDK):
+After ingestion, the agent can retrieve from authoritative knowledge via MCP `recall` or the SDK `recall` helper:
 
 ```python
-results = await session.knowledge_search(
+results = await memory.recall(
     query="surface code fidelity thresholds 2024",
-    top_k=3,
-    mode="hybrid_graph",
+    k=3,
+    mode="hybrid",
 )
 ```
 

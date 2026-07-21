@@ -1,0 +1,87 @@
+---
+position: 1
+title: LiveKit
+description: "Adding Spectron memory to a LiveKit voice agent."
+---
+
+# LiveKit
+
+[LiveKit Agents](https://docs.livekit.io/agents/) build realtime voice agents from a speech-to-text, LLM, and text-to-speech pipeline. Spectron gives that agent long-term memory: recall what the caller said in past sessions before the model speaks, and store each turn afterwards. Use the [Python SDK](/docs/spectron/integrations/sdks/python) (`surrealdb`); there is no dedicated LiveKit adapter.
+
+> [!NOTE]
+> This is an integration guide. The code shows where Spectron fits in a LiveKit agent's turn lifecycle; adapt the hook names to your installed `livekit-agents` version.
+
+## Installation
+
+```bash
+pip install "livekit-agents[openai,silero]" surrealdb
+```
+
+Set the connection details:
+
+```bash
+export SPECTRON_ENDPOINT="https://api.spectron.example"
+export SPECTRON_CONTEXT="acme-prod"
+export SPECTRON_API_KEY="sk-spec-..."
+```
+
+## Recall before the model, store after
+
+LiveKit calls `on_user_turn_completed` once the caller's speech has been transcribed, before the LLM runs. Recall relevant memory there and add it to the turn context; store the exchange when the turn finishes:
+
+```python
+import os
+from livekit.agents import Agent, AgentSession, ChatContext, ChatMessage
+from livekit.plugins import openai, silero
+from surrealdb import AsyncSpectron
+
+class MemoryAgent(Agent):
+    def __init__(self, memory: AsyncSpectron, scope: list[str]):
+        super().__init__(instructions="You are a helpful voice assistant.")
+        self._memory = memory
+        self._scope = scope
+
+    async def on_user_turn_completed(self, turn_ctx: ChatContext, new_message: ChatMessage):
+        # Recall relevant memory and inject it as context for this turn.
+        block = await self._memory.query_context(
+            new_message.text_content, k=8, scope=self._scope,
+        )
+        if block:
+            turn_ctx.add_message(role="system", content=f"## Memory\n{block}")
+
+        # Store the caller's turn for future recall (non-blocking).
+        await self._memory.remember(new_message.text_content, scope=self._scope)
+
+
+async def entrypoint(ctx):
+    memory = AsyncSpectron(
+        endpoint=os.environ["SPECTRON_ENDPOINT"],
+        context=os.environ["SPECTRON_CONTEXT"],
+        api_key=os.environ["SPECTRON_API_KEY"],
+    )
+
+    session = AgentSession(
+        stt=openai.STT(),
+        llm=openai.LLM(model="gpt-4o"),
+        tts=openai.TTS(),
+        vad=silero.VAD.load(),
+    )
+
+    await session.start(
+        agent=MemoryAgent(memory, scope=["org/acme/user/alice"]),
+        room=ctx.room,
+    )
+```
+
+## Scope per caller
+
+Bind a `scope` to the caller's identity so each person's memory stays isolated. It is a slash path or an array of paths, for example `["org/acme/user/alice"]`. Derive it from the LiveKit participant identity when the room connects. Register paths with `spectron scopes create` before first use.
+
+## Latency
+
+Voice turns are latency-sensitive. Keep recall to a single `query_context` call with a modest `k`, and let the write to `remember` run without blocking the response. For heavier synthesis, run `reflect` or `consolidate` between calls rather than inside a turn.
+
+## Next steps
+
+- [Python SDK](/docs/spectron/integrations/sdks/python): the full client surface
+- [Recalling memories](/docs/spectron/agent-memory/retrieve/recall): recall modes and filters

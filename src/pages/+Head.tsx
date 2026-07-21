@@ -3,10 +3,11 @@
 import "@mantine/core/styles.layer.css";
 import "@mantine/spotlight/styles.layer.css";
 import "@surrealdb/ui/styles.css";
+import "@surrealdb/ui/fonts.css";
 import "~/assets/styles/global.scss";
+import "~/assets/styles/override.scss";
 
 import { ColorSchemeScript } from "@mantine/core";
-import { FontLinks } from "@surrealdb/ui";
 import { usePageContext } from "vike-react/usePageContext";
 import FavIcon from "~/assets/img/favicon.svg";
 import type { PageData } from "~/utils/data";
@@ -61,7 +62,6 @@ export function Head() {
                 src="/analytics.js"
                 defer
             />
-            <FontLinks />
             {breadcrumbJsonLd && (
                 <script
                     type="application/ld+json"

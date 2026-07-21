@@ -1,0 +1,74 @@
+---
+position: 2
+title: ElevenLabs
+description: "Giving an ElevenLabs Conversational AI agent memory with Spectron."
+---
+
+# ElevenLabs
+
+[ElevenLabs Conversational AI](https://elevenlabs.io/docs/conversational-ai/overview) runs the voice agent on ElevenLabs' side and reaches your systems through **server tools** (webhooks it calls mid-conversation) and **post-call webhooks** (fired when a conversation ends). Spectron sits behind both: a server tool for recall during the call, and a post-call webhook to store the transcript. There is no dedicated adapter. You expose a small HTTP endpoint that forwards to Spectron.
+
+> [!NOTE]
+> This is an integration guide. It shows the two webhook shapes ElevenLabs calls and how each maps to Spectron; wire them to your own hosting.
+
+## Recall as a server tool
+
+Add a [server tool](https://elevenlabs.io/docs/conversational-ai/customization/tools) to the agent (for example `recall_memory(query)`) pointing at an endpoint you host. When the agent decides it needs context, ElevenLabs calls the tool and passes the return value back into the conversation. Handle it with the [JavaScript SDK](/docs/spectron/integrations/sdks/javascript-and-typescript):
+
+```typescript
+import { Spectron } from "@surrealdb/spectron";
+
+const spectron = new Spectron({
+    endpoint: process.env.SPECTRON_ENDPOINT!,
+    context: process.env.SPECTRON_CONTEXT!,
+    apiKey: process.env.SPECTRON_API_KEY!,
+});
+
+// POST /tools/recall (configured as an ElevenLabs server tool)
+export async function POST(request: Request) {
+    const { query, user_id } = await request.json();
+    const block = await spectron.context(query, {
+        scope: [`org/acme/user/${user_id}`],
+        k: 8,
+    });
+    return Response.json({ memory: block });
+}
+```
+
+Pass the caller's `user_id` as a [dynamic variable](https://elevenlabs.io/docs/conversational-ai/customization/personalization/dynamic-variables) so the tool scopes recall to the right person.
+
+## Store the conversation with a post-call webhook
+
+Configure a [post-call webhook](https://elevenlabs.io/docs/conversational-ai/workflows/post-call-webhooks). ElevenLabs POSTs the full transcript when the conversation ends; store the turns so they are available next time:
+
+```typescript
+// POST /webhooks/elevenlabs (post-call webhook)
+export async function POST(request: Request) {
+    const payload = await request.json();
+    const { transcript, conversation_id } = payload.data;
+    const userId = payload.data.metadata?.user_id ?? "anonymous";
+
+    const turns = transcript.map((t: { role: string; message: string }) => ({
+        role: t.role === "agent" ? "assistant" : "user",
+        content: t.message,
+    }));
+
+    await spectron.rememberMany(turns, {
+        scope: [`org/acme/user/${userId}`],
+    });
+
+    return new Response("ok");
+}
+```
+
+> [!IMPORTANT]
+> ElevenLabs signs post-call webhooks with an HMAC header. Verify the signature against your webhook secret before trusting the payload.
+
+## Scope per caller
+
+Both endpoints scope to the caller with a slash path such as `["org/acme/user/alice"]`, derived from the dynamic variable or conversation metadata. Register paths with `spectron scopes create` before first use.
+
+## Next steps
+
+- [JavaScript SDK](/docs/spectron/integrations/sdks/javascript-and-typescript): the full client surface
+- [REST API](/docs/spectron/integrations/surfaces/rest): calling Spectron over HTTP without the SDK

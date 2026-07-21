@@ -250,4 +250,4 @@ Find all the code in the [langchain-surrealdb repository examples](https://githu
 
 Get started for free with [Surreal Cloud](https://app.surrealdb.com/signin).
 
-Any questions or thoughts about this or graph queries using SurrealDB? Feel free to [drop by our Discord](https://discord.gg/surrealdb) to get in touch.
+Any questions or thoughts about this or graph queries using SurrealDB? [Join our Discord](https://discord.gg/surrealdb) — `#all-ai` and `#surrealql` are good places to start for this topic, and `#help` or `#general` work for anything else.

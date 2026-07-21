@@ -1,0 +1,231 @@
+---
+position: 15
+title: Codecs
+description: The SQON library provides codecs for serialising and deserialising SurrealDB value types over CBOR and JSON wire formats.
+---
+
+# Codecs
+
+Record IDs, nanosecond datetimes, decimals, and durations do not survive a round trip through plain JSON or untagged CBOR unchanged. SQON (SurrealQL Object Notation) is the wire format SurrealDB uses for these types. The [`@surrealdb/sqon`](https://www.npmjs.com/package/@surrealdb/sqon) package ships the codecs that convert between JavaScript value instances and that format.
+
+When you use the `surrealdb` SDK over WebSocket or HTTP, those codecs run automatically on every request and response. You can also import them on their own if you are building a custom client, middleware, or data pipeline and do not need the full driver.
+
+## Available codecs
+
+Two codecs are fully implemented today:
+
+<table>
+	<thead>
+		<tr>
+			<th scope="col">Codec</th>
+			<th scope="col">Wire format</th>
+			<th scope="col">When to use</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<td scope="row" data-label="Codec"><code>CborCodec</code></td>
+			<td scope="row" data-label="Wire format"><code>Uint8Array</code> (CBOR with SurrealDB tags)</td>
+			<td scope="row" data-label="When to use">RPC transport to SurrealDB - WebSocket and HTTP engines encode every request and decode every response with CBOR</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Codec"><code>JsonCodec</code></td>
+			<td scope="row" data-label="Wire format">Plain object tree (SQON JSON)</td>
+			<td scope="row" data-label="When to use">JSON-safe interchange - logging, caching, REST APIs, or any environment where binary CBOR is impractical</td>
+		</tr>
+	</tbody>
+</table>
+
+Both codecs represent the same values. If you encode with one and decode with the other, types are preserved as long as you decode back into the matching value classes.
+
+> [!NOTE]
+> `FlatBufferCodec` is exported for forward compatibility but is not implemented in this version.
+
+## Why you need a codec
+
+Without one, SurrealDB-specific types get flattened or misread on the way in or out:
+
+- A `RecordId` can turn into a plain string and lose its table
+- A `Decimal` can be rounded by JavaScript's `number` type
+- `none` can be confused with a missing JSON field or with `null`
+- Datetimes can drop from nanoseconds to milliseconds
+
+That is why query results come back as `DateTime`, `RecordId`, and the other value classes: the CBOR codec decodes every inbound RPC message before your code sees it.
+
+## Using codecs with the SDK
+
+A new `Surreal` instance registers default codecs. WebSocket and HTTP engines use `CborCodec` for RPC traffic, so you normally never call a codec yourself.
+
+Pass `codecOptions` in the driver options to change decoding behaviour:
+
+```ts
+import { Surreal } from 'surrealdb';
+
+const db = new Surreal({
+    codecOptions: {
+        useNativeDates: true,
+    },
+});
+```
+
+With `useNativeDates` set, datetimes decode as native `Date` objects instead of `DateTime`. You lose nanosecond precision, which is the trade-off if the rest of your code expects `Date`.
+
+You can replace the default codec factories when you need custom encode or decode logic:
+
+```ts
+import { CborCodec, JsonCodec, type CodecOptions } from '@surrealdb/sqon';
+import { Surreal } from 'surrealdb';
+
+const db = new Surreal({
+    codecOptions: {
+        valueDecodeVisitor: (value) => {
+            // Transform decoded values before they reach your application
+            return value;
+        },
+    },
+    codecs: {
+        cbor: (options: CodecOptions) => new CborCodec(options),
+        json: (options: CodecOptions) => new JsonCodec(options),
+    },
+});
+```
+
+## Using codecs standalone
+
+Install `@surrealdb/sqon` when you only need serialisation and not the database client:
+
+```sh
+bun add @surrealdb/sqon
+```
+
+### CBOR codec
+
+`CborCodec` outputs compact binary. Reach for it when you speak SurrealDB's RPC protocol or want a small, type-safe binary payload.
+
+```ts
+import { CborCodec, RecordId, Decimal, Duration } from '@surrealdb/sqon';
+
+const codec = new CborCodec({
+	// optional options
+});
+
+const payload = {
+    id: new RecordId('order', 42),
+    total: new Decimal('99.95'),
+    sla: Duration.parse('24h'),
+};
+
+const bytes = codec.encode(payload);
+const restored = codec.decode<typeof payload>(bytes);
+
+console.log(restored.id instanceof RecordId); // true
+console.log(restored.total instanceof Decimal); // true
+```
+
+The CBOR layout uses SurrealDB's tagged values. See the [CBOR protocol reference](/docs/reference/rest-api/cbor-protocol) for the tag list.
+
+### JSON codec
+
+`JsonCodec` builds a JSON-safe object tree in SQON JSON notation. Typed values sit inside wrapper objects such as `$recordId`, `$datetime`, and `$decimal`:
+
+```ts
+import { JsonCodec, RecordId, DateTime } from '@surrealdb/sqon';
+
+const codec = new JsonCodec({
+	// optional options
+});
+
+const value = {
+    created: DateTime.parse('2024-01-15T12:00:00.123456789Z'),
+    author: new RecordId('user', 'tobie'),
+};
+
+const sqonJson = codec.encode(value);
+```
+
+```json
+{
+    "created": { "$datetime": "2024-01-15T12:00:00.123456789Z" },
+    "author": { "$recordId": { "tb": "user", "id": "tobie" } }
+}
+```
+
+Decode the structure back to value instances:
+
+```ts
+const restored = codec.decode<typeof value>(sqonJson);
+console.log(restored.author instanceof RecordId); // true
+```
+
+`JsonCodec` fits logging, browser storage, and anything that only accepts JSON/text such as LLMs. `CborCodec` fits talking to SurrealDB directly and cases where size and binary safety matter.
+
+## Choosing a codec
+
+<table>
+	<thead>
+		<tr>
+			<th scope="col">Scenario</th>
+			<th scope="col">Recommended codec</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<td>WebSocket or HTTP RPC to SurrealDB</td>
+			<td><code>CborCodec</code> (used automatically by the SDK)</td>
+		</tr>
+		<tr>
+			<td>Storing query results in a JSON document store</td>
+			<td><code>JsonCodec</code> or <code>jsonify()</code> for string representations</td>
+		</tr>
+		<tr>
+			<td>Logging or debugging typed values</td>
+			<td><code>JsonCodec</code> or <code>jsonify()</code></td>
+		</tr>
+		<tr>
+			<td>Custom RPC client implementation</td>
+			<td><code>CborCodec</code></td>
+		</tr>
+		<tr>
+			<td>Browser storage (<code>localStorage</code>, IndexedDB as JSON)</td>
+			<td><code>JsonCodec</code></td>
+		</tr>
+	</tbody>
+</table>
+
+For a plain string form (good for display or simple serialisation), [`jsonify()`](/docs/reference/javascript/concepts/utilities#jsonifying-query-results) converts value instances to SurrealQL strings without the SQON JSON wrappers.
+
+## Codec options
+
+Both codecs accept a shared `CodecOptions` object:
+
+<table>
+	<thead>
+		<tr>
+			<th scope="col">Option</th>
+			<th scope="col">Description</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<td><code>useNativeDates</code></td>
+			<td>Decode datetimes as native <code>Date</code> instead of <code>DateTime</code> (loses nanosecond precision)</td>
+		</tr>
+		<tr>
+			<td><code>valueEncodeVisitor</code></td>
+			<td>Custom function applied to each value before encoding</td>
+		</tr>
+		<tr>
+			<td><code>valueDecodeVisitor</code></td>
+			<td>Custom function applied to each value after decoding</td>
+		</tr>
+	</tbody>
+</table>
+
+Use `valueEncodeVisitor` and `valueDecodeVisitor` to map values to your own types, or to strip fields before encoding.
+
+## Learn more
+
+- [CBOR protocol reference](/docs/reference/rest-api/cbor-protocol) for the full CBOR tag specification
+- [Value types](/docs/reference/javascript/concepts/value-types) for the value classes codecs operate on
+- [Utilities](/docs/reference/javascript/concepts/utilities) for `jsonify()` and other SQON helpers
+- [`@surrealdb/sqon` on npm](https://www.npmjs.com/package/@surrealdb/sqon) for standalone installation

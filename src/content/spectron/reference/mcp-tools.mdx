@@ -6,10 +6,13 @@ description: "Tool payloads and ACL alignment."
 
 # MCP tools
 
-Spectron's MCP server exposes seven tools at `/mcp`. Each tool maps to one or more REST endpoints and carries the same authentication and scope semantics.
+Spectron's MCP server exposes **seven** tools at `/mcp`: `remember`, `recall`, `context`, `reflect`, `forget`, `upload`, and `inspect`. Each maps to one or more REST endpoints and uses the same authentication and scope semantics.
 
 > [!NOTE]
-> REST responses use **camelCase** (`queryMs`, `traceId`, `trace.traceId`). **Scope selectors** on the wire use DNF (`ScopeSets`): writes take **`scopes`**, reads take **`lens`** — an OR of conjunctive slash-path clauses. Register paths with `spectron scopes create` before use. See [Contexts and scope](/docs/spectron/mental-model/contexts-and-scope#wire-format-scopesets).
+> Older docs and some third-party snippets used names like `memory_store` or `knowledge_search`. Those prefixes are gone — use the short names above. Authoritative schemas live in the Spectron server (`spectron-user-api` MCP tools module).
+
+> [!NOTE]
+> REST responses use **camelCase** (`queryMs`, `traceId`, `trace.traceId`). **Scope selectors** on the wire use DNF (`ScopeSets`): writes take **`scope`** / **`scopes`**, reads take **`lens`** — an OR of conjunctive slash-path clauses. Register paths with `spectron scopes create` before use. See [Contexts and scope](/docs/spectron/mental-model/contexts-and-scope#wire-format-scopesets).
 
 ## Authentication
 
@@ -29,237 +32,142 @@ All tools use **`Authorization: Bearer`** authentication (same as REST). Pass th
 }
 ```
 
-`X-Spectron-Context` in MCP client configs is a convenience for templating; the server resolves context from each tool's **`context_id`** argument.
+`X-Spectron-Context` in MCP client configs is a convenience for templating. Each API key is bound to exactly one Context, so **`context_id` is optional** on every tool: when omitted, the server resolves the Context from the bearer key. You may still pass `context_id` explicitly; a value that does not match the key's bound Context is rejected with **`401`** (masked, not `404`).
 
 ## Scope handling
 
 Scope is layered on each tool call:
 
 1. **Grant region** (from the API key's principal) – enforced server-side; cannot be widened past what the key allows.
-2. **Per-call `scopes` / `lens` argument** – DNF selector narrowing the operation within the grant (`scopes` on writes, `lens` on recall/context).
+2. **Per-call `scope` / `lens` argument** – DNF selector narrowing the operation within the grant (`scope`/`scopes` on writes, `lens` on `recall` / `context`).
 
 Register paths with `spectron scopes create` before first use.
 
 ---
 
-## `memory_store`
+## `remember`
 
-Store a memory from the current conversation. Auto-classifies into Identity / Knowledge / Context categories and reconciles against existing memory.
+Persist a new fact from text. Reconciles against existing memory (supersession, uncertainty).
 
-**Principal required:** agent or management.
+**Requires:** `memory:write` over the target scope.
 
 **Input:**
 ```jsonc
 {
-  "content": "I just got promoted to CTO.",   // required
-  "role": "user",                              // optional, default "user"
-  "session_id": "sess_abc123",                 // optional – creates implicit session if omitted
-  "scopes": [["org/acme/user/alice"]]
+  "text": "I just got promoted to CTO.",   // required
+  "session_id": "sess_abc123",            // optional – creates a session if omitted
+  "scope": [["org/acme/user/alice"]],     // optional DNF write selector
+  "labels": ["source=onboarding"],        // optional
+  "infer": "full"                         // full | preview | none (default full)
 }
 ```
 
-**Output:**
-```jsonc
-{
-  "turn_id": "turn:01HF...",
-  "entities": [{ "id": ["Person", "alice"], "action": "updated" }],
-  "attributes": [{ "key": "role", "value": "CTO", "action": "superseded" }],
-  "relations": [],
-  "instructions": [],
-  "uncertainties": [],
-  "corrections": [],
-  "traceId": "…"
-}
-```
+**Output:** Structured diff (entities, attributes, relations, instructions, uncertainties, corrections) plus a stand-in `trace_id` (the facts path returns the turn id today).
 
-**Underlying REST endpoint:** `POST /api/v1/{context_id}/facts` (or `POST .../facts/batch` for multi-turn capture)
+**Underlying REST endpoint:** `POST /api/v1/{context_id}/facts`
 
 ---
 
-## `memory_recall`
+## `recall`
 
-Retrieve relevant memory and knowledge for a query. Returns a formatted context block ready for prompt injection.
+Search the unified substrate (experiential facts + document passages) and return ranked hits.
 
-**Principal required:** any (agent, supervisor, management).
+**Requires:** `memory:read`.
 
 **Input:**
 ```jsonc
 {
   "query": "What does Alice do at Acme?",  // required
-  "k": 10,                                  // optional, default 10
-  "lens": [["org/acme"]]
+  "k": 10,                                  // optional, default 10 (max 50)
+  "mode": "hybrid",                         // vector | bm25 | graph | hybrid
+  "lens": [["org/acme"]],                   // optional DNF read lens
+  "labels": ["project=support"]             // optional key=value filter
 }
 ```
 
-**Output:**
+**Output:** Ranked hits with scores and source kinds, plus `trace_id`.
+
+**Underlying REST endpoint:** `POST /api/v1/{context_id}/query`
+
+---
+
+## `context`
+
+Assemble a markdown context block (profile + preferences + relevant facts) ready for system-prompt injection.
+
+**Requires:** `memory:read`.
+
+**Input:**
 ```jsonc
 {
-  "context": "Alice – CTO at Acme Corp. Currently leading the Q3 roadmap review.",
-  "tier": "direct",
-  "queryMs": 12,
-  "traceId": "…"
+  "query": "What does Alice do at Acme?",
+  "lens": [["org/acme"]],
+  "labels": ["org=acme"]
 }
 ```
 
-The `context` field is intended for direct injection into the system prompt. The `tier` field indicates the resolution path: `direct`, `cache`, `hybrid`, or `full_context`.
+**Output:** Markdown context string plus `trace_id`.
 
 **Underlying REST endpoint:** `POST /api/v1/{context_id}/context`
 
 ---
 
-## `memory_reflect`
+## `reflect`
 
-Synthesise patterns or insights from existing memory. Can optionally persist the reflection as new experiential memory attributes.
+Synthesise patterns across stored memory. With `persist: true`, writes the insight as new facts (`source.kind = "reflect"`).
 
-**Principal required:** any for `persist: false`; supervisor or management for `persist: true`.
+**Requires:** `memory:read`; `persist: true` also needs write access in the caller's region.
 
 **Input:**
 ```jsonc
 {
   "query": "What recurring complaints have customers raised this month?",
-  "persist": true,                                 // optional, default false
-  "lens": [["org/acme"], ["project/support"]]   // OR: org-wide OR project/support involvement
+  "persist": true   // optional, default false
 }
 ```
 
-**Output:**
-```jsonc
-{
-  "reflection": "Three recurring patterns emerged: billing confusion (8 tickets), …",
-  "evidence": ["memory_chunk:01HF...", "attribute:..."],
-  "persisted_attributes": [],
-  "traceId": "…"
-}
-```
-
-When `persist: true`, `persisted_attributes` lists the attributes stored from this reflection.
+**Output:** Reflection text, evidence refs, optional `persisted_attributes`, and `trace_id`.
 
 **Underlying REST endpoint:** `POST /api/v1/{context_id}/reflect`
 
 ---
 
-## `memory_profile`
+## `forget`
 
-Get the aggregated profile for the active scope – static facts, dynamic context, preferences, and active instructions – formatted for system prompt injection.
+Stop believing something. Soft-deletes matching attributes (`valid_until`). `purge: true` also removes supersession history (right-to-be-forgotten).
 
-**Principal required:** any.
-
-**Input:**
-```jsonc
-{
-  "scopes": [["org/acme/user/alice"]]
-}
-```
-
-**Output:**
-```jsonc
-{
-  "static": [
-    { "key": "name", "value": "Alice" },
-    { "key": "role", "value": "CTO" }
-  ],
-  "dynamic": [
-    { "key": "current_task", "value": "Q3 roadmap review" }
-  ],
-  "preferences": [
-    { "key": "editor", "value": "Neovim" }
-  ],
-  "instructions": [
-    { "label": "tone", "description": "Concise and direct" }
-  ]
-}
-```
-
-**Underlying REST endpoint:** `GET /api/v1/{context_id}/profile`
-
----
-
-## `knowledge_search`
-
-Search the authoritative authoritative knowledge base. Returns ranked document chunks with source references.
-
-**Principal required:** any.
+**Requires:** `memory:forget` (not the same as `memory:write`).
 
 **Input:**
 ```jsonc
 {
-  "query": "What is the return window for unopened items?", // required
-  "mode": "hybrid",                                         // optional: vector | bm25 | hybrid | hybrid_graph
-  "k": 5,                                                   // optional, default 5
-  "threshold": 0.5,                                         // optional
-  "filter": { "mime_type": ["application/pdf"] }            // optional
+  "query": "anything about my previous role at the old company",
+  "purge": false
 }
 ```
 
-**Output:**
-```jsonc
-{
-  "results": [
-    {
-      "chunk": {
-        "id": "knowledge_chunk:...",
-        "text": "Unopened items may be returned within 30 days of purchase...",
-        "section": "Eligibility",
-        "position": 7
-      },
-      "score": 0.87,
-      "document": {
-        "id": "document:0197...",
-        "title": "Returns Policy (2026 revision)",
-        "source": "returns.pdf"
-      }
-    }
-  ],
-  "queryMs": 38,
-  "traceId": "…"
-}
-```
+**Output:** Soft-delete count. `trace_id` may be empty on this path.
 
-**Underlying REST endpoint:** `POST /api/v1/{context_id}/query` (unified recall) or `POST .../documents/query` (document passages only)
-
----
-
-## `knowledge_get`
-
-Fetch a specific document, chunk, or typed knowledge node by ID. Use this after `knowledge_search` has identified the source – fetching by ID is faster and more deterministic than re-searching.
-
-**Principal required:** any.
-
-**Input:**
-```jsonc
-{
-  "kind": "document",                                         // document | chunk | node
-  "id": "document:0197...",                                   // for kind=document or kind=chunk
-  "node": { "kind": "product", "slug": "airpods_pro_2" }     // for kind=node
-}
-```
-
-**Output:** A typed payload matching the underlying endpoint – document metadata and status, a paginated chunk list, or a knowledge node with its content and related edges.
-
-**Underlying REST endpoints:**
-- `GET /api/v1/{context_id}/documents/{id}`
-- `GET /api/v1/{context_id}/documents/{id}/chunks`
-- `GET /api/v1/{context_id}/entities/{entity_type}/{entity_name}`
+**Underlying REST endpoint:** `POST /api/v1/{context_id}/forget`
 
 ---
 
 ## `upload`
 
-Upload a document to the knowledge layer. Bytes are base64-encoded on the wire; processing is asynchronous (chunk, embed, index).
+Upload a document (base64 bytes) into the knowledge layer. Processing is asynchronous.
 
-**Principal required:** agent or management (with `memory:write` grant).
+**Requires:** `memory:write`.
 
 **Input:**
 ```jsonc
 {
-  "context_id": "acme-prod",           // required
   "bytes_base64": "<RFC 4648 bytes>",  // required
   "title": "Returns Policy",
   "source": "returns.pdf",
   "mime_type": "application/pdf",
   "filename": "returns.pdf",
-  "scopes": [["org/acme/team/eng"]],      // optional — narrower than memory:write
-  "labels": ["team=eng"]               // optional — stamped on document rows
+  "scopes": [["org/acme/team/eng"]],   // optional — or `scope` alias
+  "labels": ["team=eng"]
 }
 ```
 
@@ -274,35 +182,31 @@ Upload a document to the knowledge layer. Bytes are base64-encoded on the wire; 
 }
 ```
 
+Poll status with **`inspect`** (`document:<id>`) or REST `GET .../documents/{id}`.
+
 **Underlying REST endpoint:** `POST /api/v1/{context_id}/documents`
 
 ---
 
-## `memory_forget`
+## `inspect`
 
-Stop believing something. Sets `valid_until` on attributes that semantically match the query. Does not physically delete records.
+Fetch a typed row by reference for explainability.
 
-**Principal required:** agent or management.
+**Requires:** `memory:read`.
 
 **Input:**
 ```jsonc
 {
-  "query": "anything about my previous role at the old company", // required
-  "scopes": [["org/acme/user/alice"]]
+  "ref": "entity:Person/alice"   // entity:<Type>/<Name> | trace:<id> | document:<id>
 }
 ```
 
-**Output:**
-```jsonc
-{
-  "deleted": 3,
-  "traceId": "…"
-}
-```
+**Output:** Entity (with attributes / supersession), flat trace record, or document metadata — matching the underlying GET.
 
-The `deleted` count reflects attributes soft-deleted (marked with `valid_until`).
-
-**Underlying REST endpoint:** `POST /api/v1/{context_id}/forget`
+**Underlying REST endpoints:**
+- `GET /api/v1/{context_id}/entities/{type}/{name}`
+- `GET /api/v1/{context_id}/traces/{id}`
+- `GET /api/v1/{context_id}/documents/{id}`
 
 ---
 
@@ -327,7 +231,7 @@ Operation failures return an **`isError: true`** tool result (HTTP transport sta
 | `401` | Missing or invalid key | Fix credentials; missing Context is masked as 401 (not 404) |
 | `403` | Grant denied | Narrow scope or request access |
 | `404` | Resource not found | Adjust query or id |
-| `429` | Rate or token limit | Back off and retry |
+| `429` | Rate limit or `enforcement_blocked` | Back off and retry |
 | `500` | Server fault | Retry; details are redacted |
 
 JSON-RPC **`error`** responses are reserved for **protocol faults** only — malformed params (`-32602`), unknown tool (`-32601`), oversized `k`, and similar.
@@ -338,19 +242,19 @@ Denied operations emit the same **`authz.denied`** audit events and error metric
 
 ## Tool ACL summary
 
-| Tool | agent | supervisor | management |
-|---|---|---|---|
-| `memory_store` | ✓ | ✓ | ✓ |
-| `memory_recall` | ✓ | ✓ | ✓ |
-| `memory_reflect` (no persist) | ✓ | ✓ | ✓ |
-| `memory_reflect` (persist=true) | ✗ | ✓ | ✓ |
-| `memory_profile` | ✓ | ✓ | ✓ |
-| `knowledge_search` | ✓ | ✓ | ✓ |
-| `knowledge_get` | ✓ | ✓ | ✓ |
-| `memory_forget` | ✓ | ✓ | ✓ |
+| Tool | Typical grant |
+|---|---|
+| `remember` | `memory:write` |
+| `recall` | `memory:read` |
+| `context` | `memory:read` |
+| `reflect` (`persist: false`) | `memory:read` |
+| `reflect` (`persist: true`) | `memory:read` + write region |
+| `forget` | `memory:forget` |
+| `upload` | `memory:write` |
+| `inspect` | `memory:read` |
 
 ## Streaming
 
 Most tools are synchronous – the full response is returned in a single payload.
 
-`memory_reflect` with `persist: true` on a large corpus may take several seconds. The server emits MCP `progress` notifications while the underlying reflection handler runs.
+`upload` returns immediately with `queued` status; ingestion continues on the worker. `reflect` with `persist: true` on a large corpus may take several seconds (no MCP progress notifications today).

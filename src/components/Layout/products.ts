@@ -1,4 +1,4 @@
-import { pictoSpectron, pictoSurrealDB } from "@surrealdb/ui";
+import { pictoSpectronGradient, pictoSurrealDBGradient } from "@surrealdb/ui";
 import DocsDark from "~/assets/img/logo/dark/docs.svg";
 import SpectronDark from "~/assets/img/logo/dark/spectron.svg";
 import LogoDark from "~/assets/img/logo/dark/surrealdb.svg";
@@ -31,13 +31,13 @@ export interface ProductConfig extends ProductMeta {
 export const PRODUCTS: Record<ProductId, ProductConfig> = {
     surrealdb: {
         ...PRODUCT_META.surrealdb,
-        picto: pictoSurrealDB,
+        picto: pictoSurrealDBGradient,
         wordmarkLight: DocsLight,
         wordmarkDark: DocsDark,
     },
     spectron: {
         ...PRODUCT_META.spectron,
-        picto: pictoSpectron,
+        picto: pictoSpectronGradient,
         wordmarkLight: SpectronLight,
         wordmarkDark: SpectronDark,
     },
