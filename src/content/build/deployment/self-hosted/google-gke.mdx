@@ -219,17 +219,18 @@ surrealdb-tikv   <none>   *       34.160.82.177   80      5m
 4. Connect to the cluster and define the initial credentials:
 
 ```bash title="Connect then define user"
-$ export SURREALDB_URL=http://$(kubectl get ingress surrealdb-tikv -o json | jq -r .status.loadBalancer.ingress[0].ip)
-$ surreal sql -e $SURREALDB_URL
-> DEFINE USER root ON ROOT PASSWORD 'StrongSecretPassword!' ROLES OWNER;
+export SURREALDB_URL=http://$(kubectl get ingress surrealdb-tikv -o json | jq -r .status.loadBalancer.ingress[0].ip)
+echo "DEFINE USER root ON ROOT PASSWORD 'StrongSecretPassword!' ROLES OWNER;" | surreal sql -e $SURREALDB_URL --pretty --hide-welcome
 ```
 
 5. Verify you can connect to the database with the new credentials:
 
 ```bash title="Connect as defined user"
-$ surreal sql -u root -p 'StrongSecretPassword!' -e $SURREALDB_URL
-> INFO FOR ROOT
-[{ accesses: {  }, namespaces: {  }, nodes: { "0e87c953-68d7-40e1-9090-3dfc404af25e": 'NODE 0e87c953-68d7-40e1-9090-3dfc404af25e SEEN 1742869518357 ACTIVE' }, system: { available_parallelism: 14, cpu_usage: 4.321133613586426f, load_average: [2.2265625f, 2.2138671875f, 2.044921875f], memory_allocated: 13428527, memory_usage: 154812416, physical_cores: 14, threads: 32 }, users: { root: "DEFINE USER root ON ROOT PASSHASH '[REDACTED]' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }]
+echo 'INFO FOR ROOT;' | surreal sql -u root -p 'StrongSecretPassword!' -e $SURREALDB_URL --pretty --hide-welcome
+```
+
+```
+[{ accesses: {  }, namespaces: {  }, nodes: { "0e87c953-68d7-40e1-9090-3dfc404af25e": 'NODE 0e87c953-68d7-40e1-9090-3dfc404af25e SEEN 1742869518357 ACTIVE' }, system: { available_parallelism: 14, cpu_usage: 4.321133613586426f, load_average: [2.2265625f, 2.2138671875f, 2.044921875f], memory_allocated: 13428527, memory_usage: 154812416, physical_cores: 14, threads: 32 }, users: { root: "DEFINE USER root ON ROOT PASSHASH '...' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }]
 ```
 
 5. Now that the initial credentials have been created, enable authentication:
