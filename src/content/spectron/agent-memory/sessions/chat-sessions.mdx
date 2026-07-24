@@ -23,14 +23,13 @@ The two patterns are not mutually exclusive. A single session can use `chat` for
 
 When you call `session.chat()`, Spectron executes the following steps:
 
-1. **Appends the user turn** – stores the message with `role: "user"` and runs the extraction pipeline (identical to a manual `session.turn()` call).
-2. **Loads the session transcript window** – the last **10** user/assistant turns (excluding the turn just written), capped at **8k characters** of the newest content. Rendered as a sanitised `# Conversation so far` block inside the system prompt (one line per turn, inside the existing untrusted-data framing).
-3. **Retrieves context** – queries the memory layer for relevant facts, applying the tiered retrieval strategy (direct scope → hybrid → full context) and formats them into an injection-ready string.
-4. **Calls the response model** – invokes the configured `response` model with retrieved context, the transcript window (when non-empty), and the current question.
-5. **Persists the assistant turn** – stores the model's reply as an `assistant` turn and runs extraction on it.
-6. **Returns** the reply text, the combined memory diff (entities, attributes, relations, and corrections produced by both the user and assistant turns), and a **`citations`** list when the model cites retrieved sources with `[S1]`-style markers.
+1. **Loads the session transcript window** – the last **10** user/assistant turns of the same session, capped at **8k characters** of the newest content. Rendered as a sanitised `# Conversation so far` block inside the system prompt (one line per turn, inside the existing untrusted-data framing). The user message for this request is not yet stored; it appears under `# Question` after a successful reply.
+2. **Retrieves context** – runs the tiered retrieval strategy. Turns already in the transcript window are not retrieved again (the prompt already includes them). Older turns from the same session remain eligible. Prior assistant replies rank below user statements and document sources when both match; citations from those hits include **`role: "assistant"`**.
+3. **Calls the response model** – invokes the configured `response` model with retrieved context, the transcript window (when non-empty), and the current question.
+4. **Persists both turns** – on a successful reply, stores the user message (`infer: full`) and the assistant reply (`infer: none`, so the reply is not re-extracted).
+5. **Returns** the reply text, the memory diff from the user turn's extraction, and a **`citations`** list when the model cites retrieved sources with `[S1]`-style markers.
 
-When the transcript window is non-empty, **tier-2 response reuse is bypassed** — the cache is keyed by query embedding and scope, not session, so transcript-dependent replies must always be freshly synthesised. First-turn and sessionless calls remain cache-eligible.
+When the transcript window is non-empty, **tier-2 response reuse is bypassed** — the cache is keyed by query embedding and caller scope, not session, so transcript-dependent replies must neither be served from nor seeded into the cache. First-turn and sessionless calls remain cache-eligible.
 
 Multi-turn chat pins a session across messages. Under scope enforcement, each turn's session is **scope-tagged** to the caller's write region so later messages in the same session authorise correctly.
 
@@ -77,11 +76,11 @@ The plain-text response from the configured response model. This is ready to dis
 
 ### `citations`
 
-One entry per cited marker. Each resolves to a source row (`id`, `kind`, `snippet`, `score`, optional `occurredAt`). Document passages also include **`documentTitle`** and **`positionPercent`** (approximate percentage through the document). Markers never invent sources — only rows from retrieval (including section-expansion context) are cited.
+One entry per cited marker. Each resolves to a source row (`id`, `kind`, `snippet`, `score`, optional `occurredAt`, optional **`role`**). Document passages also include **`documentTitle`** and **`positionPercent`** (approximate percentage through the document). When a citation points at a stored assistant reply, **`role`** is `"assistant"` so callers can tell chat is citing its own earlier output. Markers never invent sources — only rows from retrieval (including section-expansion context) are cited.
 
 ### `memory_updates`
 
-The combined extraction diff from both the user turn and the assistant turn. The shape matches the extraction result from `session.turn()`. Use this to update UI state or trigger any downstream logic that depends on changes to the memory graph.
+The extraction diff from the user turn (the assistant reply is stored with `infer: none`). The shape matches the extraction result from `session.turn()`. Use this to update UI state or trigger any downstream logic that depends on changes to the memory graph.
 
 ## Python SDK
 
