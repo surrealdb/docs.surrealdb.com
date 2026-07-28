@@ -1,10 +1,17 @@
 import {
+    createRouteResolver,
     handleSearch,
     MAX_QUERY_LENGTH,
     normaliseQuery,
+    parseContextToken,
     type SearchProduct,
+    type SearchRouteTable,
 } from "@surrealdb/docs-search-common";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+// Compiled from the content tree by plugins/vite-search-index.ts on every
+// Vite run, so the URL layout search knows about cannot drift from the
+// routes the site actually serves.
+import routeTable from "../generated/search-routes.json";
 
 const CORS_HEADERS: Record<string, string> = {
     "Access-Control-Allow-Origin": "*",
@@ -20,17 +27,23 @@ const CORS_HEADERS: Record<string, string> = {
 // serverless function or the OpenAI embedding API.
 const CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400";
 
-// Products are isolated at the URL prefix level: every Spectron
-// page lives under /docs/spectron, every SurrealDB page does not.
-// The product is passed to handleSearch, which filters the search
-// index (shared across products) before applying the relevance
-// threshold and result cap — so each product gets its full quota
-// of results rather than whatever survives a global cut.
-const PRODUCTS = ["surrealdb", "spectron"] as const satisfies readonly SearchProduct[];
-type ProductId = (typeof PRODUCTS)[number];
+// Resolves the pathname a search came from to the collection serving
+// it, using the compiled route table.
+const routes = createRouteResolver(routeTable as SearchRouteTable);
 
-function isProductId(value: string): value is ProductId {
-    return (PRODUCTS as readonly string[]).includes(value);
+// Every product declared by the content tree. Each collection names its
+// product in `__category.json`; the product is passed to handleSearch,
+// which filters the search index (shared across products) before
+// applying the relevance threshold and result cap — so each product gets
+// its full quota of results rather than whatever survives a global cut.
+const PRODUCTS: readonly SearchProduct[] = [
+    ...new Set(routeTable.collections.map((collection) => collection.product)),
+];
+
+const DEFAULT_PRODUCT = PRODUCTS[0];
+
+function isProductId(value: string): boolean {
+    return PRODUCTS.includes(value);
 }
 
 function setCors(res: VercelResponse) {
@@ -72,18 +85,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const rawProduct = typeof req.query.product === "string" ? req.query.product : "";
-    const product: ProductId = isProductId(rawProduct) ? rawProduct : "surrealdb";
+    const product = isProductId(rawProduct) ? rawProduct : DEFAULT_PRODUCT;
+
+    // The client sends the pathname it searched from; ranking only reads
+    // the kind of docs that resolves to. Collapsing it here keeps the
+    // cache key to one value per docs section rather than one per page.
+    const rawContext = typeof req.query.context === "string" ? req.query.context : "";
+    const context = rawContext ? routes.canonicalToken(rawContext) : undefined;
 
     // Redirect to the canonical query so every spelling variant
     // ("How to SELECT?", "how to select", "select") resolves to
-    // a single CDN cache entry. Product is part of the cache key
-    // so each product gets its own cached response.
+    // a single CDN cache entry. Product and context are part of the
+    // cache key so each combination gets its own cached response.
     //
     // Location must be `/docs/api/search`, not `/api/search`: the browser
     // resolves relative URLs against `surrealdb.com`, and `/api/search` is
     // not served by the docs app on that host (only `/docs/...` is proxied).
-    if (query !== raw) {
+    if (query !== raw || rawContext !== (context ?? "")) {
         const params = new URLSearchParams({ q: query, product });
+        if (context) params.set("context", context);
+
         res.writeHead(302, {
             ...CORS_HEADERS,
             Location: `/docs/api/search?${params}`,
@@ -93,7 +114,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     try {
-        const results = await handleSearch(query, product);
+        const results = await handleSearch(query, {
+            product,
+            context: context ? parseContextToken(context) : undefined,
+        });
         res.setHeader("Cache-Control", CACHE_CONTROL);
         return res.status(200).json({ success: true, results });
     } catch (err) {
