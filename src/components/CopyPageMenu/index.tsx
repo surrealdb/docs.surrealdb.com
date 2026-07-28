@@ -8,12 +8,10 @@ import {
     iconChevronDown,
     iconClaude,
     iconCopy,
+    iconText,
     useStable,
 } from "@surrealdb/ui";
 import { useMemo, useState } from "react";
-
-const RAW_BASE_URL =
-    "https://raw.githubusercontent.com/surrealdb/docs.surrealdb.com/main/src/content";
 
 const LLM_PREFIXES = {
     chatGpt: "https://chatgpt.com/?hints=search&q=",
@@ -22,11 +20,12 @@ const LLM_PREFIXES = {
 
 type LLM = keyof typeof LLM_PREFIXES;
 
-export interface CopyPageMenuProps {
-    contentPath: string;
+/** URL that serves the current page as raw markdown. */
+function markdownUrl(): string {
+    return `${location.pathname}.md`;
 }
 
-export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
+export function CopyPageMenu() {
     const { copy, copied } = useClipboard();
     const [isFetching, setIsFetching] = useState(false);
 
@@ -34,8 +33,7 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
         setIsFetching(true);
 
         try {
-            const url = `${RAW_BASE_URL}/${contentPath}`;
-            const response = await fetch(url);
+            const response = await fetch(markdownUrl());
             const body = await response.text();
 
             copy(body);
@@ -44,6 +42,10 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
         } finally {
             setIsFetching(false);
         }
+    });
+
+    const handleViewMarkdown = useStable(() => {
+        window.open(markdownUrl(), "_blank", "noopener,noreferrer");
     });
 
     const handleOpenLLM = useStable((llm: LLM) => {
@@ -126,6 +128,40 @@ export function CopyPageMenu({ contentPath }: CopyPageMenuProps) {
                             opacity={0.6}
                         >
                             Copy page content for LLMs
+                        </Text>
+                    </Stack>
+                </Menu.Item>
+                <Menu.Item
+                    bdrs="xs"
+                    leftSection={
+                        <ThemeIcon>
+                            <Icon
+                                path={iconText}
+                                opacity={1}
+                                size="lg"
+                            />
+                        </ThemeIcon>
+                    }
+                    rightSection={
+                        <Icon
+                            path={iconArrowUpRight}
+                            size="sm"
+                        />
+                    }
+                    onClick={handleViewMarkdown}
+                >
+                    <Stack gap={0}>
+                        <Text
+                            fz="sm"
+                            fw={500}
+                        >
+                            View as Markdown
+                        </Text>
+                        <Text
+                            fz="xs"
+                            opacity={0.6}
+                        >
+                            Open the raw markdown page
                         </Text>
                     </Stack>
                 </Menu.Item>

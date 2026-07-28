@@ -1,0 +1,105 @@
+---
+position: 6
+title: Migrating from Snowflake
+description: "How to map existing data and concepts from Snowflake to SurrealDB"
+---
+
+# Migrating from Snowflake to SurrealDB
+
+This page shows how Snowflake data types map to their SurrealQL equivalents, then explains how to load Snowflake tables into SurrealDB with the [Surreal Sync](https://github.com/surrealdb/surreal-sync/) tool.
+
+## Data types
+
+The following chart shows Snowflake data types along with the equivalent or near-equivalent [SurrealQL data type](/docs/reference/query-language/datamodel) for each. Surreal Sync reads values through the Snowflake SQL REST API, which returns every cell as a string together with the column's logical type, and converts each one using that type.
+
+| Snowflake Data Type | SurrealDB Mapping | Notes |
+| ------------------- | ----------------- | ----- |
+| **BOOLEAN**         | `bool`            |                                                              |
+| **NUMBER / INT / INTEGER / BIGINT** | `int` | Whole numbers (scale 0) that fit a 64-bit integer      |
+| **NUMBER(p,s) / DECIMAL / NUMERIC** | `number` | Values with a scale, or larger than a 64-bit integer, keep their precision and scale as a decimal |
+| **FLOAT / REAL / DOUBLE** | `float` (f64) | Double-precision floating point                         |
+| **VARCHAR / STRING / TEXT / CHAR** | `string` |                                                       |
+| **DATE**            | `datetime`        | Stored as days since the Unix epoch, converted to a datetime at midnight UTC |
+| **TIME**            | `datetime`        | Seconds since midnight                                        |
+| **TIMESTAMP_NTZ / DATETIME** | `datetime` | No timezone; taken as the given wall-clock instant           |
+| **TIMESTAMP_LTZ / TIMESTAMP_TZ / TIMESTAMP** | `datetime` | Timezone-aware; the absolute instant is preserved as UTC     |
+| **VARIANT / OBJECT** | `object`         | Parsed from the stored JSON document                         |
+| **ARRAY**           | `array`           | Parsed from the stored JSON array                            |
+| **BINARY / VARBINARY** | `bytes`        | Hex-decoded to raw bytes                                      |
+
+Any column whose logical type is not listed above is preserved as a `string` rather than failing the import.
+
+## Importing from Snowflake using Surreal Sync
+
+Surreal Sync can read tables from a Snowflake database and write them to SurrealDB.
+
+> [!NOTE]
+> The Snowflake source is ingestion-only. It performs a single full snapshot of the selected tables and does not support incremental synchronisation or change data capture. There is no durable cursor, so an interrupted run cannot be resumed part-way; re-run the command to start again.
+
+Rows are read one Snowflake result partition at a time and written in batches, so a large table does not need to fit in memory.
+
+### Prerequisites
+
+Surreal Sync connects to Snowflake through the [SQL REST API](https://docs.snowflake.com/en/developer-guide/sql-api/index) using key-pair (JWT) authentication. Before running an import:
+
+1. Generate an unencrypted PKCS#8 RSA key pair. Encrypted private keys are not supported yet.
+2. Register the public key on the Snowflake user that Surreal Sync will authenticate as:
+
+   ```sql
+   ALTER USER my_user SET RSA_PUBLIC_KEY='MIIBIjANBgkq...';
+   ```
+
+3. Make sure that user has a role able to read the target database and schema, and a virtual warehouse to run the queries.
+
+Keep the private key file accessible to Surreal Sync and pass its path with `--private-key-path`.
+
+### Usage
+
+```bash
+surreal-sync from snowflake \
+  --account myorg-myaccount \
+  --user my_user \
+  --private-key-path ./rsa_key.p8 \
+  --warehouse COMPUTE_WH \
+  --database MY_DB \
+  --schema PUBLIC \
+  --to-namespace my_namespace \
+  --to-database my_database \
+  --surreal-endpoint ws://localhost:8000 \
+  --surreal-username root \
+  --surreal-password root
+```
+
+When `--tables` is omitted, every base table in the schema is imported (views and temporary tables are skipped). Each table becomes a table of the same name in SurrealDB, and each row becomes a record. Snowflake upper-cases unquoted identifiers, so table and column names arrive upper-cased.
+
+Most connection options also read from an environment variable, which is useful for keeping credentials out of shell history.
+
+### Options
+
+| Option | Environment variable | Required | Description |
+| ------ | -------------------- | -------- | ----------- |
+| `--account` | `SNOWFLAKE_ACCOUNT` | Yes | Account identifier as used in the host `<account>.snowflakecomputing.com`, for example `myorg-myaccount` or `xy12345.us-east-1`. |
+| `--user` | `SNOWFLAKE_USER` | Yes | User whose key pair is registered for JWT authentication. |
+| `--private-key-path` | `SNOWFLAKE_PRIVATE_KEY_PATH` | Yes | Path to the unencrypted PKCS#8 private key PEM file. |
+| `--private-key-passphrase` | `SNOWFLAKE_PRIVATE_KEY_PASSPHRASE` | No | Passphrase for an encrypted key. Not supported yet; setting it returns an error. |
+| `--warehouse` | `SNOWFLAKE_WAREHOUSE` | Yes | Virtual warehouse used to run the queries. |
+| `--database` | `SNOWFLAKE_DATABASE` | Yes | Database to read from. |
+| `--schema` | `SNOWFLAKE_SCHEMA` | No | Schema within the database. Defaults to `PUBLIC`. |
+| `--role` | `SNOWFLAKE_ROLE` | No | Role to assume for the session. |
+| `--tables` | — | No | Comma-separated list of tables to import. When omitted, all base tables in the schema are imported. |
+| `--id-columns` | — | No | Comma-separated columns forming the SurrealDB record ID. See [Record IDs](#record-ids). |
+| `--transforms-config` | — | No | Path to a TOML file describing a transform pipeline. Omit to import rows unchanged. |
+| `--to-namespace` | — | Yes | Target SurrealDB namespace. |
+| `--to-database` | — | Yes | Target SurrealDB database. |
+
+The `--surreal-endpoint`, `--surreal-username`, `--surreal-password`, `--batch-size`, and `--dry-run` options are shared with the other Surreal Sync sources. Use `--dry-run` to read and convert rows without writing to SurrealDB.
+
+### Record IDs
+
+Snowflake primary keys are optional and often absent, so the record ID for each row depends on `--id-columns`:
+
+- **Omitted:** a sequential per-table integer is generated. It is deterministic within a run but not stable across re-runs, so prefer explicit ID columns when you need stable IDs.
+- **A single column:** the value becomes the record ID, as an integer when it parses as one and otherwise as a string.
+- **Several columns:** the values are joined with `:` into a string ID.
+
+When ID columns are given, they are used only for the record ID and are not repeated as fields on the record. Column names are matched case-insensitively.
