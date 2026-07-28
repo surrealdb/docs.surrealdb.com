@@ -1,23 +1,31 @@
 // ══════════════════════════════════════════════════════════
 // Incremental search indexer
 //
-// Runs after a docs build to sync the SurrealDB search index
-// with the current content. The process:
+// Syncs the SurrealDB search index with the compiled content index
+// that plugins/vite-search-index.ts emits during the Vite build:
 //
-//   1. Fetch content hashes for all existing records
-//   2. Crawl all markdown files and compare hashes
+//   1. Read generated/search-index.json
+//   2. Fetch content hashes for all existing records
 //   3. Embed and upsert only changed entries (saves OpenAI $)
 //   4. Delete records for pages/sections that no longer exist
 //
-// This makes repeated runs fast — only new or modified content
-// triggers an embedding API call.
+// Repeated runs are fast — only new or modified content triggers an
+// embedding API call.
+//
+// The indexer does not read src/content. Everything about a document
+// (its URL, breadcrumb, ranking kind, sections) is decided by the
+// build step from the site's own content collections, so search can
+// never disagree with the rendered pages about what exists or where
+// it lives.
 // ══════════════════════════════════════════════════════════
 
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { RecordId, type Surreal } from "surrealdb";
 import { connectDb } from "../src/db";
 import { buildEmbedText, embedBatch } from "../src/embed";
-import type { CrawledEntry, CrawledPage, CrawledSection } from "../src/types";
-import { crawl } from "./crawler";
+import type { CompiledSearchIndex, IndexedDocument } from "../src/types";
 
 // OpenAI's batch embedding endpoint accepts up to ~2048 texts,
 // but we chunk at 64 to keep individual requests manageable
@@ -27,6 +35,18 @@ const EMBED_BATCH_SIZE = 64;
 // Number of concurrent UPSERT queries against SurrealDB.
 // Higher = faster indexing but more DB load.
 const UPSERT_CONCURRENCY = 8;
+
+const INDEX_PATH = join(import.meta.dirname, "../../generated/search-index.json");
+
+// Version token mixed into every content hash. Bump it whenever the
+// indexed text changes shape (embedding model, truncation length, embed
+// text structure, breadcrumb format) so the incremental indexer treats
+// existing records as changed and re-embeds them once. "c8000" = 8000-char
+// content limit (see EMBED_CONTENT_LIMIT in search/src/embed.ts).
+//
+// v3: documents come from the compiled content index, which changed every
+// breadcrumb and restored section extraction.
+const EMBED_VERSION = "v3-c8000";
 
 interface HashRow {
     id: RecordId;
@@ -38,8 +58,105 @@ interface ExistingRecord {
     rid: RecordId;
 }
 
-/** Loads the content_hash for every existing page and section so
- *  we can detect which entries have changed and need re-embedding. */
+/**
+ * A page or section flattened into the unit the indexer works with:
+ * one embedding, one record, one content hash.
+ */
+interface Entry {
+    kind: "page" | "section";
+    /** Record id key, e.g. "reference/python:api/values/table#constructor". */
+    id: string;
+    document: IndexedDocument;
+    title: string;
+    breadcrumb: string;
+    content: string;
+    contentHash: string;
+    /** Set for sections only. */
+    anchor?: string;
+}
+
+function contentHash(...parts: string[]): string {
+    const hash = createHash("sha256");
+    hash.update(EMBED_VERSION);
+    for (const part of parts) hash.update(part);
+    return hash.digest("hex");
+}
+
+/** Record id key for a document: "<collection>:<slug>", with the root slug named. */
+function documentKey(document: IndexedDocument): string {
+    return `${document.collection}:${document.slug || "index"}`;
+}
+
+/**
+ * Flattens the compiled index into page and section entries. Sections
+ * whose heading produced no prose (a heading followed only by a code
+ * block) are already absent from the artefact.
+ */
+function toEntries(documents: IndexedDocument[]): Entry[] {
+    const entries: Entry[] = [];
+
+    for (const document of documents) {
+        const key = documentKey(document);
+
+        entries.push({
+            kind: "page",
+            id: key,
+            document,
+            title: document.title,
+            breadcrumb: document.breadcrumb,
+            content: document.content,
+            contentHash: contentHash(
+                document.title,
+                document.breadcrumb,
+                document.description,
+                document.content,
+            ),
+        });
+
+        for (const section of document.sections) {
+            const breadcrumb = `${document.breadcrumb} > ${section.title}`;
+
+            entries.push({
+                kind: "section",
+                id: `${key}#${section.anchor}`,
+                document,
+                anchor: section.anchor,
+                title: section.title,
+                breadcrumb,
+                content: section.content,
+                contentHash: contentHash(section.title, breadcrumb, section.content),
+            });
+        }
+    }
+
+    return entries;
+}
+
+/** Loads the compiled content index, explaining how to produce it if absent. */
+async function loadCompiledIndex(): Promise<IndexedDocument[]> {
+    let raw: string;
+
+    try {
+        raw = await readFile(INDEX_PATH, "utf-8");
+    } catch {
+        throw new Error(
+            `No compiled search index at ${INDEX_PATH}. It is written by the ` +
+                "viteSearchIndex plugin on any Vite run, so build the site " +
+                "(`bun run build`) or start it (`bun run dev`) first.",
+        );
+    }
+
+    const { documents } = JSON.parse(raw) as CompiledSearchIndex;
+
+    if (!Array.isArray(documents) || documents.length === 0) {
+        throw new Error(`Compiled search index at ${INDEX_PATH} contains no documents.`);
+    }
+
+    return documents;
+}
+
+/** Loads the content_hash for every existing page and section so we can
+ *  detect which entries have changed and need re-embedding. */
 async function fetchExistingRecords(db: Surreal): Promise<Map<string, ExistingRecord>> {
     const records = new Map<string, ExistingRecord>();
 
@@ -49,38 +166,33 @@ async function fetchExistingRecords(db: Surreal): Promise<Map<string, ExistingRe
         )
         .collect();
 
-    for (const row of pages) {
-        records.set(row.id.toString(), { contentHash: row.content_hash, rid: row.id });
-    }
-
-    for (const row of sections) {
+    for (const row of [...pages, ...sections]) {
         records.set(row.id.toString(), { contentHash: row.content_hash, rid: row.id });
     }
 
     return records;
 }
 
-function pageRecordId(entry: CrawledPage): RecordId {
-    return new RecordId("page", entry.id);
+function recordIdFor(entry: Entry): RecordId {
+    return new RecordId(entry.kind, entry.id);
 }
 
-function sectionRecordId(entry: CrawledSection): RecordId {
-    return new RecordId("section", entry.id);
-}
+async function upsertPage(db: Surreal, entry: Entry, embedding: number[]) {
+    const { document } = entry;
 
-function recordIdString(entry: CrawledEntry): string {
-    const rid = entry.kind === "page" ? pageRecordId(entry) : sectionRecordId(entry);
-    return rid.toString();
-}
-
-async function upsertPage(db: Surreal, entry: CrawledPage, embedding: number[]) {
-    const id = pageRecordId(entry);
-
+    // `$language ?? NONE`: only SDK pages have a language. NULL and NONE
+    // are distinct values in SurrealDB and the field is `option<string>`,
+    // which accepts only NONE — so the absent case is coerced in the
+    // query rather than depending on how the client serialises it.
     await db
         .query(
             `UPSERT $id MERGE {
                 path: $path,
                 collection: $collection,
+                slug: $slug,
+                doc_kind: $doc_kind,
+                language: $language ?? NONE,
+                product: $product,
                 title: $title,
                 description: $description,
                 breadcrumb: $breadcrumb,
@@ -90,11 +202,15 @@ async function upsertPage(db: Surreal, entry: CrawledPage, embedding: number[]) 
                 date: time::now(),
             };`,
             {
-                id,
-                path: entry.path,
-                collection: entry.collection,
+                id: recordIdFor(entry),
+                path: document.path,
+                collection: document.collection,
+                slug: document.slug,
+                doc_kind: document.kind,
+                language: document.language ?? null,
+                product: document.product,
                 title: entry.title,
-                description: entry.description,
+                description: document.description,
                 breadcrumb: entry.breadcrumb,
                 content: entry.content,
                 content_hash: entry.contentHash,
@@ -104,16 +220,13 @@ async function upsertPage(db: Surreal, entry: CrawledPage, embedding: number[]) 
         .collect();
 }
 
-async function upsertSection(db: Surreal, entry: CrawledSection, embedding: number[]) {
-    const id = sectionRecordId(entry);
-    const pageRef = new RecordId("page", entry.pageId);
-
+async function upsertSection(db: Surreal, entry: Entry, embedding: number[]) {
     await db
         .query(
             `UPSERT $id MERGE {
                 page: $page,
                 anchor: $anchor,
-                depth: $depth,
+                depth: 2,
                 title: $title,
                 breadcrumb: $breadcrumb,
                 content: $content,
@@ -122,10 +235,9 @@ async function upsertSection(db: Surreal, entry: CrawledSection, embedding: numb
                 date: time::now(),
             };`,
             {
-                id,
-                page: pageRef,
+                id: recordIdFor(entry),
+                page: new RecordId("page", documentKey(entry.document)),
                 anchor: entry.anchor,
-                depth: entry.depth,
                 title: entry.title,
                 breadcrumb: entry.breadcrumb,
                 content: entry.content,
@@ -168,6 +280,13 @@ async function runConcurrent<T>(
 }
 
 export async function runIndexer() {
+    const documents = await loadCompiledIndex();
+    const entries = toEntries(documents);
+
+    console.log(
+        `[IX] Compiled index: ${documents.length} pages, ${entries.length - documents.length} sections`,
+    );
+
     const db = await connectDb({ logging: true });
 
     // Phase 1: Load existing records so we can skip unchanged content.
@@ -176,7 +295,7 @@ export async function runIndexer() {
     console.log(`[IX] Found ${existingRecords.size} existing records`);
 
     const seenIds = new Set<string>();
-    const changed: CrawledEntry[] = [];
+    const changed: Entry[] = [];
     const stats = {
         pagesUnchanged: 0,
         pagesUpdated: 0,
@@ -186,17 +305,13 @@ export async function runIndexer() {
         sectionsDeleted: 0,
     };
 
-    // Phase 2: Crawl all content and identify what changed.
-    console.log("[CW] Crawling content...");
-
-    for await (const entry of crawl()) {
-        const rid = recordIdString(entry);
+    // Phase 2: Compare hashes to identify what changed.
+    for (const entry of entries) {
+        const rid = recordIdFor(entry).toString();
         seenIds.add(rid);
 
-        const existing = existingRecords.get(rid);
-
         // Content hash matches — skip re-embedding to save API cost.
-        if (existing?.contentHash === entry.contentHash) {
+        if (existingRecords.get(rid)?.contentHash === entry.contentHash) {
             if (entry.kind === "page") stats.pagesUnchanged++;
             else stats.sectionsUnchanged++;
             continue;
@@ -205,7 +320,7 @@ export async function runIndexer() {
         changed.push(entry);
     }
 
-    console.log(`[CW] Crawl complete. ${changed.length} entries to embed and upsert.`);
+    console.log(`[IX] ${changed.length} entries to embed and upsert.`);
 
     // Phase 3: Embed changed entries in batches, then upsert.
     const texts = changed.map(buildEmbedText);
@@ -218,12 +333,9 @@ export async function runIndexer() {
         console.log(`[EM] Embedding batch ${batchStart + 1}..${batchEnd} of ${changed.length}`);
         const embeddings = await embedBatch(batchTexts);
 
-        const pairs = batchEntries.map((entry, i) => ({
-            entry,
-            embedding: embeddings[i],
-        }));
+        const pairs = batchEntries.map((entry, i) => ({ entry, embedding: embeddings[i] }));
 
-        await runConcurrent(pairs, UPSERT_CONCURRENCY, async ({ entry, embedding }, localIdx) => {
+        await runConcurrent(pairs, UPSERT_CONCURRENCY, async ({ entry, embedding }) => {
             if (entry.kind === "page") {
                 await upsertPage(db, entry, embedding);
                 stats.pagesUpdated++;
@@ -231,13 +343,10 @@ export async function runIndexer() {
                 await upsertSection(db, entry, embedding);
                 stats.sectionsUpdated++;
             }
-
-            const globalIdx = batchStart + localIdx + 1;
-            console.log(`[IX] ${globalIdx}/${changed.length} ${entry.kind} ${entry.id}`);
         });
     }
 
-    // Phase 4: Clean up records whose source files no longer exist.
+    // Phase 4: Clean up records whose source content no longer exists.
     const stalePages: RecordId[] = [];
     const staleSections: RecordId[] = [];
 

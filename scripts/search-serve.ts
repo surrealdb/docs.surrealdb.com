@@ -8,7 +8,19 @@
 // Requires: a running SurrealDB instance with indexed content
 //           and OPENAI_API_KEY set (for query embedding).
 
-import { handleSearch, MAX_QUERY_LENGTH } from "@surrealdb/docs-search-common";
+import {
+    createRouteResolver,
+    handleSearch,
+    MAX_QUERY_LENGTH,
+    parseContextToken,
+    type SearchProduct,
+    type SearchRouteTable,
+} from "@surrealdb/docs-search-common";
+import routeTable from "../generated/search-routes.json";
+
+const routes = createRouteResolver(routeTable as SearchRouteTable);
+const PRODUCTS = new Set<SearchProduct>(routeTable.collections.map((c) => c.product));
+const DEFAULT_PRODUCT: SearchProduct = routeTable.collections[0].product;
 
 const PORT = Number(process.env.SEARCH_PORT ?? 4322);
 
@@ -51,8 +63,18 @@ const server = Bun.serve({
             );
         }
 
+        // Mirrors api/search.ts so local search behaves like production,
+        // minus the canonicalising redirect (there is no CDN in front).
+        const rawProduct = url.searchParams.get("product") ?? "";
+        const product = PRODUCTS.has(rawProduct) ? rawProduct : DEFAULT_PRODUCT;
+        const rawContext = url.searchParams.get("context") ?? "";
+        const token = rawContext ? routes.canonicalToken(rawContext) : undefined;
+
         try {
-            const results = await handleSearch(query);
+            const results = await handleSearch(query, {
+                product,
+                context: token ? parseContextToken(token) : undefined,
+            });
             return Response.json({ success: true, results }, { headers: CORS_HEADERS });
         } catch (err) {
             console.error("[SEARCH] Error:", err);
