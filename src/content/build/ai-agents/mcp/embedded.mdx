@@ -1,0 +1,213 @@
+---
+position: 5
+title: Embedded MCP
+description: "Connect AI agents and editors to a SurrealDB server you run yourself, through the built-in MCP server over HTTP or stdio."
+---
+
+# Embedded MCP
+
+<Since v="v3.1.0" />
+
+SurrealDB ships a built-in [Model Context Protocol](https://modelcontextprotocol.io) server, so agents and editors can list schema, run SurrealQL, and change records through a standard set of tools. The same access control applies as on [`/sql`](/docs/reference/rest-api/http-protocol#post-sql) and RPC: `DEFINE USER` permissions, table `PERMISSIONS`, and server capability flags all decide what a tool can do.
+
+This page covers the server inside the SurrealDB binary, for databases you run yourself. For SurrealDB Cloud, the hosted [SurrealDB MCP Server](/docs/build/ai-agents/mcp) reaches the same data tools remotely and adds organisation, instance, and billing management on top.
+
+Both publish the **same data tools**. What differs is how your editor connects and who shares the database.
+
+## When to use `surreal mcp` vs `surreal start`
+
+| | **`surreal mcp`** (stdio) | **`surreal start`** + **`/mcp`** (HTTP) |
+| --- | --- | --- |
+| **How it works** | Your editor spawns SurrealDB as a child process; MCP runs over stdin and stdout | You run a server; the editor connects to `http://…/mcp` |
+| **Database** | Embedded in the MCP process (default `memory`, or a local file path) | The same instance your app, CLI, or Surrealist uses |
+| **Authentication** | Owner-level access on every tool call — no login step | Normal SurrealDB auth (Bearer JWT, HTTP Basic, …) |
+| **Best for** | Learning MCP, solo local development, quickest editor setup | Shared databases, teams, remote instances, production patterns |
+| **Editor config** | `command` and `args` in MCP settings | `url` and auth headers |
+
+**Use `surreal mcp`** when you want the lowest-friction path on a machine you trust: paste a config, restart the editor, and experiment. Think of it as a self-contained database for your assistant.
+
+**Use `surreal start` and `/mcp`** when the agent should work against a database that already exists, or one that other clients share. That is the right model for least-privilege users, TLS, audit logging, and anything beyond trusted solo development.
+
+> [!TIP]
+> New to MCP? Start with `surreal mcp` in your coding assistant, then move to HTTP once you want the agent on the same instance as your application.
+
+## Transports
+
+### HTTP (`/mcp`)
+
+When you run `surreal start`, the server exposes **`POST /mcp`** on the same bind address as the REST API. Authenticate with the same headers you use elsewhere, for example `Authorization: Bearer <jwt>` or HTTP Basic.
+
+```bash
+surreal start --user root --pass secret --bind 127.0.0.1:8000 memory
+# MCP endpoint: http://127.0.0.1:8000/mcp
+```
+
+For a non-loopback hostname (a public FQDN, a Kubernetes service name, or a load-balancer host), the transport rejects the request with `403 Forbidden: Host header is not allowed` until you opt in. Set `SURREAL_MCP_ALLOWED_HOSTS` to your hostnames, or `SURREAL_MCP_ALLOW_ALL_HOSTS=true` behind a trusted proxy. See [Configuration](#configuration).
+
+> [!WARNING]
+> Run `/mcp` behind TLS in production. The session header acts like a bearer token for the life of the session: anyone who holds it can repeat tool calls as the same user until the session expires, five minutes after the last request by default.
+
+### Stdio (`surreal mcp`)
+
+For local editor integrations, use the dedicated subcommand. It runs the MCP server in the same process as an embedded datastore:
+
+```bash
+surreal mcp --user root --pass secret --ns main --db main memory
+```
+
+Every tool call over stdio runs with owner-level access. There is no network handshake to attach credentials to, so there is nothing to narrow the permissions with. **Do not expose this entry point to untrusted users.**
+
+See [`surreal mcp`](/docs/reference/cli/surrealdb-cli/commands/mcp) for its flags and environment variables, including `SURREAL_MCP_NS`, `SURREAL_MCP_DB`, and the shared `SURREAL_MCP_*` limits below.
+
+## Connect an editor
+
+For stdio, the editor launches SurrealDB itself, so the config is a command and its arguments.
+
+<Tabs>
+
+<TabItem label="Cursor">
+
+`~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project):
+
+```json
+{
+  "mcpServers": {
+    "surrealdb": {
+      "command": "surreal",
+      "args": ["mcp", "--user", "root", "--pass", "secret",
+          "--ns", "main", "--db", "main", "memory"]
+    }
+  }
+}
+```
+
+Restart Cursor, then check that **Settings → MCP** shows `surrealdb` as connected.
+
+</TabItem>
+
+<TabItem label="VS Code">
+
+`.vscode/mcp.json` uses a `servers` object and a `type` field:
+
+```json
+{
+  "servers": {
+    "surrealdb": {
+      "type": "stdio",
+      "command": "surreal",
+      "args": ["mcp", "--user", "root", "--pass", "secret",
+          "--ns", "main", "--db", "main", "memory"]
+    }
+  }
+}
+```
+
+Reload the window after editing the file, and enable agent mode in your MCP-capable extension.
+
+</TabItem>
+
+<TabItem label="Claude Desktop">
+
+`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, or `%APPDATA%\Claude\claude_desktop_config.json` on Windows:
+
+```json
+{
+  "mcpServers": {
+    "surrealdb": {
+      "command": "surreal",
+      "args": ["mcp", "--user", "root", "--pass", "secret",
+          "--ns", "main", "--db", "main", "memory"]
+    }
+  }
+}
+```
+
+Quit and reopen Claude Desktop completely, then start a new conversation.
+
+</TabItem>
+
+</Tabs>
+
+If the editor cannot find the binary, use the full path from `which surreal` (macOS and Linux) or `where surreal` (Windows) as `command`.
+
+> [!NOTE]
+> `--user` and `--pass` create the root user on a **new** datastore, the same as [`surreal start`](/docs/reference/cli/surrealdb-cli/commands/start). They do not authenticate each MCP call, because stdio runs every call as owner. Prefer an `env` block (`SURREAL_USER`, `SURREAL_PASS`) over literals in `args` so credentials stay out of committed config. To keep data between sessions, replace `memory` with a [file-backed path](/docs/reference/cli/surrealdb-cli/commands/start#datastore-configuration) such as `rocksdb://tmp/surreal-mcp`.
+
+For HTTP, point the editor at a server you are already running and attach credentials as headers:
+
+```json
+{
+  "mcpServers": {
+    "surrealdb": {
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": {
+        "Authorization": "Basic <base64-encoded username:password>"
+      }
+    }
+  }
+}
+```
+
+Once connected, ask the assistant which SurrealDB tools it has. It should list `query`, `select`, `use`, and the rest of the set below.
+
+## Published tools
+
+`tools/list` publishes these tools, and the names are stable:
+
+| Tool | Purpose |
+| --- | --- |
+| `query` | Run SurrealQL and return serialised results |
+| `gql` | Run an [OpenGQL](/docs/learn/querying/gql/overview) query (needs the `opengql` experimental capability on the server) |
+| `graphql` | Run a [GraphQL](/docs/learn/querying/graphql/overview) query against the configured schema |
+| `select`, `create`, `insert`, `upsert`, `update`, `delete`, `relate` | Data manipulation helpers |
+| `run` | Call a database function with typed arguments |
+| `list` | List namespaces, databases, tables, indexes, users, … |
+| `use` | Select the namespace and database context |
+| `info` | Schema or engine information for a scope |
+
+Legacy names such as `list_tables`, `use_database`, and `version` are no longer published. Use `list` and `use` instead.
+
+## Configuration
+
+MCP-specific limits are read once from the environment, with the prefix `SURREAL_MCP_`. HTTP body size uses the server-wide cap.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `SURREAL_MCP_QUERY_TIMEOUT_SECS` | 60 | Outer timeout on each tool execution (`0` disables) |
+| `SURREAL_MCP_MAX_RESULT_BYTES` | 256 KiB | Cap on serialised tool output (`0` disables) |
+| `SURREAL_MCP_RUN_MAX_ARGS` | 64 | Maximum arguments to `run` |
+| `SURREAL_MCP_PARAMS_MAX_KEYS` | 256 | Maximum top-level keys in parameter objects |
+| `SURREAL_MCP_PARAMS_MAX_QL_BYTES` | 4 KiB | Maximum byte length of a `$ql` string inside a `*_data` payload |
+| `SURREAL_MCP_SCHEMA_RESOURCE_MAX_TABLES` | 200 | Cap on tables enriched in the database schema resource |
+| `SURREAL_MCP_ALLOWED_HOSTS` <Since v="v3.2.1" /> | loopback only | Exact `Host` values accepted for HTTP `/mcp` (replaces the loopback default) |
+| `SURREAL_MCP_ALLOW_ALL_HOSTS` <Since v="v3.2.1" /> | `false` | Accept any `Host` (trusted-proxy escape hatch; overrides the allowlist) |
+| `SURREAL_HTTP_MAX_MCP_BODY_SIZE` | 4 MiB | Maximum HTTP body size for `/mcp` |
+
+Full tables live under [Environment variables](/docs/reference/cli/surrealdb-cli/environment-variables). [Observability metrics](/docs/manage/observability/metrics) include `surrealdb.mcp.*` counters and histograms from 3.1.0.
+
+## Security checklist
+
+- Prefer a least-privilege `DEFINE USER` (for example a custom role with table-level `PERMISSIONS`) over root credentials for agent clients.
+- Lock down capabilities (`--deny-funcs`, `--allow-net`, …) so a hijacked session cannot reach `http::*` or other high-risk functions.
+- Set `--allow-origin` explicitly for browser-based MCP clients, and avoid `*` in production.
+- On a public hostname, set `SURREAL_MCP_ALLOWED_HOSTS`, or `SURREAL_MCP_ALLOW_ALL_HOSTS` only behind a trusted proxy. The default allowlist is loopback-only.
+- Forward the `surrealdb::mcp::audit` tracing target to your SIEM. Audit records include the tool name, subject, namespace, database, and outcome, but never query text or row payloads.
+
+## Troubleshooting
+
+| Symptom | Things to check |
+| --- | --- |
+| The editor shows the server as disconnected | Is `surreal` on your `PATH`? Use the full path as `command`, or run the same command in a terminal to see the error |
+| The tools list is empty | Restart the editor after editing MCP config, and confirm the binary is 3.1 or later |
+| `403 Forbidden: Host header is not allowed` | HTTP `/mcp` accepts loopback hosts by default. Set `SURREAL_MCP_ALLOWED_HOSTS` to your hostname, or `SURREAL_MCP_ALLOW_ALL_HOSTS=true` behind a trusted proxy. Needs 3.2.1 or later |
+| A tool call times out | The default timeout is 60 seconds (`SURREAL_MCP_QUERY_TIMEOUT_SECS`). Narrow the query |
+| A result comes back truncated | Output is capped at 256 KiB by default. Paginate or aggregate in SurrealQL |
+| Permission errors over HTTP | The user lacks rights for the operation. Sign in with different credentials, or adjust `DEFINE USER` and table `PERMISSIONS` |
+
+## Next steps
+
+- [SurrealDB MCP Server](/docs/build/ai-agents/mcp) — the hosted server for SurrealDB Cloud instances
+- [Example usages](/docs/build/ai-agents/mcp/examples) — prompts to try once an assistant is connected
+- [`surreal mcp` CLI reference](/docs/reference/cli/surrealdb-cli/commands/mcp) — flags and environment variables
+- [Agent Skills](/docs/build/ai-agents/agent-skills) — installable SurrealQL and SDK skills for coding agents
+- [AI frameworks](/docs/build/integrations/ai-frameworks/overview) — using SurrealDB from LangChain, CrewAI, and others

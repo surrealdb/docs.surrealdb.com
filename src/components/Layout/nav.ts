@@ -159,9 +159,9 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                 heading: "Intelligence",
                 items: [
                     {
-                        label: "AI agents",
+                        label: "AI Agents",
                         href: "/docs/build/ai-agents",
-                        description: "Build AI agents on SurrealDB.",
+                        description: "Integrate SurrealDB with your agents.",
                         icon: iconSidekick,
                     },
                 ],

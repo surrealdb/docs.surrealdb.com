@@ -319,6 +319,29 @@ function sdkGettingStartedRedirects(): Redirect[] {
     return out;
 }
 
+/**
+ * The AI agents section no longer carries its own editor tutorial or agent
+ * rules page. Editor setup for the built-in MCP server now lives on the
+ * Embedded MCP page, and agent rules are documented under Integrations.
+ */
+function aiAgentsRedirects(): Redirect[] {
+    const moves: [string, string][] = [
+        ["build/ai-agents/connect-mcp-to-your-editor", "build/ai-agents/mcp/embedded"],
+        ["build/ai-agents/agent-rules", "build/integrations/agent-rules/agent-rules"],
+    ];
+
+    const out: Redirect[] = [];
+
+    for (const [from, to] of moves) {
+        out.push(
+            { source: `/docs/${from}`, destination: `/docs/${to}`, statusCode: 301 },
+            { source: `/${from}`, destination: `/docs/${to}`, statusCode: 301 },
+        );
+    }
+
+    return out;
+}
+
 /** Shared with vercel.ts (production) and the Vite dev server (local). */
 export const docsRedirects: Redirect[] = [
     { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
@@ -337,6 +360,7 @@ export const docsRedirects: Redirect[] = [
     ...phpVersionedRedirects(),
     ...sdkReferenceRedirects(),
     ...sdkGettingStartedRedirects(),
+    ...aiAgentsRedirects(),
 ];
 
 export type ResolvedRedirect = { destination: string; statusCode: number };

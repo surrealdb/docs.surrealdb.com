@@ -110,32 +110,10 @@ exceptions, security caveats, and breaking or easy-to-miss details.
 in"), padded significance, and first-person opinion in reference material.
 Match existing pages in the same section when unsure.
 
-## Writing new documentation
+## Writing or updating documentation
 
-Two agent skills in `.agents/skills/` support content work, and should both be used
-when writing new documentation or updating existing articles in the following order:
+When you need to write new documentation or update existing articles, make use of the `documentation` skill (`.agents/skills/documentation/SKILL.md`).
 
-### technical-writing
-
-Use this skill to determine how to structure individual articles and decide which content to include.
-
-Follow the skill for audience-appropriate depth, heading hierarchy, worked
-examples, completeness (edge cases, error handling), and consistency with
-surrounding docs. Draft in the voice described above.
-
-### humanizer
-
-Use after drafting in order to remove AI writing patterns and make the prose more natural and human-written.
-
-Do **not** run humanizer over:
-
-- SurrealQL syntax blocks, railroad diagrams, or mostly-code reference pages
-- Frontmatter, tables of parameters, or generated API listings
-- Text where neutral precision is the point (security warnings, error catalogues)
-
-Humanizer removes AI writing patterns (significance inflation, rule-of-three
-padding, em dashes, chatbot framing) while preserving meaning. For docs, keep
-the neutral reference tone; do not add casual voice or first-person editorial.
 
 ### Typical workflow
 
