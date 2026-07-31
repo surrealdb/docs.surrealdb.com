@@ -43,26 +43,13 @@ function parseRetryAfter(header: string | null): number | null {
     return null;
 }
 
-export interface SearchOptions {
-    product?: ProductId;
-    /**
-     * Pathname the search was made from. Ranking uses it to prefer the
-     * part of the docs the reader is already in — searching "table" in
-     * the SurrealQL reference should not lead with an SDK type wrapper.
-     * The API collapses it to a coarse section token before it reaches
-     * the CDN cache key, so sending the full pathname is safe.
-     */
-    context?: string;
-}
-
 export async function searchDocs(
     query: string,
     signal: AbortSignal,
-    { product, context }: SearchOptions = {},
+    product?: ProductId,
 ): Promise<SearchResult[]> {
     const params = new URLSearchParams({ q: query });
     if (product) params.set("product", product);
-    if (context) params.set("context", context);
     const endpoint = applyPathFallback(`/docs/api/search?${params}`);
 
     let res: Response;
