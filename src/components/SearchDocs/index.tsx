@@ -21,7 +21,6 @@ import { Icon, iconArrowLeft, iconSearch } from "@surrealdb/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { usePageContext } from "vike-react/usePageContext";
-import { toDocsPath } from "~/utils/path";
 import { getProductFromPath } from "~/utils/product";
 import { RateLimitError, SearchError, type SearchResult, searchDocs } from "~/utils/search";
 import { SearchResultCard } from "./SearchResult";
@@ -60,19 +59,10 @@ export function SearchDocs(props: UnstyledButtonProps) {
 
     const hasTypedQuery = search.trim().length > 0;
 
-    // The API collapses `context` to one token per collection, so every
-    // page in a collection produces identical results. Keying the cache
-    // on the collection prefix rather than the pathname lets those pages
-    // share one entry instead of refetching on each navigation.
-    const contextSection = urlPathname.split("/").slice(0, 3).join("/");
-
     const searchQuery = useQuery({
-        queryKey: ["docs-search", debouncedSearch, product, contextSection] as const,
+        queryKey: ["docs-search", debouncedSearch, product] as const,
         queryFn: async ({ signal }) => {
-            const results = await searchDocs(debouncedSearch, signal, {
-                product,
-                context: toDocsPath(urlPathname),
-            });
+            const results = await searchDocs(debouncedSearch, signal, product);
 
             window.dataLayer?.push({
                 event: "search_query",

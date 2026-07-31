@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import type { CrawledEntry } from "./types";
 
 // text-embedding-3-small produces 1536-dimensional vectors.
 // It's the best balance of cost, speed, and quality for
@@ -52,7 +53,7 @@ export async function embedBatch(texts: string[]): Promise<number[][]> {
 }
 
 /**
- * Builds the text string that gets embedded for an entry.
+ * Builds the text string that gets embedded for a crawled entry.
  * Structured as labelled fields so the embedding model captures
  * the semantic role of each piece (title vs breadcrumb vs content).
  *
@@ -64,18 +65,10 @@ export async function embedBatch(texts: string[]): Promise<number[][]> {
  */
 export const EMBED_CONTENT_LIMIT = 8000;
 
-/** The parts of an indexable entry that carry semantic meaning. */
-export interface EmbeddableEntry {
-    title: string;
-    breadcrumb: string;
-    description?: string;
-    content: string;
-}
-
-export function buildEmbedText(entry: EmbeddableEntry): string {
+export function buildEmbedText(entry: CrawledEntry): string {
     const parts = [`Title: ${entry.title}`, `Breadcrumb: ${entry.breadcrumb}`];
 
-    if (entry.description) {
+    if (entry.kind === "page" && entry.description) {
         parts.push(`Description: ${entry.description}`);
     }
 
