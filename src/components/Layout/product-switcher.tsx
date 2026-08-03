@@ -1,6 +1,17 @@
-import { Anchor, Box, Flex, Group, Image, Menu, Stack, Text } from "@mantine/core";
+import {
+    Anchor,
+    Box,
+    Flex,
+    Group,
+    Image,
+    Menu,
+    SegmentedControl,
+    Stack,
+    Text,
+} from "@mantine/core";
 import { Icon, iconCheck, iconChevronDown, ThemedImage } from "@surrealdb/ui";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { navigate } from "vike/client/router";
 import { PRODUCT_ORDER, PRODUCTS, type ProductConfig, type ProductId } from "./products";
 import classes from "./style.module.scss";
 
@@ -115,6 +126,57 @@ function ProductMenuItem({ product, active }: ProductMenuItemProps) {
                 {product.description}
             </Text>
         </Menu.Item>
+    );
+}
+
+export interface ProductSwitcherSegmentedProps {
+    current: ProductId;
+}
+
+/**
+ * Sidebar product switch. The header dropdown only reveals itself on
+ * hover, so the sidebar states both products up front and keeps the
+ * current one visibly selected.
+ */
+export function ProductSwitcherSegmented({ current }: ProductSwitcherSegmentedProps) {
+    const data = useMemo(
+        () =>
+            PRODUCT_ORDER.map((id) => {
+                const product = PRODUCTS[id];
+
+                return {
+                    value: id,
+                    label: (
+                        <Group
+                            justify="center"
+                            wrap="nowrap"
+                            gap="xs"
+                        >
+                            <Image
+                                src={product.picto}
+                                w={16}
+                            />
+                            <Text
+                                fz="sm"
+                                fw={500}
+                            >
+                                {product.shortLabel}
+                            </Text>
+                        </Group>
+                    ),
+                };
+            }),
+        [],
+    );
+
+    return (
+        <SegmentedControl
+            data={data}
+            value={current}
+            onChange={(id) => navigate(PRODUCTS[id].homeHref)}
+            aria-label="Switch documentation"
+            fullWidth
+        />
     );
 }
 

@@ -18,6 +18,7 @@ import { Icon, iconChevronDown, iconOpen, ThemedImage } from "@surrealdb/ui";
 import { Fragment, useState } from "react";
 import { ClientOnly } from "vike-react/ClientOnly";
 import { usePageContext } from "vike-react/usePageContext";
+import { SearchDocs } from "~/components/SearchDocs";
 import { ColorSchemeToggle } from "../ColorSchemeToggle";
 import {
     flattenMenuItems,
@@ -323,7 +324,13 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                 <Group
                     flex={{ md: 1 }}
                     justify="flex-end"
+                    wrap="nowrap"
                 >
+                    <SearchDocs
+                        w={220}
+                        mb={0}
+                        visibleFrom="sm"
+                    />
                     <ClientOnly
                         fallback={
                             <ActionIcon aria-label="Toggle color scheme">
@@ -373,6 +380,12 @@ export function MobileNav({ navLinks }: MobileNavProps) {
             px="sm"
             py="sm"
         >
+            {/* The header search only has room from `sm` up, so phones reach
+                it from here instead. */}
+            <SearchDocs
+                mb={0}
+                hiddenFrom="sm"
+            />
             <ProductSwitcherMobile current={product.id} />
             <Divider />
             <Stack gap="xs">
