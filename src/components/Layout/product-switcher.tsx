@@ -54,7 +54,7 @@ export function ProductSwitcherSegmented({ current }: ProductSwitcherSegmentedPr
 						<Group
 							wrap="nowrap"
 							gap="xs"
-							h={30}
+							h={26}
 						>
 							<Image
 								src={product.picto}
