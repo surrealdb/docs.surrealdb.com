@@ -1,9 +1,10 @@
 import { Box, type BoxProps, Group, NavLink, Stack, Text } from "@mantine/core";
 import { Icon } from "@surrealdb/ui";
 import { usePageContext } from "vike-react/usePageContext";
-import { SearchDocs } from "~/components/SearchDocs";
 import { SECTION_ICONS } from "~/utils/icons";
 import type { NavLink as NavLinkItem, NavSection } from "~/utils/navigation";
+import { ProductSwitcherSegmented } from "./product-switcher";
+import { getProductFromPath } from "./products";
 import classes from "./style.module.scss";
 
 function normalize(href: string) {
@@ -106,6 +107,9 @@ export interface SidebarProps extends BoxProps {
 }
 
 export function Sidebar({ navigation, versionSelector, ...props }: SidebarProps) {
+    const { urlPathname } = usePageContext();
+    const product = getProductFromPath(urlPathname);
+
     return (
         <Stack
             pb="sm"
@@ -113,8 +117,11 @@ export function Sidebar({ navigation, versionSelector, ...props }: SidebarProps)
             gap={0}
             {...props}
         >
-            <Box px="lg">
-                <SearchDocs />
+            <Box
+                px="lg"
+                mb="md"
+            >
+                <ProductSwitcherSegmented current={product} />
             </Box>
             {versionSelector && (
                 <Box
