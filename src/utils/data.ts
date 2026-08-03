@@ -17,6 +17,9 @@ export interface PageData {
     description: string;
 }
 
+/** Base the docs are served from — `base` in `vite.config.ts`. */
+const DOCS_BASE = "/docs";
+
 /** One path segment up (e.g. `/a/b` → `/a`). */
 export function getParentPathname(pathname: string): string | null {
     const pathOnly = pathname.includes("://") ? new URL(pathname).pathname : pathname;
@@ -33,6 +36,20 @@ export function getParentPathname(pathname: string): string | null {
     }
 
     return trimmed.slice(0, i) || "/";
+}
+
+/**
+ * One path segment up, as a browser URL.
+ *
+ * `getParentPathname` walks Vike's `urlPathname`, which has the base
+ * stripped. A `Location` header needs the base back on, or walking up from
+ * a missing page lands outside the docs entirely (`/docs/spectron/typo`
+ * would redirect to `/spectron`, which no route serves).
+ */
+export function getParentUrl(pathname: string): string | null {
+    const parent = getParentPathname(pathname);
+
+    return parent === null ? null : `${DOCS_BASE}${parent}`;
 }
 
 /**
@@ -57,7 +74,7 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
     const entry = getCollectionEntry(id, path);
 
     if (!entry) {
-        const parent = getParentPathname(context.urlPathname);
+        const parent = getParentUrl(context.urlPathname);
 
         if (parent) {
             throw redirect(parent, 302);

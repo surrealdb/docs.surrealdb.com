@@ -27,7 +27,7 @@ import {
     type NavItem,
     type NavMenuGroup,
 } from "./nav";
-import { ProductSwitcher, ProductSwitcherMobile } from "./product-switcher";
+import { ProductList, ProductWordmark } from "./product-switcher";
 import {
     getProductFromPath,
     PRODUCTS,
@@ -292,7 +292,7 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                         mb="auto"
                         color="obsidian.6"
                     />
-                    <ProductSwitcher current={product.id} />
+                    <ProductWordmark current={product.id} />
                 </Group>
                 <Group
                     component="ul"
@@ -386,7 +386,7 @@ export function MobileNav({ navLinks }: MobileNavProps) {
                 mb={0}
                 hiddenFrom="sm"
             />
-            <ProductSwitcherMobile current={product.id} />
+            <ProductList current={product.id} />
             <Divider />
             <Stack gap="xs">
                 {navLinks.map((entry, i) => {
