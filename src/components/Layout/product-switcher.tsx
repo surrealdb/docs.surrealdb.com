@@ -6,7 +6,7 @@ import { PRODUCT_ORDER, PRODUCTS, type ProductId } from "./products";
 import classes from "./style.module.scss";
 
 export interface ProductWordmarkProps {
-    current: ProductId;
+	current: ProductId;
 }
 
 /**
@@ -14,27 +14,27 @@ export interface ProductWordmarkProps {
  * the sidebar, so this only links back to the product's docs home.
  */
 export function ProductWordmark({ current }: ProductWordmarkProps) {
-    const product = PRODUCTS[current];
+	const product = PRODUCTS[current];
 
-    return (
-        <Anchor
-            href={product.homeHref}
-            underline="never"
-            className={classes.productWordmark}
-            aria-label={`${product.label} documentation home`}
-        >
-            <ThemedImage
-                lightSrc={product.wordmarkLight}
-                darkSrc={product.wordmarkDark}
-                h={20}
-                w="auto"
-            />
-        </Anchor>
-    );
+	return (
+		<Anchor
+			href={product.homeHref}
+			underline="never"
+			className={classes.productWordmark}
+			aria-label={`${product.label} documentation home`}
+		>
+			<ThemedImage
+				lightSrc={product.wordmarkLight}
+				darkSrc={product.wordmarkDark}
+				h={20}
+				w="auto"
+			/>
+		</Anchor>
+	);
 }
 
 export interface ProductSwitcherSegmentedProps {
-    current: ProductId;
+	current: ProductId;
 }
 
 /**
@@ -43,53 +43,57 @@ export interface ProductSwitcherSegmentedProps {
  * current one visibly selected.
  */
 export function ProductSwitcherSegmented({ current }: ProductSwitcherSegmentedProps) {
-    const data = useMemo(
-        () =>
-            PRODUCT_ORDER.map((id) => {
-                const product = PRODUCTS[id];
+	const data = useMemo(
+		() =>
+			PRODUCT_ORDER.map((id) => {
+				const product = PRODUCTS[id];
 
-                return {
-                    value: id,
-                    label: (
-                        <Group
-                            wrap="nowrap"
-                            gap="xs"
-                        >
-                            <Image
-                                src={product.picto}
-                                w={16}
-                            />
-                            <Text
-                                fz="sm"
-                                fw={500}
-                            >
-                                {product.shortLabel}
-                            </Text>
-                        </Group>
-                    ),
-                };
-            }),
-        [],
-    );
+				return {
+					value: id,
+					label: (
+						<Group
+							wrap="nowrap"
+							gap="xs"
+							h={30}
+						>
+							<Image
+								src={product.picto}
+								w={20}
+								className={classes.productSegmentPicto}
+								data-active={id === current || undefined}
+							/>
+							<Text
+								fz="sm"
+								fw={500}
+							>
+								{product.shortLabel}
+							</Text>
+						</Group>
+					),
+				};
+			}),
+		[current],
+	);
 
-    return (
-        <SegmentedControl
-            data={data}
-            value={current}
-            onChange={(id) => navigate(PRODUCTS[id].homeHref)}
-            aria-label="Switch documentation"
-            orientation="vertical"
-            fullWidth
-            bdrs="md"
-            bg="obsidian.9"
-        />
-    );
+	return (
+		<SegmentedControl
+			data={data}
+			value={current}
+			onChange={(id) => navigate(PRODUCTS[id].homeHref)}
+			aria-label="Switch documentation"
+			orientation="vertical"
+			size="md"
+			fullWidth
+			bdrs={18}
+			bg="obsidian.9"
+		/>
+	);
 }
 
 export interface ProductListProps {
-    /** Product to mark as current. Omit where no product is in scope. */
-    current?: ProductId;
-    label?: string;
+	/** Product to mark as current. Omit where no product is in scope. */
+	current?: ProductId;
+	label?: string;
 }
 
 /**
@@ -97,67 +101,67 @@ export interface ProductListProps {
  * the error page, where it doubles as a way out of a dead end.
  */
 export function ProductList({ current, label = "Switch documentation" }: ProductListProps) {
-    return (
-        <Box
-            component="section"
-            aria-label={label}
-        >
-            <Stack gap="xs">
-                {PRODUCT_ORDER.map((id) => {
-                    const product = PRODUCTS[id];
-                    const active = id === current;
+	return (
+		<Box
+			component="section"
+			aria-label={label}
+		>
+			<Stack gap="xs">
+				{PRODUCT_ORDER.map((id) => {
+					const product = PRODUCTS[id];
+					const active = id === current;
 
-                    return (
-                        <Anchor
-                            key={id}
-                            href={product.homeHref}
-                            underline="never"
-                            className={classes.productListItem}
-                            data-active={active || undefined}
-                            aria-current={active ? "page" : undefined}
-                        >
-                            <Group
-                                wrap="nowrap"
-                                align="center"
-                                gap="md"
-                                p="sm"
-                            >
-                                <Image
-                                    src={product.picto}
-                                    w={32}
-                                />
-                                <Stack
-                                    gap={2}
-                                    flex={1}
-                                    miw={0}
-                                >
-                                    <Text
-                                        fz="sm"
-                                        fw={600}
-                                        c="bright"
-                                    >
-                                        {product.label}
-                                    </Text>
-                                    <Text
-                                        fz="xs"
-                                        c="dimmed"
-                                        lineClamp={2}
-                                    >
-                                        {product.description}
-                                    </Text>
-                                </Stack>
-                                {active && (
-                                    <Icon
-                                        path={iconCheck}
-                                        size="sm"
-                                        aria-label="Current"
-                                    />
-                                )}
-                            </Group>
-                        </Anchor>
-                    );
-                })}
-            </Stack>
-        </Box>
-    );
+					return (
+						<Anchor
+							key={id}
+							href={product.homeHref}
+							underline="never"
+							className={classes.productListItem}
+							data-active={active || undefined}
+							aria-current={active ? "page" : undefined}
+						>
+							<Group
+								wrap="nowrap"
+								align="center"
+								gap="md"
+								p="sm"
+							>
+								<Image
+									src={product.picto}
+									w={32}
+								/>
+								<Stack
+									gap={2}
+									flex={1}
+									miw={0}
+								>
+									<Text
+										fz="sm"
+										fw={600}
+										c="bright"
+									>
+										{product.label}
+									</Text>
+									<Text
+										fz="xs"
+										c="dimmed"
+										lineClamp={2}
+									>
+										{product.description}
+									</Text>
+								</Stack>
+								{active && (
+									<Icon
+										path={iconCheck}
+										size="sm"
+										aria-label="Current"
+									/>
+								)}
+							</Group>
+						</Anchor>
+					);
+				})}
+			</Stack>
+		</Box>
+	);
 }
