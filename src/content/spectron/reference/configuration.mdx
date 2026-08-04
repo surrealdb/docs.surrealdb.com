@@ -24,19 +24,14 @@ Server configuration is provided via environment variables or a TOML configurati
 
 ### Default model settings
 
-These apply to all Contexts that do not override them:
+Per-stage defaults are cost-tiered for the deployment’s chosen LLM provider (`SPECTRON_LLM_PROVIDER` / implicit Google). Optional env overrides:
 
-| Variable | Default | Description |
-|---|---|---|
-| `SPECTRON_MODEL_EXTRACTION` | `gpt-4o-mini` | LLM for experiential memory extraction (Stage 1 fast pass) |
-| `SPECTRON_MODEL_EXTRACTION_STRONG` | `gpt-4o` | LLM for extraction Stage 2 |
-| `SPECTRON_MODEL_QUERY_UNDERSTANDING` | `gpt-4o-mini` | LLM for query classification |
-| `SPECTRON_MODEL_RESPONSE` | `gpt-4o-mini` | LLM for response synthesis |
-| `SPECTRON_MODEL_REFLECTION` | `gpt-4o` | LLM for reflection operations |
-| `SPECTRON_MODEL_BACKGROUND` | `gpt-4o-mini` | LLM for background reconciliation |
-| `SPECTRON_MODEL_EMBEDDING` | `text-embedding-3-small` | Embedding model for the deployment (1536-dim in this release) |
+| Variable | Description |
+|---|---|
+| `SPECTRON_LLM_MODEL` | Global model override when a stage has no per-Context selection |
+| `SPECTRON_MODEL_EMBEDDING` | Must be `gemini-embedding-2` (3072-dim). Embedding is **fixed per deployment** — not a free per-Context choice |
 
-The embedding model is **fixed per deployment** for launch — it is not a per-Context override. Context config rejects any `models.embedding` value other than the deployment default. Changing the server embedding model requires a [reindex](/docs/spectron/reference/management-api#force-reindex) so vectors and HNSW indexes stay in the same embedding space.
+The embedding model is **fixed per deployment** — it is not a per-Context override. Context config rejects any `models.embedding` value other than the deployment default. Changing the server embedding model requires a [reindex](/docs/spectron/reference/management-api#force-reindex) so vectors and HNSW indexes stay in the same embedding space.
 
 ### Reranker (optional)
 
@@ -57,7 +52,7 @@ HTTP OCR, CLIP, and speech-to-text for document ingestion (read by the **`worker
 | `SPECTRON_OCR_URL` | POST endpoint for OCR. Unset ⇒ built-in or local Tesseract (when enabled). |
 | `SPECTRON_OCR_MODEL` | Required when OCR URL is set. |
 | `SPECTRON_OCR_API_KEY` | Optional bearer token. |
-| `SPECTRON_CLIP_URL` | POST endpoint for visual embeddings. CLIP output must match the **512-dim** `image_chunk` width. |
+| `SPECTRON_CLIP_URL` | POST endpoint for visual embeddings. Output must match the **3072**-dim `image_chunk` width (same space as `gemini-embedding-2` when using Gemini CLIP). |
 | `SPECTRON_CLIP_MODEL` | Required when CLIP URL is set. |
 | `SPECTRON_CLIP_API_KEY` | Optional bearer token. |
 | `SPECTRON_STT_URL` | POST endpoint for speech-to-text. |
@@ -70,8 +65,11 @@ See [Multimodal content](/docs/spectron/agent-memory/ingest/authoritative/multim
 
 | Variable | Description |
 |---|---|
-| `SPECTRON_OPENAI_API_KEY` | Default OpenAI API key for all Contexts |
-| `SPECTRON_ANTHROPIC_API_KEY` | Default Anthropic API key for all Contexts |
+| `SPECTRON_PROVIDER_OPENAI_API_KEY` | OpenAI key available to Contexts and stages |
+| `SPECTRON_PROVIDER_ANTHROPIC_API_KEY` | Anthropic key available to Contexts and stages |
+| `SPECTRON_PROVIDER_GOOGLE_API_KEY` | Google (Gemini) key; also used when Gemini is the implicit request-path default |
+| `SPECTRON_LLM_PROVIDER` | Explicit default provider for unset stages: `openai` \| `anthropic` \| `google`. Unset ⇒ a present Google key makes Gemini the implicit default on `/chat` and `/facts?infer=full` |
+| `SPECTRON_EMBEDDINGS_API_KEY` | Gemini Developer API key for embeddings (`gemini-embedding-2`, 3072-dim). Embeddings are Gemini-only |
 
 ### Object store configuration
 
@@ -107,16 +105,15 @@ Each Context stores a `config` object in the control plane. This is updated via 
     "token_limit": 1000000,
     "retention_days": 90,
     "models": {
-      "extraction": "openai/gpt-4o-mini",
-      "extraction_strong": "openai/gpt-4o",
-      "query_understanding": "openai/gpt-4o-mini",
-      "response": "openai/gpt-4o-mini",
-      "reflection": "openai/gpt-4o",
-      "background": "openai/gpt-4o-mini"
+      "extraction": { "provider": "google", "model": "gemini-2.5-flash" },
+      "synthesis": { "provider": "google", "model": "gemini-2.5-pro" },
+      "elaboration_consolidation": { "provider": "google", "model": "gemini-2.5-flash" },
+      "embedding": "gemini-embedding-2"
     },
     "providers": {
-      "openai": "sk-...",
-      "anthropic": "sk-ant-..."
+      "google": "…",
+      "openai": "sk-…",
+      "anthropic": "sk-ant-…"
     }
   }
 }
@@ -129,12 +126,12 @@ Each Context stores a `config` object in the control plane. This is updated via 
 | `token_limit` | integer (optional) | Soft monthly token cap for metering and billing. Does not reject requests while `enforcement_blocked` is `false`. `null` = no cap. |
 | `retention_days` | integer (optional) | Automatic expiry for `context`-category experiential memory data. `null` = no automatic expiry. |
 | `ingestion_profile` | string | Document ingest dial: `TextOnly`, `TextPlusKeyword`, `StandardMultimodal`, or `MultimodalFull` (default). See [Multimodal content](/docs/spectron/agent-memory/ingest/authoritative/multimodal-content). |
-| `models.extraction` | string | Model for Stage 1 fast extraction. Format: `provider/model-name`. |
-| `models.extraction_strong` | string | Model for Stage 2 strong extraction. |
-| `models.query_understanding` | string | Model for classifying and expanding queries. |
-| `models.response` | string | Model for synthesising formatted context responses. |
-| `models.reflection` | string | Model for reflection operations (`reflect` endpoint). |
-| `models.background` | string | Model for background reconciliation and cross-layer linking. |
+| `models.extraction` | `{provider, model}` | LLM for turn and document extraction. |
+| `models.reconciliation` | `{provider, model}` (optional) | LLM assist when structural entity merge is inconclusive. |
+| `models.synthesis` | `{provider, model}` | LLM for `/chat` and `/reflect`. |
+| `models.elaboration_consolidation` | `{provider, model}` | LLM for worker elaboration and consolidation. |
+| `models.embedding` | string | Must be `gemini-embedding-2` when set (3072-dim; deployment-fixed). |
+| `providers.google` | string | Google (Gemini) API key for this Context. |
 | `providers.openai` | string | OpenAI API key for this Context. Overrides the server-wide default. |
 | `providers.anthropic` | string | Anthropic API key for this Context. |
 
@@ -145,7 +142,7 @@ Provider API keys are **write-only** on the API surface. The read projection for
 ```json
 {
   "config": {
-    "providers_configured": ["openai", "anthropic"]
+    "providers_configured": ["google", "openai", "anthropic"]
   }
 }
 ```

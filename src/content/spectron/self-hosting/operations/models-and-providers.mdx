@@ -6,170 +6,100 @@ description: "Provider keys and per-context model routing."
 
 # Models and providers
 
-Spectron uses LLMs and embedding models at multiple stages of the extraction and recall pipeline. Each stage can be configured independently, and each context can override the server-level defaults.
+Spectron uses LLMs and embedding models at multiple stages of the extraction and recall pipeline. Each LLM stage can be configured independently, and each Context can override the server-level defaults. Embeddings are fixed deployment-wide.
 
 ## Supported providers
 
-| Provider | Models supported |
-|-----------|------------------------------------------------------|
-| OpenAI | `gpt-4o`, `gpt-4o-mini`, `text-embedding-3-small`, `text-embedding-3-large` |
-| Anthropic | `claude-opus-4`, `claude-sonnet-4`, `claude-haiku-4` |
+| Provider | Typical models |
+| --- | --- |
+| Google (Gemini) | Flash / Pro family for LLM stages; **`gemini-embedding-2`** for embeddings |
+| OpenAI | GPT family for LLM stages |
+| Anthropic | Claude family for LLM stages |
 
-Embedding models are only available via OpenAI. If you configure Anthropic as your primary provider, you must also supply an OpenAI key for embedding generation.
+**Embeddings are Gemini-only:** `gemini-embedding-2` over the native `embedContent` API at **3072** dimensions. If you use Anthropic or OpenAI for extraction and chat, you still need a Google embeddings key (`SPECTRON_EMBEDDINGS_API_KEY` or `SPECTRON_PROVIDER_GOOGLE_API_KEY`).
 
 ---
 
 ## Server-level defaults
 
-Set provider keys and default model assignments via environment variables before starting the server:
+Set provider keys and optional model overrides before starting the server:
 
 ```bash
 # Provider keys
-SPECTRON_OPENAI_API_KEY=sk-…
-SPECTRON_ANTHROPIC_API_KEY=sk-ant-…
+SPECTRON_PROVIDER_GOOGLE_API_KEY=…
+SPECTRON_PROVIDER_OPENAI_API_KEY=…
+SPECTRON_PROVIDER_ANTHROPIC_API_KEY=…
 
-# Model defaults (optional – these are the built-in defaults)
-SPECTRON_MODEL_EXTRACTION=gpt-4o-mini
-SPECTRON_MODEL_QUERY_UNDERSTANDING=gpt-4o-mini
-SPECTRON_MODEL_RESPONSE=gpt-4o
-SPECTRON_MODEL_REFLECTION=gpt-4o
-SPECTRON_MODEL_BACKGROUND=gpt-4o-mini
-SPECTRON_MODEL_EMBEDDING=text-embedding-3-small
+# Embeddings (Gemini Developer API)
+SPECTRON_EMBEDDINGS_API_KEY=…
+
+# Explicit default LLM provider for unset stages: openai | anthropic | google
+# Unset + a Google key ⇒ Gemini is the implicit default on /chat and /facts?infer=full
+SPECTRON_LLM_PROVIDER=google
+
+# Optional global model override when a stage has no per-Context selection
+SPECTRON_LLM_MODEL=
 ```
 
-Or in the YAML configuration file:
+When `SPECTRON_LLM_PROVIDER` is unset and a Google key is present, request-path stages (`/chat`, `/facts?infer=full`) use Gemini by default so a Google-key-only deployment answers without a void provider. Background stages still require an explicit selection or Context-owned key; they do not silently promote a bare provider key. See [Configuration](/docs/spectron/reference/configuration#default-provider-api-keys).
 
-```yaml
-providers:
-  openai:
-    api_key: ${SPECTRON_OPENAI_API_KEY}
-  anthropic:
-    api_key: ${SPECTRON_ANTHROPIC_API_KEY}
-
-models:
-  extraction: gpt-4o-mini
-  query_understanding: gpt-4o-mini
-  response: gpt-4o
-  reflection: gpt-4o
-  background: gpt-4o-mini
-  embedding: text-embedding-3-small
-```
-
-Server-level defaults apply to all contexts that have not set their own model configuration.
+Per-stage built-in defaults are cost-tiered for the chosen provider (cheaper models for extraction and reconciliation, more capable models for synthesis). Override with Context `models` when you need a specific id.
 
 ---
 
 ## Pipeline stages
 
-Spectron's extraction and recall pipeline has six model stages. Each can run a different model, allowing cost/quality trade-offs per stage.
+| Stage | Purpose |
+| --- | --- |
+| `extraction` | Entity and attribute extraction from turns and documents |
+| `reconciliation` | Optional LLM assist when structural entity merge is inconclusive |
+| `synthesis` | `/chat` and `/reflect` answer generation |
+| `elaboration_consolidation` | Background elaboration and consolidation (worker dreaming tier) |
+| `embedding` | Vector embedding — fixed to `gemini-embedding-2` (3072-dim) |
 
-| Stage | Purpose | Recommended model |
-|----------------------|------------------------------------------------|------------------|
-| `extraction` | Entity and attribute extraction from turns | `gpt-4o-mini` |
-| `query_understanding`| Parsing and expanding recall queries | `gpt-4o-mini` |
-| `response` | Generating agent responses (optional) | `gpt-4o` |
-| `reflection` | Synthesising summaries from accumulated memory | `gpt-4o` |
-| `background` | Deferred resolution and classification jobs | `gpt-4o-mini` |
-| `embedding` | Embedding generation for vector search | `text-embedding-3-small` |
-
-**Extraction** and **background** run on every turn. Keeping these on a fast, inexpensive model (`gpt-4o-mini`) is important for throughput. **Reflection** is called less frequently but benefits from a more capable model.
+Keeping **extraction** on a fast, inexpensive model matters for throughput. **Synthesis** benefits from a more capable model when answer quality matters more than latency.
 
 ---
 
 ## Per-context model override
 
-Each context can override the server defaults for any or all stages. Overrides are set via the management API:
+Each Context can set `{provider, model}` for LLM stages via the management API. The embedding field, if set, must be exactly `gemini-embedding-2` — other values are rejected at set-time (HTTP 400). Changing the deployment embedding model requires a [reindex](/docs/spectron/reference/management-api#force-reindex) so vectors and HNSW indexes stay in the same space.
 
-```python
-await memory.config.models(
-    extraction="gpt-4o-mini",
-    query_understanding="gpt-4o-mini",
-    response="gpt-4o",
-    reflection="gpt-4o",
-    background="gpt-4o-mini",
-    embedding="text-embedding-3-small",
-)
+```http
+PATCH /api/v1/contexts/{context_id}
+Content-Type: application/json
+
+{
+  "config": {
+    "models": {
+      "extraction": { "provider": "google", "model": "gemini-2.5-flash" },
+      "synthesis": { "provider": "anthropic", "model": "claude-sonnet-4" },
+      "embedding": "gemini-embedding-2"
+    }
+  }
+}
 ```
 
-You can also set provider keys per context. This allows different contexts to use different OpenAI organisations or Anthropic accounts:
+You can also attach provider keys per Context so different tenants use different accounts. Unspecified stages inherit the deployment default.
 
-```python
-await memory.config.providers(
-    openai=os.environ["ACME_OPENAI_KEY"],
-    anthropic=os.environ["ACME_ANTHROPIC_KEY"],
-)
-```
-
-### Partial overrides
-
-You do not need to specify all stages. Unspecified stages inherit the server default:
-
-```python
-# Only override reflection; everything else uses server defaults
-await memory.config.models(reflection="claude-opus-4")
-```
-
-**Document ingest** resolves the **`extraction`** LLM per Context on the worker for each job — including vision description under **`MultimodalFull`**. A Context with its own provider keys and `models.extraction` does not require a deployment-wide default LLM env var for ingest to run; maintenance and document jobs share the same budget-enforced resolver.
+**Document ingest** resolves the **`extraction`** LLM per Context on the worker for each job — including vision description under **`MultimodalFull`**. A Context with its own provider keys and `models.extraction` does not require a deployment-wide default LLM env var for ingest to run.
 
 ---
 
 ## Provider key security
 
-Provider keys are stored encrypted at rest in SurrealDB, scoped to their context. The API surface is write-only: once a key is set, you cannot retrieve the plaintext value through the API.
-
-Read operations on provider configuration return a summary object indicating which providers are configured:
-
-```python
-config = await memory.config.get()
-print(config.providers_configured)
-# {"openai": True, "anthropic": True}
-```
-
-The actual key values are never exposed. To rotate a provider key, simply write the new value – it overwrites the previous entry.
-
-```python
-await memory.config.providers(openai=os.environ["NEW_OPENAI_KEY"])
-```
+Provider keys are stored encrypted at rest in SurrealDB, scoped to their Context. The API surface is write-only: once a key is set, you cannot retrieve the plaintext value through the API. Read operations return which providers are configured, not the secrets. To rotate a key, write the new value — it overwrites the previous entry.
 
 ---
 
 ## Switching providers after deployment
 
-Changing the **LLM provider** (e.g. from OpenAI to Anthropic) for extraction or reflection stages takes effect immediately for all new turns. Existing extracted memory is not affected.
+Changing the **LLM provider** for extraction or synthesis takes effect immediately for new work. Existing extracted memory is not rewritten.
 
-Changing the **embedding model** has a broader impact. Embeddings stored in SurrealDB are generated by a specific model. If you change the embedding model, existing embeddings become incompatible with new embeddings – similarity scores will be unreliable.
-
-If you need to change the embedding model in production:
-
-1. Set the new embedding model in the context or server configuration.
-2. Trigger a re-embedding job to regenerate all existing vectors:
-
-```bash
-spectronctl contexts reembed ctx_acme --api-key mgmt-… --watch
-```
-
-This is a background operation. New turns continue to be processed during re-embedding using the new model. Recall quality may degrade temporarily while re-embedding is in progress.
+Changing the **embedding model** is a deployment-wide decision. Stored vectors are tied to a specific model and width. After a change, trigger a re-embedding / reindex job; recall quality may degrade until the job finishes.
 
 ---
 
 ## Mixing providers
 
-You can mix providers across stages. A common pattern is to use OpenAI's cheaper models for extraction and Anthropic's more capable models for reflection:
-
-```python
-await memory.config.models(
-    extraction="gpt-4o-mini",
-    background="gpt-4o-mini",
-    query_understanding="gpt-4o-mini",
-    reflection="claude-opus-4",
-    response="claude-sonnet-4",
-    embedding="text-embedding-3-small",
-)
-
-await memory.config.providers(
-    openai=os.environ["OPENAI_KEY"],
-    anthropic=os.environ["ANTHROPIC_KEY"],
-)
-```
-
-Both provider keys must be present for the model assignments to work. Spectron validates provider key availability at context configuration time and raises an error if a required key is missing.
+You can mix providers across stages — for example Gemini for extraction and Anthropic for synthesis — as long as each selected provider has a key available to that Context (deployment or per-Context). Spectron validates provider availability at configuration time and rejects missing keys rather than silently re-routing.
