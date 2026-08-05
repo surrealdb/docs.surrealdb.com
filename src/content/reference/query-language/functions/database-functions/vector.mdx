@@ -57,6 +57,10 @@ A collection of essential vector operations that provide foundational functional
       <td scope="row" data-label="Description">Multiplies each item in a vector</td>
     </tr>
     <tr>
+      <td scope="row" data-label="Function"><a href="#vectorsum"><code>vector::sum()</code></a></td>
+      <td scope="row" data-label="Description">Sums vectors element-wise, as a scalar or as a grouped aggregate</td>
+    </tr>
+    <tr>
       <td scope="row" data-label="Function"><a href="#vectorsubtract"><code>vector::subtract()</code></a></td>
       <td scope="row" data-label="Description">Performs element-wise subtraction between two vectors</td>
     </tr>
@@ -366,6 +370,128 @@ RETURN vector::scale([3, 1, 5, -3, 7, 2], 5);
 
 -- [15,	5, 25, -15, 35, 10]
 ```
+
+<br />
+
+## `vector::sum`
+
+<Since v="v3.3.0" />
+
+The `vector::sum` function adds vectors element-wise. It is available in two forms, matching other aggregates such as [`math::sum`](/docs/reference/query-language/functions/database-functions/math#mathsum):
+
+- **Scalar** — sum a collection of vectors you already hold as `array<array<number>>`
+- **Aggregate** — fold a vector-valued expression across the rows of a `GROUP BY` (or `GROUP ALL`)
+
+```surql title="API DEFINITION"
+vector::sum(array<array<number>>) -> array | none
+```
+
+An empty collection returns `NONE` (there is no dimension to produce a zero vector for). Two empty vectors sum to `[]`. Vectors in the collection must share the same dimension; a mismatch returns an error in the scalar form.
+
+The following example shows the scalar form, and its output, when used in a [`RETURN`](/docs/reference/query-language/statements/return) statement:
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "[5, 7, 9]"
+
+[[test.results]]
+value = "[9, 12]"
+
+[[test.results]]
+value = "[2.5f, 3.5f]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[4, 6]"
+
+*/
+
+RETURN vector::sum([[1, 2, 3], [4, 5, 6]]);
+-- [5, 7, 9]
+
+RETURN vector::sum([[1, 2], [3, 4], [5, 6]]);
+-- [9, 12]
+
+RETURN vector::sum([[1.5, 2.5], [1, 1]]);
+-- [2.5f, 3.5f]
+
+RETURN vector::sum([[], []]);
+-- []
+
+RETURN vector::sum([]);
+-- NONE
+
+RETURN [[1, 2], [3, 4]].vector_sum();
+-- [4, 6]
+```
+
+### Aggregate form
+
+As an aggregate, `vector::sum` keeps one running vector per group, so state stays O(dimension) rather than materialising every embedding with `array::group` then folding.
+
+On the streaming path:
+
+- Rows whose vector is `NONE` or `NULL` are skipped (same idea as a missing field for `math::sum`)
+- A group that never sees a vector yields `NONE`
+- A group whose vectors disagree on dimension yields `NULL`, not a partial sum
+
+Together with [`vector::scale`](#vectorscale) and [`math::sum`](/docs/reference/query-language/functions/database-functions/math#mathsum), a weighted centroid is one query:
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ interest: [0.4f, 0.6000000000000001f, 0f], user: 'alice' }, { interest: [0f, 0f, 4f], user: 'bob' }]"
+
+[[test.results]]
+value = "[{ total: [1, 1, 0], user: 'alice' }, { total: [0, 0, 4], user: 'bob' }]"
+
+*/
+
+CREATE engagement:1 SET user = 'alice', weight = 2, embedding = [1, 0, 0] RETURN NONE;
+CREATE engagement:2 SET user = 'alice', weight = 3, embedding = [0, 1, 0] RETURN NONE;
+CREATE engagement:3 SET user = 'bob', weight = 1, embedding = [0, 0, 4] RETURN NONE;
+
+SELECT
+	user,
+	vector::scale(
+		vector::sum(vector::scale(embedding, weight)),
+		1.0 / math::sum(weight)
+	) AS interest
+FROM engagement
+GROUP BY user
+ORDER BY user;
+
+-- alice → [0.4f, 0.6000000000000001f, 0f]
+-- bob   → [0f, 0f, 4f]
+
+SELECT user, vector::sum(embedding) AS total
+FROM engagement
+GROUP BY user
+ORDER BY user;
+
+-- alice → [1, 1, 0]
+-- bob   → [0, 0, 4]
+```
+
+> [!IMPORTANT]
+> Write the reciprocal as a float (`1.0 / math::sum(weight)`). With integer weights, `1 / math::sum(weight)` is integer division and truncates to `0`, which scales the weighted total away entirely. Float weights promote the reciprocal on their own.
 
 <br />
 
