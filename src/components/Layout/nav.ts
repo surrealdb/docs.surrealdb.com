@@ -214,9 +214,9 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                 heading: "Tools",
                 items: [
                     {
-                        label: "Surrealist UI",
+                        label: "SurrealDB Studio",
                         href: "/docs/explore/surrealist",
-                        description: "Explore data in the official SurrealDB IDE.",
+                        description: "Explore data in the official SurrealDB dashboard.",
                         icon: iconSurrealist,
                     },
                 ],
