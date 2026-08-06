@@ -6,7 +6,6 @@ import { vikeSitemap } from "vike-sitemap-generator";
 import { defineConfig } from "vite";
 import { vercel } from "vite-plugin-vercel/vite";
 import { viteDevRedirects } from "./plugins/vite-dev-redirects";
-import { viteSearchIndex } from "./plugins/vite-search-index";
 
 loadEnvFile(".env.shared");
 
@@ -25,9 +24,6 @@ export default defineConfig(({ mode }) => ({
                 includeDrafts: false,
             },
         }),
-        // Must come after vikeContentCollectionPlugin: it reads the
-        // collection store that plugin's buildStart populates.
-        viteSearchIndex(),
         vikeSitemap({
             baseUrl: "https://surrealdb.com/docs",
             robots: true,
