@@ -724,6 +724,78 @@ value = "NONE"
 DEFINE FIELD OVERWRITE example ON TABLE user TYPE string;
 ```
 
+## Restrictions on computed fields
+
+<Since v="v3.3.0" />
+
+A [`COMPUTED`](#computed-fields) body is evaluated on every read of the field, inside the transaction of the statement that reads it. Two rules follow from that.
+
+### A computed body must be read-only
+
+`DEFINE FIELD` refuses a `COMPUTED` body that modifies data. A write inside a body can never succeed inside a plain `SELECT`, so the definition is rejected instead of leaving behind a field that fails on every read.
+
+```surql
+-- Refused: the body modifies data
+DEFINE FIELD view_count ON article COMPUTED (UPDATE stats:articles SET views += 1);
+```
+
+The check covers the whole expression, including subqueries, blocks and closures, and it follows calls to [custom functions](/docs/reference/query-language/statements/define/function). A body that calls a function which writes is refused, and the error names the function.
+
+```surql
+DEFINE FUNCTION fn::record_view() { CREATE view_log SET at = time::now(); RETURN 1; };
+
+-- Refused: fn::record_view() writes
+DEFINE FIELD view_count ON article COMPUTED fn::record_view();
+```
+
+The same rule holds when the function changes rather than the field: `DEFINE FUNCTION` and `ALTER FUNCTION` refuse a body that starts to write while a computed field still depends on it. See [Functions that other definitions require to stay read-only](/docs/reference/query-language/statements/define/function#functions-that-other-definitions-require-to-stay-read-only).
+
+A write that cannot be resolved when the field is defined — one reached through [`eval::surql()`](/docs/reference/query-language/functions/database-functions/eval#evalsurql), a JavaScript function, or a closure that arrives as data — is still accepted at definition time. The write is refused when the field is read.
+
+> [!NOTE]
+> These checks are relaxed under `OPTION IMPORT`, so an [export](/docs/reference/cli/surrealdb-cli/commands/export) taken before the rules existed still restores.
+
+### A computed body is capped at the definer's permissions
+
+A `COMPUTED` body is evaluated with the reader's own authentication, narrowed so that it can never exceed the level and role of the user who defined the field. As with [`DEFINE FUNCTION`](/docs/reference/query-language/statements/define/function), the limit is a ceiling: it only ever removes access.
+
+A reader with broader permissions than the definer therefore gains nothing from the field. In the example below, the body needs a root-level identity, so it is refused under the definer's database-level Editor ceiling however privileged the reader is.
+
+```surql
+-- Defined by a database-level Editor
+DEFINE FIELD server_info ON article COMPUTED (INFO FOR ROOT);
+
+-- Selected by a root Owner: the body is still capped at database-level Editor
+SELECT server_info FROM article;
+```
+
+The reverse does not hold, and a computed field is not a way to grant access. A reader with narrower permissions than the definer keeps their own: the body runs as them, and every permission that applies to their own queries applies inside it.
+
+```surql
+-- Defined by a root user
+DEFINE TABLE audit_log SCHEMALESS PERMISSIONS NONE;
+DEFINE TABLE article SCHEMALESS PERMISSIONS FULL;
+DEFINE FIELD recent_audits ON article COMPUTED (SELECT * FROM audit_log);
+
+-- Selected by a record user
+SELECT id, title, recent_audits FROM article;
+```
+
+The record user can read `article`, so the row is returned. They cannot read `audit_log`, so the computed field is empty rather than exposing the table.
+
+```surql title="Output"
+[
+	{
+		id: article:1,
+		recent_audits: [],
+		title: 'Hello'
+	}
+]
+```
+
+> [!NOTE]
+> For record and anonymous readers the narrowing is skipped altogether, because a system user's ceiling cannot narrow them any further. Auth limiting never escalates the reader — see [Capabilities](/docs/learn/security/authorization/capabilities).
+
 ## Setting permissions on fields
 
 By default, the permissions on a field will be set to `FULL` unless otherwise specified. The table is the main access gate, while field permissions only narrow further when you need to (for example, when hiding a password). With `FULL`, a field follows the [table](/docs/reference/query-language/statements/define/table#defining-permissions)'s rules without adding its own. Tables default the other way: omitting table `PERMISSIONS` in a `DEFINE` statement stores `PERMISSIONS NONE`.
