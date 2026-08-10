@@ -4,6 +4,7 @@ import {
     iconAuthKeyhole,
     iconBraces,
     iconCloud,
+    iconGrid,
     iconIntegration,
     iconLangDotNet,
     iconLangGo,
@@ -24,7 +25,6 @@ import {
     iconSandbox,
     iconSidekick,
     iconSpectron,
-    iconSurrealist,
     iconTable,
     iconTransfer,
     iconVideo,
@@ -215,9 +215,9 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                 items: [
                     {
                         label: "SurrealDB Studio",
-                        href: "/docs/explore/surrealist",
+                        href: "/docs/explore/studio",
                         description: "Explore data in the official SurrealDB dashboard.",
-                        icon: iconSurrealist,
+                        icon: iconGrid,
                     },
                 ],
             },

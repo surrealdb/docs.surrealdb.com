@@ -169,7 +169,7 @@ const systemPrompt = `You are a helpful assistant.\n\n${formatProfile(profile)}`
 
 A profile is organised by **memory category** (`static`, `dynamic`, `preferences`, `instructions`) — not by which **entity** each attribute belongs to. When you mention yourself, your school, and your cat in one conversation, all extracted attributes that match the requested scope can appear in the same section. For example, `date_of_birth` (you), `school_level` (your school), and `species` (your cat) may sit side by side under **`static`** or **`preferences`**.
 
-That flat shape is deliberate for **prompt injection** — one dense briefing block for the model. For per-subject inspection, use the **Entities** view in Surrealist, **`GET /entities`**, or entity-scoped reads rather than the profile summary alone.
+That flat shape is deliberate for **prompt injection** — one dense briefing block for the model. For per-subject inspection, use the **Entities** view in SurrealDB Studio, **`GET /entities`**, or entity-scoped reads rather than the profile summary alone.
 
 ## Scope filtering
 

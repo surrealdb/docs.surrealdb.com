@@ -70,7 +70,7 @@ A skill recalls context with `get_context()` before it answers, then records the
 
 ## Scope per user
 
-Each helper scopes to the Zo user with a slash path such as `user/alice`. Register paths with `spectron scopes create` before first use. On **SurrealDB Cloud**, use your context host from Surrealist **API keys** as the `SPECTRON_ENDPOINT`.
+Each helper scopes to the Zo user with a slash path such as `user/alice`. Register paths with `spectron scopes create` before first use. On **SurrealDB Cloud**, use your context host from SurrealDB Studio **API keys** as the `SPECTRON_ENDPOINT`.
 
 ## Next steps
 
