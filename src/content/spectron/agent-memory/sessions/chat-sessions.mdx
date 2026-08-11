@@ -1,7 +1,7 @@
 ---
 position: 3
 title: Chat sessions
-description: "Using session.chat() for Spectron-managed conversation loops."
+description: "Using chat() for Spectron-managed conversation loops."
 ---
 
 # Chat sessions
@@ -14,14 +14,14 @@ Spectron supports two ways to integrate memory into a conversation:
 
 | Pattern | Use when |
 |---|---|
-| **Spectron drives the loop** (`session.chat()`) | You want minimal integration surface. Spectron handles context retrieval, model invocation, and memory persistence. |
-| **Caller drives the loop** (`session.turn()` + `session.context()`) | You need control over the model call – custom prompts, streaming, tool use, multi-step chains, or your own model infrastructure. |
+| **Spectron drives the loop** (`chat()`) | You want minimal integration surface. Spectron handles context retrieval, model invocation, and memory persistence. |
+| **Caller drives the loop** (`remember()` + `sessions.context()`) | You need control over the model call – custom prompts, streaming, tool use, multi-step chains, or your own model infrastructure. |
 
 The two patterns are not mutually exclusive. A single session can use `chat` for simple turns and `turn` + `context` for turns that require tool use or custom prompting.
 
 ## What Spectron does in `chat`
 
-When you call `session.chat()`, Spectron executes the following steps:
+When you call `chat()`, Spectron executes the following steps:
 
 1. **Loads the session transcript window** – the last **10** user/assistant turns of the same session, capped at **8k characters** of the newest content. Rendered as a sanitised `# Conversation so far` block inside the system prompt (one line per turn, inside the existing untrusted-data framing). The user message for this request is not yet stored; it appears under `# Question` after a successful reply.
 2. **Retrieves context** – runs the tiered retrieval strategy. Turns already in the transcript window are not retrieved again (the prompt already includes them). Older turns from the same session remain eligible. Prior assistant replies rank below user statements and document sources when both match; citations from those hits include **`role: "assistant"`**.
@@ -36,13 +36,18 @@ Multi-turn chat pins a session across messages. Under scope enforcement, each tu
 ## The `chat` endpoint
 
 ```http
-POST /api/v1/{context_id}/sessions/{session_id}/chat
+POST /api/v1/{context_id}/chat
 Content-Type: application/json
 
 {
-  "content": "What do you know about me?"
+  "message": "What do you know about me?",
+  "sessionId": "sess_01jt4kx…"
 }
 ```
+
+There is no per-session chat route: `/chat` is a Context-level endpoint and the
+session is pinned with `sessionId` in the body. Omit it and the handler
+auto-creates a session. The message field is **`message`**, not `content`.
 
 Response:
 
@@ -80,7 +85,7 @@ One entry per cited marker. Each resolves to a source row (`id`, `kind`, `snippe
 
 ### `memory_updates`
 
-The extraction diff from the user turn (the assistant reply is stored with `infer: none`). The shape matches the extraction result from `session.turn()`. Use this to update UI state or trigger any downstream logic that depends on changes to the memory graph.
+The extraction diff from the user turn (the assistant reply is stored with `infer: none`). The shape matches the extraction result from `remember()`. Use this to update UI state or trigger any downstream logic that depends on changes to the memory graph.
 
 ## Python SDK
 
@@ -89,13 +94,13 @@ from surrealdb import Spectron
 
 memory = Spectron(context="acme-prod",
     api_key=os.environ["SPECTRON_API_KEY"])
-session = await memory.sessions.create(scope=["org/acme/user/alice"])
+session = await memory.sessions.create(scopes=["org/acme/user/alice"])
 
-reply = await session.chat("What do you know about me?")
+reply = await memory.chat("What do you know about me?", session_id=session.id)
 
-print(reply.reply)            # The model's response string
-print(reply.memory_updates)   # Entities, attributes, relations,
-    corrections
+print(reply["reply"])          # The model's response string
+print(reply["citations"])      # One entry per [S1] marker
+print(reply["memoryUpdates"])  # Entities, attributes, relations, corrections
 ```
 
 ## JavaScript SDK
@@ -105,9 +110,9 @@ import { Spectron } from "@surrealdb/spectron";
 
 const memory = new Spectron({ context: "acme-prod",
     apiKey: process.env.SPECTRON_API_KEY });
-const session = await memory.sessions.create({ scope: ["org/acme/user/alice"] });
+const session = await memory.sessions.create({ scopes: ["org/acme/user/alice"] });
 
-const reply = await session.chat({ message: "What do you know about me?" });
+const reply = await memory.chat("What do you know about me?", { sessionId: session.id });
 
 console.log(reply.reply);          // The model's response string
 console.log(reply.memoryUpdates);  // Entities, attributes, relations,
@@ -116,7 +121,7 @@ console.log(reply.memoryUpdates);  // Entities, attributes, relations,
 
 ## Full loop example
 
-The following pattern shows a minimal chat loop using `session.chat()`:
+The following pattern shows a minimal chat loop using `chat()`:
 
 ```python
 import os
@@ -124,14 +129,14 @@ from surrealdb import Spectron
 
 memory = Spectron(context="acme-prod",
     api_key=os.environ["SPECTRON_API_KEY"])
-session = await memory.sessions.create(scope=["org/acme/user/alice"])
+session = await memory.sessions.create(scopes=["org/acme/user/alice"])
 
 while True:
     user_input = input("You: ")
     if user_input.lower() in {"exit", "quit"}:
         break
 
-    result = await session.chat(user_input)
+    result = await memory.chat(user_input, session_id=session.id)
     print(f"Agent: {result.reply}")
 
     if result.memory_updates.corrections:
@@ -147,7 +152,7 @@ import { Spectron } from "@surrealdb/spectron";
 
 const memory = new Spectron({ context: "acme-prod",
     apiKey: process.env.SPECTRON_API_KEY });
-const session = await memory.sessions.create({ scope: ["org/acme/user/alice"] });
+const session = await memory.sessions.create({ scopes: ["org/acme/user/alice"] });
 
 const rl = readline.createInterface({ input: process.stdin,
     output: process.stdout });
@@ -159,7 +164,7 @@ const ask = () => rl.question("You: ", async (input) => {
         return;
     }
 
-    const result = await session.chat({ message: input });
+    const result = await memory.chat(input, { sessionId: session.id });
     console.log(`Agent: ${result.reply}`);
 
     for (const c of result.memoryUpdates.corrections) {
@@ -187,11 +192,11 @@ You may use any provider supported by your Spectron deployment. The extraction a
 
 See [Models and providers](/docs/spectron/self-hosting/operations/models-and-providers) for the full list of supported providers and how to configure API keys.
 
-## When to use `session.turn()` instead
+## When to use `remember()` instead
 
-Use `session.turn()` plus your own model call when you need:
+Use `remember()` plus your own model call when you need:
 
-- **Streaming responses** – `session.chat()` waits for the full completion before returning. If you require token-level streaming to your UI, drive the LLM loop yourself.
+- **Streaming responses** – a non-streaming `chat()` waits for the full completion before returning. If you require token-level streaming to your UI, drive the LLM loop yourself.
 - **Tool use** – if your agent needs to call external tools mid-conversation, you need control over the turn-taking loop to interleave tool calls and results.
 - **Custom prompting** – if you maintain your own system prompt structure, persona configuration, or prompt template that cannot be expressed through Spectron's context injection format.
 - **Multiple models per turn** – if your architecture uses a router, ensemble, or chain of models.

@@ -20,22 +20,20 @@ No sessions are required for the first pass. You keep your existing data model a
 ```python
 from surrealdb import Spectron
 
-client = Spectron(api_key="sk-...")
-memory = client.memory(context_id="my-app")
+memory = Spectron(context="my-app", api_key="sk-...")
 
 CONTEXT_ID = "my-app"
 DEFAULT_SCOPE = ["org/my-org"]  # Start with a single scope
 
 async def call_llm_with_memory(user_message: str,
     session_id: str | None = None) -> str:
-    # 1. Retrieve relevant context (create session on-the-fly if needed)
+    # 1. Create a session on first call; afterwards carry the id forward.
+    #    There is no "open" call — a session is addressed by its id.
     if session_id is None:
-        session = await memory.sessions.create(scope=DEFAULT_SCOPE)
+        session = await memory.sessions.create(scopes=DEFAULT_SCOPE)
         session_id = session.id
-    else:
-        session = memory.sessions.open(session_id)
 
-    ctx = await session.context(query=user_message, top_k=5)
+    ctx = await memory.sessions.context(session_id, query=user_message)
 
     # 2. Inject into your existing system prompt
     system = your_existing_system_prompt()
@@ -43,12 +41,11 @@ async def call_llm_with_memory(user_message: str,
         system = f"{system}\n\n## Relevant context\n{ctx.formatted}"
 
     # 3. Your existing LLM call – unchanged
-        response = your_existing_llm_call(system=system,
-        user=user_message)
+    response = your_existing_llm_call(system=system, user=user_message)
 
     # 4. Record the exchange
-    await session.turn(role="user", content=user_message)
-    await session.turn(role="assistant", content=response)
+    await memory.remember(user_message, session_id=session_id, role="user")
+    await memory.remember(response, session_id=session_id, role="assistant")
 
     return response
 ```
@@ -56,34 +53,30 @@ async def call_llm_with_memory(user_message: str,
 ```typescript
 import { Spectron } from "@surrealdb/spectron";
 
-const client = new Spectron({ apiKey: "sk-..." });
-const memory = client.memory({ contextId: "my-app" });
+const memory = new Spectron({ context: "my-app", apiKey: "sk-..." });
 
-const DEFAULT_SCOPE = { org: "my-org" };
+const DEFAULT_SCOPE = ["org/my-org"];
 
 async function callLlmWithMemory(
     userMessage: string,
     sessionId?: string,
 ): Promise<{ response: string; sessionId: string }> {
-    const session = sessionId
-        ? memory.sessions.open(sessionId)
-        : await memory.sessions.create({ scope: DEFAULT_SCOPE });
+    const id = sessionId
+        ?? (await memory.sessions.create({ scopes: DEFAULT_SCOPE })).id;
 
-        const ctx = await session.context({ query: userMessage,
-        topK: 5 });
+    const ctx = await memory.sessions.context(id, { query: userMessage });
 
     let system = yourExistingSystemPrompt();
     if (ctx.formatted) {
         system = `${system}\n\n## Relevant context\n${ctx.formatted}`;
     }
 
-        const response = await yourExistingLlmCall({ system,
-        user: userMessage });
+    const response = await yourExistingLlmCall({ system, user: userMessage });
 
-    await session.turn({ role: "user", content: userMessage });
-    await session.turn({ role: "assistant", content: response });
+    await memory.remember(userMessage, { sessionId: id, role: "user" });
+    await memory.remember(response, { sessionId: id, role: "assistant" });
 
-    return { response, sessionId: session.id };
+    return { response, sessionId: id };
 }
 ```
 
@@ -102,16 +95,15 @@ async def llm(system: str, user: str) -> str:
 async def llm(system: str, user: str,
     session_id: str | None = None) -> str:
     if session_id:
-        session = memory.sessions.open(session_id)
-        ctx = await session.context(query=user, top_k=5)
+        ctx = await memory.sessions.context(session_id, query=user)
         if ctx.formatted:
             system = f"{system}\n\n{ctx.formatted}"
 
     response = await openai_client.chat(system=system, user=user)
 
     if session_id:
-        await session.turn(role="user", content=user)
-        await session.turn(role="assistant", content=response)
+        await memory.remember(user, session_id=session_id, role="user")
+        await memory.remember(response, session_id=session_id, role="assistant")
 
     return response
 ```
@@ -128,17 +120,15 @@ async function llm(system: string, user: string,
     let enrichedSystem = system;
 
     if (sessionId) {
-        const session = memory.sessions.open(sessionId);
-        const ctx = await session.context({ query: user, topK: 5 });
+        const ctx = await memory.sessions.context(sessionId, { query: user });
         if (ctx.formatted) enrichedSystem = `${system}\n\n${ctx.formatted}`;
     }
 
     const response = await openaiClient.chat({ system: enrichedSystem, user });
 
     if (sessionId) {
-        const session = memory.sessions.open(sessionId);
-        await session.turn({ role: "user", content: user });
-        await session.turn({ role: "assistant", content: response });
+        await memory.remember(user, { sessionId, role: "user" });
+        await memory.remember(response, { sessionId, role: "assistant" });
     }
 
     return response;
@@ -168,13 +158,13 @@ Once single-scope extraction is verified, add the user dimension. The only chang
 
 ```python
 # Before
-session = await memory.sessions.create(scope=["org/my-app"])
+session = await memory.sessions.create(scopes=["org/my-app"])
 
 # After
-session = await memory.sessions.create(scope=[f"org/my-app/user/{user_id}"])
+session = await memory.sessions.create(scopes=[f"org/my-app/user/{user_id}"])
 ```
 
-Existing memory under the org-only scope remains accessible via scope floor matching. New memory is stored under the user scope and is only visible to that user's context retrievals.
+Existing memory under the org-only scope remains readable, since the org path is an ancestor of the user path. New memory is stored under the user scope and is only visible to that user's context retrievals.
 
 ## Profile injection at session start
 
@@ -183,13 +173,14 @@ Once you have per-user memory accumulating, add profile injection at the start o
 ```python
 async def start_session(user_id: str) -> tuple[str, str]:
     session = await memory.sessions.create(
-        scope=[f"org/my-app/user/{user_id}"],
+        scopes=[f"org/my-app/user/{user_id}"],
     )
 
-    profile = await memory.profile(scope=[f"org/my-app/user/{user_id}"])
+    profile = await memory.profile()
     system = your_existing_system_prompt()
-    if profile.summary:
-        system = f"{system}\n\n## About this user\n{profile.summary}"
+    profile_block = format_profile(profile)   # see Profiles: injecting into prompts
+    if profile_block:
+        system = f"{system}\n\n## About this user\n{profile_block}"
 
     return session.id, system
 ```
@@ -197,13 +188,14 @@ async def start_session(user_id: str) -> tuple[str, str]:
 ```typescript
 async function startSession(userId: string): Promise<{ sessionId: string; system: string }> {
     const [session, profile] = await Promise.all([
-        memory.sessions.create({ scope: [`org/my-app/user/${userId}`] }),
-        memory.profile({ scope: [`org/my-app/user/${userId}`] }),
+        memory.sessions.create({ scopes: [`org/my-app/user/${userId}`] }),
+        memory.profile(),
     ]);
 
     let system = yourExistingSystemPrompt();
-    if (profile.summary) {
-        system = `${system}\n\n## About this user\n${profile.summary}`;
+    const profileBlock = formatProfile(profile);   // see Profiles: injecting into prompts
+    if (profileBlock) {
+        system = `${system}\n\n## About this user\n${profileBlock}`;
     }
 
     return { sessionId: session.id, system };

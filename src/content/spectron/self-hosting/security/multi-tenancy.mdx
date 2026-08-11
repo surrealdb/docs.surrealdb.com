@@ -38,31 +38,34 @@ Context: tenant-gamma    (ns: tenants, db: gamma)
 
 ### Provisioning a Context per tenant
 
-Use the [management API](/docs/spectron/reference/management-api) or `spectronctl` to create a Context per tenant, then mint an agent key with the appropriate scope floor:
+Use the [management API](/docs/spectron/reference/management-api) or `spectrond` to create a Context per tenant, then create a principal for the tenant's app and mint a key against it:
 
 ```bash
-spectronctl contexts create tenant-acme \
-  --namespace tenants --database acme \
-  --api-key "$SPECTRON_MGMT_KEY"
+export SPECTRON_MANAGEMENT_API_KEY=…
+export SPECTRON_MANAGEMENT_GRPC_URL=http://127.0.0.1:9091
 
-spectronctl contexts tenant-acme keys create app-agent \
-  --principal agent \
-  --scope-floor 'org=acme' \
-  --api-key "$SPECTRON_MGMT_KEY"
+spectrond contexts create tenant-acme --namespace tenants --database acme
+
+spectrond principals create tenant-acme "Acme app" \
+  --kind service \
+  --grant memory:read=org/acme \
+  --grant memory:write=org/acme
+
+spectrond keys create tenant-acme app-agent --principal <principal-id>
 ```
 
 Return the minted key secret to the tenant application. End-user memory calls use `Spectron` / `AsyncSpectron` from `surrealdb` with that agent key — see [Python SDK](/docs/spectron/integrations/sdks/python).
 
 ## Pattern 2: scope-based isolation within a single Context
 
-All tenants share a single Context. Each tenant is assigned an `org` value, and agent keys for each tenant have a scope floor of `{org: tenant_id}`. Scope enforcement ensures that tenant A's key cannot access tenant B's data.
+All tenants share a single Context. Each tenant is assigned an `org` value, and each tenant's key is granted `org/<tenant_id>`. Scope enforcement ensures that tenant A's key cannot access tenant B's data.
 
 ```
 Context: platform-prod
 
-  Tenant alpha: keys with scope_floor = {org: "alpha"}
-  Tenant beta:  keys with scope_floor = {org: "beta"}
-  Tenant gamma: keys with scope_floor = {org: "gamma"}
+  Tenant alpha: keys granted org/alpha
+  Tenant beta:  keys granted org/beta
+  Tenant gamma: keys granted org/gamma
 ```
 
 **Advantages:**
@@ -85,34 +88,32 @@ Context: platform-prod
 
 ### Provisioning a tenant key
 
-```python
-async def provision_tenant(tenant_id: str) -> str:
-    """Add a tenant to the shared Context and return an agent key secret."""
-    key = await admin.contexts("platform-prod").keys.create(
-        name=f"tenant-{tenant_id}",
-        principal="agent",
-        scope_floor=[f"org/{tenant_id}"],
-    )
-    return key.secret
+```http
+POST /api/v1/contexts/platform-prod/principals
+{ "display_name": "tenant-acme", "kind": "service",
+  "grants": { "memory:read": ["org/acme"], "memory:write": ["org/acme"] } }
+
+POST /api/v1/contexts/platform-prod/principals/{principal_id}/keys/tenant-acme
 ```
 
-The key secret is given to the tenant's application. It can create sessions, recall memory, and upload documents – all strictly within `{org: tenant_id}`.
+The mint response carries the plaintext secret once.
+
+The key secret is given to the tenant's application. It can create sessions, recall memory, and upload documents — all strictly within the granted `org/<tenant>` path.
 
 ## Cross-tenant data impossibility
 
-Under scope-based isolation, a key with scope floor `{org: "alpha"}` physically cannot read data written by a key with scope floor `{org: "beta"}`. The server enforces this at the query level ([Scope as a security boundary](/docs/spectron/self-hosting/security/scope-as-security-boundary)).
+Under scope-based isolation, a key granted `org/alpha` physically cannot read data written by a key granted `org/beta`. The server enforces this at the query level ([Scope as a security boundary](/docs/spectron/self-hosting/security/scope-as-security-boundary)).
 
-Cross-tenant contamination through the recall endpoint is also prevented: a recall query carries the requesting key's scope floor, and Spectron's retrieval pipeline applies that floor as a mandatory filter at every tier.
+Cross-tenant contamination through the recall endpoint is also prevented: a recall query carries the requesting key's granted read region, and Spectron's retrieval pipeline applies it as a mandatory filter at every tier.
 
 ## Per-tenant retention policies
 
-In pattern 1 (separate Contexts), set a `retention_days` value per Context:
+There is no per-Context fact-retention setting. In both patterns, expiry comes
+from the lifecycle sweeps, and per-tenant cleanup is done with targeted forget
+operations scoped to the tenant's `org` path (`POST /scopes/forget`).
 
-```json
-{ "config": { "retention_days": 90 } }
-```
-
-In pattern 2 (shared Context), retention is uniform across all tenants. Implement per-tenant retention by scheduling targeted forget operations via the management API using the tenant's `org` scope.
+Only trace rows have a configurable window, via `trace_retention.*_days` on the
+Context config.
 
 ## Per-tenant token budgets
 
@@ -133,6 +134,6 @@ In pattern 2, use decision traces to monitor token usage per `org` scope. Spectr
 
 ## Next steps
 
-- [Scope as a security boundary](/docs/spectron/self-hosting/security/scope-as-security-boundary) – how scope floors work
+- [Scope as a security boundary](/docs/spectron/self-hosting/security/scope-as-security-boundary) – how grants are enforced
 - [Principals](/docs/spectron/self-hosting/security/principals) – key types and capabilities
 - [Managing contexts](/docs/spectron/self-hosting/operations/contexts) – Context lifecycle management

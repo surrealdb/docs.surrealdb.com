@@ -27,8 +27,8 @@ Authorization: Bearer <management-key>
   "config": {
     "token_limit": 1000000,
     "models": {
-      "extraction": "openai/gpt-4o-mini",
-      "response": "openai/gpt-4o"
+      "extraction": { "provider": "openai", "model": "gpt-4o-mini" },
+      "synthesis": { "provider": "openai", "model": "gpt-4o" }
     },
     "providers": {
       "openai": "sk-..."
@@ -46,32 +46,38 @@ Authorization: Bearer <management-key>
 ### Using the CLI
 
 ```bash
-spectronctl contexts create acme-prod \
+spectrond contexts create acme-prod \
   --namespace acme \
   --database prod \
-  --model-extraction openai/gpt-4o-mini \
-  --token-limit 1000000 \
-  --api-key mgmt-...
+  --config ./acme-prod.json \
+  --url "$SPECTRON_MANAGEMENT_GRPC_URL" \
+  --api-key "$SPECTRON_MANAGEMENT_API_KEY"
 ```
+
+`spectrond contexts create` takes `--namespace`, `--database` (defaults to the
+Context id), and `--config`, a JSON file matching the `ContextConfig` schema.
+Models, token limits, and provider keys go in that file rather than on individual
+flags.
 
 ### Using the Management API
 
-Context provisioning uses the **management REST API** (`/api/v1/contexts/…`) or **`spectronctl`**. The end-user Python and TypeScript SDKs (`Spectron` / `AsyncSpectron`, `@surrealdb/spectron`) target memory operations inside a context, not context creation.
+Context provisioning uses the **management REST API** (`/api/v1/contexts/…`) or **`spectrond contexts`**. The end-user Python and TypeScript SDKs (`Spectron` / `AsyncSpectron`, `@surrealdb/spectron`) target memory operations inside a context, not context creation.
+
+The Context id is part of the path, not the body:
 
 ```http
-POST /api/v1/contexts
+POST /api/v1/contexts/acme-prod
 Authorization: Bearer <management-key>
 Content-Type: application/json
 
 {
-  "id": "acme-prod",
   "namespace": "acme",
   "database": "prod",
   "config": {
     "token_limit": 1000000,
     "models": {
-      "extraction": "openai/gpt-4o-mini",
-      "response": "openai/gpt-4o"
+      "extraction": { "provider": "openai", "model": "gpt-4o-mini" },
+      "synthesis": { "provider": "openai", "model": "gpt-4o" }
     },
     "providers": {
       "openai": "<provider-api-key>"
@@ -79,6 +85,10 @@ Content-Type: application/json
   }
 }
 ```
+
+`namespace` and `database` are required. Optional `admin_display_name` and
+`admin_external_id` bind the bootstrap admin principal to an external identity in
+the same request.
 
 ## Listing Contexts
 
@@ -88,7 +98,9 @@ Authorization: Bearer <management-key>
 ```
 
 ```bash
-spectronctl contexts list --api-key mgmt-...
+spectrond contexts list \
+  --url "$SPECTRON_MANAGEMENT_GRPC_URL" \
+  --api-key "$SPECTRON_MANAGEMENT_API_KEY"
 ```
 
 Returns all Contexts registered on this deployment. Provider API key values are replaced with a `providers_configured` list in the response.
@@ -110,8 +122,8 @@ Returns the Context record including effective configuration:
   "config": {
     "token_limit": 1000000,
     "models": {
-      "extraction": "openai/gpt-4o-mini",
-      "response": "openai/gpt-4o"
+      "extraction": { "provider": "openai", "model": "gpt-4o-mini" },
+      "synthesis": { "provider": "openai", "model": "gpt-4o" }
     },
     "providers_configured": ["openai"]
   },
@@ -132,7 +144,7 @@ Authorization: Bearer <management-key>
   "config": {
     "token_limit": 2000000,
     "models": {
-      "reflection": "anthropic/claude-opus-4-7"
+      "synthesis": { "provider": "anthropic", "model": "claude-opus-4-7" }
     },
     "providers": {
       "anthropic": "sk-ant-..."
@@ -165,33 +177,45 @@ This pairs with SurrealDB Cloud's inline retry and resume-on-access provisioning
 { "config": { "token_limit": 5000000 } }
 ```
 
-**Switch the reflection model:**
+**Switch the synthesis model** (used by `/chat` and `/reflect`):
 ```json
-{ "config": { "models": { "reflection": "anthropic/claude-opus-4-7" } } }
+{ "config": { "models": { "synthesis": { "provider": "anthropic", "model": "claude-opus-4-7" } } } }
 ```
 
-**Add retention policy:**
+**Bound trace retention:**
 ```json
-{ "config": { "retention_days": 90 } }
+{ "config": { "trace_retention": { "decision_trace_days": 90 } } }
 ```
 
 ## Provisioning API keys
 
-After creating a Context, provision at least one agent key for your application:
+Keys are always minted **against a principal**, so provisioning is two calls:
+create the principal with the grants your application needs, then mint a key bound
+to it.
 
 ```http
-POST /api/v1/contexts/acme-prod/keys
+POST /api/v1/contexts/acme-prod/principals
 Content-Type: application/json
 Authorization: Bearer <management-key>
 
 {
-  "name": "app-agent",
-  "principal": "agent",
-  "scope_floor": { "org": "acme" }
+  "display_name": "acme-app",
+  "kind": "service",
+  "grants": {
+    "memory:read": ["org/acme/*"],
+    "memory:write": ["org/acme/*"]
+  }
 }
 ```
 
-The secret is returned once in the response. Store it securely – it cannot be retrieved again. See [API keys and delegation](/docs/spectron/self-hosting/security/api-keys-and-delegation) for key types and rotation.
+```http
+POST /api/v1/contexts/acme-prod/principals/{principal_id}/keys/app-agent?ttl_seconds=2592000
+Authorization: Bearer <management-key>
+```
+
+There is no `POST /contexts/{context_id}/keys` — that path is listing only. The
+secret is returned once in the mint response. Store it securely; it cannot be
+retrieved again. See [API keys and delegation](/docs/spectron/self-hosting/security/api-keys-and-delegation) for grants, attenuation, and rotation.
 
 ## Deleting a Context
 
@@ -203,7 +227,9 @@ Authorization: Bearer <management-key>
 ```
 
 ```bash
-spectronctl contexts delete acme-prod --api-key mgmt-...
+spectrond contexts delete acme-prod \
+  --url "$SPECTRON_MANAGEMENT_GRPC_URL" \
+  --api-key "$SPECTRON_MANAGEMENT_API_KEY"
 ```
 
 The SurrealDB namespace is **not** deleted – it may contain other Contexts. Only the bound database is dropped.

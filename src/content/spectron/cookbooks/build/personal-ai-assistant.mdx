@@ -22,12 +22,11 @@ Each conversation is a new session. The scope ties the session to the user so al
 ```python
 from surrealdb import Spectron
 
-client = Spectron(api_key="sk-...")
-memory = client.memory(context_id="assistant")
+memory = Spectron(context="assistant", api_key="sk-...")
 
 async def start_conversation(user_id: str):
     session = await memory.sessions.create(
-        scope=[f"user/{user_id}"],
+        scopes=[f"user/{user_id}"],
     )
     return session
 ```
@@ -35,12 +34,11 @@ async def start_conversation(user_id: str):
 ```typescript
 import { Spectron } from "@surrealdb/spectron";
 
-const client = new Spectron({ apiKey: "sk-..." });
-const memory = client.memory({ contextId: "assistant" });
+const memory = new Spectron({ context: "assistant", apiKey: "sk-..." });
 
 async function startConversation(userId: string) {
     const session = await memory.sessions.create({
-        scope: [`user/${userId}`],
+        scopes: [`user/${userId}`],
     });
     return session;
 }
@@ -52,33 +50,34 @@ The profile endpoint returns a structured summary of everything Spectron knows a
 
 ```python
 async def build_system_prompt(user_id: str) -> str:
-    profile = await memory.profile(scope=[f"user/{user_id}"])
+    profile = await memory.profile()
 
-        base = """You are a personal AI assistant. Be concise, direct,
-        and helpful."""
+    base = "You are a personal AI assistant. Be concise, direct, and helpful."
 
-    if profile.summary:
-        return f"{base}\n\n## What you know about this user\n\n{profile.summary}"
+    profile_block = format_profile(profile)   # see Profiles: injecting into prompts
+    if profile_block:
+        return f"{base}\n\n## What you know about this user\n\n{profile_block}"
 
     return base
 ```
 
 ```typescript
 async function buildSystemPrompt(userId: string): Promise<string> {
-    const profile = await memory.profile({ scope: [`user/${userId}`] });
+    const profile = await memory.profile();
 
         const base = "You are a personal AI assistant. Be concise,
         direct, and helpful.";
 
-    if (profile.summary) {
-        return `${base}\n\n## What you know about this user\n\n${profile.summary}`;
+    const profileBlock = formatProfile(profile);   // see Profiles: injecting into prompts
+    if (profileBlock) {
+        return `${base}\n\n## What you know about this user\n\n${profileBlock}`;
     }
 
     return base;
 }
 ```
 
-A profile summary looks something like this after a few conversations:
+A formatted profile looks something like this after a few conversations:
 
 ```
 The user is Alice Chen, Head of Platform at Acme Corp. They prefer \
@@ -99,7 +98,7 @@ async def chat(session, user_id: str, user_message: str) -> str:
     system = await build_system_prompt(user_id)
 
     # Retrieve session-specific relevant context
-    ctx = await session.context(query=user_message, top_k=5)
+    ctx = await session.context(query=user_message)
     if ctx.items:
         system += f"\n\n## Relevant context\n\n{ctx.formatted}"
 
@@ -107,8 +106,8 @@ async def chat(session, user_id: str, user_message: str) -> str:
     response = your_llm(system=system, user=user_message)
 
     # Record both turns
-    await session.turn(role="user", content=user_message)
-    await session.turn(role="assistant", content=response)
+    await memory.remember(user_message, session_id=session.id, role="user")
+    await memory.remember(response, session_id=session.id, role="assistant")
 
     return response
 ```
@@ -120,8 +119,7 @@ async function chat(session: Session, userId: string,
     let system = await buildSystemPrompt(userId);
 
     // Retrieve session-specific relevant context
-        const ctx = await session.context({ query: userMessage,
-        topK: 5 });
+        const ctx = await session.context({ query: userMessage });
     if (ctx.items.length > 0) {
         system += `\n\n## Relevant context\n\n${ctx.formatted}`;
     }
@@ -130,8 +128,8 @@ async function chat(session: Session, userId: string,
     const response = await yourLlm({ system, user: userMessage });
 
     // Record both turns
-    await session.turn({ role: "user", content: userMessage });
-    await session.turn({ role: "assistant", content: response });
+    await memory.remember(userMessage, { sessionId: session.id, role: "user" });
+    await memory.remember(response, { sessionId: session.id, role: "assistant" });
 
     return response;
 }
@@ -167,76 +165,62 @@ After the user says "I just moved from Berlin to London", the extraction pipelin
 
 The old value is retained in the supersession chain for auditability but no longer appears in the active profile.
 
-## Step 5 – Using `session.chat()` instead of `session.turn()`
+## Step 5 – Using `chat()` instead of `remember()`
 
-If you want Spectron to manage the agent call rather than just recording turns, use the `chat()` endpoint. Pass an `agent_fn` callback and Spectron drives the loop – calling your function, recording the result, and running extraction.
+If you want Spectron to manage the agent call rather than just recording turns, use the `chat()` endpoint. Spectron retrieves context, calls the Context's configured synthesis model, persists both turns, and runs extraction — there is no callback to supply. Override the model for a single call with `model` if you need to.
 
 ```python
-async def my_llm(messages: list[dict]) -> str:
-    system = await build_system_prompt(user_id)
-    return your_llm(system=system, messages=messages)
+session = await memory.sessions.create(scopes=[f"user/{user_id}"])
 
-session = await memory.sessions.create(
-    scope=[f"user/{user_id}"],
-    agent_fn=my_llm,
-)
-
-result = await session.chat(content="What are my current projects?")
-print(result.response)
+result = await memory.chat("What are my current projects?", session_id=session.id)
+print(result["reply"])
+print(result["citations"])       # one entry per [S1] marker in the reply
+print(result["memoryUpdates"])   # extraction diff from the user turn
 ```
 
 ```typescript
-const session = await memory.sessions.create({
-    scope: [`user/${userId}`],
-    agentFn: async (messages) => {
-        const system = await buildSystemPrompt(userId);
-        return yourLlm({ system, messages });
-    },
-});
+const session = await memory.sessions.create({ scopes: [`user/${userId}`] });
 
-const result = await session.chat({ content: "What are my current projects?" });
-console.log(result.response);
+const result = await memory.chat("What are my current projects?", { sessionId: session.id });
+console.log(result.reply);
+console.log(result.citations);
+console.log(result.memoryUpdates);
 ```
 
-The `chat()` call returns the assistant response, the extraction diff, and the updated session state.
+The `chat()` call returns `reply`, `citations`, `memoryUpdates`, `sessionId`, and `traceId`. Because the model is configured on the Context rather than passed in, use the `remember()` + your-own-LLM shape when you need custom prompting, tool use, or streaming to your UI.
 
 ## Step 6 – Forgetting outdated information
 
 When a user's situation changes significantly – they change jobs, finish a project, move city – you can explicitly forget stale facts rather than waiting for the supersession chain to handle it via new turns.
 
-```python
-# Forget a specific attribute
-await memory.forget(
-    scope=[f"user/{user_id}"],
-    entity_type="Person",
-    entity_name="alice",
-    attribute_key="employer",
-)
+`forget` is **query-driven**, not field-driven: you describe what to forget in
+natural language and Spectron matches the facts within the caller's
+`memory:forget` region.
 
-# Or forget everything in a category
-await memory.forget(
-    scope=[f"user/{user_id}"],
-    category="context",
-)
+```python
+# Preview first — dry_run returns the would-be count without writing
+preview = await memory.forget("Alice's employer", dry_run=True)
+print(preview["deleted"])
+
+# Then apply
+await memory.forget("Alice's employer")
 ```
 
 ```typescript
-// Forget a specific attribute
-await memory.forget({
-    scope: [`user/${userId}`],
-    entityType: "Person",
-    entityName: "alice",
-    attributeKey: "employer",
-});
+const preview = await memory.forget("Alice's employer", { dryRun: true });
+console.log(preview.deleted);
 
-// Or forget everything in a category
-await memory.forget({
-    scope: [`user/${userId}`],
-    category: "context",
-});
+await memory.forget("Alice's employer");
 ```
 
-`forget` marks the matched attributes as expired (sets `valid_until` to now) and removes them from future context retrievals. The records are retained for audit purposes.
+To erase an entire branch rather than matched facts, use the scope-level route
+**`POST /scopes/forget`** with the subtree path (`user/alice/`), or delete a single
+entity with **`DELETE /entities/{type}/{name}`**.
+
+`forget` soft-deletes the matched facts (sets `valid_until` to now) and removes
+them from future retrievals, keeping prior rows for audit. Pass `purge=True` to
+also remove the supersession history — that is the right-to-be-forgotten path and
+is irreversible.
 
 ## Memory categories in a personal assistant
 

@@ -46,7 +46,7 @@ client = AsyncSpectron(
     api_key="sk-...",
 )
 
-session = await client.sessions.create(scope=["org/acme/user/researcher-alice"])
+session = await client.sessions.create(scopes=["org/acme/user/researcher-alice"])
 profile = await client.profile()
 system_prompt = f"""You are a research assistant working on a quantum computing survey.
 
@@ -69,7 +69,7 @@ const client = new Spectron({
 });
 
 const session = await client.sessions.create({
-    scope: ["org/acme/user/researcher-alice/project/quantum-computing-survey"],
+    scopes: ["org/acme/user/researcher-alice/project/quantum-computing-survey"],
 });
 
 const profile = await client.profile();
@@ -81,27 +81,29 @@ As the agent discovers new information, store findings as structured memory:
 
 ```python
 # Store a factual finding
-await session.remember(
-    content="Surface codes are the leading error correction approach for near-term quantum hardware. IBM and Google both use variants of surface codes in their 2024 roadmaps.",
+await memory.remember(
+    "Surface codes are the leading error correction approach for near-term quantum hardware. IBM and Google both use variants of surface codes in their 2024 roadmaps.",
     memory_category="knowledge",
 )
 
 # Store a source reference
-await session.remember(
-    content="Preskill 2018 coined 'Quantum Volume' as a hardware-independent performance metric. Paper: arXiv:1801.00862",
+await memory.remember(
+    "Preskill 2018 coined 'Quantum Volume' as a hardware-independent performance metric. Paper: arXiv:1801.00862",
     memory_category="knowledge",
 )
 
-# Store an open question for follow-up
-await session.remember(
-    content="UNCLEAR: Whether topological qubits (Microsoft) will outpace surface codes before 2030. Need to check latest Microsoft Station Q publications.",
-    memory_category="uncertainties",
+# Store an open question for follow-up. Uncertainties are an extraction
+# *output*, not a category you can request — write the text and let the
+# extractor flag it; it comes back in `extraction.uncertainties`.
+await memory.remember(
+    "UNCLEAR: Whether topological qubits (Microsoft) will outpace surface codes before 2030. Need to check latest Microsoft Station Q publications.",
+    memory_category="context",
 )
 
-# Store a research directive
-await session.remember(
-    content="Always cross-reference vendor claims with peer-reviewed papers. IBM and Google press releases tend to overstate error rates.",
-    memory_category="instructions",
+# Store a research directive. Standing instructions are likewise detected by
+# extraction and returned in `extraction.instructions`.
+await memory.remember(
+    "Always cross-reference vendor claims with peer-reviewed papers. IBM and Google press releases tend to overstate error rates.",
 )
 ```
 
@@ -112,9 +114,9 @@ When the user asks a question that might connect to earlier findings, use recall
 ```python
 async def answer_with_context(session, user_question: str) -> str:
     # Retrieve relevant prior findings
-    context = await session.recall(
-        query=user_question,
-        top_k=5,
+    context = await memory.recall(
+        user_question,
+        k=5,
     )
     
     prompt = f"""Research context from previous sessions:
@@ -133,13 +135,13 @@ At the end of each session, use `reflect` to distil findings into consolidated s
 
 ```python
 # Distil findings from this session
-await session.reflect(
+await memory.reflect(
     query="What were the key findings, open questions, and next steps from today's research?",
     persist=True,  # Store the synthesis as a new memory
 )
 
 # Also distil any conflicts found
-await session.reflect(
+await memory.reflect(
     query="Were there any contradictions found between sources? What needs verification?",
     persist=True,
 )
@@ -155,13 +157,12 @@ Research papers and documents should be ingested into authoritative knowledge fo
 # Using the management client to ingest a PDF
 management = client.management
 
-await management.contexts.ingest(
-    context_id="research-ctx",
-    content=open("quantum-error-correction.pdf", "rb").read(),
+await memory.documents.upload(
+    "quantum-error-correction.pdf",
     title="Quantum Error Correction: Surface Codes and Beyond",
-    mime_type="application/pdf",
-    scope=["org/acme/project/quantum-computing-survey"],
-    tags=["error-correction", "surface-codes"],
+    content_type="application/pdf",
+    scopes=["org/acme/project/quantum-computing-survey"],
+    labels=["topic=error-correction", "topic=surface-codes"],
 )
 ```
 
@@ -181,7 +182,7 @@ Tag sessions with metadata to make them queryable and to track progress:
 
 ```python
 session = await client.sessions.create(
-    scope=["org/acme/project/quantum-survey"],
+    scopes=["org/acme/project/quantum-survey"],
     metadata={
         "day": 4,
         "focus": "topological qubits",
@@ -190,32 +191,42 @@ session = await client.sessions.create(
     },
 )
 
-# Update metadata during the session
-await session.update_metadata({
-    "sources_reviewed": 12,
-    "citations_found": 34,
-})
+```
+
+Session metadata is set when the session is created and cannot be patched
+afterwards — there is no update endpoint. To track counters that change during a
+run, write them as attributes instead, where they get a supersession chain:
+
+```python
+await memory.remember(
+    infer="triples",
+    triples=[
+        {"entity": {"type": "project", "name": "research-run-14"},
+         "key": "sources_reviewed", "value": "12"},
+    ],
+)
 ```
 
 ## State and diffs between sessions
 
-Use `get_state()` to inspect the accumulated knowledge at any point:
+Use `state()` to inspect the accumulated knowledge at any point:
 
 ```python
-state = await session.get_state()
-print(f"Entities: {len(state.entities)}")
-print(f"Relations: {len(state.relations)}")
-print(f"Open uncertainties: {len(state.uncertainties)}")
+state = await memory.state()
+print(f"Entities: {len(state.knowledge['entities'])}")
+print(f"Relations: {len(state.knowledge['relations'])}")
+print(f"Open uncertainties: {len(state.unknowns)}")
 ```
 
-Use `diff_since()` to see what changed since the previous session:
+There is no cross-session diff endpoint. Each write returns its own delta, so
+accumulate those as the run proceeds:
 
 ```python
-# Get what changed since session ID from yesterday
-diff = await session.diff_since(session_id="sess_prev_day")
-print(f"New facts: {len(diff.added_attributes)}")
-print(f"Revised facts: {len(diff.superseded_attributes)}")
-print(f"Resolved uncertainties: {len(diff.resolved_uncertainties)}")
+result = await memory.remember(finding, session_id=session.id)
+
+print(f"New facts: {len(result.extraction.attributes)}")
+print(f"Revised facts: {len(result.extraction.corrections)}")
+print(f"Open uncertainties: {len(result.extraction.uncertainties)}")
 ```
 
 ## Long-term research patterns
@@ -226,4 +237,4 @@ For research spanning weeks or months, consider:
 
 **Uncertainty triage**: Regularly recall all `uncertainties` memories and close them out – either confirming them with sources and converting to `knowledge`, or marking them as `forget` once resolved.
 
-**Scope pruning**: When a research sub-topic is complete, use `memory.forget(scope=["org/acme/project/sub-topic"])` to prune stale context that would otherwise add noise to future recalls.
+**Scope pruning**: When a research sub-topic is complete, use `POST /scopes/forget` with `{"path": "org/acme/project/sub-topic/"}` to prune stale context that would otherwise add noise to future recalls.

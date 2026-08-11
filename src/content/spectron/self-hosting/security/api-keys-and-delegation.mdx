@@ -6,7 +6,7 @@ description: "Minting, rotation, and delegated sub-keys."
 
 # API keys and delegation
 
-Spectron uses API keys for all authenticated operations. Keys carry a scope floor that restricts what memory they can read and write. A key can never access memory outside its scope floor, and it can only mint sub-keys with a scope floor that is equal to or narrower than its own.
+Spectron uses API keys for all authenticated operations. Every key is bound to a **principal** and enforces that principal's grants — a per-verb map of the scope patterns that verb is allowed on. A key can never act outside those grants, and a key's own grants can only ever narrow the principal's, never widen them.
 
 ## Creating keys
 
@@ -22,15 +22,16 @@ See [Management API](/docs/spectron/reference/management-api#api-keys) for the f
 
 Each key requires:
 
-- **Principal binding** — the principal whose grants the key inherits (optional body **`grants`** only attenuate)
-- **Name** — a human-readable label unique within the Context
-- **Expiry** (optional) — via `?ttl_seconds=` on mint or rotate
+- **Principal binding** — the principal whose grants the key inherits. Required; there are no unbound keys. An optional body **`grants`** can only attenuate what the principal already has.
+- **Name** — a human-readable label unique within the Context, and the handle used to rotate or revoke it.
+- **Expiry** (optional) — a TTL query parameter on mint or rotate: `?ttl_seconds=` on the management plane, `?ttlSeconds=` on the self-service plane (`--expires-in` on the CLI). Omitted, the key never expires.
 
 ```bash
-spectronctl contexts ctx_acme keys create planner-agent \
-  --principal agent \
-  --scope-floor 'org=acme,agent=planner' \
-  --api-key "$SPECTRON_MGMT_KEY"
+spectrond keys create ctx_acme planner-agent \
+  --principal planner \
+  --expires-in 2592000 \
+  --url "$SPECTRON_MANAGEMENT_GRPC_URL" \
+  --api-key "$SPECTRON_MANAGEMENT_API_KEY"
 ```
 
 The command prints the key id and plaintext secret once — store the secret immediately. See [Management API](/docs/spectron/reference/management-api#api-keys) for the HTTP equivalent.
@@ -39,11 +40,39 @@ The command prints the key id and plaintext secret once — store the secret imm
 
 ### Principal types
 
-| Principal | Description |
-|------------|---------------------------------------------------------------|
-| `agent` | An individual agent. Reads and writes memory within its scope floor. |
-| `supervisor` | Reads memory across all agents within its org scope. Typically used for reflection and cross-agent queries. |
-| `management` | Full administrative access to the context: key management, configuration, lifecycle operations. |
+A principal's **kind** is one of four values — it is a label describing what the
+principal is, not a permission level. Authority comes from its grants.
+
+| Kind | Description |
+| --- | --- |
+| `human` | A person acting through the API. |
+| `agent` | An autonomous agent. The default when minting. |
+| `service` | A background service or scheduled job. |
+| `unknown` | Kind not recorded. |
+
+Grants are stored as a **per-verb map**: each key is a verb, each value the list of
+scope patterns that verb is allowed on. The seven verbs are `memory:read`,
+`memory:write`, `memory:forget`, `scope:read`, `scope:create`, `scope:delete`, and
+`grant:manage`. Patterns are canonical slash-paths — `org/acme` (exact) or
+`org/acme/*` (subtree).
+
+```json
+{
+  "memory:read": ["org/acme/*"],
+  "memory:write": ["org/acme/agent/planner"]
+}
+```
+
+The `{path, verbs}` shape appears only on the grant-mutation endpoints
+(`POST` / `DELETE /principals/{id}/grants`), which add or remove one pattern at a
+time. Everything that stores or returns a grant set uses the map above.
+
+```bash
+spectrond principals create ctx_acme "Planner bot" \
+  --kind agent \
+  --grant memory:read=org/acme \
+  --grant memory:write=org/acme/agent/planner
+```
 
 ---
 
@@ -74,12 +103,13 @@ POST /api/v1/contexts/{context_id}/access-tokens
 Authorization: Bearer <management-key>
 
 {
-  "external_id": "surreal-cloud:usr_01HF…",
-  "display_name": "Alice",
-  "ttl_seconds": 3600,
+  "externalId": "surreal-cloud:usr_01HF…",
+  "displayName": "Alice",
+  "kind": "human",
+  "ttlSeconds": 3600,
   "grants": {
-    "memory:read": [{ "org": "acme", "user": "alice" }],
-    "memory:write": [{ "org": "acme", "user": "alice" }]
+    "memory:read": ["org/acme/user/alice"],
+    "memory:write": ["org/acme/user/alice"]
   }
 }
 ```
@@ -134,90 +164,80 @@ spectrond keys rotate ctx_acme primary --expires-in 2592000
 
 To change principal binding or grants, mint a new key and retire the old one:
 
-1. Create a new key with the desired scope floor and principal type.
+1. Mint a new key against the same principal.
 2. Update all callers to use the new key.
-3. Verify the old key is no longer in use (check `last_used_at`).
+3. Verify the old key is no longer in use — check `lastUsedAt` on the self-service key listing, or traces for activity attributed to that principal.
 4. Delete the old key.
 
-```python
-# Step 1: Create replacement
-new_key = await admin.contexts("ctx_acme").keys.create(
-    name="planner-agent-v2",
-    principal="agent",
-    scope_floor={"org": "acme", "agent": "planner"},
-)
+```http
+# Step 1: Mint the replacement, bound to a principal
+POST /api/v1/contexts/ctx_acme/principals/planner/keys/planner-agent-v2
+{ "grants": { "memory:write": ["org/acme/agent/planner"] } }
 
-# Step 3: Check old key activity
-old_key = await admin.contexts("ctx_acme").keys.get("key_01hw…")
-print(old_key.last_used_at)  # 2026-01-15T09:12:00Z
+# Step 3: List the Context's keys (id, name, grants)
+GET /api/v1/contexts/ctx_acme/keys
 
-# Step 4: Delete old key
-await admin.contexts("ctx_acme").keys.delete("key_01hw…")
+# Step 4: Delete the old key
+DELETE /api/v1/contexts/ctx_acme/keys/planner-agent-v1
 ```
+
+> [!NOTE]
+> Keys are minted **against a principal** — the principal id is part of the path.
+> There is no per-key detail endpoint. The management listing returns `id`, `name`,
+> and `grants` only; last-used data is available on the self-service listing (see
+> [What a key record holds](#what-a-key-record-holds)) or through traces.
 
 Deletion is immediate. Any in-flight requests using the deleted key will fail on their next API call.
 
 ---
 
-## Delegation
+## Attenuation
 
-A key holder can mint sub-keys with a scope floor that is a superset of (or equal to) their own scope floor. This is the delegation invariant: a delegated key can never be broader than the key that created it.
+There is no key-minting chain: a key cannot mint another key, and there is no
+`created_by` link between keys. Minting is a control-plane operation that requires
+a management key.
 
-**Example**: a planner agent key with `{org: "acme", agent: "planner"}` can mint a sub-key for a specific tool:
+What does exist is **attenuation**. A key is bound to a principal and inherits
+that principal's grants; the optional `grants` body on mint can only narrow them.
+A key can never hold a grant its principal lacks, and no request can widen its own
+authority.
 
-```python
-sub_key = await admin.contexts("ctx_acme").keys.create(
-    name="tool-search",
-    principal="agent",
-    scope_floor={"org": "acme", "agent": "planner", "tool": "search"},
-    expires_at="2026-06-01T00:00:00Z",
-    created_by="key_01hw…",  # the parent key
-)
+```http
+POST /api/v1/contexts/ctx_acme/principals/planner/keys/tool-search?ttl_seconds=2592000
+{ "grants": { "memory:read": ["org/acme/agent/planner/tool/search"] } }
 ```
 
-The `created_by` field records which key minted this sub-key, forming an auditable delegation chain.
+If the requested grants are not a subset of the principal's, the mint is rejected.
 
-**Invalid delegation** – the following would be rejected because the sub-key's floor is broader than the parent:
+To give a component narrower authority than any existing principal, create a
+principal with exactly the grants it needs and mint against that.
 
-```python
-# This will fail: {org: "acme"} is broader than {org: "acme", agent: "planner"}
-await admin.contexts("ctx_acme").keys.create(
-    name="too-broad",
-    scope_floor={"org": "acme"},  # broader than parent → rejected
-    created_by="key_01hw…",
-)
-# raises: ScopeEscapeError: delegated floor must be superset of parent floor
-```
+### Use cases
 
-### Use cases for delegation
-
-- **Per-tool auditing**: mint a sub-key per tool call so `last_used_at` tracks tool-level activity
-- **Session-bounded tokens**: create a key that expires when a session ends
-- **Temporary access**: grant a contractor key scoped to a single agent for a time-bounded period
-- **Principle of least privilege**: give each component exactly the scope it needs
+- **Least privilege** — a principal per component, granted only the paths it needs.
+- **Time-bounded access** — `ttl_seconds` on mint for contractors or short-lived jobs.
+- **Per-tool separation** — a principal per tool, so traces attribute activity to the tool.
 
 ---
 
 ## Expiry
 
-Keys accept an `expires_at` field in RFC 3339 format. After this timestamp, the key is rejected on every request with a `401 Unauthorized` response.
+Expiry is set at mint or rotate time as a **TTL in seconds**, not as an absolute
+timestamp: `?ttl_seconds=` on the management API, `?ttlSeconds=` on the
+self-service API, `--expires-in` on the CLI. Omit it and the key never expires.
+After the TTL elapses the key stops validating.
 
-```python
-import datetime
-
-expires = (datetime.datetime.utcnow() + datetime.timedelta(days=30)).isoformat() + "Z"
-
-key = await admin.contexts("ctx_acme").keys.create(
-    name="temp-contractor",
-    principal="agent",
-    scope_floor={"org": "acme", "agent": "contractor"},
-    expires_at=expires,
-)
+```bash
+spectrond keys create ctx_acme temp-contractor \
+  --principal contractor \
+  --expires-in 2592000 \
+  --url "$SPECTRON_MANAGEMENT_GRPC_URL" \
+  --api-key "$SPECTRON_MANAGEMENT_API_KEY"
 ```
 
-Expired keys are not automatically deleted. They remain in the key list with `status: "expired"` and can be inspected for audit purposes. Delete them when no longer needed.
-
-When creating keys with **`spectronctl`**, you can pass **`--expires-in <seconds>`** instead of an absolute timestamp; the management API stores the resulting expiry as `valid_until`.
+There is no expiry *status* on the key record and no automatic cleanup. The
+self-service listing reports the raw `validUntil`; the management listing does not
+carry it at all. Delete keys you no longer need.
 
 ---
 
@@ -243,42 +263,48 @@ See [REST API](/docs/spectron/reference/rest-api#authentication) for the header 
 
 To immediately invalidate a key, delete it:
 
-```python
-await admin.contexts("ctx_acme").keys.delete("key_01hw…")
+```http
+DELETE /api/v1/contexts/ctx_acme/keys/planner-agent-v1
 ```
 
-Deletion is hard and immediate. If you want to preserve the key record for audit purposes without allowing further use, set `revoked_at` instead:
+Deletion is hard and immediate, and it is the only way to withdraw a key — there
+is no soft revocation, no `revoked_at`, and no revoked status. To retire a key
+while keeping the audit trail, rotate it instead, which issues a new secret
+against the same key record:
 
-```python
-await admin.contexts("ctx_acme").keys.revoke("key_01hw…")
+```http
+POST /api/v1/contexts/ctx_acme/keys/planner-agent-v1/rotate
 ```
-
-A revoked key has `revoked_at` set to the current timestamp and `status: "revoked"`. It cannot be unreveoked. Use deletion when the record is no longer needed; use revocation when you need the audit trail.
 
 ---
 
-## Audit fields
+## What a key record holds
 
-Every key carries the following audit fields:
+Two endpoints list keys, and they return different views.
+
+**Management** — `GET /api/v1/contexts/{context_id}/keys`:
 
 | Field | Description |
-|--------------|--------------------------------------------------------------|
+| --- | --- |
 | `id` | Unique key identifier |
-| `name` | Human-readable label |
-| `principal` | Principal type |
-| `scope_floor` | The scope floor enforced on all requests using this key |
-| `created_at` | When the key was created |
-| `created_by` | Key ID of the parent key that minted this key (if delegated) |
-| `last_used_at` | Timestamp of the most recent authenticated request |
-| `expires_at` | Expiry timestamp (null if no expiry) |
-| `revoked_at` | Revocation timestamp (null if active) |
-| `status` | `active`, `expired`, or `revoked` |
+| `name` | Human-readable label, unique within the Context |
+| `grants` | The per-verb pattern map this key enforces. Absent when the key inherits its principal's grants unattenuated |
 
-```python
-keys = await admin.contexts("ctx_acme").keys.list()
+**Self-service** — `GET /api/v1/{context_id}/keys`, for keys a principal manages
+for itself:
 
-for key in keys:
-    print(f"{key.name:20} {key.status:8} last used: {key.last_used_at}")
-```
+| Field | Description |
+| --- | --- |
+| `id`, `name`, `grants` | As above |
+| `createdAt` | When the key was minted |
+| `lastUsedAt` | Most recent successful validation |
+| `validUntil` | Expiry, or null when the key never expires |
 
-The `created_by` chain lets you audit delegation trees: given any key, you can walk `created_by` back to the root management key.
+`lastUsedAt` is derived from an append-only key-use log rather than written to the
+key row, and it is **throttled to at most one entry per key per minute** — treat it
+as "recently active", not as a per-request audit trail. Per-call detail lives in
+traces and OTel spans.
+
+Neither view carries `created_by`, `revoked_at`, or a `status` field: there is no
+minting chain and no soft revocation.
+
