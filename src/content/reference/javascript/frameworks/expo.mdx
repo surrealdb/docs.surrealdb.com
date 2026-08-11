@@ -1,0 +1,415 @@
+---
+position: 4
+title: Expo
+description: The SurrealDB SDK for JavaScript can be used in Expo applications to connect to a remote SurrealDB instance from Android and iOS.
+---
+
+
+# Expo
+
+[Expo](https://expo.dev/) is a framework for building React Native applications for Android, iOS, and the web. The SurrealDB SDK for JavaScript runs inside Expo apps and connects to a remote SurrealDB instance over WebSocket or HTTP.
+
+This guide walks you through setting up a connection provider, storing session tokens securely, and handling the mobile app lifecycle in an Expo project.
+
+## What is different on mobile
+
+The SDK surface is the same one used in [React](/docs/reference/javascript/frameworks/react) applications, but three constraints apply on Android and iOS that do not apply in a browser.
+
+- **Embedded engines are not supported.** The [WebAssembly engine](/docs/reference/javascript/engines/wasm) needs a WebAssembly runtime, which Hermes does not provide. The [Node.js engine](/docs/reference/javascript/engines/node) is a native Node addon and cannot be loaded by React Native. Every connection from an Expo app is a remote connection.
+- **Your JavaScript bundle ships to the device.** Anyone who installs the app can read the values you compile into it. Use [record access](/docs/reference/query-language/statements/define/access/record) for end users, and keep system user credentials on a server.
+- **The connection does not survive backgrounding.** Both platforms suspend your process shortly after the user leaves the app, which closes the socket. You reconnect when the app returns to the foreground.
+
+## Prerequisites
+
+- A basic understanding of React and Expo
+- An Expo project on SDK 54 or newer, using [Expo Router](https://docs.expo.dev/router/introduction/)
+- A running [SurrealDB instance](/docs/running/overview) that the device can reach
+- The [JavaScript SDK installed](/docs/reference/javascript/installation) in your project
+
+## Supported connection protocols
+
+| Protocol | Supported | Notes |
+|----------|-----------|-------|
+| `wss://` | Yes | Long-lived connection. Required for [live queries](/docs/reference/javascript/concepts/live-queries). |
+| `https://` | Yes | Stateless requests. No live queries. |
+| `ws://`, `http://` | Development only | Blocked by default on both platforms. See [reaching your database from a device](#reaching-your-database-from-a-device). |
+
+Use `wss://` unless you only need occasional one-off requests. A WebSocket connection keeps the session authenticated between calls and is the only protocol that supports live queries.
+
+> [!NOTE]
+> The SDK needs `TextEncoder`, `TextDecoder`, `URL`, and `URLSearchParams` at runtime. The `expo` package installs all of them as globals on Android and iOS, so no polyfills are required. A bare React Native project has to add them itself — see the [React Native guide](/docs/reference/javascript/frameworks/react-native#installing-the-required-polyfills).
+
+## Installing dependencies
+
+In addition to `surrealdb`, this guide uses [@tanstack/react-query](https://tanstack.com/query/latest) to manage the asynchronous connection state, and [expo-secure-store](https://docs.expo.dev/versions/latest/sdk/securestore/) to keep session tokens in the platform keystore.
+
+```bash
+npx expo install surrealdb @tanstack/react-query expo-secure-store
+```
+
+Use `npx expo install` rather than your package manager directly. It picks dependency versions that match your Expo SDK. Follow the [installation guide](/docs/reference/javascript/installation) for more information on how to install the SDK in your project.
+
+## Reaching your database from a device
+
+On a device or emulator, `localhost` points at the device itself, not at your development machine. Set the endpoint according to where the app runs.
+
+| Where the app runs | Host to use |
+|--------------------|-------------|
+| iOS simulator | `127.0.0.1` |
+| Android emulator | `10.0.2.2` |
+| Physical device | Your machine's LAN address, for example `192.168.1.24` |
+| Production | Your deployed hostname over `wss://` |
+
+Android blocks cleartext traffic from API level 28, and iOS blocks it through App Transport Security. To connect to a plain `ws://` endpoint during development, add the following to **app.json** and rebuild.
+
+```json title="app.json"
+{
+    "expo": {
+        "ios": {
+            "infoPlist": {
+                "NSAppTransportSecurity": {
+                    "NSAllowsLocalNetworking": true
+                }
+            }
+        },
+        "plugins": [
+            [
+                "expo-build-properties",
+                {
+                    "android": {
+                        "usesCleartextTraffic": true
+                    }
+                }
+            ]
+        ]
+    }
+}
+```
+
+> [!WARNING]
+> Both settings weaken transport security for the whole app. Apply them to a development build only, and connect over `wss://` in the builds you ship.
+
+## Creating the connection provider
+
+Initialise the SDK in a [Context Provider](https://react.dev/learn/passing-data-deeply-with-context) so the `Surreal` client is available anywhere in your component tree. The provider below manages the connection lifecycle, tracks connection status through TanStack Query, closes the socket when the app moves to the background, and reconnects when it becomes active again.
+
+The `params` prop accepts the same options as [`.connect()`](/docs/reference/javascript/concepts/connecting-to-surrealdb#connection-options), including `namespace`, `database`, and [`authentication`](/docs/reference/javascript/concepts/authentication#providing-credentials-on-connect).
+
+```tsx title="surreal-provider.tsx"
+import { Surreal } from "surrealdb";
+import { useMutation } from "@tanstack/react-query";
+import { AppState } from "react-native";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+
+interface SurrealProviderProps {
+    children: React.ReactNode;
+    endpoint: string;
+    client?: Surreal;
+    params?: Parameters<Surreal["connect"]>[1];
+}
+
+interface SurrealProviderState {
+    client: Surreal;
+    isConnecting: boolean;
+    isSuccess: boolean;
+    isError: boolean;
+    error: unknown;
+    connect: () => Promise<true>;
+    close: () => Promise<true>;
+}
+
+const SurrealContext = createContext<SurrealProviderState | undefined>(undefined);
+
+export function SurrealProvider({ children, client, endpoint, params }: SurrealProviderProps) {
+    const [instance] = useState(() => client ?? new Surreal());
+
+    const {
+        mutateAsync: connectMutation,
+        isPending,
+        isSuccess,
+        isError,
+        error,
+        reset,
+    } = useMutation({
+        mutationFn: () => instance.connect(endpoint, params),
+    });
+
+    const connect = useCallback(() => connectMutation(), [connectMutation]);
+    const close = useCallback(() => instance.close(), [instance]);
+
+    useEffect(() => {
+        connect();
+
+        return () => {
+            reset();
+            instance.close();
+        };
+    }, [connect, reset, instance]);
+
+    useEffect(() => {
+        const subscription = AppState.addEventListener("change", (state) => {
+            if (state === "active" && instance.status === "disconnected") {
+                connect();
+            } else if (state === "background") {
+                instance.close();
+            }
+        });
+
+        return () => subscription.remove();
+    }, [instance, connect]);
+
+    const value: SurrealProviderState = useMemo(
+        () => ({ client: instance, isConnecting: isPending, isSuccess, isError, error, connect, close }),
+        [instance, isPending, isSuccess, isError, error, connect, close],
+    );
+
+    return <SurrealContext.Provider value={value}>{children}</SurrealContext.Provider>;
+}
+
+export function useSurreal() {
+    const context = useContext(SurrealContext);
+    if (!context) throw new Error("useSurreal must be used within a SurrealProvider");
+    return context;
+}
+
+export function useSurrealClient() {
+    return useSurreal().client;
+}
+```
+
+The handler closes the connection on `background` but ignores `inactive`. On iOS, `inactive` also fires for the app switcher and for incoming calls, which are usually too short to be worth dropping the socket.
+
+## Wrapping your application
+
+Expo Router renders `app/_layout.tsx` around every route, which makes it the place to mount providers. Wrap the navigation stack with `QueryClientProvider` and `SurrealProvider`.
+
+```tsx title="app/_layout.tsx"
+import { Stack } from "expo-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { SurrealProvider } from "../surreal-provider";
+
+const queryClient = new QueryClient();
+
+export default function RootLayout() {
+    return (
+        <QueryClientProvider client={queryClient}>
+            <SurrealProvider
+                endpoint={process.env.EXPO_PUBLIC_SURREAL_ENDPOINT!}
+                params={{
+                    namespace: "surrealdb",
+                    database: "docs",
+                }}
+            >
+                <Stack />
+            </SurrealProvider>
+        </QueryClientProvider>
+    );
+}
+```
+
+Environment variables prefixed with `EXPO_PUBLIC_` are inlined into the bundle at build time, so use them for the endpoint and never for credentials.
+
+```bash title=".env"
+EXPO_PUBLIC_SURREAL_ENDPOINT=ws://10.0.2.2:8000
+```
+
+## Executing queries
+
+Use the `useSurrealClient()` hook to reach the `Surreal` instance from any component. All [query methods](/docs/reference/javascript/concepts/executing-queries) are available on the client, including `.query()`, `.select()`, and `.create()`.
+
+Gate the query on `isSuccess` so it runs once the connection is open, and again after each reconnect.
+
+```tsx title="app/index.tsx"
+import { useEffect, useState } from "react";
+import { ActivityIndicator, FlatList, Text, View } from "react-native";
+import { Table } from "surrealdb";
+import { useSurreal } from "../surreal-provider";
+
+interface User {
+    id: string;
+    name: string;
+    email: string;
+}
+
+export default function UserList() {
+    const { client, isConnecting, isSuccess, isError, error } = useSurreal();
+    const [users, setUsers] = useState<User[]>([]);
+
+    useEffect(() => {
+        if (!isSuccess) return;
+
+        client.select<User>(new Table("users"))
+            .then(setUsers)
+            .catch(console.error);
+    }, [client, isSuccess]);
+
+    if (isConnecting) return <ActivityIndicator />;
+    if (isError) return <Text>Connection failed: {String(error)}</Text>;
+
+    return (
+        <FlatList
+            data={users}
+            keyExtractor={(user) => String(user.id)}
+            renderItem={({ item }) => (
+                <View>
+                    <Text>{item.name}</Text>
+                    <Text>{item.email}</Text>
+                </View>
+            )}
+        />
+    );
+}
+```
+
+## Subscribing to live queries
+
+[Live queries](/docs/reference/javascript/concepts/live-queries) push changes to the device as they happen, which removes the need to poll on a metered connection. They require a WebSocket connection.
+
+Because the provider closes the socket on background, tie the subscription to `isSuccess` as well. The effect then recreates the subscription every time the connection reopens.
+
+```tsx
+import { useEffect, useState } from "react";
+import { Table } from "surrealdb";
+import { useSurreal } from "../surreal-provider";
+
+interface Message {
+    id: string;
+    body: string;
+}
+
+export function useLiveMessages() {
+    const { client, isSuccess } = useSurreal();
+    const [messages, setMessages] = useState<Message[]>([]);
+
+    useEffect(() => {
+        if (!isSuccess) return;
+
+        const pending = client.live<Message>(new Table("messages"));
+
+        pending
+            .then((live) => {
+                live.subscribe((action, result) => {
+                    if (action === "CREATE") {
+                        setMessages((current) => [...current, result]);
+                    }
+                });
+            })
+            .catch(console.error);
+
+        return () => {
+            pending.then((live) => live.kill()).catch(() => {});
+        };
+    }, [client, isSuccess]);
+
+    return messages;
+}
+```
+
+## Handling authentication
+
+Sign users in with [record access](/docs/reference/query-language/statements/define/access/record) and keep the resulting tokens in the keystore, so the session survives an app restart.
+
+```tsx title="use-auth.ts"
+import * as SecureStore from "expo-secure-store";
+import { useEffect } from "react";
+import { useSurreal } from "./surreal-provider";
+
+export const ACCESS_KEY = "surreal.access";
+export const REFRESH_KEY = "surreal.refresh";
+
+export function useAuth() {
+    const { client } = useSurreal();
+
+    useEffect(() => {
+        return client.subscribe("auth", async (tokens) => {
+            if (tokens) {
+                await SecureStore.setItemAsync(ACCESS_KEY, tokens.access);
+                if (tokens.refresh) await SecureStore.setItemAsync(REFRESH_KEY, tokens.refresh);
+            } else {
+                await SecureStore.deleteItemAsync(ACCESS_KEY);
+                await SecureStore.deleteItemAsync(REFRESH_KEY);
+            }
+        });
+    }, [client]);
+
+    async function login(email: string, password: string) {
+        return client.signin({
+            namespace: "surrealdb",
+            database: "docs",
+            access: "account",
+            variables: { email, password },
+        });
+    }
+
+    async function register(email: string, password: string) {
+        return client.signup({
+            namespace: "surrealdb",
+            database: "docs",
+            access: "account",
+            variables: { email, password },
+        });
+    }
+
+    async function logout() {
+        return client.invalidate();
+    }
+
+    return { login, register, logout };
+}
+```
+
+The `auth` event fires on sign in, sign up, token refresh, and invalidation, and `.subscribe()` returns the function that removes the listener.
+
+### Restoring a session on launch
+
+Pass a function to the `authentication` connection option. The SDK calls it while opening the connection and again whenever it needs to re-authenticate after a reconnect. `SecureStore.getItemAsync()` returns `string | null`, which is exactly what the option expects.
+
+```tsx title="app/_layout.tsx"
+import * as SecureStore from "expo-secure-store";
+import { ACCESS_KEY } from "../use-auth";
+
+<SurrealProvider
+    endpoint={process.env.EXPO_PUBLIC_SURREAL_ENDPOINT!}
+    params={{
+        namespace: "surrealdb",
+        database: "docs",
+        authentication: () => SecureStore.getItemAsync(ACCESS_KEY),
+    }}
+>
+```
+
+If the stored access token has expired and you also hold a refresh token, exchange the pair with [`.authenticate()`](/docs/reference/javascript/concepts/authentication#authenticating-with-an-existing-token) instead.
+
+```ts
+const access = await SecureStore.getItemAsync(ACCESS_KEY);
+const refresh = await SecureStore.getItemAsync(REFRESH_KEY);
+
+if (access) {
+    await client.authenticate(refresh ? { access, refresh } : access);
+}
+```
+
+> [!IMPORTANT]
+> Once you call `.signin()`, `.signup()`, or `.authenticate()`, the `authentication` connection option is ignored for the rest of that session. Choose one of the two approaches per session rather than mixing them.
+
+> [!NOTE]
+> `expo-secure-store` is backed by the iOS keychain and by Android's keystore. iOS rejects values above roughly 2048 bytes, so store the access and refresh tokens under separate keys rather than as one JSON object.
+
+## Troubleshooting
+
+| Symptom | Cause |
+|---------|-------|
+| `Network request failed` on Android, works in the browser | The endpoint uses `localhost`. Use `10.0.2.2` on the emulator or the LAN address on a device. |
+| Connection hangs, then fails with no server log entry | Cleartext traffic is blocked. Switch to `wss://` or apply the [development configuration](#reaching-your-database-from-a-device). |
+| `Unable to resolve module node:util` | Metro resolved the SDK's server build. Remove `node` from `unstable_conditionNames` in **metro.config.js**. |
+| Queries fail after the app returns from the background | The query ran before the socket reopened. Gate it on `isSuccess` from the provider. |
+| Live query stops delivering after backgrounding | The subscription was created against the closed connection. Recreate it when `isSuccess` becomes true again. |
+
+## Learn more
+
+- [React Native](/docs/reference/javascript/frameworks/react-native) for the same setup without Expo, including the polyfills you must add yourself
+- [Connecting to SurrealDB](/docs/reference/javascript/concepts/connecting-to-surrealdb) for connection protocols and reconnection behaviour
+- [Authentication](/docs/reference/javascript/concepts/authentication) for signing in, signing up, and token management
+- [Executing queries](/docs/reference/javascript/concepts/executing-queries) for query builders and raw SurrealQL
+- [Live queries](/docs/reference/javascript/concepts/live-queries) for real-time subscriptions
+- [JavaScript SDK API reference](/docs/reference/javascript/api/) for the complete method reference
