@@ -49,7 +49,7 @@ results = await client.recall(
 
 ### Read/write access control
 
-To prevent worker agents from writing to shared memory (read-only readers), issue separate API keys with restricted write capabilities. A key with principal `agent` and a `scope_floor` of `{org: "acme", project: "market-research-q3"}` can read and write at that scope. If you need read-only agents, add scope floor restrictions at the application layer before passing context to the agents.
+To prevent worker agents from writing to shared memory (read-only readers), issue separate API keys with restricted write capabilities. A key bound to a principal granted `memory:read` and `memory:write` on `org/acme/project/market-research-q3` can read and write at that scope. If you need read-only agents, add scope floor restrictions at the application layer before passing context to the agents.
 
 ## Pattern 2: supervisor and workers
 
@@ -62,14 +62,14 @@ async def run_worker(topic: str, worker_id: str, client: AsyncSpectron) -> str:
     worker_scope = [*SUPERVISOR_SCOPE, f"agent/{worker_id}"]
     async with client.sessions.create(scope=worker_scope) as session:
         # Worker researches its topic
-        context = await session.recall(query=topic, top_k=5)
+        context = await memory.recall(query=topic, top_k=5)
         findings = await llm.research(topic, context.formatted)
         
         # Worker stores findings in its own scope
-        await session.remember(findings, memory_category="knowledge")
+        await memory.remember(findings, memory_category="knowledge")
         
         # Return a summary for the supervisor
-        reflection = await session.reflect(
+        reflection = await memory.reflect(
             query=f"Summarise findings about {topic}",
             persist=False,
         )
@@ -87,13 +87,13 @@ async def supervisor(client: AsyncSpectron):
     # Supervisor aggregates findings into shared scope
     async with client.sessions.create(scope=SUPERVISOR_SCOPE) as session:
         for topic, finding in zip(topics, results):
-            await session.remember(
+            await memory.remember(
                 content=f"[{topic}] {finding}",
                 memory_category="knowledge",
             )
         
         # Supervisor synthesises and stores a final report
-        await session.reflect(
+        await memory.reflect(
             query="Synthesise all research findings into a coherent executive summary.",
             persist=True,
         )
@@ -120,7 +120,7 @@ A worker querying at `{org: "acme", project: "alpha", agent: "worker-1"}` sees o
 When many agents write to a shared scope, unrelated facts from different tasks can accumulate. Use metadata to tag memory items with their provenance:
 
 ```python
-await session.remember(
+await memory.remember(
     content="Customer segment 'enterprise' values compliance features most.",
     memory_category="knowledge",
     metadata={"source": "customer-interview-2024-q3", "agent": "interview-agent"},
@@ -131,7 +131,7 @@ Use the entity type system to keep memory structured. Rather than storing flat f
 
 ```python
 # Good: structured entity extraction will happen automatically from this
-await session.remember(
+await memory.remember(
     content="The enterprise customer segment prioritises SOC2 compliance over cost.",
 )
 
@@ -146,11 +146,16 @@ await session.remember(
 When two agents write conflicting facts to the same scope at roughly the same time, Spectron's reconciliation pipeline detects the conflict and creates a supersession chain. The later write wins for attribute values. You can inspect the conflict:
 
 ```python
-state = await session.get_state(scope=SHARED_SCOPE)
-for entity in state.entities:
-    for attr in entity.attributes:
-        if attr.superseded_by:
-            print(f"Conflict: {entity.name}.{attr.key} was {attr.value} → now {attr.superseded_by.value}")
+state = await memory.state()
+
+# /state returns only the current view, so a row that carries `supersedes`
+# is one that replaced an earlier value.
+for attr in state.knowledge["attributes"]:
+    if attr["supersedes"]:
+        print(f"{attr['entity']}.{attr['key']} is now {attr['value']} (replaced an earlier value)")
+
+# Walk the full chain for one key:
+history = await memory.entities.history("person", "alice", "role")
 ```
 
 ## Supervisor reflection
@@ -163,7 +168,7 @@ async with client.sessions.create(scope=SUPERVISOR_SCOPE) as supervisor_session:
     full_context = await supervisor_session.profile()
     
     # Synthesise
-    synthesis = await supervisor_session.reflect(
+    synthesis = await supervisor_memory.reflect(
         query="What are the top-level conclusions across all worker findings? What is still uncertain?",
         persist=True,
     )
