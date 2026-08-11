@@ -1,4 +1,13 @@
-import { enum as _enum, literal, number, object, type output, strictObject, string } from "zod";
+import {
+    enum as _enum,
+    boolean,
+    literal,
+    number,
+    object,
+    type output,
+    strictObject,
+    string,
+} from "zod";
 import { SECTION_ICONS_NAMES } from "./icons";
 import { labCategories, labLanguages, labTopics } from "./labs";
 
@@ -10,6 +19,14 @@ export const pageSchema = strictObject({
     description: string().optional(),
     position: number().optional(),
     icon: _enum(SECTION_ICONS_NAMES).optional(),
+    /**
+     * Omit this page or folder from the navigation sidebar.
+     *
+     * The content is still built, routed, and reachable by URL — this only
+     * removes the entry (and, on a `__category`, its whole subtree) from the
+     * menu. Use it to park a section that is not ready to be advertised.
+     */
+    hidden: boolean().optional(),
 });
 
 export type PageSchema = output<typeof pageSchema>;

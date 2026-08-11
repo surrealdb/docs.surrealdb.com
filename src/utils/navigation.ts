@@ -39,6 +39,7 @@ function collectLinks(folder: FolderNode, baseUrl: string): Positioned<NavLink>[
 
     for (const child of folder.children) {
         if (child.name === "__category") continue;
+        if (isHidden(child)) continue;
 
         if (isFolder(child)) {
             const category = getCategoryEntry(child);
@@ -128,6 +129,7 @@ export function buildNavigation(id: string, baseUrl?: string): NavSection[] {
 
     for (const child of root.children) {
         if (child.name === "__category") continue;
+        if (isHidden(child)) continue;
 
         if (isFolder(child)) {
             sections.push(buildSection(child, base));
@@ -198,6 +200,20 @@ function join(...parts: string[]) {
 
 function isFolder(node: TreeNode): node is FolderNode {
     return "children" in node;
+}
+
+/**
+ * Whether a node opts out of the navigation sidebar.
+ *
+ * A folder is hidden by `"hidden": true` on its `__category` entry, which takes
+ * its whole subtree with it; a page by `hidden: true` in its own frontmatter.
+ * Hidden content is still built and reachable by URL.
+ */
+function isHidden(node: TreeNode): boolean {
+    if (isFolder(node)) {
+        return getCategoryEntry(node)?.metadata.hidden === true;
+    }
+    return node.entry.metadata.hidden === true;
 }
 
 function getCategoryEntry(folder: FolderNode) {
