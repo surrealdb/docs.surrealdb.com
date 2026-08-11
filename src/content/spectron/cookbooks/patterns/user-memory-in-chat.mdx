@@ -20,31 +20,26 @@ Memory builds up across sessions automatically. The second time a user starts a 
 
 ## Integration shape 1 – Spectron drives the loop
 
-Use this shape when you want the simplest possible integration and are comfortable letting Spectron manage the LLM calls. You provide an `agent_fn` callback; Spectron calls it, records the result, and runs extraction.
+Use this shape when you want the simplest possible integration and are comfortable letting Spectron manage the LLM calls. Spectron retrieves context, calls the Context's configured **synthesis** model, persists the exchange, and runs extraction.
+
+There is no caller-supplied callback. `/chat` uses the model configured on the
+Context (`models.synthesis`), which you can override per call with `model`. The
+profile is folded into the prompt server-side — you do not assemble it yourself in
+this shape. If you need your own model, prompt, or tool loop, use integration
+shape 2 below.
 
 ```python
 from surrealdb import Spectron
 
 memory = Spectron(context="chat", api_key="sk-...")
 
-async def llm_call(messages: list[dict]) -> str:
-    # Build a memory-aware system prompt
-    user_id = messages[0].get("user_id")  # passed as metadata
-    profile = await memory.profile()
-    system = "You are a helpful assistant."
-    if profile.summary:
-        system += f"\n\n{profile.summary}"
-    return your_llm(system=system, messages=messages)
-
 # Per conversation
-session = await memory.sessions.create(
-    scope=[f"user/{user_id}"],
-    agent_fn=llm_call,
-)
+session = await memory.sessions.create(scopes=[f"user/{user_id}"])
 
 # Each user message
-result = await memory.chat(content=user_message)
-reply = result.response
+result = await memory.chat(user_message, session_id=session.id)
+reply = result["reply"]
+print(result["memoryUpdates"])   # extraction diff from the user turn
 ```
 
 ```typescript
@@ -52,18 +47,11 @@ import { Spectron } from "@surrealdb/spectron";
 
 const memory = new Spectron({ context: "chat", apiKey: "sk-..." });
 
-const session = await memory.sessions.create({
-    scope: [`user/${userId}`],
-    agentFn: async (messages) => {
-        const profile = await memory.profile();
-        let system = "You are a helpful assistant.";
-        if (profile.summary) system += `\n\n${profile.summary}`;
-        return yourLlm({ system, messages });
-    },
-});
+const session = await memory.sessions.create({ scopes: [`user/${userId}`] });
 
-const result = await memory.chat({ content: userMessage });
-const reply = result.response;
+const result = await memory.chat(userMessage, { sessionId: session.id });
+const reply = result.reply;
+console.log(result.memoryUpdates);
 ```
 
 ## Integration shape 2 – Caller drives the loop
@@ -77,20 +65,21 @@ memory = Spectron(context="chat", api_key="sk-...")
 
 async def handle_message(user_id: str, session_id: str | None,
     user_message: str) -> str:
-    # Re-open existing session or create a new one
-    if session_id:
-        session = memory.sessions.create(session_id)
-    else:
-        session = await memory.sessions.create(scope=[f"user/{user_id}"])
+    # A session is addressed by its id — create one on first message,
+    # then carry the id forward. There is no re-open call.
+    if session_id is None:
+        session = await memory.sessions.create(scopes=[f"user/{user_id}"])
+        session_id = session.id
 
     # Retrieve memory-enriched context
     profile = await memory.profile()
-    ctx = await session.context(query=user_message, top_k=6)
+    ctx = await memory.sessions.context(session_id, query=user_message)
 
     # Build system prompt
     system = "You are a helpful assistant."
-    if profile.summary:
-        system += f"\n\n## User context\n{profile.summary}"
+    profile_block = format_profile(profile)   # see Profiles: injecting into prompts
+    if profile_block:
+        system += f"\n\n{profile_block}"
     if ctx.formatted:
         system += f"\n\n## Relevant memory\n{ctx.formatted}"
 
@@ -98,8 +87,8 @@ async def handle_message(user_id: str, session_id: str | None,
     response = your_llm(system=system, user=user_message)
 
     # Record the exchange
-    await memory.remember(user_message, session_id=session.id, role="user")
-    await memory.remember(response, session_id=session.id, role="assistant")
+    await memory.remember(user_message, session_id=session_id, role="user")
+    await memory.remember(response, session_id=session_id, role="assistant")
 
     return response
 ```
@@ -110,23 +99,23 @@ async function handleMessage(
     sessionId: string | null,
     userMessage: string,
 ): Promise<string> {
-    const session = sessionId
-        ? memory.sessions.create(sessionId)
-        : await memory.sessions.create({ scope: [`user/${userId}`] });
+    const id = sessionId
+        ?? (await memory.sessions.create({ scopes: [`user/${userId}`] })).id;
 
     const [profile, ctx] = await Promise.all([
         memory.profile(),
-        session.context({ query: userMessage, topK: 6 }),
+        memory.sessions.context(id, { query: userMessage }),
     ]);
 
     let system = "You are a helpful assistant.";
-    if (profile.summary) system += `\n\n## User context\n${profile.summary}`;
+    const profileBlock = formatProfile(profile);   // see Profiles: injecting into prompts
+    if (profileBlock) system += `\n\n${profileBlock}`;
     if (ctx.formatted) system += `\n\n## Relevant memory\n${ctx.formatted}`;
 
     const response = await yourLlm({ system, user: userMessage });
 
-    await memory.remember(userMessage, { sessionId: session.id, role: "user" });
-    await memory.remember(response, { sessionId: session.id, role: "assistant" });
+    await memory.remember(userMessage, { sessionId: id, role: "user" });
+    await memory.remember(response, { sessionId: id, role: "assistant" });
 
     return response;
 }
@@ -136,28 +125,33 @@ The key difference between the two shapes is ownership of the LLM call. The call
 
 ## Injecting profile into the system prompt
 
-The profile endpoint is designed for system prompt injection. It returns a `summary` string that is dense and LLM-readable, plus a structured `attributes` list if you want fine-grained control.
+The profile endpoint is designed for system prompt injection, but it returns
+**sections rather than a prose summary**: `static`, `dynamic`, `preferences`, and
+`selfFacts` are lists of `{key, value}`, and `instructions` is a list of
+`{id, label, description}`. Format the sections you want into the prompt yourself
+— see [Profiles](/docs/spectron/agent-memory/operations/profiles#injecting-profiles-into-system-prompts)
+for a reusable `format_profile` helper.
 
 ```python
 profile = await memory.profile()
 
-# Simple injection
-system = f"You are a helpful assistant.\n\n{profile.summary}"
+# Whole profile, formatted
+system = f"You are a helpful assistant.\n\n{format_profile(profile)}"
 
-# Fine-grained injection
-instructions = [a for a in profile.attributes if a.category == "instructions"]
-identity = [a for a in profile.attributes if a.category == "identity"]
+# Fine-grained: pick individual sections
+identity = profile.static
+instructions = [i["description"] for i in profile.instructions]
 ```
 
 ```typescript
 const profile = await memory.profile();
 
-// Simple injection
-const system = `You are a helpful assistant.\n\n${profile.summary}`;
+// Whole profile, formatted
+const system = `You are a helpful assistant.\n\n${formatProfile(profile)}`;
 
-// Fine-grained injection
-const instructions = profile.attributes.filter(a => a.category === "instructions");
-const identity = profile.attributes.filter(a => a.category === "identity");
+// Fine-grained: pick individual sections
+const identity = profile.static;
+const instructions = profile.instructions.map(i => i.description);
 ```
 
 ## How memory accumulates across sessions
@@ -177,7 +171,7 @@ By session 3, the profile contains all three facts. The role update from session
 To see what Spectron currently knows about a user:
 
 ```python
-entities = await memory.entities.list(scope=[f"user/{user_id}"])
+entities = await memory.entities.list()
 for entity in entities:
     print(f"{entity.type}/{entity.name}")
     for attr in entity.attributes:
@@ -185,7 +179,7 @@ for entity in entities:
 ```
 
 ```typescript
-const entities = await memory.entities.list({ scope: [`user/${userId}`] });
+const entities = await memory.entities.list();
 for (const entity of entities) {
     console.log(`${entity.type}/${entity.name}`);
     for (const attr of entity.attributes) {

@@ -6,7 +6,7 @@ description: "Importing large quantities of documents or knowledge nodes into Sp
 
 # Bulk import
 
-When populating a new Context or migrating from an existing system, you typically need to ingest many documents or knowledge nodes at once. Spectron's ingestion pipeline is designed for concurrent usage, and both the document upload endpoint and the node batch upsert endpoint support high-throughput ingestion patterns.
+When populating a new Context or migrating from an existing system, you typically need to ingest many documents or knowledge nodes at once. Spectron's ingestion pipeline is designed for concurrent usage, and both the document upload endpoint and the triple-write path on `/facts` support high-throughput ingestion patterns.
 
 ## Uploading many documents
 
@@ -29,13 +29,11 @@ files = [
 ]
 
 async def upload_file(path, title):
-    with open(path, "rb") as f:
-        return await memory.documents.upload(
-            file=f,
-            title=title,
-            profile="TextOnly",
-            scope=["org/acme"],
-        )
+    return await memory.documents.upload(
+        path,
+        title=title,
+        scopes=["org/acme"],
+    )
 
 docs = await asyncio.gather(*[upload_file(path, title) for path,
     title in files])
@@ -54,9 +52,8 @@ const files = [
     { path: "shipping-guide.pdf", title: "Shipping Guide" },
 ];
 
-const uploads = files.map(({ file, title }) =>
-        memory.documents.upload({ file, title, profile: "TextOnly",
-        scope: ["org/acme"] })
+const uploads = files.map(({ path, title }) =>
+        memory.documents.upload(path, { title, scopes: ["org/acme"] })
 );
 
 const docs = await Promise.all(uploads);
@@ -118,9 +115,15 @@ Content-Type: application/json
 Authorization: Bearer <key>
 
 {
-  "text": "Product Widget A (sku_001) costs 29.99 and belongs to category widgets.",
   "infer": "triples",
-  "scope": ["org/acme"]
+  "scopes": [["org/acme"]],
+  "triples": [
+    { "entity": { "type": "product", "name": "sku_001" },
+      "key": "price", "value": "29.99" },
+    { "entity": { "type": "product", "name": "sku_001" },
+      "key": "belongs_to",
+      "target": { "type": "category", "name": "widgets" } }
+  ]
 }
 ```
 
@@ -128,11 +131,26 @@ Response:
 
 ```json
 {
-  "created": 3,
-  "updated": 0,
-  "relations_created": 2
+  "mode": "triples",
+  "sessionId": "sess_01hy…",
+  "turnId": "turn_01hy…",
+  "extraction": {
+    "turnId": "turn_01hy…",
+    "entities": [ { "id": "…", "name": "sku_001", "entityType": "product",
+                    "memoryCategory": "knowledge", "isNew": true } ],
+    "attributes": [ { "id": "…", "entityId": "…", "key": "price",
+                      "value": "29.99", "memoryCategory": "knowledge" } ],
+    "relations": [ { "subject": "product/sku_001", "label": "belongs_to",
+                     "object": "category/widgets", "memoryCategory": "knowledge" } ],
+    "instructions": [],
+    "uncertainties": [],
+    "corrections": []
+  }
 }
 ```
+
+`infer: "triples"` takes the `triples` array directly and runs no LLM. `text` is
+optional in this mode.
 
 ### Python
 
@@ -169,8 +187,13 @@ for i in range(0, len(nodes), BATCH_SIZE):
         for r in batch_relations
     ]
     result = await memory.remember(infer="triples", triples=triples)
-        print(f"Batch {i // BATCH_SIZE + 1}: created={result.created},
-        updated={result.updated}")
+    extraction = result["extraction"]
+    print(
+        f"Batch {i // BATCH_SIZE + 1}: "
+        f"entities={len(extraction['entities'])} "
+        f"attributes={len(extraction['attributes'])} "
+        f"relations={len(extraction['relations'])}"
+    )
 ```
 
 ### JavaScript
@@ -185,8 +208,12 @@ for (let i = 0; i < nodes.length; i += BATCH_SIZE) {
         key: "title",
         value: n.title,
     }));
-    const result = await memory.remember({ infer: "triples", triples });
-    console.log(`Batch ${i / BATCH_SIZE + 1}: created=${result.created}`);
+    const result = await memory.remember(null, { infer: "triples", triples });
+    console.log(
+        `Batch ${i / BATCH_SIZE + 1}: `
+        + `entities=${result.extraction.entities.length} `
+        + `relations=${result.extraction.relations.length}`,
+    );
 }
 ```
 
@@ -194,7 +221,7 @@ for (let i = 0; i < nodes.length; i += BATCH_SIZE) {
 
 Document uploads are automatically deduplicated by content hash. If the same file is submitted multiple times during a bulk import – for example, because a script is re-run after a partial failure – each duplicate returns the existing document ID with `deduplicated: true` and no reprocessing occurs.
 
-Node upserts are deduplicated by `(kind, slug)`. Resubmitting a node with the same kind and slug updates its `title` and `content` in place.
+Triple writes reconcile by entity identity: resubmitting a triple for the same `(type, name)` entity and key supersedes the previous value rather than creating a duplicate row.
 
 These properties make bulk imports safe to re-run. A failed or interrupted import can be restarted from the beginning without creating duplicate records.
 
@@ -204,19 +231,17 @@ All documents uploaded in a bulk import share the same scope unless you specify 
 
 ```python
 async def upload_with_scope(item):
-    with open(item["path"], "rb") as f:
-        return await memory.documents.upload(
-            file=f,
-            title=item["title"],
-            profile=item.get("profile", "TextOnly"),
-            scope=item["scope"],
-        )
+    return await memory.documents.upload(
+        item["path"],
+        title=item["title"],
+        scopes=item["scopes"],
+    )
 
 items = [
         {"path": "handbook.pdf", "title": "Employee Handbook",
-        "scope": ["org/acme"]},
+        "scopes": ["org/acme"]},
         {"path": "preferences.json", "title": "User Prefs",
-        "scope": ["org/acme/user/alice"]},
+        "scopes": ["org/acme/user/alice"]},
 ]
 
 docs = await asyncio.gather(*[upload_with_scope(item) for item in items])
@@ -228,21 +253,21 @@ For imports of tens of thousands of documents, track overall progress by listing
 
 ```python
 async def import_progress():
-        ready = await memory.documents.list(status="ready",
-        scope=["org/acme"])
-        queued = await memory.documents.list(status="queued",
-        scope=["org/acme"])
-        failed = await memory.documents.list(status="failed",
-        scope=["org/acme"])
+    ready = await memory.documents.list(status="ready")
+    queued = await memory.documents.list(status="queued")
+    failed = await memory.documents.list(status="failed")
 
     print(f"Ready: {len(ready)}  Queued: {len(queued)}  Failed: {len(failed)}")
 ```
 
+`GET /documents` filters on `status` and `mimeType` and pages with `page` /
+`pageSize`. It has no scope filter — the caller's read region already bounds what
+comes back.
+
 Failed documents should be inspected individually to determine whether the failure is transient (pipeline overload) or permanent (corrupt file, unsupported format):
 
 ```python
-failed_docs = await memory.documents.list(status="failed",
-    scope=["org/acme"])
+failed_docs = await memory.documents.list(status="failed")
 for doc in failed_docs:
     full = await memory.documents.get(doc.id)
     print(f"{doc.id}  {full.title}  {full.error}")

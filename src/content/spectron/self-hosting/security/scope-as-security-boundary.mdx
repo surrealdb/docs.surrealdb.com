@@ -11,19 +11,19 @@ Scope in Spectron works at two levels:
 1. **Scope tags** partition *data* (which org, user, or project a fact belongs to).
 2. **Permissions** control *access* (which principal may read or write at which scope paths) via grant verbs: `memory:read`, `memory:write`, `memory:forget`, `scope:read`, `scope:create`, `scope:delete`, and `grant:manage`. Document operations use the **`memory:*`** verbs — there is no separate document namespace.
 
-API keys bind a **scope floor** so a client cannot read or write outside what the key allows, regardless of what the request body asks for. **Grants** let a principal delegate verbs to another — only up to what they already hold. See [Contexts and scope](/docs/spectron/mental-model/contexts-and-scope#permissions-and-delegation).
+Each API key binds to a principal and enforces its **grants**, so a client cannot read or write outside what the key allows, regardless of what the request body asks for. A key's own grants may attenuate its principal's, never widen them. See [Contexts and scope](/docs/spectron/mental-model/contexts-and-scope#permissions-and-delegation).
 
 ## Data partitioning vs security enforcement
 
 **Data partitioning** is what happens when you set `lens: [["org/acme/user/alice"]]` on a recall query. Spectron filters results to facts whose scope clauses match within your grant.
 
-**Security enforcement** happens at the API key level. A key whose grant region covers `org/acme/agent/planner` cannot read or write outside that region. The effective scope is the intersection of the requested scope and the key's grants.
+**Security enforcement** happens at the API key level. A key whose grant region covers `org/acme/agent/planner` cannot read or write outside that region. The effective scope is the intersection of the requested lens and the key's grants.
 
 ## The three request invariants
 
 Every request to Spectron is validated against three invariants before any data access occurs:
 
-1. **Principal type check** – is this key type permitted to call this endpoint at all? (A supervisor key cannot create sessions; an agent key cannot create API keys.)
+1. **Verb check** – does the caller hold the verb this endpoint requires anywhere at all? A key with no `memory:forget` grant cannot call the forget routes; a key with no `grant:manage` cannot administer principals.
 
 2. **Grant check on reads** – the scope in the query must fall within the key's read grant. A key granted at `org/acme/agent/planner` cannot query `org/acme` alone because that is broader than the grant.
 
@@ -33,23 +33,23 @@ These three invariants are checked server-side in every request handler. There i
 
 **`POST /consolidate`** on the data plane follows the same read/write regions: pooling respects **`memory:read`**, persistence requires **`memory:write`** per scope group (preview-only when read-only). Background consolidation jobs run context-wide and are not caller-scoped.
 
-## Why agent keys physically cannot see outside their floor
+## Why a key physically cannot see outside its region
 
-An agent key with floor `{ org: "acme", agent: "planner" }` has its floor stored in the control-plane database at key creation time. Every query the server issues for that key applies **scope-set visibility** — only records whose clauses are fully covered by the caller’s effective read region are returned. This predicate is injected by the server, not the client. A compromised or malicious client cannot remove it.
+A key granted `memory:read` on `org/acme/agent/planner` has that grant stored in the control-plane database at mint time. Every query the server issues for that key applies **scope-set visibility** — only records whose clauses are fully covered by the caller’s effective read region are returned. This predicate is injected by the server, not the client. A compromised or malicious client cannot remove it.
 
-The result is that an agent key is not merely configured to see only its scope floor – it is architecturally prevented from accessing anything outside it by the server-side query construction.
+The result is that a key is not merely configured to see only its granted region – it is architecturally prevented from accessing anything outside it by the server-side query construction.
 
 ## General knowledge and the empty scope
 
-Some knowledge in Spectron lives at scope `{}` – the empty scope. This is general knowledge: facts that apply across all scopes, such as background context about your product or organisation that should be available to all agents regardless of their specific scope floor.
+Some knowledge in Spectron lives at the root scope. This is general knowledge: facts that apply across all scopes, such as background context about your product or organisation that should be available to every agent regardless of its own granted region.
 
-Only management keys can write general knowledge. Agent keys with any non-empty scope floor cannot write to scope `{}`. This prevents an agent key from injecting facts into the general pool that would then be visible to all other agents.
+A key can only write within its principal's `memory:write` region. A key granted a subtree beneath the root cannot write at the root, which prevents it injecting facts into the general pool that would then be visible to every other agent.
 
 During recall, Spectron's resolution pipeline includes general knowledge in its results automatically where relevant. Agent keys benefit from general knowledge on read, but cannot contribute to it on write.
 
 ## Scope elevation and why it is impossible
 
-A caller cannot elevate the scope of their key. The scope floor is set at key creation time by a management key and cannot be changed without deleting and recreating the key. There is no "sudo" mode, no token exchange, and no JWT claim that widens the scope floor.
+A caller cannot elevate the authority of their key. Grants are set on the principal by a management key; a key can attenuate them at mint time but nothing at request time can widen them. There is no "sudo" mode, no token exchange, and no JWT claim that adds a grant. Even the `X-Spectron-On-Behalf-Of` header only intersects — it never adds.
 
 If an application needs to operate across multiple orgs or multiple agents, it must either:
 
@@ -58,18 +58,18 @@ If an application needs to operate across multiple orgs or multiple agents, it m
 
 ## Context isolation
 
-Scope enforcement operates within a single Context. A key created for Context A cannot access any data in Context B, regardless of its scope floor. Context boundaries are enforced at a different layer – the key metadata includes the Context it belongs to, and the server validates this before any scope check.
+Scope enforcement operates within a single Context. A key created for Context A cannot access any data in Context B, regardless of its grants. Context boundaries are enforced at a different layer – the key metadata includes the Context it belongs to, and the server validates this before any scope check.
 
 ## Summary
 
 | Claim | True? |
 |---|---|
-| The client can widen the effective scope by passing a broader scope in the request body. | No. The server intersects the requested scope with the key's floor. |
-| An agent key with floor `{org, agent}` can read data at scope `{org}`. | No. The floor is a minimum restriction. The key cannot read at a broader scope than its floor. |
-| A management key can read data in any scope within its Context. | Yes. The management floor is `{}` – unrestricted. |
-| General knowledge (scope `{}`) is readable by agent keys via recall. | Yes. Spectron's recall pipeline includes it. But agents cannot write to it. |
+| The client can widen the effective scope by passing a broader scope in the request body. | No. The server intersects the requested lens with the key's granted region. |
+| A key granted `org/acme/agent/planner` can read data at `org/acme`. | No. A grant covers its own subtree, not its ancestors. An out-of-region lens yields empty results, not a 403. |
+| A management key can read data in any scope within its Context. | Yes. Management keys sit outside the scope model entirely. |
+| Root-scope general knowledge is readable by agent keys via recall. | Yes. Spectron's recall pipeline includes it. But a key granted only a subtree cannot write to it. |
 | `GET /scopes` lists only scope names visible to the caller’s grants. | Yes. Scope names do not leak across compartments. |
-| Two agent keys with the same scope floor can see each other's sessions. | Yes, if they have the same floor. Isolation below the floor requires adding `user` to the floor. |
+| Two keys with identical grants can see each other's sessions. | Yes. Isolation between them requires narrowing each key's region to a distinct path. |
 
 ## Next steps
 

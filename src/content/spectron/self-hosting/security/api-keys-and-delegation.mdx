@@ -6,7 +6,7 @@ description: "Minting, rotation, and delegated sub-keys."
 
 # API keys and delegation
 
-Spectron uses API keys for all authenticated operations. Every key is bound to a **principal** and enforces that principal's grants — `{path, verbs}` pairs naming what it may do and where. A key can never act outside those grants, and a key's own grants can only ever narrow the principal's, never widen them.
+Spectron uses API keys for all authenticated operations. Every key is bound to a **principal** and enforces that principal's grants — a per-verb map of the scope patterns that verb is allowed on. A key can never act outside those grants, and a key's own grants can only ever narrow the principal's, never widen them.
 
 ## Creating keys
 
@@ -24,7 +24,7 @@ Each key requires:
 
 - **Principal binding** — the principal whose grants the key inherits. Required; there are no unbound keys. An optional body **`grants`** can only attenuate what the principal already has.
 - **Name** — a human-readable label unique within the Context, and the handle used to rotate or revoke it.
-- **Expiry** (optional) — `?ttl_seconds=` on mint or rotate (`--expires-in` on the CLI). Omitted, the key never expires.
+- **Expiry** (optional) — a TTL query parameter on mint or rotate: `?ttl_seconds=` on the management plane, `?ttlSeconds=` on the self-service plane (`--expires-in` on the CLI). Omitted, the key never expires.
 
 ```bash
 spectrond keys create ctx_acme planner-agent \
@@ -50,9 +50,22 @@ principal is, not a permission level. Authority comes from its grants.
 | `service` | A background service or scheduled job. |
 | `unknown` | Kind not recorded. |
 
-Each grant is a **`{path, verbs}`** pair — a scope path plus the verbs allowed on
-it. The seven verbs are `memory:read`, `memory:write`, `memory:forget`,
-`scope:read`, `scope:create`, `scope:delete`, and `grant:manage`.
+Grants are stored as a **per-verb map**: each key is a verb, each value the list of
+scope patterns that verb is allowed on. The seven verbs are `memory:read`,
+`memory:write`, `memory:forget`, `scope:read`, `scope:create`, `scope:delete`, and
+`grant:manage`. Patterns are canonical slash-paths — `org/acme` (exact) or
+`org/acme/*` (subtree).
+
+```json
+{
+  "memory:read": ["org/acme/*"],
+  "memory:write": ["org/acme/agent/planner"]
+}
+```
+
+The `{path, verbs}` shape appears only on the grant-mutation endpoints
+(`POST` / `DELETE /principals/{id}/grants`), which add or remove one pattern at a
+time. Everything that stores or returns a grant set uses the map above.
 
 ```bash
 spectrond principals create ctx_acme "Planner bot" \
@@ -90,12 +103,13 @@ POST /api/v1/contexts/{context_id}/access-tokens
 Authorization: Bearer <management-key>
 
 {
-  "external_id": "surreal-cloud:usr_01HF…",
-  "display_name": "Alice",
-  "ttl_seconds": 3600,
+  "externalId": "surreal-cloud:usr_01HF…",
+  "displayName": "Alice",
+  "kind": "human",
+  "ttlSeconds": 3600,
   "grants": {
-    "memory:read": [{ "org": "acme", "user": "alice" }],
-    "memory:write": [{ "org": "acme", "user": "alice" }]
+    "memory:read": ["org/acme/user/alice"],
+    "memory:write": ["org/acme/user/alice"]
   }
 }
 ```
@@ -155,10 +169,10 @@ To change principal binding or grants, mint a new key and retire the old one:
 3. Verify the old key is no longer in use — check `lastUsedAt` on the self-service key listing, or traces for activity attributed to that principal.
 4. Delete the old key.
 
-```python
+```http
 # Step 1: Mint the replacement, bound to a principal
 POST /api/v1/contexts/ctx_acme/principals/planner/keys/planner-agent-v2
-{ "grants": ["memory:write"] }
+{ "grants": { "memory:write": ["org/acme/agent/planner"] } }
 
 # Step 3: List the Context's keys (id, name, grants)
 GET /api/v1/contexts/ctx_acme/keys
@@ -169,9 +183,9 @@ DELETE /api/v1/contexts/ctx_acme/keys/planner-agent-v1
 
 > [!NOTE]
 > Keys are minted **against a principal** — the principal id is part of the path.
-> There is no per-key detail endpoint and no last-used tracking: `GET /keys`
-> returns `id`, `name`, and `grants` only. Attribute activity to a principal
-> through traces rather than through the key record.
+> There is no per-key detail endpoint. The management listing returns `id`, `name`,
+> and `grants` only; last-used data is available on the self-service listing (see
+> [What a key record holds](#what-a-key-record-holds)) or through traces.
 
 Deletion is immediate. Any in-flight requests using the deleted key will fail on their next API call.
 
@@ -190,7 +204,7 @@ authority.
 
 ```http
 POST /api/v1/contexts/ctx_acme/principals/planner/keys/tool-search?ttl_seconds=2592000
-{ "grants": [ { "path": "org/acme/agent/planner/tool/search", "verbs": ["memory:read"] } ] }
+{ "grants": { "memory:read": ["org/acme/agent/planner/tool/search"] } }
 ```
 
 If the requested grants are not a subset of the principal's, the mint is rejected.
@@ -209,8 +223,9 @@ principal with exactly the grants it needs and mint against that.
 ## Expiry
 
 Expiry is set at mint or rotate time as a **TTL in seconds**, not as an absolute
-timestamp: `?ttl_seconds=` on the API, `--expires-in` on the CLI. Omit it and the
-key never expires. After the TTL elapses the key stops validating.
+timestamp: `?ttl_seconds=` on the management API, `?ttlSeconds=` on the
+self-service API, `--expires-in` on the CLI. Omit it and the key never expires.
+After the TTL elapses the key stops validating.
 
 ```bash
 spectrond keys create ctx_acme temp-contractor \
@@ -220,8 +235,9 @@ spectrond keys create ctx_acme temp-contractor \
   --api-key "$SPECTRON_MANAGEMENT_API_KEY"
 ```
 
-There is no expiry status on the key record and no automatic cleanup — `GET /keys`
-returns `id`, `name`, and `grants` only. Delete keys you no longer need.
+There is no expiry *status* on the key record and no automatic cleanup. The
+self-service listing reports the raw `validUntil`; the management listing does not
+carry it at all. Delete keys you no longer need.
 
 ---
 
@@ -272,7 +288,7 @@ Two endpoints list keys, and they return different views.
 | --- | --- |
 | `id` | Unique key identifier |
 | `name` | Human-readable label, unique within the Context |
-| `grants` | The `{path, verbs}` pairs this key enforces |
+| `grants` | The per-verb pattern map this key enforces. Absent when the key inherits its principal's grants unattenuated |
 
 **Self-service** — `GET /api/v1/{context_id}/keys`, for keys a principal manages
 for itself:

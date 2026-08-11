@@ -68,7 +68,7 @@ await fetch("https://spectron.surrealdb.com/api/v1/my-context/documents", {
 
 ## Step 2 – Query authoritative knowledge in the agent loop
 
-Before generating a response, search authoritative knowledge for relevant knowledge nodes. Use `knowledge.search` for natural-language queries or `knowledge.get` for exact node lookups.
+Before generating a response, search authoritative knowledge for relevant passages. Use `documents.query` for natural-language search over document chunks, or an entity read for exact lookups.
 
 ```python
 from surrealdb import Spectron
@@ -77,21 +77,23 @@ memory = Spectron(context="my-context", api_key="sk-...")
 
 async def grounded_response(session, user_message: str) -> str:
     # Search authoritative knowledge for relevant authoritative knowledge
-    knowledge = await memory.documents.search(
+    knowledge = await memory.documents.query(
         query=user_message,
-        top_k=4,
+        mode="hybrid",
+        k=4,
     )
 
     # Retrieve experiential memory user context for personalisation
-    ctx = await session.context(query=user_message, top_k=4)
+    ctx = await session.context(query=user_message)
 
     # Assemble the prompt with authoritative facts taking precedence
     system = "You are a product assistant. Answer from the knowledge provided."
 
-    if knowledge.nodes:
+    # documents.query returns {results, queryMs}; each hit is {chunk, document, score}
+    if knowledge["results"]:
         system += "\n\n## Authoritative knowledge\n"
-        for node in knowledge.nodes:
-            system += f"\n{node.formatted}"
+        for hit in knowledge["results"]:
+            system += f"\n{hit['chunk']['text']}  (source: {hit['document']['title']})"
 
     if ctx.items:
         system += f"\n\n## User context\n{ctx.formatted}"
@@ -107,16 +109,16 @@ async def grounded_response(session, user_message: str) -> str:
 ```typescript
 async function groundedResponse(session: Session, userMessage: string): Promise<string> {
     const [knowledge, ctx] = await Promise.all([
-        memory.documents.search({ query: userMessage, topK: 4 }),
-        session.context({ query: userMessage, topK: 4 }),
+        memory.documents.query({ query: userMessage, mode: "hybrid", k: 4 }),
+        session.context({ query: userMessage }),
     ]);
 
     let system = "You are a product assistant. Answer from the knowledge provided.";
 
-    if (knowledge.nodes.length > 0) {
+    if (knowledge.results.length > 0) {
         system += "\n\n## Authoritative knowledge\n";
-        for (const node of knowledge.nodes) {
-            system += `\n${node.formatted}`;
+        for (const hit of knowledge.results) {
+            system += `\n${hit.chunk.text}  (source: ${hit.document.title})`;
         }
     }
 
@@ -188,22 +190,16 @@ The agent is informed via the context retrieval:
 
 The agent can then politely correct the user without any custom conflict-detection code.
 
-## Exact node retrieval
+## Exact entity retrieval
 
-For lookups where you know the entity type and name (from a structured UI, a product SKU field, etc.), use `knowledge.get` instead of a search:
+For lookups where you know the entity type and name (from a structured UI, a product SKU field, etc.), read the entity directly instead of searching. This hits **`GET /entities/{entity_type}/{entity_name}`**, not the document store — `documents.get` takes a document id.
 
 ```python
-node = await memory.documents.get(
-    entity_type="Product",
-    entity_name="airpods_pro",
-)
+entity = await memory.entities.get("product", "airpods_pro")
 ```
 
 ```typescript
-const node = await memory.documents.get({
-    entityType: "Product",
-    entityName: "airpods_pro",
-});
+const entity = await memory.entities.get("product", "airpods_pro");
 ```
 
 This is faster than semantic search and appropriate when the reference is unambiguous.
