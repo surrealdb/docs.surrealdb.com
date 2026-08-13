@@ -330,7 +330,6 @@ export const SPECTRON_NAV_LINKS: NavEntry[] = [
     { label: "Get started", href: "/docs/spectron" },
     { label: "Memory & knowledge", href: "/docs/spectron/agent-memory" },
     { label: "Integrations", href: "/docs/spectron/integrations" },
-    // { label: "Self-hosting", href: "/docs/spectron/self-hosting" },
     { label: "Cookbooks", href: "/docs/spectron/cookbooks" },
     { label: "Reference", href: "/docs/spectron/reference" },
 ];
