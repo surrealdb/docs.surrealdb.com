@@ -48,7 +48,6 @@ export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
     { prefix: "spectron/cookbooks", id: "spectron/cookbooks" },
     { prefix: "spectron/integrations", id: "spectron/integrations" },
     { prefix: "spectron/reference", id: "spectron/reference" },
-    { prefix: "spectron/self-hosting", id: "spectron/self-hosting" },
     { prefix: "spectron", id: "spectron/index" },
     { prefix: "", id: "index" },
 ];
