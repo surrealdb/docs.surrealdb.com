@@ -142,6 +142,43 @@ You can use the HTTP endpoints to perform the following actions:
 
 <br />
 
+## Request size limits
+
+Each endpoint caps the size of the request body it will accept. A request over the cap is rejected with `413 Payload Too Large`. The limits differ per endpoint because they are sized to the work each one does: `/sql` takes a query, `/import` takes a data file.
+
+The defaults are the same in 2.x and 3.x:
+
+| Endpoint | Default limit | Environment variable |
+| -------- | ------------- | -------------------- |
+| `POST /sql` | 1 MiB | `SURREAL_HTTP_MAX_SQL_BODY_SIZE` |
+| `POST /rpc` | 4 MiB | `SURREAL_HTTP_MAX_RPC_BODY_SIZE` |
+| `/api/:namespace/:database/:endpoint` | 4 MiB | `SURREAL_HTTP_MAX_API_BODY_SIZE` |
+| `POST /gql` | 1 MiB | `SURREAL_HTTP_MAX_GQL_BODY_SIZE` |
+| `/key` CRUD endpoints | 16 KiB | `SURREAL_HTTP_MAX_KEY_BODY_SIZE` |
+| `POST /signin` | 1 KiB | `SURREAL_HTTP_MAX_SIGNIN_BODY_SIZE` |
+| `POST /signup` | 1 KiB | `SURREAL_HTTP_MAX_SIGNUP_BODY_SIZE` |
+| `POST /import` | 4 GiB | `SURREAL_HTTP_MAX_IMPORT_BODY_SIZE` |
+| `POST /ml/import` | 4 GiB | `SURREAL_HTTP_MAX_ML_BODY_SIZE` |
+| `POST /mcp` <Since v="v3.1.0" /> | 4 MiB | `SURREAL_HTTP_MAX_MCP_BODY_SIZE` |
+
+The WebSocket `/rpc` endpoint is not bound by an HTTP body size. It allows up to 128 MiB per message (`SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE`). As most SDKs use the WebSocket engine by default, they are able to send payloads that the plain HTTP endpoints reject. See [Message size limits](/docs/reference/rest-api/rpc-protocol#message-size-limits) for how the server ceiling interacts with the limit an SDK applies on its own side.
+
+### Choosing an endpoint for a large payload
+
+The 1 MiB ceiling that a large query runs into applies only to the raw HTTP `/sql` endpoint. Larger payloads have somewhere to go:
+
+* For ordinary queries, connect through a client SDK such as [Rust](/docs/reference/rust) or [JavaScript](/docs/reference/javascript). The WebSocket engine raises the per-message ceiling to 128 MiB.
+* To stay on plain HTTP, use [`POST /rpc`](/docs/reference/rest-api/rpc-protocol) for 4 MiB.
+* For bulk data loading, use [`POST /import`](#import), which accepts up to 4 GiB per request.
+
+### Tuning the limits
+
+Every limit above is set by an [environment variable](/docs/reference/cli/surrealdb-cli/environment-variables#http-server-config) on a self-hosted server. From 3.0 those variables accept byte-size suffixes such as `16MiB` or `4GB`; on 2.x they take a raw byte count.
+
+SurrealDB Cloud instances run the defaults listed above.
+
+<br />
+
 ## `GET /status` {#status}
 
 This HTTP RESTful endpoint checks whether the database web server is running, returning a 200 status code.
@@ -239,6 +276,18 @@ surrealdb-3.0.0
 ## `POST /import` {#import}
 
 This HTTP RESTful endpoint imports a set of SurrealQL queries into a specific namespace and database.
+
+The body is streamed: the server parses and applies statements as the bytes arrive rather than buffering the whole file. This is the endpoint to use for bulk data loading, since it accepts far more than [`/sql`](#sql) or [`/rpc`](/docs/reference/rest-api/rpc-protocol) do.
+
+### Size limit and partial imports
+
+The default cap is 4 GiB (`SURREAL_HTTP_MAX_IMPORT_BODY_SIZE`). Two details of how it is enforced matter when planning an import:
+
+* **The cap is cumulative for one request, not per chunk.** The limiter decrements a single allowance across every frame of the stream. A request whose `Content-Length` exceeds the cap is rejected immediately with `413`; a chunked request is accepted and then fails partway through, once the total bytes received cross the cap. Split larger datasets across several files rather than sending one oversized request. The gRPC import path enforces the same cumulative cap.
+* **A failed import is partially applied.** Statements are committed as they are parsed, so an import that trips the cap — or is interrupted for any other reason — leaves everything applied up to that point in place. There is no rollback.
+
+> [!IMPORTANT]
+> Because a failed import leaves partial data behind, plan for how you would retry. Either structure the file so that re-running it is safe, or import into a fresh namespace or database and swap it in once the import has finished successfully.
 
 ### Headers
 
