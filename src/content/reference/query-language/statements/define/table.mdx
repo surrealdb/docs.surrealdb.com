@@ -545,6 +545,33 @@ DEFINE TABLE post SCHEMALESS
 
 Field permissions work the same way but default to `PERMISSIONS FULL` instead of `NONE`. This is because the table is the main access gate, while field permissions only narrow further when you need to (for example hiding a password). With `FULL`, a field follows the table's rules without adding its own. See [`DEFINE FIELD`](/docs/reference/query-language/statements/define/field#setting-permissions-on-fields) and [Permissions & row-level security](/docs/learn/security/authorization/permissions-and-row-level-security).
 
+### Writes inside a permission clause
+
+A permission clause is evaluated with permissions bypassed, so a write inside one runs unchecked. Whether that is allowed depends on which clause it sits in.
+
+**A `FOR select` clause may never modify data.** A read must never trigger a write, so the clause is refused when the table is defined and blocked again if it is somehow reached at runtime.
+
+```surql
+-- Refused: a select clause cannot write
+DEFINE TABLE post PERMISSIONS FOR select WHERE (CREATE audit SET at = time::now()) OR true;
+```
+
+**`FOR create`, `FOR update`, and `FOR delete` clauses may modify data**, because they are evaluated during a write that is already taking place. This supports patterns such as audit logging from within the clause.
+
+```surql
+DEFINE FUNCTION fn::audit($id: record) { CREATE audit SET record = $id, at = time::now(); RETURN true; };
+
+DEFINE TABLE post PERMISSIONS
+	FOR create, update WHERE fn::audit($value.id) AND user = $auth.id;
+```
+
+Nevertheless, [`DEFINE EVENT`](/docs/reference/query-language/statements/define/event) is the preferred option for this. An event is evaluated with the caller's own permissions, states the side effect where a reader expects to find it, and does not run on every access check.
+
+The check follows calls to [custom functions](/docs/reference/query-language/statements/define/function), so a write reached through a function call is caught in the same way as one written directly into the clause, and the error names the function. It also applies to [`ALTER`](/docs/reference/query-language/statements/alter/overview) as of 3.3.0 — `ALTER TABLE`, `ALTER FIELD`, `ALTER PARAM`, `ALTER MODULE`, and `ALTER BUCKET` refuse a clause that the matching `DEFINE` would refuse.
+
+> [!IMPORTANT]
+> Embedded engines behave differently. A server allows writes in `create`, `update`, and `delete` clauses; the Rust SDK's local engine, `@surrealdb/node`, and the WebAssembly engine block them unless you enable the `mutable_permissions` experimental capability. On a server, `--deny-experimental mutable_permissions` (or `SURREAL_CAPS_DENY_EXPERIMENTAL`) turns the allowance off.
+
 ## Using `IF NOT EXISTS` clause
 
 
@@ -726,6 +753,11 @@ RELATE city:one->road_to->city:three SET
 ```surql title="Output"
 "The record 'city:one' does not exist"
 ```
+
+The endpoint check is an admission gate on the write path, so it is deferred during an [import](/docs/reference/cli/surrealdb-cli/commands/import), alongside the field, event, view and changefeed checks that already defer there. An export writes tables in name order, which can place an enforced relation table before the tables it points at, and the check would otherwise reject every edge as its endpoints did not yet exist.
+
+> [!WARNING]
+> Before SurrealDB 3.3.0, restoring an export of a database containing an `ENFORCED` relation table silently dropped its edges whenever the relation table sorted before its endpoint tables — `knows` before `person`, for example. The vertices and their counts restored correctly, so the loss only showed up on a traversal. If you restored such an export on an earlier version, check the edge counts before relying on the result.
 
 ## Inserting data from undefined fields on a `SCHEMAFULL` table
 

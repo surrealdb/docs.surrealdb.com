@@ -302,6 +302,39 @@ DEFINE FUNCTION fn::fetchAllProducts() {
 } PERMISSIONS WHERE $auth.admin = true;
 ```
 
+## Functions that other definitions require to stay read-only
+
+<Since v="v3.3.0" />
+
+Two places in the schema evaluate an expression that must not modify data: a [`COMPUTED` field](/docs/reference/query-language/statements/define/field#restrictions-on-computed-fields) body, and any `PERMISSIONS` clause. Both are checked when they are defined, and the check follows calls into custom functions.
+
+A `PERMISSIONS` clause is therefore refused if it calls a function that writes.
+
+```surql
+DEFINE FUNCTION fn::log_access() { CREATE access_log SET at = time::now(); RETURN true; };
+
+-- Refused: the guard calls a function that writes
+DEFINE TABLE product PERMISSIONS FOR select WHERE fn::log_access();
+```
+
+The rule also applies when the function changes rather than the caller. `DEFINE FUNCTION` and [`ALTER FUNCTION`](/docs/reference/query-language/statements/alter/function) refuse a body that starts to write while a computed field or a permission guard still depends on that function staying read-only. The error names the definitions that depend on it, so redefining a function cannot silently break the fields and guards that call it.
+
+```surql
+DEFINE FUNCTION fn::price_with_tax($price: number) { RETURN $price * 1.2; };
+DEFINE FIELD gross_price ON product COMPUTED fn::price_with_tax(price);
+
+-- Refused: `gross_price` on `product` requires fn::price_with_tax() to stay read-only
+DEFINE FUNCTION OVERWRITE fn::price_with_tax($price: number) {
+	CREATE price_change SET price = $price, at = time::now();
+	RETURN $price * 1.2;
+};
+```
+
+The check resolves calls against the stored function bodies, so it also follows a call several functions deep. A write reached through something that cannot be resolved at definition time — [`eval::surql()`](/docs/reference/query-language/functions/database-functions/eval#evalsurql), a JavaScript function, or a closure that arrives as data — is still accepted, and the write is refused when the field or guard is evaluated.
+
+> [!NOTE]
+> These checks are relaxed under `OPTION IMPORT`, so an [export](/docs/reference/cli/surrealdb-cli/commands/export) taken before the rules existed still restores.
+
 ## Using `IF NOT EXISTS` clause
 
 
