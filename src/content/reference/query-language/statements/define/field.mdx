@@ -796,6 +796,56 @@ The record user can read `article`, so the row is returned. They cannot read `au
 > [!NOTE]
 > For record and anonymous readers the narrowing is skipped altogether, because a system user's ceiling cannot narrow them any further. Auth limiting never escalates the reader — see [Capabilities](/docs/learn/security/authorization/capabilities).
 
+### A computed field's own select permission is enforced everywhere
+
+`PERMISSIONS FOR select` on a `COMPUTED` field applies wherever the field is read, not only in a `SELECT` projection. That includes the pre-mutation image an `UPDATE` reads, a `WHERE` condition, a write statement's `RETURN` list, and `RETURN DIFF`.
+
+```surql
+DEFINE TABLE item PERMISSIONS FOR select, update FULL;
+DEFINE FIELD hidden ON item COMPUTED 'secret' PERMISSIONS FOR select NONE;
+DEFINE FIELD leak ON item TYPE any PERMISSIONS FOR select, update FULL;
+
+-- As a record user, both read the field as NONE
+SELECT * FROM item:1;
+UPDATE item:1 SET leak = hidden RETURN leak;
+```
+
+> [!WARNING]
+> Before SurrealDB 3.3.0, a caller allowed to update a record could read a computed field denied to them and copy it into a field they were allowed to select, as in the `UPDATE` above. If you relied on a computed field's select permission to hide a value, check whether any writable field on the same table was used to copy it out.
+
+### Computed fields and array elements in reduced results
+
+Field-level select permissions narrow a record before it is returned. Before 3.3.0 that pass could remove whole elements of an array field rather than narrowing them, which also made `RETURN DIFF` come back empty for every session that was not the record's owner. Both now return the expected values.
+
+## Field evaluation order
+
+<Since v="v3.3.0" />
+
+When a record is written, field clauses run in **dependency order**: a field whose clause reads another field is evaluated after that field. `DEFAULT`, `VALUE`, and `COMPUTED` all take part, because each produces a value another field may need. Fields that do not read each other are evaluated in the order they were defined.
+
+```surql
+DEFINE FIELD z_src ON v TYPE int VALUE 10;
+DEFINE FIELD a_dep ON v TYPE int VALUE z_src + 1;
+
+CREATE v:1;
+-- a_dep is 11
+```
+
+> [!NOTE]
+> Before 3.3.0, fields were evaluated in name order. The example above failed because `a_dep` ran before `z_src` had a value, which meant that renaming a field could break a working schema. Nested fields are still evaluated after their parent.
+
+`ASSERT` is different, because it produces no value and so imposes no order. Assertions run in a second pass, once every field holds its final value, so a clause that reads a sibling always sees that sibling's stored value. Two fields asserting against each other is ordinary rather than a cycle:
+
+```surql
+DEFINE FIELD in ON follows TYPE record<user> ASSERT in != out;
+DEFINE FIELD out ON follows TYPE record<user> ASSERT out != in;
+```
+
+A genuine cycle between value-producing clauses is rejected when the field is defined rather than when a record is written.
+
+> [!NOTE]
+> Computed fields are also populated on the records that [events](/docs/reference/query-language/statements/define/event), [live queries](/docs/reference/query-language/statements/live-select), and changefeeds receive. Before 3.3.0, `$before` and `$after` reported every computed field as `NONE`.
+
 ## Setting permissions on fields
 
 By default, the permissions on a field will be set to `FULL` unless otherwise specified. The table is the main access gate, while field permissions only narrow further when you need to (for example, when hiding a password). With `FULL`, a field follows the [table](/docs/reference/query-language/statements/define/table#defining-permissions)'s rules without adding its own. Tables default the other way: omitting table `PERMISSIONS` in a `DEFINE` statement stores `PERMISSIONS NONE`.
