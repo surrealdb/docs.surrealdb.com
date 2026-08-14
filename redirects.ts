@@ -319,12 +319,35 @@ function sdkGettingStartedRedirects(): Redirect[] {
     return out;
 }
 
+/**
+ * The AI agents section no longer carries its own editor tutorial or agent
+ * rules page. Editor setup for the built-in MCP server now lives on the
+ * Embedded MCP page, and agent rules are documented under Integrations.
+ */
+function aiAgentsRedirects(): Redirect[] {
+    const moves: [string, string][] = [
+        ["build/ai-agents/connect-mcp-to-your-editor", "build/ai-agents/mcp/embedded"],
+        ["build/ai-agents/agent-rules", "build/integrations/agent-rules/agent-rules"],
+    ];
+
+    const out: Redirect[] = [];
+
+    for (const [from, to] of moves) {
+        out.push(
+            { source: `/docs/${from}`, destination: `/docs/${to}`, statusCode: 301 },
+            { source: `/${from}`, destination: `/docs/${to}`, statusCode: 301 },
+        );
+    }
+
+    return out;
+}
+
 /** Shared with vercel.ts (production) and the Vite dev server (local). */
 export const docsRedirects: Redirect[] = [
     { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
     ...legacyPrefixRedirects("surrealql", "reference/query-language"),
     ...legacyPrefixRedirects("cloud", "manage/cloud"),
-    ...legacyPrefixRedirects("surrealist", "explore/surrealist"),
+    ...legacyPrefixRedirects("surrealist", "explore/studio"),
     ...legacyPrefixRedirects("surrealml", "explore/ml-models"),
     ...legacyPrefixRedirects("integrations", "build/integrations"),
     ...legacyPrefixRedirects("tutorials", "explore/tutorials"),
@@ -337,6 +360,58 @@ export const docsRedirects: Redirect[] = [
     ...phpVersionedRedirects(),
     ...sdkReferenceRedirects(),
     ...sdkGettingStartedRedirects(),
+    ...aiAgentsRedirects(),
+    // Surrealist → SurrealDB Studio path rename
+    {
+        source: "/docs/explore/surrealist",
+        destination: "/docs/explore/studio",
+        statusCode: 301,
+    },
+    {
+        source: "/docs/explore/surrealist/:path*",
+        destination: "/docs/explore/studio/:path*",
+        statusCode: 301,
+    },
+    {
+        source: "/explore/surrealist",
+        destination: "/explore/studio",
+        statusCode: 301,
+    },
+    {
+        source: "/explore/surrealist/:path*",
+        destination: "/explore/studio/:path*",
+        statusCode: 301,
+    },
+    {
+        source: "/docs/learn/querying/graphql/via-surrealist",
+        destination: "/docs/learn/querying/graphql/via-studio",
+        statusCode: 301,
+    },
+    {
+        source: "/docs/learn/querying/surrealql/executing-queries/via-surrealist",
+        destination: "/docs/learn/querying/surrealql/executing-queries/via-studio",
+        statusCode: 301,
+    },
+    {
+        source: "/docs/build/deployment/surrealdb-cloud/connecting/via-surrealist",
+        destination: "/docs/build/deployment/surrealdb-cloud/connecting/via-studio",
+        statusCode: 301,
+    },
+    {
+        source: "/learn/querying/graphql/via-surrealist",
+        destination: "/learn/querying/graphql/via-studio",
+        statusCode: 301,
+    },
+    {
+        source: "/learn/querying/surrealql/executing-queries/via-surrealist",
+        destination: "/learn/querying/surrealql/executing-queries/via-studio",
+        statusCode: 301,
+    },
+    {
+        source: "/build/deployment/surrealdb-cloud/connecting/via-surrealist",
+        destination: "/build/deployment/surrealdb-cloud/connecting/via-studio",
+        statusCode: 301,
+    },
 ];
 
 export type ResolvedRedirect = { destination: string; statusCode: number };

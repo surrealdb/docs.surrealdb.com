@@ -1,41 +1,39 @@
-import type { SearchKind } from "./ranking";
-
 // ──────────────────────────────────────────────────────────
-// Compiled index types
+// Crawler output types
 //
-// The shape of `generated/search-index.json`, produced by
-// plugins/vite-search-index.ts from the site's own content
-// collections. The indexer reads this artefact rather than crawling
-// src/content, so search indexes exactly the entries, frontmatter,
-// and category metadata the rendered pages use.
+// The crawler walks every markdown file in src/content/ and
+// emits two kinds of entries: pages and sections. These are
+// consumed by the indexer which embeds and upserts them into
+// SurrealDB.
 // ──────────────────────────────────────────────────────────
 
-/** One H2 section of a document, deep-linkable via its anchor. */
-export interface IndexedSection {
-    anchor: string; // URL fragment, e.g. "record-ranges"
-    title: string; // H2 heading text
-    content: string; // plain text until the next H2
-}
-
-export interface IndexedDocument {
-    collection: string; // e.g. "reference/query-language"
-    slug: string; // path within the collection, e.g. "statements/select"
-    path: string; // full URL path, e.g. "/docs/reference/query-language/statements/select"
+export interface CrawledPage {
+    kind: "page";
+    id: string; // e.g. "doc-surrealql:statements/select"
+    collection: string; // e.g. "doc-surrealql", "doc-sdk-javascript"
+    path: string; // URL path, e.g. "/docs/surrealql/statements/select"
+    url: string; // same as path for pages
     title: string;
-    description: string; // from frontmatter, used in ranking and as a snippet
+    description: string; // from frontmatter, used in search ranking
     breadcrumb: string; // "SurrealQL > Statements > SELECT"
-    kind: SearchKind; // ranking class declared by the collection
-    language?: string; // SDK language slug, only when kind is "sdk"
-    product: string;
     content: string; // full page plain text (no code blocks)
-    sections: IndexedSection[];
+    contentHash: string; // SHA-256 for incremental re-indexing
 }
 
-/** Shape of `generated/search-index.json`. */
-export interface CompiledSearchIndex {
-    base: string;
-    documents: IndexedDocument[];
+export interface CrawledSection {
+    kind: "section";
+    id: string; // e.g. "doc-surrealql:statements/select#record-ranges"
+    pageId: string; // parent page id
+    anchor: string; // URL fragment, e.g. "record-ranges"
+    depth: number; // heading depth (always 2)
+    url: string; // page path + "#" + anchor
+    title: string; // H2 heading text
+    breadcrumb: string; // page breadcrumb + " > " + section title
+    content: string; // plain text between this H2 and the next
+    contentHash: string;
 }
+
+export type CrawledEntry = CrawledPage | CrawledSection;
 
 // ──────────────────────────────────────────────────────────
 // Search result types
@@ -45,7 +43,7 @@ export interface CompiledSearchIndex {
 // where multiple hits from the same page are collapsed.
 // ──────────────────────────────────────────────────────────
 
-/** Raw row returned by the hybrid search query (before reranking/grouping). */
+/** Raw row returned by the hybrid search query (before boosting/grouping). */
 export interface RawSearchHit {
     kind: "page" | "section";
     url: string;
@@ -53,13 +51,7 @@ export interface RawSearchHit {
     breadcrumb: string;
     description?: string;
     content?: string;
-    /** Ranking class of the parent page, from the compiled index. */
-    doc_kind: SearchKind;
-    /** SDK language slug, only when `doc_kind` is "sdk". */
-    language?: string;
-    product: string;
-    /** Path within the collection, used to collapse cross-language duplicates. */
-    slug: string;
+    collection?: string; // used for collection-based ranking boost
     score: number; // RRF fusion score
     page_path: string; // used to group hits from the same page
 }

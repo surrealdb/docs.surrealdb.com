@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════
-// Search handler — hybrid retrieval + reranking
+// Search handler — hybrid retrieval + post-processing
 //
 // Query flow:
 //   1. Strip question prefixes for BM25 ("how to X" → "X")
@@ -10,33 +10,13 @@
 //        c. Section vector search
 //        d. Section full-text search
 //   4. Fuse results with Reciprocal Rank Fusion (RRF)
-//   5. Rerank: static authority prior × title match × page kind
-//   6. Diversify: collapse cross-language SDK duplicates and cap
-//      how many pages one SDK language may occupy
-//   7. Group hits by page and extract snippets
-//   8. Apply relevance threshold to trim noise
-//
-// Steps 5 and 6 exist because the corpus is heavily skewed: the
-// ten SDK collections are ~370 of ~880 SurrealDB pages and
-// describe the same method surface ten times over, with terse
-// one-word titles ("Table", "Select", "Upsert") that exact-match
-// short queries. Retrieval alone therefore hands the entire top
-// of the results to SDK reference pages — searching "table"
-// returned the JavaScript, Go, Python, Java and Kotlin `Table`
-// types before `DEFINE TABLE` or the Tables guide.
+//   5. Apply post-retrieval boosts (title match, collection, etc.)
+//   6. Group hits by page and extract snippets
+//   7. Apply relevance threshold to trim noise
 // ══════════════════════════════════════════════════════════
 
 import { getDb } from "./db";
 import { embed } from "./embed";
-import {
-    detectLanguages,
-    kindAuthority,
-    type LanguageIntent,
-    SDK_KIND,
-    type SearchContext,
-    type SearchKind,
-    sdkAuthority,
-} from "./ranking";
 import type { RawSearchHit, SearchResult, SearchResultItem } from "./types";
 
 export const MAX_QUERY_LENGTH = 500;
@@ -45,21 +25,27 @@ export const MAX_QUERY_LENGTH = 500;
 // Product scoping
 //
 // The search index is shared across products, but the UX is
-// product-scoped. Each page carries the product its collection
-// declares, so this is a field comparison rather than a URL test.
-//
-// Filtering happens HERE — before reranking, grouping, the relevance
-// threshold, and the result cap — so the much larger SurrealDB corpus
-// can't crowd the smaller Spectron product out of the global top-N.
-// (This previously ran in the API wrapper after the cap, which
-// starved Spectron results: a Spectron query could return few or zero
-// hits even when relevant Spectron pages existed.)
+// product-scoped: every Spectron page lives under /docs/spectron,
+// everything else is SurrealDB. Filtering happens HERE — before
+// boosting, grouping, the relevance threshold, and the result cap
+// — so the much larger SurrealDB corpus can't crowd the smaller
+// Spectron product out of the global top-N. (This previously ran
+// in the API wrapper after the cap, which starved Spectron
+// results: a Spectron query could return few or zero hits even
+// when relevant Spectron pages existed.)
 // ──────────────────────────────────────────────────────────
 
-export type SearchProduct = string;
+const SPECTRON_PATH_PREFIX = "/docs/spectron";
+
+export type SearchProduct = "surrealdb" | "spectron";
+
+function isSpectronPath(path: string): boolean {
+    return path === SPECTRON_PATH_PREFIX || path.startsWith(`${SPECTRON_PATH_PREFIX}/`);
+}
 
 function matchesProduct(hit: RawSearchHit, product: SearchProduct): boolean {
-    return hit.product === product;
+    const spectron = isSpectronPath(hit.page_path || hit.url || "");
+    return product === "spectron" ? spectron : !spectron;
 }
 
 // ──────────────────────────────────────────────────────────
@@ -85,10 +71,6 @@ const SEARCH_SQL = /* surql */ `
             path AS url,
             path AS page_path,
             collection,
-            slug,
-            doc_kind,
-            language,
-            product,
             title,
             breadcrumb,
             description,
@@ -116,10 +98,6 @@ const SEARCH_SQL = /* surql */ `
             path AS url,
             path AS page_path,
             collection,
-            slug,
-            doc_kind,
-            language,
-            product,
             title,
             breadcrumb,
             description,
@@ -153,10 +131,6 @@ const SEARCH_SQL = /* surql */ `
             string::concat(page.path, "#", anchor) AS url,
             page.path AS page_path,
             page.collection AS collection,
-            page.slug AS slug,
-            page.doc_kind AS doc_kind,
-            page.language AS language,
-            page.product AS product,
             title,
             breadcrumb,
             content,
@@ -179,10 +153,6 @@ const SEARCH_SQL = /* surql */ `
             string::concat(page.path, "#", anchor) AS url,
             page.path AS page_path,
             page.collection AS collection,
-            page.slug AS slug,
-            page.doc_kind AS doc_kind,
-            page.language AS language,
-            page.product AS product,
             title,
             breadcrumb,
             content,
@@ -206,13 +176,8 @@ const SEARCH_SQL = /* surql */ `
     -- across all lists the result appears in.
     --   arg 1: array of ranked lists to fuse
     --   arg 2: k=60 (smoothing constant, standard RRF default)
-    --   arg 3: limit=240 (max candidates to consider)
-    --
-    -- The candidate pool is deliberately larger than the 20 results
-    -- the UI shows: reranking collapses the ten cross-language copies
-    -- of an SDK page into one, so a pool sized for the display limit
-    -- would come out short after deduplication.
-    LET $fused = search::rrf([$page_ft, $page_vs, $section_ft, $section_vs], 60, 240);
+    --   arg 3: limit=160 (max candidates to consider)
+    LET $fused = search::rrf([$page_ft, $page_vs, $section_ft, $section_vs], 60, 160);
 
     RETURN (
         SELECT
@@ -220,17 +185,13 @@ const SEARCH_SQL = /* surql */ `
             url,
             page_path,
             collection,
-            slug,
-            doc_kind,
-            language,
-            product,
             title,
             breadcrumb,
             description,
             content,
             rrf_score AS score
         FROM $fused
-        LIMIT 100
+        LIMIT 60
     );
 `;
 
@@ -250,34 +211,6 @@ function tokenise(s: string): string[] {
 }
 
 /**
- * Candidate forms of a token: itself plus naive plural strips. The
- * BM25 analyser stems with snowball, so "table" already retrieves the
- * page titled "Tables"; without the same leniency here that page then
- * missed the title boost and lost to an SDK page whose title happened
- * to be the exact singular. Both "-s" and "-es" strips are kept as
- * alternatives rather than picking one, since neither rule alone
- * relates "tables"/"table" and "indexes"/"index" correctly.
- */
-function tokenForms(token: string): string[] {
-    const forms = [token];
-    if (token.length > 3 && token.endsWith("s")) forms.push(token.slice(0, -1));
-    if (token.length > 4 && token.endsWith("es")) forms.push(token.slice(0, -2));
-    return forms;
-}
-
-/** True when two tokens match exactly or as singular/plural variants. */
-function tokensMatch(a: string, b: string): boolean {
-    if (a === b) return true;
-    const formsOfB = tokenForms(b);
-    return tokenForms(a).some((form) => formsOfB.includes(form));
-}
-
-/** True when two token sequences are equal, allowing plural variants. */
-function tokensEqual(a: string[], b: string[]): boolean {
-    return a.length === b.length && a.every((token, i) => tokensMatch(token, b[i]));
-}
-
-/**
  * Checks whether `shorter` is a token-level prefix of `longer`.
  * Used for title matching: e.g. title tokens ["select"] are a
  * prefix of query tokens ["select", "statement", "examples"],
@@ -290,46 +223,36 @@ function tokensEqual(a: string[], b: string[]): boolean {
  */
 function isTokenPrefix(shorter: string[], longer: string[]): boolean {
     if (shorter.length === 0 || shorter.length > longer.length) return false;
-    return shorter.every((token, i) => tokensMatch(longer[i], token));
+    return shorter.every((token, i) => longer[i] === token);
 }
 
 // ──────────────────────────────────────────────────────────
-// Post-retrieval reranking
+// Post-retrieval boosting
 //
-// After RRF fusion, multiplicative factors adjust the ranking
-// using signals the retrieval query cannot express: where a page
-// sits in the docs taxonomy, how closely its title matches, and
-// whether the query names an SDK language.
-//
-// RRF scores sit in a narrow band by construction — rank 1 and
-// rank 5 of the same list differ by ~6% — so these factors, not
-// retrieval order, decide the top of the list. That is why the
-// authority prior has to carry real weight, and why the factors
-// are kept few and named rather than tuned freely.
+// After RRF fusion, we apply multiplicative boosts to adjust
+// rankings based on signals the database query can't capture:
+// title similarity, content type (page vs section), source
+// collection, and comparison-query detection.
 // ──────────────────────────────────────────────────────────
 
 /**
- * Title relevance tiers, mutually exclusive:
- *   3.0x — title equals the query ("RELATE" → "RELATE", "table" → "Tables")
- *   2.0x — one is a token prefix of the other ("SELECT statement" → "SELECT")
- *   1.5x — every query token appears somewhere in the title
+ * SDK / client-library reference lives under `/docs/languages/` (the
+ * per-language API docs in the `index` collection). Generic queries
+ * like "authentication" should prefer a core concept page over an SDK
+ * API reference page that merely mentions the term as one of many
+ * methods, so every non-SDK page gets a small boost.
+ *
+ * The documentation restructure (#1699) folded the former standalone
+ * SDK collections (`doc-sdk-*`) into `index/languages/*`, so this is
+ * now matched by URL prefix rather than by collection id.
  */
-const TITLE_EXACT_BOOST = 3.0;
-const TITLE_PREFIX_BOOST = 2.0;
-const TITLE_CONTAINS_BOOST = 1.5;
+const SDK_REFERENCE_URL_PREFIX = "/docs/languages/";
 
-/**
- * Pages are slightly preferred over their own sections: a page is a
- * more comprehensive landing point, and its sections stay reachable
- * through the grouped "more results on this page" list.
- */
-const PAGE_KIND_BOOST = 1.1;
-
-/** Applied when a result sits in the same part of the docs the user is reading. */
-const SAME_CONTEXT_BOOST = 1.12;
-
-/** Applied to results mentioning both terms of an "X vs Y" query. */
-const COMPARISON_BOOST = 1.5;
+/** True for any hit that is not an SDK/client-library reference page. */
+function isCoreDoc(hit: RawSearchHit): boolean {
+    const path = hit.page_path || hit.url || "";
+    return !path.startsWith(SDK_REFERENCE_URL_PREFIX);
+}
 
 /**
  * Detects whether the user is comparing two concepts and
@@ -384,177 +307,54 @@ function splitOnLast(text: string, sep: string): [string, string] | null {
     return a && b ? [a, b] : null;
 }
 
-function titleBoost(hit: RawSearchHit, queryTokens: string[]): number {
-    const titleTokens = tokenise(hit.title || "");
-
-    if (tokensEqual(titleTokens, queryTokens)) return TITLE_EXACT_BOOST;
-
-    if (isTokenPrefix(titleTokens, queryTokens) || isTokenPrefix(queryTokens, titleTokens)) {
-        return TITLE_PREFIX_BOOST;
-    }
-
-    const title = normalise(hit.title || "");
-    if (queryTokens.length > 1 && queryTokens.every((token) => title.includes(token))) {
-        return TITLE_CONTAINS_BOOST;
-    }
-
-    return 1.0;
-}
-
-/** Static prior for the kind of documentation the hit belongs to. */
-function authorityBoost(hit: RawSearchHit, intent: LanguageIntent): number {
-    return hit.doc_kind === SDK_KIND
-        ? sdkAuthority(hit.language, intent)
-        : kindAuthority(hit.doc_kind);
-}
-
-/**
- * The part of the query that names what the reader wants, with any
- * language mention removed.
- *
- * Naming a language says *where* to look, not *what* to look for, and
- * the authority prior has already acted on it. Leaving it in the tokens
- * used for title matching let the language's own landing page win on
- * title alone: "rust select" scored `/docs/languages/rust` (title
- * "Rust", a token prefix of the query) above `rust/methods/select`,
- * which is the page actually being asked for.
- *
- * Falls back to the whole query when the language is all there is, so
- * "python" still matches the Python landing page.
- */
-function subjectTokens(queryTokens: string[], intent: LanguageIntent): string[] {
-    if (intent.requested.size === 0) return queryTokens;
-
-    const namesRequestedLanguage = (token: string) =>
-        [...detectLanguages([token])].some((language) => intent.requested.has(language));
-
-    const subject = queryTokens.filter((token) => !namesRequestedLanguage(token));
-
-    return subject.length > 0 ? subject : queryTokens;
-}
-
-function rerank(
-    hits: RawSearchHit[],
-    query: string,
-    intent: LanguageIntent,
-    contextKind?: SearchKind,
-): RawSearchHit[] {
-    const queryTokens = subjectTokens(tokenise(query), intent);
+function boostResults(hits: RawSearchHit[], query: string): RawSearchHit[] {
+    const q = normalise(query);
+    const qTokens = tokenise(query);
     const comparison = extractComparisonTerms(query);
 
-    const scored = hits.map((hit) => {
-        let boost = titleBoost(hit, queryTokens) * authorityBoost(hit, intent);
+    const boosted = hits.map((hit) => {
+        const t = normalise(hit.title || "");
+        const tTokens = tokenise(hit.title || "");
+        let boost = 1.0;
 
+        // Title relevance boost (mutually exclusive tiers):
+        //   3.0x — exact title match (e.g. query "RELATE" → title "RELATE")
+        //   2.0x — token prefix (e.g. query "SELECT statement" → title "SELECT")
+        //   1.5x — all query tokens appear in title as substrings
+        if (t === q) {
+            boost = 3.0;
+        } else if (isTokenPrefix(tTokens, qTokens) || isTokenPrefix(qTokens, tTokens)) {
+            boost = 2.0;
+        } else if (qTokens.length > 1 && qTokens.every((w) => t.includes(w))) {
+            boost = 1.5;
+        }
+
+        // Slight preference for page-level results over sections,
+        // since pages are more comprehensive landing points.
         if (hit.kind === "page") {
-            boost *= PAGE_KIND_BOOST;
+            boost *= 1.1;
         }
 
-        // Someone reading the SurrealQL reference who searches "table"
-        // means the statement, not a client library's type wrapper.
-        if (contextKind && hit.doc_kind === contextKind) {
-            boost *= SAME_CONTEXT_BOOST;
+        // Prefer core docs over SDK/client-library reference pages for
+        // general queries. SDK-specific queries still rank well because
+        // they'll have stronger BM25/vector base scores.
+        if (isCoreDoc(hit)) {
+            boost *= 1.15;
         }
 
-        // For comparison queries ("X vs Y"), prefer results whose
+        // For comparison queries ("X vs Y"), boost results whose
         // title or content mentions both compared terms.
         if (comparison) {
-            const searchable = `${normalise(hit.title || "")} ${normalise(hit.content || "")}`;
+            const searchable = `${t} ${normalise(hit.content || "")}`;
             if (comparison.every((term) => searchable.includes(term))) {
-                boost *= COMPARISON_BOOST;
+                boost *= 1.5;
             }
         }
 
         return { ...hit, score: hit.score * boost };
     });
 
-    return scored.sort((a, b) => b.score - a.score);
-}
-
-// ──────────────────────────────────────────────────────────
-// SDK result diversification
-//
-// The ten SDK collections document the same surface ten times, so
-// a query matching one of them usually matches all ten with near
-// identical scores. Ranking alone cannot fix that: even correctly
-// de-prioritised, the copies stay adjacent and fill the list as a
-// block ("Table" ×5 before any SurrealDB page).
-//
-// The fix is the standard one for near-duplicate corpora — collapse
-// on a group key, as Elasticsearch field collapsing and Algolia's
-// `distinct` do. Two rules, both applied at page granularity so a
-// page's sections travel with it into the grouped result:
-//
-//   1. Collapse cross-language variants of the same page, keeping
-//      the best-scoring language.
-//   2. Cap how many distinct pages any one language may contribute,
-//      so a single SDK cannot fill the list with near-synonyms
-//      (.NET's `live-query`, `live-raw-query`, `live-table`, ...).
-//
-// Neither rule applies once the query names a language: asking for
-// "python methods" should return the whole Python surface.
-// ──────────────────────────────────────────────────────────
-
-/** Maximum distinct pages one SDK language may contribute to an unscoped query. */
-const MAX_PAGES_PER_SDK_LANGUAGE = 2;
-
-/** SDK docs version their paths (`php/v1/methods/...`); versions are not variants. */
-const VERSION_SEGMENT = /^v\d+$/;
-
-/**
- * Cross-language identity of an SDK page: its in-collection slug with
- * version segments removed. `reference/python` + "api/values/table"
- * and `reference/golang` + "api/values/table" share a key;
- * "methods/live" and "methods/live-query" do not.
- *
- * Returns null for hits that have no cross-language twin to collapse
- * against — non-SDK pages, and each SDK's own landing page.
- */
-function sdkVariantKey(hit: RawSearchHit): string | null {
-    if (hit.doc_kind !== SDK_KIND || !hit.slug) return null;
-
-    const segments = hit.slug.split("/").filter((s) => s && !VERSION_SEGMENT.test(s));
-    return segments.length > 0 ? segments.join("/") : null;
-}
-
-/**
- * Selects which pages survive diversification. Hits arrive in score
- * order, so the first page seen for a variant key or a language is
- * the best-scoring one.
- */
-function diversify(hits: RawSearchHit[], intent: LanguageIntent): RawSearchHit[] {
-    if (intent.requested.size > 0) return hits;
-
-    const admitted = new Set<string>();
-    const rejected = new Set<string>();
-    const claimedVariants = new Set<string>();
-    const pagesPerLanguage = new Map<string, number>();
-
-    for (const hit of hits) {
-        const page = hit.page_path;
-        if (admitted.has(page) || rejected.has(page)) continue;
-
-        const variant = sdkVariantKey(hit);
-        const language = hit.language;
-
-        if (variant && claimedVariants.has(variant)) {
-            rejected.add(page);
-            continue;
-        }
-
-        if (hit.doc_kind === SDK_KIND && language) {
-            const count = pagesPerLanguage.get(language) ?? 0;
-            if (count >= MAX_PAGES_PER_SDK_LANGUAGE) {
-                rejected.add(page);
-                continue;
-            }
-            pagesPerLanguage.set(language, count + 1);
-        }
-
-        if (variant) claimedVariants.add(variant);
-        admitted.add(page);
-    }
-
-    return hits.filter((hit) => admitted.has(hit.page_path));
+    return boosted.sort((a, b) => b.score - a.score);
 }
 
 // ──────────────────────────────────────────────────────────
@@ -802,19 +602,12 @@ export function normaliseQuery(raw: string): string {
 //
 // Without a cutoff, every query returns 30-50 grouped results
 // because vector search always finds "something close". We
-// drop results scoring below a fraction of the top hit and cap
-// at 20 groups so the UI isn't flooded with marginal matches.
-//
-// The ratio is lower than the score spread the authority prior
-// introduces (a de-prioritised SDK page scores ~0.3x an equally
-// well-retrieved SurrealQL page). At 0.3 the threshold would have
-// turned that prior into a filter and dropped SDK results from
-// generic queries entirely; the intent is to rank them below core
-// docs, not to hide them.
+// drop results scoring below 30% of the top hit and cap at 20
+// groups so the UI isn't flooded with marginal matches.
 // ──────────────────────────────────────────────────────────
 
 const MAX_GROUPED_RESULTS = 20;
-const MIN_SCORE_RATIO = 0.15;
+const MIN_SCORE_RATIO = 0.3;
 
 function applyRelevanceThreshold(results: SearchResult[]): SearchResult[] {
     if (results.length === 0) return results;
@@ -867,54 +660,11 @@ function groupByPage(hits: RawSearchHit[], query: string): SearchResult[] {
 
 // ──────────────────────────────────────────────────────────
 // Main entry point
-//
-// `context` is where the search came from — the reader's location,
-// resolved from their pathname by the API layer (see
-// createRouteResolver in ./routes). Search runs from inside a page
-// and that page carries intent: "table" typed in the SurrealQL
-// reference means the statement, and "connect" typed in the Python
-// SDK means the Python client. This is the signal Algolia DocSearch
-// calls contextual search.
 // ──────────────────────────────────────────────────────────
-
-export interface SearchOptions {
-    product?: SearchProduct;
-    /** Where the search was made from. */
-    context?: SearchContext;
-}
-
-/**
- * Everything that happens to retrieved hits: product scoping, then
- * rerank, diversify, group, and trim. Kept separate from retrieval so
- * ranking can be exercised without a database or an embedding call —
- * see search/src/handler.test.ts.
- */
-export function rankHits(
-    hits: RawSearchHit[],
-    query: string,
-    options: SearchOptions = {},
-): SearchResult[] {
-    const { product, context } = options;
-
-    // Filter by product BEFORE reranking/grouping/threshold so the
-    // relevance cutoff and result cap apply within the product.
-    const scoped = product ? hits.filter((hit) => matchesProduct(hit, product)) : hits;
-
-    const intent: LanguageIntent = {
-        requested: detectLanguages(tokenise(query)),
-        browsing: context?.language,
-    };
-
-    const ranked = rerank(scoped, query, intent, context?.kind);
-    const diversified = diversify(ranked, intent);
-    const grouped = groupByPage(diversified, query);
-
-    return applyRelevanceThreshold(grouped);
-}
 
 export async function handleSearch(
     query: string,
-    options: SearchOptions = {},
+    product?: SearchProduct,
 ): Promise<SearchResult[]> {
     const connection = await getDb();
 
@@ -933,5 +683,11 @@ export async function handleSearch(
         )
         .collect();
 
-    return rankHits(hits, query, options);
+    // Filter by product BEFORE boosting/grouping/threshold so the
+    // relevance cutoff and result cap apply within the product.
+    const scoped = product ? hits.filter((hit) => matchesProduct(hit, product)) : hits;
+
+    const boosted = boostResults(scoped, query);
+    const grouped = groupByPage(boosted, query);
+    return applyRelevanceThreshold(grouped);
 }

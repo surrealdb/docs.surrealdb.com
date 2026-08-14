@@ -63,18 +63,8 @@ export function SearchResultCard({ result, query }: SearchResultProps) {
     const hidden = more.slice(1);
     const hasHidden = hidden.length > 0;
 
-    // The indexed breadcrumb ends with the page (or section) title,
-    // which the card already shows on the line below. Dropping the
-    // repeat leaves the trail to do the job people use it for —
-    // telling "Reference > SurrealQL" apart from "Reference > Go SDK"
-    // when several results share a title.
     const breadcrumb = String(result.breadcrumb ?? "");
-    const crumbs = breadcrumb.split(" > ").filter(Boolean);
-    const title = String(result.title ?? "").trim();
-    const parts =
-        crumbs.length > 1 && crumbs[crumbs.length - 1].trim() === title
-            ? crumbs.slice(0, -1)
-            : crumbs;
+    const parts = breadcrumb.split(" > ").filter(Boolean);
 
     return (
         <Group

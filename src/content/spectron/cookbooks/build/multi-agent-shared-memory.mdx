@@ -35,21 +35,21 @@ SHARED_SCOPE = ["org/acme/project/market-research-q3"]
 # Agent A: data collection agent
 await client.remember(
     "Competitor X launched a new pricing tier at $299/mo targeting SMBs.",
-    scope=SHARED_SCOPE,
+    scopes=SHARED_SCOPE,
 )
 
 # Agent B: analysis agent – sees Agent A's memory
 results = await client.recall(
     "recent competitor pricing changes",
     k=5,
-    scope=SHARED_SCOPE,
+    lens=SHARED_SCOPE,
 )
 # results.hits includes Agent A's finding
 ```
 
 ### Read/write access control
 
-To prevent worker agents from writing to shared memory (read-only readers), issue separate API keys with restricted write capabilities. A key with principal `agent` and a `scope_floor` of `{org: "acme", project: "market-research-q3"}` can read and write at that scope. If you need read-only agents, add scope floor restrictions at the application layer before passing context to the agents.
+To prevent worker agents from writing to shared memory (read-only readers), issue separate API keys with restricted write capabilities. A key bound to a principal granted `memory:read` and `memory:write` on `org/acme/project/market-research-q3` can read and write at that scope. For genuinely read-only agents, mint the key against a principal granted `memory:read` but not `memory:write` on that path.
 
 ## Pattern 2: supervisor and workers
 
@@ -60,40 +60,45 @@ SUPERVISOR_SCOPE = ["org/acme/project/research-pipeline"]
 
 async def run_worker(topic: str, worker_id: str, client: AsyncSpectron) -> str:
     worker_scope = [*SUPERVISOR_SCOPE, f"agent/{worker_id}"]
-    async with client.sessions.create(scope=worker_scope) as session:
+    async with client.sessions.create(scopes=worker_scope) as session:
         # Worker researches its topic
-        context = await session.recall(query=topic, top_k=5)
-        findings = await llm.research(topic, context.formatted)
-        
+        context = await client.recall(topic, k=5)
+        findings = await llm.research(topic, context["hits"])
+
         # Worker stores findings in its own scope
-        await session.remember(findings, memory_category="knowledge")
-        
+        await client.remember(
+            findings,
+            session_id=session.id,
+            memory_category="knowledge",
+        )
+
         # Return a summary for the supervisor
-        reflection = await session.reflect(
+        reflection = await client.reflect(
             query=f"Summarise findings about {topic}",
             persist=False,
         )
-        return reflection.summary
+        return reflection.reflection
 
 async def supervisor(client: AsyncSpectron):
     topics = ["pricing trends", "competitor features", "customer sentiment"]
-    
+
     # Run workers concurrently
     results = await asyncio.gather(*[
         run_worker(topic, f"worker-{i}", client)
         for i, topic in enumerate(topics)
     ])
-    
+
     # Supervisor aggregates findings into shared scope
-    async with client.sessions.create(scope=SUPERVISOR_SCOPE) as session:
+    async with client.sessions.create(scopes=SUPERVISOR_SCOPE) as session:
         for topic, finding in zip(topics, results):
-            await session.remember(
-                content=f"[{topic}] {finding}",
+            await client.remember(
+                f"[{topic}] {finding}",
+                session_id=session.id,
                 memory_category="knowledge",
             )
-        
+
         # Supervisor synthesises and stores a final report
-        await session.reflect(
+        await client.reflect(
             query="Synthesise all research findings into a coherent executive summary.",
             persist=True,
         )
@@ -113,26 +118,30 @@ A supervisor querying at `{org: "acme", project: "alpha"}` sees:
 - Everything at the project scope (shared findings)
 - Everything at more specific scopes (individual worker findings)
 
-A worker querying at `{org: "acme", project: "alpha", agent: "worker-1"}` sees only its own memory and the shared project scope.
+A worker reading with a lens of `["org/acme/project/alpha/agent/worker-1"]` sees only its own memory and the shared project scope.
 
 ## Preventing memory pollution
 
 When many agents write to a shared scope, unrelated facts from different tasks can accumulate. Use metadata to tag memory items with their provenance:
 
 ```python
-await session.remember(
-    content="Customer segment 'enterprise' values compliance features most.",
+await memory.remember(
+    "Customer segment 'enterprise' values compliance features most.",
     memory_category="knowledge",
-    metadata={"source": "customer-interview-2024-q3", "agent": "interview-agent"},
+    labels=["source=customer-interview-2024-q3", "agent=interview-agent"],
 )
 ```
+
+Labels are `"key=value"` strings stamped on the rows the write produces. They
+narrow reads (`labels` on `/query`) but never widen access — the scope predicate
+is applied first.
 
 Use the entity type system to keep memory structured. Rather than storing flat facts, extract structured entities so that conflicts are detected and superseded correctly:
 
 ```python
 # Good: structured entity extraction will happen automatically from this
-await session.remember(
-    content="The enterprise customer segment prioritises SOC2 compliance over cost.",
+await memory.remember(
+    "The enterprise customer segment prioritises SOC2 compliance over cost.",
 )
 
 # The extraction pipeline creates:
@@ -146,11 +155,16 @@ await session.remember(
 When two agents write conflicting facts to the same scope at roughly the same time, Spectron's reconciliation pipeline detects the conflict and creates a supersession chain. The later write wins for attribute values. You can inspect the conflict:
 
 ```python
-state = await session.get_state(scope=SHARED_SCOPE)
-for entity in state.entities:
-    for attr in entity.attributes:
-        if attr.superseded_by:
-            print(f"Conflict: {entity.name}.{attr.key} was {attr.value} → now {attr.superseded_by.value}")
+state = await memory.state()
+
+# /state returns only the current view, so a row that carries `supersedes`
+# is one that replaced an earlier value.
+for attr in state.knowledge["attributes"]:
+    if attr["supersedes"]:
+        print(f"{attr['entity']}.{attr['key']} is now {attr['value']} (replaced an earlier value)")
+
+# Walk the full chain for one key:
+history = await memory.entities.history("person", "alice", "role")
 ```
 
 ## Supervisor reflection
@@ -158,12 +172,12 @@ for entity in state.entities:
 The supervisor pattern works best with a dedicated reflection pass that runs after all workers complete:
 
 ```python
-async with client.sessions.create(scope=SUPERVISOR_SCOPE) as supervisor_session:
+async with client.sessions.create(scopes=SUPERVISOR_SCOPE) as supervisor_session:
     # Load all worker contributions
-    full_context = await supervisor_session.profile()
-    
+    full_context = await client.profile()
+
     # Synthesise
-    synthesis = await supervisor_session.reflect(
+    synthesis = await client.reflect(
         query="What are the top-level conclusions across all worker findings? What is still uncertain?",
         persist=True,
     )
@@ -184,13 +198,13 @@ const client = new Spectron({
     apiKey: process.env.SPECTRON_API_KEY!,
 });
 
-const sharedScope = { org: "acme", project: "market-research-q3" };
+const sharedScope = ["org/acme/project/market-research-q3"];
 
 await client.remember(
     "Competitor X raised prices by 20% in Q2.",
-    { scope: [...sharedScope, `agent/worker-1`] },
+    { scopes: [...sharedScope, "org/acme/project/market-research-q3/agent/worker-1"] },
 );
 
-const results = await client.recall("competitor pricing", { k: 10, scope: sharedScope });
+const results = await client.recall("competitor pricing", { k: 10, lens: sharedScope });
 console.log(results.hits);
 ```
