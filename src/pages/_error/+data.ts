@@ -1,6 +1,6 @@
 import { redirect } from "vike/abort";
 import type { PageContext } from "vike/types";
-import { getParentPathname } from "~/utils/data";
+import { getParentUrl } from "~/utils/data";
 
 /**
  * 404: walk up to the parent path. `throw redirect()` is an HTTP 302 with a
@@ -15,7 +15,7 @@ export default function data(pageContext: PageContext) {
         return null;
     }
 
-    const parent = getParentPathname(pageContext.urlPathname);
+    const parent = getParentUrl(pageContext.urlPathname);
 
     if (parent) {
         throw redirect(parent, 302);

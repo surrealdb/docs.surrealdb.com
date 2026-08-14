@@ -42,15 +42,7 @@ DEFINE ANALYZER OVERWRITE simple
 DEFINE TABLE OVERWRITE page SCHEMAFULL;
 
 DEFINE FIELD OVERWRITE path         ON page TYPE string;
-DEFINE FIELD OVERWRITE collection   ON page TYPE string;  -- e.g. "reference/query-language", "reference/javascript"
-DEFINE FIELD OVERWRITE slug         ON page TYPE string;  -- path within the collection, e.g. "api/values/table"
--- Ranking metadata, declared per collection in the content tree (the
--- `search` block in each collection's root __category.json) and carried
--- here by the compiled index. Stored rather than derived from the URL at
--- query time, so moving the docs cannot silently break ranking.
-DEFINE FIELD OVERWRITE doc_kind     ON page TYPE string;  -- "reference", "guide", "sdk", ...
-DEFINE FIELD OVERWRITE language     ON page TYPE option<string>;  -- SDK language slug, only when doc_kind = "sdk"
-DEFINE FIELD OVERWRITE product      ON page TYPE string;  -- "surrealdb" | "spectron"
+DEFINE FIELD OVERWRITE collection   ON page TYPE string;  -- e.g. "doc-surrealql", "doc-sdk-javascript"
 DEFINE FIELD OVERWRITE title        ON page TYPE string;
 DEFINE FIELD OVERWRITE description  ON page TYPE string;
 DEFINE FIELD OVERWRITE breadcrumb   ON page TYPE string;  -- "SurrealQL > Statements > SELECT"
@@ -61,8 +53,6 @@ DEFINE FIELD OVERWRITE date         ON page TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX OVERWRITE page_collection   ON page FIELDS collection CONCURRENTLY;
 DEFINE INDEX OVERWRITE page_path_unique  ON page FIELDS path UNIQUE CONCURRENTLY;
--- Product scoping filters every retrieval, so it is worth an index.
-DEFINE INDEX OVERWRITE page_product      ON page FIELDS product CONCURRENTLY;
 
 -- BM25 full-text indexes, one per searchable field.
 -- Each uses the same analyzer and BM25 parameters:
