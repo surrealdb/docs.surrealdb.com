@@ -14,11 +14,11 @@ LangMem is LangChain's in-process memory library, typically backed by a local ve
 |---|---|---|
 | Namespace | Scope + Context | Spectron uses **scope tags** within a named Context |
 | Memory (document) | Entities + attributes | Spectron extracts structure; LangMem stores flat text |
-| `put_memories()` | `session.remember()` | Write path is similar; extraction differs |
-| `search_memory()` | `session.recall()` | Spectron adds graph-density reranking |
-| `get_memories()` | `session.profile()` | Returns structured snapshot |
+| `put_memories()` | `remember()` | Write path is similar; extraction differs |
+| `search_memory()` | `recall()` | Spectron adds graph-density reranking |
+| `get_memories()` | `profile()` | Returns structured snapshot |
 | Memory type (`semantic`, `episodic`, `procedural`) | Memory category (`knowledge`, `context`, `instructions`) | Categories have different volatility and expiry |
-| `delete_memories()` | `session.forget()` | Spectron supports scoped and targeted forget |
+| `delete_memories()` | `forget()` | Query-driven; `POST /scopes/forget` erases a whole subtree |
 | InMemoryStore | Embedded Spectron (in-process SurrealDB) | See the embedded deployment guide |
 
 ## Migration example
@@ -57,9 +57,9 @@ client = AsyncSpectron(
 
 await client.remember(
     "Alice prefers concise, technical answers.",
-    scope=["user/alice"],
+    scopes=["user/alice"],
 )
-results = await client.recall("communication style", k=5, scope=["user/alice"])
+results = await client.recall("communication style", k=5, lens=["user/alice"])
 for hit in results.hits:
     print(hit.text)
 ```
@@ -90,16 +90,16 @@ from surrealdb import AsyncSpectron
 client = AsyncSpectron(context="dev", endpoint="...", api_key="...")
 
 class SpectronMemory:
-    def __init__(self, client: AsyncSpectron, scope: dict):
+    def __init__(self, client: AsyncSpectron, scope: list[str]):
         self.client = client
         self.scope = scope
-    
+
     async def load_context(self, query: str) -> str:
-        results = await self.client.recall(query, k=5, scope=self.scope)
+        results = await self.client.recall(query, k=5, lens=self.scope)
         return "\n".join(hit.text for hit in results.hits)
-    
+
     async def save_turn(self, role: str, content: str):
-        await self.client.remember(f"{role}: {content}", scope=self.scope)
+        await self.client.remember(f"{role}: {content}", scopes=self.scope)
 
 # Usage in a LangGraph node
 async def agent_node(state, memory: SpectronMemory):
@@ -123,19 +123,19 @@ memory = ConversationBufferMemory()
 chain = ConversationChain(llm=llm, memory=memory)
 
 # After: Spectron-based
-async with client.sessions.create(scope=[f"user/{user_id}"]) as session:
+async with client.sessions.create(scopes=[f"user/{user_id}"]) as session:
     # At turn start, recall relevant context
-    context = await session.recall(query=user_message, top_k=5)
-    
+    context = await client.recall(user_message, k=5)
+
     # Pass context as part of the system prompt instead of full history
     response = await llm.ainvoke([
-        SystemMessage(content=f"Relevant context:\n{context.formatted}"),
+        SystemMessage(content=f"Relevant context:\n{context['hits']}"),
         HumanMessage(content=user_message),
     ])
-    
+
     # Store the turn
-    await session.add_turn(role="user", content=user_message)
-    await session.add_turn(role="assistant", content=response.content)
+    await client.remember(user_message, session_id=session.id, role="user")
+    await client.remember(response.content, session_id=session.id, role="assistant")
 ```
 
-This approach scales indefinitely – context window size is bounded by the `top_k` recall, not by conversation length.
+This approach scales indefinitely – context window size is bounded by `k` on recall, not by conversation length.

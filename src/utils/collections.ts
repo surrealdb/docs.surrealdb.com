@@ -19,7 +19,7 @@ export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
     { prefix: "build/integrations", id: "build/integrations" },
     { prefix: "build/migrating", id: "build/migrating" },
     { prefix: "explore/ml-models", id: "explore/ml-models" },
-    { prefix: "explore/surrealist", id: "explore/surrealist" },
+    { prefix: "explore/studio", id: "explore/studio" },
     { prefix: "explore/tutorials", id: "explore/tutorials" },
     { prefix: "learn/data-models", id: "learn/data-models" },
     { prefix: "learn/extensions", id: "learn/extensions" },
@@ -48,7 +48,6 @@ export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
     { prefix: "spectron/cookbooks", id: "spectron/cookbooks" },
     { prefix: "spectron/integrations", id: "spectron/integrations" },
     { prefix: "spectron/reference", id: "spectron/reference" },
-    { prefix: "spectron/self-hosting", id: "spectron/self-hosting" },
     { prefix: "spectron", id: "spectron/index" },
     { prefix: "", id: "index" },
 ];

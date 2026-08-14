@@ -1,132 +1,110 @@
-import { Anchor, Box, Flex, Group, Image, Menu, Stack, Text } from "@mantine/core";
-import { Icon, iconCheck, iconChevronDown, ThemedImage } from "@surrealdb/ui";
-import { useState } from "react";
-import { PRODUCT_ORDER, PRODUCTS, type ProductConfig, type ProductId } from "./products";
+import { Anchor, Box, Group, Image, SegmentedControl, Stack, Text } from "@mantine/core";
+import { Icon, iconCheck, ThemedImage } from "@surrealdb/ui";
+import { useMemo } from "react";
+import { navigate } from "vike/client/router";
+import { PRODUCT_ORDER, PRODUCTS, type ProductId } from "./products";
 import classes from "./style.module.scss";
 
-export interface ProductSwitcherProps {
+export interface ProductWordmarkProps {
     current: ProductId;
 }
 
-export function ProductSwitcher({ current }: ProductSwitcherProps) {
-    const [opened, setOpened] = useState(false);
+/**
+ * Wordmark for the documentation being read. Switching products lives in
+ * the sidebar, so this only links back to the product's docs home.
+ */
+export function ProductWordmark({ current }: ProductWordmarkProps) {
     const product = PRODUCTS[current];
 
     return (
-        <Menu
-            opened={opened}
-            onChange={setOpened}
-            shadow="lg"
-            offset={6}
-            width={280}
-            position="bottom-start"
-            withinPortal
-            trigger="click-hover"
-            transitionProps={{ transition: "scale-y" }}
-        >
-            <Menu.Target>
-                <Anchor
-                    component="button"
-                    type="button"
-                    underline="never"
-                    className={classes.productSwitcherTrigger}
-                    aria-label={`Switch documentation. Currently viewing ${product.label}`}
-                    aria-haspopup="menu"
-                    aria-expanded={opened}
-                    data-active={opened || undefined}
-                >
-                    <Flex
-                        align="center"
-                        gap="xs"
-                    >
-                        <ThemedImage
-                            lightSrc={product.wordmarkLight}
-                            darkSrc={product.wordmarkDark}
-                            h={20}
-                            w="auto"
-                        />
-                        <Icon
-                            path={iconChevronDown}
-                            size="xs"
-                            className={classes.productSwitcherChevron}
-                        />
-                    </Flex>
-                </Anchor>
-            </Menu.Target>
-            <Menu.Dropdown
-                bdrs="xs"
-                p="xs"
-            >
-                {PRODUCT_ORDER.map((id) => (
-                    <ProductMenuItem
-                        key={id}
-                        product={PRODUCTS[id]}
-                        active={id === current}
-                    />
-                ))}
-            </Menu.Dropdown>
-        </Menu>
-    );
-}
-
-interface ProductMenuItemProps {
-    product: ProductConfig;
-    active: boolean;
-}
-
-function ProductMenuItem({ product, active }: ProductMenuItemProps) {
-    return (
-        <Menu.Item
-            component="a"
+        <Anchor
             href={product.homeHref}
-            className={classes.productSwitcherItem}
-            data-active={active || undefined}
-            aria-current={active ? "page" : undefined}
-            bdrs="xs"
-            p="sm"
-            color="slate"
-            leftSection={
-                <Image
-                    src={product.picto}
-                    w={32}
-                />
-            }
-            rightSection={
-                active ? (
-                    <Icon
-                        path={iconCheck}
-                        size="sm"
-                        aria-label="Current"
-                    />
-                ) : null
-            }
+            underline="never"
+            className={classes.productWordmark}
+            aria-label={`${product.label} documentation home`}
         >
-            <Text
-                fw={600}
-                c="bright"
-            >
-                {product.label}
-            </Text>
-            <Text
-                c="dimmed"
-                lineClamp={2}
-                fz="xs"
-            >
-                {product.description}
-            </Text>
-        </Menu.Item>
+            <ThemedImage
+                lightSrc={product.wordmarkLight}
+                darkSrc={product.wordmarkDark}
+                h={20}
+                w="auto"
+            />
+        </Anchor>
     );
 }
 
-export interface ProductSwitcherMobileProps {
+export interface ProductSwitcherSegmentedProps {
     current: ProductId;
 }
 
-export function ProductSwitcherMobile({ current }: ProductSwitcherMobileProps) {
+/**
+ * Sidebar product switch. The header dropdown only reveals itself on
+ * hover, so the sidebar states both products up front and keeps the
+ * current one visibly selected.
+ */
+export function ProductSwitcherSegmented({ current }: ProductSwitcherSegmentedProps) {
+    const data = useMemo(
+        () =>
+            PRODUCT_ORDER.map((id) => {
+                const product = PRODUCTS[id];
+
+                return {
+                    value: id,
+                    label: (
+                        <Group
+                            wrap="nowrap"
+                            gap="xs"
+                            h={26}
+                        >
+                            <Image
+                                src={product.picto}
+                                w={20}
+                                className={classes.productSegmentPicto}
+                                data-active={id === current || undefined}
+                            />
+                            <Text
+                                fz="sm"
+                                fw={500}
+                            >
+                                {product.shortLabel}
+                            </Text>
+                        </Group>
+                    ),
+                };
+            }),
+        [current],
+    );
+
+    return (
+        <SegmentedControl
+            data={data}
+            value={current}
+            onChange={(id) => navigate(PRODUCTS[id].homeHref)}
+            aria-label="Switch documentation"
+            orientation="vertical"
+            size="md"
+            fullWidth
+            bdrs={18}
+            bg="obsidian.9"
+        />
+    );
+}
+
+export interface ProductListProps {
+    /** Product to mark as current. Omit where no product is in scope. */
+    current?: ProductId;
+    label?: string;
+}
+
+/**
+ * Every product as a described card. Used by the mobile navigation and by
+ * the error page, where it doubles as a way out of a dead end.
+ */
+export function ProductList({ current, label = "Switch documentation" }: ProductListProps) {
     return (
         <Box
             component="section"
-            aria-label="Switch documentation"
+            aria-label={label}
         >
             <Stack gap="xs">
                 {PRODUCT_ORDER.map((id) => {
@@ -138,7 +116,7 @@ export function ProductSwitcherMobile({ current }: ProductSwitcherMobileProps) {
                             key={id}
                             href={product.homeHref}
                             underline="never"
-                            className={classes.productSwitcherMobileItem}
+                            className={classes.productListItem}
                             data-active={active || undefined}
                             aria-current={active ? "page" : undefined}
                         >

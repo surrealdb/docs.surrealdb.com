@@ -1,153 +1,60 @@
 ---
 position: 2
-title: Ontology grounding
-description: "Constrain extraction to known entity types, attribute keys, and relation labels for domain-specific accuracy."
+title: Extraction vocabulary
+description: "How Spectron keeps entity names, attribute keys, and relation labels consistent across extractions."
 ---
 
-# Ontology grounding
+# Extraction vocabulary
 
-By default, Spectron's extraction pipeline operates in free-form mode. Given a conversation turn, it infers entity types, attribute names, and relation labels directly from the language of the text, without reference to any predefined vocabulary. This works well for general-purpose assistants where the subject matter is unpredictable and broad.
+Free-form extraction invents vocabulary. Given a conversation turn, the model infers attribute names and relation labels from the language in front of it, so the same concept surfaces under different names depending on phrasing. A customer's subscription plan becomes `plan` in one turn, `subscription_tier` in the next, then `pricing_tier`. Nothing is wrong with any single extraction, but the graph fragments: a query for `plan` misses two thirds of the data.
 
-For domain-specific deployments – customer support, sales intelligence, legal document analysis, medical note processing – free-form extraction produces inconsistent results. The same concept surfaces under different labels depending on phrasing: a customer's subscription plan might be extracted as `plan`, `subscription_tier`, `pricing_tier`, or `tier` across different turns. Queries and reconciliation both degrade when the same attribute is stored under multiple names.
+Spectron addresses this by **feeding the vocabulary already in the graph back into the extraction prompt**. Every extraction run is told which names, keys, labels, and verbs the Context has used before, and is instructed to reuse them when the meaning matches. Vocabulary converges as the graph grows, without configuration.
 
-Ontology grounding solves this by supplying a controlled vocabulary that Spectron injects into the extraction prompt as a constraint. Extraction is then bounded to the types, keys, and labels you define.
+## What extraction is shown
 
-## What an ontology contains
+Four vocabulary lists are gathered before each run and rendered into the prompt:
 
-An ontology has three components:
+| List | How many | Selected by |
+| --- | --- | --- |
+| Entity names and types | up to 500 | no ranking |
+| Relation labels | up to 100 | most-used first |
+| Attribute keys | up to 100 | most-used first, live rows only |
+| Action verbs | up to 100 | most-used first |
 
-- **Entity types**: the classes of thing your domain cares about (e.g. `Customer`, `Product`, `Ticket`).
-- **Attribute keys per entity type**: the allowed property names for each type. Extraction maps every observed attribute to the closest key in this list rather than inventing a new name.
-- **Relation labels**: the allowed labels for edges between entities (e.g. `purchased`, `raised`, `resolved_by`).
+Relation labels, attribute keys, and action verbs are counted within the write scope, ranked by frequency, and truncated to the most common. Attribute keys are drawn only from rows that are still current — superseded and expired values do not keep a dead key alive in the prompt.
 
-None of these components are mandatory. You can set only entity types without attribute keys if your goal is simply to suppress unexpected entity classes, or only relation labels if you want to constrain the graph topology without dictating attribute vocabulary.
+The instruction attached to each list is the same shape. For attribute keys:
 
-## Setting an ontology
+> Attribute keys already used in this memory. Reuse one as an attribute `key` when it means the same thing; only mint a new key when none fits. A key invented for a single fact can never be looked up again.
 
-### Python
+Reuse is a strong preference, not a constraint. Extraction can still mint a new key when nothing fits, which is what keeps a novel concept from being forced into a nearby-but-wrong slot.
 
-```python
-from surrealdb import Spectron
+## Entity types are a fixed set
 
-memory = Spectron(context="acme-support", api_key=os.environ["SPECTRON_API_KEY"])
+Entity types are not part of this vocabulary and cannot be extended. They are a closed list — `person`, `organisation`, `project`, `location`, `topic`, `product`, `policy`, `concept`, `event`, `agent`, `service`, `other` — and a supplied type outside it normalises to `other` rather than creating a new type.
 
-await memory.config.ontology(
-    entity_types=["Customer", "Product", "Ticket", "Agent"],
-    attribute_keys={
-        "Customer": ["name", "plan", "region", "email"],
-        "Product": ["name", "version", "category", "sku"],
-        "Ticket": ["id", "status", "priority", "channel"],
-        "Agent": ["name", "team"],
-    },
-    relation_labels=["purchased", "raised", "assigned_to", "resolved_by", "related_to"],
-)
-```
+This matters more than it looks: the type is half an entity's identity, so an invented type silently produces a second entity. See [Entity matching](/docs/spectron/agent-memory/reasoning/reconciliation-and-supersession#entity-matching).
 
-### JavaScript
+## The cold start is the weak point
 
-```javascript
-import { Spectron } from "@surrealdb/spectron";
+The mechanism is self-reinforcing, which cuts both ways. An empty Context has no vocabulary to offer, so the earliest extractions set the terms that everything later converges on. Whatever the first few documents happen to call something becomes the house style.
 
-const memory = new Spectron({ context: "acme-support", apiKey: process.env.SPECTRON_API_KEY });
+Two consequences worth planning around:
 
-await memory.config.ontology({
-    entity_types: ["Customer", "Product", "Ticket", "Agent"],
-    attribute_keys: {
-        Customer: ["name", "plan", "region", "email"],
-        Product: ["name", "version", "category", "sku"],
-        Ticket: ["id", "status", "priority", "channel"],
-        Agent: ["name", "team"],
-    },
-    relation_labels: ["purchased", "raised", "assigned_to", "resolved_by", "related_to"],
-});
-```
+- **Seed the names you care about before a bulk import.** Entities that already exist are listed in the prompt and get reused. Creating them up front is the most reliable lever available for keeping references together.
+- **Ingest in a deliberate order where you can.** A representative document first establishes better vocabulary than an unusual one.
 
-The ontology is stored per-Context and applied immediately to all subsequent extraction runs. Existing extracted facts are not retroactively relabelled.
+> [!NOTE]
+> The entity list is the one that is **not** frequency-ranked, and it is capped at 500. On a Context with more entities than that, which names reach the prompt is arbitrary — so on large graphs, seeding matters more, not less, and important entities can drop out of the prompt without any signal.
 
-## How grounding works
+## What is not configurable
 
-When Spectron processes a turn with an ontology configured, the extraction prompt includes a structured constraint block:
+There is no API for supplying your own controlled vocabulary. Allowed entity types, attribute keys, and relation labels cannot be pinned per Context; the vocabulary is emergent, derived from what the graph already holds.
 
-```
-Allowed entity types: Customer, Product, Ticket, Agent
-Allowed attribute keys for Customer: name, plan, region, email
-Allowed relation labels: purchased, raised, assigned_to, resolved_by, related_to
-```
+If you need harder guarantees than convergence provides, normalise before the write: map your variants to canonical names in your own pipeline and send those, or write structured triples with `infer: "triples"` to bypass model-chosen vocabulary entirely. For repairing drift after the fact, `POST /fsck` with the `duplicates` check reports near-identical entities for you to act on.
 
-The model is instructed to map all observed entities, attributes, and relations to the closest matching entry in these lists. If the text mentions a concept that has no clear match, the extractor either maps it to the closest allowed key or omits it – it does not invent a new label.
+## Related reading
 
-This keeps the knowledge graph consistent regardless of how users phrase their messages, and ensures that queries such as "list all customers on the enterprise plan" reliably match facts stored under `plan` rather than scattered across `plan`, `tier`, and `subscription_level`.
-
-## Partial ontologies
-
-You can supply any combination of the three components. For example, supplying only entity types without attribute keys constrains which entity classes are recognised but leaves attribute naming free-form:
-
-```python
-await memory.config.ontology(
-    entity_types=["Customer", "Order", "Product"],
-)
-```
-
-Or supplying only relation labels to constrain graph topology:
-
-```python
-await memory.config.ontology(
-    relation_labels=["ordered", "contains", "shipped_to"],
-)
-```
-
-## Updating an ontology
-
-Calling `memory.config.ontology()` replaces the existing ontology wholesale. To add new types or keys to an existing ontology, read the current configuration first, extend it, and write it back:
-
-```python
-config = await memory.config.get()
-existing = config.ontology
-
-await memory.config.ontology(
-    entity_types=existing.entity_types + ["Warranty"],
-    attribute_keys={
-        **existing.attribute_keys,
-        "Warranty": ["duration", "coverage", "start_date"],
-    },
-    relation_labels=existing.relation_labels + ["covered_by"],
-)
-```
-
-## Reading the current ontology
-
-```python
-config = await memory.config.get()
-print(config.ontology)
-```
-
-```javascript
-const config = await memory.config.get();
-console.log(config.ontology);
-```
-
-## Clearing an ontology
-
-To revert to free-form extraction, set all three fields to empty lists or omit them entirely:
-
-```python
-await memory.config.ontology(
-    entity_types=[],
-    attribute_keys={},
-    relation_labels=[],
-)
-```
-
-## When to use ontology grounding
-
-Use grounding when:
-
-- Your deployment has a **well-defined domain** with a stable set of entity types and relationships. Customer support, e-commerce, legal, and medical systems are good candidates.
-- You need **consistent attribute names** for downstream queries, filters, or integrations. If your application queries for `plan = "enterprise"`, every fact about customer plans must be stored under that exact key.
-- You are building a **multi-turn agent** where accumulated facts drive personalisation or decision logic. Inconsistent keys compound over time as the knowledge graph grows.
-
-Free-form extraction is preferable when:
-
-- The subject matter is genuinely open-ended and unpredictable (general-purpose assistants, research tools).
-- You are in the early stages of development and have not yet identified the relevant entity types for your domain.
-- You want to discover which entity types and relations naturally emerge from your data before committing to a fixed vocabulary.
+- [Reconciliation and supersession](/docs/spectron/agent-memory/reasoning/reconciliation-and-supersession) — exact-key entity matching, and why nicknames fragment
+- [Storing memories](/docs/spectron/agent-memory/ingest/experiential/remember) — `infer` modes, including caller-supplied triples
+- [Extraction pipeline](/docs/spectron/agent-memory/reasoning/extraction-pipeline) — where extraction sits in ingest
