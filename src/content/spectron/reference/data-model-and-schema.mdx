@@ -42,17 +42,29 @@ Management keys (not per-Context). Used for creating and managing Contexts.
 
 ### `context_api_key`
 
-Per-Context end-user keys, stored as Argon2 hashes. Each key carries its principal type and scope floor.
+Per-Context end-user keys, stored as Argon2 hashes. Each key binds to a principal and optionally attenuates that principal's grants.
 
 | Field | Type | Notes |
 |---|---|---|
-| `context_id` | string | The Context this key belongs to |
-| `name` | string | Human-readable label |
-| `key_hash` | string | Argon2 hash of the secret |
-| `principal` | string | `agent` \| `supervisor` |
-| `scope_floor` | object | Minimum scope dimensions for this key |
+| `context` | `record<context>` | The Context this key belongs to |
+| `name` | string | Human-readable label, unique per Context |
+| `hash` | string | Argon2 hash of the secret |
+| `principal_id` | option\<string\> | The principal this key acts as. Stored as a plain string because the `principal` row lives in the Context's own database, not the control plane |
+| `grants` | option\<object\> | Attenuating per-verb pattern map (`grants.*` is `array<string>`). Absent ⇒ inherit the principal's grants |
+| `strict` | bool | Opt into hard out-of-region errors instead of empty results. Defaults to `false` |
+| `valid_until` | option\<datetime\> | Mint-time expiry. Absent ⇒ no expiry |
 | `created_at` | datetime | |
-| `last_used_at` | datetime (optional) | |
+| `last_used_at` | option\<datetime\> | Vestigial — no longer written. Last use is derived as `max(used_at)` over `context_api_key_usage`; the column stays defined so older rows deserialize |
+
+### `context_api_key_usage`
+
+Append-only key-use log: one row per successful data-plane key validation, throttled to at most one row per key per minute. This is what backs the derived `lastUsedAt` on the self-service key listing — it records recent activity, not a per-request audit trail.
+
+| Field | Type | Notes |
+|---|---|---|
+| `key` | `record<context_api_key>` | The key that validated |
+| `context` | `record<context>` | |
+| `used_at` | datetime | |
 
 ## Knowledge tables (Authoritative pillar, per Context)
 
@@ -91,18 +103,22 @@ Text segments extracted from documents, with vector embeddings.
 DEFINE TABLE knowledge_chunk SCHEMAFULL;
 DEFINE FIELD document    ON knowledge_chunk TYPE record<document>;
 DEFINE FIELD text        ON knowledge_chunk TYPE string;
-DEFINE FIELD embedding   ON knowledge_chunk TYPE array<float, 1536>;
+DEFINE FIELD embedding   ON knowledge_chunk TYPE option<array<float, 3072>>;
 DEFINE FIELD position    ON knowledge_chunk TYPE int;
 DEFINE FIELD section     ON knowledge_chunk TYPE option<string>;
 DEFINE FIELD char_start  ON knowledge_chunk TYPE int;
 DEFINE FIELD char_end    ON knowledge_chunk TYPE int;
 DEFINE FIELD token_count ON knowledge_chunk TYPE option<int>;
+DEFINE FIELD simhash     ON knowledge_chunk TYPE option<int>;
+DEFINE FIELD duplicate_of ON knowledge_chunk TYPE option<record<knowledge_chunk>>;
 DEFINE FIELD scope       ON knowledge_chunk TYPE set<record<scope_attribute>>;
 DEFINE FIELD created_at  ON knowledge_chunk TYPE datetime DEFAULT time::now() READONLY;
-DEFINE INDEX embedding_index ON knowledge_chunk FIELDS embedding HNSW DIMENSION 1536 DIST COSINE TYPE F32;
+DEFINE INDEX embedding_index ON knowledge_chunk FIELDS embedding HNSW DIMENSION 3072 DIST COSINE TYPE F32;
 DEFINE INDEX document_index  ON knowledge_chunk FIELDS document;
 DEFINE INDEX scope_index     ON knowledge_chunk FIELDS scope;
 ```
+
+Embedding width is fixed deployment-wide at **3072** (`gemini-embedding-2`). Optional **`simhash`** / **`duplicate_of`** support near-duplicate suppression on recall (see **`includeDuplicates`** on `/query`).
 
 ### `keyword`
 
@@ -112,13 +128,13 @@ RAKE-extracted keyphrases from documents, stored as nodes in the keyword graph.
 DEFINE TABLE keyword SCHEMAFULL;
 DEFINE FIELD text           ON keyword TYPE string;
 DEFINE FIELD normalised     ON keyword TYPE string;
-DEFINE FIELD embedding      ON keyword TYPE array<float, 1536>;
+DEFINE FIELD embedding      ON keyword TYPE option<array<float, 3072>>;
 DEFINE FIELD scope          ON keyword TYPE set<record<scope_attribute>> DEFAULT [];
 DEFINE FIELD document_count ON keyword TYPE int DEFAULT 0;
 DEFINE FIELD created_at     ON keyword TYPE datetime DEFAULT time::now() READONLY;
 DEFINE FIELD updated_at     ON keyword TYPE datetime DEFAULT time::now();
-DEFINE INDEX embedding_index 
-  ON keyword FIELDS embedding HNSW DIMENSION 1536 DIST COSINE TYPE F32;
+DEFINE INDEX embedding_index
+  ON keyword FIELDS embedding HNSW DIMENSION 3072 DIST COSINE TYPE F32;
 DEFINE INDEX normalised_index ON keyword FIELDS normalised UNIQUE;
 ```
 
@@ -188,13 +204,13 @@ DEFINE FIELD type            ON entity TYPE string;
 DEFINE FIELD memory_category ON entity TYPE string
     ASSERT $value IN ["identity", "knowledge", "context"];
 DEFINE FIELD scope           ON entity TYPE set<record<scope_attribute>>;
-DEFINE FIELD embedding       ON entity TYPE array<float, 1536>;
+DEFINE FIELD embedding       ON entity TYPE option<array<float, 3072>>;
 DEFINE FIELD resolves_to     ON entity TYPE option<record<knowledge>>;
 DEFINE FIELD source_turn     ON entity TYPE option<record<turn>>;
 DEFINE FIELD created_at      ON entity TYPE datetime DEFAULT time::now() READONLY;
 DEFINE FIELD updated_at      ON entity TYPE datetime DEFAULT time::now();
 DEFINE INDEX embedding_index 
-  ON entity FIELDS embedding HNSW DIMENSION 1536 DIST COSINE TYPE F32;
+  ON entity FIELDS embedding HNSW DIMENSION 3072 DIST COSINE TYPE F32;
 DEFINE INDEX type_index       ON entity FIELDS type;
 DEFINE INDEX scope_index      ON entity FIELDS scope;
 DEFINE INDEX resolves_to_index ON entity FIELDS resolves_to;
@@ -280,18 +296,24 @@ Raw text segments from turns, embedded for semantic recall.
 DEFINE TABLE memory_chunk SCHEMAFULL;
 DEFINE FIELD session      ON memory_chunk TYPE record<session>;
 DEFINE FIELD text         ON memory_chunk TYPE string;
-DEFINE FIELD embedding    ON memory_chunk TYPE array<float, 1536>;
+DEFINE FIELD embedding    ON memory_chunk TYPE option<array<float, 3072>>;
 DEFINE FIELD scope        ON memory_chunk TYPE set<record<scope_attribute>>;
 DEFINE FIELD source_turn  ON memory_chunk TYPE option<record<turn>>;
+DEFINE FIELD turn         ON memory_chunk TYPE option<record<turn>>;
+DEFINE FIELD position     ON memory_chunk TYPE option<int>;
+DEFINE FIELD char_start   ON memory_chunk TYPE option<int>;
+DEFINE FIELD char_end     ON memory_chunk TYPE option<int>;
+DEFINE FIELD token_count  ON memory_chunk TYPE option<int>;
 DEFINE FIELD role         ON memory_chunk TYPE option<string>;
+DEFINE FIELD simhash      ON memory_chunk TYPE option<int>;
 DEFINE FIELD duplicate_of ON memory_chunk TYPE option<record<memory_chunk>>;
 DEFINE FIELD created_at   ON memory_chunk TYPE datetime DEFAULT time::now() READONLY;
-DEFINE INDEX embedding_index ON memory_chunk FIELDS embedding HNSW DIMENSION 1536 DIST COSINE TYPE F32;
+DEFINE INDEX embedding_index ON memory_chunk FIELDS embedding HNSW DIMENSION 3072 DIST COSINE TYPE F32;
 DEFINE INDEX session_index   ON memory_chunk FIELDS session;
 DEFINE INDEX scope_index     ON memory_chunk FIELDS scope;
 ```
 
-Optional **`role`** and **`duplicate_of`** support role-aware retrieval and near-duplicate suppression (see **`includeDuplicates`** on `/query`).
+Optional **`role`**, **`simhash`**, and **`duplicate_of`** support role-aware retrieval and near-duplicate suppression (see **`includeDuplicates`** on `/query`). **`char_start` / `char_end` / `token_count`** locate each sub-chunk in the turn’s text when a long passage is split for embedding.
 
 ### `decision_trace`
 
@@ -311,4 +333,4 @@ Audit record for every retrieval and storage operation.
 
 ## Migrations
 
-Schema is bundled into the Spectron binary and applied automatically when a Context is created or upgraded. See [Migrations and upgrades](/docs/spectron/self-hosting/operations/migrations-and-upgrades).
+Schema is bundled into the Spectron binary and applied automatically when a Context is created or upgraded. See [Migration status](/docs/spectron/reference/management-api#migration-status) for the fleet-wide catch-up view.

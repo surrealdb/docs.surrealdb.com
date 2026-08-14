@@ -20,36 +20,49 @@ Response:
 
 ```json
 {
-  "scope": ["org/acme/user/alice"],
   "identity": {
     "entities": [
-      { "id": "entity:01hy2a…", "type": "person", "label": "Alice" }
+      {
+        "id": "['person', 'alice']",
+        "name": "Alice",
+        "entityType": "person",
+        "memoryCategory": "identity",
+        "importance": 1.0,
+        "createdAt": "2026-05-12T16:24:00Z",
+        "updatedAt": "2026-05-12T16:24:00Z"
+      }
     ],
     "attributes": [
-      { "key": "job_title", "value": "CTO", "valid_from": "2026-05-12T16:24:00Z" },
-      { "key": "location",  "value": "Berlin",  "valid_from": "2026-04-01T09:00:00Z" }
-    ]
-  },
-  "knowledge": {
-    "facts": [],
+      {
+        "id": "attr_01hy2c",
+        "entity": "entity:person/alice",
+        "key": "job_title",
+        "value": "CTO",
+        "memoryCategory": "identity",
+        "importance": 1.0,
+        "validFrom": "2026-05-12T16:24:00Z",
+        "validUntil": null,
+        "supersedes": "attr_01hy1b",
+        "supersededBy": null,
+        "source": { "kind": "turn", "ref": "turn:01hy2…" },
+        "createdAt": "2026-05-12T16:24:00Z"
+      }
+    ],
     "relations": []
   },
-  "context": {
-    "recent_topics": ["promotion", "relocation"],
-    "open_threads": []
-  },
+  "knowledge": { "entities": [], "attributes": [], "relations": [] },
+  "context": { "entities": [], "attributes": [], "relations": [] },
   "instructions": [
-    { "text": "Always respond in German when the user writes in German.", "priority": "high" }
+    {
+      "id": "instr_01hy4d",
+      "label": "language",
+      "description": "Always respond in German when the user writes in German."
+    }
   ],
   "unknowns": [
-    { "text": "Whether Alice holds any equity in Acme.", "source_turn": "turn:01hy3…" }
-  ],
-  "corrections": [
     {
-      "attribute": "attr:01hy2c…",
-      "previous": { "key": "location", "value": "London", "source_turn": "turn:01hy1…" },
-      "current":  { "key": "location", "value": "Berlin",  "source_turn": "turn:01hy2…" },
-      "timestamp": "2026-05-01T10:15:00Z"
+      "about": "Whether Alice holds any equity in Acme.",
+      "reason": "Equity was never mentioned in the conversation."
     }
   ]
 }
@@ -59,65 +72,71 @@ Response:
 
 | Field | Description |
 |---|---|
-| `identity` | Named entities and their current attributes within this scope. |
-| `knowledge` | Extracted facts and relations that are not directly tied to the scoped entity. |
-| `context` | Conversational context: recent topics, open threads, pending questions. |
-| `instructions` | Persistent behavioural directives extracted from the conversation. |
-| `unknowns` | Statements flagged as uncertain or unverified. |
-| `corrections` | Attributes that were corrected, with their previous and current values. |
+| `identity` | Biographical facts, roles, and names — as `entities`, `attributes`, and `relations`. |
+| `knowledge` | Preferences, opinions, and skills, in the same three-part shape. |
+| `context` | Situational and recent-event memory, in the same three-part shape. |
+| `instructions` | Standing behavioural directives: `id`, `label`, `description`. |
+| `unknowns` | Things extraction could not resolve: `about` and `reason`. |
 
-The state endpoint always returns the current, canonical view. Superseded attributes are not present in `identity.attributes` – they appear only in `corrections` as the `previous` side of a correction record.
+The three memory categories share one shape — each holds `entities`, `attributes`,
+and `relations`.
 
-## The `/state/diff` endpoint
+The endpoint always returns the current, canonical view: superseded attributes are
+not included. Each returned attribute carries `supersedes` and `supersededBy`
+links, so you can walk backwards from the current value. **Corrections are not part
+of this response** — they come back on the write that made them, described in
+[Showing what changed after a turn](#showing-what-changed-after-a-turn).
 
-The diff endpoint returns only what changed since a given turn. This is more efficient than polling the full state on every message.
+## Showing what changed after a turn
 
-```http
-GET /api/v1/{context_id}/state/diff?since={turn_id}&scope[user]=alice&scope[org]=acme
-```
+There is no `/state/diff` endpoint, and `/state` takes no `since` parameter — but
+you rarely need one, because **every write returns its own delta**.
 
-Response:
+`POST /facts` responds with an `extraction` object describing exactly what that
+write produced:
 
-```json
-{
-  "added": [
-    { "type": "attribute", "key": "job_title", "value": "CTO", "source_turn": "turn:01hy2…" }
-  ],
-  "updated": [
-    { "type": "attribute", "key": "location", "value": "Berlin", "previous_value": "London" }
-  ],
-  "superseded": [
-    { "type": "attribute", "key": "location", "value": "London", "superseded_at": "2026-05-01T10:15:00Z" }
-  ]
-}
-```
+| Field | What it holds |
+| --- | --- |
+| `turnId` | The turn the extraction belongs to |
+| `entities` | Entities created or matched |
+| `attributes` | Attributes asserted |
+| `relations` | Relations asserted |
+| `instructions` | Standing directives picked up |
+| `uncertainties` | Things the extractor could not resolve |
+| `corrections` | Values this write superseded, with both sides |
 
-Pass the `turn_id` returned from a previous `session.turn()` call as the `since` parameter. The response contains only records that were added, updated, or superseded after that turn.
-
-Use this endpoint to drive incremental UI updates. After each message, fetch the diff since the previous turn and apply only the changed records rather than re-rendering the entire state.
+A supersession is reported with the value it replaced, so no second request and no
+comparison work are needed. Read `/state` for the full picture at a point in time,
+and `GET /entities/{type}/{name}/history/{key}` to follow one attribute's ordered
+supersession chain.
 
 ## Python SDK
 
 ```python
-state = await memory.state(scope=["org/acme/user/alice"])
+state = await memory.state()
 
 print(state.identity.attributes)   # Current attribute list
 print(state.instructions)          # Active behavioural instructions
 print(state.unknowns)              # Flagged uncertainties
-print(state.corrections)           # Correction history
 ```
 
-The `scope` parameter is optional. If omitted, the SDK uses the scope from the active session.
+`GET /state` takes no parameters at all — no scope, no time filter, no `since`. It
+returns everything the calling key can read. Narrow the result yourself, or read a
+single entity with `entities.get(…)`.
+
+To read as another principal, send the **`X-Spectron-On-Behalf-Of`** header. That
+is a request header available on every end-user route rather than a `state()`
+argument, and the effective authority is the intersection of your grants and the
+target's — delegation never widens access.
 
 ## JavaScript SDK
 
 ```javascript
-const state = await memory.state({ scope: ["org/acme/user/alice"] });
+const state = await memory.state();
 
 console.log(state.identity.attributes);
 console.log(state.instructions);
 console.log(state.unknowns);
-console.log(state.corrections);
 ```
 
 ## Profile endpoint
@@ -147,46 +166,32 @@ Response shape:
 
 The profile view does not include raw turn references. It is a synthesised snapshot intended for injection into system prompts or display in a "what does the AI know about me?" UI.
 
-## Using diffs for real-time UI updates
+## Driving real-time UI updates
 
-A common pattern is to store the `turn_id` returned from each `session.turn()` call and use it to fetch incremental diffs immediately after the model responds:
+Apply the `extraction` payload from each write straight to the UI — new attributes as additions, `corrections` as in-place updates:
 
 ```python
-result = await session.turn(role="user", content="I moved to Berlin last month")
-previous_turn_id = result.turn_id
+result = await memory.remember(
+    "I moved to Berlin last month",
+    session_id=session_id,
+)
 
-# … LLM call and assistant turn …
+for attr in result.extraction.attributes:
+    ui.add_fact(attr)
 
-diff = await memory.state_diff(since=previous_turn_id, scope=["user/alice"])
-
-for item in diff.added:
-    ui.add_fact(item)
-
-for item in diff.updated:
-    ui.animate_update(item.key, old=item.previous_value, new=item.value)
-
-for item in diff.superseded:
-    ui.strike_through(item.key, item.value)
+for c in result.extraction.corrections:
+    ui.animate_update(c["key"], old=c["oldValue"], new=c["newValue"])
 ```
 
 ```javascript
-const result = await session.turn({ role: "user", content: "I moved to Berlin last month" });
-const previousTurnId = result.turnId;
+const result = await memory.remember("I moved to Berlin last month", { sessionId });
 
-// … LLM call and assistant turn …
-
-const diff = await memory.stateDiff({ since: previousTurnId, scope: ["user/alice"] });
-
-for (const item of diff.added) {
-    ui.addFact(item);
+for (const attr of result.extraction.attributes) {
+    ui.addFact(attr);
 }
 
-for (const item of diff.updated) {
-    ui.animateUpdate(item.key, { old: item.previousValue, new: item.value });
-}
-
-for (const item of diff.superseded) {
-    ui.strikeThrough(item.key, item.value);
+for (const c of result.extraction.corrections) {
+    ui.animateUpdate(c.key, { old: c.oldValue, new: c.newValue });
 }
 ```
 
@@ -196,24 +201,18 @@ Corrections are produced during reconciliation whenever a newly extracted attrib
 
 ```json
 {
-  "attribute": "attr:01hy2c…",
-  "previous": {
-    "key": "location",
-    "value": "London",
-    "source_turn": "turn:01hy1…",
-    "valid_from": "2025-11-01T00:00:00Z",
-    "valid_until": "2026-04-30T23:59:59Z"
-  },
-  "current": {
-    "key": "location",
-    "value": "Berlin",
-    "source_turn": "turn:01hy2…",
-    "valid_from": "2026-05-01T00:00:00Z"
-  },
-  "timestamp": "2026-05-01T10:15:00Z"
+  "entityId": "entity:person/alice",
+  "key": "location",
+  "oldValue": "London",
+  "newValue": "Berlin"
 }
 ```
 
-`valid_until` on the previous record is set to just before the correction timestamp, preserving a temporally accurate record of when the prior value was valid. This allows historical queries – "what did the agent know about Alice's location in March 2026?" – to return the correct answer.
+The correction is a summary of the change, not the full temporal record. The
+timestamps live on the attribute rows themselves: the superseded row gets a
+`valid_until` and a `superseded_by` link, the new row a `valid_from` and a
+`supersedes` link. That is what makes historical queries — "what did the agent
+know about Alice's location in March 2026?" — return the right answer. Read the
+chain with `GET /entities/{type}/{name}/history/{key}`.
 
 Corrections accumulate and are never deleted. The full supersession chain for any attribute is always queryable, which means the audit trail for any fact is complete and irrevocable. See [Temporal validity](/docs/spectron/agent-memory/reasoning/temporal-validity) and [Reconciliation and supersession](/docs/spectron/agent-memory/reasoning/reconciliation-and-supersession) for the detailed model.
