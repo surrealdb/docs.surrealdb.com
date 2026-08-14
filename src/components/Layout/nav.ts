@@ -4,6 +4,7 @@ import {
     iconAuthKeyhole,
     iconBraces,
     iconCloud,
+    iconGrid,
     iconIntegration,
     iconLangDotNet,
     iconLangGo,
@@ -24,7 +25,6 @@ import {
     iconSandbox,
     iconSidekick,
     iconSpectron,
-    iconSurrealist,
     iconTable,
     iconTransfer,
     iconVideo,
@@ -214,10 +214,10 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                 heading: "Tools",
                 items: [
                     {
-                        label: "Surrealist UI",
-                        href: "/docs/explore/surrealist",
-                        description: "Explore data in the official SurrealDB IDE.",
-                        icon: iconSurrealist,
+                        label: "SurrealDB Studio",
+                        href: "/docs/explore/studio",
+                        description: "Explore data in the official SurrealDB dashboard.",
+                        icon: iconGrid,
                     },
                 ],
             },
@@ -330,7 +330,6 @@ export const SPECTRON_NAV_LINKS: NavEntry[] = [
     { label: "Get started", href: "/docs/spectron" },
     { label: "Memory & knowledge", href: "/docs/spectron/agent-memory" },
     { label: "Integrations", href: "/docs/spectron/integrations" },
-    { label: "Self-hosting", href: "/docs/spectron/self-hosting" },
     { label: "Cookbooks", href: "/docs/spectron/cookbooks" },
     { label: "Reference", href: "/docs/spectron/reference" },
 ];

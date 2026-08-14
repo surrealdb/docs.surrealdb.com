@@ -7,7 +7,6 @@ const SPECTRON_SIBLING_SECTIONS = new Set([
     "knowledge",
     "memory",
     "reference",
-    "self-hosting",
 ]);
 
 export default function route({ urlPathname }: PageContext) {
