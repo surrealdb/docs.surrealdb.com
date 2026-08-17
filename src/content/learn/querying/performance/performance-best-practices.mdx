@@ -55,7 +55,7 @@ surreal start --log info rocksdb://path/to/mydatabase
 
 ### Running SurrealDB embedded in Rust
 
-It is common knowledge among Rust developers that the `--release` flag is used to ensure that a build is optimized for performance as opposed to compilation speed. However, the SurrealDB source code also contains a few additional flags when the `--release` flag is passed in as seen below. As this configuration will not be present by default inside the `Cargo.toml` for your own project when adding the `surrealdb` dependency, be sure to add it if performance is crucial.
+It is common knowledge among Rust developers that the `--release` flag is used to ensure that a build is optimised for performance as opposed to compilation speed. However, the SurrealDB source code also contains a few additional flags when the `--release` flag is passed in as seen below. As this configuration will not be present by default inside the `Cargo.toml` for your own project when adding the `surrealdb` dependency, be sure to add it if performance is crucial.
 
 ```toml
 [profile.release]
@@ -188,7 +188,7 @@ FROM user:12647931632..=19374837491;
 
 ### Simplifying logic in `WHERE` clauses
 
-If a `WHERE` clause cannot be avoided, performance can still be improved by optimizing the portion after the `WHERE` clause. As a boolean check is the simplest possible operation, having a boolean field that can be used in a `WHERE` clause can significantly improve performance.
+If a `WHERE` clause cannot be avoided, performance can still be improved by optimising the portion after the `WHERE` clause. As a boolean check is the simplest possible operation, having a boolean field that can be used in a `WHERE` clause can significantly improve performance.
 
 ```surql
 DEFINE FIELD data_length ON person VALUE random_data.len();
@@ -468,7 +468,7 @@ to 'admin'.
 ]
 ```
 
-To optimize this query, you can create indexes on both the `user.role` field and the `access.user` field.
+To optimise this query, you can create indexes on both the `user.role` field and the `access.user` field.
 With these indexes, the query planner can leverage an index-based join strategy:
 
 ```surql
