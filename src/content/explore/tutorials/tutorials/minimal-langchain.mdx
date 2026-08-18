@@ -119,7 +119,7 @@ for q in queries:
     res = graph_store.query(
         """
         SELECT <-relation_KnowsAbout<-graph_People as people
-        FROM type::thing("graph_Document", $doc_key)
+        FROM type::record("graph_Document", $doc_key)
         FETCH people
         """,
         {"doc_key": top_match.metadata.get("key")},

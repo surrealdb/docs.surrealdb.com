@@ -145,7 +145,7 @@ Notes on the arguments and output of this function:
   - `lists` - array of result arrays. Each inner array must be pre‑sorted most‑relevant‑first (BM25 score descending, distance ascending already inverted, etc.).
   - `weights` - An array of numeric weights corresponding to each result(must have same length as results)
   - `limit` - Maximum number of documents to return (must be ≥ 1)
-  - `norm` - Normalization method: "minmax" for MinMax normalization or "zscore" for Z-score normalization
+  - `norm` - Normalisation method: "minmax" for MinMax normalisation or "zscore" for Z-score normalisation
 - **Processing:**
   - Computes the union of all candidate ids.
   - The function automatically extracts scores from documents using the following priority:
@@ -153,7 +153,7 @@ Notes on the arguments and output of this function:
     2. `ft_score` field - used directly (full-text search scores)
     3. `score` field - used directly (generic scores)
     4. Rank-based fallback - `1.0 / (1.0 + rank)` if no score field is found
-  - Normalization Methods:
+  - Normalisation Methods:
     - **MinMax**: Scales scores to [0,1] range using `(score - min) / (max - min)`
     - **Z-score**: Standardizes scores using `(score - mean) / std_dev`
   - When merging field data from the per‑list rows, keeps the first non‑null value encountered in the order the lists were supplied, or the last one if there are several fields with the same key.

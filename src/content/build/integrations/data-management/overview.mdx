@@ -18,19 +18,19 @@ SurrealDB offers comprehensive data management capabilities to help you efficien
     </thead>
     <tbody>
         <tr>
-            <td><a href="/docs/integrations/data-management/airbyte">Airbyte</a></td>
+            <td><a href="/docs/build/integrations/data-management/airbyte">Airbyte</a></td>
             <td>Data integration platform specialising in ELT pipelines.</td>
         </tr>
         <tr>
-            <td><a href="/docs/integrations/data-management/fivetran">Fivetran</a></td>
+            <td><a href="/docs/build/integrations/data-management/fivetran">Fivetran</a></td>
             <td>Data integration platform to manage data transfer between different sources and destination systems.</td>
         </tr>
         <tr>
-            <td><a href="/docs/integrations/data-management/n8n">n8n</a></td>
+            <td><a href="/docs/build/integrations/data-management/n8n">n8n</a></td>
             <td>Workflow automation platform that lets you build custom event-driven automations.</td>
         </tr>
         <tr>
-            <td><a href="/docs/integrations/data-management/qyrus">Qyrus</a></td>
+            <td><a href="/docs/build/integrations/data-management/qyrus">Qyrus</a></td>
             <td>Data quality assurance platform for cross-source comparisons and single-source validations.</td>
         </tr>
     </tbody>

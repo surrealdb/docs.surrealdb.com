@@ -81,7 +81,7 @@ if err != nil {
 defer db.Close(ctx)
 ```
 
-## Configuring retry behavior
+## Configuring retry behaviour
 
 By default, connection attempts are not retried. Set the `Retryer` field to enable automatic retries on connection failure.
 
