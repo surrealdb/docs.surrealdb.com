@@ -5,6 +5,14 @@ import { redirectDestinationForDev, resolveRedirect } from "../redirects";
 
 const SKIP_PREFIXES = ["/@", "/assets/", "/__vite", "/favicon"];
 
+/** Removes Vite's `/docs` base so a pathname matches the deployed redirect sources. */
+function stripDocsBase(pathname: string): string {
+    if (pathname === "/docs") {
+        return "/";
+    }
+    return pathname.startsWith("/docs/") ? pathname.slice("/docs".length) : pathname;
+}
+
 /**
  * Applies the same redirect rules as vercel.ts during `vike dev` and `vike preview`.
  * Vercel reads redirects at deploy time; Vite does not.
@@ -36,7 +44,12 @@ function createRedirectMiddleware() {
             return;
         }
 
-        const match = resolveRedirect(pathname);
+        // In production the www rewrite strips `/docs` before this project sees the
+        // request, so redirect sources are authored without it. Vite serves under
+        // `base: "/docs"`, so the same rule only matches once the base is removed.
+        // The unstripped path is still tried afterwards, because older helpers also
+        // register `/docs/…` variants that are inert in production but match here.
+        const match = resolveRedirect(stripDocsBase(pathname)) ?? resolveRedirect(pathname);
         if (!match) {
             next();
             return;

@@ -16,7 +16,6 @@ import { flattenMdxComponents } from "./mdx-to-markdown";
  */
 export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
     { prefix: "build/ai-agents", id: "build/ai-agents" },
-    { prefix: "build/deployment", id: "build/deployment" },
     { prefix: "build/embedding", id: "build/embedding" },
     { prefix: "build/integrations", id: "build/integrations" },
     { prefix: "build/migrating", id: "build/migrating" },
@@ -28,11 +27,13 @@ export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
     { prefix: "learn/querying", id: "learn/querying" },
     { prefix: "learn/schema-management", id: "learn/schema-management" },
     { prefix: "learn/security", id: "learn/security" },
-    { prefix: "manage/cloud", id: "manage/cloud" },
     { prefix: "manage/enterprise", id: "manage/enterprise" },
+    { prefix: "manage/instances", id: "manage/instances" },
     { prefix: "manage/observability", id: "manage/observability" },
+    { prefix: "manage/organisations", id: "manage/organisations" },
     { prefix: "manage/schema-migration", id: "manage/schema-migration" },
     { prefix: "manage/self-hosted", id: "manage/self-hosted" },
+    { prefix: "manage/surrealctl", id: "manage/surrealctl" },
     { prefix: "reference/cli", id: "reference/cli" },
     { prefix: "reference/dotnet", id: "reference/dotnet" },
     { prefix: "reference/golang", id: "reference/golang" },

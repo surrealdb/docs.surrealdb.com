@@ -1,6 +1,7 @@
 import {
     ActionIcon,
     Anchor,
+    Badge,
     Box,
     Burger,
     Button,
@@ -15,7 +16,7 @@ import {
     ThemeIcon,
 } from "@mantine/core";
 import { Icon, iconChevronDown, iconOpen, ThemedImage } from "@surrealdb/ui";
-import { Fragment, useState } from "react";
+import { type CSSProperties, Fragment, useState } from "react";
 import { ClientOnly } from "vike-react/ClientOnly";
 import { usePageContext } from "vike-react/usePageContext";
 import { SearchDocs } from "~/components/SearchDocs";
@@ -25,7 +26,9 @@ import {
     isMenuGroup,
     type NavEntry,
     type NavItem,
+    type NavMenuBadge,
     type NavMenuGroup,
+    type NavMenuItem,
 } from "./nav";
 import { ProductList, ProductWordmark } from "./product-switcher";
 import {
@@ -39,10 +42,45 @@ import classes from "./style.module.scss";
 export type {
     NavEntry,
     NavItem,
+    NavMenuBadge,
     NavMenuGroup,
     NavMenuItem,
     NavMenuSection,
 } from "./nav";
+
+/**
+ * Visible text per badge kind. Screen readers announce it alongside the item
+ * label, so the pill stays meaningful when the styling is not perceivable.
+ */
+const NAV_BADGE_LABELS: Record<NavMenuBadge, string> = {
+    new: "New",
+};
+
+function NavItemBadge({ badge }: { badge: NavMenuBadge }) {
+    return (
+        <Badge
+            size="xs"
+            variant="light"
+            color="violet"
+            className={classes.navItemBadge}
+        >
+            {NAV_BADGE_LABELS[badge]}
+        </Badge>
+    );
+}
+
+/**
+ * Drives the mobile icon tint through a custom property so `.nav-item-icon`
+ * keeps one declaration for tinted and untinted items alike. The `-light-color`
+ * pair is scheme-aware, matching the desktop chip glyph in both themes.
+ */
+function navItemIconStyle(item: NavMenuItem): CSSProperties | undefined {
+    if (!item.iconColor) return undefined;
+
+    return {
+        "--nav-item-icon-color": `var(--mantine-color-${item.iconColor}-light-color)`,
+    } as CSSProperties;
+}
 
 const SIGN_IN_URL =
     "https://app.surrealdb.com/signin?_gl=1*6c6cw1*FPAU*MjUyNzg4NDQ3LjE3NzA3MzU0OTI.*_ga*MTUwNTkxNTcyNS4xNzcwNzM1NDky*_ga_J1NWM32T1V*czE3NzE4NDcxMTMkbzQ2JGcxJHQxNzcxODQ3MjAwJGo1NiRsMCRoNjUwODcxODU5*_fplc*dEpHdFVZdTN2eEolMkJBWkNUY1R5NUhKbmJySSUyRk56eEN6ZHlEcU52cTJzbUV0dXpOcmZhSU5MeXZFdW90bFdPZWRpbE4yTzA1dmZ1MiUyRlc5RnM3djhEZ2NVeGZhdmoyNW1rcFFsSmhwUXJzR1BoR2ZIWUdsMXYyZ0tJSXFmOW93JTNEJTNE";
@@ -205,6 +243,13 @@ function NavDropdown({
                                                 leftSection={
                                                     <ThemeIcon
                                                         variant={itemActive ? "gradient" : "light"}
+                                                        // The gradient owns the
+                                                        // active chip, so the
+                                                        // tint only applies at
+                                                        // rest.
+                                                        color={
+                                                            itemActive ? undefined : item.iconColor
+                                                        }
                                                     >
                                                         <Icon
                                                             path={item.icon}
@@ -218,12 +263,23 @@ function NavDropdown({
                                                     ) : undefined
                                                 }
                                             >
-                                                <Text
-                                                    component="span"
-                                                    className={classes.navItemLabel}
+                                                {/* `.mantine-Menu-itemLabel` stacks its children
+                                                    in a column, so the badge needs its own row
+                                                    to sit beside the label. */}
+                                                <Group
+                                                    gap="xs"
+                                                    wrap="nowrap"
                                                 >
-                                                    {item.label}
-                                                </Text>
+                                                    <Text
+                                                        component="span"
+                                                        className={classes.navItemLabel}
+                                                    >
+                                                        {item.label}
+                                                    </Text>
+                                                    {item.badge && (
+                                                        <NavItemBadge badge={item.badge} />
+                                                    )}
+                                                </Group>
                                                 {item.description && (
                                                     <Text
                                                         component="span"
@@ -418,7 +474,19 @@ export function MobileNav({ navLinks }: MobileNavProps) {
                                             {section.items.map((item) => (
                                                 <MantineNavLink
                                                     key={item.href}
-                                                    label={item.label}
+                                                    label={
+                                                        item.badge ? (
+                                                            <Group
+                                                                gap="xs"
+                                                                wrap="nowrap"
+                                                            >
+                                                                {item.label}
+                                                                <NavItemBadge badge={item.badge} />
+                                                            </Group>
+                                                        ) : (
+                                                            item.label
+                                                        )
+                                                    }
                                                     description={item.description}
                                                     href={item.href}
                                                     component="a"
@@ -429,6 +497,7 @@ export function MobileNav({ navLinks }: MobileNavProps) {
                                                         <Icon
                                                             path={item.icon}
                                                             className={classes.navItemIcon}
+                                                            style={navItemIconStyle(item)}
                                                             opacity={1}
                                                             size="md"
                                                         />

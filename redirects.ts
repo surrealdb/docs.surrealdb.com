@@ -381,12 +381,173 @@ function authDiscoveryRedirects(): Redirect[] {
     );
 }
 
+/**
+ * Cloud and deployment restructure: the `build/deployment` and `manage/cloud`
+ * collections were dissolved and their pages redistributed.
+ *
+ * - Managed-instance topics (create, connect, scale, monitor, back up) →
+ *   `manage/instances`.
+ * - Account, team, and billing topics → `manage/organisations`.
+ * - Self-hosting and Kubernetes topics → `manage/self-hosted`, with the three
+ *   per-cloud Kubernetes pages merged into one `managed-kubernetes` page.
+ * - The two Cloud tooling pages → `explore/studio`.
+ *
+ * Each tuple is `[from, to, kind]`. `exact` maps a single page; `prefix` maps a
+ * folder and everything beneath it. The array is matched in order, so page
+ * renames are listed before the folder rule that would otherwise swallow them,
+ * and deeper folders before their parents.
+ */
+function cloudAndDeploymentRedirects(): Redirect[] {
+    const moves: [string, string, "exact" | "prefix"][] = [
+        // Cloud operations → instance operations.
+        [
+            "build/deployment/surrealdb-cloud/operations/aws-privatelink",
+            "manage/instances/private-connectivity",
+            "exact",
+        ],
+        [
+            "build/deployment/surrealdb-cloud/operations/data-export-and-backup",
+            "manage/instances/backups",
+            "exact",
+        ],
+        [
+            "build/deployment/surrealdb-cloud/operations/logs",
+            "manage/instances/monitoring",
+            "exact",
+        ],
+        [
+            "build/deployment/surrealdb-cloud/operations/metrics",
+            "manage/instances/monitoring",
+            "exact",
+        ],
+        [
+            "build/deployment/surrealdb-cloud/operations/monitoring-overview",
+            "manage/instances/monitoring",
+            "exact",
+        ],
+        [
+            "build/deployment/surrealdb-cloud/operations/migrating-data",
+            "manage/instances/import-and-export",
+            "exact",
+        ],
+        [
+            "build/deployment/surrealdb-cloud/operations/network-access",
+            "manage/instances/network-access",
+            "exact",
+        ],
+        [
+            "build/deployment/surrealdb-cloud/operations/scaling",
+            "manage/instances/scaling",
+            "exact",
+        ],
+        ["build/deployment/surrealdb-cloud/operations", "manage/instances", "prefix"],
+
+        // Cloud onboarding → organisation and instance creation.
+        [
+            "build/deployment/surrealdb-cloud/getting-started/create-an-account",
+            "manage/organisations/sign-in",
+            "exact",
+        ],
+        [
+            "build/deployment/surrealdb-cloud/getting-started/create-an-instance",
+            "manage/instances/create",
+            "exact",
+        ],
+        [
+            "build/deployment/surrealdb-cloud/getting-started/create-an-organisation",
+            "manage/organisations",
+            "exact",
+        ],
+        ["build/deployment/surrealdb-cloud/getting-started", "manage/organisations", "prefix"],
+
+        // Billing, support, FAQs, and referrals keep their slugs under organisations.
+        ["build/deployment/surrealdb-cloud/billing-and-support", "manage/organisations", "prefix"],
+
+        // Connecting → instances/connect (the Surrealist page was renamed to Studio).
+        [
+            "build/deployment/surrealdb-cloud/connecting/via-surrealist",
+            "manage/instances/connect/via-studio",
+            "exact",
+        ],
+        ["build/deployment/surrealdb-cloud/connecting", "manage/instances/connect", "prefix"],
+
+        // Cloud tooling pages are Studio features, not Cloud features.
+        ["build/deployment/surrealdb-cloud/tooling", "explore/studio", "prefix"],
+
+        // Remaining Cloud pages fold into the instances section index.
+        ["build/deployment/surrealdb-cloud/what-is-surrealdb-cloud", "manage/instances", "exact"],
+        ["build/deployment/surrealdb-cloud", "manage/instances", "prefix"],
+
+        // Self-hosted deployment → the Manage section. The Amazon EKS, Azure AKS,
+        // and Google GKE pages merged into a single Managed Kubernetes page.
+        [
+            "build/deployment/self-hosted/amazon-eks",
+            "manage/self-hosted/managed-kubernetes",
+            "exact",
+        ],
+        [
+            "build/deployment/self-hosted/azure-aks",
+            "manage/self-hosted/managed-kubernetes",
+            "exact",
+        ],
+        [
+            "build/deployment/self-hosted/google-gke",
+            "manage/self-hosted/managed-kubernetes",
+            "exact",
+        ],
+        ["build/deployment/self-hosted/overview", "manage/self-hosted", "exact"],
+        // `docker` and `kubernetes` keep their slugs, so the folder rule covers them.
+        ["build/deployment/self-hosted", "manage/self-hosted", "prefix"],
+
+        // The deployment section index became the Deployment models page. There is
+        // deliberately no `build/deployment/:path*` rule: the subtrees above cover
+        // every page, and `build/deployment/observability` is handled separately by
+        // `deploymentObservabilityToManageRedirects`.
+        ["build/deployment", "manage/self-hosted/deployment-models", "exact"],
+
+        // manage/cloud split into manage/instances and manage/organisations.
+        ["manage/cloud/architecture", "manage/instances/architecture", "exact"],
+        ["manage/cloud/aws-marketplace", "manage/organisations/aws-marketplace", "exact"],
+        ["manage/cloud/backups-and-recovery", "manage/instances/backups", "exact"],
+        ["manage/cloud/billing-and-support", "manage/organisations/billing", "exact"],
+        ["manage/cloud/high-availability", "manage/instances/high-availability", "exact"],
+        ["manage/cloud/instance-management", "manage/instances/create", "exact"],
+        ["manage/cloud/monitoring-and-logs", "manage/instances/monitoring", "exact"],
+        ["manage/cloud/network-access", "manage/instances/network-access", "exact"],
+        ["manage/cloud/organisations-and-users", "manage/organisations/members-and-roles", "exact"],
+        ["manage/cloud/patches-and-upgrades", "manage/instances/versions-and-upgrades", "exact"],
+        ["manage/cloud/scaling", "manage/instances/scaling", "exact"],
+        ["manage/cloud", "manage/instances", "prefix"],
+
+        // The legacy `/cloud/*` prefix used to point at `manage/cloud`; send it
+        // straight to the final destination rather than chaining through it.
+        ["cloud", "manage/instances", "prefix"],
+    ];
+
+    const out: Redirect[] = [];
+
+    for (const [from, to, kind] of moves) {
+        // Source without `/docs` (the www rewrite strips it); destination with
+        // `/docs` (it is browser-facing).
+        out.push({ source: `/${from}`, destination: `/docs/${to}`, statusCode: 301 });
+
+        if (kind === "prefix") {
+            out.push({
+                source: `/${from}/:path*`,
+                destination: `/docs/${to}/:path*`,
+                statusCode: 301,
+            });
+        }
+    }
+
+    return out;
+}
+
 /** Shared with vercel.ts (production) and the Vite dev server (local). */
 export const docsRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
     { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
     ...legacyPrefixRedirects("surrealql", "reference/query-language"),
-    ...legacyPrefixRedirects("cloud", "manage/cloud"),
     ...legacyPrefixRedirects("surrealist", "explore/studio"),
     ...legacyPrefixRedirects("surrealml", "explore/ml-models"),
     ...legacyPrefixRedirects("integrations", "build/integrations"),
@@ -401,6 +562,7 @@ export const docsRedirects: Redirect[] = [
     ...sdkReferenceRedirects(),
     ...sdkGettingStartedRedirects(),
     ...aiAgentsRedirects(),
+    ...cloudAndDeploymentRedirects(),
     // Surrealist → SurrealDB Studio path rename
     {
         source: "/docs/explore/surrealist",
@@ -433,11 +595,6 @@ export const docsRedirects: Redirect[] = [
         statusCode: 301,
     },
     {
-        source: "/docs/build/deployment/surrealdb-cloud/connecting/via-surrealist",
-        destination: "/docs/build/deployment/surrealdb-cloud/connecting/via-studio",
-        statusCode: 301,
-    },
-    {
         source: "/learn/querying/graphql/via-surrealist",
         destination: "/learn/querying/graphql/via-studio",
         statusCode: 301,
@@ -445,11 +602,6 @@ export const docsRedirects: Redirect[] = [
     {
         source: "/learn/querying/surrealql/executing-queries/via-surrealist",
         destination: "/learn/querying/surrealql/executing-queries/via-studio",
-        statusCode: 301,
-    },
-    {
-        source: "/build/deployment/surrealdb-cloud/connecting/via-surrealist",
-        destination: "/build/deployment/surrealdb-cloud/connecting/via-studio",
         statusCode: 301,
     },
 ];

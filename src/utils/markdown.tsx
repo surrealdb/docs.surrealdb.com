@@ -9,6 +9,8 @@ import {
 import { Boxes } from "~/components/Boxes";
 import { Edition } from "~/components/Edition";
 import { IconBox } from "~/components/IconBox";
+import { OptionsTable } from "~/components/OptionsTable";
+import { Synopsis } from "~/components/Synopsis";
 import { Version } from "~/components/Version";
 import { getIconScope } from "~/lib/icon-scope";
 import { getImageUrl } from "./image-urls";
@@ -75,8 +77,55 @@ function injectIconScope(markdown: string): string {
     return result;
 }
 
+const SYNOPSIS_BLOCK = /<Synopsis((?:\s[^>]*)?)>([\s\S]*?)<\/Synopsis>/g;
+
+/** Remove blank leading/trailing lines and the common indentation of a block body. */
+function dedent(body: string): string {
+    const lines = body.split("\n");
+
+    while (lines.length > 0 && (lines[0] ?? "").trim() === "") {
+        lines.shift();
+    }
+
+    while (lines.length > 0 && (lines[lines.length - 1] ?? "").trim() === "") {
+        lines.pop();
+    }
+
+    const indents = lines
+        .filter((line) => line.trim() !== "")
+        .map((line) => line.match(/^[ \t]*/)?.[0].length ?? 0);
+
+    const indent = indents.length > 0 ? Math.min(...indents) : 0;
+    return lines.map((line) => line.slice(indent).trimEnd()).join("\n");
+}
+
+/**
+ * Move the body of a `<Synopsis>` block into its `command` attribute.
+ *
+ * Component children are parsed as inline markdown, which eats the notation a usage
+ * line depends on: `[NAME]` loses its brackets and `<TYPE>` is dropped as an unknown
+ * tag. Attribute values are never parsed as markdown, so the body is relocated before
+ * the document is parsed and reaches the renderer verbatim.
+ */
+function inlineSynopsisCommands(markdown: string): string {
+    return markdown.replace(SYNOPSIS_BLOCK, (match, attributes: string, body: string) => {
+        if (/\bcommand\s*=/.test(attributes)) {
+            return match;
+        }
+
+        const command = dedent(body);
+        if (command === "") {
+            return match;
+        }
+
+        return `<Synopsis${attributes} command={${JSON.stringify(command)}} />`;
+    });
+}
+
 export function resolveMarkdown(markdown: string) {
-    const content = injectIconScope(stripLanguageTestComments(stripLeadingH1(markdown)));
+    const content = injectIconScope(
+        inlineSynopsisCommands(stripLanguageTestComments(stripLeadingH1(markdown))),
+    );
     const tree = parseMarkdownTree(content);
     const source = markdownSourceFromString(content);
     const headings = extractHeadings(tree, source);
@@ -106,6 +155,8 @@ export function registerMarkdownComponents(): MarkdownComponents {
     return mergeMarkdownComponents({
         IconBox: { component: IconBox, block: true },
         Boxes: { component: Boxes, block: true, preserveNewlines: false },
+        Synopsis: { component: Synopsis, block: true },
+        OptionsTable: { component: OptionsTable, block: true },
         Edition: { component: Edition },
         Version: { component: Version },
     });

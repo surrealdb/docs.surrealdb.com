@@ -1,0 +1,194 @@
+---
+position: 6
+title: Long-running operations
+description: How surrealctl waits for an instance to settle — the wait flags, which commands wait by default, the polling schedule, rate-limit handling, and exit code 10.
+---
+
+# Long-running operations
+
+Creating, resizing, pausing, resuming and deleting an instance are asynchronous. The API accepts the
+request, answers `202`, and the resource changes state over the following seconds or minutes.
+
+`surrealctl` waits for that to finish by default, so the next line of a script can connect to the
+instance it just created.
+
+## The wait flags
+
+Five commands carry all three flags: [`instance
+create`](/docs/reference/cli/surrealctl/commands/instance#instance-create), [`instance
+update`](/docs/reference/cli/surrealctl/commands/instance#instance-update), [`instance
+delete`](/docs/reference/cli/surrealctl/commands/instance#instance-delete), [`instance
+pause`](/docs/reference/cli/surrealctl/commands/instance#instance-pause) and [`instance
+resume`](/docs/reference/cli/surrealctl/commands/instance#instance-resume).
+
+<OptionsTable
+    title="Wait flags"
+    options={[
+        {
+            "name": "--wait",
+            "description": "Wait for the operation to finish. On by default, so this flag is only needed to override an earlier `--no-wait`."
+        },
+        {
+            "name": "--no-wait",
+            "description": "Return as soon as the API accepts the request."
+        },
+        {
+            "name": "--wait-timeout",
+            "value": "<DURATION>",
+            "default": "15m",
+            "description": "How long to wait before giving up. Accepts the standard duration syntax, such as `90s` or `5m`."
+        }
+    ]}
+/>
+
+`--wait` and `--no-wait` override each other, so the last one on the command line wins. That makes shell
+aliases and wrapper scripts composable: appending `--wait` undoes an alias that sets `--no-wait`, without
+having to know what the alias contained.
+
+Waiting is on in **every** output mode — rich, plain, CI and `--json` alike. A terminal-dependent
+default would break the obvious script and would mean `CI` changed semantics rather than presentation.
+
+The fifteen-minute default is chosen so that a normal operation never reaches it and a stuck one does
+not hold a CI job for an hour: a shared-tier instance is ready in about ninety seconds, and a version
+upgrade on a large instance is the slow case.
+
+Two commands that might look asynchronous are not: [`instance backup
+create`](/docs/reference/cli/surrealctl/commands/instance#instance-backup-create) carries no wait
+flags, and [`instance watch`](/docs/reference/cli/surrealctl/commands/instance#instance-watch) carries
+`--wait-timeout` only, because a watch is nothing but a wait.
+
+```bash title="Create and block until ready — the default"
+surrealctl instance create api --type shared-1 --region aws-euw1
+```
+
+```bash title="Fire and forget, then pick the wait up later"
+surrealctl instance create api --type shared-1 --region aws-euw1 --no-wait
+surrealctl instance watch api
+```
+
+```bash title="Give up sooner than fifteen minutes"
+surrealctl instance update production --type production-2 --wait-timeout 5m
+```
+
+## How the wait works
+
+The API has no job resources, no `Location` header and no idempotency key. A long operation is a `202`
+plus the mutated resource, so the only way to know it finished is to fetch the resource again.
+`surrealctl` therefore polls the instance until it reaches the state the command asked for.
+
+Polling backs off:
+
+| Elapsed | Interval |
+| --- | --- |
+| Under 30 seconds | 2 seconds |
+| 30 seconds to 2 minutes | 5 seconds |
+| Over 2 minutes | 10 seconds |
+
+Each interval carries jitter between 0.8× and 1.2× so that concurrent waiters do not convoy, and the
+result is capped at 15 seconds.
+
+In plain and CI output, one line is printed per state change plus a heartbeat every 60 seconds, so a
+log stays readable and a stalled wait is still visibly alive. Under `--json`, transitions are
+[newline-delimited JSON on
+stderr](/docs/reference/cli/surrealctl/output-and-exit-codes#ndjson-streams) and the final document
+goes to stdout.
+
+The credential is re-checked before every poll, because a long wait can outlive a Cloud session.
+
+### Rate limiting during a wait
+
+A `429` honours the `Retry-After` header — falling back to five seconds when the header is absent —
+and extends the deadline by the time it slept, so being throttled cannot itself cause a timeout.
+
+That credit is capped at a cumulative two minutes. Without a ceiling, a poll that answered `429` every
+time would extend the deadline by exactly the time it slept and loop for ever, and a hang looks like a
+slow API rather than a bug. Two minutes absorbs any real throttle while guaranteeing the loop reaches
+its deadline.
+
+### Unrecognised states
+
+A state this build has never seen keeps the wait going and is displayed verbatim. Aborting on one
+would turn an addition to Cloud's vocabulary into an outage here.
+
+What each state means depends on what the command asked for:
+
+| Waiting for | Ready | Paused | Failed | Gone |
+| --- | --- | --- | --- | --- |
+| Ready | Success | Settled elsewhere | Failed | Vanished |
+| Paused | Settled elsewhere | Success | Failed | Vanished |
+| Deleted | Keep waiting | Keep waiting | Failed | Success |
+
+*Settled elsewhere* is its own outcome because the instance reached a stable state the caller did not
+ask for, and polling on would burn the whole timeout to reach the same conclusion.
+
+For a delete, a `404` while polling is the success condition — there is nothing left to fetch.
+
+## Outcomes and exit codes
+
+| Outcome | Exit code | What happened |
+| --- | --- | --- |
+| Succeeded | `0` | The instance reached the state the command asked for |
+| Timed out | `10` | The wait gave up, and the operation is still running |
+| Failed | `6` | The instance entered a failed state |
+| Settled elsewhere | `6` | The instance settled in a stable state the command did not ask for |
+| Vanished | `5` | The instance was removed while the command was waiting |
+
+Each outcome closes with one sentence naming how long it took:
+
+```text
+The instance is ready after 1m 31s.
+The instance entered `failed` after 2m 14s.
+The instance settled in `paused` after 45s.
+The instance was removed while waiting, after 12s.
+Gave up after 15m; the instance is still `provisioning` and still working.
+```
+
+Exit code `10` deserves its own handling. It means the wait gave up, **not** that the operation
+failed:
+
+```text
+Timed out after 15m waiting for the instance to become ready.
+It is still `provisioning`, and the operation is still running server-side.
+```
+
+The right response is usually to poll again on the next run rather than to roll anything back:
+
+```bash title="Treat a timeout as 'check again later'"
+surrealctl instance create api --type shared-1 --region aws-euw1 --wait-timeout 3m
+case $? in
+    0)  echo "ready" ;;
+    10) echo "still provisioning; the next run will pick it up" ;;
+    *)  exit 1 ;;
+esac
+```
+
+## Interrupting a wait
+
+Interrupting a wait does not stop the operation — the CLI is only polling, and the change carries on
+server-side. Pick the state back up with
+[`instance get`](/docs/reference/cli/surrealctl/commands/instance#instance-get) for a snapshot, or
+[`instance watch`](/docs/reference/cli/surrealctl/commands/instance#instance-watch) to resume waiting.
+
+```bash
+surrealctl instance watch api --until ready
+```
+
+The same applies to a wait that was never started. `--no-wait` and a later `instance watch` are
+equivalent to waiting inline, which is what makes a two-stage CI pipeline possible: provision in one
+job, block in the next.
+
+> [!WARNING]
+> `instance create` has no idempotency key, because the API's create route accepts none. A retried
+> create is a second instance and a second bill. If a create times out, run [`instance
+> list`](/docs/reference/cli/surrealctl/commands/instance#instance-list) before running it again.
+
+## Related pages
+
+- [`instance` commands](/docs/reference/cli/surrealctl/commands/instance) — every command that waits
+- [Output and exit codes](/docs/reference/cli/surrealctl/output-and-exit-codes) — the NDJSON progress
+  stream and the full exit-code table
+- [Global flags](/docs/reference/cli/surrealctl/global-flags) — `--timeout` and `--retries`, which
+  govern a single request rather than a wait
+- [Overview](/docs/reference/cli/surrealctl/overview) — the rest of the reference
+- [SurrealDB CLI](/docs/reference/cli/surrealdb-cli/overview) — for connecting to the instance once it
+  is ready

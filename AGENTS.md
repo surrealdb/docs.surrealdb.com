@@ -1,6 +1,6 @@
 # SurrealDB Docs
 
-Documentation site for SurrealDB, built with Vike (React), Vite, Mantine v8,
+Documentation site for SurrealDB, built with Vike (React 19), Vite, Mantine v9,
 `@surrealdb/ui`, and SCSS modules. Content is managed with
 vike-content-collection (Zod-validated markdown collections).
 
@@ -124,8 +124,8 @@ When you need to write new documentation or update existing articles, make use o
 
 ## Content collections
 
-Schemas, slugs, and collection metadata live in `src/content/config.ts`. Each
-collection has a `+Content.ts` file in `src/content/<collection>/`.
+Content lives in `src/content`. Frontmatter schemas live in
+`src/utils/schema.ts`.
 
 ### Plugin configuration (`vite.config.ts`)
 
@@ -134,84 +134,230 @@ collection has a `+Content.ts` file in `src/content/<collection>/`.
 - `drafts.field`: `"draft"`, `includeDrafts`: `false`
 - `ssr.external`: includes `"vike-content-collection"`
 
-### Collections
+### Collection ids are directory paths
 
-| Kind | Schema          | Collections                                                                                                                                         |
-| ---- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Docs | `abstractDoc`   | `doc-surrealdb`, `doc-cloud`, `doc-surrealist`, `doc-surrealml`, `doc-surrealkv`, `doc-surrealql`, `doc-integrations`, `doc-tutorials`, `doc-sdk-*` |
-| Labs | `labCollection` | `labs-items`                                                                                                                                        |
+A collection is any directory under `src/content` holding a `+Content.ts`, and
+its id is that directory's path relative to `src/content`. So
+`src/content/manage/instances/+Content.ts` declares the collection
+`manage/instances`. Renaming a directory renames the collection id, which then
+has to be updated everywhere the id is named (see below).
 
-Every `+Content.ts`:
+The collections are `index` (the root catch-all, serving `/docs/<slug>`), one per
+section under `build/*`, `explore/*`, `learn/*`, `manage/*`, `reference/*` and
+`spectron/*` (plus `spectron/index` for `/docs/spectron`), and `labs-items`.
+
+Every doc collection's `+Content.ts` is the same boilerplate:
 
 ```ts
-import { abstractDoc, contentSlug } from "../config";
+import { defineCollection } from "vike-content-collection";
+import { pageSchema } from "~/utils/schema";
 
-export const Content = {
-    schema: abstractDoc,
-    
-};
+export const Content = defineCollection({
+    schema: pageSchema,
+    type: "both",
+});
 ```
 
-### Schemas (`src/content/config.ts`)
+`labs-items` is the exception: `labSchema` and `type: "content"`.
 
-- **`abstractDoc`** — `title`, `description`, `position`, `no_page_headings`, `no_sidebar` (all optional, strict object)
-- **`labCollection`** — `title` (required), `url`, `category`, `author`, `topics`, `languages`
-- **`contentSlug`** — strips the collection prefix from the file path and removes trailing `/index`
+> [!IMPORTANT]
+> `+Content.ts` belongs at the collection root only. Discovery recurses
+> unconditionally, so a nested `+Content.ts` registers a second collection over
+> the same files and each file is indexed twice. Nested folders are structured by
+> directory depth plus `__category.json`.
 
-### URL mapping
+### Schemas (`src/utils/schema.ts`)
 
-`urlForCollection` maps collection names to URL prefixes:
+- **`pageSchema`** — `title`, `description`, `position`, `icon`, `hidden`, all
+  optional. It is a Zod `strictObject`, so an unknown frontmatter key is a build
+  error. `icon` must be a member of `SECTION_ICONS_NAMES` (`src/utils/icons.ts`).
+- **`labSchema`** — `title`, `category` and `author` required; `description`,
+  `url`, `topics` (max 2) and `languages` optional.
 
-- `doc-surrealdb` → `/surrealdb`
-- `doc-sdk-javascript` → `/sdk/javascript`
-- `labs-items` → `/labs`
+`type: "both"` means `__category.json` files are collection entries as well, and
+they are validated by the same `pageSchema`. A folder's `__category.json` carries
+the section `title`, `position`, `icon` and `hidden` for that subtree. Anything
+enumerating a collection has to filter slugs ending in `__category`.
+
+### Slugs and URLs
+
+A slug is the file path relative to the collection root with the extension
+stripped, each segment passed through `github-slugger` (dots are dropped, so
+`v1.x` becomes `v1x`), and a trailing `index` removed.
+
+There is no `urlForCollection`. The URL prefix is the optional third argument to
+`resolveDataFromCollection` in the page group's `+data.ts`, defaulting to the
+collection id:
+
+| Collection         | `+data.ts` call                           | URL                             |
+| ------------------ | ----------------------------------------- | ------------------------------- |
+| `manage/instances` | `(context, "manage/instances")`           | `/docs/manage/instances/<slug>` |
+| `index`            | `(context, "index", "")`                  | `/docs/<slug>`                  |
+| `spectron/index`   | `(context, "spectron/index", "spectron")` | `/docs/spectron/<slug>`         |
 
 ### Adding content
 
 1. Create a `.md` or `.mdx` file in the appropriate `src/content/<collection>/` folder.
-2. Add YAML frontmatter matching the collection schema.
-3. For docs, sidebar ordering uses `position` in frontmatter and `__category.json` files in subdirectories.
+2. Add YAML frontmatter matching `pageSchema`.
+3. Ordering comes from `position` in frontmatter for pages and from
+   `__category.json` for folders. Both default to `0` and ties fall back to
+   filesystem order, so set `position` explicitly on anything you add or move.
 
-When adding a new doc collection, also update redirect logic in
-`aws/viewer-request/index.js`.
+### Adding, renaming, or moving a collection
+
+The content side needs `src/content/<id>/+Content.ts` and `__category.json`. The
+page group `src/pages/<url-prefix>/` needs `+route.ts`, `+data.ts`, `+Page.tsx`,
+`+Layout.tsx` and `+sitemapUrls.ts`. Then update:
+
+- `src/utils/collections.ts` — `COLLECTION_ROUTES` powers the raw `.md` endpoint.
+  Most specific prefix first; the `{ prefix: "", id: "index" }` catch-all stays last.
+- `src/components/Layout/nav.ts` — top-nav hrefs are hardcoded.
+- `redirects.ts` — old URLs to new URLs (see below).
+- `public/llms.txt` — hand-maintained absolute URLs.
+- `src/utils/product.ts` — only when introducing a new product (`surrealdb` | `spectron`).
+- `src/pages/spectron/index/+route.ts` — add the segment to
+  `SPECTRON_SIBLING_SECTIONS` when the collection sits under `/spectron`.
+
+### Redirects
+
+Redirects live in `redirects.ts` (the `docsRedirects` array), read by `vercel.ts`
+in production and by `plugins/vite-dev-redirects.ts` in dev and preview. There is
+no `aws/` directory.
+
+`www.surrealdb.com` rewrites `/docs/(.*)` to this project with the `/docs` prefix
+**stripped**. Two rules follow from that:
+
+- `source` must **not** include `/docs`. A `/docs/…` source can never match.
+- `destination` **must** include `/docs`. It becomes a browser-facing `Location`
+  header resolved against `surrealdb.com`, where the docs only exist under `/docs`.
+
+Use `statusCode: 301` for content moves. Rules are matched in array order with no
+specificity scoring, so list page renames before the folder rule that would
+otherwise swallow them, and deeper folders before their parents. Follow
+`cloudAndDeploymentRedirects` as the model.
+
+Two things to check alongside a move:
+
+- The `www.surrealdb.com` repo has its own `/docs/*` redirects in
+  `redirects.json`, and they run first. When you move a page a www entry already
+  points at, repoint that entry instead of leaving a second hop.
+- A missing page does not 404 — `resolveDataFromCollection` 302s up to the parent
+  path — so a missed redirect is silent. Diff the URL set before and after
+  instead of watching for 404s.
+
+## Content components
+
+Markdown pages can use a small set of React components, registered in
+`registerMarkdownComponents` (`src/utils/markdown.tsx`).
+
+| Component                        | Use                                                           |
+| -------------------------------- | ------------------------------------------------------------- |
+| `<Synopsis>`                     | Usage or signature line for a command or method.              |
+| `<OptionsTable>`                 | Reference table of CLI options, arguments, or SDK parameters. |
+| `<Boxes>` with `<IconBox>`       | Card grid of links, used on section landing pages.            |
+| `<Edition value="enterprise" />` | Community or Enterprise badge.                                |
+| `<Version sdk="…" />`            | Inline current version number for an SDK.                     |
+
+> [!IMPORTANT]
+> Braced attribute values are parsed as **JSON**, not JavaScript. Object keys and
+> strings need double quotes; an invalid value is dropped with a console warning.
+
+### `<Synopsis>`
+
+Write the usage lines as the block body:
+
+```mdx
+<Synopsis>
+surrealctl instance create [OPTIONS] <NAME>
+</Synopsis>
+```
+
+The markdown pipeline moves the body into the `command` attribute before parsing,
+so metasyntax (`[NAME]`, `<TYPE>`, `...`) reaches the renderer verbatim —
+children would be parsed as inline markdown and lose it. `label` defaults to
+`Usage`; use `label="Signature"` for SDK reference. There is deliberately no copy
+button, because a synopsis is not paste-ready.
+
+### `<OptionsTable>`
+
+```mdx
+<OptionsTable
+	title="Options"
+	options={[
+		{ "name": "--type", "short": "-t", "value": "<TYPE>", "env": "SURREALCTL_TYPE", "description": "Instance type to provision." },
+		{ "name": "--replicas", "type": "number", "default": 1, "description": "Number of `scale` plan replicas." }
+	]}
+/>
+```
+
+Each row needs `name` and `description`; `short`, `value`, `type`, `default`,
+`env` and `required` are optional. The `Type`, `Default` and
+`Environment variable` columns render only when a row uses them, so a table never
+carries a column of em-dashes. Use `value` for CLI placeholders and `type` for
+SDK parameter types. Backtick spans inside `description` render as inline code.
 
 ## Data loading and rendering
 
-Doc pages follow this pattern in `+data.ts`:
+A doc page group's `+data.ts` is a single call:
 
-1. Resolve collection ID and slug from the URL (`getCollectionPartsFromURL` from `src/utils/collection.ts`)
-2. Call `getCollectionEntry(id, slug)` — throw 404 if not found
-3. Parse markdown with `resolveMarkdown(entry.content)` from `src/utils/markdown.tsx` (not `renderEntry`)
-4. Build sidebar with `getSidebarItemsFromCollection(id)` from `src/utils/sidebar.ts`
-5. Return `{ ast, headings, sidebar, contentPath }`
+```ts
+export default async function data(context: PageContext) {
+    return resolveDataFromCollection(context, "manage/instances");
+}
+```
+
+`resolveDataFromCollection` (`src/utils/data.ts`):
+
+1. Strips the URL prefix (the optional third argument, defaulting to the
+   collection id) to get the slug, then looks up `getCollectionEntry(id, slug)`.
+2. On a miss, 302s one path segment up — `getParentUrl` re-attaches the `/docs`
+   base — and only throws a 404 when there is no parent.
+3. Sets the page `title` and `description` through `useConfig`, suffixing the
+   title per product (`src/utils/product.ts`).
+4. Builds the sidebar with `buildNavigation(id, prefix)`.
+5. Parses the markdown with `resolveMarkdown(entry.content)`.
+6. Walks each path prefix looking for a `<prefix>/__category` entry to build
+   breadcrumbs; a folder without `__category.json` is skipped.
+
+It returns `{ content, headings, navigation, contentPath, breadcrumbs, title, description }`.
+
+`+Page.tsx` is identical in every group:
+`export { DocMarkdown as default } from "~/components/DocMarkdown";`. `DocMarkdown`
+renders `content` through `@surrealdb/ui`'s `MarkdownViewer` with `jsxMode="render"`
+and the components from `registerMarkdownComponents`.
 
 Labs listing: `sortCollection(getCollection("labs-items"), "title", "asc")`.
 
-Markdown pipeline (`resolveMarkdown` in `src/utils/markdown.tsx`):
+Markdown pipeline (`resolveMarkdown` in `src/utils/markdown.tsx`) returns
+`{ content, headings }`:
 
-1. `parseMarkdown` → AST (via `@surrealdb/ui`)
-2. Strip leading H1
-3. `resolveAstImages`
-4. `extractHeadings` (custom, uses `github-slugger`)
+1. `stripLeadingH1` — the rendered heading comes from frontmatter `title`.
+2. Strip leading language-test block comments out of fenced code.
+3. `inlineSynopsisCommands` — move `<Synopsis>` bodies into the `command` attribute.
+4. `injectIconScope` — quote `icon={{ … }}` keys and resolve icon identifiers to URLs.
+5. `parseMarkdownTree` and `extractHeadings` (both from `@surrealdb/ui`) for the page aside.
 
-Sidebar: `getSidebarItemsFromCollection` in `src/utils/sidebar.ts` builds trees
-from `getCollection(id)` plus `__category.json` via `getCategories` in
-`src/lib/categories.ts`.
+Sidebar: `buildNavigation` in `src/utils/navigation.ts` builds sections from
+`getCollectionTree(id)`. The root folder becomes the first section, each top-level
+subfolder becomes its own section (with the `icon` from its `__category.json`), and
+deeper folders become links with children. A folder with no entry of its own takes
+its first child's href. `hidden: true` removes an entry from the menu while the
+page stays built and reachable by URL.
 
-Prerendering: each doc section has `+onBeforePrerenderStart.ts` mapping
-collection entries to URL paths.
-
-Sitemap lastmod: `vite.config.ts` uses `getCollectionEntry` for content pages;
-falls back to `getLastModFromGit` elsewhere.
+Prerendering is off (`prerender: false` in `src/pages/+config.ts`), so every
+request is served by the SSR function and the `+onBeforePrerenderStart.ts` files
+are inert. Sitemap URLs come from `+sitemapUrls.ts` instead
+(`collectionSitemapUrls` in `src/utils/sitemap.ts`, which filters `__category`
+entries) — add one for every new page group.
 
 ### vike-content-collection APIs
 
-**Used:** `getCollection`, `getCollectionEntry`, `sortCollection`, `vikeContentCollectionPlugin`
+**Used:** `defineCollection`, `getCollection`, `getCollectionEntry`,
+`getCollectionTree`, `sortCollection`, `vikeContentCollectionPlugin`
 
 **Not used:**
 
-- `renderEntry` / `extractHeadings` — rendering uses `@surrealdb/ui`'s `parseMarkdown` + `RenderMarkdown`
-- `getBreadcrumbs` — sidebar-based breadcrumbs
-- `getAdjacentEntries` — prev/next follows `__category.json` tree order
-- `getEntryUrl` — URLs come from `urlForCollection`
-- `getCollectionTree` — sidebar uses `__category.json`
+- `renderEntry` and the package's `extractHeadings` — rendering goes through `@surrealdb/ui`'s `parseMarkdownTree` + `MarkdownViewer`
+- `getBreadcrumbs` — breadcrumbs come from `__category` lookups in `resolveDataFromCollection`
+- `getAdjacentEntries`
+- `getEntryUrl` — URLs come from the page group's URL prefix

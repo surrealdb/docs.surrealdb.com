@@ -1,0 +1,268 @@
+---
+position: 2
+title: auth
+description: Reference for surrealctl auth — signing in, signing out, inspecting the stored credential, renewing it, and listing what it is permitted to do.
+---
+
+# auth
+
+`surrealctl auth` signs in, signs out, and inspects credentials. Four of its five verbs work entirely
+from the local credential store; only `login`, `refresh` and `auth status --verify` touch the network.
+
+<Synopsis>
+surrealctl auth <COMMAND> [OPTIONS]
+</Synopsis>
+
+| Verb | Purpose |
+| --- | --- |
+| [`login`](#auth-login) | Sign in to SurrealDB Cloud |
+| [`logout`](#auth-logout) | Remove the stored credentials for a profile |
+| [`status`](#auth-status) | Show which credentials are in use |
+| [`refresh`](#auth-refresh) | Renew the stored credentials now |
+| [`scopes`](#auth-scopes) | Show what the current credential is permitted to do |
+
+Behaviour when nothing is signed in is deliberate and differs by verb: `status` and `logout` succeed
+with exit `0`, while `scopes` and `refresh` exit `3`. See
+[Authentication](/docs/reference/cli/surrealctl/authentication#what-each-auth-verb-does-when-nothing-is-signed-in)
+for why.
+
+## surrealctl auth login {#auth-login}
+
+Sign in to SurrealDB Cloud, storing a credential for the active profile.
+
+<Synopsis>
+surrealctl auth login [OPTIONS]
+</Synopsis>
+
+This command takes no positional arguments.
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--with-token",
+            "description": "Read a personal access token from standard input instead of signing in. This is the only way to store a token."
+        },
+        {
+            "name": "--label",
+            "value": "<NAME>",
+            "description": "A label to remember this personal access token by. Requires `--with-token`."
+        },
+        {
+            "name": "--flow",
+            "value": "<FLOW>",
+            "description": "Which sign-in flow to use: `browser`, `device` or `paste`. Conflicts with `--with-token`."
+        },
+        {
+            "name": "--no-browser",
+            "description": "Do not open a browser; show a code or a URL instead. Conflicts with `--with-token` and `--flow`."
+        },
+        {
+            "name": "--force",
+            "description": "Sign in again even if this profile already has a credential."
+        }
+    ]}
+/>
+
+| `--flow` value | Behaviour |
+| --- | --- |
+| `browser` | Open a browser and listen on `127.0.0.1` for the redirect |
+| `device` | Show a code to type on another device, following RFC 8628 |
+| `paste` | Print a URL and take back the address the browser was redirected to |
+
+Left to itself the command tries browser, then device, then paste, and stops at the first one that can
+run. A flow named explicitly is used or it fails; there is no silent substitution.
+
+```bash title="Sign in interactively"
+surrealctl auth login
+```
+
+```bash title="Sign in over SSH, where a local browser is no use"
+surrealctl auth login --flow device
+```
+
+```bash title="Store a personal access token for a profile"
+echo "$CI_TOKEN" | surrealctl --profile ci auth login --with-token --label "build runner"
+```
+
+**Refusals and short-circuits.** A profile that already holds a credential is a no-op that exits `0`
+and names the remedy:
+
+```text
+Profile `default` is already signed in as ana@acme.example.
+
+Try:  surrealctl auth login --force
+```
+
+An interactive flow that does not complete exits `30`. A session with nobody present and no way to
+prompt cannot start a flow at all, and says so rather than printing a device code nobody will read.
+
+Only `--with-token` stores a credential. `--token`, `--token-file` and `SURREALCTL_TOKEN` are
+request-scoped and never written to disk.
+
+## surrealctl auth logout {#auth-logout}
+
+Remove the stored credentials for a profile.
+
+<Synopsis>
+surrealctl auth logout [OPTIONS]
+</Synopsis>
+
+This command takes no positional arguments.
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--force",
+            "description": "Do not ask for confirmation."
+        }
+    ]}
+/>
+
+```bash title="Sign out of the active profile"
+surrealctl auth logout
+```
+
+```bash title="Tear down a profile in a script"
+surrealctl --profile ci auth logout --force --json
+```
+
+Logging out revokes the refresh token at the identity provider on a best-effort basis and removes only
+this profile's entry. A failed revocation warns but never blocks the local wipe.
+
+Signing out when nothing is signed in still succeeds and still emits a document, so `auth logout
+--json` in a teardown script has the same shape on its second run as on its first:
+
+```json title="Output"
+{
+  "profile": "ci",
+  "removed": false,
+  "revoked": false
+}
+```
+
+Declining the confirmation prints `Nothing was changed.` and exits `0`.
+
+## surrealctl auth status {#auth-status}
+
+Show which credentials are in use, without touching the network.
+
+<Synopsis>
+surrealctl auth status [OPTIONS]
+</Synopsis>
+
+This command takes no positional arguments.
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--verify",
+            "description": "Also check the credential against the API. Adds one request."
+        }
+    ]}
+/>
+
+```bash title="What am I signed in as?"
+surrealctl auth status
+```
+
+```bash title="Confirm the credential still works"
+surrealctl auth status --verify
+```
+
+The document has the same shape signed in and signed out, so a script can read one field without
+branching first. `status` warns when the machine's clock is more than five minutes out, and when
+`SURREALCTL_CLOUD_TOKEN` is supplying a session token.
+
+For the API's own view of your identity, use
+[`whoami`](/docs/reference/cli/surrealctl/commands/misc#whoami), which spends a request.
+
+## surrealctl auth refresh {#auth-refresh}
+
+Renew the stored credentials now, rather than waiting for them to expire.
+
+<Synopsis>
+surrealctl auth refresh [OPTIONS]
+</Synopsis>
+
+This command takes no positional arguments.
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--all",
+            "description": "Also renew the token for the account-management routes."
+        }
+    ]}
+/>
+
+```bash
+surrealctl auth refresh
+```
+
+The command forces both the access token and the Cloud session. `--all` additionally renews the token
+used for the account-management routes, which is the one the [`token`
+commands](/docs/reference/cli/surrealctl/commands/token) need.
+
+**Refusals.** With nothing signed in, this exits `3`. On a personal access token it reports that a
+token does not expire on a schedule and cannot be refreshed, then exits `0` without sending anything.
+
+## surrealctl auth scopes {#auth-scopes}
+
+Show what the current credential is permitted to do.
+
+<Synopsis>
+surrealctl auth scopes [OPTIONS]
+</Synopsis>
+
+This command takes no positional arguments.
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--no-header",
+            "description": "Omit the header row."
+        }
+    ]}
+/>
+
+> [!NOTE]
+> This is the one list-shaped command that carries only `--no-header`. It has no `--columns`,
+> `--wide`, `--sort`, `--reverse` or `--limit`.
+
+```bash title="What may this token do?"
+surrealctl auth scopes
+```
+
+```text title="Output"
+SCOPE
+read:cloud
+write:cloud-instances
+```
+
+The single column is `scope`.
+
+**Refusals.** With nothing signed in, this exits `3` — a script asking "what may this credential do"
+and getting an empty list would read it as "nothing is permitted" rather than "nothing is signed in".
+
+On a login session the list is empty, and a sentence on stderr points at [`org
+permissions`](/docs/reference/cli/surrealctl/commands/org#org-permissions): identity scopes are not an
+authorisation model, and your role in the organisation is what decides what you may do.
+
+For the catalogue of scopes a token *can* be granted, use [`token
+scopes`](/docs/reference/cli/surrealctl/commands/token#token-scopes).
+
+## Related pages
+
+- [Authentication](/docs/reference/cli/surrealctl/authentication) — the credential model, login flows
+  and credential storage
+- [`token` commands](/docs/reference/cli/surrealctl/commands/token) — creating and revoking personal
+  access tokens
+- [`context` commands](/docs/reference/cli/surrealctl/commands/context) — switching between profiles
+- [Overview](/docs/reference/cli/surrealctl/overview) — the rest of the reference
+- [SurrealDB CLI](/docs/reference/cli/surrealdb-cli/overview) — database-level authentication, which
+  these credentials do not cover
