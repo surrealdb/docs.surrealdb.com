@@ -1,5 +1,7 @@
 import { getCollectionEntry } from "vike-content-collection";
-import { stripLeadingH1 } from "./markdown";
+import type { SdkVersionMap } from "~/lib/versions";
+import { stripLanguageTestComments, stripLeadingH1 } from "./markdown";
+import { flattenMdxComponents } from "./mdx-to-markdown";
 
 /**
  * Maps a URL prefix to the content collection that serves it.
@@ -105,13 +107,24 @@ export function suffixDocsLinks(markdown: string): string {
  *
  * Prepends the frontmatter title as a top-level heading and the description
  * beneath it, followed by the page body (with its own leading H1 removed to
- * avoid a duplicate heading). Internal docs links are rewritten to `.md` so
- * link-following stays in markdown mode.
+ * avoid a duplicate heading). MDX components are flattened to plain markdown,
+ * and internal docs links are rewritten to `.md` so link-following stays in
+ * markdown mode.
+ *
+ * The `[test]` annotations that the docs test harness embeds in code samples are
+ * stripped, mirroring `resolveMarkdown` - without this the markdown carries
+ * internal expectations the rendered page never shows.
+ *
+ * `sdkVersions` resolves `<Version>` markers to the version numbers the
+ * rendered page shows; without it they fall back to "latest".
  */
-export function composeRawMarkdown(entry: CollectionEntry): string {
+export function composeRawMarkdown(entry: CollectionEntry, sdkVersions?: SdkVersionMap): string {
     const metadata = entry.metadata as { title?: string; description?: string };
     const heading = metadata.title ? `# ${metadata.title}` : undefined;
-    const body = stripLeadingH1(entry.content);
+    const body = flattenMdxComponents(
+        stripLanguageTestComments(stripLeadingH1(entry.content)),
+        sdkVersions,
+    );
 
     const document = [heading, metadata.description, body].filter(Boolean).join("\n\n");
 

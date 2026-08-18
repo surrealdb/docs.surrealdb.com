@@ -30,7 +30,7 @@ function stripLanguageTestComment(code: string): string {
     return match[2] ?? code;
 }
 
-function stripLanguageTestComments(markdown: string): string {
+export function stripLanguageTestComments(markdown: string): string {
     return markdown.replace(FENCED_CODE_BLOCK, (_match, fence, body, closing) => {
         return `${fence}${stripLanguageTestComment(body)}${closing}`;
     });

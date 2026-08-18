@@ -1,31 +1,70 @@
 import vike, { type App } from "@vikejs/hono";
 import { Hono } from "hono";
 import type { Server } from "vike/types";
+import { fetchAllSdkVersions } from "~/lib/versions";
+import {
+    acceptsMarkdown,
+    estimateTokens,
+    MARKDOWN_CACHE_CONTROL,
+    MARKDOWN_CONTENT_TYPE,
+} from "~/utils/agent-markdown";
 import { composeRawMarkdown, resolveCollectionEntry } from "~/utils/collections";
 
 const BASE = "/docs";
 
 const app = new Hono();
 
-// Serve a page's raw markdown when its URL is suffixed with `.md`
-// (e.g. `/docs/reference/query-language/statements/select.md`). Registered
-// before Vike so it wins over Vike's catch-all route.
+/**
+ * Serves a page's markdown representation, two ways:
+ *
+ *   - a `.md`-suffixed URL, e.g.
+ *     `/docs/reference/query-language/statements/select.md`, and
+ *   - content negotiation, when a request for the page's own URL sends
+ *     `Accept: text/markdown`.
+ *
+ * The apex site answers negotiation in edge middleware, but that middleware
+ * skips `/docs` entirely, so both entry points have to be served here.
+ * Registered before Vike so it wins over Vike's catch-all route.
+ *
+ * The two differ only in cache and indexing metadata. A `.md` URL is a distinct
+ * URL, so it is marked `noindex` to keep it out of search results as a duplicate
+ * of the page it mirrors - which matters now that every page links its own `.md`
+ * URL from the "View as Markdown" menu. A negotiated response is the *same* URL
+ * as the HTML, so it carries `Vary: Accept` instead and stays indexable.
+ */
 app.get("*", async (c, next) => {
     const { pathname } = new URL(c.req.url);
+    const suffixed = pathname.endsWith(".md");
+    const negotiated = !suffixed && acceptsMarkdown(c.req.header("accept"));
 
-    if (!pathname.endsWith(".md")) {
+    if (!suffixed && !negotiated) {
         return next();
     }
 
-    const path = pathname.slice(0, -".md".length).replace(new RegExp(`^${BASE}`), "");
-    const entry = resolveCollectionEntry(path);
+    const path = (suffixed ? pathname.slice(0, -".md".length) : pathname).replace(
+        new RegExp(`^${BASE}`),
+        "",
+    );
+    // The docs root cannot carry the suffix on its own path, so `/docs/index.md`
+    // addresses it - the same convention the apex site uses for its homepage.
+    const entry = resolveCollectionEntry(path.replace(/^\/?index$/, ""));
 
     if (!entry) {
-        return c.text("Not Found", 404);
+        // A `.md` URL names a page that does not exist; a negotiated request
+        // may be for an asset or a non-content route, so let Vike answer it.
+        return negotiated ? next() : c.text("Not Found", 404);
     }
 
-    return c.body(composeRawMarkdown(entry), 200, {
-        "Content-Type": "text/markdown; charset=utf-8",
+    // Resolved from the same file-backed cache the page render uses, so
+    // `<Version>` markers report what the HTML reports.
+    const sdkVersions = await fetchAllSdkVersions();
+    const markdown = composeRawMarkdown(entry, sdkVersions);
+
+    return c.body(markdown, 200, {
+        "Content-Type": MARKDOWN_CONTENT_TYPE,
+        "Cache-Control": MARKDOWN_CACHE_CONTROL,
+        "X-Markdown-Tokens": String(estimateTokens(markdown)),
+        ...(suffixed ? { "X-Robots-Tag": "noindex" } : { Vary: "Accept" }),
     });
 });
 
