@@ -342,8 +342,48 @@ function aiAgentsRedirects(): Redirect[] {
     return out;
 }
 
+/**
+ * OAuth/OIDC discovery hand-offs.
+ *
+ * Probing this origin for these documents did not 404 - it returned
+ * `200 text/html`. The request fell through to the parent-path fallback, which
+ * walks up to the nearest valid page and lands on `/docs`, so a client asking
+ * for JSON metadata got a rendered docs page with a success status. That is
+ * worse than a 404: a strict client fails to parse it, and a lenient one may
+ * treat HTML as a valid response.
+ *
+ * These hand off to the host that owns each document. `auth.surrealdb.com` is
+ * the issuer (`https://auth.surrealdb.com/`) and already publishes both.
+ * Serving copies here would declare a docs site to be an OIDC issuer, which it
+ * is not; a redirect points at the real one without ever claiming to be it.
+ *
+ * Both path forms are covered because this project is reached two ways:
+ * directly, and through the `/docs` prefix that surrealdb.com rewrites onto it.
+ *
+ * 307 rather than 301: auth infrastructure moves more often than docs URLs, and
+ * a permanent redirect gets cached hard by clients.
+ *
+ * `oauth-protected-resource` is deliberately absent. Per RFC 9728 it belongs on
+ * the resource host, and api.surrealdb.com serves it per-resource (for example
+ * `/.well-known/oauth-protected-resource/api/mcp`). There is no single document
+ * for this origin to point at, and redirecting to a guess would be worse than
+ * the 404 a client gets today.
+ */
+function authDiscoveryRedirects(): Redirect[] {
+    const documents = ["openid-configuration", "oauth-authorization-server"] as const;
+
+    return ["", "/docs"].flatMap((prefix) =>
+        documents.map((doc) => ({
+            source: `${prefix}/.well-known/${doc}`,
+            destination: `https://auth.surrealdb.com/.well-known/${doc}`,
+            statusCode: 307,
+        })),
+    );
+}
+
 /** Shared with vercel.ts (production) and the Vite dev server (local). */
 export const docsRedirects: Redirect[] = [
+    ...authDiscoveryRedirects(),
     { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
     ...legacyPrefixRedirects("surrealql", "reference/query-language"),
     ...legacyPrefixRedirects("cloud", "manage/cloud"),
