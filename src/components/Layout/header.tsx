@@ -243,17 +243,20 @@ function NavDropdown({
                                                 leftSection={
                                                     <ThemeIcon
                                                         variant={itemActive ? "gradient" : "light"}
-                                                        // The gradient owns the
-                                                        // active chip, so the
-                                                        // tint only applies at
-                                                        // rest.
-                                                        color={
-                                                            itemActive ? undefined : item.iconColor
-                                                        }
                                                     >
+                                                        {/* The tint belongs to the
+                                                            glyph, not the chip, so
+                                                            every chip stays uniform.
+                                                            The active gradient owns
+                                                            its own glyph colour. */}
                                                         <Icon
                                                             path={item.icon}
                                                             size="lg"
+                                                            color={
+                                                                itemActive
+                                                                    ? undefined
+                                                                    : item.iconColor
+                                                            }
                                                         />
                                                     </ThemeIcon>
                                                 }

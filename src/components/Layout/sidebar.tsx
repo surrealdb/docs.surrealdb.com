@@ -117,34 +117,42 @@ export function Sidebar({ navigation, versionSelector, ...props }: SidebarProps)
             gap={0}
             {...props}
         >
-            <Box
-                px="lg"
-                mb="md"
-            >
-                <ProductSwitcherSegmented current={product} />
-            </Box>
-            {versionSelector && (
-                <Box
-                    px="lg"
-                    mt="sm"
-                    mb="xl"
-                >
-                    {versionSelector}
-                </Box>
-            )}
+            {/* One scroll container for the whole sidebar, so the product switcher
+                and version selector travel with the tree rather than staying pinned
+                above it. The `nav` landmark stays on the tree alone — the switcher
+                is a control, not navigation within this product's docs. */}
             <Stack
-                gap="lg"
-                component="nav"
-                px="md"
+                gap={0}
                 flex={1}
                 style={{ overflowY: "auto" }}
             >
-                {navigation.map((section) => (
-                    <SidebarSection
-                        key={section.title}
-                        section={section}
-                    />
-                ))}
+                <Box
+                    px="lg"
+                    mb="md"
+                >
+                    <ProductSwitcherSegmented current={product} />
+                </Box>
+                {versionSelector && (
+                    <Box
+                        px="lg"
+                        mt="sm"
+                        mb="xl"
+                    >
+                        {versionSelector}
+                    </Box>
+                )}
+                <Stack
+                    gap="lg"
+                    component="nav"
+                    px="md"
+                >
+                    {navigation.map((section) => (
+                        <SidebarSection
+                            key={section.title}
+                            section={section}
+                        />
+                    ))}
+                </Stack>
             </Stack>
         </Stack>
     );

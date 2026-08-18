@@ -48,6 +48,17 @@ Apply SOLID where it fits:
 
 All user-facing text uses **British English** spelling (`-ise`, `-our`, `-re`, `-ogue`).
 
+### Line breaks in content
+
+**Never hard-wrap a paragraph.** The markdown renderer preserves single newlines as
+line breaks, so a wrapped source line becomes a visible break mid-sentence and can
+split a link across two lines. Write each paragraph, list item and callout body as one
+line and leave wrapping to the viewport.
+
+Newlines separate blocks, not lines within a block. Line structure is only meaningful
+where it is part of the syntax — fenced code, `<Synopsis>` bodies (one usage line per
+line), multi-line JSX attributes, tables and frontmatter.
+
 ### Headings and subheaders
 
 Use **sentence case** for multi-word headings (`##`, `###`, `####`). Do not use
