@@ -201,6 +201,95 @@ Errors: {2: InternalError("Tried to set `$x`, but couldn't coerce value: Expecte
 Successes: IndexedResults { results: {0: (DbResultStats { execution_time: Some(301.375µs), query_type: Some(Other) }, Ok(None)), 3: (DbResultStats { execution_time: Some(2.278083ms), query_type: Some(Other) }, Ok(Array(Array([Object(Object({"id": RecordId(RecordId { table: Table("person"), key: String("yq7gxgm3ffkr4kibumeb") })}))]))))}, live_queries: {} }
 ```
 
+### Binding parameters (`.bind()`) {#binding-parameters}
+
+The [`.bind()`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Query.html#method.bind) method sets the parameters that a query refers to with SurrealQL's `$` syntax. It accepts anything that implements `IntoVariables`, which covers any type implementing `SurrealValue` that converts into an object, plus key-value pairs.
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Form</th>
+            <th scope="col">Example</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Form">A single key-value pair</td>
+            <td scope="row" data-label="Example"><code>.bind(("table", "person"))</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Form">The <code>vars!</code> macro</td>
+            <td scope="row" data-label="Example"><code>.bind(vars! { table: "person", min_age: 18 })</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Form">The <code>object!</code> macro</td>
+            <td scope="row" data-label="Example"><code>.bind(object! { table: "person" })</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Form">A struct deriving <code>SurrealValue</code></td>
+            <td scope="row" data-label="Example"><code>.bind(Filters { min_age: 18 })</code></td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Form">A map, such as <code>HashMap&lt;String, Value&gt;</code></td>
+            <td scope="row" data-label="Example"><code>.bind(map)</code></td>
+        </tr>
+    </tbody>
+</table>
+
+The [`vars!`](/docs/reference/rust/concepts/rust-after-30#the-vars-macro) macro is the most direct way to set several parameters at once, as each pair is written in place rather than chained one call at a time.
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb::types::{RecordId, SurrealValue, vars};
+
+#[derive(Debug, SurrealValue)]
+struct Person {
+    id: RecordId,
+    name: String,
+    age: i64,
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("memory").await?;
+    db.use_ns("ns").use_db("db").await?;
+
+    let statements = "
+        CREATE type::table($table) SET name = $name, age = $age;
+        SELECT * FROM type::table($table) WHERE age >= $min_age;
+    ";
+
+    let mut result = db
+        .query(statements)
+        .bind(vars! {
+            table: "person",
+            name: "Aeon",
+            age: 30,
+            min_age: 18,
+        })
+        .await?;
+
+    let created: Option<Person> = result.take(0)?;
+    dbg!(created);
+    let adults: Vec<Person> = result.take(1)?;
+    dbg!(adults);
+    Ok(())
+}
+```
+
+Calls to `.bind()` accumulate rather than replace, so parameters can be gathered from more than one place before the query is awaited. A later call wins if it repeats a name.
+
+```rust
+let mut result = db
+    .query("RETURN [$a, $b]")
+    .bind(vars! { a: 1 })
+    .bind(vars! { b: 2 })
+    .await?;
+```
+
+> [!NOTE]
+> A binding error is not raised at the point of the `.bind()` call. It is held until the query is awaited, and surfaces there as the result of the whole query.
+
 ### Per-statement stats (`.with_stats()`)
 
 The [`.with_stats()`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Query.html#method.with_stats) method can be used on the query builder before awaiting the future. The awaited value is [`WithStats<IndexedResults>`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.WithStats.html), which wraps the usual [`IndexedResults`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.IndexedResults.html) so each `.take(...)` can return both [`Stats`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Stats.html) (including execution time) and the deserialized statement result.
@@ -277,6 +366,64 @@ To test the live stream, either log in using SurrealDB Studio or the CLI using t
 Notification { query_id: Uuid(3bad02bb-fd1e-402b-9a43-5b3eae88f279), action: Create, data: Object(Object({"id": RecordId(RecordId { table: Table("person"), key: String("zhby5ibqh8b2hfyyao30") })})) }
 Notification { query_id: Uuid(829d7ec7-d67c-47ef-bd7c-8b3e10b8d149), action: Create, data: Object(Object({"id": RecordId(RecordId { table: Table("cat"), key: String("cgu921pkfco7uk7ajeym") })})) }
 ```
+
+### Stream results as they arrive (`.stream_items()`) {#stream-items}
+
+<Since v="v3.3.0" />
+
+Awaiting a query gives an `IndexedResults`, which holds the entire result set in memory and yields nothing until the last row has been read. The [`.stream_items()`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Query.html#method.stream_items) method returns an [`ItemStream`](https://docs.rs/surrealdb/latest/surrealdb/method/query/struct.ItemStream.html) instead, so a large `SELECT` can be processed while the server is still producing it. The stream implements [`futures::Stream`](https://docs.rs/futures/latest/futures/stream/trait.Stream.html) and yields [`StreamItem`](https://docs.rs/surrealdb/latest/surrealdb/method/query/enum.StreamItem.html) values, of which there are two:
+
+* `StreamItem::Row` carries one row along with the index of the statement that produced it.
+* `StreamItem::StatementEnd` marks a statement as finished, and carries its stats and its `Result`.
+
+```rust
+use futures::StreamExt;
+use surrealdb::engine::any::connect;
+use surrealdb::method::StreamItem;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("memory").await?;
+    db.use_ns("ns").use_db("db").await?;
+
+    db.query("CREATE person:ada SET name = 'Ada'; CREATE person:grace SET name = 'Grace';")
+        .await?
+        .check()?;
+
+    let mut rows = db.query("SELECT name FROM person").stream_items()?;
+
+    while let Some(item) = rows.next().await {
+        match item? {
+            StreamItem::Row { statement, value } => {
+                println!("statement {statement} produced {value:?}");
+            }
+            StreamItem::StatementEnd { statement, stats, result } => {
+                result?;
+                println!("statement {statement} finished in {:?}", stats.execution_time);
+            }
+        }
+    }
+    Ok(())
+}
+```
+
+Output:
+
+```
+statement 0 produced Object(Object({"name": String("Ada")}))
+statement 0 produced Object(Object({"name": String("Grace")}))
+statement 0 finished in Some(1.8045ms)
+```
+
+> [!IMPORTANT]
+> Rows are provisional until their statement ends. A statement can still fail on a later row, and a `BEGIN … COMMIT` block can still roll back, so a `StatementEnd` carrying an error retracts every row that preceded it. Code that acts on rows as they arrive has to be able to undo that.
+
+Two further points worth knowing:
+
+* Only some engines stream incrementally. The embedded engines (`mem://`, `rocksdb://`, `surrealkv://` and file paths) and the gRPC remote engine (`grpc://`) deliver rows as the server produces them. The WebSocket and HTTP engines have no incremental path, so they run the query to completion and then replay the items. Every engine yields the same items in the same order; on those two they simply do not arrive any earlier than awaiting the query would.
+* Dropping the stream stops the query, as the execution behind it holds an open transaction that has to be finalised rather than abandoned.
+
+`LIVE SELECT` is not served by this method. A live query's ID arrives as an ordinary row and nothing subscribes to it. Use the awaited form described in [Stream `LIVE SELECT` output](#live-select-stream) for live queries, and `.stream_items()` for reading rows.
 
 ### Security when using the .query() method
 
