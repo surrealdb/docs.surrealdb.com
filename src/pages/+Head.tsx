@@ -20,6 +20,12 @@ export function Head() {
     const { urlPathname } = pageContext;
     const canonicalUrl = buildCanonicalUrl(urlPathname);
 
+    // The docs root has no path segment to suffix, so its markdown lives at
+    // `/docs/index.md` - matching how the apex site addresses its homepage.
+    const markdownUrl = `${canonicalUrl.replace(/\/$/, "")}${
+        urlPathname === "/" ? "/index.md" : ".md"
+    }`;
+
     const navigation = (pageContext.data as PageData)?.navigation ?? [];
     const breadcrumbJsonLd = buildBreadcrumbJsonLd(navigation);
 
@@ -37,6 +43,15 @@ export function Head() {
             <link
                 rel="canonical"
                 href={canonicalUrl}
+            />
+            {/* How an agent holding the HTML discovers the markdown rendering of
+                this page. The same document is also served on this URL to a
+                request sending `Accept: text/markdown` - see src/pages/+server.ts. */}
+            <link
+                rel="alternate"
+                type="text/markdown"
+                href={markdownUrl}
+                title="Markdown version of this page"
             />
             <meta
                 property="og:url"
