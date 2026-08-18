@@ -151,6 +151,15 @@ function databaseFunctionsOverviewRedirects(): Redirect[] {
         { source: from, destination: to, statusCode: 301 },
     ];
 }
+/** surrealctl installation moved into the guide; the reference is command-only. */
+function surrealctlInstallRedirects(): Redirect[] {
+    const from = "/reference/cli/surrealctl/install";
+    const to = "/manage/surrealctl/install";
+    return [
+        { source: `/docs${from}`, destination: `/docs${to}`, statusCode: 301 },
+        { source: from, destination: `/docs${to}`, statusCode: 301 },
+    ];
+}
 /** PHP SDK split into versioned folders: legacy v1 paths → /languages/php/v1/*. */
 function phpVersionedRedirects(): Redirect[] {
     const moves: [string, string][] = [
@@ -582,6 +591,7 @@ export const docsRedirects: Redirect[] = [
     ...deploymentObservabilityToManageRedirects(),
     ...runningFromSelfHostedRedirects(),
     ...databaseFunctionsOverviewRedirects(),
+    ...surrealctlInstallRedirects(),
     ...phpVersionedRedirects(),
     ...sdkReferenceRedirects(),
     ...sdkGettingStartedRedirects(),
