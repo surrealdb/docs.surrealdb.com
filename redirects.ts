@@ -543,6 +543,30 @@ function cloudAndDeploymentRedirects(): Redirect[] {
     return out;
 }
 
+/**
+ * A destination becomes a browser-facing `Location:` header resolved against
+ * surrealdb.com, where these pages only exist under `/docs`. A destination
+ * written without that prefix therefore sends the reader to a URL that does not
+ * exist, even though the same rule looks correct next to its `/docs`-less source.
+ *
+ * Sources are the other half of the asymmetry and are deliberately left alone:
+ * the www rewrite strips `/docs` before this project sees the request.
+ *
+ * Applying this at the point of export means a helper cannot reintroduce the bug.
+ */
+function withDocsDestination(rule: Redirect): Redirect {
+    const { destination } = rule;
+
+    if (/^[a-z][a-z0-9+.-]*:/i.test(destination) || destination.startsWith("/docs")) {
+        return rule;
+    }
+
+    return {
+        ...rule,
+        destination: `/docs${destination.startsWith("/") ? destination : `/${destination}`}`,
+    };
+}
+
 /** Shared with vercel.ts (production) and the Vite dev server (local). */
 export const docsRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
@@ -604,7 +628,7 @@ export const docsRedirects: Redirect[] = [
         destination: "/learn/querying/surrealql/executing-queries/via-studio",
         statusCode: 301,
     },
-];
+].map(withDocsDestination);
 
 export type ResolvedRedirect = { destination: string; statusCode: number };
 

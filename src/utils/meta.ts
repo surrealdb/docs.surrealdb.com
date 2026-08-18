@@ -3,8 +3,27 @@ import { PRODUCT_META, type ProductId } from "~/utils/product";
 
 export const BASE_URL = "https://surrealdb.com/docs";
 
-export function getSuffixedMetaTitle(title: string, productId: ProductId = "surrealdb") {
-    return `${title} | ${PRODUCT_META[productId].label}`;
+/**
+ * Builds the document title, qualified by the section the page sits in.
+ *
+ * Short page titles repeat across the site — "Overview", "Installation" and
+ * "Authentication" each appear in many sections — so an unqualified title tells a
+ * reader in their history, a search result or a stack of tabs nothing about which
+ * one they have. The deepest section name disambiguates it.
+ *
+ * The section is dropped when it would only repeat the page title, which is the
+ * case for a section's own landing page.
+ */
+export function getSuffixedMetaTitle(
+    title: string,
+    productId: ProductId = "surrealdb",
+    section?: string,
+) {
+    const product = PRODUCT_META[productId].label;
+    const repeatsTitle = section?.trim().toLowerCase() === title.trim().toLowerCase();
+    const qualifier = section && !repeatsTitle ? ` | ${section}` : "";
+
+    return `${title}${qualifier} | ${product}`;
 }
 
 /**

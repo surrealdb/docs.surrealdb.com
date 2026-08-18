@@ -21,6 +21,53 @@ export interface PageData {
 const DOCS_BASE = "/docs";
 
 /** One path segment up (e.g. `/a/b` → `/a`). */
+/**
+ * Category titles that name a position in a tree rather than a subject. They are
+ * accurate in a sidebar, where the surrounding tree supplies the context, but
+ * useless in a document title.
+ */
+const GENERIC_SECTION_TITLES = new Set(["overview", "index", "introduction", "getting started"]);
+
+/**
+ * Collection segments whose casing is part of the name. Executables are written
+ * as they are typed, so title-casing them would be wrong.
+ */
+const LITERAL_SECTION_NAMES = new Map([
+    ["surrealctl", "surrealctl"],
+    ["surrealdb-cli", "surreal"],
+    ["surqlfmt", "surqlfmt"],
+]);
+
+/**
+ * Picks the section that best identifies where a page sits, for use in its
+ * document title.
+ *
+ * The deepest meaningful breadcrumb wins. When every crumb is a generic tree
+ * label, the collection's own name is used instead, so a page one level inside a
+ * collection is still qualified.
+ */
+function resolveSection(breadcrumbs: string[], collectionId: string): string | undefined {
+    const meaningful = breadcrumbs.filter(
+        (crumb) => !GENERIC_SECTION_TITLES.has(crumb.trim().toLowerCase()),
+    );
+
+    if (meaningful.length) {
+        return meaningful.at(-1);
+    }
+
+    const segment = collectionId.split("/").at(-1);
+
+    if (!segment) return undefined;
+
+    return (
+        LITERAL_SECTION_NAMES.get(segment) ??
+        segment
+            .split("-")
+            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(" ")
+    );
+}
+
 export function getParentPathname(pathname: string): string | null {
     const pathOnly = pathname.includes("://") ? new URL(pathname).pathname : pathname;
     const trimmed = pathOnly.replace(/\/+$/, "");
@@ -84,19 +131,7 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
     }
 
     const productId = getProductFromPath(context.urlPathname);
-    const title = entry.metadata.title
-        ? getSuffixedMetaTitle(entry.metadata.title, productId)
-        : undefined;
     const description = "description" in entry.metadata ? entry.metadata?.description : undefined;
-
-    config({
-        title,
-        description,
-    });
-
-    const navigation = buildNavigation(id, prefix);
-    const { content, headings } = resolveMarkdown(entry.content);
-    const contentPath = entry.filePath.replace(/.*\/content\//, "");
 
     const curPath: string[] = [];
     const breadcrumbs: string[] = [];
@@ -111,6 +146,19 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
             breadcrumbs.push(entry.metadata.title ?? part);
         }
     }
+
+    const title = entry.metadata.title
+        ? getSuffixedMetaTitle(entry.metadata.title, productId, resolveSection(breadcrumbs, id))
+        : undefined;
+
+    config({
+        title,
+        description,
+    });
+
+    const navigation = buildNavigation(id, prefix);
+    const { content, headings } = resolveMarkdown(entry.content);
+    const contentPath = entry.filePath.replace(/.*\/content\//, "");
 
     return {
         content,
