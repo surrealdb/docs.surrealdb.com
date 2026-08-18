@@ -1,0 +1,242 @@
+---
+position: 3
+title: Authentication
+description: How surrealctl signs in, the difference between a login session and a personal access token, what a token cannot do, and where credentials are stored on disk.
+---
+
+# Authentication
+
+`surrealctl` holds one credential per profile. There are two kinds, and they differ in what they can *write* rather than in what they can reach.
+
+| Credential | Created by | Suited to |
+| --- | --- | --- |
+| **Login session** | `surrealctl auth login` | Interactive use. Can do everything your role allows. |
+| **Personal access token** | `surrealctl token create`, or the dashboard | CI and automation. Read-only on the Cloud surface. |
+
+A login session is an OAuth 2.0 authorisation-code flow with PKCE against `https://auth.surrealdb.com/`. It stores a refresh token and one access token per audience, and renews them as they expire. A personal access token is a long-lived `sdbp_…` string that carries a fixed set of scopes and never expires on a schedule.
+
+## Signing in
+
+```bash
+surrealctl auth login
+```
+
+The command tries three flows in order, and stops at the first one that can run.
+
+| Flow | Used when |
+| --- | --- |
+| Browser loopback | A browser is available and a `127.0.0.1` port can be bound |
+| Device code | `--flow device`, or no browser is available |
+| Paste | `--flow paste`, or nothing else could run |
+
+Only *mechanical* failures fall through to the next flow — specifically, the loopback listener failing to bind or serve. If you decline the consent screen, or your email address is unverified, the command says so rather than asking again in a different form. An incomplete interactive flow exits `30`.
+
+Naming a flow explicitly means it is used or it fails; there is no silent substitution.
+
+```bash title="Sign in on a machine with no browser"
+surrealctl auth login --flow device
+```
+
+The browser flow is skipped automatically when `SSH_CONNECTION` or `SSH_TTY` is set, because a browser at the far end of an SSH connection opens on the wrong machine.
+
+Signing in when the profile already holds a credential is a no-op that exits `0`. Pass `--force` to replace it.
+
+```bash title="Sign in to a second profile"
+surrealctl --profile staging auth login
+```
+
+### How the browser flow is hardened
+
+Worth knowing when a corporate network is in the way:
+
+- The listener binds the literal `127.0.0.1`, never `localhost`, which resolves through `/etc/hosts` and DNS and can answer on `::1`.
+- One of four ports is used — `9375`, `9376`, `9377`, `9378` — because the identity provider matches callback URLs exactly.
+- Only `/callback` is answered; anything else gets a 404.
+- The `state` parameter is compared in constant time, and the flow has a 180-second deadline.
+- The device flow gets 600 seconds, because a device code is typed on a phone.
+
+## Personal access tokens
+
+A token is supplied per invocation and is never persisted:
+
+```bash title="From the environment — the usual choice in CI"
+export SURREALCTL_TOKEN=sdbp_...
+surrealctl instance list
+```
+
+```bash title="From a file, or from stdin"
+surrealctl --token-file /run/secrets/surrealctl instance list
+cat /run/secrets/surrealctl | surrealctl --token-file - instance list
+```
+
+`--token` and `--token-file` are mutually exclusive: a credential comes from a flag or from a file, never both. `--token` deliberately has no short form, because `-t` reads as `--type` on the instance commands, and because a credential belongs in the environment or a file rather than in `argv`, where `ps` and shell history can both see it.
+
+The only way to *store* a token is `auth login --with-token`, which reads it from stdin:
+
+```bash
+echo "$SURREALCTL_TOKEN" | surrealctl auth login --with-token --label "ci runner"
+```
+
+### What a personal access token cannot do
+
+**It cannot manage personal access tokens.** All four verbs — `token list`, `token create`, `token delete` and `token scopes` — are refused locally, before any request is sent, and exit `4`. A leaked token must not be able to mint its own replacements, nor revoke the one an operator would use to clean up after it.
+
+```text
+Managing personal access tokens needs an interactive login session, so nothing was sent.
+
+Sign in with:  surrealctl auth login
+```
+
+**It cannot make Cloud writes.** The gateway refuses a token on every non-`GET` Cloud route, so the mutating verbs — `instance create`, `org update`, `spectron key rotate` and the rest — answer 403, exit `4`, even when the token carries the matching write scope. Use a login session for those.
+
+**It cannot exceed its scopes.** A missing scope is a 403 naming the scope, relayed rather than predicted.
+
+Everything else works, including `org list`, `instance list`, `instance endpoint`, `instance token`, `auth status`, `auth scopes` and `auth logout`.
+
+### Scopes
+
+The scope vocabulary is shared with the Cloud MCP tools:
+
+| Scope | Grants |
+| --- | --- |
+| `read:cloud` | Read access across the Cloud surface |
+| `write:cloud-instances` | Create, update and delete instances |
+| `write:cloud-organization` | Change organisation settings and membership |
+| `write:cloud-billing` | Change billing details |
+| `write:cloud-spectron` | Manage Spectron contexts and keys |
+
+Two commands answer two different questions. [`token scopes`](/docs/reference/cli/surrealctl/commands/token#token-scopes) is the catalogue of what *can* be granted; [`auth scopes`](/docs/reference/cli/surrealctl/commands/auth#auth-scopes) is what the credential in hand *carries*. One is the menu, the other is the receipt.
+
+`auth scopes` on a login session returns an empty list and points you at [`org permissions`](/docs/reference/cli/surrealctl/commands/org#org-permissions), because OAuth identity scopes are not an authorisation model — your role in the organisation is.
+
+## What each `auth` verb does when nothing is signed in
+
+| Verb | Behaviour |
+| --- | --- |
+| `auth status` | Succeeds, exit `0` |
+| `auth logout` | Succeeds, exit `0`, and still emits a document |
+| `auth scopes` | Exits `3` |
+| `auth refresh` | Exits `3` |
+
+A diagnostic that errors because there is no credential cannot help you fix it, and logging out of nothing is a no-op rather than a failure — a teardown script must not fail on its second run. `scopes` and `refresh` each answer a question *about* a credential, and with none there is no answer to give.
+
+`auth status` and `auth scopes` touch no network at all, so they work on a plane, in a container with no egress, and in a CI job that is about to fail for a different reason. [`whoami`](/docs/reference/cli/surrealctl/commands/misc#whoami) is the command that asks the API who you are.
+
+## Where credentials are stored
+
+One directory holds everything:
+
+| Path | Holds |
+| --- | --- |
+| `config.toml` | Non-secret configuration: profiles, the persisted organisation |
+| `credentials.json` | Tokens, the Cloud user id, and the observed clock skew |
+| `credentials.lock` | A zero-byte advisory lock file |
+| `bin/surreal` | The managed copy of the `surreal` binary, when one was downloaded |
+
+The directory is created mode `0700`, and `credentials.json` mode `0600`. The split between the two files is about **atomicity, not sensitivity**: the few non-secret values that must be replaced in the same transaction as a token live beside it in `credentials.json`.
+
+`config.toml` is safe to commit or to sync into a dotfiles repository. `credentials.json` is not.
+
+### Paths
+
+The directory is resolved in this order:
+
+1. The directory containing the path given to `--config`
+2. `SURREALCTL_CONFIG_DIR`
+3. `$XDG_CONFIG_HOME/surrealctl`, or `~/.config/surrealctl` when that variable is unset
+
+On Windows the platform configuration directory is used instead — typically `%APPDATA%\surrealctl`.
+
+XDG applies on macOS too, rather than `~/Library/Application Support`: this is a terminal tool people symlink into dotfiles repositories, and the macOS path contains a space that shells and documentation both handle badly. `gh` and `aws` make the same choice.
+
+```bash title="Print the resolved path"
+surrealctl config path
+```
+
+### Permissions are enforced, not warned about
+
+Reading `credentials.json` with any group or other bit set is a hard error:
+
+```text
+/Users/ana/.config/surrealctl/credentials.json is mode 644 and holds a refresh token.
+Fix it with:  chmod 600 /Users/ana/.config/surrealctl/credentials.json
+```
+
+The file is created with its final mode, so there is no window in which it is readable by anyone else. Windows has no file mode, and the check does not apply there.
+
+### Why a file, and not the OS keyring
+
+This reverses the obvious default deliberately. macOS keychain ACLs are bound to the requesting binary's code signature, so a CLI installed by `cargo install` or Homebrew re-prompts *"surrealctl wants to use your confidential information"* after every upgrade — unanswerable inside a CI job. Headless Linux and containers have no Secret Service at all. `gh`, `aws`, `gcloud` and `flyctl` are all file-based for the same reasons.
+
+There is **no keyring backend**. If one is ever added, the rule it has to follow is that selecting it and finding it unavailable fails loudly rather than silently downgrading to the file.
+
+### Concurrent invocations
+
+Refresh-token rotation makes a race genuinely dangerous: a losing racer presents an already-consumed refresh token, and the identity provider's breach detection may then invalidate the whole token family, signing you out everywhere.
+
+So every mutation takes an exclusive advisory lock on `credentials.lock`, re-reads under the lock in case a sibling has already refreshed, performs the network call inside the lock, and writes through a temporary file in the same directory followed by an atomic rename. Readers take no lock at all, because a rename is atomic — a reader sees either the old file or the new one, never a mix.
+
+The lock budget is 30 seconds. Past that:
+
+```text
+another surrealctl is updating credentials (waited 30s for /Users/ana/.config/surrealctl/credentials.lock).
+Retry in a moment.
+```
+
+### Clock skew
+
+Skew is learned from the `Date` header on every response, successful or not — a 401 caused by a bad clock is exactly the case this fixes — and folded into the next write rather than triggering one. `auth status` warns when the observed skew exceeds five minutes.
+
+Only an `invalid_grant` from the identity provider ever deletes a stored session. Local time is an input to scheduling, never to invalidation, which is what stops a broken clock from becoming a lockout.
+
+## Renewing and signing out
+
+```bash title="Renew now, rather than waiting for expiry"
+surrealctl auth refresh
+```
+
+`auth refresh` forces both the access token and the Cloud session. `--all` additionally renews the token used for the account-management routes. On a personal access token it reports that a token does not expire on a schedule and cannot be refreshed, then exits `0` without sending anything.
+
+```bash title="Remove the stored credential for this profile"
+surrealctl auth logout
+```
+
+`auth logout` revokes the refresh token at the identity provider on a best-effort basis and removes only this profile's entry. A failed revocation never blocks the local wipe, but does produce a warning:
+
+```text
+warning: The refresh token could not be revoked at the identity provider. It was removed from this
+machine, but may still be usable elsewhere.
+```
+
+## What is sent on the wire
+
+Two headers carry the credential, and they are attached in one place in the client rather than by individual commands:
+
+| Header | Value |
+| --- | --- |
+| `Authorization` | `Bearer <access token or sdbp_… token>` |
+| `X-Cloud-Token` | The bare Cloud session JWT, with no `Bearer ` prefix — added only for routes that need it |
+
+Every request also carries `X-Request-Id` (a client-minted identifier, echoed back and reported in error output), `X-Client-Name`, `X-Client-Version` and a `User-Agent` naming the version and build target.
+
+`--debug` logs every request and response to stderr with the credential reduced to a digest — `Authorization: Bearer <sha256:8f3a91c4>` — so a debug transcript can be pasted into an issue.
+
+## Advanced environment variables
+
+Three variables exist for support and for non-production tenants. They are absent from `--help` on purpose.
+
+| Variable | Purpose |
+| --- | --- |
+| `SURREALCTL_CLOUD_TOKEN` | Supply an already-minted Cloud session token, bypassing sign-in. For debugging and support reproduction only: the session lives about an hour, so it is no use as a CI credential. `auth status` reports when it is set. |
+| `SURREALCTL_AUTH_CLIENT_ID` | Override the OAuth client id, for a non-production tenant |
+| `SURREALCTL_AUTH_ISSUER` | Override the OAuth issuer, for a non-production tenant |
+
+Use a [personal access token](#personal-access-tokens) for automation. It is the only credential designed to be handed to a machine.
+
+## Related pages
+
+- [`auth` commands](/docs/reference/cli/surrealctl/commands/auth) — every flag on every verb
+- [`token` commands](/docs/reference/cli/surrealctl/commands/token) — creating and revoking tokens
+- [Global flags](/docs/reference/cli/surrealctl/global-flags) — `--token`, `--token-file`, `--profile`
+- [Overview](/docs/reference/cli/surrealctl/overview) — the rest of the reference
+- [SurrealDB CLI](/docs/reference/cli/surrealdb-cli/overview) — database credentials, which are a separate concern from these

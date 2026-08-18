@@ -85,7 +85,7 @@ export function ProductSwitcherSegmented({ current }: ProductSwitcherSegmentedPr
             size="md"
             fullWidth
             bdrs={18}
-            bg="obsidian.9"
+            className={classes.productSegment}
         />
     );
 }

@@ -1,0 +1,344 @@
+---
+position: 4
+title: Instances
+description: "Deploy, find, connect to, scale, pause, back up, and delete instances with the surrealctl instance commands."
+---
+
+# Instances
+
+This page walks through everyday instance work from the command line: creating an instance, finding it again, opening a SurrealQL session, resizing it, pausing it, taking backups, and deleting it. It assumes you are signed in and that an organisation resolves. For every flag on every verb, see the [`surrealctl` reference](/docs/reference/cli/surrealctl/overview).
+
+## Before you start
+
+Instances belong to an organisation, and there is no route that lists them across organisations. Pick one for the profile once, and every `instance` command follows it.
+
+```bash
+surrealctl org use acme
+```
+
+`--org` overrides it for a single command, and `SURREALCTL_ORG` overrides it for a shell. See [Organisations](/docs/manage/surrealctl/organisations#choosing-an-organisation) for the full order of precedence.
+
+Two catalogues tell you what you can deploy.
+
+```bash
+surrealctl catalog regions
+surrealctl catalog instance-types
+surrealctl catalog instance-versions
+surrealctl org plans
+```
+
+`catalog` lists what the platform offers in general. `org plans` is narrower and organisation-specific — it is the one to trust before a `create`.
+
+## Create an instance
+
+<Synopsis>
+surrealctl instance create [OPTIONS] --type <SLUG> --region <SLUG> <NAME>
+</Synopsis>
+
+Price it first if the cost matters, then deploy.
+
+```bash
+surrealctl instance estimate --type shared-1 --region aws-euw1
+surrealctl instance create production --type shared-1 --region aws-euw1
+```
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "<NAME>",
+            "required": true,
+            "description": "A name for the instance. 1 to 30 characters."
+        },
+        {
+            "name": "--type",
+            "value": "<SLUG>",
+            "required": true,
+            "description": "The instance type, by slug. See `surrealctl catalog instance-types`."
+        },
+        {
+            "name": "--region",
+            "value": "<SLUG>",
+            "required": true,
+            "description": "The region to deploy into, by slug. See `surrealctl catalog regions`."
+        },
+        {
+            "name": "--version",
+            "value": "<VERSION>",
+            "description": "The SurrealDB version to run. Defaults to the platform's current one."
+        },
+        {
+            "name": "--compute-units",
+            "value": "<N>",
+            "description": "How many compute units to run, for the types that scale."
+        },
+        {
+            "name": "--storage",
+            "value": "<GB>",
+            "description": "Storage to allocate, in gigabytes."
+        },
+        {
+            "name": "--access-type",
+            "value": "<ACCESS>",
+            "description": "How the instance may be reached: `public`, `private`, or `dual`."
+        },
+        {
+            "name": "--restore-from",
+            "value": "<INSTANCE/SNAPSHOT>",
+            "description": "Restore from a snapshot, as `<instance>/<snapshot>`."
+        }
+    ]}
+/>
+
+`create` waits until the instance is ready before it returns, so the next line in your script can connect. Pass `--no-wait` to return as soon as the API accepts the request; the output then includes the `surrealctl instance watch` command to pick the state back up.
+
+> [!WARNING]
+> Creating an instance is not idempotent. A retried `instance create` is a second instance and a second bill. `surrealctl` never replays a create automatically for this reason — if a create fails without a clear answer, run `surrealctl instance list` before trying again.
+
+## Naming an instance
+
+Every command that takes an instance accepts four spellings: the id, the slug, the name, or `org/name` when you want to be explicit about which organisation.
+
+```bash
+surrealctl instance get production
+surrealctl instance get acme/production
+surrealctl instance get prod-a1b2c3
+```
+
+Omit the name at a terminal and `surrealctl` offers a picker. Omit it in a script and you get a usage error that lists the available instances, so the failure tells you what you should have typed.
+
+## Find instances
+
+```bash
+surrealctl instance list
+surrealctl instance list --wide
+surrealctl instance list --columns name,state,version --sort name
+surrealctl instance get production
+```
+
+`--columns`, `--wide`, `--sort`, `--reverse`, and `--limit` shape the table. The API has no pagination or sort parameter, so all five are applied on your machine after the whole list arrives — and none of them reaches `--json`, where the complete payload is always emitted. A `--limit 1` must not silently truncate a pipeline.
+
+## Connect to an instance
+
+```bash
+surrealctl instance endpoint production
+surrealctl instance sql production -- --ns app --db main
+```
+
+`instance endpoint` prints the endpoint alone, with no label and no styling, and its output is byte-identical whether you are at a terminal or in a pipe. That makes `$(surrealctl instance endpoint production)` safe to embed in another command.
+
+`instance sql` resolves the instance, mints a database token, and becomes `surreal sql`. Everything after `--` is passed to `surreal` verbatim, so the full flag surface of the sibling CLI is available. The token travels in the child process's environment, never in `argv`, where `ps` and shell history can both read it.
+
+Imports and exports work the same way, but both need a namespace and a database, because `surreal` requires them. The check happens before a token is minted.
+
+```bash
+surrealctl instance export production --namespace app --database main -- backup.surql
+surrealctl instance import staging --namespace app --database main -- seed.surql
+```
+
+To authenticate your own client instead, mint a database token.
+
+```bash
+surrealctl instance token production > token.txt
+surrealctl instance jwks production
+```
+
+`instance token` refuses to print to a terminal, where the token would stay in your scrollback. Pipe it, redirect it, or pass `--reveal` if you meant to read it. `instance jwks` fetches the key set that verifies those tokens; under `--json` it emits the whole key set so it can be piped straight into a verifier.
+
+## Scale an instance
+
+```bash
+surrealctl instance update production --compute-units 4
+surrealctl instance update production --storage 100
+surrealctl instance update production --version 3.2.4
+```
+
+Pass at least one of `--type`, `--compute-units`, `--storage`, `--version`, or `--access-type`. With no flags at all, `update` is a usage error rather than a silent no-op.
+
+One invocation may be several requests. Each field has its own route, and `surrealctl` applies them in a fixed order — type, compute units, storage, version, access type — stopping at the first failure. If a later change fails, the earlier ones have already been applied.
+
+> [!IMPORTANT]
+> Every change in this list restarts the instance. Plan updates the way you would plan a deployment, and expect a reconnect window. Storage can only be changed once every few hours; `surrealctl` reports the cool-off and when the last change happened rather than sending a request that would be refused.
+
+## Pause and resume
+
+```bash
+surrealctl instance pause staging
+surrealctl instance resume staging
+```
+
+Pausing stops compute charges and keeps storage and configuration. Pausing an instance that is already paused prints a note, still emits the same document, and exits `0`, so a script that pauses an environment every evening is safe to run twice.
+
+## Watch an operation
+
+`instance watch` follows an operation that was started elsewhere — by a colleague, by Studio, or by an earlier `--no-wait` command.
+
+```bash
+surrealctl instance watch production
+surrealctl instance watch production --until paused
+surrealctl instance watch production --json
+```
+
+`--until` takes `ready`, `paused`, or `deleted`. Under `--json`, `watch` writes one compact object per line to stdout as the state changes, because the transitions are the answer rather than a progress report.
+
+## Waiting semantics
+
+`create`, `update`, `delete`, `pause`, and `resume` wait for the instance to settle before they return.
+
+<OptionsTable
+    title="Wait options"
+    options={[
+        {
+            "name": "--wait",
+            "default": "on",
+            "description": "Wait for the operation to finish. On by default in every output mode."
+        },
+        {
+            "name": "--no-wait",
+            "description": "Return as soon as the API accepts the request."
+        },
+        {
+            "name": "--wait-timeout",
+            "value": "<DURATION>",
+            "default": "15m",
+            "description": "How long to wait before giving up, such as `90s` or `20m`."
+        }
+    ]}
+/>
+
+Waiting is on in rich, plain, CI, and `--json` output alike. A default that changed with the terminal would mean `CI` changed behaviour rather than presentation, and would break the obvious script: create, then connect.
+
+Polling backs off — two seconds for the first thirty, then five, then ten — with jitter so parallel waiters do not convoy. Being rate limited extends the deadline rather than consuming it, up to a couple of minutes of credit, so a busy account does not get spurious timeouts.
+
+If the wait gives up, `surrealctl` exits `10` and says so. That is a distinct outcome from a failure: **the operation is still running server-side.** Poll again with `instance get` or `instance watch` rather than rolling back.
+
+Interrupting a wait does not stop the operation either. It carries on, and `surrealctl instance watch <name>` picks the state back up.
+
+## Read state, logs, and metrics
+
+```bash
+surrealctl instance status production
+surrealctl instance logs production --level error --limit 100
+surrealctl instance logs production --follow
+surrealctl instance metrics production --metric cpu --from 2026-08-11T10:00:00Z
+surrealctl instance usage production
+```
+
+`instance status` reports the deployment phase and the snapshots the instance can be restored from, as one document.
+
+`--level` is a display filter applied on your machine — the API has no level parameter — so `--json` still carries every line the API sent, and a note tells you how many lines were hidden. `--follow` polls every five seconds and, under `--json`, writes one compact object per new line.
+
+`--metric` is free-form, because the set of metrics is not published anywhere `surrealctl` can read. `cpu`, `memory`, and `disk` are the usual ones. `--from` and `--to` take RFC 3339 timestamps and are forwarded byte for byte.
+
+For the equivalent views in the browser, see [Monitoring](/docs/manage/instances/monitoring).
+
+## Backups
+
+```bash
+surrealctl instance backup list production
+surrealctl instance backup create production
+surrealctl instance backup policy get production
+surrealctl instance backup policy set production --daily 14 --weekly 8
+```
+
+The three retention flags — `--daily`, `--weekly`, `--monthly` — take a number of periods to keep, or the literal `default` to restore your organisation's own value for that tier. `--frequency-hours` sets how often a snapshot is taken, in whole hours up to 24; the plan decides which values are allowed.
+
+Only a **reduction** asks for confirmation. Lengthening a retention cannot lose a snapshot, so it is applied without a prompt.
+
+Which tiers you may change depends on the organisation's plan. `backup policy get` shows which are editable.
+
+`instance backup create` returns as soon as the platform accepts the request. It has no `--wait`, and a new snapshot takes a while to appear in the list, so do not expect to restore from one you took a moment ago.
+
+Restoring means creating a new instance from a snapshot, which leaves the original untouched.
+
+```bash
+snapshot=$(surrealctl instance backup list production --json \
+  | jq -r 'sort_by(.started_at) | last | .snapshot_id')
+
+surrealctl instance create recovery \
+  --type shared-1 --region aws-euw1 \
+  --restore-from "production/${snapshot}"
+```
+
+See [Backups and recovery](/docs/manage/instances/backups) for retention behaviour and what a snapshot contains.
+
+## Capabilities
+
+Capabilities decide what SurrealQL running on the instance may do: scripting, guest access, outbound network access, which functions and RPC methods are permitted.
+
+```bash
+surrealctl instance capabilities get production
+surrealctl instance capabilities set production --deny-scripting --allow-net api.example.com
+```
+
+The endpoint is a full replacement, so `capabilities set` reads the current configuration, applies your flags, prints what would change, and asks before writing. Two consequences matter:
+
+- **A list flag replaces that list.** `--allow-net a.example.com,b.example.com` sets the whole list. A later run naming only `a.example.com` removes `b.example.com`.
+- **Anything you do not name is left exactly as it is**, including capabilities this version of `surrealctl` does not know about.
+
+Flags that would change nothing print a note and write nothing. `--force` skips the confirmation.
+
+For what each capability means, see [Configure an instance](/docs/manage/instances/configure) and [Network access](/docs/manage/instances/network-access).
+
+## Delete an instance
+
+```bash
+surrealctl instance delete staging
+surrealctl instance delete staging --force
+```
+
+The confirmation names the instance, its slug, and its region. Declining changes nothing and exits `0`. `--force` skips the prompt; in an unattended session with neither `--force` nor `--yes`, `delete` exits `2` having sent no request.
+
+Deletion removes the instance and everything in it. Take an export or confirm a snapshot first.
+
+## Worked examples
+
+### Stand up a review environment
+
+```bash title="review-env.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+name="review-${1}"
+
+surrealctl instance create "$name" --type shared-1 --region aws-euw1
+surrealctl instance import "$name" --namespace app --database main -- fixtures/seed.surql
+surrealctl instance endpoint "$name"
+```
+
+`create` returns only once the instance is ready, so the `import` on the next line has something to talk to. The final line prints the endpoint for whatever consumes this script.
+
+### Pause every non-production instance overnight
+
+```bash title="pause-overnight.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+surrealctl instance list --json \
+  | jq -r '.[] | select(.state == "ready" and .name != "production") | .name' \
+  | while read -r name; do
+        surrealctl instance pause "$name" --wait-timeout 5m
+    done
+```
+
+### Clone production from its latest snapshot
+
+```bash title="clone-production.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+snapshot=$(surrealctl instance backup list production --json \
+  | jq -r 'sort_by(.started_at) | last | .snapshot_id')
+
+surrealctl instance create scratch \
+  --type shared-1 --region aws-euw1 \
+  --restore-from "production/${snapshot}"
+
+surrealctl instance endpoint scratch
+```
+
+## Next steps
+
+- [Organisations](/docs/manage/surrealctl/organisations) — members, roles, invitations, usage, and spend.
+- [Scripting](/docs/manage/surrealctl/scripting) — exit codes and the `--json` contract in full.
+- [`surrealctl` reference](/docs/reference/cli/surrealctl/overview) — every instance flag and default.

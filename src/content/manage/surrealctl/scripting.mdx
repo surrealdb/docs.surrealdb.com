@@ -1,0 +1,351 @@
+---
+position: 6
+title: Scripting
+description: "Drive surrealctl from CI and shell scripts: the JSON contract, exit codes for control flow, unattended runs, and waiting semantics."
+---
+
+# Scripting
+
+This page covers running `surrealctl` where nobody is watching: in CI, in cron, and in shell scripts. It explains the output contract, how to branch on exit codes, how to keep a run from blocking on a prompt, and where to put a credential. It is for engineers automating control-plane work.
+
+## The two streams
+
+`surrealctl` splits its output by purpose, and the split is absolute.
+
+- **stdout** carries the command's data payload. Nothing else, ever.
+- **stderr** carries progress, prompts, warnings, hints, errors, and debug output.
+
+So `| jq` always works, `--json > out.json` can still ask you a question, and a failed command leaves stdout empty rather than half a document. A broken downstream pipe is not an error: `surrealctl instance list | head -3` exits `0` silently.
+
+## Reading successful output
+
+`--json` prints the bare wire payload on stdout, with no envelope. There is no `.data[]` to unwrap, because the stream split and the exit code already answer "did it work".
+
+```bash
+surrealctl instance list --json | jq -r '.[] | select(.state == "ready") | .name'
+surrealctl instance get production --json | jq -r '.version'
+surrealctl org list --json | jq -r '.[] | [.id, .name] | @tsv'
+```
+
+Every invocation emits exactly one document. Two commands stream instead, and say so in their own help: `instance watch` and `instance logs --follow` emit newline-delimited JSON, one object per line. Two more are not documents at all: `completion` writes a shell script, and `token create` writes a secret, so it has no `--json` form.
+
+A field the API adds appears in `--json` without a new release of `surrealctl`, so treat the payload as open: read the keys you need and ignore the rest.
+
+`--limit`, `--sort`, `--columns`, `--wide`, and `--reverse` are presentation only. They shape a table and never reach `--json`, so `--limit 1` cannot silently truncate a pipeline.
+
+## Reading failures
+
+On failure, `--json` writes one enveloped object to **stderr** and leaves stdout empty.
+
+```json title="Error envelope"
+{
+  "kind": "conflict",
+  "message": "could not pause `api`: Instance is not in a valid state",
+  "status": 409,
+  "code": null,
+  "request_id": "01J8XYZ7QK9M3P5R7T9V1W3Y5Z",
+  "hint": "The instance is busy with another change.",
+  "command": "surrealctl instance get --wait",
+  "docs": null,
+  "retry_after_secs": null,
+  "exit_code": 6
+}
+```
+
+Every key is always present, with an explicit `null` rather than being omitted, so a consumer can index without checking first.
+
+| Key | Type | Contents |
+| --- | --- | --- |
+| `kind` | string | The error class. Never `null` |
+| `message` | string | The whole failure chain, including which command failed |
+| `status` | integer or `null` | The HTTP status, when there was one |
+| `code` | string or `null` | The API's own error code, when it sent a non-empty one |
+| `request_id` | string or `null` | The request identifier to quote in a support report |
+| `hint` | string or `null` | What to do about it |
+| `command` | string or `null` | A command to run next |
+| `docs` | string or `null` | A documentation link, for the classes that have a useful one |
+| `retry_after_secs` | integer or `null` | How long to wait, from the response |
+| `exit_code` | integer | The process exit code, so the document and the shell agree |
+
+One further key appears conditionally: `candidates`, an array of suggested names, when a reference failed to resolve and `surrealctl` had near matches to offer.
+
+`kind` is a closed vocabulary of eleven values, so it is safe to match on: `auth`, `forbidden`, `not_found`, `conflict`, `invalid`, `rate_limited`, `upstream`, `network`, `not_available`, `wait_timeout`, `unknown`.
+
+```bash
+if ! surrealctl instance pause api --json > /dev/null 2> error.json; then
+    jq -r '"\(.kind): \(.message)"' < error.json >&2
+fi
+```
+
+`not_available` is worth calling out: it means a feature is not enabled for this deployment. Nothing is broken.
+
+## Exit codes
+
+Error text is not a contract. These numbers are.
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success, including an empty list |
+| `1` | An unclassified failure |
+| `2` | Bad invocation, or a destructive command that could not confirm |
+| `3` | Not authenticated, or the credential expired and could not be renewed |
+| `4` | Authenticated but not allowed: scope, role, or credential kind |
+| `5` | The named resource does not exist |
+| `6` | The resource is not in a state that allows this, or a precondition failed |
+| `7` | The API rejected the request as invalid |
+| `8` | Rate limited, after the retry budget was spent |
+| `9` | The API or its upstream is unreachable, or the feature is not available |
+| `10` | A wait gave up. **The operation is still running** |
+| `11` | The credential store could not be read or written |
+| `30` | An interactive sign-in did not complete |
+| `130` | Interrupted |
+
+`0`, `1`, and `2` keep their conventional meanings, so `if ! surrealctl …` and usage errors behave exactly as they do with the `surreal` CLI. Everything above `2` is additive.
+
+`10` earns its own code because "still running" is a genuinely different answer from "failed". A pipeline may reasonably poll again rather than roll back.
+
+### Branching on the code
+
+Capture the status rather than testing it inside an `if`, so `set -e` does not end the script and `$?` still means what you think it does.
+
+```bash title="create-if-missing.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+status=0
+surrealctl instance get api --json > instance.json 2> error.json || status=$?
+
+case "$status" in
+    0)  ;;
+    5)  surrealctl instance create api --type shared-1 --region aws-euw1 --json > instance.json ;;
+    3)  echo "credential expired; re-authenticate the runner" >&2; exit 1 ;;
+    8)  exit 75 ;;  # tell the scheduler to requeue
+    *)  jq -r '.message' < error.json >&2; exit "$status" ;;
+esac
+```
+
+## Unattended runs
+
+<OptionsTable
+    title="Options that matter in automation"
+    options={[
+        {
+            "name": "--json",
+            "short": "-j",
+            "env": "SURREALCTL_JSON",
+            "description": "Emit machine-readable JSON on stdout."
+        },
+        {
+            "name": "--no-input",
+            "env": "SURREALCTL_NO_INPUT",
+            "description": "Never prompt for input; fail instead. Also spelled `--non-interactive`."
+        },
+        {
+            "name": "--yes",
+            "short": "-y",
+            "env": "SURREALCTL_YES",
+            "description": "Assume yes for every confirmation."
+        },
+        {
+            "name": "--quiet",
+            "short": "-q",
+            "description": "Suppress progress and informational output."
+        },
+        {
+            "name": "--plain",
+            "env": "SURREALCTL_PLAIN",
+            "description": "Disable tables, spinners, and relative times."
+        },
+        {
+            "name": "--org",
+            "value": "<ORG>",
+            "env": "SURREALCTL_ORG",
+            "description": "The organisation to operate on, by id or name."
+        },
+        {
+            "name": "--token",
+            "value": "<TOKEN>",
+            "env": "SURREALCTL_TOKEN",
+            "description": "Personal access token to authenticate with."
+        },
+        {
+            "name": "--timeout",
+            "value": "<DURATION>",
+            "default": "30s",
+            "env": "SURREALCTL_TIMEOUT",
+            "description": "Maximum time to wait for a single API request."
+        },
+        {
+            "name": "--retries",
+            "value": "<N>",
+            "default": "3",
+            "env": "SURREALCTL_RETRIES",
+            "description": "How many times to retry a failed request."
+        },
+        {
+            "name": "--debug",
+            "env": "SURREALCTL_DEBUG",
+            "description": "Log every API request and response to stderr."
+        }
+    ]}
+/>
+
+Every one of these has an environment variable, so a pipeline can set them once for the whole job rather than repeating flags on each step.
+
+Two rules govern prompts.
+
+**A destructive command refuses rather than proceeds when it cannot ask.** With no `--yes` and no command-specific `--force`, `instance delete` in a non-interactive session exits `2` having sent nothing. A command that quietly went ahead because there was no terminal would be the worst possible default.
+
+**`--no-input` makes any session behave as an unattended one**, even at a terminal. Use it to test a pipeline locally: if the script works with `--no-input`, it will work in CI.
+
+```bash
+export SURREALCTL_NO_INPUT=1
+surrealctl instance delete staging --force
+```
+
+## CI detection and output modes
+
+`surrealctl` detects a CI environment and switches to plain output on its own: no spinners, no borders, no relative times. `CI=false`, `CI=0`, and an empty `CI` all mean *not* CI, so a system that sets the variable deliberately is not trapped in plain output.
+
+What CI changes is structure, interactivity, and how much progress is reported. What it must not change, and does not: colour, `--json` bytes, exit codes, which requests are made, timeouts, poll intervals, `--wait` defaults, and confirmation semantics.
+
+`--json` output is byte-identical whatever the terminal, the width, or the colour settings. Plain output does not depend on terminal width either, so it is stable to diff between runs. For parsing, still prefer `--json`.
+
+## The token in the environment
+
+Put a personal access token in the environment and leave it out of `argv`, where `ps` and shell history can both read it. See [Authentication](/docs/manage/surrealctl/authentication#personal-access-tokens) for how to create one.
+
+```bash
+export SURREALCTL_TOKEN="$(cat /run/secrets/surrealctl)"
+export SURREALCTL_ORG=67upifj5dt6p87ch3nh5t3a8
+surrealctl instance list --json
+```
+
+Set `SURREALCTL_ORG` to the organisation **id**. An id is used as it stands; a name costs a lookup on every command.
+
+```yaml title=".github/workflows/instance-report.yml"
+name: instance-report
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    env:
+      SURREALCTL_TOKEN: ${{ secrets.SURREALCTL_TOKEN }}
+      SURREALCTL_ORG: ${{ vars.SURREALCTL_ORG_ID }}
+      SURREALCTL_NO_INPUT: "1"
+    steps:
+      - run: curl -fsSL https://download.surrealdb.com/surrealctl/install.sh | sh
+      - run: surrealctl status
+      - run: surrealctl instance list --json > instances.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: instances
+          path: instances.json
+```
+
+`surrealctl status` early in a job is worth the one second it costs: it names which credential is in use, whether the API answers, and which organisation resolved, all before a later step fails for one of those reasons.
+
+> [!IMPORTANT]
+> A personal access token reads the control plane and cannot write to it. A job that creates, updates, or deletes needs a login session on a dedicated machine account. See [What a personal access token cannot do](/docs/manage/surrealctl/authentication#what-a-personal-access-token-cannot-do).
+
+## Waiting in a pipeline
+
+`instance create`, `update`, `delete`, `pause`, and `resume` wait for the operation to finish, in every output mode including `--json`. You have three choices.
+
+| Choice | Behaviour | Use it when |
+| --- | --- | --- |
+| Default | Wait up to 15 minutes | The next step needs the instance ready |
+| `--wait-timeout <DURATION>` | Wait that long, then exit `10` if it has not settled | The job has its own time budget |
+| `--no-wait` | Return as soon as the request is accepted | Something else will follow up |
+
+Under `--json`, a waiting command streams progress as newline-delimited JSON on **stderr** and puts one final document on stdout. That split is what keeps "exactly one document on stdout" true for a command that reports progress.
+
+```json title="Progress events, on stderr"
+{"event":"started","resource":"instance","goal":"ready","state":"pending"}
+{"event":"transition","resource":"instance","from":"pending","to":"ready","elapsed_secs":86}
+{"event":"finished","resource":"instance","outcome":"succeeded","state":"ready","elapsed_secs":86,"succeeded":true}
+```
+
+Six event types appear: `started`, `transition`, `heartbeat`, `poll_failed`, `throttled`, and `finished`. `instance watch --json` inverts the stream and writes these to stdout instead, because for a watch the transitions *are* the answer.
+
+Treat exit `10` as "poll again", not "failed".
+
+```bash title="fail-fast-then-follow.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+status=0
+surrealctl instance create api \
+    --type shared-1 --region aws-euw1 \
+    --wait-timeout 2m --json > instance.json || status=$?
+
+if [ "$status" -eq 10 ]; then
+    echo "still provisioning after two minutes; following the state" >&2
+    surrealctl instance watch api
+elif [ "$status" -ne 0 ]; then
+    exit "$status"
+fi
+```
+
+Interrupting a wait does not stop the operation. It continues server-side, and `surrealctl instance watch <name>` picks the state back up.
+
+## Retries, timeouts, and repeated runs
+
+`--timeout` bounds a single request and `--retries` bounds how many times one is retried. Retry behaviour depends on what the request would change: a read is retried on a connection failure or a 5xx, and a create is never retried after a 5xx, because the instance may exist and a replay would bill for two. Rate limits honour the server's `Retry-After`.
+
+That leaves a small amount for your script to know about re-runs.
+
+| Command | Repeating it |
+| --- | --- |
+| `instance create` | Creates a second instance. Check with `instance get` first |
+| `instance backup create` | Takes a second snapshot |
+| `instance pause`, `instance resume` | Safe. Already-paused prints a note, emits the same document, exits `0` |
+| `instance delete` | Safe. A missing instance while waiting counts as done |
+| `auth logout` | Safe. Signed out already still exits `0` with a document |
+| `instance capabilities set` | Safe. No change means no write |
+
+## Calling the API directly
+
+When a route has no verb yet, `surrealctl api` sends the request with the credential, headers, and retry policy already handled.
+
+```bash
+surrealctl api get /api/cloud/v0/organizations
+surrealctl api get /api/cloud/v0/organizations --include
+surrealctl api post /api/cloud/v0/organizations -d @body.json --force
+```
+
+The path is a path, not a URL — the host comes from `--api`. Any write method asks for confirmation unless you pass `--force`. `--query key=value` and `--header name:value` are repeatable. Authentication headers cannot be overridden here; change the credential instead. `--include` prints the status and headers to stderr, and `--raw` prints the body exactly as it arrived.
+
+## Configuration on the machine
+
+Values a script should not have to repeat can live in the profile instead.
+
+```bash
+surrealctl config list
+surrealctl config set json true
+surrealctl config set org acme
+surrealctl config path
+```
+
+An environment variable outranks the configured value, and `config set` warns you when the matching variable is exported. `config get` prints the value alone, and nothing at all when there is none, so `[ -z "$(surrealctl config get org)" ]` behaves.
+
+## Checklist before shipping a pipeline
+
+- Set `SURREALCTL_NO_INPUT=1` so nothing can block on a prompt.
+- Set `SURREALCTL_ORG` to an organisation id.
+- Pass `--json` and parse with `jq`. Never grep stderr.
+- Branch on exit codes, not on messages.
+- Treat `10` as "poll again", and `8` as "requeue".
+- Pass `--yes` or a command's `--force` deliberately, on the steps that need it.
+- Give a read-only job a personal access token, and nothing more.
+- Run `surrealctl status` first, so a misconfigured job says so in one line.
+
+## Next steps
+
+- [Authentication](/docs/manage/surrealctl/authentication) — credentials, scopes, and profiles.
+- [Instances](/docs/manage/surrealctl/instances) — the workflows these scripts drive.
+- [`surrealctl` reference](/docs/reference/cli/surrealctl/overview) — every command, flag, default, and environment variable.

@@ -1,0 +1,310 @@
+---
+position: 5
+title: Output and exit codes
+description: The surrealctl --json contract, the stdout and stderr split, NDJSON streams, the shared list presentation flags, the secret and confirmation guards, and every exit code.
+---
+
+# Output and exit codes
+
+`surrealctl` is driven as often by pipelines and agents as by people. This page is the contract those callers can rely on: which stream carries what, what `--json` guarantees, and what each exit code means.
+
+The framing rule is short. **stderr text is not a contract. The exit codes are.**
+
+## The stream split
+
+- **stdout** carries the command's data payload, and nothing else, ever.
+- **stderr** carries progress, prompts, warnings, hints, errors and debug output.
+
+So `| jq` always works, `--json > out.json` can still prompt you, and a failed command leaves stdout empty. Exactly one document is written to stdout per invocation.
+
+A broken downstream pipe exits `0` silently, so `surrealctl instance list | head -3` behaves as you expect.
+
+```bash title="Capture the data, keep the diagnostics"
+surrealctl instance list --json > instances.json
+```
+
+## `--json`
+
+**On success**, stdout carries the bare wire payload, pretty-printed with a two-space indent and no envelope. An envelope would force `.data[]` on every consumer for ever, and the stream split plus the exit code already answer *did it work*.
+
+```bash
+surrealctl instance get production --json
+```
+
+```json title="Output"
+{
+  "id": "67upif0m8sh1cn1p2c8t",
+  "name": "production",
+  "slug": "production-6xk2",
+  "state": "ready",
+  "type": "shared-1",
+  "region": "aws-euw1",
+  "version": "3.2.4",
+  "host": "production-6xk2.aws-euw1.surreal.cloud"
+}
+```
+
+Because the payload is the API's own body rather than a struct assembled here, a field the API adds this morning appears in `--json` this afternoon with no new release.
+
+**On failure**, stdout gets zero bytes and an enveloped object goes to stderr:
+
+```json title="stderr"
+{
+  "kind": "conflict",
+  "message": "could not pause `api`: Instance is not in a valid state",
+  "status": 409,
+  "code": null,
+  "request_id": "01J8XYZ2QK7M4N0P8R9S1T2V3W",
+  "hint": "The instance is busy with another change. Wait for it to settle, then try again.",
+  "command": "surrealctl instance get api",
+  "docs": null,
+  "retry_after_secs": null,
+  "exit_code": 6
+}
+```
+
+Every key is always present, with an explicit `null` rather than being omitted, so a consumer can index without checking first.
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `kind` | string | The error class. Never `null` |
+| `message` | string | The full message chain, including the layer naming which command failed |
+| `status` | integer or `null` | The HTTP status, when there was one |
+| `code` | string or `null` | The API's own error code, when it sent a non-empty one |
+| `request_id` | string or `null` | The request identifier to quote when reporting a problem |
+| `hint` | string or `null` | What to do about it |
+| `command` | string or `null` | A command to run next |
+| `docs` | string or `null` | A documentation link, for authentication and rate-limit failures only |
+| `retry_after_secs` | integer or `null` | From the `Retry-After` header |
+| `exit_code` | integer | Matches the process exit code exactly |
+
+One further key appears conditionally: `candidates`, an array of strings, when a resource reference could not be resolved and there were near matches to suggest.
+
+`docs` is populated only where a link explains something. Authentication and permission failures link to the authentication documentation; rate limits link to the rate-limit documentation; everything else is `null`, because a link to a generic index in place of an explanation is worse than no link.
+
+### The `kind` vocabulary
+
+Eleven values, and the set is closed:
+
+| `kind` | Exit code | Meaning |
+| --- | --- | --- |
+| `auth` | `3` | Not authenticated, or the credential could not be renewed |
+| `forbidden` | `4` | Authenticated but not allowed |
+| `not_found` | `5` | The named resource does not exist |
+| `conflict` | `6` | Not in a state that allows this, or a precondition failed |
+| `invalid` | `7` | The API rejected the request as invalid |
+| `rate_limited` | `8` | Rate limited after the retry budget was spent |
+| `upstream` | `9` | The API's upstream failed |
+| `network` | `9` | The API could not be reached |
+| `not_available` | `9` | The feature is not enabled for this deployment |
+| `wait_timeout` | `10` | A wait gave up; the operation is still running |
+| `unknown` | `1` | Unclassified |
+
+`not_available` is worth calling out: it is HTTP 501, and it means nothing is broken — the feature is simply not enabled here. Every [Spectron](/docs/reference/cli/surrealctl/commands/spectron) route answers this way on a deployment without Spectron.
+
+### What `--json` guarantees
+
+- **Additions are non-breaking and expected.** Renames, removals and type changes are breaking.
+- **Output is byte-identical** regardless of `CI`, `NO_COLOR`, `TERM`, terminal width, or `--color always`. `--json` is never coloured.
+- **Money stays in integer minor units** — cents, or millicents where the API uses them. Formatting happens in the view layer only.
+- **Timestamps stay verbatim RFC 3339**, including the `9999-12-31T23:59:59Z` sentinel that means "never expires".
+- **Presentation flags never reach it.** `--columns`, `--wide`, `--sort`, `--reverse` and `--limit` arrange a table; `--json` always emits the complete payload.
+- **Relative times never appear.** "3 days ago" is a rendering, not data.
+
+Two commands are documented exceptions. [`token create`](/docs/reference/cli/surrealctl/commands/token#token-create) has no `--json` form at all, because the secret is returned exactly once and can neither go inside the document nor share stdout with it. [`completion`](/docs/reference/cli/surrealctl/commands/misc#completion) emits a shell script rather than a view, so `--json` does not wrap it.
+
+## Output shapes
+
+| Shape | Produced by | Under `--json` |
+| --- | --- | --- |
+| **Table** | Every `list` verb, every `catalog` command, `org roles`/`permissions`/`usage`/`spend`/`plans`, `instance jwks`/`metrics`/`logs`/`usage`, `instance backup list`, `token scopes`, `auth scopes`, `spectron scopes`/`verbs`/`providers`/`usage`, `config list`, `context list`, `status` | A JSON array |
+| **Detail** | Every `get`, `create`, `update`, `delete`, `archive` and `use`, plus `whoami`, `version`, `context show`, `open`, `instance estimate`, `instance capabilities get`/`set`, `instance backup create`, `instance backup policy get`/`set`, `spectron config` | The wire body |
+| **Scalar** | `instance endpoint`, `config get`, `config path` | The single value |
+| **Secret** | `instance token`, `token create`, `spectron key create`/`rotate`, `spectron scoped-key create`, `spectron access-token create` | A one-field document, except `token create`, which refuses `--json` |
+| **Composite** | `instance status` — a phase plus a snapshot table, as one document | The whole status body |
+| **NDJSON on stdout** | `instance watch`, `instance logs --follow` | One compact object per line |
+| **Raw bytes** | `completion`, `api --raw` | Written straight through |
+
+A scalar is the value alone plus a newline, byte-identical in every text mode, with no label and no styling — so `$(…)` captures exactly the value:
+
+```bash
+ENDPOINT=$(surrealctl instance endpoint production)
+```
+
+`config get` on an unset key writes zero bytes, so `[ -z "$(surrealctl config get org)" ]` and `wc -l` agree with each other.
+
+## NDJSON streams
+
+A command that waits reports its progress as newline-delimited JSON on **stderr**, then writes one final document to stdout. The split is what keeps "exactly one document on stdout" true for a command that reports progress.
+
+```json title="stderr, during instance create --json"
+{"event":"started","resource":"instance","goal":"ready","state":"pending"}
+{"event":"transition","resource":"instance","from":"pending","to":"provisioning","elapsed_secs":4}
+{"event":"heartbeat","resource":"instance","state":"provisioning","elapsed_secs":64}
+{"event":"finished","resource":"instance","outcome":"succeeded","state":"ready","elapsed_secs":91,"succeeded":true}
+```
+
+Two more event shapes appear when the API pushes back: `poll_failed`, carrying a `detail`, and `throttled`, carrying `retry_after_secs`.
+
+[`instance watch`](/docs/reference/cli/surrealctl/commands/instance#instance-watch) inverts the split and writes the same stream to **stdout**, because a watch is a stream by nature and there is no single final object to be the answer. [`instance logs --follow`](/docs/reference/cli/surrealctl/commands/instance#instance-logs) does the same with log lines. Both say so in their own `--help`.
+
+## List presentation flags {#list-presentation-flags}
+
+Every list-shaped command accepts the same six flags.
+
+<OptionsTable
+    title="Presentation flags"
+    options={[
+        {
+            "name": "--columns",
+            "value": "<IDS>",
+            "description": "Show only these columns, comma-separated. Conflicts with `--wide`."
+        },
+        {
+            "name": "--wide",
+            "description": "Show every column, including the ones hidden by default."
+        },
+        {
+            "name": "--no-header",
+            "description": "Omit the header row."
+        },
+        {
+            "name": "--sort",
+            "value": "<ID>",
+            "description": "Sort by this column. An unrecognised id is a usage error listing the valid ones."
+        },
+        {
+            "name": "--reverse",
+            "description": "Reverse the sort order."
+        },
+        {
+            "name": "--limit",
+            "value": "<N>",
+            "description": "Show at most this many rows."
+        }
+    ]}
+/>
+
+Sorting, reversing and limiting are always applied on this side, because the API has no pagination, no sort parameter and no search. They are applied in one order — sort, then reverse, then limit — and sorting compares the *rendered* value of each cell, so the display order matches the sort order.
+
+`--wide` reveals the columns a table hides by default. `--columns` takes the column ids, which are what `--sort` also accepts. Run a command with `--wide --no-header` to see everything a row carries.
+
+```bash title="Just the names and states, longest-lived first"
+surrealctl instance list --columns name,state,version --sort name
+```
+
+```bash title="Every column, for a spreadsheet"
+surrealctl instance list --wide --plain > instances.tsv
+```
+
+An unknown column id is a usage error, exit `2`. It is caught as the rows are arranged for display rather than before the request, so the list has already been fetched by the time it is reported. The message names every column the row carries, including the ones only `--wide` shows:
+
+```text
+Unknown sort column `naem`. Available columns: name, state, type, version, region, compute_units, storage, id, slug, host, access_type, organization_id
+```
+
+None of these flags reach `--json`, which always emits the complete payload. A `--limit 1` must not silently truncate a pipeline.
+
+> [!NOTE]
+> [`auth scopes`](/docs/reference/cli/surrealctl/commands/auth#auth-scopes) is the one list-shaped command that carries only `--no-header`. It has no `--columns`, `--wide`, `--sort`, `--reverse` or `--limit`.
+
+## Output modes
+
+`--json` chooses the encoding; `--plain` chooses the decoration. The encoding is resolved per stream, so `surrealctl instance list | less` gives plain data on stdout while a terminal on stderr keeps its spinner.
+
+Encoding is decided by the first match:
+
+1. `--json` or `SURREALCTL_JSON`
+2. `--plain` or `SURREALCTL_PLAIN`
+3. An agent environment is detected
+4. `CI` is set to something other than `false`, `0` or empty
+5. `TERM=dumb`
+6. The stream is not a terminal
+7. Otherwise, rich output
+
+Colour is decided independently, and deliberately does not depend on `--plain` or `CI` — GitHub Actions sets `CI`, is not a terminal, and renders ANSI perfectly. `--color always` colours piped output; `--json` is never coloured, even then.
+
+Plain output is space-padded to its content width, with uppercase headers, no borders and no truncation, and is byte-identical at any terminal width. `CI=1` is byte-for-byte equivalent to `--plain`.
+
+What `CI` changes is structure, interactivity and progress granularity. What it must never change: colour, `--json` bytes, exit codes, which requests are made, timeouts, poll intervals, `--wait` defaults, or confirmation semantics.
+
+## The secret guard
+
+Every command that mints a credential refuses to write it to a terminal, where it would stay in your scrollback. The check happens **before** the request, so a forgotten `--reveal` never costs a credential nobody can recover.
+
+```text
+Refusing to print a secret to a terminal, where it would stay in your scrollback.
+Pipe the output, or pass --reveal if you meant to see it.
+```
+
+That is exit `2`. Either pipe the output, or pass `--reveal` to say you meant it.
+
+```bash title="Pipe it"
+surrealctl instance token production | pbcopy
+```
+
+```bash title="Or ask for it on screen"
+surrealctl instance token production --reveal
+```
+
+## The confirmation guard
+
+A destructive command has exactly three outcomes:
+
+- `--yes` (or the command's own `--force`) is set — it proceeds without asking.
+- A person is present — it prompts on stderr, defaulting to **no**.
+- Neither — it is an error, exit `2`, with nothing sent:
+
+```text
+Refusing to delete `production` without confirmation in a non-interactive session.
+Pass --yes to confirm, or run this from a terminal.
+```
+
+Declining a prompt is not a failure. The command says what it did not do — `Nothing was deleted.` — and exits `0`.
+
+## Exit codes
+
+Codes are never reused, and none exceeds 125 except for the signal convention.
+
+| Code | Meaning |
+| --- | --- |
+| `0` | The command did what was asked. Includes an empty list |
+| `1` | A failure that does not fit any category below |
+| `2` | Bad invocation: a usage error, client-side validation, a required value missing in a non-interactive session, or a destructive command that could not confirm |
+| `3` | Not authenticated, or the credential expired and could not be renewed |
+| `4` | Authenticated but not allowed: insufficient scopes, insufficient role, or a credential kind this operation refuses |
+| `5` | The named resource does not exist |
+| `6` | The resource is not in a state that allows this, or a precondition failed |
+| `7` | The API rejected the request as invalid |
+| `8` | Rate limited, after the retry budget was spent |
+| `9` | The API or its upstream is unreachable, the feature is not available, or this client is too old |
+| `10` | A wait gave up. **The operation is still running** |
+| `11` | The credential store could not be read or written |
+| `30` | An interactive login flow did not complete |
+| `130` | Interrupted |
+
+`0`, `1` and `2` keep their conventional meanings, so `if ! surrealctl …` behaves exactly as it does with the [`surreal` CLI](/docs/reference/cli/surrealdb-cli/overview), and usage errors exit `2` as every other command-line tool does. Everything above `2` is additive.
+
+`10` earns its own code because *still running* is a genuinely different answer from *failed*, and a pipeline may reasonably poll again rather than roll back. See [Long-running operations](/docs/reference/cli/surrealctl/long-running-operations).
+
+```bash title="Branch on the outcome"
+if surrealctl instance create api --type shared-1 --region aws-euw1 --json > instance.json; then
+    echo "ready: $(jq -r .name instance.json)"
+else
+    case $? in
+        6)  echo "an instance called api already exists" ;;
+        8)  echo "rate limited; requeue this job" ;;
+        10) echo "still provisioning; poll again next run" ;;
+        *)  echo "failed" ; exit 1 ;;
+    esac
+fi
+```
+
+> [!IMPORTANT]
+> [`status`](/docs/reference/cli/surrealctl/commands/misc#status) is the single deliberate exception to "stdout is empty on failure". Its table *is* the diagnosis, so it prints even when the command exits non-zero. The exit code comes from the first fatal check — `3` for a credential problem, `9` for an unreachable API.
+
+## Related pages
+
+- [Global flags](/docs/reference/cli/surrealctl/global-flags) — `--json`, `--plain`, `--quiet`, `--color`, `--yes`
+- [Long-running operations](/docs/reference/cli/surrealctl/long-running-operations) — waiting, polling and exit code `10`
+- [Overview](/docs/reference/cli/surrealctl/overview) — the rest of the reference

@@ -1,0 +1,206 @@
+---
+position: 5
+title: Organisations
+description: "Select an organisation, manage members and invitations, check roles, and read usage and spend from the command line."
+---
+
+# Organisations
+
+An organisation owns instances, members, and billing. This page covers how `surrealctl` decides which organisation you mean, how to manage the people in it, and how to read what it has used and what it has cost. It is for anyone who administers a team's SurrealDB Cloud account.
+
+## Choosing an organisation
+
+Almost every command needs an organisation. `surrealctl` works down a fixed order and stops at the first answer.
+
+1. `--org` on the command line
+2. `SURREALCTL_ORG` in the environment
+3. `org` in this profile's section of `config.toml`
+4. The organisation remembered by `surrealctl org use`
+5. Your account's default organisation
+6. The only candidate, when you belong to exactly one
+7. An interactive picker, at a terminal
+8. An error naming the flag
+
+```bash
+surrealctl org list
+surrealctl org use acme          # remember it for this profile
+surrealctl --org acme instance list
+surrealctl org use --clear       # forget it again
+```
+
+`surrealctl context show` reports which organisation resolved and which layer decided it. Add `--debug` to any command to see the winning layer for every value.
+
+In CI, set `SURREALCTL_ORG` to the organisation **id** rather than its name. An id is used as it stands; a name costs a lookup on every command.
+
+> [!NOTE]
+> `SURREALCTL_ORG` outranks the value `org use` remembered. If a remembered organisation seems to be ignored, check whether the variable is exported. `org use` warns you about it at the time.
+
+## Manage organisations
+
+```bash
+surrealctl org list
+surrealctl org list --all                 # include archived organisations
+surrealctl org get acme
+surrealctl org create acme-labs --use
+surrealctl org update acme --name "Acme Ltd"
+surrealctl org archive acme
+```
+
+An organisation name is 1 to 30 characters. `--use` on `create` remembers the new organisation immediately, so the commands after it need no `--org`. `org archive` asks for confirmation unless you pass `--force`.
+
+`org get` shows the plan, the state, your role, the member count, the instance allowances, and the billing configuration.
+
+## Members
+
+Members are addressed by username or user id.
+
+```bash
+surrealctl team list
+surrealctl team get ada
+surrealctl team update ada --role admin
+surrealctl team remove ada
+```
+
+`team remove` ends someone's membership of the organisation. Their account is untouched, which is why the verb is `remove` and not `delete`.
+
+`team list` deliberately does not fold in pending invitations. Someone who has been invited is not yet a member; `invite list` is where they appear.
+
+## Invitations
+
+Roles are defined per organisation, so read the list before you send an invitation.
+
+```bash
+surrealctl org roles
+surrealctl team invite ada@example.com --role member
+surrealctl invite list
+surrealctl invite delete ada@example.com
+```
+
+<OptionsTable
+    title="team invite"
+    options={[
+        {
+            "name": "<EMAIL>",
+            "required": true,
+            "description": "The email address to invite."
+        },
+        {
+            "name": "--role",
+            "value": "<ROLE>",
+            "required": true,
+            "description": "The role to grant. Run `surrealctl org roles` for the ones this organisation defines."
+        }
+    ]}
+/>
+
+`surrealctl team invite` and `surrealctl invite create` are the same command under two names — use whichever reads better where you are. If the API rejects the role, the error points you back at `org roles`.
+
+`invite delete` withdraws an invitation, by the email address it was sent to or by its code. The confirmation names the address.
+
+## Roles and permissions
+
+```bash
+surrealctl org roles        # the roles this organisation can assign
+surrealctl org permissions  # what you are permitted to do here
+```
+
+`org permissions` answers "what may I do in this organisation" for the credential in hand. It is the question `auth scopes` cannot answer for a login session, where the authorisation model is your role rather than a scope list.
+
+For what Owner, Admin, and Member each permit, see [Members and roles](/docs/manage/organisations/members-and-roles).
+
+## Personal access tokens
+
+Tokens belong to your account rather than to an organisation, but they are how a pipeline reads an organisation's data.
+
+```bash
+surrealctl token scopes
+surrealctl token create "ci-read-only" --scope read:cloud | tail -1
+surrealctl token list
+surrealctl token delete ci-read-only
+```
+
+All four verbs need a login session, so a token cannot mint its own replacement. See [Authentication](/docs/manage/surrealctl/authentication#personal-access-tokens) for scopes, expiry, and how to capture the secret.
+
+## Usage and spend
+
+```bash
+surrealctl org usage                  # consumption across every instance
+surrealctl instance usage production  # one instance
+surrealctl org spend                  # the current billing period
+surrealctl org spend --period 03-2026 # a specific month
+surrealctl org plans                  # the plans available to this organisation
+```
+
+`--period` is written month first, as `MM-YYYY`. If you write it the other way round, `surrealctl` says so and shows the correction rather than sending the request.
+
+In text output, `org spend` prints a total on stderr. The total is computed before `--limit` is applied, so it is always the whole bill even when the table is trimmed.
+
+> [!IMPORTANT]
+> Under `--json`, money stays in integer minor units — cents, or millicents where the API uses them. Do not treat `amount` as a decimal. Divide before you display.
+
+```bash title="Total spend for a month, in whole currency units"
+surrealctl org spend --period 03-2026 --json | jq '[.[].amount] | add / 100'
+```
+
+```bash title="Line items as TSV"
+surrealctl org spend --json \
+  | jq -r '.[] | [.effective_at, .resource, .description, .amount] | @tsv'
+```
+
+For invoices, payment methods, and how the platform bills, see [Billing](/docs/manage/organisations/billing).
+
+## Open the dashboard
+
+```bash
+surrealctl open org acme
+surrealctl open billing acme
+surrealctl open instance production
+surrealctl open terms
+```
+
+The URL is always printed; a browser is only opened when somebody is present to look at it, so this is safe in a script that logs its output. `surrealctl` links to the terms and never accepts them on your behalf.
+
+## Worked examples
+
+### Onboard a new engineer
+
+```bash title="onboard.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+email="$1"
+
+surrealctl team invite "$email" --role member
+surrealctl invite list --columns email,role,status
+```
+
+### Report which instances cost the most
+
+```bash title="top-spend.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+surrealctl org spend --json \
+  | jq -r 'group_by(.instance_id)
+           | map({instance: .[0].instance_id, cents: ([.[].amount] | add)})
+           | sort_by(-.cents)
+           | .[] | [.instance, .cents] | @tsv'
+```
+
+### Audit who is in every organisation you belong to
+
+```bash title="audit-members.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+surrealctl org list --json | jq -r '.[].id' | while read -r org; do
+    echo "== ${org}"
+    surrealctl --org "$org" team list --json | jq -r '.[] | [.username, .role] | @tsv'
+done
+```
+
+## Next steps
+
+- [Scripting](/docs/manage/surrealctl/scripting) — exit codes, `--json`, and unattended runs.
+- [Instances](/docs/manage/surrealctl/instances) — the instance lifecycle from the command line.
+- [Organisations](/docs/manage/organisations) — the same concepts in SurrealDB Studio.
