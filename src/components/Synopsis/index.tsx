@@ -61,7 +61,22 @@ export function Synopsis({ command, label = "Usage", children }: SynopsisProps) 
                     component="pre"
                     className={classes.synopsisBody}
                 >
-                    <code>{text}</code>
+                    <code>
+                        {/*
+                         * One block per authored line, so a line that wraps on a narrow
+                         * viewport can carry a hanging indent and stay distinguishable
+                         * from the next usage line.
+                         */}
+                        {text.split("\n").map((line, index) => (
+                            <Box
+                                key={index}
+                                component="span"
+                                className={classes.synopsisLine}
+                            >
+                                {line}
+                            </Box>
+                        ))}
+                    </code>
                 </Box>
             )}
         </Box>

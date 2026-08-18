@@ -224,9 +224,18 @@ export function OptionsTable({ title, options }: OptionsTableProps) {
                     {title}
                 </Text>
             )}
+            {/*
+             * The scroll container is focusable and named so a keyboard-only user can
+             * reach it and scroll the clipped columns with the arrow keys.
+             */}
             <Table.ScrollContainer
+                className={classes.scrollContainer}
                 minWidth={minWidth}
                 type="native"
+                role="region"
+                tabIndex={0}
+                aria-labelledby={title ? captionId : undefined}
+                aria-label={title ? undefined : "Options table"}
             >
                 <Table
                     className={classes.table}
