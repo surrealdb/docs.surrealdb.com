@@ -9,13 +9,56 @@
 // Usage: bun run search:reindex
 //
 // Environment:
-//   DOCS_WEBHOOK_SECRET  required, shared with the API's own secret
-//   REINDEX_URL          optional, defaults to production
-//   GITHUB_SHA           optional, recorded in the payload for the API log
+//   DOCS_WEBHOOK_SECRET   required, shared with the API's own secret
+//   REINDEX_ENVIRONMENT   optional, "production" (default) or "staging"
+//   REINDEX_URL           optional, a full URL that overrides the above
+//   GITHUB_SHA            optional, recorded in the payload for the API log
 
 import { createHmac } from "node:crypto";
 
-const DEFAULT_URL = "https://api.surrealdb.com/api/docs/v1/reindex";
+const ENDPOINT_PATH = "/api/docs/v1/reindex";
+
+/**
+ * Resolved from REINDEX_ENVIRONMENT, which the workflow fills from its
+ * workflow_dispatch input. A push carries no input, so the value arrives empty
+ * and production is used — the same choice a merge should make.
+ */
+const HOSTS = {
+    production: "https://api.surrealdb.com",
+    staging: "https://api.staging.surrealdb.com",
+} as const;
+
+type Environment = keyof typeof HOSTS;
+
+function isEnvironment(value: string): value is Environment {
+    return value in HOSTS;
+}
+
+/**
+ * REINDEX_URL wins, for local runs against a stub. Otherwise the environment
+ * name picks a host, and an empty name means production.
+ *
+ * This lives here rather than in a workflow expression so it can be exercised.
+ * A GitHub expression is untestable, and this workflow only ever runs after a
+ * merge — there is no run on the pull request to catch a mistake in it.
+ */
+function resolveUrl(): string {
+    const override = process.env.REINDEX_URL?.trim();
+    if (override) return override;
+
+    const name = process.env.REINDEX_ENVIRONMENT?.trim() ?? "";
+    if (!name) return `${HOSTS.production}${ENDPOINT_PATH}`;
+
+    if (!isEnvironment(name)) {
+        // Never fall back to production for a typo: re-indexing the wrong
+        // environment is quiet and confusing.
+        fail(
+            `REINDEX_ENVIRONMENT is "${name}". Expected one of: ${Object.keys(HOSTS).join(", ")}.`,
+        );
+    }
+
+    return `${HOSTS[name]}${ENDPOINT_PATH}`;
+}
 
 /** The only ref the endpoint acts on. Anything else is discarded with a 202. */
 const INDEXED_REF = "refs/heads/main";
@@ -89,9 +132,7 @@ if (!secret) {
     fail("DOCS_WEBHOOK_SECRET is not set. Add it as a repository secret.");
 }
 
-// `??` alone would not catch an empty string, and the workflow computes this
-// value from an expression — an empty result would otherwise be fetched as "".
-const url = process.env.REINDEX_URL?.trim() || DEFAULT_URL;
+const url = resolveUrl();
 const payload = buildPayload();
 const signature = signPayload(payload, secret);
 
