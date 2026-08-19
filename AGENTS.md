@@ -121,6 +121,60 @@ exceptions, security caveats, and breaking or easy-to-miss details.
 in"), padded significance, and first-person opinion in reference material.
 Match existing pages in the same section when unsure.
 
+**Do not presume the reader's situation.** The test is *who the sentence is
+about*, not whether it contains a negative. Attributing a state, a practice, or a
+misconception to the reader is the fault. Samsung's writing style guide gives the
+same rule as "use positive expressions".
+
+A negative is fine in two cases. It is fine when it describes what SurrealDB asks
+of the reader, because it lifts an obligation. It is also fine when it names a
+general subject outright, because the claim then lands on a category rather than
+on this reader — "most vector stores keep no history of a superseded fact" is an
+observation, and a negative attached to our own architecture ("one engine, no
+plumbing to run") describes ours. What fails is the **bare** negation: with no
+stated subject the reader supplies themselves, and reads it as a verdict on their
+own setup.
+
+Fine, because these describe what SurrealDB asks of the reader and remove an
+obligation:
+
+- "No need to learn another query language just for time series."
+- "You do not have to author Rust yourself to benefit from Surrealism."
+- "You do not need to create the table first — SurrealDB adds it on the first write."
+
+Not fine, because each one only works if the reader is in a state we have
+decided for them:
+
+| Avoid | What it presumes | Use |
+| ----- | ---------------- | --- |
+| No message broker, no polling, no glue code | Nothing states the subject, so the reader becomes it | The database is your event bus and your source of truth at once |
+| One engine, not a pile of stores | They suspected we were a pile of stores | One engine, one transaction |
+| Nothing here is a mention tally. The count is… | They guessed "mention tally" | The count is… |
+| Forget about infrastructure operations | Ops is their burden today — and instructs them | SurrealDB Cloud runs the infrastructure for you |
+| Stop stitching databases together | They stitch databases together — and instructs them | One database for every model your app needs |
+
+Two forms to watch for:
+
+1. **Imputed practice or pain** — the sentence only holds if the reader's current
+   setup is bad. Watch "glue code", "bolt-ons", "plumbing", "juggling",
+   "wrestling with", "hassle" — though these are not banned words, and are fine
+   against a named general subject or against our own architecture. It is the
+   bare, subjectless use that lands on the reader.
+2. **Imputed misconception** — the sentence answers a question nobody asked, so
+   it plants the wrong idea in order to knock it down. Usual shapes: "not a…",
+   "isn't just…", "Nothing here is…", "more than just…".
+
+A negative imperative ("Stop…", "Forget about…", "Say goodbye to…") is both at
+once, and never belongs in the docs.
+
+None of this applies where the subject genuinely *is* a problem or a limit:
+`> [!WARNING]` and `> [!NOTE]` bodies, prohibitions, documented limits ("eval is
+denied for every subject by default"), factual permission statements ("sort
+fields do not need to appear in the `SELECT` list"), API semantics that literally
+stop something, and product-to-product contrast on a comparison page ("not just
+embeddings" on a page about vector databases). Rewriting those costs precision
+and gains nothing.
+
 ## Writing or updating documentation
 
 When you need to write new documentation or update existing articles, make use of the `documentation` skill (`.agents/skills/documentation/SKILL.md`).

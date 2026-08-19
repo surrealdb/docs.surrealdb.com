@@ -98,7 +98,7 @@ Match this house style:
 **Phrasing patterns that fit**
 
 - Purpose line: `Use [product] to [verb], [verb], and [verb] [object].`
-- Clarifying correction: `You get a full [X], not a [misleading abstraction].`
+- Precise scope: `[X] is a full [thing]: it [capability] and [capability].`
 - Branching audience: `If you are new to [topic], start with [basics]. If you already know [topic], go to [build].`
 - Outcome frame: `When you finish, you will have [concrete result].`
 - List annotation: `**[Title]:** [What it is or when to use it].`
@@ -113,6 +113,12 @@ Match this house style:
 - Stacked noun clusters longer than three nouns.
 - Em dashes used as decoration; stacked adjectives; rule-of-three padding.
 - Leaking internal codenames, sprint language, or “we currently hack around…”.
+- Copy that presumes the reader’s situation: imputed pain (“no glue code”, “no
+  more plumbing”), imputed misconceptions (“not just a wrapper”, “nothing here
+  is a tally”), and negative imperatives (“stop stitching…”, “forget about…”).
+  A negative that describes what the product asks of the reader (“no need to
+  learn another query language”) is fine—it removes an obligation rather than
+  assigning the reader a state. See **Documentation voice** in `AGENTS.md`.
 
 Apply **ASD-STE100 Simplified Technical English** as specified in [references/ste.md](references/ste.md). Product and API names are allowed technical nouns/verbs; do not force awkward rewrites of proper names.
 
