@@ -1,0 +1,260 @@
+---
+position: 4
+title: MCP tools
+description: "Tool payloads and ACL alignment."
+---
+
+# MCP tools
+
+SurrealDB Agent Memory's MCP server exposes **seven** tools at `/mcp`: `remember`, `recall`, `context`, `reflect`, `forget`, `upload`, and `inspect`. Each maps to one or more REST endpoints and uses the same authentication and scope semantics.
+
+> [!NOTE]
+> Older docs and some third-party snippets used names like `memory_store` or `knowledge_search`. Those prefixes are gone — use the short names above. Authoritative schemas live in the SurrealDB Agent Memory server (`spectron-user-api` MCP tools module).
+
+> [!NOTE]
+> REST responses use **camelCase** (`queryMs`, `traceId`, `trace.traceId`). **Scope selectors** on the wire use DNF (`ScopeSets`): writes take **`scope`** / **`scopes`**, reads take **`lens`** — an OR of conjunctive slash-path clauses. Register paths with `spectron scopes create` before use. See [Contexts and scope](/docs/agent-memory/mental-model/contexts-and-scope#wire-format-scopesets).
+
+## Authentication
+
+All tools use **`Authorization: Bearer`** authentication (same as REST). Pass the token in the MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "spectron": {
+      "url": "https://spectron.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer sk-...",
+        "X-Spectron-Context": "acme-prod"
+      }
+    }
+  }
+}
+```
+
+`X-Spectron-Context` in MCP client configs is a convenience for templating. Each API key is bound to exactly one Context, so **`context_id` is optional** on every tool: when omitted, the server resolves the Context from the bearer key. You may still pass `context_id` explicitly; a value that does not match the key's bound Context is rejected with **`401`** (masked, not `404`).
+
+## Scope handling
+
+Scope is layered on each tool call:
+
+1. **Grant region** (from the API key's principal) – enforced server-side; cannot be widened past what the key allows.
+2. **Per-call `scope` / `lens` argument** – DNF selector narrowing the operation within the grant (`scope`/`scopes` on writes, `lens` on `recall` / `context`).
+
+Register paths with `spectron scopes create` before first use.
+
+---
+
+## `remember`
+
+Persist a new fact from text. Reconciles against existing memory (supersession, uncertainty).
+
+**Requires:** `memory:write` over the target scope.
+
+**Input:**
+```jsonc
+{
+  "text": "I just got promoted to CTO.",   // required
+  "session_id": "sess_abc123",            // optional – creates a session if omitted
+  "scope": [["org/acme/user/alice"]],     // optional DNF write selector
+  "labels": ["source=onboarding"],        // optional
+  "infer": "full"                         // full | preview | none (default full)
+}
+```
+
+**Output:** Structured diff (entities, attributes, relations, instructions, uncertainties, corrections) plus a stand-in `trace_id` (the facts path returns the turn id today).
+
+**Underlying REST endpoint:** `POST /api/v1/{context_id}/facts`
+
+---
+
+## `recall`
+
+Search the unified substrate (experiential facts + document passages) and return ranked hits.
+
+**Requires:** `memory:read`.
+
+**Input:**
+```jsonc
+{
+  "query": "What does Alice do at Acme?",  // required
+  "k": 10,                                  // optional, default 10 (max 50)
+  "mode": "hybrid",                         // vector | bm25 | graph | hybrid
+  "lens": [["org/acme"]],                   // optional DNF read lens
+  "labels": ["project=support"]             // optional key=value filter
+}
+```
+
+**Output:** Ranked hits with scores and source kinds, plus `trace_id`.
+
+**Underlying REST endpoint:** `POST /api/v1/{context_id}/query`
+
+---
+
+## `context`
+
+Assemble a markdown context block (profile + preferences + relevant facts) ready for system-prompt injection.
+
+**Requires:** `memory:read`.
+
+**Input:**
+```jsonc
+{
+  "query": "What does Alice do at Acme?",
+  "lens": [["org/acme"]],
+  "labels": ["org=acme"]
+}
+```
+
+**Output:** Markdown context string plus `trace_id`.
+
+**Underlying REST endpoint:** `POST /api/v1/{context_id}/context`
+
+---
+
+## `reflect`
+
+Synthesise patterns across stored memory. With `persist: true`, writes the insight as new facts (`source.kind = "reflect"`).
+
+**Requires:** `memory:read`; `persist: true` also needs write access in the caller's region.
+
+**Input:**
+```jsonc
+{
+  "query": "What recurring complaints have customers raised this month?",
+  "persist": true   // optional, default false
+}
+```
+
+**Output:** Reflection text, evidence refs, optional `persisted_attributes`, and `trace_id`.
+
+**Underlying REST endpoint:** `POST /api/v1/{context_id}/reflect`
+
+---
+
+## `forget`
+
+Stop believing something. Soft-deletes matching attributes (`valid_until`). `purge: true` also removes supersession history (right-to-be-forgotten).
+
+**Requires:** `memory:forget` (not the same as `memory:write`).
+
+**Input:**
+```jsonc
+{
+  "query": "anything about my previous role at the old company",
+  "purge": false
+}
+```
+
+**Output:** Soft-delete count. `trace_id` may be empty on this path.
+
+**Underlying REST endpoint:** `POST /api/v1/{context_id}/forget`
+
+---
+
+## `upload`
+
+Upload a document (base64 bytes) into the knowledge layer. Processing is asynchronous.
+
+**Requires:** `memory:write`.
+
+**Input:**
+```jsonc
+{
+  "bytes_base64": "<RFC 4648 bytes>",  // required
+  "title": "Returns Policy",
+  "source": "returns.pdf",
+  "mime_type": "application/pdf",
+  "filename": "returns.pdf",
+  "scopes": [["org/acme/team/eng"]],   // optional — or `scope` alias
+  "labels": ["team=eng"]
+}
+```
+
+**Output:**
+```jsonc
+{
+  "id": "doc:01hx9…",
+  "status": "queued",
+  "content_hash": "blake3:…",
+  "deduplicated": false,
+  "version": 1
+}
+```
+
+Poll status with **`inspect`** (`document:<id>`) or REST `GET .../documents/{id}`.
+
+**Underlying REST endpoint:** `POST /api/v1/{context_id}/documents`
+
+---
+
+## `inspect`
+
+Fetch a typed row by reference for explainability.
+
+**Requires:** `memory:read`.
+
+**Input:**
+```jsonc
+{
+  "ref": "entity:Person/alice"   // entity:<Type>/<Name> | trace:<id> | document:<id>
+}
+```
+
+**Output:** Entity (with attributes / supersession), flat trace record, or document metadata — matching the underlying GET.
+
+**Underlying REST endpoints:**
+- `GET /api/v1/{context_id}/entities/{type}/{name}`
+- `GET /api/v1/{context_id}/traces/{id}`
+- `GET /api/v1/{context_id}/documents/{id}`
+
+---
+
+## Error handling
+
+Operation failures return an **`isError: true`** tool result (HTTP transport stays **200**), not a JSON-RPC protocol error. The result includes the same HTTP status the REST API would return:
+
+```jsonc
+{
+  "isError": true,
+  "structuredContent": {
+    "error": {
+      "status": 404,
+      "message": "Document not found"
+    }
+  }
+}
+```
+
+| Status | Meaning | Agent action |
+| --- | --- | --- |
+| `401` | Missing or invalid key | Fix credentials; missing Context is masked as 401 (not 404) |
+| `403` | Grant denied | Narrow scope or request access |
+| `404` | Resource not found | Adjust query or id |
+| `429` | Rate limit or `enforcement_blocked` | Back off and retry |
+| `500` | Server fault | Retry; details are redacted |
+
+JSON-RPC **`error`** responses are reserved for **protocol faults** only — malformed params (`-32602`), unknown tool (`-32601`), oversized `k`, and similar.
+
+Denied operations emit the same **`authz.denied`** audit events and error metrics as REST.
+
+---
+
+## Tool ACL summary
+
+| Tool | Typical grant |
+|---|---|
+| `remember` | `memory:write` |
+| `recall` | `memory:read` |
+| `context` | `memory:read` |
+| `reflect` (`persist: false`) | `memory:read` |
+| `reflect` (`persist: true`) | `memory:read` + write region |
+| `forget` | `memory:forget` |
+| `upload` | `memory:write` |
+| `inspect` | `memory:read` |
+
+## Streaming
+
+Most tools are synchronous – the full response is returned in a single payload.
+
+`upload` returns immediately with `queued` status; ingestion continues on the worker. `reflect` with `persist: true` on a large corpus may take several seconds (no MCP progress notifications today).

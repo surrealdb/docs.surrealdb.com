@@ -53,8 +53,8 @@ const EXCLUDED_COLLECTIONS = new Set<string>(["labs-items"]);
 const URL_PREFIX_OVERRIDES: Record<string, string> = {
     // Served from the docs root (/docs/<slug>).
     index: "",
-    // Served from /docs/spectron rather than /docs/spectron/index.
-    "spectron/index": "spectron",
+    // Served from /docs/agent-memory rather than /docs/agent-memory/index.
+    "agent-memory/index": "agent-memory",
 };
 
 /** The site is served under a `/docs` base path (see vite.config.ts). */

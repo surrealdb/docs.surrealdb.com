@@ -47,11 +47,10 @@ export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
     { prefix: "reference/rest-api", id: "reference/rest-api" },
     { prefix: "reference/rust", id: "reference/rust" },
     { prefix: "reference/swift", id: "reference/swift" },
-    { prefix: "spectron/agent-memory", id: "spectron/agent-memory" },
-    { prefix: "spectron/cookbooks", id: "spectron/cookbooks" },
-    { prefix: "spectron/integrations", id: "spectron/integrations" },
-    { prefix: "spectron/reference", id: "spectron/reference" },
-    { prefix: "spectron", id: "spectron/index" },
+    { prefix: "agent-memory/cookbooks", id: "agent-memory/cookbooks" },
+    { prefix: "agent-memory/integrations", id: "agent-memory/integrations" },
+    { prefix: "agent-memory/reference", id: "agent-memory/reference" },
+    { prefix: "agent-memory", id: "agent-memory/index" },
     { prefix: "", id: "index" },
 ];
 

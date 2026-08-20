@@ -90,8 +90,8 @@ export function getParentPathname(pathname: string): string | null {
  *
  * `getParentPathname` walks Vike's `urlPathname`, which has the base
  * stripped. A `Location` header needs the base back on, or walking up from
- * a missing page lands outside the docs entirely (`/docs/spectron/typo`
- * would redirect to `/spectron`, which no route serves).
+ * a missing page lands outside the docs entirely (`/docs/agent-memory/typo`
+ * would redirect to `/agent-memory`, which no route serves).
  */
 export function getParentUrl(pathname: string): string | null {
     const parent = getParentPathname(pathname);
@@ -173,7 +173,7 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
 
 /**
  * URLs for static prerendering. Omits category-only slug segments so crawlers
- * never enqueue paths such as `/spectron/__category`.
+ * never enqueue paths such as `/agent-memory/__category`.
  */
 export function prerenderCollectionUrls<K extends keyof CollectionMap>(
     collectionId: K,

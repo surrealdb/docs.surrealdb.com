@@ -1,0 +1,83 @@
+---
+position: 1
+title: Respan
+description: "Using SurrealDB Agent Memory alongside Respan tracing and the Respan LLM gateway."
+---
+
+# Respan
+
+[Respan](https://www.respan.ai/) is an LLM engineering platform: tracing, evals, and a gateway across many model providers. It is complementary to SurrealDB Agent Memory: Respan observes and evaluates your agent, while Agent Memory gives it memory. This guide runs the two together with the [Python SDK](/docs/agent-memory/integrations/sdks/python) (`surrealdb`).
+
+> [!NOTE]
+> This is an integration guide. Respan and SurrealDB Agent Memory are separate services; the code shows how they sit side by side in one request.
+
+## Installation
+
+> [!NOTE]
+> `Spectron` was the project name for SurrealDB Agent Memory. These type names
+> will be renamed in a future release.
+
+```bash
+pip install openai
+pip install --pre surrealdb
+```
+
+```bash
+export SPECTRON_ENDPOINT="https://api.spectron.example"
+export SPECTRON_CONTEXT="acme-prod"
+export SPECTRON_API_KEY="sk-spec-..."
+export RESPAN_API_KEY="..."
+```
+
+## Route model calls through Respan, memory through Agent Memory
+
+Point your model client's base URL at the Respan gateway so every call is traced and cost-attributed, and use the SurrealDB Agent Memory client for recall and storage. Check the [Respan docs](https://www.respan.ai/docs/documentation/overview) for the current gateway base URL:
+
+```python
+import os
+from openai import OpenAI
+from surrealdb import Spectron
+
+# Model calls flow through Respan (traced, logged, cost-attributed).
+llm = OpenAI(
+    base_url="https://gateway.respan.ai/v1",  # see Respan docs for the exact URL
+    api_key=os.environ["RESPAN_API_KEY"],
+)
+
+# Memory is handled by Spectron.
+memory = Spectron(
+    endpoint=os.environ["SPECTRON_ENDPOINT"],
+    context=os.environ["SPECTRON_CONTEXT"],
+    api_key=os.environ["SPECTRON_API_KEY"],
+)
+scope = ["org/acme/user/alice"]
+
+def answer(user_message: str) -> str:
+    block = memory.query_context(user_message, k=8, lens=scope)
+
+    completion = llm.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": f"You are a helpful assistant.\n\n## Memory\n{block}"},
+            {"role": "user", "content": user_message},
+        ],
+    )
+    reply = completion.choices[0].message.content
+
+    memory.remember_many(
+        [{"role": "user", "content": user_message}, {"role": "assistant", "content": reply}],
+        scopes=scope,
+    )
+    return reply
+```
+
+The recall and storage calls appear in Respan's trace tree alongside the model call, so you can see the memory operations and their latency for each turn.
+
+## Scope per user
+
+Pass a `scope` on every SurrealDB Agent Memory call to isolate memory. A scope is a slash path or an array of paths, for example `["org/acme/user/alice"]`. Register paths with `spectron scopes create` before first use.
+
+## Next steps
+
+- [Python SDK](/docs/agent-memory/integrations/sdks/python): the full client surface
+- [Traces](/docs/agent-memory/reference/rest-api): SurrealDB Agent Memory's own decision traces, correlated by `traceId`

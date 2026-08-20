@@ -1,0 +1,243 @@
+---
+position: 9
+title: Configuration
+description: "Context config, models, and limits."
+---
+
+# Configuration
+
+SurrealDB Agent Memory has two configuration surfaces: server-wide settings (in the server binary or environment) and per-Context configuration (stored in the control plane and patchable at runtime).
+
+## Server-wide configuration
+
+Server configuration is provided via environment variables or a TOML configuration file passed at startup. These settings apply to all Contexts unless overridden at the Context level.
+
+> [!NOTE]
+> Every variable keeps the `SPECTRON_` prefix from **Spectron**, the project name SurrealDB Agent Memory was developed under. These names are part of the shipped interface, so the product renaming leaves them unchanged for now; they will be renamed in a future release.
+
+### Core settings
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `SPECTRON_BIND` | string | `0.0.0.0:8080` | Listen address and port |
+| `SPECTRON_SURREALDB_URL` | string | – | SurrealDB connection URL (required) |
+| `SPECTRON_SURREALDB_USER` | string | – | SurrealDB username (required) |
+| `SPECTRON_SURREALDB_PASS` | string | – | SurrealDB password (required) |
+| `SPECTRON_OBJECT_STORE` | string | `local://./data` | Object store backend (see below) |
+
+### Default model settings
+
+Per-stage defaults are cost-tiered for the deployment’s chosen LLM provider (`SPECTRON_LLM_PROVIDER` / implicit Google). Optional env overrides:
+
+| Variable | Description |
+|---|---|
+| `SPECTRON_LLM_MODEL` | Global model override when a stage has no per-Context selection |
+| `SPECTRON_MODEL_EMBEDDING` | Must be `gemini-embedding-2` (3072-dim). Embedding is **fixed per deployment** — not a free per-Context choice |
+
+The embedding model is **fixed per deployment** — it is not a per-Context override. Context config rejects any `models.embedding` value other than the deployment default. Changing the server embedding model requires a [reindex](/docs/agent-memory/reference/management-api#force-reindex) so vectors and HNSW indexes stay in the same embedding space.
+
+### Reranker (optional)
+
+Cross-encoder reranking for `/documents/query` when `use_reranker=true`:
+
+| Variable | Description |
+| --- | --- |
+| `SPECTRON_RERANKER_URL` | POST endpoint for the reranker service. Unset ⇒ no provider; requests fall through to bi-encoder ordering. |
+| `SPECTRON_RERANKER_MODEL` | Required when URL is set. Boot error if URL is set without a model. |
+| `SPECTRON_RERANKER_API_KEY` | Optional bearer token (`Authorization: Bearer …`). |
+
+### Multimodal providers (optional)
+
+HTTP OCR, CLIP, and speech-to-text for document ingestion (read by the **`worker`** role). An HTTP provider **takes precedence** over the built-in local fallback for the same modality. Misconfigured URLs fail at boot.
+
+| Variable | Description |
+| --- | --- |
+| `SPECTRON_OCR_URL` | POST endpoint for OCR. Unset ⇒ built-in or local Tesseract (when enabled). |
+| `SPECTRON_OCR_MODEL` | Required when OCR URL is set. |
+| `SPECTRON_OCR_API_KEY` | Optional bearer token. |
+| `SPECTRON_CLIP_URL` | POST endpoint for visual embeddings. Output must match the **3072**-dim `image_chunk` width (same space as `gemini-embedding-2` when using Gemini CLIP). |
+| `SPECTRON_CLIP_MODEL` | Required when CLIP URL is set. |
+| `SPECTRON_CLIP_API_KEY` | Optional bearer token. |
+| `SPECTRON_STT_URL` | POST endpoint for speech-to-text. |
+| `SPECTRON_STT_MODEL` | Required when STT URL is set. |
+| `SPECTRON_STT_API_KEY` | Optional bearer token. |
+
+See [Multimodal content](/docs/agent-memory/ingest/authoritative/multimodal-content).
+
+### Default provider API keys
+
+| Variable | Description |
+|---|---|
+| `SPECTRON_PROVIDER_OPENAI_API_KEY` | OpenAI key available to Contexts and stages |
+| `SPECTRON_PROVIDER_ANTHROPIC_API_KEY` | Anthropic key available to Contexts and stages |
+| `SPECTRON_PROVIDER_GOOGLE_API_KEY` | Google (Gemini) key; also used when Gemini is the implicit request-path default |
+| `SPECTRON_LLM_PROVIDER` | Explicit default provider for unset stages: `openai` \| `anthropic` \| `google`. Unset ⇒ a present Google key makes Gemini the implicit default on `/chat` and `/facts?infer=full` |
+| `SPECTRON_EMBEDDINGS_API_KEY` | Gemini Developer API key for embeddings (`gemini-embedding-2`, 3072-dim). Embeddings are Gemini-only |
+
+### Object store configuration
+
+| Backend | `SPECTRON_OBJECT_STORE` format | Notes |
+|---|---|---|
+| Local filesystem | `local:///path/to/data` | Development and single-node deployments |
+| Amazon S3 | `s3://bucket-name/prefix` | Requires `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` or instance role |
+| Google Cloud Storage | `gcs://bucket-name/prefix` | Requires `GOOGLE_APPLICATION_CREDENTIALS` |
+| Azure Blob Storage | `azure://container/prefix` | Requires `AZURE_STORAGE_ACCOUNT` + `AZURE_STORAGE_ACCESS_KEY` |
+
+### CORS (browser clients)
+
+Cross-origin browser calls to the API are **off by default**. Enable an origin allowlist when a web client (for example SurrealDB Studio against a Cloud-brokered access token) calls the user API from a different origin than the API host.
+
+| Service | Variable | CLI flag |
+| --- | --- | --- |
+| User API | `SPECTRON_CORS_ALLOWED_ORIGINS` | `--cors-allowed-origins` |
+| Management API | `SPECTRON_MANAGEMENT_CORS_ALLOWED_ORIGINS` | `--cors-allowed-origins` |
+
+Comma-separated origins. Entries are trimmed, lower-cased, and normalised (trailing `/` stripped). Exact entries match the `Origin` header verbatim; entries containing `*` are **anchored globs** on both sides (bare `*` or `https://*` are rejected). Allowed origins are echoed in `Access-Control-Allow-Origin`; credentials are not used — callers authenticate with `Authorization`, not cookies. Preflight mirrors request headers so SDK headers (`api-version`, `X-Spectron-Context`, `Idempotency-Key`, and others) pass without a fixed allowlist.
+
+The management API is normally server-side only; CORS is optional there for operator tooling.
+
+## Per-Context configuration
+
+Each Context stores a `config` object in the control plane. This is updated via `PATCH /api/v1/contexts/{id}` and applies immediately to new requests.
+
+### Full config schema
+
+```json
+{
+  "config": {
+    "token_limit": 1000000,
+    "models": {
+      "extraction": { "provider": "google", "model": "gemini-2.5-flash" },
+      "synthesis": { "provider": "google", "model": "gemini-2.5-pro" },
+      "elaboration_consolidation": { "provider": "google", "model": "gemini-2.5-flash" },
+      "embedding": "gemini-embedding-2"
+    },
+    "providers": {
+      "google": "…",
+      "openai": "sk-…",
+      "anthropic": "sk-ant-…"
+    }
+  }
+}
+```
+
+### Config fields
+
+| Field | Type | Description |
+|---|---|---|
+| `token_limit` | integer (optional) | Soft monthly token cap for metering and billing. Does not reject requests while `enforcement_blocked` is `false`. `null` = no cap. |
+| `ingestion_profile` | string | Document ingest dial: `TextOnly`, `TextPlusKeyword`, `StandardMultimodal`, or `MultimodalFull` (default). See [Multimodal content](/docs/agent-memory/ingest/authoritative/multimodal-content). |
+| `models.extraction` | `{provider, model}` | LLM for turn and document extraction. |
+| `models.reconciliation` | `{provider, model}` (optional) | LLM assist when structural entity merge is inconclusive. |
+| `models.synthesis` | `{provider, model}` | LLM for `/chat` and `/reflect`. |
+| `models.elaboration_consolidation` | `{provider, model}` | LLM for worker elaboration and consolidation. |
+| `models.embedding` | string | Must be `gemini-embedding-2` when set (3072-dim; deployment-fixed). |
+| `providers.google` | string | Google (Gemini) API key for this Context. |
+| `providers.openai` | string | OpenAI API key for this Context. Overrides the server-wide default. |
+| `providers.anthropic` | string | Anthropic API key for this Context. |
+
+### Provider API key visibility
+
+Provider API keys are **write-only** on the API surface. The read projection for a Context replaces the key values with a **`providers_configured`** summary — names of providers for which **this Context** stores its own key:
+
+```json
+{
+  "config": {
+    "providers_configured": ["google", "openai", "anthropic"]
+  }
+}
+```
+
+This is **not** the same as **`GET /api/v1/{context_id}/providers`**, which lists providers reachable via a global deployment key **or** a per-Context key and includes selectable model ids. The two surfaces are not derivable from each other.
+
+The raw key values never appear in read responses.
+
+### Top-level Context fields (outside `config`)
+
+These fields live on the Context record itself, not inside the `config` object. A `PATCH` that only updates `config` cannot change them.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `enforcement_blocked` | boolean | `false` | When `true`, gated LLM-backed requests return **`429`** regardless of the soft `token_limit`. When `false`, usage may exceed `token_limit` (pay-as-you-go). |
+
+### Patching config
+
+Send only the fields you want to change. Unset fields are left unchanged (deep merge):
+
+```http
+PATCH /api/v1/contexts/acme-prod
+Content-Type: application/json
+Authorization: Bearer mgmt-...
+
+{
+  "config": {
+    "token_limit": 2000000,
+    "models": {
+      "reflection": "anthropic/claude-opus-4-7"
+    }
+  }
+}
+```
+
+## Extraction tuning
+
+Additional per-Context settings control extraction behaviour:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `llm_extraction_enabled` | boolean | `false` | Whether typed-node extraction runs at all. With it off, documents and turns are still stored and searchable, but produce no entities, attributes, or relations |
+| `pii_redaction_enabled` | boolean | `false` | Redact detected personal data during ingest |
+| `reconciliation.confidence_floor` | float | `0.7` | Posterior-confidence floor for auto-supersession. Below it, a conflicting assertion records an `uncertainty` instead of replacing the prior value |
+| `ingestion_profile` | string | — | Which pipeline steps run during document ingest |
+| `chunking_strategy` | string | — | How document text is split before embedding |
+
+There is no setting that constrains which entity types, attribute keys, or relation labels extraction may produce. Entity types come from a fixed vocabulary; keys and labels converge through reuse. See [Extraction vocabulary](/docs/agent-memory/tuning/ontology-grounding).
+
+## Cache settings
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `response_cache.enabled` | boolean | `true` | Master switch. With it `false`, every `/chat` and `/reflect` call skips the cache tier |
+| `response_cache.similarity_threshold` | float | `0.92` | Cosine-similarity floor a prior query must score against the new one before its answer is reused |
+| `response_cache.freshness_window_seconds` | integer | `3600` | Soft cap on how old a reusable response may be |
+
+## Key policy
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `allow_self_service_keys` | boolean | `true` | When `false`, members cannot mint keys via `POST /{ctx}/keys`; use Cloud-brokered access tokens only. |
+| `max_token_ttl_seconds` | integer (optional) | none | Maximum TTL clamp applied to every key mint (management, broker, self-service). `null` = no clamp. |
+
+Every **data-plane** API key must be **bound to a principal**. Keys with no principal binding are rejected with **`401`** — there is no unscoped passthrough mode. Mint keys under a principal (management API or self-service `POST /{ctx}/keys`).
+
+## Request and list limits
+
+Operator-tunable ceilings (env vars, read at process start):
+
+| Variable | Default | Caps |
+| --- | --- | --- |
+| `SPECTRON_DEFAULT_PAGE_SIZE` | 100 | Default `limit` when listing session turns and omitted elsewhere |
+| `SPECTRON_MAX_LIST_LIMIT` | 500 | Maximum rows per list response (`list_turns`, traces, audit) |
+| `SPECTRON_MAX_QUERY_K` | 50 | Maximum `limit` / `k` on `/query`, `/context`, document query, and MCP `recall` / `context`. **Clamp-down only** — the env var can lower the ceiling but never raise it above 50. Default answer size **`k`** / **`limit`** is **10**. |
+| `SPECTRON_RETRIEVAL_POOL_SIZE` | 256 | Internal candidate-pool breadth for fused retrieval. **Decoupled from `k`** — `k` only truncates the fused answer; raising `k` does not widen the search pool. |
+| `SPECTRON_RETRIEVAL_SECTION_EXPANSION` | `true` | When on (default), pull same-section sibling passages into `contextHits` after ranking so synthesis sees section bodies, not only heading/pointer chunks. Opt out with `0` / `false`. Does not change ranked `hits`. See [Section expansion](/docs/agent-memory/retrieve/recall#section-expansion). |
+| `SPECTRON_DB_WS_MAX_MESSAGE_BYTES` | `134217728` (128 MiB) | Client-side WebSocket per-message cap for pooled SurrealDB connections. Raise in lockstep with the server's `SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE` when large document persists fail with `Message too long`. |
+| `SPECTRON_TRACE_FEATURE_TTL_SECS` | 60 | TTL (seconds) for the in-process per-(Context, scope) trace-features cache in the fused ranker — how long prior retrieval outcomes re-weight candidates before recomputation. Process-local; `0` or invalid values fall back to the default. |
+
+Requests above the query ceiling return **`400 Bad Request`**.
+
+## Reconciliation
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `reconciliation.confidence_floor` | float | `0.7` | Minimum confidence required for same-provenance supersession |
+
+## Defaults reference
+
+When a per-Context field is not set, the server-wide default applies. The effective configuration for a Context is always visible at:
+
+```http
+GET /api/v1/contexts/{id}
+```
+
+The response includes the `config` object with all effective values merged – Context-level overrides where set, server-wide defaults elsewhere.

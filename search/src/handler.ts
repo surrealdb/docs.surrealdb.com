@@ -25,27 +25,27 @@ export const MAX_QUERY_LENGTH = 500;
 // Product scoping
 //
 // The search index is shared across products, but the UX is
-// product-scoped: every Spectron page lives under /docs/spectron,
+// product-scoped: every Agent Memory page lives under /docs/agent-memory,
 // everything else is SurrealDB. Filtering happens HERE — before
 // boosting, grouping, the relevance threshold, and the result cap
 // — so the much larger SurrealDB corpus can't crowd the smaller
-// Spectron product out of the global top-N. (This previously ran
-// in the API wrapper after the cap, which starved Spectron
-// results: a Spectron query could return few or zero hits even
-// when relevant Spectron pages existed.)
+// Agent Memory product out of the global top-N. (This previously ran
+// in the API wrapper after the cap, which starved Agent Memory
+// results: an Agent Memory query could return few or zero hits
+// even when relevant Agent Memory pages existed.)
 // ──────────────────────────────────────────────────────────
 
-const SPECTRON_PATH_PREFIX = "/docs/spectron";
+const AGENT_MEMORY_PATH_PREFIX = "/docs/agent-memory";
 
-export type SearchProduct = "surrealdb" | "spectron";
+export type SearchProduct = "surrealdb" | "agent-memory";
 
-function isSpectronPath(path: string): boolean {
-    return path === SPECTRON_PATH_PREFIX || path.startsWith(`${SPECTRON_PATH_PREFIX}/`);
+function isAgentMemoryPath(path: string): boolean {
+    return path === AGENT_MEMORY_PATH_PREFIX || path.startsWith(`${AGENT_MEMORY_PATH_PREFIX}/`);
 }
 
 function matchesProduct(hit: RawSearchHit, product: SearchProduct): boolean {
-    const spectron = isSpectronPath(hit.page_path || hit.url || "");
-    return product === "spectron" ? spectron : !spectron;
+    const agentMemory = isAgentMemoryPath(hit.page_path || hit.url || "");
+    return product === "agent-memory" ? agentMemory : !agentMemory;
 }
 
 // ──────────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ const SEARCH_SQL = /* surql */ `
     -- neighbours, exploring up to 240 candidates in the HNSW
     -- graph (higher = more accurate but slower). The pool is kept
     -- generous because results are product-filtered downstream, and
-    -- the smaller product (Spectron) must not be crowded out.
+    -- the smaller product (Agent Memory) must not be crowded out.
     LET $page_vs = (
         SELECT
             id,

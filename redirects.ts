@@ -577,6 +577,49 @@ function withDocsDestination(rule: Redirect): Redirect {
 }
 
 /** Shared with vercel.ts (production) and the Vite dev server (local). */
+/**
+ * Spectron → SurrealDB Agent Memory rename (August 2026). The docs moved from
+ * `/docs/spectron` to `/docs/agent-memory` to match the website, and the nested
+ * `agent-memory` section was flattened into the collection root — so paths under
+ * `/spectron/agent-memory` lose that segment while everything else keeps its
+ * shape below the new prefix.
+ *
+ * Exact rules precede their prefix rules: `:path*` also matches the empty path,
+ * so `/spectron/agent-memory/:path*` would otherwise swallow the hub page.
+ */
+function agentMemoryRedirects(): Redirect[] {
+    const moves: [string, string][] = [
+        // Page slug renamed with the product; must precede the prefix rules below.
+        // `what-is-agent-memory` shipped only briefly as an interim slug.
+        [
+            "/spectron/welcome/what-is-spectron",
+            "/docs/agent-memory/welcome/what-is-surrealdb-agent-memory",
+        ],
+        [
+            "/agent-memory/welcome/what-is-spectron",
+            "/docs/agent-memory/welcome/what-is-surrealdb-agent-memory",
+        ],
+        [
+            "/agent-memory/welcome/what-is-agent-memory",
+            "/docs/agent-memory/welcome/what-is-surrealdb-agent-memory",
+        ],
+        // Flattened section — the hub page's content lives at a new slug.
+        ["/spectron/agent-memory", "/docs/agent-memory/memory-and-knowledge"],
+        ["/spectron/agent-memory/:path*", "/docs/agent-memory/:path*"],
+        // Everything else keeps its path below the new prefix.
+        ["/spectron", "/docs/agent-memory"],
+        ["/spectron/:path*", "/docs/agent-memory/:path*"],
+    ];
+
+    // Emitted with and without a `/docs` source prefix. The www rewrite strips
+    // `/docs` before the request reaches this project, but the repo's existing
+    // rules cover both spellings and a duplicate destination is harmless.
+    return moves.flatMap(([source, destination]): Redirect[] => [
+        { source, destination, statusCode: 301 },
+        { source: `/docs${source}`, destination, statusCode: 301 },
+    ]);
+}
+
 export const docsRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
     { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
@@ -597,6 +640,7 @@ export const docsRedirects: Redirect[] = [
     ...sdkGettingStartedRedirects(),
     ...aiAgentsRedirects(),
     ...cloudAndDeploymentRedirects(),
+    ...agentMemoryRedirects(),
     // Surrealist → SurrealDB Studio path rename
     {
         source: "/docs/explore/surrealist",

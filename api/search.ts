@@ -20,13 +20,13 @@ const CORS_HEADERS: Record<string, string> = {
 // serverless function or the OpenAI embedding API.
 const CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400";
 
-// Products are isolated at the URL prefix level: every Spectron
-// page lives under /docs/spectron, every SurrealDB page does not.
+// Products are isolated at the URL prefix level: every Agent Memory
+// page lives under /docs/agent-memory, every SurrealDB page does not.
 // The product is passed to handleSearch, which filters the search
 // index (shared across products) before applying the relevance
 // threshold and result cap — so each product gets its full quota
 // of results rather than whatever survives a global cut.
-const PRODUCTS = ["surrealdb", "spectron"] as const satisfies readonly SearchProduct[];
+const PRODUCTS = ["surrealdb", "agent-memory"] as const satisfies readonly SearchProduct[];
 type ProductId = (typeof PRODUCTS)[number];
 
 function isProductId(value: string): value is ProductId {
