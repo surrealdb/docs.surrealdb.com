@@ -22,8 +22,8 @@ export interface ProductMeta {
 export const PRODUCT_META: Record<ProductId, ProductMeta> = {
     surrealdb: {
         id: "surrealdb",
-        label: "SurrealDB",
-        shortLabel: "SurrealDB",
+        label: "Database",
+        shortLabel: "Database",
         description: "Database, query language, SDKs, and tooling.",
         homeHref: "/docs/",
         pathPrefix: "/",
