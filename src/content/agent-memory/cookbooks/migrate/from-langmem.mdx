@@ -1,0 +1,145 @@
+---
+position: 1
+title: Migrate from LangMem
+description: "Moving LangChain memory to SurrealDB Agent Memory."
+---
+
+# Migrating from LangMem
+
+LangMem is LangChain's in-process memory library, typically backed by a local vector store or an in-memory store. This guide covers the concept mapping and migration path to SurrealDB Agent Memory.
+
+> [!NOTE]
+> `Spectron` was the project name for SurrealDB Agent Memory. These type names
+> will be renamed in a future release.
+
+## Concept mapping
+
+| LangMem concept | SurrealDB Agent Memory equivalent | Notes |
+|---|---|---|
+| Namespace | Scope + Context | SurrealDB Agent Memory uses **scope tags** within a named Context |
+| Memory (document) | Entities + attributes | SurrealDB Agent Memory extracts structure; LangMem stores flat text |
+| `put_memories()` | `remember()` | Write path is similar; extraction differs |
+| `search_memory()` | `recall()` | SurrealDB Agent Memory adds graph-density reranking |
+| `get_memories()` | `profile()` | Returns structured snapshot |
+| Memory type (`semantic`, `episodic`, `procedural`) | Memory category (`knowledge`, `context`, `instructions`) | Categories have different volatility and expiry |
+| `delete_memories()` | `forget()` | Query-driven; `POST /scopes/forget` erases a whole subtree |
+| InMemoryStore | Embedded SurrealDB Agent Memory (in-process SurrealDB) | See the embedded deployment guide |
+
+## Migration example
+
+### LangMem (Python)
+
+```python
+from langgraph.store.memory import InMemoryStore
+from langmem import create_memory_store_manager
+
+store = InMemoryStore(
+    index={"dims": 1536, "embed": embeddings}
+)
+memory = create_memory_store_manager(
+    "openai/gpt-4o",
+    namespace=("user", "alice"),
+    store=store,
+)
+
+await memory.aput(
+    [{"content": "Alice prefers concise, technical answers."}]
+)
+results = await memory.asearch("communication style")
+```
+
+### SurrealDB Agent Memory equivalent
+
+```python
+from surrealdb import AsyncSpectron
+
+client = AsyncSpectron(
+    context="dev",
+    endpoint="https://spectron.example.com",
+    api_key="sk-...",
+)
+
+await client.remember(
+    "Alice prefers concise, technical answers.",
+    scopes=["user/alice"],
+)
+results = await client.recall("communication style", k=5, lens=["user/alice"])
+for hit in results.hits:
+    print(hit.text)
+```
+
+## Key differences
+
+**Persistence**: LangMem with `InMemoryStore` loses all memory when the process restarts. SurrealDB Agent Memory is durable by default – all memory lives in SurrealDB and survives restarts, deployments, and crashes.
+
+**Structured extraction**: LangMem stores memories as text documents. SurrealDB Agent Memory extracts structured entities, attributes, and relations. "Alice prefers concise answers" becomes an entity `Person/alice` with attribute `communication_style = "concise, technical"` – queryable and updatable as structured data.
+
+**Conflict handling**: LangMem stores all memories and relies on the retrieval layer to resolve conflicts via recency ranking. SurrealDB Agent Memory detects contradictions and supersedes old attribute values, maintaining a correct, single current value with a history chain.
+
+**Namespace vs scope**: LangMem uses a tuple namespace `("user", "alice")`. SurrealDB Agent Memory uses hierarchical slash paths like `["user/alice"]`. For single-clause scopes, org-wide queries surface org-tagged memory while hiding user-specific records — see [Contexts and scope](/docs/agent-memory/mental-model/contexts-and-scope).
+
+**Categorisation**: SurrealDB Agent Memory's categories map loosely to LangMem memory types:
+- LangMem `semantic` → `knowledge` (facts, preferences)
+- LangMem `episodic` → `context` (recent, auto-expiring events)
+- LangMem `procedural` → `instructions` (behavioural directives)
+
+## LangChain integration
+
+SurrealDB Agent Memory ships a LangChain memory adapter (planned). Until it is released, use the SDK directly and inject the formatted context into your chain or graph:
+
+```python
+from langchain_core.messages import SystemMessage
+from surrealdb import AsyncSpectron
+
+client = AsyncSpectron(context="dev", endpoint="...", api_key="...")
+
+class SpectronMemory:
+    def __init__(self, client: AsyncSpectron, scope: list[str]):
+        self.client = client
+        self.scope = scope
+
+    async def load_context(self, query: str) -> str:
+        results = await self.client.recall(query, k=5, lens=self.scope)
+        return "\n".join(hit.text for hit in results.hits)
+
+    async def save_turn(self, role: str, content: str):
+        await self.client.remember(f"{role}: {content}", scopes=self.scope)
+
+# Usage in a LangGraph node
+async def agent_node(state, memory: SpectronMemory):
+    context = await memory.load_context(state["messages"][-1].content)
+    messages = [
+        SystemMessage(content=f"Memory:\n{context}"),
+        *state["messages"],
+    ]
+    response = await llm.ainvoke(messages)
+    await memory.save_turn("assistant", response.content)
+    return {"messages": [response]}
+```
+
+## Migrating from LangChain ConversationBufferMemory
+
+If you are using the older LangChain `ConversationBufferMemory` or similar in-context memory, migration is straightforward: replace the buffer with SurrealDB Agent Memory sessions. Instead of passing the full conversation history as context (which grows without bound), pass a recalled summary from SurrealDB Agent Memory.
+
+```python
+# Before: buffer-based
+memory = ConversationBufferMemory()
+chain = ConversationChain(llm=llm, memory=memory)
+
+# After: Spectron-based
+async with client.sessions.create(scopes=[f"user/{user_id}"]) as session:
+    # At turn start, recall relevant context
+    context = await client.recall(user_message, k=5)
+
+    # Pass context as part of the system prompt instead of full history
+    response = await llm.ainvoke([
+        SystemMessage(content=f"Relevant context:\n{context['hits']}"),
+        HumanMessage(content=user_message),
+    ])
+
+    # Store the turn
+    await client.remember(user_message, session_id=session.id, role="user")
+    await client.remember(response.content, session_id=session.id, role="assistant")
+```
+
+This approach scales indefinitely – context window size is bounded by `k` on recall, not by conversation length.

@@ -1,0 +1,81 @@
+---
+position: 1
+title: Models per stage
+description: "Configure which LLM is used for each processing stage in SurrealDB Agent Memory."
+---
+
+# Models per stage
+
+SurrealDB Agent Memory’s pipeline uses separate LLM stages with different latency and quality needs. Assign a model per stage rather than one model for everything. Embeddings are fixed deployment-wide.
+
+For provider keys and Gemini defaults, see [Configuration](/docs/agent-memory/reference/configuration#default-provider-api-keys).
+
+## The stages
+
+### Extraction
+
+Runs on conversational turns and document jobs. Classifies content and extracts entities, attributes, relations, instructions, and uncertainties. Often on the critical path for `/facts?infer=full`, so latency matters.
+
+### Reconciliation
+
+Optional LLM assist when structural entity merge is inconclusive. Not every write invokes it.
+
+### Synthesis
+
+Powers `/chat` and `/reflect` answer generation from retrieved context. Quality usually matters more than on extraction.
+
+### Elaboration and consolidation
+
+Background “dreaming” work on the worker tier: elaboration and consolidation passes. Not on the user-facing critical path.
+
+### Embedding
+
+Converts text (and multimodal content) into dense vectors for HNSW retrieval and the semantic cache. Fixed to **`gemini-embedding-2`** at **3072** dimensions. Not freely assignable per Context — Context config may only pin that same model id. Vector reads filter by **`embedding_model_id`**. After changing the deployment embedding model, run a [reindex](/docs/agent-memory/reference/management-api#force-reindex).
+
+## Configuring models per stage
+
+Model assignment is per-Context. Each LLM stage takes `{provider, model}`:
+
+```http
+PATCH /api/v1/contexts/{context_id}
+Content-Type: application/json
+
+{
+  "config": {
+    "models": {
+      "extraction": { "provider": "google", "model": "gemini-2.5-flash" },
+      "synthesis": { "provider": "anthropic", "model": "claude-sonnet-4" },
+      "elaboration_consolidation": { "provider": "google", "model": "gemini-2.5-flash" },
+      "embedding": "gemini-embedding-2"
+    }
+  }
+}
+```
+
+Omit any stage to leave the current assignment (or deployment default) unchanged. Missing provider keys for a selected provider fail at configuration time rather than silently re-routing.
+
+## Supported providers
+
+| Provider | Role |
+| --- | --- |
+| Google (Gemini) | LLM stages; **required** for embeddings |
+| OpenAI | LLM stages |
+| Anthropic | LLM stages |
+
+Provider keys may be set deployment-wide (`SPECTRON_PROVIDER_*`) or per Context. Keys are write-only on the API; reads return which providers are configured, not the secrets.
+
+## Latency versus quality
+
+| Stage | Typical path | Prefer |
+| --- | --- | --- |
+| `extraction` | Sync on write / ingest | Fast, inexpensive model |
+| `reconciliation` | Occasional on write | Fast or mid-tier |
+| `synthesis` | `/chat`, `/reflect` | More capable when answer quality matters |
+| `elaboration_consolidation` | Worker background | Fast enough for batch work |
+| `embedding` | Ingest + query | Fixed: `gemini-embedding-2` (3072-dim) |
+
+A common pattern is a cheap model for extraction and a stronger model for synthesis only.
+
+## Changing the embedding model
+
+Embeddings are Gemini-only at 3072 dimensions. Switching the deployment embedding model requires a reindex so stored vectors and query vectors share one space. See [Management API — force reindex](/docs/agent-memory/reference/management-api#force-reindex).

@@ -1,0 +1,218 @@
+---
+position: 4
+title: State and diffs
+description: "Reading structured memory state and tracking what changed between turns."
+---
+
+# State and diffs
+
+The state endpoints give you a structured, queryable view of everything SurrealDB Agent Memory has learned within a given scope. Rather than replaying the conversation history, you query the current knowledge graph directly – grouped by category and filtered by scope – and receive a clean, structured representation of what the agent knows.
+
+## The `/state` endpoint
+
+```http
+GET /api/v1/{context_id}/state?scope[user]=alice&scope[org]=acme
+```
+
+The scope parameters filter the state to the specified dimensional intersection. Omitting a dimension broadens the query – `scope[org]=acme` without a user returns the union of all user-level knowledge for that organisation.
+
+Response:
+
+```json
+{
+  "identity": {
+    "entities": [
+      {
+        "id": "['person', 'alice']",
+        "name": "Alice",
+        "entityType": "person",
+        "memoryCategory": "identity",
+        "importance": 1.0,
+        "createdAt": "2026-05-12T16:24:00Z",
+        "updatedAt": "2026-05-12T16:24:00Z"
+      }
+    ],
+    "attributes": [
+      {
+        "id": "attr_01hy2c",
+        "entity": "entity:person/alice",
+        "key": "job_title",
+        "value": "CTO",
+        "memoryCategory": "identity",
+        "importance": 1.0,
+        "validFrom": "2026-05-12T16:24:00Z",
+        "validUntil": null,
+        "supersedes": "attr_01hy1b",
+        "supersededBy": null,
+        "source": { "kind": "turn", "ref": "turn:01hy2…" },
+        "createdAt": "2026-05-12T16:24:00Z"
+      }
+    ],
+    "relations": []
+  },
+  "knowledge": { "entities": [], "attributes": [], "relations": [] },
+  "context": { "entities": [], "attributes": [], "relations": [] },
+  "instructions": [
+    {
+      "id": "instr_01hy4d",
+      "label": "language",
+      "description": "Always respond in German when the user writes in German."
+    }
+  ],
+  "unknowns": [
+    {
+      "about": "Whether Alice holds any equity in Acme.",
+      "reason": "Equity was never mentioned in the conversation."
+    }
+  ]
+}
+```
+
+### Response structure
+
+| Field | Description |
+|---|---|
+| `identity` | Biographical facts, roles, and names — as `entities`, `attributes`, and `relations`. |
+| `knowledge` | Preferences, opinions, and skills, in the same three-part shape. |
+| `context` | Situational and recent-event memory, in the same three-part shape. |
+| `instructions` | Standing behavioural directives: `id`, `label`, `description`. |
+| `unknowns` | Things extraction could not resolve: `about` and `reason`. |
+
+The three memory categories share one shape — each holds `entities`, `attributes`,
+and `relations`.
+
+The endpoint always returns the current, canonical view: superseded attributes are
+not included. Each returned attribute carries `supersedes` and `supersededBy`
+links, so you can walk backwards from the current value. **Corrections are not part
+of this response** — they come back on the write that made them, described in
+[Showing what changed after a turn](#showing-what-changed-after-a-turn).
+
+## Showing what changed after a turn
+
+There is no `/state/diff` endpoint, and `/state` takes no `since` parameter — but
+you rarely need one, because **every write returns its own delta**.
+
+`POST /facts` responds with an `extraction` object describing exactly what that
+write produced:
+
+| Field | What it holds |
+| --- | --- |
+| `turnId` | The turn the extraction belongs to |
+| `entities` | Entities created or matched |
+| `attributes` | Attributes asserted |
+| `relations` | Relations asserted |
+| `instructions` | Standing directives picked up |
+| `uncertainties` | Things the extractor could not resolve |
+| `corrections` | Values this write superseded, with both sides |
+
+A supersession is reported with the value it replaced, so no second request and no
+comparison work are needed. Read `/state` for the full picture at a point in time,
+and `GET /entities/{type}/{name}/history/{key}` to follow one attribute's ordered
+supersession chain.
+
+## Python SDK
+
+```python
+state = await memory.state()
+
+print(state.identity.attributes)   # Current attribute list
+print(state.instructions)          # Active behavioural instructions
+print(state.unknowns)              # Flagged uncertainties
+```
+
+`GET /state` takes no parameters at all — no scope, no time filter, no `since`. It
+returns everything the calling key can read. Narrow the result yourself, or read a
+single entity with `entities.get(…)`.
+
+To read as another principal, send the **`X-Spectron-On-Behalf-Of`** header. That
+is a request header available on every end-user route rather than a `state()`
+argument, and the effective authority is the intersection of your grants and the
+target's — delegation never widens access.
+
+## JavaScript SDK
+
+```javascript
+const state = await memory.state();
+
+console.log(state.identity.attributes);
+console.log(state.instructions);
+console.log(state.unknowns);
+```
+
+## Profile endpoint
+
+The profile endpoint returns a richer, opinionated view of a single user's memory – pre-formatted for prompt injection or display in account or preferences UIs.
+
+### Python SDK
+
+```python
+profile = await memory.profile()
+```
+
+### JavaScript SDK
+
+```javascript
+const profile = await memory.profile();
+```
+
+Response shape:
+
+| Field | Description |
+|---|---|
+| `static` | Stable identity facts: name, role, organisation, contact details. |
+| `dynamic` | Frequently-updated attributes: location, status, current project, mood. |
+| `preferences` | Extracted preferences and stated likes or dislikes. |
+| `instructions` | Active behavioural directives applicable to this user. |
+
+The profile view does not include raw turn references. It is a synthesised snapshot intended for injection into system prompts or display in a "what does the AI know about me?" UI.
+
+## Driving real-time UI updates
+
+Apply the `extraction` payload from each write straight to the UI — new attributes as additions, `corrections` as in-place updates:
+
+```python
+result = await memory.remember(
+    "I moved to Berlin last month",
+    session_id=session_id,
+)
+
+for attr in result.extraction.attributes:
+    ui.add_fact(attr)
+
+for c in result.extraction.corrections:
+    ui.animate_update(c["key"], old=c["oldValue"], new=c["newValue"])
+```
+
+```javascript
+const result = await memory.remember("I moved to Berlin last month", { sessionId });
+
+for (const attr of result.extraction.attributes) {
+    ui.addFact(attr);
+}
+
+for (const c of result.extraction.corrections) {
+    ui.animateUpdate(c.key, { old: c.oldValue, new: c.newValue });
+}
+```
+
+## The corrections format in detail
+
+Corrections are produced during reconciliation whenever a newly extracted attribute contradicts an existing one. Each correction record contains both sides of the change and the turn references that establish provenance:
+
+```json
+{
+  "entityId": "entity:person/alice",
+  "key": "location",
+  "oldValue": "London",
+  "newValue": "Berlin"
+}
+```
+
+The correction is a summary of the change, not the full temporal record. The
+timestamps live on the attribute rows themselves: the superseded row gets a
+`valid_until` and a `superseded_by` link, the new row a `valid_from` and a
+`supersedes` link. That is what makes historical queries — "what did the agent
+know about Alice's location in March 2026?" — return the right answer. Read the
+chain with `GET /entities/{type}/{name}/history/{key}`.
+
+Corrections accumulate and are never deleted. The full supersession chain for any attribute is always queryable, which means the audit trail for any fact is complete and irrevocable. See [Temporal validity](/docs/agent-memory/reasoning/temporal-validity) and [Reconciliation and supersession](/docs/agent-memory/reasoning/reconciliation-and-supersession) for the detailed model.

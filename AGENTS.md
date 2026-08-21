@@ -209,7 +209,8 @@ has to be updated everywhere the id is named (see below).
 
 The collections are `index` (the root catch-all, serving `/docs/<slug>`), one per
 section under `build/*`, `explore/*`, `learn/*`, `manage/*`, `reference/*` and
-`spectron/*` (plus `spectron/index` for `/docs/spectron`), and `labs-items`.
+`agent-memory/*` (plus `agent-memory/index` for `/docs/agent-memory`), and
+`labs-items`.
 
 Every doc collection's `+Content.ts` is the same boilerplate:
 
@@ -258,7 +259,7 @@ collection id:
 | ------------------ | ----------------------------------------- | ------------------------------- |
 | `manage/instances` | `(context, "manage/instances")`           | `/docs/manage/instances/<slug>` |
 | `index`            | `(context, "index", "")`                  | `/docs/<slug>`                  |
-| `spectron/index`   | `(context, "spectron/index", "spectron")` | `/docs/spectron/<slug>`         |
+| `agent-memory/index` | `(context, "agent-memory/index", "agent-memory")` | `/docs/agent-memory/<slug>` |
 
 ### Adding content
 
@@ -279,9 +280,12 @@ page group `src/pages/<url-prefix>/` needs `+route.ts`, `+data.ts`, `+Page.tsx`,
 - `src/components/Layout/nav.ts` — top-nav hrefs are hardcoded.
 - `redirects.ts` — old URLs to new URLs (see below).
 - `public/llms.txt` — hand-maintained absolute URLs.
-- `src/utils/product.ts` — only when introducing a new product (`surrealdb` | `spectron`).
-- `src/pages/spectron/index/+route.ts` — add the segment to
-  `SPECTRON_SIBLING_SECTIONS` when the collection sits under `/spectron`.
+- `src/utils/product.ts` — only when introducing a new product (`surrealdb` |
+  `agent-memory`).
+- `src/pages/agent-memory/index/+route.ts` — add the segment to
+  `AGENT_MEMORY_SIBLING_SECTIONS` when the collection sits under `/agent-memory`.
+- `search/src/handler.ts` and `search/scripts/crawler.ts` — the search product
+  filter and the crawler's URL-prefix map are both keyed on the path prefix.
 
 ### Redirects
 

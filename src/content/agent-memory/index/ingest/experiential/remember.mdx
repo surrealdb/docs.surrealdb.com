@@ -1,0 +1,132 @@
+---
+position: 1
+title: Storing memories
+description: "Ingesting facts and conversations into the unified substrate."
+---
+
+# Storing memories
+
+SurrealDB Agent Memory stores memory by **extracting** structured entities, attributes, and relations from text — not by accepting opaque key-value blobs. Every write runs through the reconciler (calibration, supersession, uncertainty on conflict).
+
+> [!NOTE]
+> `Spectron` was the project name for SurrealDB Agent Memory. These type names
+> will be renamed in a future release.
+
+Conversation turns (`/facts`, `/facts/batch`, `/chat`) and document uploads share one extraction contract: the same JSON schema, confidence and temporal fields, and reconciler. Adapters supply the input kind and trust posture (spoken turn vs curated document); they do not invent parallel entity-type vocabularies. That keeps a person named in a policy PDF and the same person named in chat as one node when normalisation matches.
+
+Register scope paths before first write:
+
+```bash
+spectron scopes create org/acme
+spectron scopes create org/acme/user/alice
+```
+
+## Primary write paths
+
+| Path | Use when |
+| --- | --- |
+| `POST /api/v1/{ctx}/facts` | Single utterance, raw triples (`infer: "triples"`), or literal (`infer: "none"`) |
+| `POST /api/v1/{ctx}/facts/batch` | Full conversation transcript in one request (preferred for harnesses) |
+
+`source.kind` on persisted records is typically `"turn"` for conversational ingest and `"document"` for upload pipeline output.
+
+## CLI
+
+```bash
+export SPECTRON_URL=http://localhost:9090
+export SPECTRON_API_KEY=...
+export SPECTRON_CONTEXT_ID=dev
+
+spectron remember "Alice was promoted to CTO." --scope org/acme/user/alice
+
+spectron remember "The reveal happened on page 42." --scope org/acme --as-of 1886-01-01T00:00:00Z
+
+spectron remember --from-file ./transcript.jsonl --scope org/acme/user/alice --extract per_message
+```
+
+Flags: `--infer full|triples|preview|none`, `--session`, `--transcript`, `--extract whole_conversation|per_message` (batch only).
+
+> [!NOTE]
+> The CLI does **not** accept `--confidence`, `--trust`, or `--location` on `remember` — calibration and trust come from the reconciler and source metadata.
+
+## HTTP — single fact
+
+```http
+POST /api/v1/{context_id}/facts
+Authorization: Bearer <key>
+Content-Type: application/json
+
+{
+  "text": "Alice was promoted to CTO.",
+  "infer": "full",
+  "scopes": [["org/acme/user/alice"]],
+  "observed_at": "2026-05-12T10:00:00Z"
+}
+```
+
+Optional **`observed_at`** (RFC 3339) stamps derived facts at a caller-supplied **known time** instead of wall-clock ingest. Use this for **narrative playback** — ingest an entire canon but answer only as far as the user has read or watched (see [Spoiler-safe narrative memory](/docs/agent-memory/cookbooks/patterns/spoiler-safe-narrative-memory)). Omitted keeps the default (ingest time).
+
+**Response (`infer: full`):** nested **`extraction`** with entities, attributes, relations, instructions, and uncertainties, plus `sessionId` and `turnId`.
+
+**Response (`infer: none`):** `chunkId`, `sessionId`, and `turnId` for the literal memory chunk. Long text is split into multiple **`memory_chunk`** rows (one embedding per sub-chunk) so vector recall covers the full passage — `chunkId` returns the first row’s id.
+
+## HTTP — batch
+
+```http
+POST /api/v1/{context_id}/facts/batch
+Authorization: Bearer <key>
+Idempotency-Key: stable-conversation-id
+Content-Type: application/json
+
+{
+  "messages": [
+    { "role": "user", "content": "I was promoted to CTO." },
+    { "role": "assistant", "content": "Congratulations!" }
+  ],
+  "scopes": [["org/acme/user/alice"]],
+  "extract": "whole_conversation"
+}
+```
+
+`extract`: **`whole_conversation`** (default) sends the full transcript in one LLM pass; **`per_message`** runs extraction once per message.
+
+Returns **`extractions`**, **`sessionId`**, and **`turnIds`**.
+
+## SDK (Python)
+
+```python
+# from surrealdb import Spectron — see Python SDK guide
+await client.remember(
+    text="Alice was promoted to CTO.",
+    infer="full",
+    scope=[["org/acme/user/alice"]],
+)
+```
+
+## Sessions
+
+Sessions group episodic **turns** for transcript browsing and session-scoped context. Creating a session is optional when using `/facts/batch` with an explicit `session_id`.
+
+```http
+POST /api/v1/{context_id}/sessions
+{ "scopes": [["org/acme/user/alice"]] }
+```
+
+See [Sessions and turns](/docs/agent-memory/mental-model/sessions-and-turns).
+
+## Authoritative content
+
+Manuals, policies, and files use the **document** path, not `/facts`:
+
+```bash
+spectron documents upload ./policy.pdf
+```
+
+See [Knowledge hub](/docs/agent-memory/memory-and-knowledge).
+
+## What you do not do
+
+- Write arbitrary JSON blobs to a “memory table”
+- Use removed `/knowledge/nodes` APIs
+
+Extraction, reconciliation, and provenance are described in [Extraction pipeline](/docs/agent-memory/reasoning/extraction-pipeline) and [Provenance and traceability](/docs/agent-memory/mental-model/provenance-and-traceability).

@@ -1,0 +1,195 @@
+---
+position: 2
+title: User memory in chat
+description: "Per-user scopes and profile injection."
+---
+
+# User memory in chat
+
+Adding per-user persistent memory to a chat application is the most common SurrealDB Agent Memory integration. This guide covers the two integration shapes – one driven by SurrealDB Agent Memory, one driven by the caller – and shows how to inject memory into system prompts and how memory accumulates across multiple sessions.
+
+> [!NOTE]
+> `Spectron` was the project name for SurrealDB Agent Memory. These type names
+> will be renamed in a future release.
+
+## The pattern
+
+The core pattern is:
+
+1. **One session per conversation** – scoped to the user's identifier.
+2. **Profile injection** – retrieve the user's accumulated memory and prepend it to the system prompt before each LLM call.
+3. **Turn recording** – after each exchange, record both the user and assistant turns so the extraction pipeline can update memory.
+
+Memory builds up across sessions automatically. The second time a user starts a conversation, the profile already contains facts from previous sessions.
+
+## Integration shape 1 – SurrealDB Agent Memory drives the loop
+
+Use this shape when you want the simplest possible integration and are comfortable letting SurrealDB Agent Memory manage the LLM calls. SurrealDB Agent Memory retrieves context, calls the Context's configured **synthesis** model, persists the exchange, and runs extraction.
+
+There is no caller-supplied callback. `/chat` uses the model configured on the
+Context (`models.synthesis`), which you can override per call with `model`. The
+profile is folded into the prompt server-side — you do not assemble it yourself in
+this shape. If you need your own model, prompt, or tool loop, use integration
+shape 2 below.
+
+```python
+from surrealdb import Spectron
+
+memory = Spectron(context="chat", api_key="sk-...")
+
+# Per conversation
+session = await memory.sessions.create(scopes=[f"user/{user_id}"])
+
+# Each user message
+result = await memory.chat(user_message, session_id=session.id)
+reply = result["reply"]
+print(result["memoryUpdates"])   # extraction diff from the user turn
+```
+
+```typescript
+import { Spectron } from "@surrealdb/spectron";
+
+const memory = new Spectron({ context: "chat", apiKey: "sk-..." });
+
+const session = await memory.sessions.create({ scopes: [`user/${userId}`] });
+
+const result = await memory.chat(userMessage, { sessionId: session.id });
+const reply = result.reply;
+console.log(result.memoryUpdates);
+```
+
+## Integration shape 2 – Caller drives the loop
+
+Use this shape when you already manage the conversation loop and want to inject SurrealDB Agent Memory into your existing flow without restructuring it.
+
+```python
+from surrealdb import Spectron
+
+memory = Spectron(context="chat", api_key="sk-...")
+
+async def handle_message(user_id: str, session_id: str | None,
+    user_message: str) -> str:
+    # A session is addressed by its id — create one on first message,
+    # then carry the id forward. There is no re-open call.
+    if session_id is None:
+        session = await memory.sessions.create(scopes=[f"user/{user_id}"])
+        session_id = session.id
+
+    # Retrieve memory-enriched context
+    profile = await memory.profile()
+    ctx = await memory.sessions.context(session_id, query=user_message)
+
+    # Build system prompt
+    system = "You are a helpful assistant."
+    profile_block = format_profile(profile)   # see Profiles: injecting into prompts
+    if profile_block:
+        system += f"\n\n{profile_block}"
+    if ctx.formatted:
+        system += f"\n\n## Relevant memory\n{ctx.formatted}"
+
+    # Your LLM call
+    response = your_llm(system=system, user=user_message)
+
+    # Record the exchange
+    await memory.remember(user_message, session_id=session_id, role="user")
+    await memory.remember(response, session_id=session_id, role="assistant")
+
+    return response
+```
+
+```typescript
+async function handleMessage(
+    userId: string,
+    sessionId: string | null,
+    userMessage: string,
+): Promise<string> {
+    const id = sessionId
+        ?? (await memory.sessions.create({ scopes: [`user/${userId}`] })).id;
+
+    const [profile, ctx] = await Promise.all([
+        memory.profile(),
+        memory.sessions.context(id, { query: userMessage }),
+    ]);
+
+    let system = "You are a helpful assistant.";
+    const profileBlock = formatProfile(profile);   // see Profiles: injecting into prompts
+    if (profileBlock) system += `\n\n${profileBlock}`;
+    if (ctx.formatted) system += `\n\n## Relevant memory\n${ctx.formatted}`;
+
+    const response = await yourLlm({ system, user: userMessage });
+
+    await memory.remember(userMessage, { sessionId: id, role: "user" });
+    await memory.remember(response, { sessionId: id, role: "assistant" });
+
+    return response;
+}
+```
+
+The key difference between the two shapes is ownership of the LLM call. The caller-driven shape is usually the right choice for existing applications because it requires no changes to the core call path – you add memory injection before and recording after.
+
+## Injecting profile into the system prompt
+
+The profile endpoint is designed for system prompt injection, but it returns
+**sections rather than a prose summary**: `static`, `dynamic`, `preferences`, and
+`selfFacts` are lists of `{key, value}`, and `instructions` is a list of
+`{id, label, description}`. Format the sections you want into the prompt yourself
+— see [Profiles](/docs/agent-memory/operations/profiles#injecting-profiles-into-system-prompts)
+for a reusable `format_profile` helper.
+
+```python
+profile = await memory.profile()
+
+# Whole profile, formatted
+system = f"You are a helpful assistant.\n\n{format_profile(profile)}"
+
+# Fine-grained: pick individual sections
+identity = profile.static
+instructions = [i["description"] for i in profile.instructions]
+```
+
+```typescript
+const profile = await memory.profile();
+
+// Whole profile, formatted
+const system = `You are a helpful assistant.\n\n${formatProfile(profile)}`;
+
+// Fine-grained: pick individual sections
+const identity = profile.static;
+const instructions = profile.instructions.map(i => i.description);
+```
+
+## How memory accumulates across sessions
+
+Memory is not session-scoped – it is user-scoped. Every session with the same `user` scope dimension feeds into the same pool of entities and attributes.
+
+Consider a user who has three conversations over a week:
+
+- **Session 1**: "I work at Acme Corp as a backend engineer." → extracts `employer: Acme Corp`, `role: backend engineer`.
+- **Session 2**: "I prefer concise answers." → extracts instruction `response_style: concise`.
+- **Session 3**: "I just moved to the platform team." → updates `role: platform engineer` with a supersession chain.
+
+By session 3, the profile contains all three facts. The role update from session 3 supersedes session 1, but the old value is preserved in the supersession chain for auditability.
+
+## Querying accumulated memory
+
+To see what SurrealDB Agent Memory currently knows about a user:
+
+```python
+entities = await memory.entities.list()
+for entity in entities:
+    print(f"{entity.type}/{entity.name}")
+    for attr in entity.attributes:
+        print(f"  {attr.key}: {attr.value}")
+```
+
+```typescript
+const entities = await memory.entities.list();
+for (const entity of entities) {
+    console.log(`${entity.type}/${entity.name}`);
+    for (const attr of entity.attributes) {
+        console.log(`  ${attr.key}: ${attr.value}`);
+    }
+}
+```
+
+This is the same view the agent gets via the profile endpoint, but structured for programmatic inspection rather than prompt injection.

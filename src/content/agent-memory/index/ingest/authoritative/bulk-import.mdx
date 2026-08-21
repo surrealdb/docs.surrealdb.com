@@ -1,0 +1,278 @@
+---
+position: 4
+title: Bulk import
+description: "Importing large quantities of documents or knowledge nodes into SurrealDB Agent Memory."
+---
+
+# Bulk import
+
+When populating a new Context or migrating from an existing system, you typically need to ingest many documents or knowledge nodes at once. SurrealDB Agent Memory's ingestion pipeline is designed for concurrent usage, and both the document upload endpoint and the triple-write path on `/facts` support high-throughput ingestion patterns.
+
+> [!NOTE]
+> `Spectron` was the project name for SurrealDB Agent Memory. These type names
+> will be renamed in a future release.
+
+## Uploading many documents
+
+`POST /api/v1/{context_id}/documents` accepts one document per request. For bulk uploads, issue multiple requests concurrently and track their status independently.
+
+### Concurrent upload pattern
+
+```python
+import asyncio
+from surrealdb import Spectron
+
+memory = Spectron(context="acme-prod",
+    api_key=os.environ["SPECTRON_API_KEY"])
+
+files = [
+    ("returns-policy.pdf", "Returns Policy"),
+    ("shipping-guide.pdf", "Shipping Guide"),
+    ("warranty-terms.pdf", "Warranty Terms"),
+    ("product-manual.pdf", "Product Manual"),
+]
+
+async def upload_file(path, title):
+    return await memory.documents.upload(
+        path,
+        title=title,
+        scopes=["org/acme"],
+    )
+
+docs = await asyncio.gather(*[upload_file(path, title) for path,
+    title in files])
+doc_ids = [doc.id for doc in docs]
+print(f"Queued {len(doc_ids)} documents")
+```
+
+```javascript
+import { Spectron } from "@surrealdb/spectron";
+
+const memory = new Spectron({ context: "acme-prod",
+    apiKey: process.env.SPECTRON_API_KEY });
+
+const files = [
+    { path: "returns-policy.pdf", title: "Returns Policy" },
+    { path: "shipping-guide.pdf", title: "Shipping Guide" },
+];
+
+const uploads = files.map(({ path, title }) =>
+        memory.documents.upload(path, { title, scopes: ["org/acme"] })
+);
+
+const docs = await Promise.all(uploads);
+const docIds = docs.map(d => d.id);
+```
+
+### Polling for completion
+
+After queuing a batch, poll all document IDs until every document is `ready` or `failed`:
+
+```python
+async def wait_for_all(doc_ids):
+    pending = set(doc_ids)
+    failed = []
+
+    while pending:
+        await asyncio.sleep(5)
+        for doc_id in list(pending):
+            doc = await memory.documents.get(doc_id)
+            if doc.status == "ready":
+                pending.discard(doc_id)
+                print(f"{doc_id}: ready")
+            elif doc.status == "failed":
+                pending.discard(doc_id)
+                failed.append((doc_id, doc.error))
+                print(f"{doc_id}: failed – {doc.error}")
+
+    return failed
+
+failed = await wait_for_all(doc_ids)
+if failed:
+    print(f"{len(failed)} documents failed processing")
+```
+
+### Rate limiting
+
+SurrealDB Agent Memory applies rate limits per API key. If you are ingesting thousands of documents, introduce a semaphore to limit concurrency:
+
+```python
+semaphore = asyncio.Semaphore(10)  # max 10 concurrent uploads
+
+async def upload_with_limit(path, title):
+    async with semaphore:
+        return await upload_file(path, title)
+
+docs = await asyncio.gather(*[upload_with_limit(path, title) for path,
+    title in files])
+```
+
+The recommended concurrency ceiling for standard deployments is 10–20 concurrent uploads. Self-hosted deployments can be tuned according to your infrastructure capacity.
+
+## Bulk structured facts
+
+For structured catalogue or policy data you already trust, use **`POST /api/v1/{context_id}/facts`** with `infer: "triples"` (or batch multiple utterances via **`/facts/batch`**). The reconciler persists entities, attributes, and relations in the unified graph with `source.kind = "document"` or operator-provided provenance.
+
+```http
+POST /api/v1/{context_id}/facts
+Content-Type: application/json
+Authorization: Bearer <key>
+
+{
+  "infer": "triples",
+  "scopes": [["org/acme"]],
+  "triples": [
+    { "entity": { "type": "product", "name": "sku_001" },
+      "key": "price", "value": "29.99" },
+    { "entity": { "type": "product", "name": "sku_001" },
+      "key": "belongs_to",
+      "target": { "type": "category", "name": "widgets" } }
+  ]
+}
+```
+
+Response:
+
+```json
+{
+  "mode": "triples",
+  "sessionId": "sess_01hy…",
+  "turnId": "turn_01hy…",
+  "extraction": {
+    "turnId": "turn_01hy…",
+    "entities": [ { "id": "…", "name": "sku_001", "entityType": "product",
+                    "memoryCategory": "knowledge", "isNew": true } ],
+    "attributes": [ { "id": "…", "entityId": "…", "key": "price",
+                      "value": "29.99", "memoryCategory": "knowledge" } ],
+    "relations": [ { "subject": "product/sku_001", "label": "belongs_to",
+                     "object": "category/widgets", "memoryCategory": "knowledge" } ],
+    "instructions": [],
+    "uncertainties": [],
+    "corrections": []
+  }
+}
+```
+
+`infer: "triples"` takes the `triples` array directly and runs no LLM. `text` is
+optional in this mode.
+
+### Python
+
+```python
+# Build nodes and relations from your data source
+nodes = [
+        {"kind": "product", "slug": record["sku"],
+        "title": record["name"], "content": record}
+    for record in product_catalogue
+]
+
+relations = [
+        {"in": ("product", record["sku"]), "out": ("category",
+        record["category_slug"]), "label": "belongs_to"}
+    for record in product_catalogue
+    if record.get("category_slug")
+]
+
+# Upsert in batches of 1000
+BATCH_SIZE = 1000
+for i in range(0, len(nodes), BATCH_SIZE):
+    batch_nodes = nodes[i:i + BATCH_SIZE]
+    batch_relations = [r for r in relations if any(
+        r["in"][1] == n["slug"] for n in batch_nodes
+    )]
+    triples = [
+        {"entity": {"type": "concept", "name": n["slug"]},
+         "key": "title", "value": n["title"]}
+        for n in batch_nodes
+    ] + [
+        {"entity": {"type": "concept", "name": r["in"][1]},
+         "key": r["label"],
+         "target": {"type": "concept", "name": r["out"][1]}}
+        for r in batch_relations
+    ]
+    result = await memory.remember(infer="triples", triples=triples)
+    extraction = result["extraction"]
+    print(
+        f"Batch {i // BATCH_SIZE + 1}: "
+        f"entities={len(extraction['entities'])} "
+        f"attributes={len(extraction['attributes'])} "
+        f"relations={len(extraction['relations'])}"
+    )
+```
+
+### JavaScript
+
+```javascript
+const BATCH_SIZE = 1000;
+
+for (let i = 0; i < nodes.length; i += BATCH_SIZE) {
+    const batchNodes = nodes.slice(i, i + BATCH_SIZE);
+    const triples = batchNodes.map((n) => ({
+        entity: { type: "concept", name: n.slug },
+        key: "title",
+        value: n.title,
+    }));
+    const result = await memory.remember(null, { infer: "triples", triples });
+    console.log(
+        `Batch ${i / BATCH_SIZE + 1}: `
+        + `entities=${result.extraction.entities.length} `
+        + `relations=${result.extraction.relations.length}`,
+    );
+}
+```
+
+## Deduplication
+
+Document uploads are automatically deduplicated by content hash. If the same file is submitted multiple times during a bulk import – for example, because a script is re-run after a partial failure – each duplicate returns the existing document ID with `deduplicated: true` and no reprocessing occurs.
+
+Triple writes reconcile by entity identity: resubmitting a triple for the same `(type, name)` entity and key supersedes the previous value rather than creating a duplicate row.
+
+These properties make bulk imports safe to re-run. A failed or interrupted import can be restarted from the beginning without creating duplicate records.
+
+## Scope assignment on bulk imports
+
+All documents uploaded in a bulk import share the same scope unless you specify it per-document. For mixed-scope imports – for example, some documents are org-level and others are user-level – structure your upload loop to set scope per file:
+
+```python
+async def upload_with_scope(item):
+    return await memory.documents.upload(
+        item["path"],
+        title=item["title"],
+        scopes=item["scopes"],
+    )
+
+items = [
+        {"path": "handbook.pdf", "title": "Employee Handbook",
+        "scopes": ["org/acme"]},
+        {"path": "preferences.json", "title": "User Prefs",
+        "scopes": ["org/acme/user/alice"]},
+]
+
+docs = await asyncio.gather(*[upload_with_scope(item) for item in items])
+```
+
+## Monitoring a large import
+
+For imports of tens of thousands of documents, track overall progress by listing documents with a status filter:
+
+```python
+async def import_progress():
+    ready = await memory.documents.list(status="ready")
+    queued = await memory.documents.list(status="queued")
+    failed = await memory.documents.list(status="failed")
+
+    print(f"Ready: {len(ready)}  Queued: {len(queued)}  Failed: {len(failed)}")
+```
+
+`GET /documents` filters on `status` and `mimeType` and pages with `page` /
+`pageSize`. It has no scope filter — the caller's read region already bounds what
+comes back.
+
+Failed documents should be inspected individually to determine whether the failure is transient (pipeline overload) or permanent (corrupt file, unsupported format):
+
+```python
+failed_docs = await memory.documents.list(status="failed")
+for doc in failed_docs:
+    full = await memory.documents.get(doc.id)
+    print(f"{doc.id}  {full.title}  {full.error}")
+```

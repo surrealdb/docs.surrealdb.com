@@ -120,8 +120,8 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                 heading: "Extending",
                 items: [
                     {
-                        label: "Spectron",
-                        href: "/docs/spectron",
+                        label: "Agent Memory",
+                        href: "/docs/agent-memory",
                         description: "The AI memory and knowledge layer.",
                         icon: iconSpectron,
                         external: true,
@@ -368,11 +368,11 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
     },
 ];
 
-export const SPECTRON_NAV_LINKS: NavEntry[] = [
-    /** Label is display-only; target is the `spectron/index` hub at `/spectron`. */
-    { label: "Get started", href: "/docs/spectron" },
-    { label: "Memory & knowledge", href: "/docs/spectron/agent-memory" },
-    { label: "Integrations", href: "/docs/spectron/integrations" },
-    { label: "Cookbooks", href: "/docs/spectron/cookbooks" },
-    { label: "Reference", href: "/docs/spectron/reference" },
+export const AGENT_MEMORY_NAV_LINKS: NavEntry[] = [
+    /** Label is display-only; target is the `agent-memory/index` hub at `/agent-memory`. */
+    { label: "Get started", href: "/docs/agent-memory" },
+    { label: "Memory & knowledge", href: "/docs/agent-memory/memory-and-knowledge" },
+    { label: "Integrations", href: "/docs/agent-memory/integrations" },
+    { label: "Cookbooks", href: "/docs/agent-memory/cookbooks" },
+    { label: "Reference", href: "/docs/agent-memory/reference" },
 ];

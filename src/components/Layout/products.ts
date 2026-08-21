@@ -35,8 +35,8 @@ export const PRODUCTS: Record<ProductId, ProductConfig> = {
         wordmarkLight: DocsLight,
         wordmarkDark: DocsDark,
     },
-    spectron: {
-        ...PRODUCT_META.spectron,
+    "agent-memory": {
+        ...PRODUCT_META["agent-memory"],
         picto: pictoSpectronGradient,
         wordmarkLight: SpectronLight,
         wordmarkDark: SpectronDark,
