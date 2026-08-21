@@ -1,0 +1,214 @@
+---
+position: 5
+title: Multi-agent shared memory
+description: "Supervisors, reflection, and shared scopes."
+---
+
+# Multi-agent shared memory
+
+When multiple agents collaborate on a shared task, they need access to the same memory. SurrealDB Agent Memory's scope model makes this natural: agents that share a scope dimension (such as `project`) can all read from and write to the same experiential memory, while retaining individual isolation where needed.
+
+> [!NOTE]
+> `Spectron` was the project name for SurrealDB Agent Memory. These type names
+> will be renamed in a future release.
+
+## Patterns
+
+There are two common patterns for multi-agent memory sharing:
+
+| Pattern | When to use |
+|---|---|
+| Shared scope | All agents contribute to and read from a common project scope |
+| Supervisor + workers | A supervisor agent coordinates several worker agents, each with its own user/agent scope |
+
+## Pattern 1: shared project scope
+
+The simplest approach – all agents are given the same scope when creating sessions. Memory written by one agent is immediately visible to others operating in the same scope.
+
+```python
+from surrealdb import AsyncSpectron
+
+client = AsyncSpectron(
+    context="acme-prod",
+    endpoint="https://spectron.example.com",
+    api_key="sk-...",
+)
+
+SHARED_SCOPE = ["org/acme/project/market-research-q3"]
+
+# Agent A: data collection agent
+await client.remember(
+    "Competitor X launched a new pricing tier at $299/mo targeting SMBs.",
+    scopes=SHARED_SCOPE,
+)
+
+# Agent B: analysis agent – sees Agent A's memory
+results = await client.recall(
+    "recent competitor pricing changes",
+    k=5,
+    lens=SHARED_SCOPE,
+)
+# results.hits includes Agent A's finding
+```
+
+### Read/write access control
+
+To prevent worker agents from writing to shared memory (read-only readers), issue separate API keys with restricted write capabilities. A key bound to a principal granted `memory:read` and `memory:write` on `org/acme/project/market-research-q3` can read and write at that scope. For genuinely read-only agents, mint the key against a principal granted `memory:read` but not `memory:write` on that path.
+
+## Pattern 2: supervisor and workers
+
+A supervisor agent orchestrates several workers. Each worker operates in its own user/agent scope, but the supervisor aggregates their findings into a shared project scope.
+
+```python
+SUPERVISOR_SCOPE = ["org/acme/project/research-pipeline"]
+
+async def run_worker(topic: str, worker_id: str, client: AsyncSpectron) -> str:
+    worker_scope = [*SUPERVISOR_SCOPE, f"agent/{worker_id}"]
+    async with client.sessions.create(scopes=worker_scope) as session:
+        # Worker researches its topic
+        context = await client.recall(topic, k=5)
+        findings = await llm.research(topic, context["hits"])
+
+        # Worker stores findings in its own scope
+        await client.remember(
+            findings,
+            session_id=session.id,
+            memory_category="knowledge",
+        )
+
+        # Return a summary for the supervisor
+        reflection = await client.reflect(
+            query=f"Summarise findings about {topic}",
+            persist=False,
+        )
+        return reflection.reflection
+
+async def supervisor(client: AsyncSpectron):
+    topics = ["pricing trends", "competitor features", "customer sentiment"]
+
+    # Run workers concurrently
+    results = await asyncio.gather(*[
+        run_worker(topic, f"worker-{i}", client)
+        for i, topic in enumerate(topics)
+    ])
+
+    # Supervisor aggregates findings into shared scope
+    async with client.sessions.create(scopes=SUPERVISOR_SCOPE) as session:
+        for topic, finding in zip(topics, results):
+            await client.remember(
+                f"[{topic}] {finding}",
+                session_id=session.id,
+                memory_category="knowledge",
+            )
+
+        # Supervisor synthesises and stores a final report
+        await client.reflect(
+            query="Synthesise all research findings into a coherent executive summary.",
+            persist=True,
+        )
+```
+
+## Scope hierarchy
+
+SurrealDB Agent Memory resolves **scope visibility** from OR-of-AND clauses on each record. For typical single-owner tags, a query at scope `["org/acme"]` retrieves org-wide memory and shared org facts, but not another user’s private record info unless your grant covers them.
+
+```
+{org: "acme"}                    ← visible to all org agents
+{org: "acme", project: "alpha"}  ← visible to project alpha agents
+{org: "acme", project: "alpha", agent: "planner"}  ← planner only
+```
+
+A supervisor querying at `{org: "acme", project: "alpha"}` sees:
+- Everything at the project scope (shared findings)
+- Everything at more specific scopes (individual worker findings)
+
+A worker reading with a lens of `["org/acme/project/alpha/agent/worker-1"]` sees only its own memory and the shared project scope.
+
+## Preventing memory pollution
+
+When many agents write to a shared scope, unrelated facts from different tasks can accumulate. Use metadata to tag memory items with their provenance:
+
+```python
+await memory.remember(
+    "Customer segment 'enterprise' values compliance features most.",
+    memory_category="knowledge",
+    labels=["source=customer-interview-2024-q3", "agent=interview-agent"],
+)
+```
+
+Labels are `"key=value"` strings stamped on the rows the write produces. They
+narrow reads (`labels` on `/query`) but never widen access — the scope predicate
+is applied first.
+
+Use the entity type system to keep memory structured. Rather than storing flat facts, extract structured entities so that conflicts are detected and superseded correctly:
+
+```python
+# Good: structured entity extraction will happen automatically from this
+await memory.remember(
+    "The enterprise customer segment prioritises SOC2 compliance over cost.",
+)
+
+# The extraction pipeline creates:
+# entity: CustomerSegment/enterprise
+# attribute: top_priority = "SOC2 compliance"
+# relation: enterprise → values → compliance_features
+```
+
+## Handling write conflicts
+
+When two agents write conflicting facts to the same scope at roughly the same time, SurrealDB Agent Memory's reconciliation pipeline detects the conflict and creates a supersession chain. The later write wins for attribute values. You can inspect the conflict:
+
+```python
+state = await memory.state()
+
+# /state returns only the current view, so a row that carries `supersedes`
+# is one that replaced an earlier value.
+for attr in state.knowledge["attributes"]:
+    if attr["supersedes"]:
+        print(f"{attr['entity']}.{attr['key']} is now {attr['value']} (replaced an earlier value)")
+
+# Walk the full chain for one key:
+history = await memory.entities.history("person", "alice", "role")
+```
+
+## Supervisor reflection
+
+The supervisor pattern works best with a dedicated reflection pass that runs after all workers complete:
+
+```python
+async with client.sessions.create(scopes=SUPERVISOR_SCOPE) as supervisor_session:
+    # Load all worker contributions
+    full_context = await client.profile()
+
+    # Synthesise
+    synthesis = await client.reflect(
+        query="What are the top-level conclusions across all worker findings? What is still uncertain?",
+        persist=True,
+    )
+    
+    print(synthesis.summary)
+```
+
+The persisted reflection becomes part of the shared scope's long-term memory and is included in future `profile()` calls.
+
+## JavaScript example
+
+```javascript
+import { Spectron } from "@surrealdb/spectron";
+
+const client = new Spectron({
+    endpoint: process.env.SPECTRON_ENDPOINT!,
+    context: "acme-prod",
+    apiKey: process.env.SPECTRON_API_KEY!,
+});
+
+const sharedScope = ["org/acme/project/market-research-q3"];
+
+await client.remember(
+    "Competitor X raised prices by 20% in Q2.",
+    { scopes: [...sharedScope, "org/acme/project/market-research-q3/agent/worker-1"] },
+);
+
+const results = await client.recall("competitor pricing", { k: 10, lens: sharedScope });
+console.log(results.hits);
+```

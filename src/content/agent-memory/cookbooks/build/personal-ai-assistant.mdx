@@ -1,0 +1,239 @@
+---
+position: 1
+title: Personal AI assistant
+description: "End-user scoped memory with profiles and preferences."
+---
+
+# Personal AI assistant
+
+This guide covers building a personal AI assistant that learns from every conversation and retains that knowledge across sessions. The assistant accumulates user preferences, biographical facts, current projects, and behavioural instructions. It injects relevant context automatically at the start of each new session so the experience feels continuous.
+
+> [!NOTE]
+> `Spectron` was the project name for SurrealDB Agent Memory. These type names
+> will be renamed in a future release.
+
+## What you are building
+
+- A single-user Context scoped by `user_id`.
+- Memory that spans multiple sessions: identity facts, knowledge, context-specific state, and instructions.
+- A profile endpoint that produces a ready-to-inject system prompt fragment.
+- The ability to forget outdated information when the user's situation changes.
+
+## Step 1 – Create a session per conversation
+
+Each conversation is a new session. The scope ties the session to the user so all extracted facts are associated with them.
+
+```python
+from surrealdb import Spectron
+
+memory = Spectron(context="assistant", api_key="sk-...")
+
+async def start_conversation(user_id: str):
+    session = await memory.sessions.create(
+        scopes=[f"user/{user_id}"],
+    )
+    return session
+```
+
+```typescript
+import { Spectron } from "@surrealdb/spectron";
+
+const memory = new Spectron({ context: "assistant", apiKey: "sk-..." });
+
+async function startConversation(userId: string) {
+    const session = await memory.sessions.create({
+        scopes: [`user/${userId}`],
+    });
+    return session;
+}
+```
+
+## Step 2 – Inject memory at the start of each session
+
+The profile endpoint returns a structured summary of everything SurrealDB Agent Memory knows about the user – identity attributes, active projects, preferences, and instructions – formatted as a system prompt fragment.
+
+```python
+async def build_system_prompt(user_id: str) -> str:
+    profile = await memory.profile()
+
+    base = "You are a personal AI assistant. Be concise, direct, and helpful."
+
+    profile_block = format_profile(profile)   # see Profiles: injecting into prompts
+    if profile_block:
+        return f"{base}\n\n## What you know about this user\n\n{profile_block}"
+
+    return base
+```
+
+```typescript
+async function buildSystemPrompt(userId: string): Promise<string> {
+    const profile = await memory.profile();
+
+        const base = "You are a personal AI assistant. Be concise,
+        direct, and helpful.";
+
+    const profileBlock = formatProfile(profile);   // see Profiles: injecting into prompts
+    if (profileBlock) {
+        return `${base}\n\n## What you know about this user\n\n${profileBlock}`;
+    }
+
+    return base;
+}
+```
+
+A formatted profile looks something like this after a few conversations:
+
+```
+The user is Alice Chen, Head of Platform at Acme Corp. They prefer \
+  TypeScript over JavaScript. They live in London. They prefer \
+  bullet-point responses and dislike filler phrases. They are \
+  currently leading a migration from CommonJS to ESM.
+```
+
+This summary is synthesised from the five memory categories: Identity (name, role, location), Knowledge (technical stack), Context (current project), and Instructions (response style preferences).
+
+## Step 3 – Run the conversation loop
+
+The simplest integration records each exchange as a pair of turns. SurrealDB Agent Memory extracts facts asynchronously and they are available for the next session.
+
+```python
+async def chat(session, user_id: str, user_message: str) -> str:
+    # Build context-aware system prompt
+    system = await build_system_prompt(user_id)
+
+    # Retrieve session-specific relevant context
+    ctx = await session.context(query=user_message)
+    if ctx.items:
+        system += f"\n\n## Relevant context\n\n{ctx.formatted}"
+
+    # Call your LLM
+    response = your_llm(system=system, user=user_message)
+
+    # Record both turns
+    await memory.remember(user_message, session_id=session.id, role="user")
+    await memory.remember(response, session_id=session.id, role="assistant")
+
+    return response
+```
+
+```typescript
+async function chat(session: Session, userId: string,
+    userMessage: string): Promise<string> {
+    // Build context-aware system prompt
+    let system = await buildSystemPrompt(userId);
+
+    // Retrieve session-specific relevant context
+        const ctx = await session.context({ query: userMessage });
+    if (ctx.items.length > 0) {
+        system += `\n\n## Relevant context\n\n${ctx.formatted}`;
+    }
+
+    // Call your LLM
+    const response = await yourLlm({ system, user: userMessage });
+
+    // Record both turns
+    await memory.remember(userMessage, { sessionId: session.id, role: "user" });
+    await memory.remember(response, { sessionId: session.id, role: "assistant" });
+
+    return response;
+}
+```
+
+## Step 4 – How memory builds up
+
+After the user says "I prefer bullet-point responses", the extraction pipeline creates an `Instruction` record:
+
+```json
+{
+  "category": "instructions",
+  "key": "response_format",
+  "value": "Use bullet points. Avoid filler phrases.",
+  "source_turn": "turn:01jt4m...",
+  "valid_from": "2024-11-15T10:23:00Z"
+}
+```
+
+After the user says "I just moved from Berlin to London", the extraction pipeline updates the `location` attribute on the user's `Person` entity and creates a supersession chain:
+
+```json
+{
+  "entity": "entity:[\"Person\", \"alice\"]",
+  "category": "identity",
+  "key": "location",
+  "value": "London",
+  "previous_value": "Berlin",
+  "action": "updated",
+  "valid_from": "2024-11-15T10:25:00Z"
+}
+```
+
+The old value is retained in the supersession chain for auditability but no longer appears in the active profile.
+
+## Step 5 – Using `chat()` instead of `remember()`
+
+If you want SurrealDB Agent Memory to manage the agent call rather than just recording turns, use the `chat()` endpoint. It will retrieve context, call the Context's configured synthesis model, persist both turns, and run extraction with no callback to supply. Override the model for a single call with `model` if you need to.
+
+```python
+session = await memory.sessions.create(scopes=[f"user/{user_id}"])
+
+result = await memory.chat("What are my current projects?", session_id=session.id)
+print(result["reply"])
+print(result["citations"])       # one entry per [S1] marker in the reply
+print(result["memoryUpdates"])   # extraction diff from the user turn
+```
+
+```typescript
+const session = await memory.sessions.create({ scopes: [`user/${userId}`] });
+
+const result = await memory.chat("What are my current projects?", { sessionId: session.id });
+console.log(result.reply);
+console.log(result.citations);
+console.log(result.memoryUpdates);
+```
+
+The `chat()` call returns `reply`, `citations`, `memoryUpdates`, `sessionId`, and `traceId`. Because the model is configured on the Context rather than passed in, use the `remember()` + your-own-LLM shape when you need custom prompting, tool use, or streaming to your UI.
+
+## Step 6 – Forgetting outdated information
+
+When a user's situation changes significantly – they change jobs, finish a project, move city – you can explicitly forget stale facts rather than waiting for the supersession chain to handle it via new turns.
+
+`forget` is **query-driven**, not field-driven: you describe what to forget in
+natural language and SurrealDB Agent Memory matches the facts within the caller's
+`memory:forget` region.
+
+```python
+# Preview first — dry_run returns the would-be count without writing
+preview = await memory.forget("Alice's employer", dry_run=True)
+print(preview["deleted"])
+
+# Then apply
+await memory.forget("Alice's employer")
+```
+
+```typescript
+const preview = await memory.forget("Alice's employer", { dryRun: true });
+console.log(preview.deleted);
+
+await memory.forget("Alice's employer");
+```
+
+To erase an entire branch rather than matched facts, use the scope-level route
+**`POST /scopes/forget`** with the subtree path (`user/alice/`), or delete a single
+entity with **`DELETE /entities/{type}/{name}`**.
+
+`forget` soft-deletes the matched facts (sets `valid_until` to now) and removes
+them from future retrievals, keeping prior rows for audit. Pass `purge=True` to
+also remove the supersession history — that is the right-to-be-forgotten path and
+is irreversible.
+
+## Memory categories in a personal assistant
+
+| Category | Examples |
+|---|---|
+| Identity | Name, location, occupation, family |
+| Knowledge | Domain expertise, tools, languages, opinions |
+| Context | Current projects, recent events, open tasks |
+| Instructions | Response style, formatting preferences, topics to avoid |
+| Unknowns | Contradictory or uncertain statements flagged for review |
+
+The profile endpoint surfaces all five categories in a single call, prioritising high-confidence, recently validated facts.

@@ -74,7 +74,7 @@ At checkout, you will be prompted to enter your payment details (if you don't ha
 
 ## Using the CLI
 
-If you prefer to migrate using the command line rather than SurrealDB Studio, the SurrealDB `3.x` binary includes a `v2` subcommand that can connect to your `2.x` database and produce a v3-compatible export. This is necessary because the `3.x` binary cannot directly read `2.x` data, and the `2.x` binary does not support the v3-compatible export format.
+If you prefer to migrate using the command line rather tha SurrealDB Studio, the SurrealDB `3.x` binary includes a `v2` subcommand that can connect to your `2.x` database and produce a v3-compatible export. This is necessary because the `3.x` binary cannot directly read `2.x` data, and the `2.x` binary does not support the v3-compatible export format.
 
 >[!NOTE]
 >The `v2` subcommand requires SurrealDB version `3.0.3` or later.

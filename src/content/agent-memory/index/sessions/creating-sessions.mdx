@@ -1,0 +1,141 @@
+---
+position: 1
+title: Creating sessions
+description: "How to create and manage conversation sessions in SurrealDB Agent Memory."
+---
+
+# Creating sessions
+
+A **session** is the fundamental unit of conversation in SurrealDB Agent Memory. It is a scoped, persistent container that groups all turns, extracted facts, and derived knowledge from a single conversational thread. Every entity, attribute, relation, instruction, and uncertainty produced by SurrealDB Agent Memory carries a reference to the session and turn it was extracted from, giving the memory layer complete provenance.
+
+> [!NOTE]
+> `Spectron` was the project name for SurrealDB Agent Memory. These type names
+> will be renamed in a future release.
+
+## Why sessions exist
+
+SurrealDB Agent Memory stores memory as a structured graph of discrete facts rather than a bag of text chunks. For that model to be useful, each fact must answer two questions:
+
+- **Where did it come from?** Which conversation, which message, which principal?
+- **Who does it apply to?** Which user, organisation, or project?
+
+Sessions answer both. The session is the provenance anchor: every extracted fact carries a `source_turn` that links back through the turn to the session. The session is also the scope container: when you create a session, you declare **scope tags** – user, organisation, project, or any combination – and data produced in that session inherits them.
+
+## Session scope
+
+Scope on create is a **DNF selector** (`scopes`): an OR of conjunctive slash-path clauses (for example `[["org/acme/user/alice"]]`). Register paths with `spectron scopes create` before first use. SurrealDB Agent Memory propagates the session scope to all records created during the session.
+
+```json
+[["org/acme/user/alice"]]
+```
+
+Scope is used in two places:
+
+1. **Isolation**: queries against the state or recall endpoints are filtered to the declared scope, so a user cannot retrieve facts that belong to another user in the same context.
+2. **Attribution**: corrections and supersessions track which scoped principal a fact belongs to, so any comparison of two `/state` reads stays relative to a coherent scope.
+
+A session scoped to `["org/acme"]` (without a `user/…` segment) accumulates org-level knowledge rather than user-level knowledge.
+
+## Creating a session
+
+### REST
+
+```http
+POST /api/v1/{context_id}/sessions
+Content-Type: application/json
+
+{
+  "scopes": [["org/acme/user/alice"]],
+  "metadata": { "channel": "web-chat", "locale": "en-GB" }
+}
+```
+
+Response:
+
+```json
+{
+  "id": "session:01hx7…",
+  "scopes": [["org/acme/user/alice"]],
+  "createdAt": "2026-05-12T16:24:00Z"
+}
+```
+
+The `metadata` field is optional. Use it to attach arbitrary operational data – channel, locale, application version – that should travel with the session record for auditing purposes but is not used by SurrealDB Agent Memory's extraction pipeline.
+
+### Python SDK
+
+```python
+from surrealdb import Spectron
+
+memory = Spectron(context="acme-prod", api_key=os.environ["SPECTRON_API_KEY"])
+
+session = await memory.sessions.create(
+    scopes=["org/acme/user/alice"],
+    metadata={"channel": "web-chat"}
+)
+
+print(session.id)       # session:01hx7…
+print(session.scope)    # ["org/acme/user/alice"]
+```
+
+### JavaScript SDK
+
+```javascript
+import { Spectron } from "@surrealdb/spectron";
+
+const memory = new Spectron({ context: "acme-prod", apiKey: process.env.SPECTRON_API_KEY });
+
+const session = await memory.sessions.create({
+    scopes: [["org/acme/user/alice"]],
+    metadata: { channel: "web-chat" },
+});
+
+console.log(session.id);     // session:01hx7…
+console.log(session.scopes);   // [["org/acme/user/alice"]]
+```
+
+## Session lifecycle
+
+A typical session follows three stages:
+
+### 1. Create
+
+Call `POST /api/v1/{context_id}/sessions` (or `memory.sessions.create()` in the SDK) once per conversational thread. Store the returned session ID in your application state alongside the conversation context.
+
+### 2. Add turns
+
+As messages flow through your application, record each one by posting to the turns endpoint. SurrealDB Agent Memory extracts structured facts from each turn synchronously and returns the extraction result immediately. See [Adding turns](/docs/agent-memory/sessions/adding-turns) for the full extraction result shape.
+
+### 3. Close
+
+When the conversation ends, delete the session:
+
+```http
+DELETE /api/v1/{context_id}/sessions/{session_id}
+```
+
+```python
+await session.close()
+```
+
+```javascript
+await session.close();
+```
+
+Closing a session does not delete the extracted data. All entities, attributes, relations, and other facts persisted during the session remain in the memory layer, linked to their source turns, and continue to be available for retrieval and state queries. Closing merely marks the session as ended and releases any server-side resources held for it.
+
+## Session write access
+
+Appending turns (via **`POST .../sessions/{id}/turns`**, **`/chat`**, or a pinned **`session_id`** on **`/facts`** / **`/facts/batch`**) requires the caller's **`memory:write`** grant to cover the **session's scope**. SurrealDB Agent Memory resolves the session through the same scope predicate used for reads — a principal cannot append to a session outside its write region, even if it knows the session id.
+
+Absent and out-of-region sessions both return **`403 Forbidden`** with the same error shape so callers cannot probe for valid session ids.
+
+Creating a **new** session (no pinned id) uses the caller's resolved write region for the new session's scope tags.
+
+The ownership restriction applies to **writes** only. Reading state and retrieving context from a session may be permitted to other principals depending on the access control configuration of the context. See [Permissions and delegation](/docs/agent-memory/mental-model/contexts-and-scope#permissions-and-delegation) for details.
+
+## One session per thread
+
+Create one session per conversational thread. Do not reuse a session for unrelated conversations: scope and provenance are inherited from the session record, so mixing conversations produces mixed attribution. If a user starts a fresh chat window, create a new session even if it is the same user.
+
+For long-running agents that operate continuously across many user interactions, the pattern is the same – one session per logical thread – with each new top-level invocation or user-initiated conversation opening a new session.

@@ -1,0 +1,228 @@
+---
+position: 2
+title: Contexts and scope
+description: "How Contexts isolate tenants and how scope tags partition memory within a Context."
+---
+
+# Contexts and scope
+
+SurrealDB Agent Memory uses two complementary mechanisms:
+
+- **Contexts** — hard isolation between separate products or deployments (each with its own database and keys).
+- **Scope** — tags on memory **records** that partition data within a Context (org, user, project, and so on).
+
+**Scope is not the same as permissions.** Scope says *which bucket a fact belongs to*. [Principals and grants](#permissions-and-delegation) say *who may read or write* at which scope paths. Together they define what each caller can trust to see. A principal may **delegate** grants to another principal, but only up to what they already hold — you cannot grant access you do not have.
+
+## Contexts
+
+A **Context** is the fundamental unit of isolation. Each Context maps to its own SurrealDB `(namespace, database)` pair holding documents, turns, entities, traces, and configuration. Nothing crosses Context boundaries.
+
+Typical reasons for separate Contexts:
+
+- Separate products with no shared memory
+- Distinct business units
+- Test versus production environments
+
+### Context or scope?
+
+Use **scope** when records belong to the same product world and you only need to *partition* them (by user, project, tenant path, time folder, and so on). Grants then decide who sees which paths.
+
+Use a **new Context** when isolation must be absolute, namely when nothing from A should ever appear in B’s `/query`, `/chat`, or profile, even by accident.
+
+| Prefer… | When… |
+| ------- | ----- |
+| **Scopes** | Same app, same “who is speaking,” shared models and config; you need folders (org/user/project) or temporary lenses |
+| **New Context** | Different products, environments (staging vs prod), or **personas** that must not share a profile |
+| **New Context** | Memory has become polluted (operator chat mixed with character memory, eval probes drowning testimony) and forgetting individual paths is harder than starting clean |
+| **New Context** | You need a clean eval / demo run with reproducible prior-memory seeds |
+
+Scopes do **not** give you a second profile or a second response-cache. Chat turns, instructions, and consolidation still live in one Context-wide substrate. If Playground answers as the wrong persona, or retrieval is dominated by earlier probe denials, registering another scope path will not fix that — create a fresh Context (and new API keys), re-seed what you still want, and leave the old Context as a regression artefact if useful.
+
+A practical rule: **scope partitions data; a Context partitions worlds.** When in doubt for demos and product testing, prefer a new Context over trying to “scope away” cross-talk.
+
+Contexts are created through the management API:
+
+```http
+POST /api/v1/contexts/{context_id}
+Content-Type: application/json
+
+{
+  "namespace": "acme",
+  "database": "prod",
+  "description": "Customer support agent for Acme Corp"
+}
+```
+
+API keys are issued **per Context** — a key for `acme-prod` cannot access another Context.
+
+## Scope tags (data partitioning)
+
+Within a Context, memory records carry **scope** as an **OR of conjunctive clauses** — each clause names one or more hierarchical scope paths that must **all** apply together (AND within the clause, OR across clauses). Typical single-owner facts use one clause; **co-ownership** uses multiple clauses so more than one principal can read the same record.
+
+You still choose dimensions that match your app: `org`, `user`, `team`, `project`, `region`, `env`, and so on — expressed as paths like `org/acme/user/alice/`.
+
+### How visibility works
+
+On each read, SurrealDB Agent Memory resolves your **grant** into the scope nodes you may cover, then finds which **scope-set clauses** on each record are fully satisfied. A record is visible when **at least one** clause matches (fail-closed: empty or unmatched scope sees nothing).
+
+For the common case — a single clause with one or two tags — behaviour matches intuitive **subset** semantics:
+
+| Record clause (simplified) | Query / grant covers | Visible? |
+| --- | --- | --- |
+| `{org/acme}` only | `{org/acme, user/alice}` | Yes — org-wide fact visible in user queries |
+| `{org/acme, user/alice}` | `{org/acme}` only | No — user-specific fact hidden from org-only reads |
+| `{org/acme, user/alice}` | `{org/acme, user/alice}` | Yes |
+| `{org/other}` | `{org/acme, user/alice}` | No |
+
+**Co-ownership:** a document deduplicated across two uploaders may carry **two clauses** — one per owner — so both can read the same content-addressed file without a separate copy.
+
+Org-wide facts appear in user-level queries; user-specific facts do not appear in org-only queries.
+
+### Wire format (`ScopeSets`)
+
+On the wire, scope selectors use **disjunctive normal form** — an OR of conjunctive clauses:
+
+| Intent | `scopes` / `lens` value |
+| --- | --- |
+| Tag or read at one path | `[["org/acme/user/alice"]]` — or a bare string `"org/acme/user/alice"` (accepted as a singleton clause) |
+| Co-own across two owners (OR) | `[["org/acme/user/alice"], ["org/acme/user/bob"]]` |
+| Require two paths together (AND) | `[["org/acme", "org/acme/team/eng"]]` |
+
+- **Writes** use **`scopes`** on facts, sessions, uploads, and MCP tools. The legacy field name **`scope`** is still accepted as an alias.
+- **Reads** use **`lens`** on `/query`, `/context`, and MCP recall — same DNF shape, but the lens **filters by involvement** within your grant; it never widens access.
+
+> [!WARNING]
+> **Breaking change (pre-GA):** a flat two-element array such as `["org/acme", "project/support"]` now means **OR** (`org/acme` **or** `project/support`), not AND. To express AND, nest the paths in one inner array: `[["org/acme", "project/support"]]`.
+
+### Example queries
+
+**As a specific user** (read lens):
+
+```json
+{ "lens": [["org/acme/user/alice"]] }
+```
+
+Matches org-wide facts at `org/acme` and user-specific facts at `org/acme/user/alice` when your grant covers both.
+
+**At org level:**
+
+```json
+{ "lens": [["org/acme"]] }
+```
+
+Matches org-wide memory only — not Alice’s private rows unless your grant includes her path.
+
+Register paths before first use: `spectron scopes create org/acme/user/alice`.
+
+### Default write region
+
+When a write omits an explicit **`scopes`** selector — Playground chat, a document upload without metadata scopes, or `remember` without `--scope` — SurrealDB Agent Memory tags the new records with the caller's resolved **`memory:write`** region (the scope paths your key or brokered token already covers).
+
+Those facts are real and queryable immediately. The **Scopes** UI lists registered vocabulary paths; an empty tree does **not** mean no memory exists yet — it means you have not registered named paths for navigation. Use **Memory** or **`GET /profile`** to inspect what was stored under your principal's region, then register paths such as `org/acme/user/alice` when you want hierarchical partitioning.
+
+On SurrealDB Studio, a new context's Overview count of **one scope** is usually that root write region. Register additional paths (for example `surrealdb/employee_1` and `surrealdb/employee_2`) when you want explicit folders for grants and uploads — see [SurrealDB Agent Memory on SurrealDB Cloud](/docs/agent-memory/quickstarts/surrealdb-cloud).
+
+### Tombstone vs erase
+
+Two destructive operations sound similar but differ:
+
+| Operation | What it affects | Reversible? |
+| --- | --- | --- |
+| **Tombstone scope node** (`scope:delete`, Scopes UI) | The **folder entry** in the scope vocabulary | Soft-delete — node marked tombstoned; facts may still exist until erased separately |
+| **Scoped forget** (`POST /scopes/forget`) | **All facts** tagged under a scope subtree | **No** — permanent erasure for compliance |
+
+See [Forgetting memories](/docs/agent-memory/operations/forget#scoped-forget--erase-a-whole-subtree).
+
+## Permissions and delegation
+
+Scope tags partition **data**. **Grants** partition **access**. Four things sit
+between a request and a stored fact, and each answers a different question:
+
+| Term | Answers | Changes when |
+| --- | --- | --- |
+| **API key** | Which credential is calling, and how narrow is it? | You rotate, revoke, or attenuate a credential |
+| **Principal** | Which identity does that key act as? | Rarely — it is the identity recorded on every write |
+| **Grants** | Which verbs may that identity use, and where? | You widen or narrow access |
+| **Scope** | Where does the knowledge live? | You register new paths |
+
+Every key is bound to exactly one principal — there are no unbound keys. The key
+authenticates, the principal supplies the grants, and the grants name scope
+paths. So a write resolves as **key → principal → grants → scope**, and the fact
+is tagged with the scope region that chain lands on.
+
+A key can carry **less** access than the principal it acts as, never more. Key
+grants must be a subset of the bound principal's on every mint path, and a key's
+[scope floor](/docs/agent-memory/reference/glossary#scope-floor) sets the minimum
+paths its requests must include: a key floored at `org/acme` cannot ask about
+`org/beta`, whatever the principal is allowed.
+
+Keys and principals are separate for a practical reason: they change at different
+rates. One principal can hold several keys — a laptop, a CI runner, a service.
+Revoke one key and the others keep working, with no change to access. Widen a
+principal's grants and every key it holds follows, with no re-issue.
+
+- A principal receives grant verbs (`memory:read`, `memory:write`, `grant:manage`, …) on scope paths.
+- Granting to someone else can only convey **part or all of what you already have** — not broader access.
+- API keys bind a principal to a scope **floor**; the server clamps requests that try to escalate.
+- The principal — not the key — is what provenance records, which is why `principal:` ids appear throughout stored facts and request logs.
+
+### Exact node or subtree
+
+A grant names either **one node** or **a node and everything under it**. The
+trailing `/*` is what separates them, and paths are hierarchical only where a
+pattern says so:
+
+| Pattern | Covers | Does not cover |
+| --- | --- | --- |
+| `org/acme` | that node alone | `org/acme/team/eng` |
+| `org/acme/*` | that node and every descendant | `org/beta` |
+| `*` or `/*` | every scope in the Context | — |
+
+A `*` anywhere other than the end is rejected.
+
+> [!WARNING]
+> A grant on a parent alone does **not** cover its children. `memory:read=org/acme`
+> plus `memory:write=org/acme/team/eng` writes rows the same principal cannot
+> read back, and the symptom is quiet: scoped reads return **empty**, not
+> refused, so a client that polls for its own writes waits instead of failing.
+> Use `org/acme/*` when you mean the region.
+
+> [!NOTE]
+> Register a scope path with `spectron scopes create` before a write targets it.
+> Creating paths is its own verb (`scope:create`), so the identity that registers
+> the vocabulary is often not the one that writes into it.
+
+See [Surface, models, and security](/docs/agent-memory/architecture/surface-security-and-models#security-and-privacy) for how keys and grants are enforced at the request surface.
+
+## Geographic scope
+
+Scope dimensions can include **geometry** (points, polygons) for territory-based partitioning — e.g. a service region polygon. Spatial predicates compose with semantic and graph signals in the same [ranker](/docs/agent-memory/architecture/coherence-retrieval-and-tiers).
+
+## Use cases
+
+**Multi-tenancy:** One Context, one API key per customer org scoped to `org/<id>/`.
+
+**Per-user isolation:** Tag interactions with `user/<id>/` so personal memory stays private unless the query includes that user path.
+
+**Shared org knowledge:** Tag policies with `org/acme/` only; tag personal notes with `org/acme/user/alice/`.
+
+**Project context:** Add a `project/…` segment so project-specific instructions surface only in that project’s scope.
+
+## Labels, lens, and scope views (reads)
+
+Recall and context endpoints accept optional parameters beyond flat scope tags:
+
+- **`labels`** — descriptive `key=value` tags (for example `subject=alice`) that **filter** results within what scope and permissions already allow. Labels help you find facts *about* something; they do not grant access by themselves.
+- **`lens`** — optional hierarchical scope paths that **filter by involvement** within your grant. A lens of `region/eu` returns every readable clause that **includes** `eu` — for example both `{eu}` and `{eu, macbook}` — rather than shrinking your access region to exact `{eu}` matches only.
+- **`scope_view`** — controls how broadly results are folded **within** the caller’s grant:
+  - **`strict`** (default) — the caller’s own read region only.
+  - **`crossTeam`** — cross-principal shared reads where grants allow; resolves like **`strict`**.
+  - **`merged`** — same-fact records at narrower scopes with provenance preserved; resolves like **`strict`**.
+
+None of these widen past a principal’s grant. See [REST API](/docs/agent-memory/reference/rest-api) for `/query` and `/context` request fields.
+
+## Related reading
+
+- [Surface, models, and security](/docs/agent-memory/architecture/surface-security-and-models)
+- [Principal](/docs/agent-memory/reference/glossary#principal)
+- [REST API](/docs/agent-memory/reference/rest-api)
