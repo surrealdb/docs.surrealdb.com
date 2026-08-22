@@ -3,11 +3,11 @@
 --
 -- The search system uses two complementary retrieval strategies:
 --
---   1. BM25 full-text search — lexical matching via tokenised
+--   1. BM25 full-text search - lexical matching via tokenised
 --      inverted indexes. Good for exact keyword matches
 --      (e.g. "DEFINE TABLE", "array::group").
 --
---   2. HNSW vector search — semantic similarity via OpenAI
+--   2. HNSW vector search - semantic similarity via OpenAI
 --      embeddings. Good for natural-language queries where the
 --      user's phrasing differs from the docs wording
 --      (e.g. "how to join tables" → record links / RELATE).

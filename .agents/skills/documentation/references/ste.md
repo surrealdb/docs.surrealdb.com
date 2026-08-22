@@ -4,18 +4,18 @@ Apply ASD-STE100 Simplified Technical English so paragraphs stay clear for reade
 
 ## Core rules
 
-1. **Active voice** — Name the actor. Prefer `The server rejects the request.` over `The request is rejected.`
-2. **One instruction per sentence** — In procedures, do not chain actions with “and then”.
-3. **Short sentences** — Aim for ≤20 words in procedural sentences, ≤25 in descriptive sentences. Split when longer.
-4. **Short paragraphs** — At most six sentences; prefer fewer.
-5. **Simple verb forms** — Infinitive, imperative, simple present, simple past, simple future. Avoid progressive (`-ing`) verb forms when a simple form works: prefer `When the build finishes, deploy the app.` over `When the build is finishing…`.
-6. **Imperative mood for steps** — `Create the project.` `Export the token.` `Click **Save**.`
-7. **Consistent wording** — One approved word per meaning in a page. Do not alternate `start` / `begin` / `initiate` for the same action. Prefer the simplest common verb (`start`, `stop`, `use`, `set`, `get`, `show`, `make`, `connect`).
-8. **One word, one meaning** — Do not reuse a term for two concepts on the same page without clarification.
-9. **Limited noun clusters** — Avoid more than three nouns in a row. Rewrite `customer account billing configuration panel` → `panel for customer billing configuration` or `billing settings`.
-10. **No filler synonyms or jargon** — Cut words that do not change meaning. Replace vague verbs (`handle`, `process`, `leverage`) with concrete ones when possible.
-11. **Articles and pronouns stay clear** — If `it` or `this` could point to two nouns, repeat the noun.
-12. **Technical names allowed** — Product names, class names, commands, and standard protocols stay as-is. Do not rewrite them into STE dictionary words.
+1. **Active voice** - Name the actor. Prefer `The server rejects the request.` over `The request is rejected.`
+2. **One instruction per sentence** - In procedures, do not chain actions with “and then”.
+3. **Short sentences** - Aim for ≤20 words in procedural sentences, ≤25 in descriptive sentences. Split when longer.
+4. **Short paragraphs** - At most six sentences; prefer fewer.
+5. **Simple verb forms** - Infinitive, imperative, simple present, simple past, simple future. Avoid progressive (`-ing`) verb forms when a simple form works: prefer `When the build finishes, deploy the app.` over `When the build is finishing…`.
+6. **Imperative mood for steps** - `Create the project.` `Export the token.` `Click **Save**.`
+7. **Consistent wording** - One approved word per meaning in a page. Do not alternate `start` / `begin` / `initiate` for the same action. Prefer the simplest common verb (`start`, `stop`, `use`, `set`, `get`, `show`, `make`, `connect`).
+8. **One word, one meaning** - Do not reuse a term for two concepts on the same page without clarification.
+9. **Limited noun clusters** - Avoid more than three nouns in a row. Rewrite `customer account billing configuration panel` → `panel for customer billing configuration` or `billing settings`.
+10. **No filler synonyms or jargon** - Cut words that do not change meaning. Replace vague verbs (`handle`, `process`, `leverage`) with concrete ones when possible.
+11. **Articles and pronouns stay clear** - If `it` or `this` could point to two nouns, repeat the noun.
+12. **Technical names allowed** - Product names, class names, commands, and standard protocols stay as-is. Do not rewrite them into STE dictionary words.
 
 ## Descriptive vs procedural text
 

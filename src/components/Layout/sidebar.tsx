@@ -7,6 +7,13 @@ import { ProductSwitcherSegmented } from "./product-switcher";
 import { getProductFromPath } from "./products";
 import classes from "./style.module.scss";
 
+/**
+ * Left inset shared by every sidebar block. The nav links add their own 8px
+ * on top, so the label sits just inside the blocks above it rather than
+ * flush with them.
+ */
+const SIDEBAR_INSET = 24;
+
 function normalize(href: string) {
     return href.replace(/\/$/, "");
 }
@@ -83,7 +90,7 @@ function SidebarSection({ section }: { section: NavSection }) {
                 )}
                 <Text
                     component="h3"
-                    fz="md"
+                    fz={15}
                     fw={600}
                 >
                     {section.title}
@@ -113,28 +120,27 @@ export function Sidebar({ navigation, versionSelector, ...props }: SidebarProps)
     return (
         <Stack
             pb="sm"
-            mah="calc(100vh - 56px)"
             gap={0}
             {...props}
         >
             {/* One scroll container for the whole sidebar, so the product switcher
                 and version selector travel with the tree rather than staying pinned
-                above it. The `nav` landmark stays on the tree alone — the switcher
+                above it. The `nav` landmark stays on the tree alone - the switcher
                 is a control, not navigation within this product's docs. */}
             <Stack
                 gap={0}
                 flex={1}
-                style={{ overflowY: "auto" }}
+                className={classes.sidebarScroll}
             >
                 <Box
-                    px="lg"
+                    px={SIDEBAR_INSET}
                     mb="md"
                 >
                     <ProductSwitcherSegmented current={product} />
                 </Box>
                 {versionSelector && (
                     <Box
-                        px="lg"
+                        px={SIDEBAR_INSET}
                         mt="sm"
                         mb="xl"
                     >
@@ -144,7 +150,7 @@ export function Sidebar({ navigation, versionSelector, ...props }: SidebarProps)
                 <Stack
                     gap="lg"
                     component="nav"
-                    px="md"
+                    px={SIDEBAR_INSET}
                 >
                     {navigation.map((section) => (
                         <SidebarSection

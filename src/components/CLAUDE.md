@@ -24,6 +24,6 @@ ComponentName/
 
 ## SOLID in components
 
-- **Single Responsibility** — one component, one purpose. Split complex UI into focused sub-components.
-- **Interface Segregation** — keep prop interfaces small and focused. Avoid catch-all prop types.
-- **Dependency Inversion** — accept callbacks and data via props rather than importing concrete services directly.
+- **Single Responsibility** - one component, one purpose. Split complex UI into focused sub-components.
+- **Interface Segregation** - keep prop interfaces small and focused. Avoid catch-all prop types.
+- **Dependency Inversion** - accept callbacks and data via props rather than importing concrete services directly.

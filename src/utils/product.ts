@@ -30,7 +30,7 @@ export const PRODUCT_META: Record<ProductId, ProductMeta> = {
     },
     "agent-memory": {
         id: "agent-memory",
-        label: "SurrealDB Agent Memory",
+        label: "Agent Memory",
         shortLabel: "Agent Memory",
         description: "Persistent agent memory built on knowledge graphs.",
         homeHref: "/docs/agent-memory",

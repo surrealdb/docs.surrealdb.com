@@ -12,8 +12,8 @@ export function DocMarkdown() {
             jsxMode="render"
             components={registerMarkdownComponents()}
             onResolveMedia={resolveImageDescriptor}
-            fz={15}
-            lh="sm"
+            fz={17}
+            lh={1.5}
             p={0}
         />
     );

@@ -98,11 +98,11 @@ Examples below mirror public product-doc phrasing. Product names are generic. Us
 
 **Before (internal, vague, AI-flavoured)**
 
-> In today’s modern landscape, our next-gen datastore seamlessly empowers teams to leverage holistic Postgres abstractions. Engineering currently uses the `hydra-b` pooler on the `db-staging-8` box—don’t document that. Simply dive in and explore the myriad ways you can begin initiating connections!
+> In today’s modern landscape, our next-gen datastore seamlessly empowers teams to leverage holistic Postgres abstractions. Engineering currently uses the `hydra-b` pooler on the `db-staging-8` box - don’t document that. Simply dive in and explore the myriad ways you can begin initiating connections!
 
 **After (public, STE-aligned)**
 
-> Use the datastore to connect to a full Postgres database—not a Postgres abstraction.
+> Use the datastore to connect to a full Postgres database - not a Postgres abstraction.
 >
 > **Connect to your database:** Choose a connection string and mode (direct, transaction, or session). Use the pooler for serverless clients and short-lived connections.
 >
@@ -112,6 +112,6 @@ Examples below mirror public product-doc phrasing. Product names are generic. Us
 
 1. **Bold lead-ins** in bullets so scanners see the topic before the clause.
 2. **Tables** when the reader must choose among types, modes, or plans.
-3. **Callouts** for secrets and irreversible actions—not for ordinary tips every other paragraph.
+3. **Callouts** for secrets and irreversible actions - not for ordinary tips every other paragraph.
 4. **Expected command output** in quickstarts so the reader knows success.
 5. **Progressive disclosure:** basics first; advanced pages linked under “next steps”.

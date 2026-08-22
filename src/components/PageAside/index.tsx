@@ -52,14 +52,17 @@ export function PageAside({ headings }: PageAsideProps) {
             w={275}
             mah="stretch"
             pos="sticky"
-            top="0"
+            top="calc(var(--docs-header-height) + 24px)"
             right="2rem"
             aria-hidden={headings.length === 0}
             visibleFrom="md"
             hidden={headings.length === 0}
             style={{ flexShrink: 0 }}
         >
-            <Anchor href="#top">
+            <Anchor
+                href="#top"
+                className={classes.tocHeading}
+            >
                 <Flex
                     align="center"
                     gap={8}
@@ -96,7 +99,7 @@ export function PageAside({ headings }: PageAsideProps) {
                             underline="never"
                             data-active={activeId === heading.id || undefined}
                             style={{
-                                paddingLeft: `${(heading.depth - minDepth) * 12 + 12}px`,
+                                paddingLeft: `${(heading.depth - minDepth) * 12 + 20}px`,
                             }}
                         >
                             {heading.text}

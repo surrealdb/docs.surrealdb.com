@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════
-// Search handler — hybrid retrieval + post-processing
+// Search handler - hybrid retrieval + post-processing
 //
 // Query flow:
 //   1. Strip question prefixes for BM25 ("how to X" → "X")
@@ -26,9 +26,9 @@ export const MAX_QUERY_LENGTH = 500;
 //
 // The search index is shared across products, but the UX is
 // product-scoped: every Agent Memory page lives under /docs/agent-memory,
-// everything else is SurrealDB. Filtering happens HERE — before
+// everything else is SurrealDB. Filtering happens HERE - before
 // boosting, grouping, the relevance threshold, and the result cap
-// — so the much larger SurrealDB corpus can't crowd the smaller
+// - so the much larger SurrealDB corpus can't crowd the smaller
 // Agent Memory product out of the global top-N. (This previously ran
 // in the API wrapper after the cap, which starved Agent Memory
 // results: an Agent Memory query could return few or zero hits
@@ -53,8 +53,8 @@ function matchesProduct(hit: RawSearchHit, product: SearchProduct): boolean {
 //
 // Runs four sub-queries and fuses them with RRF. The query
 // receives two parameters:
-//   $query — the search string for BM25 (question prefixes stripped)
-//   $qvec  — the 1536-dim embedding vector for KNN search
+//   $query - the search string for BM25 (question prefixes stripped)
+//   $qvec - the 1536-dim embedding vector for KNN search
 // ──────────────────────────────────────────────────────────
 const SEARCH_SQL = /* surql */ `
     -- ── Page vector search ──
@@ -86,11 +86,11 @@ const SEARCH_SQL = /* surql */ `
     -- BM25 scoring across five indexed fields. Each @N@ operator
     -- binds to search::score(N) so we can weight fields differently.
     -- Weights reflect how informative each field is:
-    --   path (15)        — URL segments are strong signals ("surrealql/statements/select")
-    --   title (25)       — strongest signal, exact topic match
-    --   breadcrumb (10)  — navigation context ("SurrealQL > Statements > SELECT")
-    --   description (8)  — frontmatter summary, good keywords
-    --   content (3)      — body text, weakest per-term but most volume
+    --   path (15) - URL segments are strong signals ("surrealql/statements/select")
+    --   title (25) - strongest signal, exact topic match
+    --   breadcrumb (10) - navigation context ("SurrealQL > Statements > SELECT")
+    --   description (8) - frontmatter summary, good keywords
+    --   content (3) - body text, weakest per-term but most volume
     LET $page_ft = (
         SELECT
             id,
@@ -263,7 +263,7 @@ function isCoreDoc(hit: RawSearchHit): boolean {
  *
  * Uses indexOf-based splitting instead of regex capture groups
  * to avoid polynomial backtracking (ReDoS) on adversarial
- * input — greedy/lazy `.+?` overlapping with `\s+` separators
+ * input - greedy/lazy `.+?` overlapping with `\s+` separators
  * causes exponential search in the regex engine.
  */
 function extractComparisonTerms(query: string): [string, string] | null {
@@ -318,9 +318,9 @@ function boostResults(hits: RawSearchHit[], query: string): RawSearchHit[] {
         let boost = 1.0;
 
         // Title relevance boost (mutually exclusive tiers):
-        //   3.0x — exact title match (e.g. query "RELATE" → title "RELATE")
-        //   2.0x — token prefix (e.g. query "SELECT statement" → title "SELECT")
-        //   1.5x — all query tokens appear in title as substrings
+        //   3.0x - exact title match (e.g. query "RELATE" → title "RELATE")
+        //   2.0x - token prefix (e.g. query "SELECT statement" → title "SELECT")
+        //   1.5x - all query tokens appear in title as substrings
         if (t === q) {
             boost = 3.0;
         } else if (isTokenPrefix(tTokens, qTokens) || isTokenPrefix(qTokens, tTokens)) {
@@ -429,7 +429,7 @@ function extractSnippet(
 
     const terms = tokenise(query);
 
-    // Phase 1 — find the best single block with query term matches
+    // Phase 1 - find the best single block with query term matches
     // that is long enough to be a meaningful preview.
     let bestBlock: string | null = null;
     let bestHits = 0;
@@ -449,7 +449,7 @@ function extractSnippet(
 
     if (bestBlock) return truncateToLimit(bestBlock);
 
-    // Phase 2 — try joining consecutive blocks to form a long
+    // Phase 2 - try joining consecutive blocks to form a long
     // enough candidate. Only adjacent blocks are joined, matching
     // the principle of not mixing unrelated content.
     if (terms.length > 0) {
@@ -465,7 +465,7 @@ function extractSnippet(
         }
     }
 
-    // Phase 3 — no query-matching block found. Use the longest
+    // Phase 3 - no query-matching block found. Use the longest
     // block if it meets the minimum length, otherwise fall back
     // to the frontmatter description (pages) or empty (sections).
     const longest = blocks.reduce((a, b) => (a.length >= b.length ? a : b));
@@ -530,7 +530,7 @@ function stripQuestionPrefix(query: string): string {
 // page that only says "permissions". We append a small, curated
 // set of SurrealDB-specific synonyms to the BM25 query so common
 // aliases and acronyms still retrieve the right pages. Expansion
-// is applied ONLY to the keyword query — the vector embedding
+// is applied ONLY to the keyword query - the vector embedding
 // uses the original wording and already handles paraphrase.
 //
 // Keep this map small and high-precision: every added term widens
@@ -669,7 +669,7 @@ export async function handleSearch(
     const connection = await getDb();
 
     // Strip question words and expand domain synonyms for BM25, but
-    // embed the original query — the vector model understands
+    // embed the original query - the vector model understands
     // natural language and paraphrase natively.
     const ftQuery = expandSynonyms(stripQuestionPrefix(query));
     const qvec = await embed(query);

@@ -28,11 +28,11 @@ Always run `bun run qa` then `bun run qc` before finishing any task.
 
 Apply SOLID where it fits:
 
-- **Single Responsibility** — one reason to change per module, component, or function.
-- **Open/Closed** — extend through composition and props, not by modifying existing code.
-- **Liskov Substitution** — interchangeable components must not break consumers.
-- **Interface Segregation** — focused prop interfaces and types; avoid catch-all types.
-- **Dependency Inversion** — depend on abstractions (types, interfaces, callbacks).
+- **Single Responsibility** - one reason to change per module, component, or function.
+- **Open/Closed** - extend through composition and props, not by modifying existing code.
+- **Liskov Substitution** - interchangeable components must not break consumers.
+- **Interface Segregation** - focused prop interfaces and types; avoid catch-all types.
+- **Dependency Inversion** - depend on abstractions (types, interfaces, callbacks).
 
 ### UI and components
 
@@ -48,6 +48,21 @@ Apply SOLID where it fits:
 
 All user-facing text uses **British English** spelling (`-ise`, `-our`, `-re`, `-ogue`).
 
+### Dashes
+
+Use the standard hyphen (`-`) everywhere. Em dashes (`—`) and en dashes (`–`) do
+not appear in this repo, in prose, headings, tables, code comments or these guides.
+
+| Use | Instead of |
+| --- | ---------- |
+| `a spaced hyphen - like this` | `an em dash — like this` |
+| `2-3 minutes`, `pages 10-12` | `2–3 minutes`, `pages 10–12` |
+
+A parenthetical takes a hyphen with a space on each side, so the words either
+side stay separate. A numeric range takes a tight hyphen with no spaces.
+Where a sentence leans on the dash for its rhythm, a comma, a colon or a full
+stop usually reads better than either.
+
 ### Line breaks in content
 
 **Never hard-wrap a paragraph.** The markdown renderer preserves single newlines as
@@ -56,7 +71,7 @@ split a link across two lines. Write each paragraph, list item and callout body 
 line and leave wrapping to the viewport.
 
 Newlines separate blocks, not lines within a block. Line structure is only meaningful
-where it is part of the syntax — fenced code, `<Synopsis>` bodies (one usage line per
+where it is part of the syntax - fenced code, `<Synopsis>` bodies (one usage line per
 line), multi-line JSX attributes, tables and frontmatter.
 
 ### Headings and subheaders
@@ -68,7 +83,7 @@ Title Case on every main word.
 | ------- | ---- | -------- |
 | Single word | Capitalise the word | `## Syntax`, `#### Parameters`, `#### Returns` |
 | Multiple words | Capitalise the **first word only**; lowercase the rest | `## Type parameters`, `### Complete examples`, `### Default response` |
-| Numbered lists | Same as multiple words — capitalise the first word after the number | `### 3. Don't reuse transactions`, `## 1. Install the SDK` |
+| Numbered lists | Same as multiple words - capitalise the first word after the number | `### 3. Don't reuse transactions`, `## 1. Install the SDK` |
 
 **Keep capitalised** where they are names, not prose:
 
@@ -129,7 +144,7 @@ same rule as "use positive expressions".
 A negative is fine in two cases. It is fine when it describes what SurrealDB asks
 of the reader, because it lifts an obligation. It is also fine when it names a
 general subject outright, because the claim then lands on a category rather than
-on this reader — "most vector stores keep no history of a superseded fact" is an
+on this reader - "most vector stores keep no history of a superseded fact" is an
 observation, and a negative attached to our own architecture ("one engine, no
 plumbing to run") describes ours. What fails is the **bare** negation: with no
 stated subject the reader supplies themselves, and reads it as a verdict on their
@@ -140,7 +155,7 @@ obligation:
 
 - "No need to learn another query language just for time series."
 - "You do not have to author Rust yourself to benefit from Surrealism."
-- "You do not need to create the table first — SurrealDB adds it on the first write."
+- "You do not need to create the table first - SurrealDB adds it on the first write."
 
 Not fine, because each one only works if the reader is in a state we have
 decided for them:
@@ -150,17 +165,17 @@ decided for them:
 | No message broker, no polling, no glue code | Nothing states the subject, so the reader becomes it | The database is your event bus and your source of truth at once |
 | One engine, not a pile of stores | They suspected we were a pile of stores | One engine, one transaction |
 | Nothing here is a mention tally. The count is… | They guessed "mention tally" | The count is… |
-| Forget about infrastructure operations | Ops is their burden today — and instructs them | SurrealDB Cloud runs the infrastructure for you |
-| Stop stitching databases together | They stitch databases together — and instructs them | One database for every model your app needs |
+| Forget about infrastructure operations | Ops is their burden today - and instructs them | SurrealDB Cloud runs the infrastructure for you |
+| Stop stitching databases together | They stitch databases together - and instructs them | One database for every model your app needs |
 
 Two forms to watch for:
 
-1. **Imputed practice or pain** — the sentence only holds if the reader's current
+1. **Imputed practice or pain** - the sentence only holds if the reader's current
    setup is bad. Watch "glue code", "bolt-ons", "plumbing", "juggling",
-   "wrestling with", "hassle" — though these are not banned words, and are fine
+   "wrestling with", "hassle" - though these are not banned words, and are fine
    against a named general subject or against our own architecture. It is the
    bare, subjectless use that lands on the reader.
-2. **Imputed misconception** — the sentence answers a question nobody asked, so
+2. **Imputed misconception** - the sentence answers a question nobody asked, so
    it plants the wrong idea in order to knock it down. Usual shapes: "not a…",
    "isn't just…", "Nothing here is…", "more than just…".
 
@@ -234,10 +249,10 @@ export const Content = defineCollection({
 
 ### Schemas (`src/utils/schema.ts`)
 
-- **`pageSchema`** — `title`, `description`, `position`, `icon`, `hidden`, all
+- **`pageSchema`** - `title`, `description`, `position`, `icon`, `hidden`, all
   optional. It is a Zod `strictObject`, so an unknown frontmatter key is a build
   error. `icon` must be a member of `SECTION_ICONS_NAMES` (`src/utils/icons.ts`).
-- **`labSchema`** — `title`, `category` and `author` required; `description`,
+- **`labSchema`** - `title`, `category` and `author` required; `description`,
   `url`, `topics` (max 2) and `languages` optional.
 
 `type: "both"` means `__category.json` files are collection entries as well, and
@@ -275,16 +290,16 @@ The content side needs `src/content/<id>/+Content.ts` and `__category.json`. The
 page group `src/pages/<url-prefix>/` needs `+route.ts`, `+data.ts`, `+Page.tsx`,
 `+Layout.tsx` and `+sitemapUrls.ts`. Then update:
 
-- `src/utils/collections.ts` — `COLLECTION_ROUTES` powers the raw `.md` endpoint.
+- `src/utils/collections.ts` - `COLLECTION_ROUTES` powers the raw `.md` endpoint.
   Most specific prefix first; the `{ prefix: "", id: "index" }` catch-all stays last.
-- `src/components/Layout/nav.ts` — top-nav hrefs are hardcoded.
-- `redirects.ts` — old URLs to new URLs (see below).
-- `public/llms.txt` — hand-maintained absolute URLs.
-- `src/utils/product.ts` — only when introducing a new product (`surrealdb` |
+- `src/components/Layout/nav.ts` - top-nav hrefs are hardcoded.
+- `redirects.ts` - old URLs to new URLs (see below).
+- `public/llms.txt` - hand-maintained absolute URLs.
+- `src/utils/product.ts` - only when introducing a new product (`surrealdb` |
   `agent-memory`).
-- `src/pages/agent-memory/index/+route.ts` — add the segment to
+- `src/pages/agent-memory/index/+route.ts` - add the segment to
   `AGENT_MEMORY_SIBLING_SECTIONS` when the collection sits under `/agent-memory`.
-- `search/src/handler.ts` and `search/scripts/crawler.ts` — the search product
+- `search/src/handler.ts` and `search/scripts/crawler.ts` - the search product
   filter and the crawler's URL-prefix map are both keyed on the path prefix.
 
 ### Redirects
@@ -310,8 +325,8 @@ Two things to check alongside a move:
 - The `www.surrealdb.com` repo has its own `/docs/*` redirects in
   `redirects.json`, and they run first. When you move a page a www entry already
   points at, repoint that entry instead of leaving a second hop.
-- A missing page does not 404 — `resolveDataFromCollection` 302s up to the parent
-  path — so a missed redirect is silent. Diff the URL set before and after
+- A missing page does not 404 - `resolveDataFromCollection` 302s up to the parent
+  path - so a missed redirect is silent. Diff the URL set before and after
   instead of watching for 404s.
 
 ## Content components
@@ -342,7 +357,7 @@ surrealctl instance create [OPTIONS] <NAME>
 ```
 
 The markdown pipeline moves the body into the `command` attribute before parsing,
-so metasyntax (`[NAME]`, `<TYPE>`, `...`) reaches the renderer verbatim —
+so metasyntax (`[NAME]`, `<TYPE>`, `...`) reaches the renderer verbatim -
 children would be parsed as inline markdown and lose it. `label` defaults to
 `Usage`; use `label="Signature"` for SDK reference. There is deliberately no copy
 button, because a synopsis is not paste-ready.
@@ -379,8 +394,8 @@ export default async function data(context: PageContext) {
 
 1. Strips the URL prefix (the optional third argument, defaulting to the
    collection id) to get the slug, then looks up `getCollectionEntry(id, slug)`.
-2. On a miss, 302s one path segment up — `getParentUrl` re-attaches the `/docs`
-   base — and only throws a 404 when there is no parent.
+2. On a miss, 302s one path segment up - `getParentUrl` re-attaches the `/docs`
+   base - and only throws a 404 when there is no parent.
 3. Sets the page `title` and `description` through `useConfig`, suffixing the
    title per product (`src/utils/product.ts`).
 4. Builds the sidebar with `buildNavigation(id, prefix)`.
@@ -400,10 +415,10 @@ Labs listing: `sortCollection(getCollection("labs-items"), "title", "asc")`.
 Markdown pipeline (`resolveMarkdown` in `src/utils/markdown.tsx`) returns
 `{ content, headings }`:
 
-1. `stripLeadingH1` — the rendered heading comes from frontmatter `title`.
+1. `stripLeadingH1` - the rendered heading comes from frontmatter `title`.
 2. Strip leading language-test block comments out of fenced code.
-3. `inlineSynopsisCommands` — move `<Synopsis>` bodies into the `command` attribute.
-4. `injectIconScope` — quote `icon={{ … }}` keys and resolve icon identifiers to URLs.
+3. `inlineSynopsisCommands` - move `<Synopsis>` bodies into the `command` attribute.
+4. `injectIconScope` - quote `icon={{ … }}` keys and resolve icon identifiers to URLs.
 5. `parseMarkdownTree` and `extractHeadings` (both from `@surrealdb/ui`) for the page aside.
 
 Sidebar: `buildNavigation` in `src/utils/navigation.ts` builds sections from
@@ -417,7 +432,7 @@ Prerendering is off (`prerender: false` in `src/pages/+config.ts`), so every
 request is served by the SSR function and the `+onBeforePrerenderStart.ts` files
 are inert. Sitemap URLs come from `+sitemapUrls.ts` instead
 (`collectionSitemapUrls` in `src/utils/sitemap.ts`, which filters `__category`
-entries) — add one for every new page group.
+entries) - add one for every new page group.
 
 ### vike-content-collection APIs
 
@@ -426,7 +441,7 @@ entries) — add one for every new page group.
 
 **Not used:**
 
-- `renderEntry` and the package's `extractHeadings` — rendering goes through `@surrealdb/ui`'s `parseMarkdownTree` + `MarkdownViewer`
-- `getBreadcrumbs` — breadcrumbs come from `__category` lookups in `resolveDataFromCollection`
+- `renderEntry` and the package's `extractHeadings` - rendering goes through `@surrealdb/ui`'s `parseMarkdownTree` + `MarkdownViewer`
+- `getBreadcrumbs` - breadcrumbs come from `__category` lookups in `resolveDataFromCollection`
 - `getAdjacentEntries`
-- `getEntryUrl` — URLs come from the page group's URL prefix
+- `getEntryUrl` - URLs come from the page group's URL prefix

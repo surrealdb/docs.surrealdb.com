@@ -3,7 +3,7 @@ name: documentation
 description: >-
   Writes and rewrites public-facing product documentation with a semi-technical
   tone, ASD-STE100 Simplified Technical English, clear structure, and careful
-  disclosure. Use whenever documentation is written — including new guides,
+  disclosure. Use whenever documentation is written - including new guides,
   quickstarts, reference pages, overviews, how-tos, explanations, README docs,
   and rewrites of existing doc text for a public audience.
 metadata:
@@ -17,9 +17,9 @@ Write public product documentation that a new or moderately experienced reader c
 
 ## Modes
 
-**Rewrite** — User provides existing text (paste, file path, or selection). Preserve factual intent. Restructure, rephrase, and cut until the result matches this skill. Do not invent features.
+**Rewrite** - User provides existing text (paste, file path, or selection). Preserve factual intent. Restructure, rephrase, and cut until the result matches this skill. Do not invent features.
 
-**Write** — User provides a topic, outline, or brief. Ask only for missing facts that would make the page wrong or unsafe. Then draft a complete page in this style.
+**Write** - User provides a topic, outline, or brief. Ask only for missing facts that would make the page wrong or unsafe. Then draft a complete page in this style.
 
 If the mode is unclear, infer from the prompt. If both source text and a new topic appear, prefer rewrite of the source unless the user asks for a new page.
 
@@ -53,7 +53,7 @@ Before writing, decide:
 
 Public docs disclose **what the reader needs to succeed**, not how the organisation builds, staffs, or roadmaps the product. Prefer stable interfaces, recommended paths, and user-visible behaviour. Omit staff names, internal tools, unreleased plans, private URLs, and implementation trivia that does not change how the reader uses the product.
 
-When audience is expert (API reference, deep ops), raise density and shorten definitions—but keep STE clarity and the same disclosure rules.
+When audience is expert (API reference, deep ops), raise density and shorten definitions - but keep STE clarity and the same disclosure rules.
 
 ### 2. Page types
 
@@ -77,20 +77,20 @@ Match this house style:
 
 - Second person for tasks (`you`, `your app`).
 - Third person for product facts (`The API returns…`).
-- Address the reader as a peer building something—not a student in a lecture, not a marketing lead.
+- Address the reader as a peer building something - not a student in a lecture, not a marketing lead.
 
 **Tone**
 
 - Semi-technical, calm, instructional.
 - Confident without hype. No “powerful”, “seamless”, “robust”, “modern”, “end-to-end”, or “dive in”.
-- Warmth is allowed in small doses on long tutorials (“After the app responds, stop the process with `Ctrl+C`”)—never cheerleading.
+- Warmth is allowed in small doses on long tutorials (“After the app responds, stop the process with `Ctrl+C`”) - never cheerleading.
 
 **Sentence structure**
 
 - Lead the page with **purpose in one sentence**, then optionally one clarifying fact that prevents a common misunderstanding.
-- Prefer **subject–verb–object**. Keep most sentences under ~25 words (descriptions) or ~20 words (steps).
+- Prefer **subject - verb - object**. Keep most sentences under ~25 words (descriptions) or ~20 words (steps).
 - One idea per sentence. One instruction per procedural sentence.
-- Short paragraphs: usually 1–3 sentences. Rarely more than 4.
+- Short paragraphs: usually 1-3 sentences. Rarely more than 4.
 - Use present tense for behaviour; imperative for steps; simple future only for outcomes (“You will get a token”).
 - Parallel structure in lists: same grammatical shape for every item.
 - Bridge steps with one plain sentence when context would otherwise jump (“With the toolchain ready, create the project”).
@@ -102,7 +102,7 @@ Match this house style:
 - Branching audience: `If you are new to [topic], start with [basics]. If you already know [topic], go to [build].`
 - Outcome frame: `When you finish, you will have [concrete result].`
 - List annotation: `**[Title]:** [What it is or when to use it].`
-- Caution inline: put the warning in the same list item or in a callout—not three paragraphs later.
+- Caution inline: put the warning in the same list item or in a callout - not three paragraphs later.
 - Recommendation with escape hatch: `Use [default] for the simplest path. [Alternative] remains available.`
 
 **Avoid**
@@ -117,7 +117,7 @@ Match this house style:
   more plumbing”), imputed misconceptions (“not just a wrapper”, “nothing here
   is a tally”), and negative imperatives (“stop stitching…”, “forget about…”).
   A negative that describes what the product asks of the reader (“no need to
-  learn another query language”) is fine—it removes an obligation rather than
+  learn another query language”) is fine - it removes an obligation rather than
   assigning the reader a state. See **Documentation voice** in `AGENTS.md`.
 
 Apply **ASD-STE100 Simplified Technical English** as specified in [references/ste.md](references/ste.md). Product and API names are allowed technical nouns/verbs; do not force awkward rewrites of proper names.
@@ -132,7 +132,7 @@ Structure carries meaning. Do not leave everything in prose blocks.
 - **Tables:** comparisons, parameters, modes, “when to use A vs B”.
 - **Code fences:** runnable commands and snippets; show expected output when it helps the reader verify.
 - **Callouts:** `NOTE` for tips, `WARNING` / `IMPORTANT` for safety, data loss, or secrets.
-- **Placeholders:** `<your-token>`, `YOUR_PROJECT_ID`—never real credentials.
+- **Placeholders:** `<your-token>`, `YOUR_PROJECT_ID` - never real credentials.
 - **Links:** push depth outward; keep the current page focused.
 - **Hub pages:** title + one-line description per destination beats long essays.
 
