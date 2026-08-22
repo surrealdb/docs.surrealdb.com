@@ -15,10 +15,11 @@ import {
     Text,
     ThemeIcon,
 } from "@mantine/core";
-import { Icon, iconChevronDown, iconOpen, ThemedImage } from "@surrealdb/ui";
+import { Icon, iconChevronDown, iconOpen } from "@surrealdb/ui";
 import { Fragment, useState } from "react";
 import { ClientOnly } from "vike-react/ClientOnly";
 import { usePageContext } from "vike-react/usePageContext";
+import { SurrealDBLogo } from "~/components/Logo";
 import { SearchDocs } from "~/components/SearchDocs";
 import { ColorSchemeToggle } from "../ColorSchemeToggle";
 import {
@@ -30,12 +31,7 @@ import {
     type NavMenuGroup,
 } from "./nav";
 import { ProductList, ProductWordmark } from "./product-switcher";
-import {
-    getProductFromPath,
-    PRODUCTS,
-    SURREALDB_LOGO_DARK,
-    SURREALDB_LOGO_LIGHT,
-} from "./products";
+import { getProductFromPath, PRODUCTS } from "./products";
 import classes from "./style.module.scss";
 
 export type {
@@ -326,10 +322,9 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                         href="/"
                         aria-label="SurrealDB home"
                     >
-                        <ThemedImage
-                            lightSrc={SURREALDB_LOGO_LIGHT}
-                            darkSrc={SURREALDB_LOGO_DARK}
-                            h={27}
+                        <SurrealDBLogo
+                            height={27}
+                            className={classes.logo}
                         />
                     </Anchor>
                     <Divider
