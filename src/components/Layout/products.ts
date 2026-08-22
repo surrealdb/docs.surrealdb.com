@@ -1,6 +1,4 @@
 import { pictoSpectronGradient, pictoSurrealDBGradient } from "@surrealdb/ui";
-import LogoDark from "~/assets/img/logo/dark/surrealdb.svg";
-import LogoLight from "~/assets/img/logo/light/surrealdb.svg";
 import {
     PRODUCT_META,
     PRODUCT_ORDER as PRODUCT_ORDER_META,
@@ -32,6 +30,3 @@ export const PRODUCTS: Record<ProductId, ProductConfig> = {
         picto: pictoSpectronGradient,
     },
 };
-
-export const SURREALDB_LOGO_LIGHT = LogoLight;
-export const SURREALDB_LOGO_DARK = LogoDark;

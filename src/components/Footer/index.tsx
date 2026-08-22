@@ -11,9 +11,8 @@ import {
     iconBrandStackOverflow,
     iconBrandX,
     iconBrandYouTube,
-    ThemedImage,
 } from "@surrealdb/ui";
-import { SURREALDB_LOGO_DARK, SURREALDB_LOGO_LIGHT } from "../Layout/products";
+import { SurrealDBLogo } from "~/components/Logo";
 import { FooterLink } from "./link";
 import classes from "./style.module.scss";
 
@@ -119,14 +118,7 @@ export function Footer() {
                 {/* Closing statement, carried over from the apex site: wordmark,
                     masthead line, then the two supporting sentences. */}
                 <Box className={classes.identity}>
-                    <ThemedImage
-                        lightSrc={SURREALDB_LOGO_LIGHT}
-                        darkSrc={SURREALDB_LOGO_DARK}
-                        h={{ base: 22, md: 28 }}
-                        w="auto"
-                        mb="xl"
-                        className={classes.logo}
-                    />
+                    <SurrealDBLogo className={classes.logo} />
                     <Text
                         c="bright"
                         fz={{ base: 18, sm: 20, md: 22 }}
