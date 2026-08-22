@@ -46,6 +46,7 @@ export function PageAside({ headings }: PageAsideProps) {
     return (
         <Stack
             component="aside"
+            className={classes.root}
             gap="lg"
             px="md"
             pb="md"
