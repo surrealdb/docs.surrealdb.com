@@ -60,7 +60,7 @@ export async function searchDocs(
         if (error instanceof DOMException && error.name === "AbortError") {
             throw error;
         }
-        throw new SearchError("Could not reach search — check your connection");
+        throw new SearchError("Could not reach search - check your connection");
     }
 
     if (res.status === 429) {

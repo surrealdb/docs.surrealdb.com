@@ -17,7 +17,7 @@ export interface PageData {
     description: string;
 }
 
-/** Base the docs are served from — `base` in `vite.config.ts`. */
+/** Base the docs are served from - `base` in `vite.config.ts`. */
 const DOCS_BASE = "/docs";
 
 /** One path segment up (e.g. `/a/b` → `/a`). */
@@ -150,6 +150,17 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
     const title = entry.metadata.title
         ? getSuffixedMetaTitle(entry.metadata.title, productId, resolveSection(breadcrumbs, id))
         : undefined;
+
+    // A page sitting directly in a collection root has no ancestor folder, so
+    // the walk above finds nothing and the page loses its eyebrow. Fall back to
+    // the collection's own category, which is what the index page shows.
+    if (!breadcrumbs.length) {
+        const root = getCollectionEntry(id, "__category");
+
+        if (root?.metadata.title) {
+            breadcrumbs.push(root.metadata.title);
+        }
+    }
 
     config({
         title,

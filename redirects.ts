@@ -580,7 +580,7 @@ function withDocsDestination(rule: Redirect): Redirect {
 /**
  * Spectron → SurrealDB Agent Memory rename (August 2026). The docs moved from
  * `/docs/spectron` to `/docs/agent-memory` to match the website, and the nested
- * `agent-memory` section was flattened into the collection root — so paths under
+ * `agent-memory` section was flattened into the collection root - so paths under
  * `/spectron/agent-memory` lose that segment while everything else keeps its
  * shape below the new prefix.
  *
@@ -603,7 +603,7 @@ function agentMemoryRedirects(): Redirect[] {
             "/agent-memory/welcome/what-is-agent-memory",
             "/docs/agent-memory/welcome/what-is-surrealdb-agent-memory",
         ],
-        // Flattened section — the hub page's content lives at a new slug.
+        // Flattened section - the hub page's content lives at a new slug.
         ["/spectron/agent-memory", "/docs/agent-memory/memory-and-knowledge"],
         ["/spectron/agent-memory/:path*", "/docs/agent-memory/:path*"],
         // Everything else keeps its path below the new prefix.

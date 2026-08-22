@@ -13,7 +13,7 @@ const CORS_HEADERS: Record<string, string> = {
 };
 
 // Vercel purges the CDN cache on every production deploy, which
-// is when the search indexer runs — so cached results are never
+// is when the search indexer runs - so cached results are never
 // stale relative to the indexed content. Between deploys we
 // cache aggressively at the edge (1 h) and serve stale results
 // while revalidating (24 h) so most requests never hit the
@@ -24,7 +24,7 @@ const CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400";
 // page lives under /docs/agent-memory, every SurrealDB page does not.
 // The product is passed to handleSearch, which filters the search
 // index (shared across products) before applying the relevance
-// threshold and result cap — so each product gets its full quota
+// threshold and result cap - so each product gets its full quota
 // of results rather than whatever survives a global cut.
 const PRODUCTS = ["surrealdb", "agent-memory"] as const satisfies readonly SearchProduct[];
 type ProductId = (typeof PRODUCTS)[number];

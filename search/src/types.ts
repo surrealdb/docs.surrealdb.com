@@ -70,7 +70,7 @@ export interface SearchResultItem {
 /**
  * A grouped search result: one primary hit plus additional
  * hits from the same page collapsed under `more`. This lets
- * the UI show "SELECT — Record ranges, Selecting inside
+ * the UI show "SELECT - Record ranges, Selecting inside
  * graph queries" as a single result group.
  */
 export interface SearchResult extends SearchResultItem {

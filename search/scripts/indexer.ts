@@ -9,7 +9,7 @@
 //   3. Embed and upsert only changed entries (saves OpenAI $)
 //   4. Delete records for pages/sections that no longer exist
 //
-// This makes repeated runs fast — only new or modified content
+// This makes repeated runs fast - only new or modified content
 // triggers an embedding API call.
 // ══════════════════════════════════════════════════════════
 
@@ -195,7 +195,7 @@ export async function runIndexer() {
 
         const existing = existingRecords.get(rid);
 
-        // Content hash matches — skip re-embedding to save API cost.
+        // Content hash matches - skip re-embedding to save API cost.
         if (existing?.contentHash === entry.contentHash) {
             if (entry.kind === "page") stats.pagesUnchanged++;
             else stats.sectionsUnchanged++;

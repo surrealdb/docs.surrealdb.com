@@ -28,7 +28,7 @@ const fallback = {
 
 /**
  * Whether there is somewhere to go back to, which is what makes offering it
- * worthwhile — someone who typed the URL or opened a stale bookmark has
+ * worthwhile - someone who typed the URL or opened a stale bookmark has
  * nothing behind them. Resolved after mount so the server and the client
  * render the same initial markup.
  *

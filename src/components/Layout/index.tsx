@@ -6,6 +6,7 @@ import {
     Divider,
     Drawer,
     Group,
+    Stack,
     Text,
     Title,
 } from "@mantine/core";
@@ -22,6 +23,7 @@ import { Footer } from "../Footer";
 import { Header, MobileNav } from "./header";
 import type { NavEntry } from "./nav";
 import { PageNavigation } from "./page-navigation";
+import { getProductFromPath } from "./products";
 import { Sidebar } from "./sidebar";
 import classes from "./style.module.scss";
 
@@ -49,12 +51,19 @@ export function DefaultLayout({
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on route change
     useEffect(() => {
-        contentRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    }, [urlPathname]);
+
+    // Mantine portals its drawers and menus to `document.body`, outside this
+    // element, so the accent tokens have to be reachable from the root too.
+    useEffect(() => {
+        document.documentElement.dataset.product = getProductFromPath(urlPathname);
     }, [urlPathname]);
 
     return (
         <Box
             className={classes.layout}
+            data-product={getProductFromPath(urlPathname)}
             style={
                 {
                     "--bg-image": `url(${globulesImg})`,
@@ -66,11 +75,6 @@ export function DefaultLayout({
                 navLinks={navLinks}
                 opened={menuOpened}
                 onToggle={toggleMenu}
-            />
-            <Sidebar
-                navigation={data.navigation}
-                visibleFrom="lg"
-                versionSelector={versionSelector}
             />
             <Drawer
                 opened={menuOpened}
@@ -93,99 +97,113 @@ export function DefaultLayout({
                     versionSelector={versionSelector}
                 />
             </Drawer>
-            <Group
-                ref={contentRef}
-                justify="center"
-                align="flex-start"
-            >
-                <Container
-                    size="md"
-                    p="xl"
-                    flex={1}
-                    miw={0}
-                    h="100%"
+            <Box className={classes.shell}>
+                <Sidebar
+                    navigation={data.navigation}
+                    visibleFrom="lg"
+                    versionSelector={versionSelector}
+                />
+                <Stack
+                    ref={contentRef}
+                    gap={0}
                 >
                     <Group
-                        wrap="nowrap"
-                        align="start"
-                        gap="2xl"
-                        miw={0}
+                        justify="center"
+                        align="flex-start"
+                        flex={1}
                     >
-                        <Box
+                        <Container
+                            size="md"
                             flex={1}
                             miw={0}
+                            className={classes.contentContainer}
                         >
                             <Group
-                                align="center"
-                                gap="sm"
+                                wrap="nowrap"
+                                align="start"
+                                gap={64}
+                                miw={0}
                             >
-                                <ActionIcon
-                                    variant="subtle"
-                                    color="gray"
-                                    hiddenFrom="lg"
-                                    onClick={toggleSidebar}
-                                    aria-label="Toggle sidebar"
-                                >
-                                    <Icon path={iconSidebar} />
-                                </ActionIcon>
                                 <Box
                                     flex={1}
                                     miw={0}
-                                    className={classes.breadcrumbScroll}
+                                    maw={832}
+                                    className={classes.contentColumn}
                                 >
-                                    <Breadcrumbs
-                                        fz="sm"
-                                        id="top"
-                                        separator={
-                                            <Text
-                                                c="slate"
-                                                fw={600}
-                                            >
-                                                /
-                                            </Text>
-                                        }
+                                    <Group
+                                        align="center"
+                                        gap="sm"
                                     >
-                                        {data.breadcrumbs.map((breadcrumb) => (
-                                            <Text
-                                                key={breadcrumb}
-                                                c="violet"
-                                                fz="md"
-                                                lh="unset"
-                                                fw={600}
+                                        <ActionIcon
+                                            variant="subtle"
+                                            color="gray"
+                                            hiddenFrom="lg"
+                                            onClick={toggleSidebar}
+                                            aria-label="Toggle sidebar"
+                                        >
+                                            <Icon path={iconSidebar} />
+                                        </ActionIcon>
+                                        <Box
+                                            flex={1}
+                                            miw={0}
+                                            className={classes.breadcrumbScroll}
+                                        >
+                                            <Breadcrumbs
+                                                fz="sm"
+                                                id="top"
+                                                separator={
+                                                    <Text
+                                                        c="slate"
+                                                        fw={600}
+                                                    >
+                                                        /
+                                                    </Text>
+                                                }
                                             >
-                                                {breadcrumb}
-                                            </Text>
-                                        ))}
-                                    </Breadcrumbs>
+                                                {data.breadcrumbs.map((breadcrumb) => (
+                                                    <Text
+                                                        key={breadcrumb}
+                                                        c="violet"
+                                                        fz="md"
+                                                        lh="unset"
+                                                        fw={600}
+                                                    >
+                                                        {breadcrumb}
+                                                    </Text>
+                                                ))}
+                                            </Breadcrumbs>
+                                        </Box>
+                                    </Group>
+                                    <Group id="top">
+                                        <Title
+                                            order={1}
+                                            c="bright"
+                                            fw={500}
+                                            flex={1}
+                                        >
+                                            {data.title}
+                                        </Title>
+                                        <CopyPageMenu />
+                                    </Group>
+                                    {data.description && <Text fz="xl">{data.description}</Text>}
+                                    <Box
+                                        mt="xl"
+                                        component="main"
+                                        flex={1}
+                                    >
+                                        {children}
+                                    </Box>
+                                    <Divider my="3xl" />
+                                    <PageContentActions contentPath={data.contentPath} />
+                                    <PageNavigation navigation={data.navigation} />
                                 </Box>
+                                {showToc && <PageAside headings={data.headings} />}
                             </Group>
-                            <Group id="top">
-                                <Title
-                                    order={1}
-                                    c="bright"
-                                    flex={1}
-                                >
-                                    {data.title}
-                                </Title>
-                                <CopyPageMenu />
-                            </Group>
-                            {data.description && <Text fz="xl">{data.description}</Text>}
-                            <Box
-                                mt="xl"
-                                component="main"
-                                flex={1}
-                            >
-                                {children}
-                            </Box>
-                            <Divider my="3xl" />
-                            <PageContentActions contentPath={data.contentPath} />
-                            <PageNavigation navigation={data.navigation} />
-                            <Footer />
-                        </Box>
-                        {showToc && <PageAside headings={data.headings} />}
+                        </Container>
                     </Group>
-                </Container>
-            </Group>
+                </Stack>
+            </Box>
+            <Footer />
         </Box>
     );
 }

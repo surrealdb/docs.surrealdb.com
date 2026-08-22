@@ -18,7 +18,7 @@ for conventions, documentation voice, and architectural detail.
 - [ ] All user-facing text uses **British English** spelling:
   `-ise` (not `-ize`), `-our` (not `-or`), `-re` (not `-er`),
   `-ogue` (not `-og`).
-- [ ] **Subheaders** (`##`–`####`) follow sentence case (see `AGENTS.md`):
+- [ ] **Subheaders** (`##` - `####`) follow sentence case (see `AGENTS.md`):
   - Single-word headings are capitalised (`#### Parameters`, `## Syntax`).
   - Multi-word headings capitalise the first word only (`## Type parameters`,
     `### Complete examples`).
@@ -31,15 +31,15 @@ for conventions, documentation voice, and architectural detail.
 
 ## 3. SOLID principles
 
-- [ ] **Single Responsibility** — each module, component, or function has one
+- [ ] **Single Responsibility** - each module, component, or function has one
   reason to change.
-- [ ] **Open/Closed** — behaviour is extended through composition and props, not
+- [ ] **Open/Closed** - behaviour is extended through composition and props, not
   by modifying existing code.
-- [ ] **Liskov Substitution** — components sharing an interface are
+- [ ] **Liskov Substitution** - components sharing an interface are
   interchangeable without breaking consumers.
-- [ ] **Interface Segregation** — prop interfaces and type definitions are
+- [ ] **Interface Segregation** - prop interfaces and type definitions are
   focused; no large catch-all types.
-- [ ] **Dependency Inversion** — code depends on abstractions (types,
+- [ ] **Dependency Inversion** - code depends on abstractions (types,
   interfaces, callbacks) rather than concrete implementations.
 
 ## 4. Component and UI conventions
@@ -53,7 +53,7 @@ for conventions, documentation voice, and architectural detail.
   over custom CSS.
 - [ ] SCSS modules are named `style.module.scss` with **kebab-case** class
   names.
-- [ ] No inline `style` attributes for static styling — only for truly dynamic
+- [ ] No inline `style` attributes for static styling - only for truly dynamic
   values.
 - [ ] Shared UI that could benefit other SurrealDB frontends belongs in
   `@surrealdb/ui`, not duplicated in this repo.
@@ -74,7 +74,7 @@ for conventions, documentation voice, and architectural detail.
 ## 6. TypeScript and imports
 
 - [ ] The path alias `~/` (mapped to `src/`) is used for imports.
-- [ ] Strict mode is respected — no untyped `any` without clear justification.
+- [ ] Strict mode is respected - no untyped `any` without clear justification.
 - [ ] No unused imports (Biome `noUnusedImports` rule).
 - [ ] `useEffect` / `useCallback` dependencies are exhaustive (Biome
   `useExhaustiveDependencies` rule). `useInputState` and `useStable` are
@@ -84,14 +84,14 @@ for conventions, documentation voice, and architectural detail.
 
 - [ ] Frontmatter matches the schema in `src/content/config.ts`:
   - Docs → `abstractDoc` (`title`, `description`, `position`,
-    `no_page_headings`, `no_sidebar` — all optional).
+    `no_page_headings`, `no_sidebar` - all optional).
   - Labs → `labCollection` (`title` required; `url`, `category`, `author`,
     `topics`, `languages` optional).
 - [ ] New markdown files are placed under the correct
   `src/content/<collection>/` folder.
 - [ ] Sidebar ordering uses `position` in frontmatter and
   `__category.json` files in subdirectories.
-- [ ] Content slugs are derived automatically — no manual slug field is added.
+- [ ] Content slugs are derived automatically - no manual slug field is added.
 - [ ] If a **new doc collection** is introduced:
   - `urlForCollection` in `src/content/config.ts` is updated.
   - A corresponding `+Content.ts` file exists in the new collection folder.
@@ -101,9 +101,9 @@ for conventions, documentation voice, and architectural detail.
 
 - [ ] Doc `+data.ts` files follow the standard pipeline:
   1. `getCollectionPartsFromURL(urlPathname, sliceIndex)`
-  2. `getCollectionEntry(id, slug)` — 404 if not found
-  3. `resolveMarkdown(entry.content)` — produces `{ ast, headings }`
-  4. `getSidebarItemsFromCollection(id)` — builds the sidebar tree
+  2. `getCollectionEntry(id, slug)` - 404 if not found
+  3. `resolveMarkdown(entry.content)` - produces `{ ast, headings }`
+  4. `getSidebarItemsFromCollection(id)` - builds the sidebar tree
   5. Returns `{ ast, headings, sidebar, contentPath }`
 - [ ] `+Page.tsx` renders via `<RenderMarkdown>` with
   `registerMarkdownComponents()` and `getMarkdownScope()`.
@@ -115,7 +115,7 @@ for conventions, documentation voice, and architectural detail.
 
 ## 9. APIs from vike-content-collection
 
-The project intentionally **does not** use the following APIs — flag any
+The project intentionally **does not** use the following APIs - flag any
 introduction of them:
 
 | API                  | Reason not used                                                             |
@@ -132,7 +132,7 @@ introduction of them:
 - [ ] Raw HTML elements (`<div>`, `<a>`, `<section>`, `<nav>`, etc.) used
   instead of Mantine equivalents.
 - [ ] `+onBeforePrerenderStart.ts` not updated after adding new content pages.
-- [ ] Wrong `sliceIndex` in `getCollectionPartsFromURL` — causes 404s.
+- [ ] Wrong `sliceIndex` in `getCollectionPartsFromURL` - causes 404s.
 - [ ] American English spelling in user-facing strings.
 - [ ] Inline styles used where Mantine props or SCSS modules would suffice.
 - [ ] New component created without first checking Mantine / `@surrealdb/ui`

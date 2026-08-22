@@ -1,6 +1,6 @@
-import { Anchor, Box, Group, Image, SegmentedControl, Stack, Text } from "@mantine/core";
-import { Icon, iconCheck, ThemedImage } from "@surrealdb/ui";
-import { useMemo } from "react";
+import { Anchor, Box, Group, Stack, Text } from "@mantine/core";
+import { Icon, iconCheck } from "@surrealdb/ui";
+import { type MouseEvent, useState } from "react";
 import { navigate } from "vike/client/router";
 import { PRODUCT_ORDER, PRODUCTS, type ProductId } from "./products";
 import classes from "./style.module.scss";
@@ -11,7 +11,9 @@ export interface ProductWordmarkProps {
 
 /**
  * Wordmark for the documentation being read. Switching products lives in
- * the sidebar, so this only links back to the product's docs home.
+ * the sidebar, so this only links back to the product's docs home. The
+ * word is set as text rather than an image so it inherits the site's
+ * typeface and colour in both themes.
  */
 export function ProductWordmark({ current }: ProductWordmarkProps) {
     const product = PRODUCTS[current];
@@ -23,12 +25,14 @@ export function ProductWordmark({ current }: ProductWordmarkProps) {
             className={classes.productWordmark}
             aria-label={`${product.label} documentation home`}
         >
-            <ThemedImage
-                lightSrc={product.wordmarkLight}
-                darkSrc={product.wordmarkDark}
-                h={20}
-                w="auto"
-            />
+            <Text
+                fz="xl"
+                fw={500}
+                lh={1}
+                className={classes.productWordmarkLabel}
+            >
+                Docs
+            </Text>
         </Anchor>
     );
 }
@@ -37,56 +41,61 @@ export interface ProductSwitcherSegmentedProps {
     current: ProductId;
 }
 
+/** How long the indicator takes to cross, and how long navigation waits for it. */
+const SWITCH_DURATION = 280;
+
 /**
- * Sidebar product switch. The header dropdown only reveals itself on
- * hover, so the sidebar states both products up front and keeps the
- * current one visibly selected.
+ * Sidebar product switch. The fill is one indicator on the container, so
+ * changing product slides it across rather than swapping two backgrounds.
+ *
+ * Switching products also changes page group, which remounts this component -
+ * so a CSS transition alone would never be seen: the new page would simply
+ * render with the indicator already moved. The click therefore moves the
+ * indicator first and lets navigation follow once it has travelled. Without
+ * JavaScript the anchors still navigate on their own.
  */
 export function ProductSwitcherSegmented({ current }: ProductSwitcherSegmentedProps) {
-    const data = useMemo(
-        () =>
-            PRODUCT_ORDER.map((id) => {
-                const product = PRODUCTS[id];
+    const [pending, setPending] = useState<ProductId | null>(null);
+    const shown = pending ?? current;
 
-                return {
-                    value: id,
-                    label: (
-                        <Group
-                            wrap="nowrap"
-                            gap="xs"
-                            h={26}
-                        >
-                            <Image
-                                src={product.picto}
-                                w={20}
-                                className={classes.productSegmentPicto}
-                                data-active={id === current || undefined}
-                            />
-                            <Text
-                                fz="sm"
-                                fw={500}
-                            >
-                                {product.shortLabel}
-                            </Text>
-                        </Group>
-                    ),
-                };
-            }),
-        [current],
-    );
+    function handleSwitch(event: MouseEvent<HTMLAnchorElement>, id: ProductId) {
+        if (id === current) return;
+
+        event.preventDefault();
+        setPending(id);
+        setTimeout(() => navigate(PRODUCTS[id].homeHref), SWITCH_DURATION);
+    }
 
     return (
-        <SegmentedControl
-            data={data}
-            value={current}
-            onChange={(id) => navigate(PRODUCTS[id].homeHref)}
+        <Group
+            component="nav"
             aria-label="Switch documentation"
-            orientation="vertical"
-            size="md"
-            fullWidth
-            bdrs={18}
-            className={classes.productSegment}
-        />
+            gap={0}
+            wrap="nowrap"
+            className={classes.productSwitch}
+            data-active-index={PRODUCT_ORDER.indexOf(shown)}
+        >
+            {PRODUCT_ORDER.map((id) => {
+                const product = PRODUCTS[id];
+                const active = id === shown;
+
+                return (
+                    <Anchor
+                        key={id}
+                        href={product.homeHref}
+                        onClick={(event) => handleSwitch(event, id)}
+                        underline="never"
+                        fz={14}
+                        fw={500}
+                        className={classes.productSwitchItem}
+                        data-active={active || undefined}
+                        aria-current={id === current ? "page" : undefined}
+                    >
+                        {product.shortLabel}
+                    </Anchor>
+                );
+            })}
+        </Group>
     );
 }
 
@@ -126,10 +135,6 @@ export function ProductList({ current, label = "Switch documentation" }: Product
                                 gap="md"
                                 p="sm"
                             >
-                                <Image
-                                    src={product.picto}
-                                    w={32}
-                                />
                                 <Stack
                                     gap={2}
                                     flex={1}

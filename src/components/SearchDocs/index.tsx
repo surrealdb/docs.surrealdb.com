@@ -116,7 +116,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
             : searchQuery.error instanceof SearchError
               ? searchQuery.error.message
               : searchQuery.error
-                ? "Something went wrong — please try again"
+                ? "Something went wrong - please try again"
                 : null;
 
     const actions = useMemo(() => {
@@ -130,7 +130,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
     let nothingFound: ReactNode;
 
     if (rateLimitRemaining > 0) {
-        nothingFound = `Too many requests — try again in ${rateLimitRemaining}s`;
+        nothingFound = `Too many requests - try again in ${rateLimitRemaining}s`;
     } else if (errorMessage) {
         nothingFound = errorMessage;
     } else if (searchQuery.isSuccess && debouncedSearch.length > 0 && actions.length === 0) {

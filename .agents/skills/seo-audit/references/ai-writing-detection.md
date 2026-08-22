@@ -18,7 +18,7 @@ Sources: Grammarly (2025), Microsoft 365 Life Hacks (2025), GPTHuman (2025), Wal
 
 ## Em Dashes: The Primary AI Tell
 
-**The em dash (—) has become one of the most reliable markers of AI-generated content.**
+**The em dash ( - ) has become one of the most reliable markers of AI-generated content.**
 
 Em dashes are longer than hyphens (-) and are used for emphasis, interruptions, or parenthetical information. While they have legitimate uses in writing, AI models drastically overuse them.
 
@@ -31,10 +31,10 @@ Em dashes are longer than hyphens (-) and are used for emphasis, interruptions, 
 ### What To Do Instead
 | Instead of | Use |
 |------------|-----|
-| The results—which were surprising—showed... | The results, which were surprising, showed... |
-| This approach—unlike traditional methods—allows... | This approach, unlike traditional methods, allows... |
-| The study found—as expected—that... | The study found, as expected, that... |
-| Communication skills—both written and verbal—are essential | Communication skills (both written and verbal) are essential |
+| The results - which were surprising - showed... | The results, which were surprising, showed... |
+| This approach - unlike traditional methods - allows... | This approach, unlike traditional methods, allows... |
+| The study found - as expected - that... | The study found, as expected, that... |
+| Communication skills - both written and verbal - are essential | Communication skills (both written and verbal) are essential |
 
 ### Guidelines
 - Use commas for most parenthetical information

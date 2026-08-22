@@ -28,7 +28,7 @@ export class FileCache {
         const freshValue = await getFreshValue();
 
         // Write failures (e.g. read-only filesystem in serverless environments)
-        // are non-fatal — the fresh value is returned regardless.
+        // are non-fatal - the fresh value is returned regardless.
         try {
             await this.write(key, freshValue);
         } catch {

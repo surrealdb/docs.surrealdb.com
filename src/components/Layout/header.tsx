@@ -16,7 +16,7 @@ import {
     ThemeIcon,
 } from "@mantine/core";
 import { Icon, iconChevronDown, iconOpen, ThemedImage } from "@surrealdb/ui";
-import { type CSSProperties, Fragment, useState } from "react";
+import { Fragment, useState } from "react";
 import { ClientOnly } from "vike-react/ClientOnly";
 import { usePageContext } from "vike-react/usePageContext";
 import { SearchDocs } from "~/components/SearchDocs";
@@ -28,7 +28,6 @@ import {
     type NavItem,
     type NavMenuBadge,
     type NavMenuGroup,
-    type NavMenuItem,
 } from "./nav";
 import { ProductList, ProductWordmark } from "./product-switcher";
 import {
@@ -69,18 +68,7 @@ function NavItemBadge({ badge }: { badge: NavMenuBadge }) {
     );
 }
 
-/**
- * Drives the mobile icon tint through a custom property so `.nav-item-icon`
- * keeps one declaration for tinted and untinted items alike. The `-light-color`
- * pair is scheme-aware, matching the desktop chip glyph in both themes.
- */
-function navItemIconStyle(item: NavMenuItem): CSSProperties | undefined {
-    if (!item.iconColor) return undefined;
-
-    return {
-        "--nav-item-icon-color": `var(--mantine-color-${item.iconColor}-light-color)`,
-    } as CSSProperties;
-}
+const HEADER_INSET = 32;
 
 const SIGN_IN_URL =
     "https://app.surrealdb.com/signin?_gl=1*6c6cw1*FPAU*MjUyNzg4NDQ3LjE3NzA3MzU0OTI.*_ga*MTUwNTkxNTcyNS4xNzcwNzM1NDky*_ga_J1NWM32T1V*czE3NzE4NDcxMTMkbzQ2JGcxJHQxNzcxODQ3MjAwJGo1NiRsMCRoNjUwODcxODU5*_fplc*dEpHdFVZdTN2eEolMkJBWkNUY1R5NUhKbmJySSUyRk56eEN6ZHlEcU52cTJzbUV0dXpOcmZhSU5MeXZFdW90bFdPZWRpbE4yTzA1dmZ1MiUyRlc5RnM3djhEZ2NVeGZhdmoyNW1rcFFsSmhwUXJzR1BoR2ZIWUdsMXYyZ0tJSXFmOW93JTNEJTNE";
@@ -97,8 +85,8 @@ function entryHrefs(entry: NavEntry): string[] {
  * Resolves the single nav href that owns the current page.
  *
  * Each candidate href is matched against the current path and the most
- * specific (longest) match wins, so overlapping entries — e.g. a section
- * hub and one of its sub-pages — never both light up.
+ * specific (longest) match wins, so overlapping entries - e.g. a section
+ * hub and one of its sub-pages - never both light up.
  *
  * The root entry (`/docs/`, normalising to `/`) is the "Start" catch-all:
  * its sub-pages are unprefixed (`/docs/architecture`, not `/docs/start/…`),
@@ -141,10 +129,10 @@ function NavLink({ label, href, activeHref }: NavItem & { activeHref: string | n
     return (
         <Anchor
             href={href}
-            fz="sm"
+            fz={14}
             py="sm"
             px="xs"
-            fw={500}
+            fw={400}
             underline="never"
             className={classes.navLink}
             data-active={active || undefined}
@@ -179,10 +167,10 @@ function NavDropdown({
             <Menu.Target>
                 <Anchor
                     component="button"
-                    fz="sm"
+                    fz={14}
                     py="sm"
                     px="xs"
-                    fw={500}
+                    fw={400}
                     underline="never"
                     className={classes.navLink}
                     data-active={active || undefined}
@@ -203,7 +191,7 @@ function NavDropdown({
                 </Anchor>
             </Menu.Target>
             <Menu.Dropdown
-                bdrs="md"
+                bdrs={4}
                 className={classes.navDropdown}
             >
                 <Flex className={classes.navSections}>
@@ -323,15 +311,17 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
         <Box
             component="header"
             aria-label="Main navigation"
-            h="56px"
+            h="var(--docs-header-height)"
         >
             <Group
                 align="center"
                 h="100%"
-                px="lg"
+                px={HEADER_INSET}
                 gap="md"
             >
-                <Group flex={1}>
+                {/* Width comes from the stylesheet so it can track the tree's
+                    column; a `flex` prop here would render inline and win. */}
+                <Group className={classes.headerIdentity}>
                     <Anchor
                         href="/"
                         aria-label="SurrealDB home"
@@ -339,7 +329,7 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                         <ThemedImage
                             lightSrc={SURREALDB_LOGO_LIGHT}
                             darkSrc={SURREALDB_LOGO_DARK}
-                            h={24}
+                            h={27}
                         />
                     </Anchor>
                     <Divider
@@ -358,7 +348,6 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                     align="center"
                     gap="lg"
                     visibleFrom="lg"
-                    mx="auto"
                     className={classes.navList}
                 >
                     {navLinks.map((entry) => (
@@ -381,7 +370,7 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                     ))}
                 </Group>
                 <Group
-                    flex={{ md: 1 }}
+                    flex={1}
                     justify="flex-end"
                     wrap="nowrap"
                 >
@@ -496,15 +485,6 @@ export function MobileNav({ navLinks }: MobileNavProps) {
                                                     py="sm"
                                                     bdrs="xs"
                                                     active={item.href === activeHref}
-                                                    leftSection={
-                                                        <Icon
-                                                            path={item.icon}
-                                                            className={classes.navItemIcon}
-                                                            style={navItemIconStyle(item)}
-                                                            opacity={1}
-                                                            size="md"
-                                                        />
-                                                    }
                                                 />
                                             ))}
                                         </Fragment>
