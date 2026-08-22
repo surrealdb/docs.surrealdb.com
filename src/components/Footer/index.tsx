@@ -135,7 +135,7 @@ export function Footer() {
                         lts="-0.01em"
                         maw={760}
                     >
-                        The unified data layer for AI.
+                        The unified data layer for AI
                     </Text>
                     <Text
                         c="slate"
