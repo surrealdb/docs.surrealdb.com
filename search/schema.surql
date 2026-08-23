@@ -125,3 +125,22 @@ DEFINE FIELD OVERWRITE comment   ON page_feedback TYPE string
 DEFINE FIELD OVERWRITE date      ON page_feedback TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX OVERWRITE page_feedback_path ON page_feedback FIELDS path CONCURRENTLY;
+
+-- ────────────────────────────────────────────────────────────
+-- SEARCH MISS table
+--
+-- One record per zero-result search, written by the search API.
+-- The cheapest missing-content signal there is: these are the
+-- exact words readers used when the docs failed them. Client
+-- analytics cannot be relied on for this (docs pages carry no
+-- tag manager), so the API records it at the source.
+-- ────────────────────────────────────────────────────────────
+
+DEFINE TABLE OVERWRITE search_miss SCHEMAFULL;
+
+DEFINE FIELD OVERWRITE query   ON search_miss TYPE string
+    ASSERT string::len($value) <= 200;
+DEFINE FIELD OVERWRITE product ON search_miss TYPE string;
+DEFINE FIELD OVERWRITE date    ON search_miss TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX OVERWRITE search_miss_query ON search_miss FIELDS query CONCURRENTLY;

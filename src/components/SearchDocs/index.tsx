@@ -9,6 +9,7 @@ import {
     Text,
     UnstyledButton,
     type UnstyledButtonProps,
+    VisuallyHidden,
 } from "@mantine/core";
 import { useDebouncedValue, useHotkeys, useInputState, useOs } from "@mantine/hooks";
 import {
@@ -30,13 +31,17 @@ function mapResultsToActions(results: SearchResult[], query: string): SpotlightA
     return results.map((result, index) => ({
         id: `result-${index}`,
         label: String(result.title ?? ""),
+        // A real anchor rather than a button-with-navigation: middle-click,
+        // ctrl-click, copy-link and crawler semantics all come back, and the
+        // browser owns the navigation. The click handler only reports.
+        component: "a",
+        href: String(result.url ?? "/"),
         onClick: () => {
             window.dataLayer?.push({
                 event: "search_result_click",
                 search_term: query,
                 result_url: result.url,
             });
-            window.location.href = String(result.url ?? "/");
         },
         children: (
             <SearchResultCard
@@ -44,7 +49,7 @@ function mapResultsToActions(results: SearchResult[], query: string): SpotlightA
                 query={query}
             />
         ),
-    }));
+    })) as SpotlightActionData[];
 }
 
 const noFilter: SpotlightFilterFunction = (_query, actions) => actions;
@@ -167,6 +172,16 @@ export function SearchDocs(props: UnstyledButtonProps) {
                     </Flex>
                 </Group>
             </UnstyledButton>
+            {/* Announces result counts to screen readers; the list itself
+                re-renders silently otherwise. */}
+            <VisuallyHidden
+                role="status"
+                aria-live="polite"
+            >
+                {hasQuery && searchQuery.isSuccess
+                    ? `${actions.length} result${actions.length === 1 ? "" : "s"} for ${debouncedSearch}`
+                    : ""}
+            </VisuallyHidden>
             <Spotlight
                 actions={hasQuery ? actions : []}
                 nothingFound={nothingFound}

@@ -1,4 +1,5 @@
 import {
+    getDb,
     handleSearch,
     MAX_QUERY_LENGTH,
     normaliseQuery,
@@ -94,6 +95,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     try {
         const results = await handleSearch(query, product);
+
+        // A zero-result search is the exact phrasing of a content gap, so it
+        // is recorded at the source rather than through client analytics
+        // (docs pages carry no tag manager). Fire-and-forget: recording must
+        // never delay or fail the search response. Edge caching means each
+        // distinct miss is logged roughly once per cache window, which is
+        // plenty for gap discovery.
+        if (results.length === 0) {
+            getDb()
+                .then((db) =>
+                    db
+                        .query("CREATE search_miss SET query = $query, product = $product", {
+                            query,
+                            product,
+                        })
+                        .collect(),
+                )
+                .catch((err) => console.error("[SEARCH] miss log failed:", err));
+        }
+
         res.setHeader("Cache-Control", CACHE_CONTROL);
         return res.status(200).json({ success: true, results });
     } catch (err) {

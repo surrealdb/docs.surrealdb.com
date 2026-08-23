@@ -38,6 +38,10 @@ export function CopyPageMenu() {
             const body = await response.text();
 
             copy(body);
+            window.dataLayer?.push({
+                event: "copy_page_markdown",
+                page_path: window.location.pathname,
+            });
         } catch (error) {
             console.error(error);
         } finally {

@@ -13,6 +13,7 @@ export function FullWidthLayout({ children }: FullWidthLayoutProps) {
     return (
         <Container
             component="main"
+            id="main-content"
             size="lg"
             flex={1}
         >

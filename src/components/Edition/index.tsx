@@ -19,6 +19,7 @@ const COLOURS: Record<EditionValue, string> = {
 export function Edition({ value, variant = "light", size = "sm", ...rest }: EditionProps) {
     return (
         <Badge
+            component="span"
             color={COLOURS[value]}
             variant={variant}
             size={size}
