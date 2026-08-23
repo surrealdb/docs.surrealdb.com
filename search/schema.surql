@@ -102,3 +102,26 @@ DEFINE INDEX OVERWRITE section_ft_content    ON section FIELDS content    FULLTE
 
 DEFINE INDEX OVERWRITE section_embedding_hnsw ON section FIELDS embedding
     HNSW DIMENSION 1536 DIST COSINE CONCURRENTLY;
+
+-- ────────────────────────────────────────────────────────────
+-- PAGE FEEDBACK table
+--
+-- One record per submission of the "Was this page helpful?"
+-- widget. Deliberately minimal: the page, the verdict, the
+-- reader's chosen reasons and optional comment, and when.
+-- No IP address, user agent or identifier is stored.
+-- ────────────────────────────────────────────────────────────
+
+DEFINE TABLE OVERWRITE page_feedback SCHEMAFULL;
+
+DEFINE FIELD OVERWRITE path      ON page_feedback TYPE string
+    ASSERT string::starts_with($value, "/") AND string::len($value) <= 300;
+DEFINE FIELD OVERWRITE sentiment ON page_feedback TYPE string
+    ASSERT $value IN ["helpful", "not-helpful"];
+DEFINE FIELD OVERWRITE reasons   ON page_feedback TYPE array<string>
+    ASSERT array::len($value) <= 8;
+DEFINE FIELD OVERWRITE comment   ON page_feedback TYPE string
+    ASSERT string::len($value) <= 2000;
+DEFINE FIELD OVERWRITE date      ON page_feedback TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX OVERWRITE page_feedback_path ON page_feedback FIELDS path CONCURRENTLY;
