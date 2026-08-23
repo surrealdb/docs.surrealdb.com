@@ -54,6 +54,7 @@ export function DefaultLayout({
                 size="325px"
                 hiddenFrom="lg"
                 withCloseButton={false}
+                classNames={{ content: classes.drawerContent }}
             >
                 <Sidebar
                     navigation={data.navigation}

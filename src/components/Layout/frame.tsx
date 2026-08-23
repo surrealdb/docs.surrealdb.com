@@ -66,6 +66,7 @@ export function PageFrame({ children }: { children: React.ReactNode }) {
                 size="325px"
                 hiddenFrom="lg"
                 withCloseButton={false}
+                classNames={{ content: classes.drawerContent }}
             >
                 <MobileNav navLinks={navLinks} />
             </Drawer>
