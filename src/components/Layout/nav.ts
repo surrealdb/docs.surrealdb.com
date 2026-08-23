@@ -33,6 +33,7 @@ import {
     iconTransfer,
     iconVideo,
 } from "@surrealdb/ui";
+import { getProductFromPath } from "~/utils/product";
 
 export interface NavItem {
     label: string;
@@ -376,3 +377,16 @@ export const AGENT_MEMORY_NAV_LINKS: NavEntry[] = [
     { label: "Cookbooks", href: "/docs/agent-memory/cookbooks" },
     { label: "Reference", href: "/docs/agent-memory/reference" },
 ];
+
+/**
+ * Top navigation for a path.
+ *
+ * The header is rendered once for the whole site, above the page groups, so it
+ * has to work out its own links rather than take them from a group's layout.
+ * Product is the only thing that varies, and the path already determines that.
+ */
+export function navLinksForPath(pathname: string): NavEntry[] {
+    return getProductFromPath(pathname) === "agent-memory"
+        ? AGENT_MEMORY_NAV_LINKS
+        : SURREALDB_NAV_LINKS;
+}
