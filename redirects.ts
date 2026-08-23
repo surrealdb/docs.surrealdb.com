@@ -45,49 +45,6 @@ function sdkRedirects(): Redirect[] {
     return out;
 }
 
-/** Flat tutorial URLs → thematic subfolders under explore/tutorials/tutorials/. */
-function exploreTutorialsThematicRedirects(): Redirect[] {
-    const moves: [string, string][] = [
-        ["tutorials/auth0-integration", "tutorials/authentication/auth0-integration"],
-        ["tutorials/aws-cognito-integration", "tutorials/authentication/aws-cognito-integration"],
-        ["tutorials/build-an-ai-agent", "tutorials/ai-and-agents/build-an-ai-agent"],
-        ["tutorials/gen-ai-chatbot", "tutorials/ai-and-agents/gen-ai-chatbot"],
-        [
-            "tutorials/how-to-build-a-knowledge-graph-for-ai",
-            "tutorials/ai-and-agents/how-to-build-a-knowledge-graph-for-ai",
-        ],
-        ["tutorials/minimal-langchain", "tutorials/ai-and-agents/minimal-langchain"],
-        [
-            "tutorials/build-a-real-time-presence-app",
-            "tutorials/realtime-applications/build-a-real-time-presence-app",
-        ],
-        ["tutorials/connect-via-ngrok", "tutorials/integration-and-tooling/connect-via-ngrok"],
-        ["tutorials/http-via-postman", "tutorials/integration-and-tooling/http-via-postman"],
-        ["tutorials/github-actions", "tutorials/integration-and-tooling/github-actions"],
-        ["tutorials/define-a-schema", "tutorials/schema-and-search/define-a-schema"],
-        [
-            "tutorials/semantic-search-in-rust",
-            "tutorials/schema-and-search/semantic-search-in-rust",
-        ],
-    ];
-    const out: Redirect[] = [];
-    for (const [from, to] of moves) {
-        out.push(
-            {
-                source: `/docs/explore/tutorials/${from}`,
-                destination: `/docs/explore/tutorials/${to}`,
-                statusCode: 301,
-            },
-            {
-                source: `/explore/tutorials/${from}`,
-                destination: `/explore/tutorials/${to}`,
-                statusCode: 301,
-            },
-        );
-    }
-    return out;
-}
-
 /** Index “Running” section (formerly /self-hosted). */
 function runningFromSelfHostedRedirects(): Redirect[] {
     return [
@@ -628,7 +585,6 @@ export const docsRedirects: Redirect[] = [
     ...legacyPrefixRedirects("surrealml", "explore/ml-models"),
     ...legacyPrefixRedirects("integrations", "build/integrations"),
     ...legacyPrefixRedirects("tutorials", "explore/tutorials"),
-    ...exploreTutorialsThematicRedirects(),
     ...sdkRedirects(),
     ...legacyMigratingRedirects(),
     ...deploymentObservabilityToManageRedirects(),
