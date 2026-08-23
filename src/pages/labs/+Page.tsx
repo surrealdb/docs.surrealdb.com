@@ -6,7 +6,9 @@ import {
     Stack,
     Text,
     TextInput,
+    Title,
     useComputedColorScheme,
+    VisuallyHidden,
 } from "@mantine/core";
 import { Icon, iconSearch } from "@surrealdb/ui";
 import { useEffect, useMemo, useState } from "react";
@@ -133,14 +135,19 @@ export default function Page() {
             pb="xl"
         >
             <Box className={classes.hero}>
-                <Image
-                    src={labsLogo}
-                    alt="SurrealDB Labs"
-                    height={32}
-                    fit="contain"
-                    mb="lg"
-                    w="auto"
-                />
+                {/* The page's visible identity is the wordmark image, so the
+                    document heading rides along for outlines and readers. */}
+                <Title order={1}>
+                    <VisuallyHidden>SurrealDB Labs</VisuallyHidden>
+                    <Image
+                        src={labsLogo}
+                        alt=""
+                        height={32}
+                        fit="contain"
+                        mb="lg"
+                        w="auto"
+                    />
+                </Title>
                 <Text
                     fz="sm"
                     maw={640}

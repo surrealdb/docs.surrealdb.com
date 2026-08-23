@@ -84,7 +84,7 @@ export function flattenMenuItems(group: NavMenuGroup): NavMenuItem[] {
 }
 
 export const SURREALDB_NAV_LINKS: NavEntry[] = [
-    { label: "Get started", href: "/docs/" },
+    { label: "Get started", href: "/docs" },
     {
         label: "Learn",
         sections: [
