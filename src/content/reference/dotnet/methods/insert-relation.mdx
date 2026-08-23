@@ -13,7 +13,7 @@ Inserts one or multiple relations in the database.
 await db.InsertRelation<T>(table, data)
 ```
 
-### Arguments
+## Arguments
 
 <table>
     <thead>
@@ -53,7 +53,7 @@ await db.InsertRelation<T>(table, data)
     </tbody>
 </table>
 
-### Example usage
+## Example usage
 
 ```csharp
 await db.InsertRelation(

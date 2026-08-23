@@ -13,7 +13,7 @@ Inserts one or multiple relations in the database.
 $db->insertRelation($thing, $data)
 ```
 
-### Arguments
+## Arguments
 
 <table>
 	<thead>
@@ -51,7 +51,7 @@ $db->insertRelation($thing, $data)
 	</tbody>
 </table>
 
-### Example usage
+## Example usage
 ```php
 
 // Insert a single relation

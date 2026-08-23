@@ -13,7 +13,7 @@ Switch to a specific namespace and database. If only the ns or db property is sp
 $db->use([ "namespace" => "...", "database" => "..." ]);
 ```
 
-### Arguments
+## Arguments
 <table>
     <thead>
         <tr>
@@ -43,7 +43,7 @@ $db->use([ "namespace" => "...", "database" => "..." ]);
     </tbody>
 </table>
 
-### Example usage
+## Example usage
 ```php
 $db->use([
     "namespace" => "surrealdb",

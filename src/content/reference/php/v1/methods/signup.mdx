@@ -18,7 +18,7 @@ $db->signup([
 ]);
 ```
 
-### Arguments
+## Arguments
 <table>
     <thead>
         <tr>
@@ -57,7 +57,7 @@ $db->signup([
     </tbody>
 </table>
 
-### Example usage
+## Example usage
 ```php
 $token = $db->signup([
 	"namespace" => "surrealdb",

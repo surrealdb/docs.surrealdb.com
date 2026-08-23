@@ -15,7 +15,7 @@ but will rather give those back as a string, and this will include the time it t
 $db->queryRaw($query, $params);
 ```
 
-### Arguments
+## Arguments
 <table>
     <thead>
         <tr>
@@ -52,7 +52,7 @@ $db->queryRaw($query, $params);
     </tbody>
 </table>
 
-### Example
+## Example
 
 ```php title="Example"
 

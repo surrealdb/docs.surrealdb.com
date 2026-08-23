@@ -18,7 +18,7 @@ $db->signin([
 ]);
 ```
 
-### Arguments
+## Arguments
 <table>
     <thead>
         <tr>
@@ -74,7 +74,7 @@ $db->signin([
     </tbody>
 </table>
 
-### Example usage
+## Example usage
 ```php
 // Authenticate with a root user
 $token = $db->signin([
