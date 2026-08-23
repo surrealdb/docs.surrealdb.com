@@ -42,7 +42,13 @@ export function buildCanonicalUrl(urlPathname: string): string {
     //     }
     // }
 
-    return `${BASE_URL}${urlPathname}`;
+    // `BASE_URL` already ends the path, so the docs root arrives here as "/" and
+    // would declare `/docs/` canonical - a URL the server 308s away from, which
+    // makes the page point at something that redirects. Anything with a real
+    // path is unaffected; Vike never gives those a trailing slash.
+    const path = urlPathname === "/" ? "" : urlPathname;
+
+    return `${BASE_URL}${path}`;
 }
 
 /**

@@ -4,7 +4,7 @@ import { type CollectionMap, getCollection, getCollectionEntry } from "vike-cont
 import { useConfig } from "vike-react/useConfig";
 import { type DocHeading, resolveMarkdown } from "./markdown";
 import { getSuffixedMetaTitle } from "./meta";
-import { buildNavigation, type NavSection } from "./navigation";
+import { buildNavigation, type NavSection, resolveFolderLanding } from "./navigation";
 import { getProductFromPath } from "./product";
 
 export interface PageData {
@@ -121,10 +121,22 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
     const entry = getCollectionEntry(id, path);
 
     if (!entry) {
-        const parent = getParentUrl(context.urlPathname);
+        // A folder with no page of its own still names something real, so it
+        // sends the reader to its first child - the same page the sidebar
+        // points at. Anything else 404s.
+        //
+        // This used to be a 302 one path segment up, applied to every miss.
+        // That meant a stale link landed on a section index that said nothing
+        // about what had been asked for, and a crawler recorded a redirect
+        // rather than a gap. Both hid the breakage: twelve unreachable
+        // tutorials went unnoticed for seven weeks, because each one answered
+        // 302 and resolved to a page that returned 200. A page that has really
+        // moved belongs in `redirects.ts`, where the destination is stated
+        // rather than guessed at.
+        const landing = resolveFolderLanding(id, path, prefix);
 
-        if (parent) {
-            throw redirect(parent, 302);
+        if (landing) {
+            throw redirect(`${DOCS_BASE}${landing}` as `/${string}`, 301);
         }
 
         throw render(404, "Not Found");
