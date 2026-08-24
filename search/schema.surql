@@ -102,3 +102,45 @@ DEFINE INDEX OVERWRITE section_ft_content    ON section FIELDS content    FULLTE
 
 DEFINE INDEX OVERWRITE section_embedding_hnsw ON section FIELDS embedding
     HNSW DIMENSION 1536 DIST COSINE CONCURRENTLY;
+
+-- ────────────────────────────────────────────────────────────
+-- PAGE FEEDBACK table
+--
+-- One record per submission of the "Was this page helpful?"
+-- widget. Deliberately minimal: the page, the verdict, the
+-- reader's chosen reasons and optional comment, and when.
+-- No IP address, user agent or identifier is stored.
+-- ────────────────────────────────────────────────────────────
+
+DEFINE TABLE OVERWRITE page_feedback SCHEMAFULL;
+
+DEFINE FIELD OVERWRITE path      ON page_feedback TYPE string
+    ASSERT string::starts_with($value, "/") AND string::len($value) <= 300;
+DEFINE FIELD OVERWRITE sentiment ON page_feedback TYPE string
+    ASSERT $value IN ["helpful", "not-helpful"];
+DEFINE FIELD OVERWRITE reasons   ON page_feedback TYPE array<string>
+    ASSERT array::len($value) <= 8;
+DEFINE FIELD OVERWRITE comment   ON page_feedback TYPE string
+    ASSERT string::len($value) <= 2000;
+DEFINE FIELD OVERWRITE date      ON page_feedback TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX OVERWRITE page_feedback_path ON page_feedback FIELDS path CONCURRENTLY;
+
+-- ────────────────────────────────────────────────────────────
+-- SEARCH MISS table
+--
+-- One record per zero-result search, written by the search API.
+-- The cheapest missing-content signal there is: these are the
+-- exact words readers used when the docs failed them. Client
+-- analytics cannot be relied on for this (docs pages carry no
+-- tag manager), so the API records it at the source.
+-- ────────────────────────────────────────────────────────────
+
+DEFINE TABLE OVERWRITE search_miss SCHEMAFULL;
+
+DEFINE FIELD OVERWRITE query   ON search_miss TYPE string
+    ASSERT string::len($value) <= 200;
+DEFINE FIELD OVERWRITE product ON search_miss TYPE string;
+DEFINE FIELD OVERWRITE date    ON search_miss TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX OVERWRITE search_miss_query ON search_miss FIELDS query CONCURRENTLY;

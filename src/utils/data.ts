@@ -3,8 +3,8 @@ import type { PageContext } from "vike/types";
 import { type CollectionMap, getCollection, getCollectionEntry } from "vike-content-collection";
 import { useConfig } from "vike-react/useConfig";
 import { type DocHeading, resolveMarkdown } from "./markdown";
-import { getSuffixedMetaTitle } from "./meta";
-import { buildNavigation, type NavSection } from "./navigation";
+import { BASE_URL, type BreadcrumbItem, getSuffixedMetaTitle } from "./meta";
+import { buildNavigation, type NavSection, resolveFolderLanding } from "./navigation";
 import { getProductFromPath } from "./product";
 
 export interface PageData {
@@ -13,6 +13,8 @@ export interface PageData {
     navigation: NavSection[];
     contentPath: string;
     breadcrumbs: string[];
+    /** Ancestor trail for BreadcrumbList JSON-LD: Docs, categories, then the page. */
+    breadcrumbItems: BreadcrumbItem[];
     title: string;
     description: string;
 }
@@ -26,7 +28,25 @@ const DOCS_BASE = "/docs";
  * accurate in a sidebar, where the surrounding tree supplies the context, but
  * useless in a document title.
  */
-const GENERIC_SECTION_TITLES = new Set(["overview", "index", "introduction", "getting started"]);
+const GENERIC_SECTION_TITLES = new Set([
+    "overview",
+    "index",
+    "introduction",
+    "getting started",
+    // The structural folders every SDK tree repeats. Left in a title they
+    // produce nine pages called "Authentication | Concepts | Database";
+    // skipping them lets the SDK-level crumb (or the collection name)
+    // qualify the title instead.
+    "concepts",
+    "methods",
+    "api",
+    "core",
+    "data types",
+    "engines",
+    "frameworks",
+    "libraries",
+    "advanced topics",
+]);
 
 /**
  * Collection segments whose casing is part of the name. Executables are written
@@ -53,6 +73,15 @@ function resolveSection(breadcrumbs: string[], collectionId: string): string | u
 
     if (meaningful.length) {
         return meaningful.at(-1);
+    }
+
+    // The collection's own landing page already carries the proper name
+    // ("JavaScript SDK", "PHP SDK"), so prefer it to prettifying the
+    // directory name, which would title-case "Javascript".
+    const rootTitle = getCollectionEntry(collectionId as keyof CollectionMap, "")?.metadata?.title;
+
+    if (rootTitle && !GENERIC_SECTION_TITLES.has(rootTitle.trim().toLowerCase())) {
+        return rootTitle;
     }
 
     const segment = collectionId.split("/").at(-1);
@@ -124,10 +153,22 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
     const entry = getCollectionEntry(id, path);
 
     if (!entry) {
-        const parent = getParentUrl(context.urlPathname);
+        // A folder with no page of its own still names something real, so it
+        // sends the reader to its first child - the same page the sidebar
+        // points at. Anything else 404s.
+        //
+        // This used to be a 302 one path segment up, applied to every miss.
+        // That meant a stale link landed on a section index that said nothing
+        // about what had been asked for, and a crawler recorded a redirect
+        // rather than a gap. Both hid the breakage: twelve unreachable
+        // tutorials went unnoticed for seven weeks, because each one answered
+        // 302 and resolved to a page that returned 200. A page that has really
+        // moved belongs in `redirects.ts`, where the destination is stated
+        // rather than guessed at.
+        const landing = resolveFolderLanding(id, path, prefix);
 
-        if (parent) {
-            throw redirect(parent, 302);
+        if (landing) {
+            throw redirect(`${DOCS_BASE}${landing}` as `/${string}`, 301);
         }
 
         throw render(404, "Not Found");
@@ -138,6 +179,8 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
 
     const curPath: string[] = [];
     const breadcrumbs: string[] = [];
+    const prefixSegments = prefix.split("/").filter(Boolean);
+    const breadcrumbItems: BreadcrumbItem[] = [{ name: "Docs", item: BASE_URL }];
 
     for (const part of path.split("/")) {
         curPath.push(part);
@@ -146,7 +189,13 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         const entry = getCollectionEntry(id, slug);
 
         if (entry) {
-            breadcrumbs.push(entry.metadata.title ?? part);
+            const name = entry.metadata.title ?? part;
+
+            breadcrumbs.push(name);
+            breadcrumbItems.push({
+                name,
+                item: `${BASE_URL}/${[...prefixSegments, ...curPath].join("/")}`,
+            });
         }
     }
 
@@ -162,7 +211,19 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
 
         if (root?.metadata.title) {
             breadcrumbs.push(root.metadata.title);
+
+            if (prefixSegments.length) {
+                breadcrumbItems.push({
+                    name: root.metadata.title,
+                    item: `${BASE_URL}/${prefixSegments.join("/")}`,
+                });
+            }
         }
+    }
+
+    // The page itself closes the trail. The final element may omit `item`.
+    if (entry.metadata.title) {
+        breadcrumbItems.push({ name: entry.metadata.title });
     }
 
     config({
@@ -180,6 +241,7 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         navigation,
         contentPath,
         breadcrumbs,
+        breadcrumbItems,
         title: entry.metadata.title ?? "",
         description: description ?? "",
     };

@@ -13,7 +13,7 @@ Listen responses from an existing live query.
 db.ListenLive<T>(queryUuid)
 ```
 
-### Arguments
+## Arguments
 <table>
     <thead>
         <tr>
@@ -34,7 +34,7 @@ db.ListenLive<T>(queryUuid)
     </tbody>
 </table>
 
-### Example usage
+## Example usage
 
 ```csharp
 await using var liveQuery = db.ListenLive<Person>(queryUuid);

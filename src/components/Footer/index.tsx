@@ -34,11 +34,16 @@ const COLUMNS: FooterColumn[] = [
     {
         heading: "Documentation",
         links: [
-            { label: "Overview", href: "/docs/" },
+            // Every href here is a direct 200 - a footer that routes through
+            // redirects (or, since missing pages became honest 404s, into one)
+            // is how /docs/build/sdks shipped dead on every page. There is no
+            // SDK overview page, so SDKs takes the JavaScript SDK, matching
+            // the apex site's footer.
+            { label: "Overview", href: "/docs" },
             { label: "Agent Memory", href: "/docs/agent-memory" },
-            { label: "SurrealQL", href: "/docs/surrealql" },
-            { label: "SDKs", href: "/docs/build/sdks" },
-            { label: "Cloud", href: "/docs/manage/cloud" },
+            { label: "SurrealQL", href: "/docs/reference/query-language" },
+            { label: "SDKs", href: "/docs/reference/javascript" },
+            { label: "Cloud", href: "/docs/manage/instances" },
             { label: "Labs", href: "/docs/labs" },
         ],
     },

@@ -16,7 +16,7 @@ Imports data into a table.
 $db->import($content, $username, $password);
 ```
 
-### Arguments
+## Arguments
 
 <table>
 	<thead>
@@ -66,7 +66,7 @@ $db->import($content, $username, $password);
 	</tbody>
 </table>
 
-### Example
+## Example
 
 ```php title="Example"
 

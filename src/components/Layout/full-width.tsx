@@ -16,6 +16,7 @@ export function FullWidthLayout({ children }: FullWidthLayoutProps) {
         <Box className={classes.fullShell}>
             <Container
                 component="main"
+                id="main-content"
                 size={1300}
                 px={32}
                 w="100%"

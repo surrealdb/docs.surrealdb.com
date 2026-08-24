@@ -135,6 +135,27 @@ On Vercel production builds, `bun run search:index` runs automatically as a
 `postbuild` step. Preview and development builds skip indexing and fall back to
 the production search API.
 
+### Two indexes during the transition
+
+The search described in this file is being moved to `api.surrealdb.com`, which
+keeps its own copy of the index in a separate database. Until the site's own
+search is retired, a merge to `main` updates both:
+
+| Index | Written by | Read by |
+| --- | --- | --- |
+| This one | `postbuild` on the Vercel production build | `/docs/api/search`, which the site's UI calls today |
+| The API's | `.github/workflows/reindex-docs.yml` calling `POST /api/docs/v1/reindex` | `api.surrealdb.com/api/docs/v1/search`, and the `search_documentation` MCP tool |
+
+The two do not collide, because they write to different databases — but both pay
+for OpenAI embeddings, so retiring this one is worth doing.
+
+The workflow signs its request the way a GitHub webhook would: HMAC-SHA256 over
+the exact body bytes, in `X-Hub-Signature-256`, with `DOCS_WEBHOOK_SECRET`. The
+signing and the response handling live in `scripts/trigger-reindex.ts`; run it by
+hand with `bun run search:reindex`. Note that a 409 from the endpoint means
+another index run already holds its lease and is covering the same commit, so the
+script treats that as success.
+
 ### Environment variables (Vercel project settings)
 
 | Variable              | Description                             |
@@ -145,6 +166,9 @@ the production search API.
 | `SURREAL_USERNAME`    | SurrealDB username (root or scoped)     |
 | `SURREAL_PASSWORD`    | SurrealDB password                      |
 | `OPENAI_API_KEY`      | OpenAI API key for embeddings           |
+
+`DOCS_WEBHOOK_SECRET` is a GitHub Actions repository secret rather than a
+Vercel variable, because the workflow — not the build — is what uses it.
 
 ## File structure
 

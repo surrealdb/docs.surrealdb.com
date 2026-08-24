@@ -13,7 +13,7 @@ Selects all records in a table, or a specific record, from the database.
 $db->select($thing)
 ```
 
-### Arguments
+## Arguments
 <table>
     <thead>
         <tr>
@@ -38,7 +38,7 @@ $db->select($thing)
     </tbody>
 </table>
 
-### Example usage
+## Example usage
 ```php
 // Select all records from a table
 $people = $db->select('person');
@@ -48,7 +48,7 @@ $person = $db->select(new RecordId('person', 'h5wxrf2ewk8xjxosxtyc'));
 $person = $db->select(new StringRecordId('person:h5wxrf2ewk8xjxosxtyc'));
 ```
 
-### Translated query
+## Translated query
 This function will run the following query in the database.
 
 ```surql

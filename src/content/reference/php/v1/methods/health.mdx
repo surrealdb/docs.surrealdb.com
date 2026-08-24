@@ -16,7 +16,7 @@ This method checks wether the database is running and the storage engine is runn
 $db->health();
 ```
 
-### Example usage
+## Example usage
 ```php
 $health = $db->health();
 echo "The health status is: $health."; // 200 or 500

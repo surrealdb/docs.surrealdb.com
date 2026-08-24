@@ -13,7 +13,7 @@ Creates or updates a record in a table.
 $db->upsert($thing, $data);
 ```
 
-### Arguments
+## Arguments
 
 <table>
 	<thead>
@@ -51,7 +51,7 @@ $db->upsert($thing, $data);
 	</tbody>
 </table>
 
-### Example
+## Example
 
 ```php title="Example"
 

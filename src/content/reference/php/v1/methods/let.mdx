@@ -13,7 +13,7 @@ Assigns a value as a parameter for this connection.
 $db->let($name, $value)
 ```
 
-### Arguments
+## Arguments
 <table>
     <thead>
         <tr>
@@ -50,7 +50,7 @@ $db->let($name, $value)
     </tbody>
 </table>
 
-### Example usage
+## Example usage
 ```php
 // Assign the variable on the connection
 $db->let('name', [

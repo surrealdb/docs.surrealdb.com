@@ -13,7 +13,7 @@ Deletes all records in a table, or a specific record, from the database.
 $db->delete($thing)
 ```
 
-### Arguments
+## Arguments
 <table>
     <thead>
         <tr>
@@ -38,7 +38,7 @@ $db->delete($thing)
     </tbody>
 </table>
 
-### Example usage
+## Example usage
 ```php
 // Delete all records from a table
 $db->delete('person');
@@ -47,7 +47,7 @@ $db->delete('person');
 $db->delete(new RecordId('person', 'h5wxrf2ewk8xjxosxtyc'));
 ```
 
-### Translated query
+## Translated query
 This function will run the following query in the database.
 
 ```surql

@@ -2,10 +2,12 @@ import { Anchor, Box, Button, Group, Text } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { Icon, iconBug, iconCheck, iconClose, iconEdit, Spacer, useStable } from "@surrealdb/ui";
 import { useState } from "react";
+import { usePageContext } from "vike-react/usePageContext";
 import { GITHUB_BASE, GITHUB_ISSUES } from "~/components/PageAside";
 import { FeedbackModal, type Sentiment } from "~/modals/FeedbackModal";
 
 export function PageContentActions({ contentPath }: { contentPath: string }) {
+    const { urlPathname } = usePageContext();
     const editUrl = `${GITHUB_BASE}${contentPath}`;
 
     const [opened, { open, close }] = useDisclosure(false);
@@ -83,6 +85,7 @@ export function PageContentActions({ contentPath }: { contentPath: string }) {
                 opened={opened}
                 sentiment={sentiment}
                 onClose={close}
+                path={`/docs${urlPathname}`}
             />
         </>
     );

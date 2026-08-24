@@ -13,7 +13,7 @@ Inserts one or multiple records in the database.
 $db->insert($thing, $data)
 ```
 
-### Arguments
+## Arguments
 <table>
     <thead>
         <tr>
@@ -50,7 +50,7 @@ $db->insert($thing, $data)
     </tbody>
 </table>
 
-### Example usage
+## Example usage
 ```php
 
 // Insert a single record
@@ -95,7 +95,7 @@ $people = $db->insert('person', [
 ]);
 ```
 
-### Translated query
+## Translated query
 This function will run the following query in the database.
 
 ```surql

@@ -13,7 +13,7 @@ This method retrieves the current status of a remote database.
 $db->status();
 ```
 
-### Example usage
+## Example usage
 ```php
 $status = $db->status();
 echo "The status code is: $status."; // 200 or 500
