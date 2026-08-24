@@ -99,6 +99,134 @@ function legacyMigratingRedirects(): Redirect[] {
     return out;
 }
 
+/**
+ * Legacy `/docs/surrealdb/*` tree from the pre-restructure IA. The www repo
+ * redirects some of this tree (`installation`, `security`, `cli`, and the bare
+ * `/docs/surrealdb`), but `introduction/*`, the nested `surrealql/*` pages, and
+ * the old top-level `/docs/cli` prefix were left behind and 404 (verified
+ * August 2026). Exact page rules precede the folder catch-alls that would
+ * otherwise swallow them.
+ */
+function legacySurrealdbTreeRedirects(): Redirect[] {
+    // "prefix" collapses a removed tree onto one page; "prefix-path" carries
+    // the path through to a tree whose slugs still match one-for-one.
+    const moves: [string, string, "exact" | "prefix" | "prefix-path"][] = [
+        // The old "Start" page covered running the server; its successor is the
+        // Running section index.
+        ["surrealdb/introduction/start", "running/overview", "exact"],
+        ["surrealdb/introduction/concepts", "concepts", "exact"],
+        ["surrealdb/introduction/architecture", "architecture", "exact"],
+        ["surrealdb/introduction", "what-is-surrealdb", "prefix"],
+        // SurrealQL nested under the product prefix → the query language
+        // reference, whose slugs mirror the old tree.
+        ["surrealdb/surrealql", "reference/query-language", "prefix-path"],
+        // Remaining unmapped pages fold into the product introduction rather
+        // than 404. The www rules for `installation`, `security`, and `cli`
+        // run first in production, so this only catches what they miss.
+        ["surrealdb", "what-is-surrealdb", "prefix"],
+    ];
+
+    const out: Redirect[] = [];
+
+    for (const [from, to, kind] of moves) {
+        // Both source spellings: the www rewrite strips `/docs` in production,
+        // while dev and preview see the prefixed path.
+        for (const source of [`/${from}`, `/docs/${from}`]) {
+            out.push({ source, destination: `/docs/${to}`, statusCode: 301 });
+
+            if (kind !== "exact") {
+                out.push({
+                    source: `${source}/:path*`,
+                    destination: kind === "prefix-path" ? `/docs/${to}/:path*` : `/docs/${to}`,
+                    statusCode: 301,
+                });
+            }
+        }
+    }
+
+    // The very old top-level CLI prefix. `overview` sits beside the commands
+    // folder, so it is named before the command catch-all.
+    out.push(
+        { source: "/cli", destination: "/docs/reference/cli", statusCode: 301 },
+        { source: "/docs/cli", destination: "/docs/reference/cli", statusCode: 301 },
+        {
+            source: "/cli/overview",
+            destination: "/docs/reference/cli/surrealdb-cli/overview",
+            statusCode: 301,
+        },
+        {
+            source: "/docs/cli/overview",
+            destination: "/docs/reference/cli/surrealdb-cli/overview",
+            statusCode: 301,
+        },
+        {
+            source: "/cli/:path*",
+            destination: "/docs/reference/cli/surrealdb-cli/commands/:path*",
+            statusCode: 301,
+        },
+        {
+            source: "/docs/cli/:path*",
+            destination: "/docs/reference/cli/surrealdb-cli/commands/:path*",
+            statusCode: 301,
+        },
+    );
+
+    return out;
+}
+
+/**
+ * Old `/docs/integration(s)/sdks/*` pages → the per-language docs. Without
+ * these, the general `integrations → build/integrations` prefix rule sends
+ * SDK paths to `/docs/build/integrations/sdks/*`, which does not exist - a
+ * redirect chain that ends in a 404 (verified August 2026). Spread before
+ * `legacyPrefixRedirects("integrations", …)` so these rules win.
+ */
+function legacyIntegrationSdkRedirects(): Redirect[] {
+    const sdks: [string, string][] = [
+        ["nodejs", "javascript"],
+        ["deno", "javascript"],
+        ["dotnet", "dotnet"],
+        ["golang", "golang"],
+        ["java", "java"],
+        ["javascript", "javascript"],
+        ["kotlin", "kotlin"],
+        ["php", "php"],
+        ["python", "python"],
+        ["rust", "rust"],
+    ];
+
+    const out: Redirect[] = [];
+
+    for (const [from, to] of sdks) {
+        for (const source of [`/integrations/sdks/${from}`, `/docs/integrations/sdks/${from}`]) {
+            out.push(
+                { source, destination: `/docs/languages/${to}`, statusCode: 301 },
+                // Deeper legacy paths collapse onto the language hub; mapping
+                // them through would name pages that no longer exist.
+                {
+                    source: `${source}/:path*`,
+                    destination: `/docs/languages/${to}`,
+                    statusCode: 301,
+                },
+            );
+        }
+    }
+
+    // The section index and any SDK slug not named above.
+    out.push(
+        { source: "/integrations/sdks", destination: "/docs/languages", statusCode: 301 },
+        { source: "/docs/integrations/sdks", destination: "/docs/languages", statusCode: 301 },
+        { source: "/integrations/sdks/:path*", destination: "/docs/languages", statusCode: 301 },
+        {
+            source: "/docs/integrations/sdks/:path*",
+            destination: "/docs/languages",
+            statusCode: 301,
+        },
+    );
+
+    return out;
+}
+
 /** Database functions overview merged into the section index. */
 function databaseFunctionsOverviewRedirects(): Redirect[] {
     const from = "/reference/query-language/functions/database-functions/overview";
@@ -597,10 +725,12 @@ export const docsRedirects: Redirect[] = [
     { source: "/surrealist", destination: "/explore/studio", statusCode: 301 },
     { source: "/surrealist/:path*", destination: "/explore/studio", statusCode: 301 },
     ...legacyPrefixRedirects("surrealml", "explore/ml-models"),
+    ...legacyIntegrationSdkRedirects(),
     ...legacyPrefixRedirects("integrations", "build/integrations"),
     ...legacyPrefixRedirects("tutorials", "explore/tutorials"),
     ...sdkRedirects(),
     ...legacyMigratingRedirects(),
+    ...legacySurrealdbTreeRedirects(),
     ...deploymentObservabilityToManageRedirects(),
     ...runningFromSelfHostedRedirects(),
     ...databaseFunctionsOverviewRedirects(),
