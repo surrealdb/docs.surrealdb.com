@@ -7,6 +7,73 @@ import { ProductSwitcherSegmented } from "./product-switcher";
 import { getProductFromPath } from "./products";
 import classes from "./style.module.scss";
 
+/**
+ * Left inset shared by every sidebar block. The nav links add their own 8px
+ * on top, so the label sits just inside the blocks above it rather than
+ * flush with them.
+ */
+export const SIDEBAR_INSET = 24;
+
+export interface SidebarPaneProps extends BoxProps {
+    children: React.ReactNode;
+}
+
+/**
+ * Scrollable column for a shell rail. One scroll container for the whole
+ * pane, so anything above the listing travels with it rather than staying
+ * pinned. Shared by the docs tree and the labs filter rail so both panes
+ * scroll and fade identically.
+ */
+export function SidebarPane({ children, ...props }: SidebarPaneProps) {
+    return (
+        <Stack
+            pb="sm"
+            gap={0}
+            {...props}
+        >
+            <Stack
+                gap={0}
+                flex={1}
+                className={classes.sidebarScroll}
+            >
+                {children}
+            </Stack>
+        </Stack>
+    );
+}
+
+export interface SidebarSectionHeadingProps {
+    icon?: string;
+    children: React.ReactNode;
+}
+
+/** Heading row for a sidebar section, shared with the labs filter rail. */
+export function SidebarSectionHeading({ icon, children }: SidebarSectionHeadingProps) {
+    return (
+        <Group
+            align="center"
+            gap="sm"
+            mt="lg"
+            mb="sm"
+            px="sm"
+        >
+            {icon && (
+                <Icon
+                    path={icon}
+                    size="sm"
+                />
+            )}
+            <Text
+                component="h3"
+                fz={15}
+                fw={600}
+            >
+                {children}
+            </Text>
+        </Group>
+    );
+}
+
 function normalize(href: string) {
     return href.replace(/\/$/, "");
 }
@@ -64,31 +131,11 @@ function SidebarNavLink({ link }: { link: NavLinkItem }) {
 }
 
 function SidebarSection({ section }: { section: NavSection }) {
-    const icon = section.icon && SECTION_ICONS.get(section.icon);
+    const icon = section.icon ? SECTION_ICONS.get(section.icon) : undefined;
 
     return (
         <Box component="section">
-            <Group
-                align="center"
-                gap="sm"
-                mt="lg"
-                mb="sm"
-                px="sm"
-            >
-                {icon && (
-                    <Icon
-                        path={icon}
-                        size="sm"
-                    />
-                )}
-                <Text
-                    component="h3"
-                    fz="md"
-                    fw={600}
-                >
-                    {section.title}
-                </Text>
-            </Group>
+            <SidebarSectionHeading icon={icon}>{section.title}</SidebarSectionHeading>
             <Stack gap="xs">
                 {section.links.map((link) => (
                     <SidebarNavLink
@@ -111,49 +158,36 @@ export function Sidebar({ navigation, versionSelector, ...props }: SidebarProps)
     const product = getProductFromPath(urlPathname);
 
     return (
-        <Stack
-            pb="sm"
-            mah="calc(100vh - 56px)"
-            gap={0}
-            {...props}
-        >
-            {/* One scroll container for the whole sidebar, so the product switcher
-                and version selector travel with the tree rather than staying pinned
-                above it. The `nav` landmark stays on the tree alone — the switcher
-                is a control, not navigation within this product's docs. */}
-            <Stack
-                gap={0}
-                flex={1}
-                style={{ overflowY: "auto" }}
+        <SidebarPane {...props}>
+            {/* The `nav` landmark stays on the tree alone - the switcher is a
+                control, not navigation within this product's docs. */}
+            <Box
+                px={SIDEBAR_INSET}
+                mb="md"
             >
+                <ProductSwitcherSegmented current={product} />
+            </Box>
+            {versionSelector && (
                 <Box
-                    px="lg"
-                    mb="md"
+                    px={SIDEBAR_INSET}
+                    mt="sm"
+                    mb="xl"
                 >
-                    <ProductSwitcherSegmented current={product} />
+                    {versionSelector}
                 </Box>
-                {versionSelector && (
-                    <Box
-                        px="lg"
-                        mt="sm"
-                        mb="xl"
-                    >
-                        {versionSelector}
-                    </Box>
-                )}
-                <Stack
-                    gap="lg"
-                    component="nav"
-                    px="md"
-                >
-                    {navigation.map((section) => (
-                        <SidebarSection
-                            key={section.title}
-                            section={section}
-                        />
-                    ))}
-                </Stack>
+            )}
+            <Stack
+                gap="lg"
+                component="nav"
+                px={SIDEBAR_INSET}
+            >
+                {navigation.map((section) => (
+                    <SidebarSection
+                        key={section.title}
+                        section={section}
+                    />
+                ))}
             </Stack>
-        </Stack>
+        </SidebarPane>
     );
 }

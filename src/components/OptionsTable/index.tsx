@@ -5,7 +5,7 @@ import classes from "./style.module.scss";
 
 /**
  * One documented input in a reference table: a CLI flag, a positional argument, or
- * an SDK parameter. Only `name` and `description` are required — every other field
+ * an SDK parameter. Only `name` and `description` are required - every other field
  * is optional, and a column is rendered only when at least one row in the table
  * uses it.
  */
@@ -30,7 +30,7 @@ export interface ReferenceOption {
     type?: string;
     /**
      * Default applied when the option is omitted. Omit for booleans that default to
-     * false — an absent default is the silent, common case.
+     * false - an absent default is the silent, common case.
      */
     default?: string | number | boolean;
     /**

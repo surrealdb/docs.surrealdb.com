@@ -1,35 +1,20 @@
-import {
-    ActionIcon,
-    Box,
-    Breadcrumbs,
-    Container,
-    Divider,
-    Drawer,
-    Group,
-    Text,
-    Title,
-} from "@mantine/core";
+import { ActionIcon, Box, Breadcrumbs, Divider, Group, Text, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { Icon, iconSidebar } from "@surrealdb/ui";
-import { type CSSProperties, useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { usePageContext } from "vike-react/usePageContext";
-import globulesImg from "~/assets/img/globules.webp";
 import { PageContentActions } from "~/components/ContentActions";
 import { PageAside } from "~/components/PageAside";
 import type { PageData } from "~/utils/data";
 import { CopyPageMenu } from "../CopyPageMenu";
-import { Footer } from "../Footer";
-import { Header, MobileNav } from "./header";
-import type { NavEntry } from "./nav";
 import { PageNavigation } from "./page-navigation";
+import { Shell, ShellContent, ShellDrawer } from "./shell";
 import { Sidebar } from "./sidebar";
 import classes from "./style.module.scss";
 
 export interface DefaultLayoutProps {
     data: PageData;
     children: React.ReactNode;
-    /** Top navigation entries shown in the header. Defined per layout. */
-    navLinks: NavEntry[];
     lastUpdated?: string;
     showToc?: boolean;
     versionSelector?: React.ReactNode;
@@ -38,82 +23,47 @@ export interface DefaultLayoutProps {
 export function DefaultLayout({
     children,
     data,
-    navLinks,
     showToc = true,
     versionSelector,
 }: DefaultLayoutProps) {
-    const [menuOpened, { toggle: toggleMenu, close: closeMenu }] = useDisclosure();
     const [sidebarOpened, { toggle: toggleSidebar, close: closeSidebar }] = useDisclosure();
-    const contentRef = useRef<HTMLDivElement>(null);
     const { urlPathname } = usePageContext();
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on route change
     useEffect(() => {
-        contentRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        closeSidebar();
     }, [urlPathname]);
 
     return (
-        <Box
-            className={classes.layout}
-            style={
-                {
-                    "--bg-image": `url(${globulesImg})`,
-                    "--bg-opacity": 0.15,
-                } as CSSProperties
-            }
-        >
-            <Header
-                navLinks={navLinks}
-                opened={menuOpened}
-                onToggle={toggleMenu}
-            />
-            <Sidebar
-                navigation={data.navigation}
-                visibleFrom="lg"
-                versionSelector={versionSelector}
-            />
-            <Drawer
-                opened={menuOpened}
-                onClose={closeMenu}
-                size="325px"
-                hiddenFrom="lg"
-                withCloseButton={false}
-            >
-                <MobileNav navLinks={navLinks} />
-            </Drawer>
-            <Drawer
+        <>
+            <ShellDrawer
                 opened={sidebarOpened}
                 onClose={closeSidebar}
-                size="325px"
-                hiddenFrom="lg"
-                withCloseButton={false}
             >
                 <Sidebar
                     navigation={data.navigation}
                     versionSelector={versionSelector}
                 />
-            </Drawer>
-            <Group
-                ref={contentRef}
-                justify="center"
-                align="flex-start"
-            >
-                <Container
-                    size="md"
-                    p="xl"
-                    flex={1}
-                    miw={0}
-                    h="100%"
-                >
+            </ShellDrawer>
+            <Shell>
+                <Sidebar
+                    navigation={data.navigation}
+                    visibleFrom="lg"
+                    versionSelector={versionSelector}
+                />
+                <ShellContent>
                     <Group
                         wrap="nowrap"
                         align="start"
-                        gap="2xl"
+                        gap={64}
                         miw={0}
                     >
                         <Box
                             flex={1}
                             miw={0}
+                            maw={832}
+                            className={classes.contentColumn}
                         >
                             <Group
                                 align="center"
@@ -163,6 +113,7 @@ export function DefaultLayout({
                                 <Title
                                     order={1}
                                     c="bright"
+                                    fw={500}
                                     flex={1}
                                 >
                                     {data.title}
@@ -180,12 +131,11 @@ export function DefaultLayout({
                             <Divider my="3xl" />
                             <PageContentActions contentPath={data.contentPath} />
                             <PageNavigation navigation={data.navigation} />
-                            <Footer />
                         </Box>
                         {showToc && <PageAside headings={data.headings} />}
                     </Group>
-                </Container>
-            </Group>
-        </Box>
+                </ShellContent>
+            </Shell>
+        </>
     );
 }

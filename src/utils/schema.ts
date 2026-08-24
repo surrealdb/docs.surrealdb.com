@@ -22,7 +22,7 @@ export const pageSchema = strictObject({
     /**
      * Omit this page or folder from the navigation sidebar.
      *
-     * The content is still built, routed, and reachable by URL — this only
+     * The content is still built, routed, and reachable by URL - this only
      * removes the entry (and, on a `__category`, its whole subtree) from the
      * menu. Use it to park a section that is not ready to be advertised.
      */

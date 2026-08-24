@@ -4,7 +4,6 @@ import {
     Group,
     Kbd,
     Loader,
-    SimpleGrid,
     Stack,
     Text,
     UnstyledButton,
@@ -116,7 +115,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
             : searchQuery.error instanceof SearchError
               ? searchQuery.error.message
               : searchQuery.error
-                ? "Something went wrong — please try again"
+                ? "Something went wrong - please try again"
                 : null;
 
     const actions = useMemo(() => {
@@ -130,7 +129,7 @@ export function SearchDocs(props: UnstyledButtonProps) {
     let nothingFound: ReactNode;
 
     if (rateLimitRemaining > 0) {
-        nothingFound = `Too many requests — try again in ${rateLimitRemaining}s`;
+        nothingFound = `Too many requests - try again in ${rateLimitRemaining}s`;
     } else if (errorMessage) {
         nothingFound = errorMessage;
     } else if (searchQuery.isSuccess && debouncedSearch.length > 0 && actions.length === 0) {
@@ -201,47 +200,42 @@ export function SearchDocs(props: UnstyledButtonProps) {
 
 function SearchTutorial({ modKey }: { modKey: string }) {
     return (
-        <Stack pt={90}>
-            <Text fz="lg">Enter a search term to find documentation</Text>
-            <SimpleGrid
-                cols={2}
-                mt="xl"
+        <Stack
+            py={90}
+            align="center"
+        >
+            <Text
+                fz="lg"
+                ta="center"
             >
-                <Box ta="right">
-                    <Kbd>{modKey} + K</Kbd>
-                </Box>
-                <Box ta="left">
-                    <Text>to open the search</Text>
-                </Box>
-                <Box ta="right">
-                    <Kbd>
-                        <Icon
-                            path={iconArrowLeft}
-                            style={{ transform: "rotate(-90deg)" }}
-                        />
-                    </Kbd>
-                </Box>
-                <Box ta="left">
-                    <Text>to navigate down</Text>
-                </Box>
-                <Box ta="right">
-                    <Kbd>
-                        <Icon
-                            path={iconArrowLeft}
-                            style={{ transform: "rotate(90deg)" }}
-                        />
-                    </Kbd>
-                </Box>
-                <Box ta="left">
-                    <Text>to navigate up</Text>
-                </Box>
-                <Box ta="right">
-                    <Kbd>Esc</Kbd>
-                </Box>
-                <Box ta="left">
-                    <Text>to close the search</Text>
-                </Box>
-            </SimpleGrid>
+                Enter a search term to find documentation
+            </Text>
+            {/* Both columns size to their content, so the block's real width
+                is its visual width and centring it lines it up under the
+                heading - a half-and-half split centres the gap instead. */}
+            <Box
+                mt="xl"
+                className={classes.tutorialGrid}
+            >
+                <Kbd>{modKey} + K</Kbd>
+                <Text>to open the search</Text>
+                <Kbd>
+                    <Icon
+                        path={iconArrowLeft}
+                        style={{ transform: "rotate(-90deg)" }}
+                    />
+                </Kbd>
+                <Text>to navigate down</Text>
+                <Kbd>
+                    <Icon
+                        path={iconArrowLeft}
+                        style={{ transform: "rotate(90deg)" }}
+                    />
+                </Kbd>
+                <Text>to navigate up</Text>
+                <Kbd>Esc</Kbd>
+                <Text>to close the search</Text>
+            </Box>
         </Stack>
     );
 }

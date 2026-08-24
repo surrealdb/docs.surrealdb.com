@@ -11,9 +11,9 @@ SurrealDB.
 1. **Crawler** (`search/crawler.ts`) walks every markdown file in
    `src/content/`, parses frontmatter and body, then yields two kinds of
    records:
-   - **Page** — one per document (title, description, breadcrumb, full plain
+   - **Page** - one per document (title, description, breadcrumb, full plain
      text).
-   - **Section** — one per H2 heading within a page (title, breadcrumb, plain
+   - **Section** - one per H2 heading within a page (title, breadcrumb, plain
      text until the next H2). Links to the parent page via `#anchor`.
 2. **Embedder** (`search/embed.ts`) sends each record's text to OpenAI
    `text-embedding-3-small` and receives a 1536-dimensional vector.
@@ -30,8 +30,8 @@ section. Code blocks are excluded from indexed text.
 2. The Vercel function (`api/search.ts`) embeds the query via OpenAI.
 3. It passes both the raw query string and the vector to `fn::search` in
    SurrealDB.
-4. `fn::search` runs four parallel retrievals — page vector, page full-text,
-   section vector, section full-text — then fuses them with RRF, collapses by
+4. `fn::search` runs four parallel retrievals - page vector, page full-text,
+   section vector, section full-text - then fuses them with RRF, collapses by
    page, and returns grouped results.
 
 ### Schema
@@ -46,10 +46,10 @@ Full-text scoring weights:
 
 | Field       | Page weight | Section weight |
 | ----------- | ----------- | -------------- |
-| path        | 15          | —              |
+| path        | 15          | - |
 | title       | 25          | 25             |
 | breadcrumb  | 10          | 10             |
-| description | 8           | —              |
+| description | 8           | - |
 | content     | 1           | 1              |
 
 ### Search UI
@@ -124,7 +124,7 @@ production search endpoint at `https://surrealdb.com/docs/api/search`.
 
 ### Re-indexing
 
-The indexer is incremental — it computes a SHA-256 hash of each record's
+The indexer is incremental - it computes a SHA-256 hash of each record's
 content and skips records that haven't changed. Only new or modified pages and
 sections are re-embedded and upserted. Deleted pages are cleaned up
 automatically.

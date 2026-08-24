@@ -1,54 +1,28 @@
-import { Container, Drawer, Stack } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
-import type { CSSProperties } from "react";
-import globulesImg from "~/assets/img/globules.webp";
-import { Footer } from "~/components/Footer";
-import { Header, MobileNav } from "./header";
-import type { NavEntry } from "./nav";
+import { Box, Container } from "@mantine/core";
 import classes from "./style.module.scss";
 
 export interface FullWidthLayoutProps {
     children: React.ReactNode;
-    /** Top navigation entries shown in the header. Defined per layout. */
-    navLinks: NavEntry[];
 }
 
-export function FullWidthLayout({ children, navLinks }: FullWidthLayoutProps) {
-    const [menuOpened, { toggle: toggleMenu, close: closeMenu }] = useDisclosure();
-
+/**
+ * A page with no documentation tree beside it - the labs index and the error
+ * page. Header, backdrop and footer come from the frame around it, so this
+ * paints the same reading surface the shell gives the docs and centres a
+ * column matching the shell's overall content width.
+ */
+export function FullWidthLayout({ children }: FullWidthLayoutProps) {
     return (
-        <Stack
-            className={classes.fullWidthLayout}
-            gap={0}
-            style={
-                {
-                    "--bg-image": `url(${globulesImg})`,
-                    "--bg-opacity": 0.15,
-                } as CSSProperties
-            }
-        >
-            <Header
-                navLinks={navLinks}
-                opened={menuOpened}
-                onToggle={toggleMenu}
-            />
-            <Drawer
-                opened={menuOpened}
-                onClose={closeMenu}
-                size="325px"
-                hiddenFrom="lg"
-                withCloseButton={false}
-            >
-                <MobileNav navLinks={navLinks} />
-            </Drawer>
+        <Box className={classes.fullShell}>
             <Container
                 component="main"
-                size="lg"
+                size={1300}
+                px={32}
+                w="100%"
                 flex={1}
             >
                 {children}
             </Container>
-            <Footer />
-        </Stack>
+        </Box>
     );
 }

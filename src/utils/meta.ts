@@ -6,8 +6,8 @@ export const BASE_URL = "https://surrealdb.com/docs";
 /**
  * Builds the document title, qualified by the section the page sits in.
  *
- * Short page titles repeat across the site — "Overview", "Installation" and
- * "Authentication" each appear in many sections — so an unqualified title tells a
+ * Short page titles repeat across the site - "Overview", "Installation" and
+ * "Authentication" each appear in many sections - so an unqualified title tells a
  * reader in their history, a search result or a stack of tabs nothing about which
  * one they have. The deepest section name disambiguates it.
  *

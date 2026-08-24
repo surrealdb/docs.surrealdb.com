@@ -4,8 +4,8 @@
 // Walks every markdown file in src/content/, parses it into
 // a Lezer syntax tree, and emits two kinds of entries:
 //
-//   • Page  — one per file, with the full plain-text content
-//   • Section — one per H2 heading, with the text between
+//   • Page - one per file, with the full plain-text content
+//   • Section - one per H2 heading, with the text between
 //     that heading and the next H2
 //
 // These entries are consumed by the indexer which computes
@@ -46,7 +46,7 @@ const EXCLUDED_COLLECTIONS = new Set<string>(["labs-items"]);
 
 // URL prefix overrides. A page's URL is derived as
 // `/docs/<prefix>/<slug>`, where the prefix defaults to the
-// collection id — mirroring `resolveDataFromCollection` in
+// collection id - mirroring `resolveDataFromCollection` in
 // src/utils/data.ts, where `prefix = urlPrefix ?? id`. The entries
 // below override that default and must stay in sync with the
 // `urlPrefix` argument passed in each collection's +data.ts.
@@ -399,7 +399,7 @@ function createAnchorDeduplicator(): (raw: string) => string {
 const EMBED_VERSION = "v2-c8000";
 
 /**
- * SHA-256 hash used for incremental indexing — if the hash
+ * SHA-256 hash used for incremental indexing - if the hash
  * hasn't changed since last index, we skip re-embedding and
  * re-upserting the record to save OpenAI API calls. EMBED_VERSION
  * is folded in so embedding-strategy changes force a re-index.

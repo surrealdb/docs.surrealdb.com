@@ -5,7 +5,7 @@ import classes from "./style.module.scss";
 interface SynopsisProps {
     /**
      * The usage line(s), as raw text. A single string may contain newlines; an array
-     * is joined with newlines. Rendered verbatim — never parsed as markdown — so
+     * is joined with newlines. Rendered verbatim - never parsed as markdown - so
      * notation such as `[NAME]`, `<TYPE>` and `...` survives intact.
      *
      * In markdown this prop is filled in by the pipeline from the block body, so

@@ -1,5 +1,8 @@
 import { Anchor, Avatar, Badge, Box, Group, Image, Paper, Text, Title } from "@mantine/core";
 import {
+    Icon,
+    iconOpen,
+    iconSurreal,
     pictoCurlyBracesGradient,
     pictoFileGradient,
     pictoInboxGradient,
@@ -35,7 +38,6 @@ export interface LabCardItem {
 
 export interface LabCardProps {
     item: LabCardItem;
-    isDark: boolean;
 }
 
 const CATEGORY_IMAGES: Record<string, string> = {
@@ -68,49 +70,61 @@ export function LabCard({ item }: LabCardProps) {
     }
 
     const href = item.url || "#";
+    const isExternal = href.startsWith("http");
     const description = item.description?.trim();
 
     return (
         <Anchor
             href={href}
             underline="never"
-            target={href.startsWith("http") ? "_blank" : undefined}
-            rel={href.startsWith("http") ? "noopener noreferrer" : undefined}
+            target={isExternal ? "_blank" : undefined}
+            rel={isExternal ? "noopener noreferrer" : undefined}
             className={classes.anchor}
             c="unset"
         >
             <Paper
                 className={classes.root}
-                withBorder
-                radius="sm"
-                p="md"
+                radius="var(--surreal-radius-card)"
+                p="lg"
             >
-                <Group>
+                <Group
+                    gap="sm"
+                    wrap="nowrap"
+                >
                     {categoryImage && (
                         <Image
                             src={categoryImage}
                             alt=""
-                            w={20}
+                            w={18}
                         />
                     )}
+                    {/* Same kicker treatment as the nav dropdowns' section
+                        labels, so the category reads as an eyebrow rather
+                        than competing with the title. */}
                     <Text
                         className={classes.category}
-                        fz="sm"
-                        fw={500}
-                        lineClamp={2}
-                        opacity={0.8}
+                        lineClamp={1}
                     >
                         {item.category}
                     </Text>
                     <Spacer />
                     {item.topics.length > 0 && (
-                        <Group gap="xs">
+                        <Group
+                            gap={4}
+                            wrap="nowrap"
+                        >
                             {item.topics.map((topic) => (
                                 <Badge
                                     key={topic}
                                     variant="transparent"
-                                    color="violet"
+                                    // The product accent, not Mantine violet: brand
+                                    // pink on the Database docs in both themes.
+                                    color="var(--docs-accent-text)"
                                     size="sm"
+                                    // Transparent badges carry no fill, so the
+                                    // built-in inset only breaks alignment with
+                                    // the card's right padding edge.
+                                    px={0}
                                 >
                                     {topic}
                                 </Badge>
@@ -122,18 +136,22 @@ export function LabCard({ item }: LabCardProps) {
                 <Title
                     mt="md"
                     order={3}
-                    fz="xl"
+                    fz="lg"
+                    fw={500}
                     c="bright"
                     lineClamp={2}
                     lh={1.35}
+                    className={classes.title}
                 >
                     {item.title}
                 </Title>
 
                 {description && (
                     <Text
+                        className={classes.description}
+                        fz="sm"
                         lineClamp={2}
-                        opacity={0.85}
+                        opacity={0.8}
                     >
                         {description}
                     </Text>
@@ -141,20 +159,36 @@ export function LabCard({ item }: LabCardProps) {
 
                 <Spacer />
 
-                <Group mt="sm">
-                    <Avatar
-                        src={avatarSrc}
-                        alt=""
-                        className={classes.avatar}
-                        name={authorName === "SurrealDB" ? "SD" : undefined}
-                        size="sm"
-                    />
+                <Group
+                    mt="md"
+                    gap="sm"
+                >
+                    {item.author === "surrealdb" ? (
+                        // Official entries carry the brand mark on the
+                        // product accent rather than initials.
+                        <Avatar
+                            size="sm"
+                            className={classes.officialAvatar}
+                        >
+                            <Icon
+                                path={iconSurreal}
+                                size={18}
+                            />
+                        </Avatar>
+                    ) : (
+                        <Avatar
+                            src={avatarSrc}
+                            alt=""
+                            size="sm"
+                        />
+                    )}
                     <Box>
                         <Text
                             fz="sm"
                             fw={500}
                             lh={1.3}
                             lineClamp={1}
+                            c="bright"
                         >
                             {authorName}
                         </Text>
@@ -167,6 +201,15 @@ export function LabCard({ item }: LabCardProps) {
                             {authorRole}
                         </Text>
                     </Box>
+                    <Spacer />
+                    {isExternal && (
+                        <Icon
+                            path={iconOpen}
+                            size="sm"
+                            className={classes.open}
+                            aria-hidden
+                        />
+                    )}
                 </Group>
             </Paper>
         </Anchor>

@@ -27,12 +27,13 @@ import {
     iconQuery,
     iconSandbox,
     iconServer,
-    iconSpectron,
     iconStudio,
+    iconSurreal,
     iconTable,
     iconTransfer,
     iconVideo,
 } from "@surrealdb/ui";
+import { getProductFromPath } from "~/utils/product";
 
 export interface NavItem {
     label: string;
@@ -54,7 +55,7 @@ export interface NavMenuItem {
     external?: boolean;
     icon: string;
     /**
-     * Mantine colour key used to tint the item's icon — e.g. `"orange"`.
+     * Mantine colour key used to tint the item's icon - e.g. `"orange"`.
      * Omit it to use the neutral chip, which is the default for most items.
      */
     iconColor?: MantineColor;
@@ -83,7 +84,7 @@ export function flattenMenuItems(group: NavMenuGroup): NavMenuItem[] {
 }
 
 export const SURREALDB_NAV_LINKS: NavEntry[] = [
-    { label: "Start", href: "/docs/" },
+    { label: "Get started", href: "/docs/" },
     {
         label: "Learn",
         sections: [
@@ -123,7 +124,7 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         label: "Agent Memory",
                         href: "/docs/agent-memory",
                         description: "The AI memory and knowledge layer.",
-                        icon: iconSpectron,
+                        icon: iconSurreal,
                         external: true,
                     },
                     {
@@ -376,3 +377,16 @@ export const AGENT_MEMORY_NAV_LINKS: NavEntry[] = [
     { label: "Cookbooks", href: "/docs/agent-memory/cookbooks" },
     { label: "Reference", href: "/docs/agent-memory/reference" },
 ];
+
+/**
+ * Top navigation for a path.
+ *
+ * The header is rendered once for the whole site, above the page groups, so it
+ * has to work out its own links rather than take them from a group's layout.
+ * Product is the only thing that varies, and the path already determines that.
+ */
+export function navLinksForPath(pathname: string): NavEntry[] {
+    return getProductFromPath(pathname) === "agent-memory"
+        ? AGENT_MEMORY_NAV_LINKS
+        : SURREALDB_NAV_LINKS;
+}

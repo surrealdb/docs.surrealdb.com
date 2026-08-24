@@ -12,6 +12,7 @@ import {
     useStable,
 } from "@surrealdb/ui";
 import { useMemo, useState } from "react";
+import classes from "./style.module.scss";
 
 const LLM_PREFIXES = {
     chatGpt: "https://chatgpt.com/?hints=search&q=",
@@ -89,8 +90,11 @@ export function CopyPageMenu() {
             }}
         >
             <Menu.Target>
+                {/* The chevron sits in its own compartment behind a rule, as on
+                    the reference docs, rather than floating inside the label. */}
                 <Button
                     size="xs"
+                    className={classes.copyButton}
                     leftSection={leftSection}
                     rightSection={
                         <Icon
@@ -104,7 +108,7 @@ export function CopyPageMenu() {
             </Menu.Target>
             <Menu.Dropdown>
                 <Menu.Item
-                    bdrs="xs"
+                    className={classes.menuItem}
                     leftSection={
                         <ThemeIcon>
                             <Icon
@@ -132,7 +136,7 @@ export function CopyPageMenu() {
                     </Stack>
                 </Menu.Item>
                 <Menu.Item
-                    bdrs="xs"
+                    className={classes.menuItem}
                     leftSection={
                         <ThemeIcon>
                             <Icon
@@ -166,7 +170,7 @@ export function CopyPageMenu() {
                     </Stack>
                 </Menu.Item>
                 <Menu.Item
-                    bdrs="xs"
+                    className={classes.menuItem}
                     leftSection={
                         <ThemeIcon>
                             <Icon
@@ -200,7 +204,7 @@ export function CopyPageMenu() {
                     </Stack>
                 </Menu.Item>
                 <Menu.Item
-                    bdrs="xs"
+                    className={classes.menuItem}
                     leftSection={
                         <ThemeIcon>
                             <Icon

@@ -17,7 +17,7 @@ export interface PageData {
     description: string;
 }
 
-/** Base the docs are served from — `base` in `vite.config.ts`. */
+/** Base the docs are served from - `base` in `vite.config.ts`. */
 const DOCS_BASE = "/docs";
 
 /** One path segment up (e.g. `/a/b` → `/a`). */
@@ -115,8 +115,11 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
     const config = useConfig();
 
     const prefix = urlPrefix ?? id;
+    // Escaped by hand rather than with `RegExp.escape`, which needs Node 24
+    // and breaks `bun run dev` on the Node 22 the repo otherwise supports.
+    const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const path = prefix
-        ? context.urlPathname.replace(new RegExp(`/${RegExp.escape(prefix)}/?`), "")
+        ? context.urlPathname.replace(new RegExp(`/${escapedPrefix}/?`), "")
         : context.urlPathname.replace(/^\//, "");
     const entry = getCollectionEntry(id, path);
 
@@ -150,6 +153,17 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
     const title = entry.metadata.title
         ? getSuffixedMetaTitle(entry.metadata.title, productId, resolveSection(breadcrumbs, id))
         : undefined;
+
+    // A page sitting directly in a collection root has no ancestor folder, so
+    // the walk above finds nothing and the page loses its eyebrow. Fall back to
+    // the collection's own category, which is what the index page shows.
+    if (!breadcrumbs.length) {
+        const root = getCollectionEntry(id, "__category");
+
+        if (root?.metadata.title) {
+            breadcrumbs.push(root.metadata.title);
+        }
+    }
 
     config({
         title,

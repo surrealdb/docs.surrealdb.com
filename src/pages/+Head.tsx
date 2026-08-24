@@ -1,5 +1,6 @@
 // https://vike.dev/Head
 
+import "~/assets/styles/layers.scss";
 import "@mantine/core/styles.layer.css";
 import "@mantine/spotlight/styles.layer.css";
 import "@surrealdb/ui/styles.css";
