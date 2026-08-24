@@ -444,10 +444,16 @@ Resource limits for [ISO GQL](/docs/learn/querying/gql/overview) `MATCH` executi
       <td scope="row" data-label="Notes">Specifies how many concurrent jobs can be buffered in the worker channel.</td>
     </tr>
     <tr>
+      <td scope="row" data-label="Env var"><code>SURREAL_MAX_EXPRESSION_PARSING_DEPTH</code><Since v="v3.3.0" /></td>
+      <td scope="row" data-label="Default">128</td>
+      <td scope="row" data-label="Allowed values">A usize</td>
+      <td scope="row" data-label="Notes">How deep the parser will build an expression operator tree. This bounds long operator chains such as <code>1 + 1 + 1 + …</code> and prefix/postfix chains, which consume neither of the other two parsing budgets.</td>
+    </tr>
+    <tr>
       <td scope="row" data-label="Env var"><code>SURREAL_MAX_OBJECT_PARSING_DEPTH</code></td>
       <td scope="row" data-label="Default">100</td>
       <td scope="row" data-label="Allowed values">A usize</td>
-      <td scope="row" data-label="Notes">Specifies how deep the parser will parse nested objects and arrays in a query.</td>
+      <td scope="row" data-label="Notes">How deep the parser will parse nested objects and arrays. Type annotations such as <code>array&lt;option&lt;array&lt;int&gt;&gt;&gt;</code> count against it as well. For data arriving over an SDK or RPC this is the governing limit. For a query written as text, see <a href="#nesting-depth-in-queries-versus-data">Nesting depth in queries versus data</a>.</td>
     </tr>
     <tr>
       <td scope="row" data-label="Env var"><code>SURREAL_MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE</code><Since v="v2.2.0" /></td>
@@ -459,7 +465,7 @@ Resource limits for [ISO GQL](/docs/learn/querying/gql/overview) `MATCH` executi
       <td scope="row" data-label="Env var"><code>SURREAL_MAX_QUERY_PARSING_DEPTH</code></td>
       <td scope="row" data-label="Default">20</td>
       <td scope="row" data-label="Allowed values">A usize</td>
-      <td scope="row" data-label="Notes">Specifies how deep the parser will parse recursive queries (queries within queries).</td>
+      <td scope="row" data-label="Notes">How deep the parser will parse recursive queries (queries within queries). Object and array literals written into a query count against this budget as well as against <code>SURREAL_MAX_OBJECT_PARSING_DEPTH</code>, and this one is the smaller of the two - see <a href="#nesting-depth-in-queries-versus-data">Nesting depth in queries versus data</a>.</td>
     </tr>
     <tr>
       <td scope="row" data-label="Env var"><code>SURREAL_OPERATOR_BUFFER_SIZE</code></td>
@@ -481,6 +487,26 @@ Resource limits for [ISO GQL](/docs/learn/querying/gql/overview) `MATCH` executi
     </tr>
   </tbody>
 </table>
+
+#### Nesting depth in queries versus data
+
+Four separate budgets bound recursion, and which one a deeply nested value hits depends on how it reaches the server.
+
+A value written into query text is read by the SurrealQL parser, and each level of an object or array costs one level of `SURREAL_MAX_QUERY_PARSING_DEPTH` as well as one of `SURREAL_MAX_OBJECT_PARSING_DEPTH`. Since the query budget defaults to `20` against the object budget's `100`, the query budget is what a nested literal runs out of first.
+
+A value arriving as **data** (the body of an SDK call, an RPC message, or a WebSocket frame) is never parsed as SurrealQL, so it spends only the object budget and nests roughly five times deeper for the same default configuration.
+
+The practical effect is that one document can be accepted through an SDK and rejected as a literal in `surreal sql`, which reads as an inconsistency but is two budgets doing their own jobs. A structure alternating object and array, as in `{ inner: [{ inner: [ … ] }] }`, spends two levels per step:
+
+| Path | Governing default | Levels of `{ inner: [ … ] }` |
+| --- | --- | --- |
+| Query text (`surreal sql`, `/sql`) | `SURREAL_MAX_QUERY_PARSING_DEPTH` = 20 | 9 |
+| SDK, RPC, WebSocket | `SURREAL_MAX_OBJECT_PARSING_DEPTH` = 100 | 49 |
+
+Exceeding either is a parse error, not a crash, giving the error `Exceeded query recursion depth limit` for the first, `Exceeded object recursion depth limit` for the second. To send deep literals as text, raise `SURREAL_MAX_QUERY_PARSING_DEPTH` - raising the object budget alone changes nothing on that path.
+
+> [!NOTE]
+> Two further depth limits are fixed and cannot be configured: recursive idiom paths stop at 256, and the binary protocol's decoder rejects frames nested beyond 512. Neither is reachable before the parsing budgets above under a default configuration.
 
 ### Runtime config
 
