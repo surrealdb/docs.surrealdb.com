@@ -3,11 +3,11 @@ import {
     Icon,
     iconOpen,
     iconSurreal,
-    pictoCurlyBracesGradient,
-    pictoFileGradient,
-    pictoInboxGradient,
-    pictoPlayGradient,
-    pictoQuestionGradient,
+    pictoCurlyBracesSolid,
+    pictoFileSolid,
+    pictoInboxSolid,
+    pictoPlaySolid,
+    pictoQuestionSolid,
     Spacer,
 } from "@surrealdb/ui";
 import placeholderAvatar from "~/assets/img/labs-authors/placeholder.png";
@@ -41,11 +41,11 @@ export interface LabCardProps {
 }
 
 const CATEGORY_IMAGES: Record<string, string> = {
-    "Source code": pictoCurlyBracesGradient,
-    Videos: pictoPlayGradient,
-    Blogposts: pictoInboxGradient,
-    Documentation: pictoFileGradient,
-    "Learning resources": pictoQuestionGradient,
+    "Source code": pictoCurlyBracesSolid,
+    Videos: pictoPlaySolid,
+    Blogposts: pictoInboxSolid,
+    Documentation: pictoFileSolid,
+    "Learning resources": pictoQuestionSolid,
 };
 
 function getAuthorAvatarUrl(slug: string): string | undefined {

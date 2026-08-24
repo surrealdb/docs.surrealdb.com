@@ -1,4 +1,4 @@
-import { pictoSpectronGradient, pictoSurrealDBGradient } from "@surrealdb/ui";
+import { pictoSpectronSolid, pictoSurrealDBSolid } from "@surrealdb/ui";
 import {
     PRODUCT_META,
     PRODUCT_ORDER as PRODUCT_ORDER_META,
@@ -23,10 +23,10 @@ export interface ProductConfig extends ProductMeta {
 export const PRODUCTS: Record<ProductId, ProductConfig> = {
     surrealdb: {
         ...PRODUCT_META.surrealdb,
-        picto: pictoSurrealDBGradient,
+        picto: pictoSurrealDBSolid,
     },
     "agent-memory": {
         ...PRODUCT_META["agent-memory"],
-        picto: pictoSpectronGradient,
+        picto: pictoSpectronSolid,
     },
 };
