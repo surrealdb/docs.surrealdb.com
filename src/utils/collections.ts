@@ -1,4 +1,5 @@
-import { getCollectionEntry } from "vike-content-collection";
+import type { CollectionMap } from "vike-content-collection";
+import { getCollection, getCollectionEntry } from "vike-content-collection";
 import type { SdkVersionMap } from "~/lib/versions";
 import { stripLanguageTestComments, stripLeadingH1 } from "./markdown";
 import { flattenMdxComponents } from "./mdx-to-markdown";
@@ -129,4 +130,40 @@ export function composeRawMarkdown(entry: CollectionEntry, sdkVersions?: SdkVers
     const document = [heading, metadata.description, body].filter(Boolean).join("\n\n");
 
     return `${suffixDocsLinks(document)}\n`;
+}
+
+const DOCS_ORIGIN = "https://surrealdb.com";
+
+/**
+ * Build the full documentation corpus served at `/docs/llms-full.txt`: every
+ * page of every collection as one markdown document, in the llms-full.txt
+ * convention. Each page opens with a `Source:` line naming its canonical URL,
+ * so an agent can cite or re-fetch the page it is quoting.
+ *
+ * Pages are composed with the same `composeRawMarkdown` pipeline as the
+ * per-page `.md` endpoint, so `<Version>` markers, stripped test annotations,
+ * and `.md`-suffixed internal links all match what a single-page fetch returns.
+ * `__category` entries are folder metadata, not pages, and are skipped.
+ */
+export function composeFullCorpusMarkdown(sdkVersions?: SdkVersionMap): string {
+    const sections: string[] = [
+        "# SurrealDB documentation - full corpus",
+        `> The complete SurrealDB documentation as a single markdown document. Each page starts with a "Source:" line naming its canonical URL. The page index is at ${DOCS_ORIGIN}/docs/llms.txt, and every page is also available individually by appending \`.md\` to its URL.`,
+    ];
+
+    for (const { prefix, id } of COLLECTION_ROUTES) {
+        const entries = [...getCollection(id as keyof CollectionMap)]
+            .filter((entry) => !entry.slug.endsWith("__category"))
+            .sort((a, b) => a.slug.localeCompare(b.slug));
+
+        for (const entry of entries) {
+            const path = [prefix, entry.slug].filter(Boolean).join("/");
+            const url = path ? `${DOCS_ORIGIN}/docs/${path}` : `${DOCS_ORIGIN}/docs`;
+            const page = composeRawMarkdown(entry, sdkVersions).trimEnd();
+
+            sections.push(`---\n\nSource: ${url}\n\n${page}`);
+        }
+    }
+
+    return `${sections.join("\n\n")}\n`;
 }

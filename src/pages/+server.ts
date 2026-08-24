@@ -8,11 +8,47 @@ import {
     MARKDOWN_CACHE_CONTROL,
     MARKDOWN_CONTENT_TYPE,
 } from "~/utils/agent-markdown";
-import { composeRawMarkdown, resolveCollectionEntry } from "~/utils/collections";
+import {
+    composeFullCorpusMarkdown,
+    composeRawMarkdown,
+    resolveCollectionEntry,
+} from "~/utils/collections";
 
 const BASE = "/docs";
 
 const app = new Hono();
+
+/**
+ * The full documentation corpus as one markdown document, following the
+ * llms-full.txt convention. The hand-maintained index at `/docs/llms.txt`
+ * links pages individually; this endpoint serves every page in one response
+ * for agents that prefer a single fetch over walking the index.
+ *
+ * Composed once per server instance: the content is fixed at build time, and
+ * SDK versions come from the same file-backed cache the page render uses. A
+ * failed compose is not memoised, so the next request retries.
+ */
+let fullCorpus: Promise<string> | undefined;
+
+app.get(`${BASE}/llms-full.txt`, async (c) => {
+    if (!fullCorpus) {
+        fullCorpus = fetchAllSdkVersions().then(composeFullCorpusMarkdown);
+        fullCorpus.catch(() => {
+            fullCorpus = undefined;
+        });
+    }
+
+    const markdown = await fullCorpus;
+
+    return c.body(markdown, 200, {
+        "Content-Type": MARKDOWN_CONTENT_TYPE,
+        "Cache-Control": MARKDOWN_CACHE_CONTROL,
+        "X-Markdown-Tokens": String(estimateTokens(markdown)),
+        // One giant concatenation of pages that are all indexed at their own
+        // URLs; keep it out of search results as a duplicate.
+        "X-Robots-Tag": "noindex",
+    });
+});
 
 /**
  * Serves a page's markdown representation, two ways:
