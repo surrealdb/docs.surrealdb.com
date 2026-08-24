@@ -109,6 +109,7 @@ export function CopyPageMenu() {
             <Menu.Dropdown>
                 <Menu.Item
                     bdrs="xs"
+                    className={classes.menuItem}
                     leftSection={
                         <ThemeIcon>
                             <Icon
@@ -124,6 +125,7 @@ export function CopyPageMenu() {
                         <Text
                             fz="sm"
                             fw={500}
+                            className={classes.menuItemLabel}
                         >
                             Copy as Markdown
                         </Text>
@@ -137,6 +139,7 @@ export function CopyPageMenu() {
                 </Menu.Item>
                 <Menu.Item
                     bdrs="xs"
+                    className={classes.menuItem}
                     leftSection={
                         <ThemeIcon>
                             <Icon
@@ -158,6 +161,7 @@ export function CopyPageMenu() {
                         <Text
                             fz="sm"
                             fw={500}
+                            className={classes.menuItemLabel}
                         >
                             View as Markdown
                         </Text>
@@ -171,6 +175,7 @@ export function CopyPageMenu() {
                 </Menu.Item>
                 <Menu.Item
                     bdrs="xs"
+                    className={classes.menuItem}
                     leftSection={
                         <ThemeIcon>
                             <Icon
@@ -192,6 +197,7 @@ export function CopyPageMenu() {
                         <Text
                             fz="sm"
                             fw={500}
+                            className={classes.menuItemLabel}
                         >
                             Open in ChatGPT
                         </Text>
@@ -205,6 +211,7 @@ export function CopyPageMenu() {
                 </Menu.Item>
                 <Menu.Item
                     bdrs="xs"
+                    className={classes.menuItem}
                     leftSection={
                         <ThemeIcon>
                             <Icon
@@ -226,6 +233,7 @@ export function CopyPageMenu() {
                         <Text
                             fz="sm"
                             fw={500}
+                            className={classes.menuItemLabel}
                         >
                             Open in Claude
                         </Text>
