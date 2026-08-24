@@ -13,7 +13,7 @@ Removes a parameter for this connection.
 $db->unset($key)
 ```
 
-### Arguments
+## Arguments
 <table>
     <thead>
         <tr>
@@ -38,7 +38,7 @@ $db->unset($key)
     </tbody>
 </table>
 
-### Example usage
+## Example usage
 ```php
 // Remove the variable from the connection
 $db->unset('name');

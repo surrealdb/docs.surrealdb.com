@@ -45,49 +45,6 @@ function sdkRedirects(): Redirect[] {
     return out;
 }
 
-/** Flat tutorial URLs → thematic subfolders under explore/tutorials/tutorials/. */
-function exploreTutorialsThematicRedirects(): Redirect[] {
-    const moves: [string, string][] = [
-        ["tutorials/auth0-integration", "tutorials/authentication/auth0-integration"],
-        ["tutorials/aws-cognito-integration", "tutorials/authentication/aws-cognito-integration"],
-        ["tutorials/build-an-ai-agent", "tutorials/ai-and-agents/build-an-ai-agent"],
-        ["tutorials/gen-ai-chatbot", "tutorials/ai-and-agents/gen-ai-chatbot"],
-        [
-            "tutorials/how-to-build-a-knowledge-graph-for-ai",
-            "tutorials/ai-and-agents/how-to-build-a-knowledge-graph-for-ai",
-        ],
-        ["tutorials/minimal-langchain", "tutorials/ai-and-agents/minimal-langchain"],
-        [
-            "tutorials/build-a-real-time-presence-app",
-            "tutorials/realtime-applications/build-a-real-time-presence-app",
-        ],
-        ["tutorials/connect-via-ngrok", "tutorials/integration-and-tooling/connect-via-ngrok"],
-        ["tutorials/http-via-postman", "tutorials/integration-and-tooling/http-via-postman"],
-        ["tutorials/github-actions", "tutorials/integration-and-tooling/github-actions"],
-        ["tutorials/define-a-schema", "tutorials/schema-and-search/define-a-schema"],
-        [
-            "tutorials/semantic-search-in-rust",
-            "tutorials/schema-and-search/semantic-search-in-rust",
-        ],
-    ];
-    const out: Redirect[] = [];
-    for (const [from, to] of moves) {
-        out.push(
-            {
-                source: `/docs/explore/tutorials/${from}`,
-                destination: `/docs/explore/tutorials/${to}`,
-                statusCode: 301,
-            },
-            {
-                source: `/explore/tutorials/${from}`,
-                destination: `/explore/tutorials/${to}`,
-                statusCode: 301,
-            },
-        );
-    }
-    return out;
-}
-
 /** Index “Running” section (formerly /self-hosted). */
 function runningFromSelfHostedRedirects(): Redirect[] {
     return [
@@ -624,11 +581,24 @@ export const docsRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
     { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
     ...legacyPrefixRedirects("surrealql", "reference/query-language"),
-    ...legacyPrefixRedirects("surrealist", "explore/studio"),
+    // `surrealist/*` cannot map path-for-path: the tree it points at was
+    // consolidated to three pages. The two survivors are named, and the rest go
+    // to the section, same as the `explore/surrealist` rules further down.
+    {
+        source: "/surrealist/advanced-topics/search-and-shortcuts",
+        destination: "/explore/studio/search-and-shortcuts",
+        statusCode: 301,
+    },
+    {
+        source: "/surrealist/advanced-topics/surrealql-editors",
+        destination: "/explore/studio/surrealql-editors",
+        statusCode: 301,
+    },
+    { source: "/surrealist", destination: "/explore/studio", statusCode: 301 },
+    { source: "/surrealist/:path*", destination: "/explore/studio", statusCode: 301 },
     ...legacyPrefixRedirects("surrealml", "explore/ml-models"),
     ...legacyPrefixRedirects("integrations", "build/integrations"),
     ...legacyPrefixRedirects("tutorials", "explore/tutorials"),
-    ...exploreTutorialsThematicRedirects(),
     ...sdkRedirects(),
     ...legacyMigratingRedirects(),
     ...deploymentObservabilityToManageRedirects(),
@@ -647,9 +617,27 @@ export const docsRedirects: Redirect[] = [
         destination: "/docs/explore/studio",
         statusCode: 301,
     },
+    // The Surrealist tree was consolidated into a three-page Studio section, so
+    // only these two pages have a counterpart to point at - both promoted out of
+    // `advanced-topics/`. They are listed before the wildcard below, which would
+    // otherwise swallow them.
+    {
+        source: "/docs/explore/surrealist/advanced-topics/search-and-shortcuts",
+        destination: "/docs/explore/studio/search-and-shortcuts",
+        statusCode: 301,
+    },
+    {
+        source: "/docs/explore/surrealist/advanced-topics/surrealql-editors",
+        destination: "/docs/explore/studio/surrealql-editors",
+        statusCode: 301,
+    },
+    // Everything else under `surrealist/` was removed rather than moved, so it
+    // goes to the section that absorbed it. Mapping the path through instead
+    // would name a page that does not exist, which is now a 404 rather than a
+    // quiet walk back up the tree.
     {
         source: "/docs/explore/surrealist/:path*",
-        destination: "/docs/explore/studio/:path*",
+        destination: "/docs/explore/studio",
         statusCode: 301,
     },
     {
@@ -658,8 +646,18 @@ export const docsRedirects: Redirect[] = [
         statusCode: 301,
     },
     {
+        source: "/explore/surrealist/advanced-topics/search-and-shortcuts",
+        destination: "/explore/studio/search-and-shortcuts",
+        statusCode: 301,
+    },
+    {
+        source: "/explore/surrealist/advanced-topics/surrealql-editors",
+        destination: "/explore/studio/surrealql-editors",
+        statusCode: 301,
+    },
+    {
         source: "/explore/surrealist/:path*",
-        destination: "/explore/studio/:path*",
+        destination: "/explore/studio",
         statusCode: 301,
     },
     {
@@ -700,14 +698,25 @@ export function resolveRedirect(pathname: string): ResolvedRedirect | null {
 
         if (source.endsWith("/:path*")) {
             const sourceBase = source.slice(0, -"/:path*".length);
-            const destBase = destination.endsWith("/:path*")
-                ? destination.slice(0, -"/:path*".length)
-                : destination;
-            if (normalized === sourceBase || normalized.startsWith(`${sourceBase}/`)) {
-                const suffix = normalized.slice(sourceBase.length);
-                return { destination: `${destBase}${suffix}`, statusCode };
+
+            if (normalized !== sourceBase && !normalized.startsWith(`${sourceBase}/`)) {
+                continue;
             }
-            continue;
+
+            // The matched path carries through only where the destination asks
+            // for it. A destination without `:path*` is a fixed target, and
+            // Vercel sends every match there; appending the suffix anyway made
+            // dev and preview resolve a URL production never produces, so a
+            // wildcard rule collapsing a removed tree onto one page looked
+            // broken locally and worked in production.
+            if (!destination.endsWith("/:path*")) {
+                return { destination, statusCode };
+            }
+
+            const destBase = destination.slice(0, -"/:path*".length);
+            const suffix = normalized.slice(sourceBase.length);
+
+            return { destination: `${destBase}${suffix}`, statusCode };
         }
 
         if (normalized === source) {

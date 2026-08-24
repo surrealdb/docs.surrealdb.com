@@ -13,7 +13,7 @@ Runs a defined SurrealQL function on the remote database.
 $db->run($function, $version, $params);
 ```
 
-### Arguments
+## Arguments
 
 <table>
 	<thead>
@@ -63,7 +63,7 @@ $db->run($function, $version, $params);
 	</tbody>
 </table>
 
-### Example
+## Example
 
 ```php title="Example"
 $functionA = $db->run("fn::hello_world", null, ["Tobie"]);

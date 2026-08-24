@@ -31,7 +31,11 @@ export function DefaultLayout({
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on route change
     useEffect(() => {
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        // The CSS reduced-motion override cannot reach an explicit JS
+        // `behavior: "smooth"`, so honour the preference here too.
+        const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+        window.scrollTo({ top: 0, behavior: reduced ? "auto" : "smooth" });
         closeSidebar();
     }, [urlPathname]);
 
@@ -124,6 +128,7 @@ export function DefaultLayout({
                             <Box
                                 mt="xl"
                                 component="main"
+                                id="main-content"
                                 flex={1}
                             >
                                 {children}

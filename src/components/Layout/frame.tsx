@@ -1,4 +1,4 @@
-import { Box, Drawer } from "@mantine/core";
+import { Anchor, Box, Drawer } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { type CSSProperties, useEffect } from "react";
 import { usePageContext } from "vike-react/usePageContext";
@@ -55,6 +55,14 @@ export function PageFrame({ children }: { children: React.ReactNode }) {
                 } as CSSProperties
             }
         >
+            {/* First tab stop on every page: keyboard and screen-reader users
+                jump past the header and the whole sidebar tree (WCAG 2.4.1). */}
+            <Anchor
+                href="#main-content"
+                className={classes.skipLink}
+            >
+                Skip to content
+            </Anchor>
             <Header
                 navLinks={navLinks}
                 opened={menuOpened}

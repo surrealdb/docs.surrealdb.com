@@ -13,7 +13,7 @@ Authenticates the current connection with a JWT token.
 $db->authenticate($token)
 ```
 
-### Arguments
+## Arguments
 <table>
     <thead>
         <tr>
@@ -38,7 +38,7 @@ $db->authenticate($token)
     </tbody>
 </table>
 
-### Example usage
+## Example usage
 ```php
 $db->authenticate('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJTdXJyZWFsREIiLCJpYXQiOjE1MTYyMzkwMjIsIm5iZiI6MTUxNjIzOTAyMiwiZXhwIjoxODM2NDM5MDIyLCJOUyI6InRlc3QiLCJEQiI6InRlc3QiLCJTQyI6InVzZXIiLCJJRCI6InVzZXI6dG9iaWUifQ.N22Gp9ze0rdR06McGj1G-h2vu6a6n9IVqUbMFJlOxxA');
 ```

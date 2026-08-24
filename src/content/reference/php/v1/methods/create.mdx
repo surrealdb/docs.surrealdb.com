@@ -13,7 +13,7 @@ Creates a record in the database.
 $db->create($thing, $data)
 ```
 
-### Arguments
+## Arguments
 <table>
     <thead>
         <tr>
@@ -50,7 +50,7 @@ $db->create($thing, $data)
     </tbody>
 </table>
 
-### Example usage
+## Example usage
 ```php
 // Create a record with a random ID
 [$person] = $db->create('person');
@@ -71,7 +71,7 @@ $person = $db->create(new RecordId('person', 'tobie'), [
 );
 ```
 
-### Translated query
+## Translated query
 This function will run the following query in the database.
 
 ```surql

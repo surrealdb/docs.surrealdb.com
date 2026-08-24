@@ -13,7 +13,7 @@ Kills a running live query by it's UUID.
 await db.Kill(queryUuid)
 ```
 
-### Arguments
+## Arguments
 
 <table>
     <thead>
@@ -44,7 +44,7 @@ await db.Kill(queryUuid)
     </tbody>
 </table>
 
-### Example usage
+## Example usage
 
 ```csharp
 await db.Kill(queryUuid);

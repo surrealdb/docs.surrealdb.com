@@ -27,8 +27,8 @@ export function Head() {
         urlPathname === "/" ? "/index.md" : ".md"
     }`;
 
-    const navigation = (pageContext.data as PageData)?.navigation ?? [];
-    const breadcrumbJsonLd = buildBreadcrumbJsonLd(navigation);
+    const breadcrumbItems = (pageContext.data as PageData)?.breadcrumbItems ?? [];
+    const breadcrumbJsonLd = buildBreadcrumbJsonLd(breadcrumbItems);
 
     return (
         <>

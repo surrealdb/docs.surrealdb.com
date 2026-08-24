@@ -16,7 +16,7 @@ $db->merge($thing, $data)
 > [!NOTE]
 > This function merges the current document / record data with the specified data.
 
-### Arguments
+## Arguments
 <table>
     <thead>
         <tr>
@@ -53,7 +53,7 @@ $db->merge($thing, $data)
     </tbody>
 </table>
 
-### Example usage
+## Example usage
 ```php
 
 // Update all records in a table
@@ -75,7 +75,7 @@ $record = $db->merge(new RecordId('person', 'tobie'), [
 ]);
 ```
 
-### Translated query
+## Translated query
 This function will run the following query in the database.
 
 ```surql

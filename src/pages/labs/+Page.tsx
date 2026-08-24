@@ -142,7 +142,10 @@ export default function Page() {
                     {...filterProps}
                 />
                 <ShellContent symmetric>
-                    <Box component="main">
+                    <Box
+                        component="main"
+                        id="main-content"
+                    >
                         <ActionIcon
                             variant="subtle"
                             color="gray"

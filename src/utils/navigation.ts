@@ -224,3 +224,36 @@ function getCategoryEntry(folder: FolderNode) {
     }
     return undefined;
 }
+
+/**
+ * Where a folder that has no page of its own should send a reader.
+ *
+ * Some folders are pure containers: `reference/javascript/concepts` holds pages
+ * but is not one. The tree already answers this - `collectLinks` gives such a
+ * folder its first child's href - so the URL answers it the same way, through
+ * the same ordering, and the reader lands on the page the sidebar highlights.
+ *
+ * Returns undefined when the path names no folder, which is a real 404 rather
+ * than something to guess at.
+ */
+export function resolveFolderLanding(
+    id: string,
+    path: string,
+    baseUrl?: string,
+): string | undefined {
+    const segments = path.split("/").filter(Boolean);
+
+    if (segments.length === 0) return undefined;
+
+    let node = getCollectionTree(id) as FolderNode;
+
+    for (const segment of segments) {
+        const next = node.children.find((child) => isFolder(child) && child.name === segment);
+
+        if (!next || !isFolder(next)) return undefined;
+
+        node = next;
+    }
+
+    return sortByPosition(collectLinks(node, baseUrl ?? id))[0]?.path;
+}
