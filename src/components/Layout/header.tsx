@@ -226,12 +226,15 @@ function NavDropdown({
                                                 aria-current={itemActive ? "page" : undefined}
                                                 leftSection={
                                                     <ThemeIcon
-                                                        variant={itemActive ? "gradient" : "light"}
+                                                        variant="light"
+                                                        className={classes.navItemChip}
+                                                        data-active={itemActive || undefined}
                                                     >
                                                         {/* The tint belongs to the
                                                             glyph, not the chip, so
                                                             every chip stays uniform.
-                                                            The active gradient owns
+                                                            The active chip paints the
+                                                            product accent and owns
                                                             its own glyph colour. */}
                                                         <Icon
                                                             path={item.icon}

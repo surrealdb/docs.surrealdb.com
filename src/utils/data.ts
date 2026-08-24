@@ -144,8 +144,11 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
     const config = useConfig();
 
     const prefix = urlPrefix ?? id;
+    // Escaped by hand rather than with `RegExp.escape`, which needs Node 24
+    // and breaks `bun run dev` on the Node 22 the repo otherwise supports.
+    const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const path = prefix
-        ? context.urlPathname.replace(new RegExp(`/${RegExp.escape(prefix)}/?`), "")
+        ? context.urlPathname.replace(new RegExp(`/${escapedPrefix}/?`), "")
         : context.urlPathname.replace(/^\//, "");
     const entry = getCollectionEntry(id, path);
 

@@ -112,7 +112,7 @@ export function CopyPageMenu() {
             </Menu.Target>
             <Menu.Dropdown>
                 <Menu.Item
-                    bdrs="xs"
+                    className={classes.menuItem}
                     leftSection={
                         <ThemeIcon>
                             <Icon
@@ -140,7 +140,7 @@ export function CopyPageMenu() {
                     </Stack>
                 </Menu.Item>
                 <Menu.Item
-                    bdrs="xs"
+                    className={classes.menuItem}
                     leftSection={
                         <ThemeIcon>
                             <Icon
@@ -174,7 +174,7 @@ export function CopyPageMenu() {
                     </Stack>
                 </Menu.Item>
                 <Menu.Item
-                    bdrs="xs"
+                    className={classes.menuItem}
                     leftSection={
                         <ThemeIcon>
                             <Icon
@@ -208,7 +208,7 @@ export function CopyPageMenu() {
                     </Stack>
                 </Menu.Item>
                 <Menu.Item
-                    bdrs="xs"
+                    className={classes.menuItem}
                     leftSection={
                         <ThemeIcon>
                             <Icon
