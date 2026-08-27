@@ -85,7 +85,7 @@ function entryHrefs(entry: NavEntry): string[] {
  * hub and one of its sub-pages - never both light up.
  *
  * The root entry (`/docs/`, normalising to `/`) is the "Start" catch-all:
- * its sub-pages are unprefixed (`/docs/architecture`, not `/docs/start/…`),
+ * its sub-pages are unprefixed (`/docs/what-is-surrealdb`, not `/docs/start/…`),
  * so prefix matching can't claim them. Instead it acts as the fallback for
  * any docs page no other entry owns.
  */
