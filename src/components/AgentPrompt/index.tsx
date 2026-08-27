@@ -1,11 +1,19 @@
 import { Box, Group, Image, Text, Tooltip, UnstyledButton } from "@mantine/core";
 import { useClipboard } from "@mantine/hooks";
 import { Icon, iconCheck, iconCopy, pictoAISolid } from "@surrealdb/ui";
+import type { ReactNode } from "react";
 import { SETUP_PROMPT } from "~/utils/agents";
 import classes from "./style.module.scss";
 
 /** Long enough to read the confirmation, short enough to be gone on the next glance. */
 const COPIED_TIMEOUT = 2000;
+
+export interface AgentPromptProps {
+    /** Overrides the button text where the surrounding copy already explains it. */
+    label?: string;
+    /** Replaces the leading mark, e.g. with the brands the prompt covers. */
+    leading?: ReactNode;
+}
 
 /**
  * Puts the setup prompt on the clipboard, ready to paste into an agent. The same
@@ -15,7 +23,10 @@ const COPIED_TIMEOUT = 2000;
  * The tooltip is controlled rather than hover-triggered, because it confirms the
  * copy rather than explaining a button whose purpose is written on its face.
  */
-export function AgentPrompt() {
+export function AgentPrompt({
+    label = "Onboard your agent to SurrealDB",
+    leading,
+}: AgentPromptProps) {
     const clipboard = useClipboard({ timeout: COPIED_TIMEOUT });
 
     return (
@@ -34,16 +45,18 @@ export function AgentPrompt() {
                         gap="sm"
                         wrap="nowrap"
                     >
-                        <Image
-                            src={pictoAISolid}
-                            mr="xs"
-                            w={16}
-                        />
+                        {leading ?? (
+                            <Image
+                                src={pictoAISolid}
+                                mr="xs"
+                                w={16}
+                            />
+                        )}
                         <Text
                             fw={500}
                             c="bright"
                         >
-                            Onboard your agent to SurrealDB
+                            {label}
                         </Text>
                         <Icon
                             path={clipboard.copied ? iconCheck : iconCopy}
