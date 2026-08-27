@@ -72,6 +72,8 @@ export function IconBox({
                             src={unifiedSrc}
                             alt={title ?? "Icon"}
                             w={24}
+                            h={24}
+                            fit="contain"
                             className={classes.unifiedIcon}
                             data-only-icon={onlyIcon || undefined}
                         />
@@ -82,6 +84,8 @@ export function IconBox({
                                     src={resolvedLightSrc}
                                     alt={title ?? "Icon"}
                                     w={24}
+                                    h={24}
+                                    fit="contain"
                                     className={classes.lightIcon}
                                     data-only-icon={onlyIcon || undefined}
                                 />
@@ -91,6 +95,8 @@ export function IconBox({
                                     src={resolvedDarkSrc}
                                     alt={title ?? "Icon"}
                                     w={24}
+                                    h={24}
+                                    fit="contain"
                                     className={classes.darkIcon}
                                     data-only-icon={onlyIcon || undefined}
                                 />
