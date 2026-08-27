@@ -19,7 +19,6 @@ import {
     iconLangPython,
     iconLangRust,
     iconLangSwift,
-    iconMCP,
     iconMemory,
     iconOffice,
     iconOrganization,
@@ -172,13 +171,6 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
             {
                 heading: "Intelligence",
                 items: [
-                    {
-                        label: "Agent setup",
-                        href: "/docs/agents",
-                        description: "Set up your coding agent for SurrealDB.",
-                        icon: iconMCP,
-                        badge: "new",
-                    },
                     {
                         label: "AI Agents",
                         href: "/docs/build/ai-agents",

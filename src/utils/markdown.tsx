@@ -6,6 +6,8 @@ import {
     mergeMarkdownComponents,
     parseMarkdownTree,
 } from "@surrealdb/ui";
+import { AgentPicker } from "~/components/AgentPicker";
+import { AgentPrompt } from "~/components/AgentPrompt";
 import { Boxes } from "~/components/Boxes";
 import { Edition } from "~/components/Edition";
 import { IconBox } from "~/components/IconBox";
@@ -174,6 +176,8 @@ export function resolveImageDescriptor(node: MediaDescriptor): MediaDescriptor {
 
 export function registerMarkdownComponents(): MarkdownComponents {
     return mergeMarkdownComponents({
+        AgentPicker: { component: AgentPicker, block: true },
+        AgentPrompt: { component: AgentPrompt, block: true },
         IconBox: { component: IconBox, block: true },
         Boxes: { component: Boxes, block: true, preserveNewlines: false },
         Synopsis: { component: Synopsis, block: true },

@@ -42,22 +42,6 @@ const DEPTH = { default: 2, reference: 1 };
 const SKIP_COLLECTIONS = new Set(["labs-items"]);
 
 /**
- * Pages built by hand rather than from a collection, listed under the section
- * they belong to. Everything else here is derived, so a hand-built page is
- * invisible to this script unless it is named - and a page an agent is meant to
- * find has to appear in the index agents read.
- */
-const STANDALONE_PAGES = {
-    index: [
-        {
-            path: "agents",
-            title: "Agent setup",
-            description: `Connect your coding agent to SurrealDB with Agent Skills and MCP, with per-agent steps and a setup prompt. The instructions an agent follows are at ${SITE}/docs/agents/instructions.md.`,
-        },
-    ],
-};
-
-/**
  * Preamble. Prose, so it stays hand-written - it is the only part of this file
  * a person should edit.
  */
@@ -215,21 +199,6 @@ function sectionOf(id) {
 
 const collections = readCollections();
 const sections = new Map();
-
-for (const [key, pages] of Object.entries(STANDALONE_PAGES)) {
-    const group = sections.get(key) ?? { pages: [], position: 999 };
-
-    group.pages.push(
-        ...pages.map((page) => ({
-            url: `${SITE}/docs/${page.path}`,
-            title: page.title,
-            description: page.description,
-            depth: 0,
-        })),
-    );
-
-    sections.set(key, group);
-}
 
 for (const [id, prefix] of collections) {
     if (SKIP_COLLECTIONS.has(id)) continue;
