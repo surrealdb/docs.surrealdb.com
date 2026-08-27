@@ -2,6 +2,7 @@ import vike, { type App } from "@vikejs/hono";
 import { Hono } from "hono";
 import type { Server } from "vike/types";
 import { fetchAllSdkVersions } from "~/lib/versions";
+import agentInstructions from "~/pages/agents/instructions.md?raw";
 import {
     acceptsMarkdown,
     estimateTokens,
@@ -49,6 +50,24 @@ app.get(`${BASE}/llms-full.txt`, async (c) => {
         "X-Robots-Tag": "noindex",
     });
 });
+
+/**
+ * The agent setup instructions, as the markdown an agent is pointed at.
+ *
+ * The `/docs/agents` page is hand-built rather than a content collection entry,
+ * so the `.md` route below cannot resolve it. This serves the document directly,
+ * and is registered ahead of that route so the lookup never runs.
+ *
+ * The URL is quoted verbatim in the prompt the page and SurrealDB Studio copy to
+ * the clipboard, so it is a stable address: change the document, not the path.
+ */
+app.get(`${BASE}/agents/instructions.md`, (c) =>
+    c.body(agentInstructions, 200, {
+        "Content-Type": MARKDOWN_CONTENT_TYPE,
+        "Cache-Control": MARKDOWN_CACHE_CONTROL,
+        "X-Markdown-Tokens": String(estimateTokens(agentInstructions)),
+    }),
+);
 
 /**
  * Serves a page's markdown representation, two ways:
