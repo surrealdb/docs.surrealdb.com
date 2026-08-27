@@ -83,7 +83,7 @@ async function buildSystemPrompt(userId: string): Promise<string> {
 
 A formatted profile looks something like this after a few conversations:
 
-```
+```text
 The user is Alice Chen, Head of Platform at Acme Corp. They prefer \
   TypeScript over JavaScript. They live in London. They prefer \
   bullet-point responses and dislike filler phrases. They are \

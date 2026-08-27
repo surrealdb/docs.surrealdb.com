@@ -15,7 +15,7 @@ SurrealDB supports multiple types of embedded storage in Go:
 
 - **In-memory database** (`mem://`) - Fastest performance with data stored in RAM. Perfect for testing, caching, or temporary data. Data is lost when the connection closes.
 
-- **File-based database** (`surrealkv://` or `rocksdb://`) - Persistent storage on disk using the SurrealKV storage engine. Data persists across connections and application restarts. The RocksDB backend requires a separate manual build detailed [here](https://github.com/surrealdb/surrealdb.c.go/blob/main/docs/rocksdb.md)
+- **File-based database** (`surrealkv://` or `rocksdb://`) - Persistent storage on disk using the SurrealKV storage engine. Data persists across connections and application restarts. The RocksDB backend requires a separate manual build, detailed in [the RocksDB build guide](https://github.com/surrealdb/surrealdb.c.go/blob/main/docs/rocksdb.md)
 
 ## Quick example
 

@@ -186,7 +186,7 @@ while True:
 
 Example output for a video document processed with `MultimodalFull`:
 
-```
+```text
 Stage: queued
 Stage: extracting
 Stage: transcribing
