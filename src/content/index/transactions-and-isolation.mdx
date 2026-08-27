@@ -18,6 +18,8 @@ SurrealDB does not offer weaker isolation levels. You cannot downgrade to read c
 
 On commit, the engine checks for **write - write conflicts**. If two concurrent transactions modified the same key, the later commit fails with a transaction conflict error and must be retried. There is no silent last-writer-wins merge at the storage layer.
 
+Records that a transaction only reads are outside that check by default. The [`FOR UPDATE`](#locked-reads-with-for-update) clause brings them into it.
+
 These semantics apply across deployment models and storage backends: embedded and server, single-node and distributed, RocksDB, SurrealKV, SurrealMX, and browser IndexedDB. The query layer enforces the same isolation contract regardless of which engine persists the keys underneath.
 
 ## What you get in practice
@@ -29,9 +31,24 @@ Snapshot isolation with write - write conflict detection on commit gives you str
 | Dirty reads | Yes | A transaction never reads uncommitted data from another transaction. |
 | Non-repeatable reads | Yes | Re-reading the same data inside a transaction returns the same values. |
 | Lost updates (same key) | Yes | Concurrent writes to the same key cannot both commit; one transaction must retry. |
-| Write skew | No | See [write skew](#write-skew) below. |
+| Write skew | Opt in | Covered per record with [`FOR UPDATE`](#locked-reads-with-for-update); see [write skew](#write-skew) below. |
 
-In database terms, snapshot isolation sits between read committed and serialisable. It matches the default isolation level in MySQL (InnoDB `REPEATABLE READ`) and PostgreSQL's optional `REPEATABLE READ` level (note that PostgreSQL's default is `READ COMMITTED`), with the important caveat that SurrealDB does not provide serialisable isolation.
+In database terms, snapshot isolation sits between read committed and serialisable. It matches the default isolation level in MySQL (InnoDB `REPEATABLE READ`) and PostgreSQL's optional `REPEATABLE READ` level (note that PostgreSQL's default is `READ COMMITTED`), with the important caveat that SurrealDB does not provide serialisable isolation. For the specific records a transaction names, [`FOR UPDATE`](#locked-reads-with-for-update) closes the remaining gap, serving the same purpose as `SELECT ... FOR UPDATE` under PostgreSQL's `REPEATABLE READ` while working by a different mechanism.
+
+### Compared with PostgreSQL `REPEATABLE READ`
+
+PostgreSQL's `REPEATABLE READ` is snapshot isolation too, so the two protect against the same anomalies. The mechanisms differ in ways that decide where an application handles a conflict.
+
+| | PostgreSQL `REPEATABLE READ` | SurrealDB |
+| --- | --- | --- |
+| Snapshot taken | At the first statement in the transaction | At the start of the transaction |
+| Competing writer | Blocks on a row lock until the first transaction resolves | Never blocks; proceeds and commits |
+| Conflict surfaces | At the conflicting statement, as `could not serialize access due to concurrent update` | At `COMMIT`, as a transaction conflict error |
+| `SELECT ... FOR UPDATE` | Takes a row lock, and raises straight away if the row moved since the snapshot | Registers the record, and raises at `COMMIT` if it moved |
+| Write skew | Needs explicit locking, or the `SERIALIZABLE` level | Needs [`FOR UPDATE`](#locked-reads-with-for-update) |
+| Blanket serialisable level | `SERIALIZABLE` covers predicate-based anomalies as well | No equivalent; `FOR UPDATE` covers named records only |
+
+Two consequences follow for application code. Conflicts arrive later in SurrealDB: a `FOR UPDATE` read never fails on account of a concurrent write, so retry logic wraps the whole transaction rather than guarding individual statements. And because a predicate cannot be registered, an invariant that depends on a set of records rather than on named ones has no direct equivalent of `SERIALIZABLE` to fall back on, so it needs a record that stands in for the set, such as a counter or a parent record that every participant reads for update.
 
 ## Default and manual transactions
 
@@ -64,7 +81,48 @@ Snapshot isolation does not prevent **write skew**. Write skew occurs when two t
 
 An everyday example of write skew is one in which two doctors each check a schedule, see that only one shift is booked, and both book themselves. Each "transaction" read a consistent snapshot (the data in the schedule as of the last "write"), but together they overbooked the day.
 
-If write skew matters for your workload, encode the invariant inside the transaction with **explicit record-level guards**: read and update every record your rule depends on (for example, the shared counter or `schedule` record), or use conditional updates so a concurrent change causes the transaction to fail and retry.
+If write skew matters for your workload, read the records the rule depends on with [`SELECT ... FOR UPDATE`](#locked-reads-with-for-update). Each doctor's transaction then registers the `schedule` record it based its decision on, so whichever transaction commits second fails and retries against the booking the first one made.
+
+Writing every record the rule depends on has the same effect, because a write is conflict-checked already. That remains the natural choice where the transaction was going to update the record anyway, and conditional updates work on the same principle.
+
+## Locked reads with `FOR UPDATE`
+
+<Since v="v3.3.0" />
+
+The [`FOR UPDATE`](/docs/reference/query-language/statements/select#the-for-update-clause) clause on `SELECT` enrols a record that the transaction only reads into the same commit-time conflict check that already covers writes. The transaction commits only if no other transaction wrote that record after the snapshot was taken. Otherwise `COMMIT` fails with a transaction conflict error and the transaction can be retried.
+
+```surql
+BEGIN;
+
+-- Register the schedule for commit-time conflict detection
+LET $schedule = SELECT * FROM ONLY schedule:monday FOR UPDATE;
+
+-- The decision below rests on a value that is read but never written,
+-- which is exactly the case FOR UPDATE covers
+IF $schedule.shifts_booked = 0 {
+    UPDATE booking SET doctor = $auth.id, day = "monday";
+};
+
+COMMIT;
+```
+
+Three properties are worth knowing beyond the basic guarantee:
+
+- **Concurrent writers are not blocked.** The clause takes no lock. Another transaction can write a registered record and commit normally, and the cost lands on the reading transaction, whose own `COMMIT` then fails and must be retried. Readers coming from a database where `SELECT ... FOR UPDATE` holds a row lock should plan for retries rather than for waiting.
+- **An absent record is still covered.** Reading a record id that does not exist registers that id, so a concurrent transaction creating it also invalidates the commit. This is what makes `FOR UPDATE` safe for get-or-create paths.
+- **The enclosing statement becomes write-classified.** A `FOR UPDATE` read nested inside an expression promotes its statement to a write transaction, because the registration can only be validated at commit time.
+
+| Aspect | Behaviour |
+| --- | --- |
+| Targets | Record ids only, written literally or passed through a parameter. Tables, record ranges, subqueries and parameters holding a table are rejected. |
+| Concurrency model | Optimistic. No lock is taken and no transaction waits; a conflict surfaces at `COMMIT` on the transaction that read the record. |
+| Granularity | One record at a time. Tables, ranges and query predicates are not locked, so a concurrent transaction can still create a new record that matches a predicate. |
+| Transaction type | Requires a transaction that commits. A read-only context rejects the clause, since the registration would never be validated. |
+| Storage backends | Available on SurrealMX, RocksDB, SurrealKV, TiKV and IndexedDB. A backend without a conflict-tracked read path rejects the clause rather than serving a read it cannot validate. |
+| Clause conflicts | Cannot be combined with `VERSION`, `GROUP BY` or `SPLIT`, or with `LIMIT` across multiple targets. |
+
+> [!NOTE]
+> `FOR UPDATE` is used for a record the transaction reads but never writes. A record the transaction also writes is covered already by the write - write check, so adding the clause there changes nothing.
 
 ## ACID at a glance
 
@@ -72,7 +130,7 @@ If write skew matters for your workload, encode the invariant inside the transac
 | --- | --- |
 | **Atomicity** | A transaction’s statements commit together or roll back together. |
 | **Consistency** | Schema, permissions, and statement semantics apply on every commit; you define business invariants in SurrealQL and application code. |
-| **Isolation** | Snapshot isolation on all storage backends; write - write conflicts abort on commit. |
+| **Isolation** | Snapshot isolation on all storage backends; write - write conflicts abort on commit, and [`FOR UPDATE`](#locked-reads-with-for-update) extends that check to records the transaction only reads. |
 | **Durability** | Committed data persists according to your storage engine and sync settings - see [File-backed storage](/docs/running/file-backed) and [Deployment models](/docs/manage/self-hosted/deployment-models). |
 
 Some features deliberately step outside the triggering transaction’s ACID boundary - for example, [`ASYNC` events](/docs/reference/query-language/statements/define/event#async-events) run after commit in a separate transaction. Use them only when that trade-off is acceptable.
