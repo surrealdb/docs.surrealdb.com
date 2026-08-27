@@ -68,6 +68,7 @@ export function AgentBrand({ agent, size, alt = "" }: AgentBrandProps) {
                 alt={alt}
                 w={size}
                 h={size}
+                fit="contain"
             />
         );
     }
@@ -79,6 +80,7 @@ export function AgentBrand({ agent, size, alt = "" }: AgentBrandProps) {
                 alt={alt}
                 w={size}
                 h={size}
+                fit="contain"
                 darkHidden
             />
             <Image
@@ -86,6 +88,7 @@ export function AgentBrand({ agent, size, alt = "" }: AgentBrandProps) {
                 alt={alt}
                 w={size}
                 h={size}
+                fit="contain"
                 lightHidden
             />
         </>
