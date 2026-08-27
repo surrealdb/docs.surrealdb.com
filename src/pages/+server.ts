@@ -1,6 +1,7 @@
 import vike, { type App } from "@vikejs/hono";
 import { Hono } from "hono";
 import type { Server } from "vike/types";
+import agentInstructions from "~/lib/agent-instructions.md?raw";
 import { fetchAllSdkVersions } from "~/lib/versions";
 import {
     acceptsMarkdown,
@@ -12,6 +13,7 @@ import {
     composeFullCorpusMarkdown,
     composeRawMarkdown,
     resolveCollectionEntry,
+    suffixDocsLinks,
 } from "~/utils/collections";
 
 const BASE = "/docs";
@@ -49,6 +51,32 @@ app.get(`${BASE}/llms-full.txt`, async (c) => {
         "X-Robots-Tag": "noindex",
     });
 });
+
+/**
+ * The agent setup instructions, served exactly as written.
+ *
+ * This one is not a documentation page. It is addressed to an AI coding agent
+ * in the second person and read by fetching it, so it is kept out of the
+ * content collections: a collection entry would render as an article for people
+ * and would gain a title and a description written about the document rather
+ * than to its reader.
+ *
+ * Its internal links still get the `.md` treatment the collections give theirs,
+ * so an agent following one stays in markdown.
+ *
+ * The URL is quoted verbatim in the prompt the setup page and SurrealDB Studio
+ * copy to the clipboard, so it is a stable address: change the document, not
+ * the path.
+ */
+const agentInstructionsBody = `${suffixDocsLinks(agentInstructions.trimEnd())}\n`;
+
+app.get(`${BASE}/agents/instructions.md`, (c) =>
+    c.body(agentInstructionsBody, 200, {
+        "Content-Type": MARKDOWN_CONTENT_TYPE,
+        "Cache-Control": MARKDOWN_CACHE_CONTROL,
+        "X-Markdown-Tokens": String(estimateTokens(agentInstructionsBody)),
+    }),
+);
 
 /**
  * Serves a page's markdown representation, two ways:
