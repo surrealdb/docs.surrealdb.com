@@ -1,12 +1,12 @@
 import { Anchor, Badge, Box, Group, Image, SimpleGrid, Text } from "@mantine/core";
 import {
-    pictoClaude,
-    pictoCursor,
-    pictoGitHub,
-    pictoOpenAI,
-    pictoVisualStudioCode,
-    pictoWindsurf,
-    pictoZed,
+    pictoClaudeSolid,
+    pictoCursorSolid,
+    pictoGitHubSolid,
+    pictoOpenAISolid,
+    pictoVisualStudioCodeSolid,
+    pictoWindsurfSolid,
+    pictoZedSolid,
 } from "@surrealdb/ui";
 import { useMemo, useState } from "react";
 import { AGENTS, type AgentSummary, type AgentWorkflow, WORKFLOW_LABELS } from "~/utils/agents";
@@ -14,13 +14,13 @@ import classes from "./style.module.scss";
 
 /** Brand marks, keyed by the agent id so the catalogue stays free of UI imports. */
 const AGENT_PICTOS: Record<string, string> = {
-    "claude-code": pictoClaude,
-    codex: pictoOpenAI,
-    cursor: pictoCursor,
-    "github-copilot": pictoGitHub,
-    vscode: pictoVisualStudioCode,
-    windsurf: pictoWindsurf,
-    zed: pictoZed,
+    "claude-code": pictoClaudeSolid,
+    codex: pictoOpenAISolid,
+    cursor: pictoCursorSolid,
+    "github-copilot": pictoGitHubSolid,
+    vscode: pictoVisualStudioCodeSolid,
+    windsurf: pictoWindsurfSolid,
+    zed: pictoZedSolid,
 };
 
 /** The workflow filters, with "all" first as the default view. */

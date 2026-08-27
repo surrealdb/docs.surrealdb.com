@@ -4,10 +4,10 @@ import {
     Icon,
     iconCheck,
     iconCopy,
-    pictoClaude,
-    pictoCursor,
-    pictoVisualStudioCode,
-    pictoWindsurf,
+    pictoClaudeSolid,
+    pictoCursorSolid,
+    pictoVisualStudioCodeSolid,
+    pictoWindsurfSolid,
 } from "@surrealdb/ui";
 import { SETUP_PROMPT } from "~/utils/agents";
 import classes from "./style.module.scss";
@@ -17,10 +17,10 @@ const COPIED_TIMEOUT = 2000;
 
 /** Stands in for "whichever agent you use", not for the four that are shown. */
 const HERO_PICTOS = [
-    { picto: pictoClaude, name: "Claude Code" },
-    { picto: pictoCursor, name: "Cursor" },
-    { picto: pictoVisualStudioCode, name: "Visual Studio Code" },
-    { picto: pictoWindsurf, name: "Windsurf" },
+    { picto: pictoClaudeSolid, name: "Claude Code" },
+    { picto: pictoCursorSolid, name: "Cursor" },
+    { picto: pictoVisualStudioCodeSolid, name: "Visual Studio Code" },
+    { picto: pictoWindsurfSolid, name: "Windsurf" },
 ];
 
 /**

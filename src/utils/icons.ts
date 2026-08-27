@@ -1,5 +1,6 @@
 import {
     iconAccountSecure,
+    iconAI,
     iconAlert,
     iconAPI,
     iconAtom,
@@ -70,6 +71,7 @@ import {
 
 export const SECTION_ICONS = new Map([
     ["account", iconAccountSecure],
+    ["ai", iconAI],
     ["api", iconAPI],
     ["atom", iconAtom],
     ["auth", iconAuthKeyhole],

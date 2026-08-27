@@ -56,7 +56,7 @@ export function DocMarkdown() {
             components={registerMarkdownComponents()}
             onResolveMedia={resolveImageDescriptor}
             renderers={{ image: MarkdownImage }}
-            fz={17}
+            fz={15}
             lh={1.5}
             p={0}
         />
