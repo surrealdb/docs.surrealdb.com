@@ -1,14 +1,7 @@
-import { Box, Group, Image, Text, Tooltip, UnstyledButton } from "@mantine/core";
+import { Box, Group, Text, Tooltip, UnstyledButton } from "@mantine/core";
 import { useClipboard } from "@mantine/hooks";
-import {
-    Icon,
-    iconCheck,
-    iconCopy,
-    pictoClaudeSolid,
-    pictoCursorSolid,
-    pictoVisualStudioCodeSolid,
-    pictoWindsurfSolid,
-} from "@surrealdb/ui";
+import { Icon, iconCheck, iconCopy } from "@surrealdb/ui";
+import { AgentBrand } from "~/components/AgentBrand";
 import { SETUP_PROMPT } from "~/utils/agents";
 import classes from "./style.module.scss";
 
@@ -16,11 +9,11 @@ import classes from "./style.module.scss";
 const COPIED_TIMEOUT = 2000;
 
 /** Stands in for "whichever agent you use", not for the four that are shown. */
-const HERO_PICTOS = [
-    { picto: pictoClaudeSolid, name: "Claude Code" },
-    { picto: pictoCursorSolid, name: "Cursor" },
-    { picto: pictoVisualStudioCodeSolid, name: "Visual Studio Code" },
-    { picto: pictoWindsurfSolid, name: "Windsurf" },
+const HERO_AGENTS = [
+    { id: "claude-code", name: "Claude Code" },
+    { id: "cursor", name: "Cursor" },
+    { id: "vscode", name: "Visual Studio Code" },
+    { id: "windsurf", name: "Windsurf" },
 ];
 
 /**
@@ -64,13 +57,12 @@ export function AgentPrompt() {
                             gap={6}
                             wrap="nowrap"
                         >
-                            {HERO_PICTOS.map(({ picto, name }) => (
-                                <Image
-                                    key={name}
-                                    src={picto}
+                            {HERO_AGENTS.map(({ id, name }) => (
+                                <AgentBrand
+                                    key={id}
+                                    agent={id}
+                                    size={18}
                                     alt={name}
-                                    w={18}
-                                    h={18}
                                 />
                             ))}
                         </Group>

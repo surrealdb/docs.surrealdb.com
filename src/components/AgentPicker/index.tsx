@@ -1,27 +1,8 @@
-import { Anchor, Badge, Box, Group, Image, SimpleGrid, Text } from "@mantine/core";
-import {
-    pictoClaudeSolid,
-    pictoCursorSolid,
-    pictoGitHubSolid,
-    pictoOpenAISolid,
-    pictoVisualStudioCodeSolid,
-    pictoWindsurfSolid,
-    pictoZedSolid,
-} from "@surrealdb/ui";
+import { Anchor, Badge, Box, Group, SimpleGrid, Text } from "@mantine/core";
 import { useMemo, useState } from "react";
+import { AgentBrand } from "~/components/AgentBrand";
 import { AGENTS, type AgentSummary, type AgentWorkflow, WORKFLOW_LABELS } from "~/utils/agents";
 import classes from "./style.module.scss";
-
-/** Brand marks, keyed by the agent id so the catalogue stays free of UI imports. */
-const AGENT_PICTOS: Record<string, string> = {
-    "claude-code": pictoClaudeSolid,
-    codex: pictoOpenAISolid,
-    cursor: pictoCursorSolid,
-    "github-copilot": pictoGitHubSolid,
-    vscode: pictoVisualStudioCodeSolid,
-    windsurf: pictoWindsurfSolid,
-    zed: pictoZedSolid,
-};
 
 /** The workflow filters, with "all" first as the default view. */
 const FILTERS: { id: AgentWorkflow | "all"; label: string }[] = [
@@ -49,11 +30,9 @@ function AgentCard({ agent }: AgentCardProps) {
                     wrap="nowrap"
                     align="flex-start"
                 >
-                    <Image
-                        src={AGENT_PICTOS[agent.id]}
-                        alt=""
-                        w={28}
-                        h={28}
+                    <AgentBrand
+                        agent={agent.id}
+                        size={28}
                     />
                     <Box miw={0}>
                         <Text
