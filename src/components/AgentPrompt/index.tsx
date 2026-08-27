@@ -1,20 +1,11 @@
-import { Box, Group, Text, Tooltip, UnstyledButton } from "@mantine/core";
+import { Box, Group, Image, Text, Tooltip, UnstyledButton } from "@mantine/core";
 import { useClipboard } from "@mantine/hooks";
-import { Icon, iconCheck, iconCopy } from "@surrealdb/ui";
-import { AgentBrand } from "~/components/AgentBrand";
+import { Icon, iconCheck, iconCopy, pictoAISolid } from "@surrealdb/ui";
 import { SETUP_PROMPT } from "~/utils/agents";
 import classes from "./style.module.scss";
 
 /** Long enough to read the confirmation, short enough to be gone on the next glance. */
 const COPIED_TIMEOUT = 2000;
-
-/** Stands in for "whichever agent you use", not for the four that are shown. */
-const HERO_AGENTS = [
-    { id: "claude-code", name: "Claude Code" },
-    { id: "cursor", name: "Cursor" },
-    { id: "vscode", name: "Visual Studio Code" },
-    { id: "windsurf", name: "Windsurf" },
-];
 
 /**
  * Puts the setup prompt on the clipboard, ready to paste into an agent. The same
@@ -43,9 +34,10 @@ export function AgentPrompt() {
                         gap="sm"
                         wrap="nowrap"
                     >
-                        <Icon
-                            path={clipboard.copied ? iconCheck : iconCopy}
-                            size="sm"
+                        <Image
+                            src={pictoAISolid}
+                            mr="xs"
+                            w={16}
                         />
                         <Text
                             fw={500}
@@ -53,19 +45,10 @@ export function AgentPrompt() {
                         >
                             Onboard your agent to SurrealDB
                         </Text>
-                        <Group
-                            gap={6}
-                            wrap="nowrap"
-                        >
-                            {HERO_AGENTS.map(({ id, name }) => (
-                                <AgentBrand
-                                    key={id}
-                                    agent={id}
-                                    size={18}
-                                    alt={name}
-                                />
-                            ))}
-                        </Group>
+                        <Icon
+                            path={clipboard.copied ? iconCheck : iconCopy}
+                            size="sm"
+                        />
                     </Group>
                 </UnstyledButton>
             </Tooltip>

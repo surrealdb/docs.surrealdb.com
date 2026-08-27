@@ -28,7 +28,6 @@ function AgentCard({ agent }: AgentCardProps) {
                 <Group
                     gap="sm"
                     wrap="nowrap"
-                    align="flex-start"
                 >
                     <AgentBrand
                         agent={agent.id}
@@ -43,6 +42,7 @@ function AgentCard({ agent }: AgentCardProps) {
                             {agent.vendor}
                         </Text>
                         <Text
+                            mt={-2}
                             fw={500}
                             c="bright"
                             lineClamp={1}
