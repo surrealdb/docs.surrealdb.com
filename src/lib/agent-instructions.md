@@ -1,10 +1,3 @@
----
-position: 9
-title: Set up this environment for SurrealDB
-description: "Instructions for an AI coding agent asked to configure itself for SurrealDB, covering the Agent Skills and the MCP server."
-hidden: true
----
-
 # Set up this environment for SurrealDB
 
 You are an AI coding agent, and the person you are working with has asked you to set them up for SurrealDB. Work through this document in order and report what you did at the end.
