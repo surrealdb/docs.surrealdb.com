@@ -552,7 +552,7 @@ SELECT count() AS number_of_records FROM person GROUP ALL;
 
 ### Bare `count()` implies `GROUP ALL`
 
-<Since v="v3.2.5" />
+<Since v="v3.3.0" />
 
 When every expression in the projection is a bare zero-argument [`count()`](/docs/reference/query-language/functions/database-functions/count) (with or without an alias), SurrealDB implies `GROUP ALL`. Outside an aggregation, `count()` has nothing to count and would otherwise return the constant `1` once per record.
 
@@ -560,7 +560,7 @@ When every expression in the projection is a bare zero-argument [`count()`](/doc
 -- count() with explicit GROUP ALL
 SELECT count() AS number_of_records FROM person GROUP ALL;
 
--- From 3.2.5, equivalent when the projection is only bare count()
+-- From 3.3.0, equivalent when the projection is only bare count()
 SELECT count() AS number_of_records FROM person;
 ```
 
@@ -632,7 +632,7 @@ SPLIT emails;
 
 <Since v="v3.0.0" />
 
-To speed up the `count()` function along with `GROUP ALL` to get the total number of records in a table, a `COUNT` index can be used. This keeps track of the total number of records as a single value as opposed to a dynamic iteration of the table to get the full count every time a query is run. From 3.2.5, a bare `count()` projection [implies `GROUP ALL`](#bare-count-implies-group-all); the examples below keep the explicit form.
+To speed up the `count()` function along with `GROUP ALL` to get the total number of records in a table, a `COUNT` index can be used. This keeps track of the total number of records as a single value as opposed to a dynamic iteration of the table to get the full count every time a query is run. From 3.3.0, a bare `count()` projection [implies `GROUP ALL`](#bare-count-implies-group-all); the examples below keep the explicit form.
 
 ```surql
 DEFINE INDEX person_count ON person COUNT;
@@ -810,7 +810,7 @@ SELECT * FROM person
 
 <Since v="v3.3.0" />
 
-Inside a transaction, a plain `SELECT` reads a consistent snapshot, but the transaction can still commit successfully even if the records it read were modified by another transaction in the meantime. When later writes depend on a value that was only read, this allows the transaction to commit decisions based on stale data.
+Inside a transaction, a plain `SELECT` reads a consistent [snapshot](/docs/transactions-and-isolation#snapshot-isolation), but the transaction can still commit successfully even if the records it read were modified by another transaction in the meantime. When later writes depend on a value that was only read, this allows the transaction to commit decisions based on stale data.
 
 The `FOR UPDATE` clause registers each selected record for commit-time conflict detection: the enclosing transaction will only commit if none of those records were modified by another transaction after the snapshot was taken. If a concurrent modification is detected, `COMMIT` fails with a transaction conflict error, and the transaction can be retried.
 
@@ -829,11 +829,19 @@ IF $account.status = "active" {
 COMMIT;
 ```
 
+The clause takes no lock, and no transaction waits on another. A concurrent transaction can write a registered record and commit normally; the conflict surfaces on the transaction that read the record, whose `COMMIT` then fails. Where `SELECT ... FOR UPDATE` holds a row lock in other databases, here it adds a check, so plan for retries rather than for waiting.
+
 `FOR UPDATE` is only needed for records that are read as decision inputs but never written within the transaction. A record that the transaction also writes is already protected, because the write itself is checked for conflicts at commit time.
 
 The `FOR UPDATE` clause requires record ids as targets, and each selected record is protected individually. It does not lock tables, ranges, or query predicates, so it does not prevent new matching records from being created by concurrent transactions.
 
-The clause cannot be combined with the `VERSION`, `GROUP`, or `SPLIT` clauses, and it cannot be used with targets other than record ids. It also cannot be used in a read-only context, such as within an expression that is evaluated as part of a read-only statement, because the conflict registration can only be validated when the transaction commits.
+A target can be named literally or passed through a parameter, so `SELECT * FROM $record FOR UPDATE` behaves the same as naming the record id inline, as long as the parameter holds a record id rather than a table.
+
+Reading a record id that does not exist registers that id too, so a concurrent transaction that creates it also causes this transaction's commit to fail. This is what makes the clause suitable for guarding a get-or-create path, where the decision rests on a record being absent.
+
+The clause cannot be combined with the `VERSION`, `GROUP`, or `SPLIT` clauses, nor with `LIMIT` across multiple targets, and it cannot be used with targets other than record ids.
+
+Because the conflict registration is only validated at commit time, `FOR UPDATE` needs a transaction that commits. A read nested inside an expression is accommodated by promoting the enclosing statement to a write, so the registration still reaches a committing transaction. A read-only transaction has no commit to validate against, and rejects the clause.
 
 ## The `TEMPFILES` clause
 
