@@ -43,7 +43,7 @@ If you are creating your collection copying the following files, make sure to cr
 
 Set authentication to basic, using your credentials from above (username: `root`, password: `secret`). Or save the following in a new file as `collection.bru`:
 
-```
+```text
 auth {
   mode: basic
 }
@@ -58,7 +58,7 @@ auth:basic {
 
 Save this file as `import.bru`. We are going to import this script using Bruno:
 
-```
+```text
 meta {
   name: import
   type: http
@@ -168,7 +168,7 @@ settings {
 
 Save this one as `query.graphql`
 
-```
+```text
 meta {
   name: test
   type: graphql

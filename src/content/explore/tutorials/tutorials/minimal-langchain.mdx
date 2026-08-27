@@ -160,7 +160,7 @@ print("\nBye!")
 
 ## Let’s try it out
 
-```
+```text
 ----------------------------------
 Topic: "database"
 Vector search:
@@ -215,7 +215,7 @@ template = """
 
 🥁 Drum roll...
 
-```
+```text
 LLM answer:
 ===========
 Yo, listen up, let me share a tale,
@@ -233,7 +233,7 @@ They'll hook you up with knowledge, just wait and see!
 
 It never disappoints.
 
-```
+```text
 LLM answer:
 ===========
 Yo, listen up, let me share a tale,
