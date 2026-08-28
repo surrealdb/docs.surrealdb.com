@@ -1,28 +1,28 @@
 ---
 position: 1
 title: Transactions
-description: "SurrealDB transactions: default per-statement scope and manual BEGIN, COMMIT and CANCEL for atomic multi-step changes."
+description: "How SurrealDB transactions work: the default per-statement scope, manual BEGIN, COMMIT and CANCEL, and the snapshot isolation guarantees that apply under concurrency."
 ---
 
-# How transactions work
+# Transactions
 
-Each statement within SurrealDB is run within its own transaction by default. This includes side effects such as [defined events](/docs/reference/query-language/statements/define/event).
+SurrealDB is ACID-compliant, so the work inside a transaction either commits as a whole or rolls back with no partial effect. By default **each SurrealQL statement runs in its own transaction**, including side effects such as [defined events](/docs/reference/query-language/statements/define/event). A single `CREATE`, `UPDATE` or `SELECT` is therefore atomic on its own.
+
+This page covers manual transactions, which group statements that must succeed or fail together, and the **isolation** guarantees that apply when many clients read and write at the same time.
 
 ## Manual transactions
 
-If a set of changes need to be made together, then groups of statements can be run together as a single transaction. If all of the statements within a transaction succeed, and the transaction is successful, then all of the data modifications made during the transaction are committed and become a permanent part of the database. If a transaction encounters errors and must be cancelled or rolled back, then any data modification made within the transaction is rolled back, and will not become a permanent part of the database.
+Three statements control a manual transaction:
 
-## Starting a manual transaction
-
-The `BEGIN` or `BEGIN TRANSACTION` statement starts a transaction in which multiple statements can be run together.
-
-```surql title="Starting a transaction"
+```surql title="Transaction statements"
 BEGIN [ TRANSACTION ];
+COMMIT [ TRANSACTION ];
+CANCEL [ TRANSACTION ];
 ```
 
-The following query shows example usage of this statement.
+[`BEGIN`](/docs/reference/query-language/statements/begin) opens the transaction. [`COMMIT`](/docs/reference/query-language/statements/commit) makes every change inside it a permanent part of the database. [`CANCEL`](/docs/reference/query-language/statements/cancel) rolls those changes back instead. If any statement inside the transaction fails, the whole transaction is rolled back and no change survives.
 
-```surql title="Example usage of BEGIN TRANSACTION"
+```surql title="A transfer between two accounts"
 -- Create two accounts for bank customers
 CREATE account:one SET balance = 135605.16;
 CREATE account:two SET balance = 91031.31;
@@ -34,65 +34,18 @@ BEGIN TRANSACTION;
 UPDATE account:one SET balance += 300.00;
 UPDATE account:two SET balance -= 300.00;
 
--- Finalise the transaction. This will apply the changes to the database. If there was an error
--- during any of the previous steps within the transaction, all changes would be rolled back and
--- the database would remain in its initial state.
+-- Apply both updates together. Had either statement failed, the database
+-- would remain in its initial state.
 COMMIT TRANSACTION;
 ```
 
-### Committing a manual transaction
+Replacing `COMMIT TRANSACTION` with `CANCEL TRANSACTION` in the example above leaves both balances untouched.
 
-The [COMMIT](/docs/reference/query-language/statements/commit) statement is used to commit a set of statements within a transaction, ensuring that all data modifications become a permanent part of the database.
-
-```surql title="Committing a transaction"
-COMMIT [ TRANSACTION ];
-```
-
-The following query shows example usage of this statement.
-
-```surql title="Example usage of COMMIT TRANSACTION"
--- Setup accounts
-CREATE account:one SET balance = 135605.16;
-CREATE account:two SET balance = 91031.31;
-
-BEGIN TRANSACTION;
-
--- Move money
-UPDATE account:one SET balance += 300.00;
-UPDATE account:two SET balance -= 300.00;
-
--- Finalise all changes
-COMMIT TRANSACTION;
-```
-
-### Cancelling a manual transaction
-
-The [CANCEL](/docs/reference/query-language/statements/cancel) statement can be used to cancel a set of statements within a transaction, reverting or rolling back any data modification made within the transaction as a whole.
-
-```surql title="Cancelling a transaction"
-CANCEL [ TRANSACTION ];
-```
-
-The following query shows example usage of this statement.
-
-```surql title="Example usage of CANCEL TRANSACTION"
--- Setup accounts
-CREATE account:one SET balance = 135605.16;
-CREATE account:two SET balance = 91031.31;
-
-BEGIN TRANSACTION;
-
--- Move money
-UPDATE account:one SET balance += 300.00;
-UPDATE account:two SET balance -= 300.00;
-
--- Rollback all changes
-CANCEL TRANSACTION;
-```
+Client SDKs expose the same model through transaction handles. See the transactions guide for your language under [SDKs](/docs/languages/javascript).
 
 ## THROW to conditionally cancel a transaction
 
-While transactions are automatically rolled back if an error occurs in any of its statements, [THROW](/docs/reference/query-language/statements/throw) can also be used to explicitly break out of a transaction at any point. `THROW` can be followed by any value which serves as the error message, usually a string.
+A transaction rolls back on its own when a statement errors. [`THROW`](/docs/reference/query-language/statements/throw) breaks out of one deliberately, at any point. `THROW` can be followed by any value, which serves as the error message, and is usually a string.
 
 ```surql
 CREATE account:one SET dollars =  100;
@@ -128,33 +81,117 @@ SELECT * FROM account;
 ]
 ```
 
-## Reading a value that a later write depends on
+## Snapshot isolation
+
+Every SurrealDB transaction runs under **snapshot isolation**. When a transaction starts, it sees a consistent point-in-time view of the database. That snapshot stays stable for the lifetime of the transaction, so reads inside the transaction do not observe concurrent writes from other transactions until commit.
+
+SurrealDB does not offer weaker isolation levels. You cannot downgrade to read committed or read uncommitted.
+
+On commit, the engine checks for **write conflicts**. If two concurrent transactions modified the same key, the later commit fails with a transaction conflict error and must be retried. There is no silent last-writer-wins merge at the storage layer.
+
+Records that a transaction only reads are outside that check by default. The [`FOR UPDATE`](#locked-reads-with-for-update) clause brings them into it.
+
+These semantics apply across deployment models and storage backends: embedded and server, single-node and distributed, RocksDB, SurrealKV, SurrealMX, and browser IndexedDB. The [query layer](/docs/learn/data-models/architecture#query-layer) enforces the same isolation contract regardless of which engine persists the keys underneath.
+
+### What you get in practice
+
+Snapshot isolation with conflict detection on commit protects against the anomalies most application developers plan for:
+
+| Anomaly | Protected? | Notes |
+| --- | --- | --- |
+| Dirty reads | Yes | A transaction never reads uncommitted data from another transaction. |
+| Non-repeatable reads | Yes | Re-reading the same data inside a transaction returns the same values. |
+| Lost updates (same key) | Yes | Concurrent writes to the same key cannot both commit; one transaction must retry. |
+| Write skew | Opt in | Covered per record with [`FOR UPDATE`](#locked-reads-with-for-update); see [write skew](#write-skew) below. |
+
+In database terms, snapshot isolation sits between read committed and serialisable. It matches the default isolation level in MySQL (InnoDB `REPEATABLE READ`) and PostgreSQL's optional `REPEATABLE READ` level, with the important caveat that SurrealDB does not provide serialisable isolation. For the specific records a transaction names, [`FOR UPDATE`](#locked-reads-with-for-update) closes the remaining gap.
+
+### Compared with PostgreSQL `REPEATABLE READ`
+
+PostgreSQL's `REPEATABLE READ` is snapshot isolation too, so the two protect against the same anomalies. The mechanisms differ in ways that decide where an application handles a conflict.
+
+| | PostgreSQL `REPEATABLE READ` | SurrealDB |
+| --- | --- | --- |
+| Snapshot taken | At the first statement in the transaction | At the start of the transaction |
+| Competing writer | Blocks on a row lock until the first transaction resolves | Never blocks; proceeds and commits |
+| Conflict surfaces | At the conflicting statement, as `could not serialize access due to concurrent update` | At `COMMIT`, as a transaction conflict error |
+| `SELECT ... FOR UPDATE` | Takes a row lock, and raises straight away if the row moved since the snapshot | Registers the record, and raises at `COMMIT` if it moved |
+| Write skew | Needs explicit locking, or the `SERIALIZABLE` level | Needs [`FOR UPDATE`](#locked-reads-with-for-update) |
+| Blanket serialisable level | `SERIALIZABLE` covers predicate-based anomalies as well | No equivalent; `FOR UPDATE` covers named records only |
+
+Two consequences follow for application code. Conflicts arrive later in SurrealDB: a `FOR UPDATE` read never fails on account of a concurrent write, so retry logic wraps the whole transaction rather than guarding individual statements. And because a predicate cannot be registered, an invariant that depends on a set of records rather than on named ones has no direct equivalent of `SERIALIZABLE` to fall back on. Such an invariant needs a record that stands in for the set, such as a counter or a parent record that every participant reads for update.
+
+## Write conflicts and retries
+
+When a commit fails because another transaction wrote the same key first, SurrealDB returns a **transaction conflict** error. Your application, or your client's retry logic, should run the transaction again.
+
+This is normal under concurrent load, not a sign of data corruption. At scale, rising conflict rates show up in metrics such as `surrealdb_transaction_conflicts_total` - see [Observability](/docs/manage/observability/metrics) for monitoring guidance.
+
+Keep transactions short and touch the fewest keys necessary. Long-running transactions that overlap on hot keys see more conflicts.
+
+## Write skew
+
+Snapshot isolation does not prevent **write skew**. Write skew occurs when two transactions each read overlapping state, make independent decisions, and both commit even though their combined effect breaks an invariant.
+
+An everyday example is one in which two doctors each check a schedule, see that only one shift is booked, and both book themselves. Each transaction read a consistent snapshot, but together they overbooked the day.
+
+Where write skew matters for your workload, read the records the rule depends on with [`SELECT ... FOR UPDATE`](#locked-reads-with-for-update). Each doctor's transaction then registers the `schedule` record it based its decision on, so whichever transaction commits second fails and retries against the booking the first one made.
+
+Writing every record the rule depends on has the same effect, because a write is conflict-checked already. That remains the natural choice where the transaction was going to update the record anyway, and conditional updates work on the same principle.
+
+## Locked reads with `FOR UPDATE`
 
 <Since v="v3.3.0" />
 
-A transaction sees a stable snapshot, so any value it reads stays the same for the transaction's lifetime. That value can still have moved on by the time the transaction commits: another transaction may have written the record in the meantime, and a plain read does not stand in the way of the commit. Where a write inside the transaction rests on such a value, add [`FOR UPDATE`](/docs/reference/query-language/statements/select#the-for-update-clause) to the read.
+The [`FOR UPDATE`](/docs/reference/query-language/statements/select#the-for-update-clause) clause on `SELECT` enrols a record that the transaction only reads into the same commit-time conflict check that already covers writes. The transaction commits only if no other transaction wrote that record after the snapshot was taken. Otherwise `COMMIT` fails with a transaction conflict error and the transaction can be retried.
 
 ```surql
-BEGIN TRANSACTION;
+BEGIN;
 
--- The overdraft limit informs the check below but is never written,
--- so FOR UPDATE registers it for the commit-time conflict check
-LET $limit = SELECT VALUE overdraft FROM ONLY settings:account_one FOR UPDATE;
+-- Register the schedule for commit-time conflict detection
+LET $schedule = SELECT * FROM ONLY schedule:monday FOR UPDATE;
 
-UPDATE account:one SET dollars -= 150;
-IF account:one.dollars < $limit {
-    THROW "Transfer would breach the overdraft limit"
+-- The decision below rests on a value that is read but never written,
+-- which is exactly the case FOR UPDATE covers
+IF $schedule.shifts_booked = 0 {
+    UPDATE booking SET doctor = $auth.id, day = "monday";
 };
 
-COMMIT TRANSACTION;
+COMMIT;
 ```
 
-If another transaction writes `settings:account_one` after this transaction's snapshot was taken, the `COMMIT` fails with a transaction conflict error, and a retry re-reads the limit that now applies.
+Three properties are worth knowing beyond the basic guarantee:
 
-The clause takes record ids only, and a record the transaction writes needs no clause, because the write is conflict-checked in its own right. See [Transactions and isolation](/docs/transactions-and-isolation#locked-reads-with-for-update) for the full behaviour and limits.
+- **Concurrent writers are not blocked.** The clause takes no lock. Another transaction can write a registered record and commit normally, and the cost lands on the reading transaction, whose own `COMMIT` then fails and must be retried. Readers coming from a database where `SELECT ... FOR UPDATE` holds a row lock should plan for retries rather than for waiting.
+- **An absent record is still covered.** Reading a record id that does not exist registers that id, so a concurrent transaction creating it also invalidates the commit. This is what makes `FOR UPDATE` safe for get-or-create paths.
+- **The enclosing statement becomes write-classified.** A `FOR UPDATE` read nested inside an expression promotes its statement to a write transaction, because the registration can only be validated at commit time.
+
+| Aspect | Behaviour |
+| --- | --- |
+| Targets | Record ids only, written literally or passed through a parameter. Tables, record ranges, subqueries and parameters holding a table are rejected. |
+| Concurrency model | Optimistic. No lock is taken and no transaction waits; a conflict surfaces at `COMMIT` on the transaction that read the record. |
+| Granularity | One record at a time. Tables, ranges and query predicates are not locked, so a concurrent transaction can still create a new record that matches a predicate. |
+| Transaction type | Requires a transaction that commits. A read-only context rejects the clause, since the registration would never be validated. |
+| Storage backends | Supported on every storage backend. Where an engine has no conflict-tracked read path the clause is refused outright, so the guarantee is never quietly downgraded. |
+| Clause conflicts | Cannot be combined with `VERSION`, `GROUP BY` or `SPLIT`, or with `LIMIT` across multiple targets. |
+
+> [!NOTE]
+> `FOR UPDATE` is used for a record the transaction reads but never writes. A record the transaction also writes is covered already by the write conflict check, so adding the clause there changes nothing.
+
+## ACID at a glance
+
+| Property | In SurrealDB |
+| --- | --- |
+| **Atomicity** | A transaction's statements commit together or roll back together. |
+| **Consistency** | Schema, permissions, and statement semantics apply on every commit; you define business invariants in SurrealQL and application code. |
+| **Isolation** | Snapshot isolation on all storage backends; write conflicts abort on commit, and [`FOR UPDATE`](#locked-reads-with-for-update) extends that check to records the transaction only reads. |
+| **Durability** | Committed data persists according to your storage engine and sync settings - see [File-backed storage](/docs/running/file-backed) and [Deployment models](/docs/manage/self-hosted/deployment-models). |
+
+Some features deliberately step outside the triggering transaction's ACID boundary. [`ASYNC` events](/docs/reference/query-language/statements/define/event#async-events), for example, run after commit in a separate transaction. Use them only when that trade-off is acceptable.
 
 ## See also
 
-* [Transactions and isolation](/docs/transactions-and-isolation)
 * [The `FOR UPDATE` clause](/docs/reference/query-language/statements/select#the-for-update-clause)
+* [Transaction statements in SurrealQL](/docs/reference/query-language/language-primitives/transactions)
 * [Using transactions to test code for errors](/docs/learn/querying/concepts-and-guides/testing#using-manual-transactions-for-testing)
+* [Architecture](/docs/learn/data-models/architecture)

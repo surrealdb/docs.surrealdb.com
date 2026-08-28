@@ -114,8 +114,8 @@ function legacySurrealdbTreeRedirects(): Redirect[] {
         // The old "Start" page covered running the server; its successor is the
         // Running section index.
         ["surrealdb/introduction/start", "running/overview", "exact"],
-        ["surrealdb/introduction/concepts", "concepts", "exact"],
-        ["surrealdb/introduction/architecture", "architecture", "exact"],
+        ["surrealdb/introduction/concepts", "learn/data-models/architecture", "exact"],
+        ["surrealdb/introduction/architecture", "learn/data-models/architecture", "exact"],
         ["surrealdb/introduction", "what-is-surrealdb", "prefix"],
         // SurrealQL nested under the product prefix → the query language
         // reference, whose slugs mirror the old tree.
@@ -705,9 +705,32 @@ function agentMemoryRedirects(): Redirect[] {
     ]);
 }
 
+/**
+ * Overview section consolidation (August 2026). The Getting started overview
+ * held four pages where two would do, so `architecture` absorbed `concepts` and
+ * moved under Data models, and `transactions-and-isolation` merged into the
+ * querying guide that already covered `BEGIN` and `COMMIT`.
+ *
+ * All three sources sat directly under `/docs`, so each is an exact rule - there
+ * is no subtree below them to carry through.
+ */
+function overviewConsolidationRedirects(): Redirect[] {
+    const moves: [string, string][] = [
+        ["/architecture", "/docs/learn/data-models/architecture"],
+        ["/concepts", "/docs/learn/data-models/architecture"],
+        ["/transactions-and-isolation", "/docs/learn/querying/concepts-and-guides/transactions"],
+    ];
+
+    return moves.flatMap(([source, destination]): Redirect[] => [
+        { source, destination, statusCode: 301 },
+        { source: `/docs${source}`, destination, statusCode: 301 },
+    ]);
+}
+
 export const docsRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
     { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
+    ...overviewConsolidationRedirects(),
     ...legacyPrefixRedirects("surrealql", "reference/query-language"),
     // `surrealist/*` cannot map path-for-path: the tree it points at was
     // consolidated to three pages. The two survivors are named, and the rest go
