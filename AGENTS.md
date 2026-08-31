@@ -53,10 +53,10 @@ All user-facing text uses **British English** spelling (`-ise`, `-our`, `-re`, `
 Use the standard hyphen (`-`) everywhere. Em dashes (`—`) and en dashes (`–`) do
 not appear in this repo, in prose, headings, tables, code comments or these guides.
 
-| Use | Instead of |
-| --- | ---------- |
-| `a spaced hyphen - like this` | `an em dash — like this` |
-| `2-3 minutes`, `pages 10-12` | `2–3 minutes`, `pages 10–12` |
+| Use                           | Instead of                   |
+| ----------------------------- | ---------------------------- |
+| `a spaced hyphen - like this` | `an em dash — like this`     |
+| `2-3 minutes`, `pages 10-12`  | `2–3 minutes`, `pages 10–12` |
 
 A parenthetical takes a hyphen with a space on each side, so the words either
 side stay separate. A numeric range takes a tight hyphen with no spaces.
@@ -79,11 +79,11 @@ line), multi-line JSX attributes, tables and frontmatter.
 Use **sentence case** for multi-word headings (`##`, `###`, `####`). Do not use
 Title Case on every main word.
 
-| Pattern | Rule | Examples |
-| ------- | ---- | -------- |
-| Single word | Capitalise the word | `## Syntax`, `#### Parameters`, `#### Returns` |
-| Multiple words | Capitalise the **first word only**; lowercase the rest | `## Type parameters`, `### Complete examples`, `### Default response` |
-| Numbered lists | Same as multiple words - capitalise the first word after the number | `### 3. Don't reuse transactions`, `## 1. Install the SDK` |
+| Pattern        | Rule                                                                | Examples                                                              |
+| -------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Single word    | Capitalise the word                                                 | `## Syntax`, `#### Parameters`, `#### Returns`                        |
+| Multiple words | Capitalise the **first word only**; lowercase the rest              | `## Type parameters`, `### Complete examples`, `### Default response` |
+| Numbered lists | Same as multiple words - capitalise the first word after the number | `### 3. Don't reuse transactions`, `## 1. Install the SDK`            |
 
 **Keep capitalised** where they are names, not prose:
 
@@ -129,6 +129,23 @@ include inline test assertions and response blocks. SDK pages show imports,
 configuration, and the trade-off when an option changes behaviour. Tutorials
 include verification steps so readers can confirm the setup worked.
 
+**Example ordering.** SurrealQL often has several equivalents of the
+same operation, and readers - agents included, since the docs are served raw
+through the `.md` endpoints and `llms.txt` - take the first example shown as
+the recommendation. Where a page presents two equivalent forms, lead with the
+one whose meaning is fully visible in the snippet itself, breaking ties by
+token count and then by similarity to mainstream languages. In practice:
+literal unions (`TYPE 'draft' | 'published'`) before `ASSERT $value IN [...]`,
+method syntax (`$value.len()`) before qualified paths in incidental examples,
+`.map()`/`.filter()` chains before `FOR` loops for pure transformations,
+inline closures before closures bound to a parameter first, and object forms
+(`CONTENT {...}`, `INSERT INTO ... [{...}]`) before `SET` clauses. The other
+form stays, with a one-line note on when to prefer it. Carve-outs: a page
+documenting a construct keeps that construct first, migration pages stay
+chronological, version-gated syntax keeps its `<Since>` marker, and statement
+choice (`CREATE`/`INSERT`/`UPSERT`) is never swapped - those differ on
+existing records.
+
 **Callouts.** Use `> [!NOTE]`, `> [!WARNING]`, and `> [!IMPORTANT]` for
 exceptions, security caveats, and breaking or easy-to-miss details.
 
@@ -160,13 +177,13 @@ obligation:
 Not fine, because each one only works if the reader is in a state we have
 decided for them:
 
-| Avoid | What it presumes | Use |
-| ----- | ---------------- | --- |
-| No message broker, no polling, no glue code | Nothing states the subject, so the reader becomes it | The database is your event bus and your source of truth at once |
-| One engine, not a pile of stores | They suspected we were a pile of stores | One engine, one transaction |
-| Nothing here is a mention tally. The count is… | They guessed "mention tally" | The count is… |
-| Forget about infrastructure operations | Ops is their burden today - and instructs them | SurrealDB Cloud runs the infrastructure for you |
-| Stop stitching databases together | They stitch databases together - and instructs them | One database for every model your app needs |
+| Avoid                                          | What it presumes                                     | Use                                                             |
+| ---------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------- |
+| No message broker, no polling, no glue code    | Nothing states the subject, so the reader becomes it | The database is your event bus and your source of truth at once |
+| One engine, not a pile of stores               | They suspected we were a pile of stores              | One engine, one transaction                                     |
+| Nothing here is a mention tally. The count is… | They guessed "mention tally"                         | The count is…                                                   |
+| Forget about infrastructure operations         | Ops is their burden today - and instructs them       | SurrealDB Cloud runs the infrastructure for you                 |
+| Stop stitching databases together              | They stitch databases together - and instructs them  | One database for every model your app needs                     |
 
 Two forms to watch for:
 
@@ -270,11 +287,11 @@ There is no `urlForCollection`. The URL prefix is the optional third argument to
 `resolveDataFromCollection` in the page group's `+data.ts`, defaulting to the
 collection id:
 
-| Collection         | `+data.ts` call                           | URL                             |
-| ------------------ | ----------------------------------------- | ------------------------------- |
-| `manage/instances` | `(context, "manage/instances")`           | `/docs/manage/instances/<slug>` |
-| `index`            | `(context, "index", "")`                  | `/docs/<slug>`                  |
-| `agent-memory/index` | `(context, "agent-memory/index", "agent-memory")` | `/docs/agent-memory/<slug>` |
+| Collection           | `+data.ts` call                                   | URL                             |
+| -------------------- | ------------------------------------------------- | ------------------------------- |
+| `manage/instances`   | `(context, "manage/instances")`                   | `/docs/manage/instances/<slug>` |
+| `index`              | `(context, "index", "")`                          | `/docs/<slug>`                  |
+| `agent-memory/index` | `(context, "agent-memory/index", "agent-memory")` | `/docs/agent-memory/<slug>`     |
 
 ### Adding content
 
