@@ -146,6 +146,17 @@ chronological, version-gated syntax keeps its `<Since>` marker, and statement
 choice (`CREATE`/`INSERT`/`UPSERT`) is never swapped - those differ on
 existing records.
 
+**`RETURN` in examples.** Bare expressions are valid statements that yield the
+same value, so a snippet that is a single expression drops the leading
+`RETURN`: the bare form is the fragment a reader can paste into a `SELECT`
+projection, a `WHERE` or an `ASSERT`, while the `RETURN` form is a statement
+that fits none of those slots. Keep `RETURN` where it carries information: on
+the final line of a multi-statement example to mark which statement produced
+the displayed output, for early return and transaction return values (control
+flow), and on the page documenting `RETURN` itself. Prose that only narrates
+the keyword ("shows this function used in a `RETURN` statement") is trimmed
+along with it.
+
 **Callouts.** Use `> [!NOTE]`, `> [!WARNING]`, and `> [!IMPORTANT]` for
 exceptions, security caveats, and breaking or easy-to-miss details.
 
