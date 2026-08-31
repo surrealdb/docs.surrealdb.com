@@ -54,7 +54,7 @@ string input =
         DEFINE TABLE bar SCHEMALESS;
         CREATE foo:1 CONTENT { hello: "world" };
         CREATE bar:1 CONTENT { hello: "world" };
-        DEFINE FUNCTION fn::foo() {
+        DEFINE FUNCTION fn::foo() -> string {
             RETURN "bar";
         };
         """;

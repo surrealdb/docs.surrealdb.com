@@ -68,7 +68,7 @@ Full fledged fetch implementation closely matching the [official specification](
 </table>
 
 ```surql
-RETURN function() {
+function() {
 	// List all posts
 	const posts = fetch('https://jsonplaceholder.typicode.com/posts');
 

@@ -106,7 +106,7 @@ value = "[{ op: 'change', path: '', value: '@@ -1,5 +1,6 @@
 
 */
 
-RETURN 'tobie'.diff('tobias');
+'tobie'.diff('tobias');
 ```
 
 ```surql title="Output"
