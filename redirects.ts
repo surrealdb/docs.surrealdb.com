@@ -707,18 +707,23 @@ function agentMemoryRedirects(): Redirect[] {
 
 /**
  * Overview section consolidation (August 2026). The Getting started overview
- * held four pages where two would do, so `architecture` absorbed `concepts` and
- * moved under Data models, and `transactions-and-isolation` merged into the
- * querying guide that already covered `BEGIN` and `COMMIT`.
+ * held five pages where one would do, so `architecture` absorbed `concepts` and
+ * moved under Data models, `transactions-and-isolation` merged into the querying
+ * guide that already covered `BEGIN` and `COMMIT`, and `sample-queries` moved
+ * into the SurrealQL section. `what-is-surrealdb` is all that remains beside the
+ * section index.
  *
- * All three sources sat directly under `/docs`, so each is an exact rule - there
- * is no subtree below them to carry through.
+ * Every source sat directly under `/docs`, so each is an exact rule - there is
+ * no subtree below them to carry through.
  */
 function overviewConsolidationRedirects(): Redirect[] {
     const moves: [string, string][] = [
         ["/architecture", "/docs/learn/data-models/architecture"],
         ["/concepts", "/docs/learn/data-models/architecture"],
         ["/transactions-and-isolation", "/docs/learn/querying/concepts-and-guides/transactions"],
+        // Runnable SurrealQL examples belong beside the pages that teach the
+        // language, next to the GraphQL and GQL pages of the same name.
+        ["/sample-queries", "/docs/learn/querying/surrealql/sample-queries"],
     ];
 
     return moves.flatMap(([source, destination]): Redirect[] => [
