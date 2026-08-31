@@ -127,7 +127,11 @@ related pages inline rather than duplicating full explanations.
 **Examples.** Runnable code with realistic data. SurrealQL reference pages often
 include inline test assertions and response blocks. SDK pages show imports,
 configuration, and the trade-off when an option changes behaviour. Tutorials
-include verification steps so readers can confirm the setup worked.
+include verification steps so readers can confirm the setup worked. A
+`DEFINE FUNCTION` example carries an explicit `-> type` return annotation
+matching the value the body actually produces, except where the example
+demonstrates that the annotation is optional or the function exists only for
+its side effects.
 
 **Example ordering.** SurrealQL often has several equivalents of the
 same operation, and readers - agents included, since the docs are served raw
