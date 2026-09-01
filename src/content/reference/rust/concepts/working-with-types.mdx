@@ -1,0 +1,581 @@
+---
+position: 9
+title: Working with types
+description: "The surrealdb-types crate provides the SurrealValue trait, the kind! macro and the value constructors used to move data between Rust and SurrealDB."
+---
+
+# Working with types
+
+The [surrealdb-types](https://crates.io/crates/surrealdb-types) crate holds the public value type system shared across SurrealDB. It is kept separate from the database core so that types and type conversions can be used on their own, without pulling in the whole database, but it is also available from the main `surrealdb` crate under the `surrealdb::types` path.
+
+## The `SurrealValue` trait
+
+`SurrealValue` is the trait that converts a Rust type to and from a SurrealDB value. Deriving it is all that is needed to use a Rust type for serialisation and deserialisation. To customise how a type is converted, such as renaming fields or tagging enum variants, see [SurrealValue attributes](/docs/reference/rust/concepts/surrealvalue-attributes).
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb::types::SurrealValue;
+
+#[derive(Debug, SurrealValue)]
+struct Employee {
+    name: String,
+    active: bool,
+}
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+
+    db.use_ns("ns").use_db("db").await.unwrap();
+
+    let mut res = db
+        .query("CREATE employee:bobby SET name = 'Bobby', active = true")
+        .await
+        .unwrap();
+
+    let bobby = res.take::<Option<Employee>>(0).unwrap().unwrap();
+
+    // Employee { name: "Bobby", active: true }
+    println!("{bobby:?}");
+}
+```
+
+The `SurrealValue` trait can be implemented manually via three methods: one to indicate the matching SurrealDB type, a second to convert into a SurrealDB Value, and a third to convert out of a SurrealDB Value.
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb::types::{Datetime, Error, Kind, SurrealValue, Value};
+
+#[derive(Debug)]
+struct MyOwnDateTime(i64);
+
+impl SurrealValue for MyOwnDateTime {
+    fn kind_of() -> Kind {
+        Kind::Datetime
+    }
+
+    fn into_value(self) -> Value {
+        Value::Datetime(Datetime::from_timestamp(self.0, 0).unwrap())
+    }
+
+    fn from_value(value: Value) -> Result<Self, Error>
+    where
+        Self: Sized,
+    {
+        match value {
+            Value::Datetime(n) => Ok(MyOwnDateTime(n.timestamp_millis())),
+            _ => Err(Error::thrown("No good".to_string())),
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+
+    db.use_ns("main").use_db("main").await.unwrap();
+
+    println!(
+        "{:?}",
+        db.query("time::now()")
+            .await
+            .unwrap()
+            .take::<Option<MyOwnDateTime>>(0)
+    );
+}
+```
+
+An example of successful and unsuccessful conversions into the user-created `MyOwnDateTime` struct:
+
+```rust
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+
+    db.use_ns("main").use_db("main").await.unwrap();
+
+    println!(
+        "{:?}\n",
+        db.query("time::now()")
+            .await
+            .unwrap()
+            .take::<Option<MyOwnDateTime>>(0)
+    );
+
+    println!(
+        "{:?}",
+        db.query("CREATE person")
+            .await
+            .unwrap()
+            .take::<Option<MyOwnDateTime>>(0)
+    );
+}
+```
+
+Output:
+
+```text
+Ok(Some(MyOwnDateTime(1760330504574)))
+
+Err(InternalError("Couldn't convert Object(Object({\"id\": RecordId(RecordId { table: \"person\", key: String(\"tcblzaktx3ponin9dyci\") })})) to MyOwnDateTime"))
+```
+
+## The `kind!` macro
+
+The crate includes a `kind!` macro which allows a SurrealQL type to be used directly instead of its Rust equivalent.
+
+This macro is especially useful when working with types like [literals](/docs/reference/query-language/language-primitives/data-types/literals) which are similar to enums but can specify exact possible values in a way that Rust would require deriving `TryFrom` to work. In this case, the `SurrealValue` trait can be implemented manually and the `kind!` macro used for its `kind_of()` method.
+
+```rust
+fn kind_of() -> surrealdb_types::Kind {
+    kind!({ status: "good" } | { status: "goodwithnotification", notification: string} | { status: "error", at: datetime, reason: string })
+}
+```
+
+This is technically possible without the macro, but requires a lot more boilerplate. Here is the output when using `cargo expand` to show the generated code for the example above.
+
+```rust
+fn kind_of() -> surrealdb_types::Kind {
+    surrealdb_types::Kind::Either(
+        vec!([
+            surrealdb_types::Kind::Literal(
+                surrealdb_types::KindLiteral::Object(
+                    std::collections::BTreeMap::from([
+                        (
+                            "status".to_string(),
+                            surrealdb_types::Kind::Literal(
+                                surrealdb_types::KindLiteral::String("good".to_string()),
+                            ),
+                        ),
+                    ]),
+                ),
+            ),
+            surrealdb_types::Kind::Literal(
+                surrealdb_types::KindLiteral::Object(
+                    std::collections::BTreeMap::from([
+                        (
+                            "status".to_string(),
+                            surrealdb_types::Kind::Literal(
+                                surrealdb_types::KindLiteral::String(
+                                    "goodwithnotification".to_string(),
+                                ),
+                            ),
+                        ),
+                        ("notification".to_string(), surrealdb_types::Kind::String),
+                    ]),
+                ),
+            ),
+            surrealdb_types::Kind::Literal(
+                surrealdb_types::KindLiteral::Object(
+                    std::collections::BTreeMap::from([
+                        (
+                            "status".to_string(),
+                            surrealdb_types::Kind::Literal(
+                                surrealdb_types::KindLiteral::String("error".to_string()),
+                            ),
+                        ),
+                        ("at".to_string(), surrealdb_types::Kind::Datetime),
+                        ("reason".to_string(), surrealdb_types::Kind::String),
+                    ]),
+                ),
+            ),
+            ]),
+        ),
+}
+```
+
+The following example shows the `kind!` macro used for a Rust enum that manually implements `SurrealValue`, along with examples of its use from the Rust side to the SurrealDB side, and vice versa.
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb_types::{Datetime, Error, Object, SurrealValue, ToSql, Value, kind};
+
+#[derive(SurrealValue)]
+struct MyError {
+    at: Datetime,
+    reason: String,
+}
+
+enum Response {
+    Good,
+    GoodWithNotification(String),
+    Error(MyError),
+}
+
+impl SurrealValue for Response {
+    fn kind_of() -> surrealdb_types::Kind {
+        kind!({ status: "good" } | { status: "goodwithnotification", notification: string} | { status: "error", at: datetime, reason: string })
+    }
+
+    fn into_value(self) -> Value {
+        let mut obj = Object::new();
+        match self {
+            Response::Good => {
+                obj.insert("status", "good");
+            }
+            Response::GoodWithNotification(n) => {
+                obj.insert("status", "goodwithnotification");
+                obj.insert("notification", n);
+            }
+            Response::Error(e) => {
+                obj.insert("status", "error");
+                obj.insert("at", e.at);
+                obj.insert("reason", e.reason);
+            }
+        }
+        Value::Object(obj)
+    }
+
+    fn from_value(value: Value) -> Result<Self, Error>
+    where
+        Self: Sized,
+    {
+        let Value::Object(o) = value else {
+            return Err(Error::thrown("Should have been an object".to_string()));
+        };
+        let Some(Value::String(status)) = o.get("status") else {
+            return Err(Error::thrown(
+                "Error trying to get 'status' field".to_string(),
+            ));
+        };
+        match status.as_str() {
+            "Good" => Ok(Response::Good),
+            status @ "GoodWithNotification" => {
+                Ok(Response::GoodWithNotification(status.to_string()))
+            }
+            "Error" => {
+                let Some(Value::Datetime(at)) = o.get("at") else {
+                    return Err(Error::thrown("Error trying to get 'at' field".to_string()));
+                };
+                let Some(Value::String(reason)) = o.get("reason") else {
+                    return Err(Error::thrown(
+                        "Error trying to get 'reason' field".to_string(),
+                    ));
+                };
+                Ok(Response::Error(MyError {
+                    at: at.clone(),
+                    reason: reason.clone(),
+                }))
+            }
+            _ => Err(Error::thrown("No status field for some reason".to_string())),
+        }
+    }
+
+    fn is_value(value: &Value) -> bool {
+        value.is_kind(&Self::kind_of())
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    db.use_ns("main").use_db("main").await.unwrap();
+
+    // Turning DB results into Rust enum
+    let mut statuses = db.query("
+        { status: 'Good' };
+        { status: 'GoodWithNotification', notification: 'We need things to make us go. We need help.' };
+        { status: 'Error', at: d'1914-07-28', reason: 'General conflagration'};
+    ").await.unwrap();
+
+    println!(
+        "Good: {}",
+        statuses
+            .take::<Option<Response>>(0)
+            .unwrap()
+            .unwrap()
+            .into_value()
+            .to_sql_pretty()
+    );
+    println!(
+        "Good with notification: {}",
+        statuses
+            .take::<Option<Response>>(1)
+            .unwrap()
+            .unwrap()
+            .into_value()
+            .to_sql_pretty()
+    );
+    println!(
+        "Error: {}",
+        statuses
+            .take::<Option<Response>>(2)
+            .unwrap()
+            .unwrap()
+            .into_value()
+            .to_sql_pretty()
+    );
+
+    // Turn Rust enum into Values,
+    // use them in the CONTENT clause
+    // and then print the result
+    let good = Response::Good;
+    let good_but = Response::GoodWithNotification("Keep it up!".into());
+    let error = Response::Error(MyError {
+        at: Datetime::now(),
+        reason: "Error: can't think of interesting error message".into(),
+    });
+
+    println!(
+        "Good: {:?}",
+        db.query("CREATE result CONTENT $content")
+            .bind(("content", good))
+            .await
+            .unwrap()
+            .take::<Option<Value>>(0)
+            .unwrap()
+            .unwrap()
+            .to_sql()
+    );
+    println!(
+        "Good but: {:?}",
+        db.query("CREATE result CONTENT $content")
+            .bind(("content", good_but))
+            .await
+            .unwrap()
+            .take::<Option<Value>>(0)
+            .unwrap()
+            .unwrap()
+            .to_sql()
+    );
+    println!(
+        "Error: {:?}",
+        db.query("CREATE result CONTENT $content")
+            .bind(("content", error))
+            .await
+            .unwrap()
+            .take::<Option<Value>>(0)
+            .unwrap()
+            .unwrap()
+            .to_sql()
+    );
+}
+```
+
+## Value construction macros
+
+Alongside `kind!`, the crate exports four macros for building values by hand: `object!`, `array!`, `set!` and `vars!`. Each is available from `surrealdb::types` as well as from `surrealdb_types` directly.
+
+| Macro | Builds | Notes |
+| ----- | ------ | ----- |
+| `object!` | `Object` | Keys can be bare identifiers or quoted string literals |
+| `array!` | `Array` | Uses square brackets, like `vec!` |
+| `set!` | `Set` | Deduplicates its items; takes `Value`s, not raw Rust values |
+| `vars!` | `Variables` | Same syntax as `object!`, used for `.bind()` after `.query()` |
+
+Values passed to `object!`, `array!` and `vars!` only need to implement `SurrealValue`, so ordinary Rust types can be used directly.
+
+```rust
+use surrealdb::types::{Value, array, object, set};
+
+fn main() {
+    let obj = object! {
+        name: "Aeon",
+        age: 30,
+        "home-town": "Bregna",
+    };
+
+    let arr = array![1, "two", true];
+
+    let tags = set! {
+        Value::from_t("rust"),
+        Value::from_t("surrealdb"),
+        Value::from_t("rust"),
+    };
+
+    println!("{obj:?}");
+    println!("{arr:?}");
+    println!("{tags:?}");
+}
+```
+
+Output:
+
+```text
+Object({"age": Number(Int(30)), "home-town": String("Bregna"), "name": String("Aeon")})
+Array([Number(Int(1)), String("two"), Bool(true)])
+Set({String("rust"), String("surrealdb")})
+```
+
+Note the two differences between `array!` and `set!`. `set!` drops the duplicate `"rust"`, and it does not convert its items for you: each one must already be a `Value`. Passing `set! { 1, 2, 3 }` will not compile, while `array![1, 2, 3]` will.
+
+### The `vars!` macro
+
+`vars!` builds a `Variables` map, which is what the [`.bind()`](/docs/reference/rust/methods/query#binding-parameters) method on a query takes. It is the most direct way to pass more than one parameter into a query.
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb::types::{RecordId, SurrealValue, vars};
+
+#[derive(Debug, SurrealValue)]
+struct Person {
+    id: RecordId,
+    name: String,
+    age: i64,
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("mem://").await?;
+    db.use_ns("main").use_db("main").await?;
+
+    let sql = "
+        CREATE type::table($table) SET name = $name, age = $age;
+        SELECT * FROM type::table($table) WHERE age >= $min_age;
+    ";
+
+    let mut result = db
+        .query(sql)
+        .bind(vars! {
+            table: "person",
+            name: "Aeon",
+            age: 30,
+            min_age: 18,
+        })
+        .await?;
+
+    let created: Option<Person> = result.take(0)?;
+    dbg!(created);
+    let adults: Vec<Person> = result.take(1)?;
+    dbg!(adults);
+    Ok(())
+}
+```
+
+`Variables` is an ordinary struct as well as a macro target. `Variables::new()` followed by `.insert()` builds the same value at runtime, which is the better choice when the set of parameters is not known when the code is written.
+
+## Convenience methods for the `Value` type
+
+Importing the `SurrealValue` trait gives access to a lot of convenience methods.
+
+One example is the `.into_value()` method which converts a large number of Rust standard library types into a SurrealQL `Value`.
+
+```rust
+use surrealdb_types::{SurrealValue, Value};
+
+fn main() {
+    let string_val = "string".into_value();
+    assert!(string_val.is_string());
+    assert_eq!(string_val, Value::String("string".into()));
+}
+```
+
+One more example of `.into_value()` to convert a `HashMap<String, &'str>` into a `Value`:
+
+```rust
+use std::collections::HashMap;
+
+use surrealdb::engine::any::connect;
+use surrealdb_types::{SurrealValue, Value};
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    db.use_ns("db").use_db("db").await.unwrap();
+
+    let mut map = HashMap::new();
+    map.insert("name".to_string(), "Billy");
+    map.insert("id".to_string(), "person:one");
+
+    // Turn HashMap into SurrealDB Value
+    let as_person = map.into_value();
+
+    // Object(Object({"id": String("person:one"), "name": String("Billy")}))
+    println!("{as_person:?}");
+
+    // Insert it into a query to create a record
+    let res = db
+        .query("CREATE ONLY person CONTENT $person")
+        .bind(("person", as_person))
+        .await
+        .unwrap()
+        .take::<Value>(0)
+        .unwrap();
+
+    // Object(Object({"id": RecordId(RecordId { table: "person", key: String("person:one") }), "name": String("Billy")}))
+    println!("{res:?}");
+}
+```
+
+A `Value` can be manually constructed using any of the various structs and enums contained within it. This is particularly useful when constructing a complex ID made up of a table name and an array for the key.
+
+```rust
+use std::str::FromStr;
+
+use surrealdb::engine::any::connect;
+use surrealdb_types::{Array, Datetime, RecordId, RecordIdKey, Value};
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    db.use_ns("db").use_db("db").await.unwrap();
+
+    let date = "2025-10-13T05:16:11.343Z";
+
+    let complex_id = RecordId {
+        table: "weather".into(),
+        key: RecordIdKey::Array(Array::from(vec![
+            Value::String("London".to_string()),
+            Value::Datetime(Datetime::from_str(date).unwrap()),
+        ])),
+    };
+
+    let mut res = db
+        .query("CREATE ONLY weather SET id = $id")
+        .bind(("id", complex_id))
+        .await
+        .unwrap();
+
+    // Object(Object({"id": RecordId(RecordId { table: "weather", key: Array(Array([String("London"), Datetime(Datetime(2025-10-13T05:16:11.343Z))])) })}))
+    println!("{:?}", res.take::<Value>(0).unwrap());
+}
+```
+
+The `.is()` method for a `Value` returns `true` if the type(s) in question can be converted to the type indicated when the method is called.
+
+```rust
+use std::collections::HashMap;
+use surrealdb_types::SurrealValue;
+
+fn main() {
+    // true
+    println!("{}", "string".into_value().is::<String>());
+
+    let mut map = HashMap::new();
+    map.insert("name".to_string(), "Billy");
+    map.insert("id".to_string(), "person:one");
+
+    // true
+    println!("{}", map.clone().into_value().is::<HashMap<String, &str>>());
+    // Also true
+    println!("{}", map.into_value().is::<HashMap<String, String>>());
+}
+```
+
+A `Value` can be converted into a `serde_json::Value` using the `.into_json_value()` method, and vice versa using `.into_value()`.
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb_types::{SurrealValue, Value};
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    db.use_ns("db").use_db("db").await.unwrap();
+
+    let value = db
+        .query("CREATE ONLY person:one SET age = 21")
+        .await
+        .unwrap()
+        .take::<Value>(0)
+        .unwrap();
+
+    // Object(Object({"age": Number(Int(21)), "id": RecordId(RecordId { table: "person", key: String("one") })}))
+    println!("{value:?}");
+    // Object {"age": Number(21), "id": String("person:one")}
+    println!("{:?}", value.clone().into_json_value());
+
+    // Round trip
+    value.into_json_value().into_value();
+}
+```
