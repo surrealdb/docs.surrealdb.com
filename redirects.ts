@@ -769,6 +769,14 @@ export const docsRedirects: Redirect[] = [
     ...aiAgentsRedirects(),
     ...cloudAndDeploymentRedirects(),
     ...agentMemoryRedirects(),
+    // "Types after 3.0" split into a concepts page and an attribute reference.
+    // The old slug dropped the dot in the filename, so it was served at
+    // `rust-after-30`.
+    {
+        source: "/reference/rust/concepts/rust-after-30",
+        destination: "/docs/reference/rust/concepts/working-with-types",
+        statusCode: 301,
+    },
     // Surrealist → SurrealDB Studio path rename
     {
         source: "/docs/explore/surrealist",
