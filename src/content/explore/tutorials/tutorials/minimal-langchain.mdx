@@ -248,6 +248,6 @@ Influenced by Max Ernst, the pioneer of the time.
 
 Find all the code in the [langchain-surrealdb repository examples](https://github.com/surrealdb/langchain-surrealdb/tree/main/examples/basic/graph.py).
 
-Get started for free with [Surreal Cloud](https://app.surrealdb.com/signin).
+Get started for free with [Surreal Cloud](https://studio.surrealdb.com/signin).
 
 Any questions or thoughts about this or graph queries using SurrealDB? [Join our Discord](https://discord.gg/surrealdb) - `#all-ai` and `#surrealql` are good places to start for this topic, and `#help` or `#general` work for anything else.
