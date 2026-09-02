@@ -16,7 +16,9 @@ export const sdkFetcherRegistry: Record<string, VersionFetcher> = {
     php: createPackagistFetcher("surrealdb", "surrealdb.php"),
     javascript: createNpmFetcher("surrealdb"),
     python: createPyPiFetcher("surrealdb"),
-    rust: createCratesIoFetcher("surrealdb"),
+    // The Rust SDK ships as the `surrealdb` crate from the same repo as the
+    // server, so version.surrealdb.com is a valid stand-in if crates.io fails.
+    rust: createCratesIoFetcher("surrealdb", createSurrealDbVersionFetcher()),
     golang: createGoProxyFetcher("github.com/surrealdb/surrealdb.go"),
     java: createMavenFetcher("com.surrealdb", "surrealdb"),
 };

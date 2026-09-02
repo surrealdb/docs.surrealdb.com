@@ -1,5 +1,8 @@
 import type { VersionFetcher } from "./types";
 
+/** crates.io requires a User-Agent that identifies the caller. */
+const CRATES_IO_USER_AGENT = "surrealdb-docs (https://surrealdb.com/docs)";
+
 export function createSurrealDbVersionFetcher(): VersionFetcher {
     return async () => {
         const res = await fetch("https://version.surrealdb.com");
@@ -39,11 +42,47 @@ export function createPyPiFetcher(packageName: string): VersionFetcher {
     };
 }
 
-export function createCratesIoFetcher(crateName: string): VersionFetcher {
+/**
+ * Latest stable version of a crate, from crates.io.
+ *
+ * `fallback` covers crates.io being unavailable. It is opt-in because a fallback
+ * is only correct where the substitute tracks the same version as the crate, so
+ * the caller has to assert that. Whatever it returns is normalised to the shape
+ * crates.io uses, which carries no `v` prefix.
+ */
+export function createCratesIoFetcher(
+    crateName: string,
+    fallback?: VersionFetcher,
+): VersionFetcher {
     return async () => {
-        const res = await fetch(`https://crates.io/api/v1/crates/${crateName}`);
-        const data = await res.json();
-        return data?.crate?.newest_version ?? "unknown";
+        try {
+            // crates.io rejects any request without a User-Agent identifying the caller.
+            const res = await fetch(`https://crates.io/api/v1/crates/${crateName}`, {
+                headers: { "User-Agent": CRATES_IO_USER_AGENT },
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                // `newest_version` is the most recently *published* version, so a patch
+                // released against an older line reports lower than the current release.
+                // `max_stable_version` is the highest stable version, which is what the
+                // docs mean by "the latest version".
+                const version = data?.crate?.max_stable_version;
+
+                if (version) {
+                    return version;
+                }
+            }
+        } catch {
+            // Fall through to the fallback below.
+        }
+
+        if (!fallback) {
+            return "unknown";
+        }
+
+        const substitute = await fallback();
+        return substitute === "unknown" ? substitute : substitute.replace(/^v/, "");
     };
 }
 
@@ -66,10 +105,21 @@ export function createGoProxyFetcher(modulePath: string): VersionFetcher {
 
 export function createMavenFetcher(groupId: string, artifactId: string): VersionFetcher {
     return async () => {
+        // Maven Central's canonical metadata, rather than the search.maven.org Solr
+        // index, whose `latestVersion` lags releases by as much as two major versions.
+        const groupPath = groupId.replaceAll(".", "/");
         const res = await fetch(
-            `https://search.maven.org/solrsearch/select?q=g:${groupId}+AND+a:${artifactId}&rows=1&wt=json`,
+            `https://repo1.maven.org/maven2/${groupPath}/${artifactId}/maven-metadata.xml`,
         );
-        const data = await res.json();
-        return data?.response?.docs?.[0]?.latestVersion ?? "unknown";
+
+        if (!res.ok) {
+            return "unknown";
+        }
+
+        const xml = await res.text();
+        // `<release>` is the latest non-snapshot release; `<latest>` can include one.
+        const match =
+            /<release>([^<]+)<\/release>/.exec(xml) ?? /<latest>([^<]+)<\/latest>/.exec(xml);
+        return match?.[1]?.trim() || "unknown";
     };
 }
