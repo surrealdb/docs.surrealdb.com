@@ -131,6 +131,64 @@ WHERE
 ]
 ```
 
+## Why a score can be 0
+
+BM25 weights every term by its inverse document frequency, a measure of how rare that term is across the indexed documents. SurrealDB computes it as `ln((N - n + 0.5) / (n + 0.5))`, where `N` is the number of indexed documents and `n` is how many of them contain the term, and then clamps the result at zero so that very common terms never carry a negative weight.
+
+That clamp is reached as soon as `n` is at least half of `N`. A term held by half or more of the indexed documents weighs exactly `0`, and because that weight multiplies the rest of the formula, `search::score()` returns `0` for it.
+
+Small datasets reach the threshold easily. Three documents, two of which contain the term being searched for, are already enough:
+
+```surql
+DEFINE ANALYZER simple TOKENIZERS class FILTERS lowercase;
+DEFINE INDEX doc_text ON document FIELDS text FULLTEXT ANALYZER simple BM25;
+
+CREATE document:1 SET text = "a database for graphs";
+CREATE document:2 SET text = "a database for documents";
+CREATE document:3 SET text = "an engine for vectors";
+
+SELECT id, search::score(0) AS score FROM document WHERE text @0@ 'database';
+```
+
+```surql title="Output"
+[
+	{
+		id: document:1,
+		score: 0f
+	},
+	{
+		id: document:2,
+		score: 0f
+	}
+]
+```
+
+Four more documents that never mention the term leave `n` at 2 while `N` rises to 7, putting the term under the threshold and giving it a positive weight. The index, the query and the two matching records are all unchanged:
+
+```surql
+CREATE document:4 SET text = "an engine for time series";
+CREATE document:5 SET text = "an engine for documents";
+CREATE document:6 SET text = "a store for vectors";
+CREATE document:7 SET text = "a store for graphs";
+
+SELECT id, search::score(0) AS score FROM document WHERE text @0@ 'database';
+```
+
+```surql title="Output"
+[
+	{
+		id: document:1,
+		score: 0.7997389435768127f
+	},
+	{
+		id: document:2,
+		score: 0.7997389435768127f
+	}
+]
+```
+
+Matching is unaffected either way, so the same rows come back and only their ranking weight is zero. A score of `0` across a handful of records is the clamp behaving as designed, which makes a small dataset a poor place to measure relevance. It is preferable to benchmark on a larger corpus (the size of the real one if possible), and read `ORDER BY score DESC` over a toy dataset as unordered.
+
 The `AND` and `OR` clauses can be used inside the `@@` as well. This allows a single string to be compared against instead of needing to specify individual parts of the string.
 
 ```surql
