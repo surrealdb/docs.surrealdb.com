@@ -363,8 +363,10 @@ Two things to check alongside a move:
 
 ## Content components
 
-Markdown pages can use a small set of React components, registered in
-`registerMarkdownComponents` (`src/utils/markdown.tsx`).
+Markdown pages can use a small set of React components. Most are registered in
+`registerMarkdownComponents` (`src/utils/markdown.tsx`); `<YouTube>` and
+`<SurrealistMini>` come from `@surrealdb/ui` instead, so do not expect to find
+every component in that file.
 
 | Component                        | Use                                                           |
 | -------------------------------- | ------------------------------------------------------------- |
@@ -373,10 +375,21 @@ Markdown pages can use a small set of React components, registered in
 | `<Boxes>` with `<IconBox>`       | Card grid of links, used on section landing pages.            |
 | `<Edition value="enterprise" />` | Community or Enterprise badge.                                |
 | `<Version sdk="…" />`            | Inline current version number for an SDK.                     |
+| `<YouTube code="…" />`           | Embedded video. The `code` is the YouTube id.                 |
+| `<SurrealistMini>`               | Runnable query embed of a live editor.                        |
 
 > [!IMPORTANT]
 > Braced attribute values are parsed as **JSON**, not JavaScript. Object keys and
 > strings need double quotes; an invalid value is dropped with a console warning.
+
+> [!WARNING]
+> **Raw HTML is stripped, silently.** The markdown pipeline renders registered
+> components only, so a hand-written `<iframe>` produces nothing at all - no error,
+> no empty box, and the tag's contents still appear in the page source, so grepping
+> for `youtube` finds a video that no reader can see. Two pages carried a dead
+> `<iframe>` this way until a reader reported one of them. Always embed a video with
+> `<YouTube code="…" />`, and leave a blank line between the preceding paragraph and
+> the tag so it parses as its own block.
 
 ### `<Synopsis>`
 
