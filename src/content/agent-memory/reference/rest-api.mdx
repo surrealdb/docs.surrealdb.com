@@ -71,6 +71,42 @@ See [Contexts and scope](/docs/agent-memory/mental-model/contexts-and-scope).
 
 JSON responses use **camelCase** field names (`queryMs`, `sessionId`, `traceId`, …).
 
+## Pagination
+
+Every list surface pages the same way. Three optional query parameters, uniform on each listing:
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `limit` | `100` | Page size. A value above the cap of `500` is clamped rather than rejected. An explicit `limit=0` is a `400`, because it asks for no rows and clamping it up would answer a different request. |
+| `cursor` | first page | Opaque continuation token from the previous response. |
+| `count` | `false` | Also compute `totalSize`. |
+
+The collection comes back beside a `page` block:
+
+```json
+{
+  "entities": [ ... ],
+  "page": {
+    "nextCursor": "eyJ2IjoxLCJrIjp7ImsiOiJ0eXBlX25hbWUi…",
+    "hasMore": true,
+    "totalSize": 40312
+  }
+}
+```
+
+`nextCursor` and `totalSize` are omitted when absent, so the last page is `{"hasMore": false}`.
+
+> [!IMPORTANT]
+> Walk a listing by following `nextCursor` until it is absent. **Never terminate on a short page.** A listing that is bounded in the database and then filtered for visibility, such as `/scopes` or `/keys`, can return fewer rows than `limit` while further pages remain.
+
+Paging is keyset rather than offset: a cursor names the last returned row's position in the listing's sort order, so any page costs the same as the first and the walk stays stable under concurrent writes. The record id is the last component of every ordering, which is what makes a position unambiguous within a run of equal sort values.
+
+A cursor is unsigned and carries no identity. The scope predicate is resolved from the caller's credentials on every request, independently of the cursor, so replaying another caller's cursor grants nothing. What a cursor does carry is a fingerprint of the request's filters, so reusing one under changed filters returns `400` rather than silently resuming inside a different result set.
+
+`count=true` costs a full count of the filtered set, which is the unbounded read that pagination exists to avoid, so it never rides along with a default page fetch. `totalSize` counts the whole listing, not the rows remaining after the cursor.
+
+Over gRPC the same three inputs are `page_size`, `page_token` and `want_total`, and responses carry `next_page_token` and an optional `total_size`. There is no `has_more`, because an absent token already means the last page.
+
 ## Unified verbs
 
 | Verb | Method and path | Purpose |
@@ -306,7 +342,7 @@ metadata={"title":"Returns Policy","scopes":[["org/acme/team/eng"]],"labels":["t
 GET /api/v1/{context_id}/documents?pageSize=20&mimeType=application/pdf
 ```
 
-Query parameters use **camelCase** (`pageSize`, `mimeType`). Pagination is **zero-indexed** (`page=0` is the first page).
+Query parameters use **camelCase** (`mimeType`). Page with `limit` and `cursor` as described under [Pagination](#pagination); the older zero-indexed `page` and `pageSize` parameters are still accepted here for existing callers.
 
 ### Document query (`/documents/query`)
 
