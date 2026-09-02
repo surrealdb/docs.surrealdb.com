@@ -150,6 +150,26 @@ chronological, version-gated syntax keeps its `<Since>` marker, and statement
 choice (`CREATE`/`INSERT`/`UPSERT`) is never swapped - those differ on
 existing records.
 
+**`IF` blocks.** Always write a conditional as `IF @condition { … }`, with any
+`ELSE IF` and `ELSE` taking blocks of their own. The older
+`IF @condition THEN @expression ELSE @expression END` form still parses, but it
+is kept for compatibility rather than recommended, and no example should teach
+it. Its branch holds a single expression rather than a block, so a branch cannot
+take a `LET`, a `THROW`, a `BREAK`, a `CONTINUE`, or two statements separated by
+`;`. Adding a second statement reports
+`Parse error: Unexpected token 'CREATE', expected if to end`, which points at
+the wrong token and names a construct the reader never wrote. The form also
+persists: a `DEFINE FUNCTION`, `DEFINE FIELD` or `DEFINE EVENT` keeps a body in
+the schema, and the stored form is never normalised, so `INFO FOR DB` and
+`surreal export` both emit `THEN … END` again and `surreal import` has to parse
+it back. That round trip is what keeps the parse path in the server, so treat
+the syntax as permanent and simply never teach it.
+
+The word `THEN` is unrelated and correct in `DEFINE EVENT … THEN`,
+`DEFINE API … THEN` and `REFERENCE ON DELETE THEN`, where it is the only syntax.
+Leave those, and leave historical `THEN … END` in release notes and migration
+pages, which stay chronological.
+
 **`RETURN` in examples.** Bare expressions are valid statements that yield the
 same value, so a snippet that is a single expression drops the leading
 `RETURN`: the bare form is the fragment a reader can paste into a `SELECT`
