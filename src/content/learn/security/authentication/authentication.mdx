@@ -37,9 +37,9 @@ DEFINE USER birthday_bot ON ROOT PASSWORD "botpassword9!" ROLES VIEWER;
 DEFINE USER clumsy_ceo ON ROOT PASSWORD "password" ROLES VIEWER COMMENT "Don't let the CEO have more than VIEWER access";
 ```
 
-To learn more about authentication in SurrealDB, check out this explainer video:
-<iframe width="100%" src="https://www.youtube.com/embed/cGAxH9FezUY?si=qolPqSytH4DU3prg" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" 
-style={{aspectRatio: 1.7, paddingTop: '20px'}} allowfullscreen></iframe>
+This explainer video covers the user groups SurrealDB authenticates as, and the roles a system user can hold:
+
+<YouTube code="cGAxH9FezUY" />
 
 ### Sign in using the new user
 
