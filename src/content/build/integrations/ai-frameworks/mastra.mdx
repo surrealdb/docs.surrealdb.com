@@ -1,0 +1,273 @@
+---
+position: 11
+title: Mastra
+description: Use SurrealDB as the storage backend for Mastra agents, covering conversation memory, workflow snapshots, scores, observability spans, and native vector search.
+---
+
+# Mastra
+
+[Mastra](https://mastra.ai) is a TypeScript framework for building AI agents, workflows, and RAG pipelines. [`@surrealdb/mastra-ai`](https://github.com/surrealdb/mastra-ai) provides `SurrealDBStore`, a storage adapter that backs Mastra with a single SurrealDB instance: conversation memory (threads, messages, and working memory), workflow suspend/resume snapshots, scores, observability spans, and [HNSW vector indexes](/docs/learn/data-models/vector-search/overview) for RAG.
+
+Because SurrealDB is [multi-model](/docs/learn/data-models), one database covers everything a Mastra application persists. Message history, workflow state, and vector embeddings live in the same ACID-compliant engine, so there is no separate vector database to deploy or keep in sync.
+
+> [!NOTE]
+> This page covers the storage adapter, which runs against a SurrealDB instance you manage. The same package also integrates with [SurrealDB Agent Memory](/docs/agent-memory/integrations/frameworks/mastra), a hosted memory provider for fact extraction and semantic recall.
+
+## Requirements
+
+- [SurrealDB v3](/docs/running/installation), local or on [SurrealDB Cloud](/docs/manage/instances)
+- Bun 1+ or Node.js 22+
+- `@mastra/core` 1.31.0+
+
+## Setup
+
+Start SurrealDB locally, either [installed directly](/docs/running/installation):
+
+```sh
+surreal start --user root --pass secret memory
+```
+
+or [with Docker](/docs/running/docker):
+
+```sh
+docker run --rm --pull always -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass secret
+```
+
+Alternatively, create a managed instance on [SurrealDB Cloud](/docs/manage/instances) and connect with its `wss://` URL.
+
+## Install dependencies
+
+```sh
+bun add @surrealdb/mastra-ai
+```
+
+## Quick start
+
+Create a store, pass it to `Mastra` as `storage`, and call `store.init()` to connect and apply the table schemas. The agent's conversation history then persists in SurrealDB, keyed by `resourceId` and `threadId`:
+
+```typescript
+import { Mastra } from "@mastra/core/mastra";
+import { Agent } from "@mastra/core/agent";
+import { anthropic } from "@ai-sdk/anthropic";
+import { SurrealDBStore } from "@surrealdb/mastra-ai";
+
+const store = new SurrealDBStore({
+    id: "my-store",
+    url: "ws://localhost:8000",
+    username: "root",
+    password: "secret",
+    namespace: "mastra",
+    database: "my_app",
+});
+
+const agent = new Agent({
+    name: "assistant",
+    instructions: "You are a helpful assistant.",
+    model: anthropic("claude-sonnet-4-6"),
+});
+
+const mastra = new Mastra({
+    agents: { assistant: agent },
+    storage: store,
+});
+
+await store.init();
+
+const response = await mastra.getAgent("assistant").generate("Hello!", {
+    resourceId: "user-001",
+    threadId: "thread-001",
+});
+
+console.log(response.text);
+await store.close();
+```
+
+## Configuration
+
+`SurrealDBStore` accepts three configuration shapes. `namespace` and `database` are optional in the first two and both default to `mastra`.
+
+Username and password:
+
+```typescript
+new SurrealDBStore({
+    id: "my-store",
+    url: "ws://localhost:8000",
+    username: "root",
+    password: "secret",
+    namespace: "mastra",
+    database: "my_app",
+});
+```
+
+Token authentication, for example against a SurrealDB Cloud instance:
+
+```typescript
+new SurrealDBStore({
+    id: "my-store",
+    url: "wss://cloud.surrealdb.com",
+    token: "<your-jwt-token>",
+    namespace: "mastra",
+    database: "my_app",
+});
+```
+
+A pre-connected `Surreal` instance from the [JavaScript SDK](/docs/reference/javascript), when your application already manages its own connection:
+
+```typescript
+import { Surreal } from "surrealdb";
+
+const db = new Surreal();
+await db.connect("ws://localhost:8000");
+
+new SurrealDBStore({ id: "my-store", db });
+```
+
+## Workflow suspend and resume
+
+Mastra workflows can suspend mid-run and resume later, for example to wait for human approval. With `SurrealDBStore` as storage, each snapshot is written atomically, so a run survives a process restart and resumes from the suspended step:
+
+```typescript
+import { Mastra } from "@mastra/core/mastra";
+import { createWorkflow, createStep } from "@mastra/core/workflows";
+import { SurrealDBStore } from "@surrealdb/mastra-ai";
+import { z } from "zod";
+
+const store = new SurrealDBStore({ id: "store", url: "ws://localhost:8000", username: "root", password: "secret" });
+const mastra = new Mastra({ storage: store });
+
+const approveStep = createStep({
+    id: "approve",
+    inputSchema: z.object({ value: z.number() }),
+    resumeSchema: z.object({ approved: z.boolean() }),
+    outputSchema: z.object({ approved: z.boolean() }),
+    execute: async ({ inputData, resumeData, suspend }) => {
+        if (!resumeData) {
+            await suspend({});
+        }
+        return { approved: resumeData!.approved };
+    },
+});
+
+const workflow = createWorkflow({
+    id: "approval",
+    mastra,
+    inputSchema: z.object({ value: z.number() }),
+    outputSchema: z.object({ approved: z.boolean() }),
+    steps: [approveStep],
+}).then(approveStep).commit();
+
+await store.init();
+
+const run = workflow.createRun();
+await run.start({ inputData: { value: 42 } });
+
+await run.resume({
+    step: approveStep,
+    resumeData: { approved: true },
+});
+
+await store.close();
+```
+
+## Observational Memory
+
+`SurrealDBStore` is a supported backend for Mastra's [Observational Memory](https://mastra.ai/docs/memory/observational-memory), the observer/reflector system in `@mastra/memory` that compresses long message histories into observations. [Memory extractors](https://mastra.ai/blog/introducing-memory-extractors) also work, pulling structured facts out of conversations during observation cycles, and extracted values persist through the same SurrealDB tables. Observational Memory requires `@mastra/memory` 1.1.0+, and extractors require 1.22.0+:
+
+```typescript
+import { Extractor, Memory } from "@mastra/memory";
+import { SurrealDBStore } from "@surrealdb/mastra-ai";
+import { z } from "zod";
+
+const store = new SurrealDBStore({
+    id: "om-store",
+    url: "ws://localhost:8000",
+    username: "root",
+    password: "secret",
+});
+await store.init();
+
+const memory = new Memory({
+    storage: store,
+    options: {
+        observationalMemory: {
+            model: "anthropic/claude-haiku-4-5",
+            observation: {
+                extract: [
+                    new Extractor({
+                        name: "User profile",
+                        instructions: "Extract stable user profile facts.",
+                        schema: z.object({
+                            preferredName: z.string().optional(),
+                            timezone: z.string().optional(),
+                        }),
+                    }),
+                ],
+            },
+        },
+    },
+});
+```
+
+## Vector search
+
+SurrealDB v3 includes native [HNSW vector indexes](/docs/learn/data-models/vector-search/overview), so the same database that stores agent memory also serves RAG queries. The package exposes `SurrealDBClient` for raw SurrealQL, letting you define a schema, upsert documents with embeddings, and run a k-nearest-neighbour search:
+
+```typescript
+import { SurrealDBClient } from "@surrealdb/mastra-ai";
+
+const SCHEMA = `
+DEFINE TABLE IF NOT EXISTS documents SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS content   ON documents TYPE string;
+DEFINE FIELD IF NOT EXISTS embedding ON documents TYPE array<float>;
+DEFINE INDEX IF NOT EXISTS idx_hnsw
+  ON documents FIELDS embedding HNSW DIMENSION 1536 DIST COSINE;
+`;
+
+const client = new SurrealDBClient({ id: "rag", url: "ws://localhost:8000", username: "root", password: "secret" });
+await client.connect();
+await client.execute(SCHEMA);
+
+await client.execute(
+    `UPSERT type::record('documents', $id) CONTENT $data`,
+    { id: "doc-1", data: { content: "SurrealDB supports vector search.", embedding: [] } },
+);
+
+const results = await client.queryAll(
+    `SELECT content, vector::distance::cosine(embedding, $qe) AS dist
+     FROM documents WHERE embedding <|5|> $qe ORDER BY dist ASC`,
+    { qe: [] },
+);
+```
+
+## API
+
+### `SurrealDBStore`
+
+| Member | Description |
+| ------ | ----------- |
+| `init()` | Connect and apply all table schemas |
+| `close()` | Disconnect |
+| `client` | The underlying `SurrealDBClient` for raw queries |
+| `stores` | Individual domain stores (`memory`, `workflows`, `scores`, `observability`) |
+
+### `SurrealDBClient`
+
+| Method | Description |
+| ------ | ----------- |
+| `connect(config?)` | Open the WebSocket connection |
+| `close()` | Disconnect |
+| `queryAll<T>(surql, bindings?)` | Run a query and return all rows |
+| `queryOne<T>(surql, bindings?)` | Run a query and return the first row or `null` |
+| `execute(surql, bindings?)` | Run a statement with no return value |
+| `txBatch(statements, bindings?)` | Run statements in a single `BEGIN`/`COMMIT TRANSACTION` request |
+
+## Next steps
+
+The [repository](https://github.com/surrealdb/mastra-ai) includes runnable examples for each area:
+
+- [basic-agent](https://github.com/surrealdb/mastra-ai/tree/main/examples/basic-agent): multi-turn agent conversation with SurrealDB memory
+- [workflow-persistence](https://github.com/surrealdb/mastra-ai/tree/main/examples/workflow-persistence): suspend/resume workflow with snapshot storage
+- [rag-pipeline](https://github.com/surrealdb/mastra-ai/tree/main/examples/rag-pipeline): vector similarity search with SurrealDB HNSW indexes
+- [observational-memory](https://github.com/surrealdb/mastra-ai/tree/main/examples/observational-memory): Observational Memory and extractors on SurrealDB
+
+For hosted memory with fact extraction and semantic recall, see the [SurrealDB Agent Memory integration for Mastra](/docs/agent-memory/integrations/frameworks/mastra).
