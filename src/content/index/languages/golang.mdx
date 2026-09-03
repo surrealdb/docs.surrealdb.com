@@ -51,7 +51,7 @@ if err := db.Use(ctx, "company_name", "project_name"); err != nil {
 
 _, err = db.SignIn(ctx, surrealdb.Auth{
 	Username: "root",
-	Password: "root",
+	Password: "secret",
 })
 if err != nil {
 	log.Fatal(err)
