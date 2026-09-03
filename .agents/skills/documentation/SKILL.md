@@ -133,6 +133,7 @@ Structure carries meaning. Do not leave everything in prose blocks.
 - **Code fences:** runnable commands and snippets; show expected output when it helps the reader verify.
 - **Callouts:** `NOTE` for tips, `WARNING` / `IMPORTANT` for safety, data loss, or secrets.
 - **Placeholders:** `<your-token>`, `YOUR_PROJECT_ID` - never real credentials.
+- **Example passwords:** make them look like passwords (`secret`, `hunter123`), never reuse the username. The SurrealDB default is `secret` with the username `root`.
 - **Links:** push depth outward; keep the current page focused.
 - **Hub pages:** title + one-line description per destination beats long essays.
 
