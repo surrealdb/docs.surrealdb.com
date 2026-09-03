@@ -284,9 +284,10 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         icon: iconSandbox,
                     },
                     {
-                        label: "REST API",
+                        label: "APIs & protocols",
                         href: "/docs/reference/rest-api",
-                        description: "Call the HTTP API for queries and admin.",
+                        description:
+                            "REST, HTTP, RPC, CBOR and Postgres wire protocols, and the error format they share.",
                         icon: iconAPI,
                     },
                     {
