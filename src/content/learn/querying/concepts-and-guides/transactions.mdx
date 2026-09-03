@@ -10,6 +10,59 @@ SurrealDB is ACID-compliant, so the work inside a transaction either commits as 
 
 This page covers manual transactions, which group statements that must succeed or fail together, and the **isolation** guarantees that apply when many clients read and write at the same time.
 
+## Implicit transactions
+
+`BEGIN` is not the only thing that groups statements. Blocks and function bodies each run as one transaction, despite the lack of `BEGIN` or `COMMIT`, which is why they are described as implicit. Each behaves like any other transaction: it commits when it finishes, and rolls back if anything inside it fails.
+
+Implicit transactions commit on normal completion, including an early `RETURN`. An early return is control flow rather than a failure, so the work already done is kept:
+
+```surql
+{
+    CREATE shipment:shp_5501 SET order = order:ord_8412, carrier = 'DHL';
+	-- the caller only wants the id
+    RETURN shipment:shp_5501;                            
+	-- never runs
+    UPDATE order:ord_8412 SET status = 'shipped';        
+};
+```
+
+Implicit transactions also roll back back on errors, whether that is a [`THROW`](/docs/reference/query-language/statements/throw) or a statement that simply fails, such as a schema violation. Nothing inside survives:
+
+```surql
+{
+    CREATE order:ord_8412 SET item = product:keyboard, quantity = 2;   -- rolled back
+    THROW "Insufficient stock";
+    UPDATE product:keyboard SET stock -= 2;                            -- never runs
+};
+```
+
+Without the braces the order would persist while the stock it reserved never moved, which is the inconsistency a transaction exists to prevent.
+
+In a bare sequence of statements, each one is its own transaction. Here the `THROW` reports an error, and both records still exist afterwards, because the statements either side of it committed independently:
+
+```surql
+CREATE product:keyboard SET stock = 40;   -- commits
+THROW "Stop the import";                  -- errors, and stops nothing
+CREATE product:mouse SET stock = 25;      -- commits
+```
+
+Both products exist afterwards. A bare `THROW` reports an error without halting the statements around it, so it cannot be used as a guard clause outside a block.
+
+So wrapping statements in braces is enough to make them atomic.
+
+A block does not, however, give a failure somewhere to be contained. There is one transaction per query rather than a stack of them, so a block inside a manual transaction is part of that transaction rather than a nested one. A `THROW` inside the block aborts the whole thing, including the statements that ran before it:
+
+```surql
+BEGIN;
+UPDATE account:one SET balance -= 100;    -- rolled back as well
+{
+    CREATE ledger_entry:le_9001 SET amount = 100, account = account:one;
+    THROW "Ledger rejected the entry";
+};
+UPDATE account:two SET balance += 100;    -- never runs
+COMMIT;                                   -- fails: the transaction was already aborted
+```
+
 ## Manual transactions
 
 Three statements control a manual transaction:
