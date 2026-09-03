@@ -8,6 +8,8 @@ description: The Python SDK provides a structured error hierarchy for handling s
 
 All errors raised by the Python SDK extend [`SurrealError`](/docs/reference/python/api/errors/#surrealerror), so you can catch every SDK error with a single `except` clause. Server-originated errors use the [`ServerError`](/docs/reference/python/api/errors/#servererror) subtree with structured kinds, details, and cause chains. SDK-side errors cover connection, parsing, and feature support failures.
 
+The error kinds, wire codes and structured shape behind these are documented once in [Errors](/docs/reference/rest-api/errors), which applies to every SDK and protocol.
+
 See the [Errors reference](/docs/reference/python/api/errors/) for the complete error hierarchy and all available properties.
 
 ## API references
@@ -47,6 +49,60 @@ See the [Errors reference](/docs/reference/python/api/errors/) for the complete 
 	</tbody>
 </table>
 
+## Where an error surfaces
+
+A query travels through two layers, and it is worth knowing which one a failure comes from.
+
+The first is the request itself: a connection that is unavailable, a rejected sign-in, a query that will not parse. The second is the individual statements inside the query, which can fail while the request as a whole succeeds.
+
+`.execute()` collapses both into an exception. It raises on the first statement that fails, so a query whose earlier statements succeeded returns nothing at all: those results are lost along with the error.
+
+Where the per-statement outcome matters, [`query_raw()`](/docs/reference/python/api/core/surreal#query-raw) returns every statement instead of raising. Each entry carries a `status` of `OK` or `ERR`, and a failing one also carries the `kind`.
+
+```python
+from surrealdb import Surreal, ThrownError
+
+with Surreal("ws://localhost:8000") as db:
+    db.signin({"username": "root", "password": "secret"})
+    db.use("test", "test")
+
+    # .execute() raises on the first statement that fails, so the result of
+    # the statement that succeeded is not returned.
+    try:
+        db.query("RETURN 1; THROW 'second'").execute()
+    except ThrownError as e:
+        print(f"{e.kind}: {e}")
+
+    # query_raw() reports every statement instead of raising.
+    response = db.query_raw("RETURN 1; THROW 'second'")
+    for index, statement in enumerate(response["result"]):
+        print(index, statement["status"], statement["result"])
+```
+
+```python title="Output"
+Thrown: An error occurred: second
+0 OK 1
+1 ERR An error occurred: second
+```
+
+## Error kinds
+
+Every server error carries a `.kind`, and the SDK raises a dedicated class for each of the kinds below. The meaning of each kind is described in [Errors](/docs/reference/rest-api/errors#error-kinds). Match on the kind or the class rather than on the message text, which is free to change between releases.
+
+| Kind | Exception class |
+| --- | --- |
+| `Validation` | `ValidationError` |
+| `Configuration` | `ConfigurationError` |
+| `Query` | `QueryError` |
+| `Serialization` | `SerializationError` |
+| `NotAllowed` | `NotAllowedError` |
+| `NotFound` | `NotFoundError` |
+| `AlreadyExists` | `AlreadyExistsError` |
+| `Thrown` | `ThrownError` |
+| `Internal` | `InternalError` |
+
+Any kind without a dedicated class, including one added by a newer server, arrives as the base `ServerError` with its `.kind` intact. Catching `ServerError` therefore stays correct as the server grows new kinds, and the `ErrorKind` enum can be used with `.has_kind()` to test for one without importing its class.
+
 ## Catching all SDK errors
 
 The simplest way to handle errors is to catch `SurrealError`, which is the base class for every exception the SDK raises.
@@ -56,7 +112,7 @@ from surrealdb import Surreal, SurrealError
 
 with Surreal("ws://localhost:8000") as db:
     db.use("my_ns", "my_db")
-    db.signin({"username": "root", "password": "root"})
+    db.signin({"username": "root", "password": "secret"})
 
     try:
         result = db.query("SELECT * FROM users").execute()
@@ -172,7 +228,7 @@ from surrealdb import Surreal, UnsupportedFeatureError
 
 with Surreal("http://localhost:8000") as db:
     db.use("my_ns", "my_db")
-    db.signin({"username": "root", "password": "root"})
+    db.signin({"username": "root", "password": "secret"})
 
     try:
         session = db.new_session()

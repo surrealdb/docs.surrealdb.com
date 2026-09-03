@@ -8,6 +8,8 @@ description: The JavaScript SDK provides specific error classes for handling dif
 
 The JavaScript SDK defines specific error classes for different failure scenarios. All SDK errors extend the base `SurrealError` class, making it easy to distinguish SDK errors from other JavaScript errors and to handle specific failure types with `instanceof` checks.
 
+The error kinds, wire codes and structured shape behind these are documented once in [Errors](/docs/reference/rest-api/errors), which applies to every SDK and protocol.
+
 ## API references
 
 <table>
@@ -42,6 +44,65 @@ The JavaScript SDK defines specific error classes for different failure scenario
 </table>
 
 A complete list of error classes is available in the [Errors API reference](/docs/reference/javascript/api/errors).
+
+## Where an error surfaces
+
+A query travels through two layers, and it is worth knowing which one a failure comes from.
+
+The first is the request itself: a connection that is unavailable, a rejected sign-in, a query that will not parse. The second is the individual statements inside the query, which can fail while the request as a whole succeeds.
+
+Awaiting a query collapses both into a rejection. It rejects on the first statement that fails, so a query whose earlier statements succeeded resolves to nothing at all: those results are lost along with the error.
+
+Where the per-statement outcome matters, `.responses()` returns every statement instead of rejecting. Each entry carries a `success` flag, and a failing one carries an `error` with its `kind`.
+
+```ts
+import { Surreal, createRemoteEngines, ThrownError } from 'surrealdb';
+
+const db = new Surreal({ engines: { ...createRemoteEngines() } });
+await db.connect('http://localhost:8000');
+await db.signin({ username: 'root', password: 'secret' });
+await db.use({ namespace: 'test', database: 'test' });
+
+// Awaiting the query rejects on the first statement that fails, so the
+// result of the statement that succeeded is not returned.
+try {
+    await db.query("RETURN 1; THROW 'second'");
+} catch (e) {
+    if (e instanceof ThrownError) {
+        console.log(`${e.kind}: ${e.message}`);
+    }
+}
+
+// .responses() reports every statement instead of rejecting.
+const responses = await db.query("RETURN 1; THROW 'second'").responses();
+for (const [index, statement] of responses.entries()) {
+    console.log(index, statement.success, statement.success ? statement.result : statement.error.kind);
+}
+```
+
+```ts title="Output"
+Thrown: An error occurred: second
+0 true 1
+1 false Thrown
+```
+
+## Error kinds
+
+Every server error carries a `kind`, and the SDK throws a dedicated class for each of the kinds below. The meaning of each kind is described in [Errors](/docs/reference/rest-api/errors#error-kinds). Match on the kind or the class rather than on the message text, which is free to change between releases.
+
+| Kind | Error class |
+| --- | --- |
+| `Validation` | `ValidationError` |
+| `Configuration` | `ConfigurationError` |
+| `Query` | `QueryError` |
+| `Serialization` | `SerializationError` |
+| `NotAllowed` | `NotAllowedError` |
+| `NotFound` | `NotFoundError` |
+| `AlreadyExists` | `AlreadyExistsError` |
+| `Thrown` | `ThrownError` |
+| `Internal` | `InternalError` |
+
+Any kind without a dedicated class, including one added by a newer server, arrives as the base `ServerError` with its `kind` intact. Catching `ServerError` therefore stays correct as the server grows new kinds.
 
 ## Catching SDK errors
 

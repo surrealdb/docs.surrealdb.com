@@ -1,0 +1,123 @@
+---
+position: 12
+title: Error handling
+description: Every fallible method in the Rust SDK returns a surrealdb::Error, which carries a kind you can match on along with structured details and a cause chain.
+---
+
+# Error handling
+
+Every fallible method in the Rust SDK returns `surrealdb::Result<T>`, an alias for `Result<T, surrealdb::Error>`. That error type is the same one the server sends over the wire, so a failure raised inside the database and a failure raised by the SDK arrive in the same shape.
+
+The error kinds, wire codes and structured shape behind these are documented once in [Errors](/docs/reference/rest-api/errors), which applies to every SDK and protocol.
+
+Be sure to match on the error's kind rather than on its message. The kind and the wire code are a stable contract, while message text is free to change between releases.
+
+## Two places an error can appear
+
+A query travels through two layers, and each reports failure differently.
+
+The `Result` covers the request as a whole: a malformed query, a connection that is unavailable, a rejected sign-in. The response covers the individual statements inside the query, which can fail while the request itself succeeds.
+
+That second layer is easy to miss. A query whose statements fail still returns `Ok`, because the request reached the server and came back. The statement errors appear only when the response is inspected with [`.check()`](/docs/reference/rust/methods/query) or `.take_errors()`.
+
+```rust
+use surrealdb::engine::any::connect;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("memory").await?;
+    db.use_ns("test").use_db("test").await?;
+
+    // Three statements in one call. Only the third breaks the assertion.
+    let mut response = db
+        .query(
+            "DEFINE FIELD name ON user TYPE string ASSERT $value.len() <= 20;
+             CREATE user:short SET name = 'Billy';
+             CREATE user:long SET name = 'Mr. Muchtoolongname the Fourth';",
+        )
+        .await?;
+
+    // The call succeeded, so `?` above did not fire. take_errors() reports which
+    // statements failed and leaves the successful ones in place.
+    for (index, e) in response.take_errors() {
+        println!("statement {index}: {} - {}", e.kind_str(), e.message());
+    }
+
+    // The record created by the statement that worked is still there.
+    let created: Vec<String> = db.query("SELECT VALUE name FROM user").await?.take(0)?;
+    println!("records still created: {created:?}");
+
+    // A malformed query fails the call itself, so this one does return Err.
+    if let Err(e) = db.query("SELECT * FROM").await {
+        println!("call error: {} (is_validation = {})", e.kind_str(), e.is_validation());
+    }
+
+    // Some kinds carry structured details.
+    if let Err(e) = connect("ws://127.0.0.1:9/").await {
+        println!("{}: {:?}", e.kind_str(), e.connection_details());
+    }
+    Ok(())
+}
+```
+
+```text title="Output"
+statement 2: Internal - Found 'Mr. Muchtoolongname the Fourth' for field `name`, with record `user:long`, but field must conform to: $value.len() <= 20
+records still created: ["Billy"]
+call error: Validation (is_validation = true)
+Connection: Some(ConnectionFailed)
+```
+
+`take_errors()` gives the index of each failing statement, which is what makes it possible to tell which one of a multi-statement query went wrong. The same call wrapped in a transaction behaves differently: see [Errors](/docs/reference/rest-api/errors#inside-a-transaction).
+
+## Error kinds
+
+`.kind_str()` returns the kind as a string, and each kind has a matching predicate for use in a `match` guard. The meaning of each kind is described in [Errors](/docs/reference/rest-api/errors#error-kinds).
+
+| Kind | Predicate |
+| --- | --- |
+| `Validation` | `.is_validation()` |
+| `Configuration` | `.is_configuration()` |
+| `Query` | `.is_query()` |
+| `Serialization` | `.is_serialization()` |
+| `NotAllowed` | `.is_not_allowed()` |
+| `NotFound` | `.is_not_found()` |
+| `AlreadyExists` | `.is_already_exists()` |
+| `Connection` | `.is_connection()` |
+| `Thrown` | `.is_thrown()` |
+| `Internal` | `.is_internal()` |
+| `Context` | `.is_context()` |
+
+Because `Internal` absorbs unrecognised kinds, a `match` that handles the kinds it cares about and treats the rest as internal stays correct against a newer server.
+
+```rust
+match db.query("SELECT * FROM person").await {
+    Ok(response) => { /* inspect statements with .check() */ }
+    Err(e) if e.is_validation() => eprintln!("bad query: {}", e.message()),
+    Err(e) if e.is_not_allowed() => eprintln!("not permitted: {}", e.message()),
+    Err(e) if e.is_connection() => eprintln!("connection lost: {}", e.message()),
+    Err(e) => eprintln!("{}: {}", e.kind_str(), e.message()),
+}
+```
+
+## Structured details
+
+Eight of the kinds carry a typed detail enum, reached through an accessor named after the kind: `.validation_details()`, `.configuration_details()`, `.query_details()`, `.serialization_details()`, `.not_allowed_details()`, `.not_found_details()`, `.already_exists_details()`, and `.connection_details()`. Each returns `Option`, since a kind does not always carry a detail.
+
+The detail types live under `surrealdb::types`, so the `ConnectionFailed` printed by the example above is a `surrealdb::types::ConnectionError`. `Thrown`, `Internal` and `Context` have no detail type.
+
+## Following the cause chain
+
+`.cause()` returns the underlying error where one was attached, so a failure that passed through several layers can be unwound to its origin.
+
+```rust
+let mut current = Some(&error);
+while let Some(e) = current {
+    eprintln!("{}: {}", e.kind_str(), e.message());
+    current = e.cause();
+}
+```
+
+## Learn more
+
+- [`.query()`](/docs/reference/rust/methods/query) - `.check()` and `.take_errors()` on a response
+- [Working with types](/docs/reference/rust/concepts/working-with-types) - the `surrealdb::types` crate that defines `Error`
