@@ -396,7 +396,7 @@ every component in that file.
 | `<Edition value="enterprise" />` | Community or Enterprise badge.                                |
 | `<Version sdk="…" />`            | Inline current version number for an SDK.                     |
 | `<YouTube code="…" />`           | Embedded video. The `code` is the YouTube id.                 |
-| `<SurrealistMini>`               | Runnable query embed of a live editor.                        |
+| `<SurrealistMini query="…" />`   | Runnable query embed of a live editor.                        |
 
 > [!IMPORTANT]
 > Braced attribute values are parsed as **JSON**, not JavaScript. Object keys and
@@ -410,6 +410,23 @@ every component in that file.
 > `<iframe>` this way until a reader reported one of them. Always embed a video with
 > `<YouTube code="…" />`, and leave a blank line between the preceding paragraph and
 > the tag so it parses as its own block.
+
+### `<SurrealistMini>`
+
+Pass the SurrealQL as a **`query`** attribute, with display options as sibling attributes:
+
+```mdx
+<SurrealistMini orientation="horizontal" query="CREATE person:john SET name = 'John';
+SELECT * FROM person;
+" />
+```
+
+Pick the attribute delimiter the query itself does not contain: `"` normally, `'` where the SurrealQL uses double-quoted strings, or `` query={`…`} `` where it uses both.
+
+> [!WARNING]
+> **Do not use a `url` attribute.** `url` is a valid key on the component's config type, but the markdown path drops it when it builds the iframe source, so the embed renders as an **empty editor** with no error. Neither the URL nor the `?query=` inside it survives. Eight pages carried a dead embed this way until a reader reported one of them, and the page still looked right because the iframe was there at its full size.
+
+A `url` embed also costs the raw `.md` endpoints. The converter in `src/utils/mdx-to-markdown.ts` recovers the query from `?query=` as a fallback, but it then also emits the whole percent-encoded URL as a "Run this example" link - between 500 and 1,700 characters of unreadable blob per embed. The `query` form emits a clean ` ```surql ` fence and nothing else.
 
 ### `<Synopsis>`
 
