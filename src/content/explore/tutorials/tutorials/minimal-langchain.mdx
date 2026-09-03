@@ -34,7 +34,7 @@ from langchain_surrealdb.experimental.surrealdb_graph import SurrealDBGraph
 from langchain_surrealdb.vectorstores import SurrealDBVectorStore
 
 conn = Surreal("ws://localhost:8000/rpc")
-conn.signin({"username": "root", "password": "root"})
+conn.signin({"username": "root", "password": "secret"})
 conn.use("langchain", "demo")
 vector_store = SurrealDBVectorStore(OllamaEmbeddings(model="all-minilm:22m"), conn)
 graph_store = SurrealDBGraph(conn)

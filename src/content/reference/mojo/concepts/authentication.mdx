@@ -44,7 +44,7 @@ def main():
         ),
     )
 
-    # Encode the credentials map {"user": "root", "pass": "root"}.
+    # Encode the credentials map {"user": "root", "pass": "secret"}.
     var codec = CborCodec()
     var pairs = List[Tuple[String, List[UInt8]]]()
     pairs.append(Tuple(String("user"), codec.encode_text("root")))

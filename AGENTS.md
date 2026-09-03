@@ -133,6 +133,15 @@ matching the value the body actually produces, except where the example
 demonstrates that the annotation is optional or the function exists only for
 its side effects.
 
+**Example credentials.** A password in an example should look like a password.
+Using `root` for both the username and the password suggests the value has
+something to do with being a root user, and makes the two hard to tell apart in
+a command line or a connection string. The default is `secret`; where an example
+needs a second one, or a more realistic one, anything obviously a password works
+(`hunter123`, `strongPassword`). The username itself stays `root` where that is
+the user being signed in as. This one drifts back easily, so check the
+surrounding examples rather than copying whichever is nearest.
+
 **Example ordering.** SurrealQL often has several equivalents of the
 same operation, and readers - agents included, since the docs are served raw
 through the `.md` endpoints and `llms.txt` - take the first example shown as
