@@ -1,0 +1,181 @@
+---
+position: 6
+title: Errors
+description: Every error SurrealDB returns carries a kind, a wire code, optional structured details and an optional cause, in the same shape across every protocol and SDK.
+---
+
+# Errors
+
+Every error SurrealDB returns has the same shape, whichever protocol carries it. The SDKs map that shape onto their own idioms, so the vocabulary on this page is the one behind every SDK's error type.
+
+The preferred way to handle an error is to branch on `kind` first and `code` second, both of which are a stable contract. The `message` is written for a person reading it and is free to change between releases, so treat it as text to display rather than something to match on.
+
+## Where an error appears
+
+A request has two layers that can fail independently, and they report failure differently.
+
+The **call** can fail as a whole: incorrect syntax, an unknown method, a rejected sign-in. In this case the response will carry an `error` object in place of a result.
+
+```json title="Call-level error"
+{
+    "error": {
+        "cause": null,
+        "code": -32603,
+        "details": { "kind": "InvalidParams" },
+        "kind": "Validation",
+        "message": "Expected (what, data)"
+    }
+}
+```
+
+Once the call succeeds, individual statements inside will be either successes or failures. Each statement reports its own `status`, and a failing one carries its `kind` with the message in `result`. Statements that ran before it keep their results.
+
+Take these three statements for example which can be sent as one call. The field definition and the first `CREATE` statement are accepted, and only the third breaks the assertion:
+
+```surql
+DEFINE FIELD name ON user TYPE string ASSERT $value.len() <= 20;
+CREATE user:short SET name = "Billy";
+CREATE user:long SET name = "Mr. Muchtoolongname the Fourth";
+```
+
+The call itself succeeded, so there is no `error` object. The failure is reported against the one statement that caused it, and `user:short` is still created:
+
+```json title="Statement-level error"
+{
+    "result": [
+        { "result": null, "status": "OK", "time": "7.899708ms", "type": null },
+        {
+            "result": [{ "id": "user:short", "name": "Billy" }],
+            "status": "OK",
+            "time": "10.369375ms",
+            "type": null
+        },
+        {
+            "kind": "Internal",
+            "result": "Found 'Mr. Muchtoolongname the Fourth' for field `name`, with record `user:long`, but field must conform to: $value.len() <= 20",
+            "status": "ERR",
+            "time": "1.351458ms",
+            "type": null
+        }
+    ]
+}
+```
+
+A failed statement does not stop the ones after it, and does not roll back the ones before it. Statements are independent unless a [transaction](/docs/reference/query-language/statements/begin) makes them otherwise.
+
+### Inside a transaction
+
+Wrapping the same two `CREATE` statements in `BEGIN` and `COMMIT` ties their fates together:
+
+```surql
+DEFINE FIELD name ON user TYPE string ASSERT $value.len() <= 20;
+
+BEGIN;
+CREATE user:short SET name = "Billy";
+CREATE user:long SET name = "Mr. Muchtoolongname the Fourth";
+COMMIT;
+```
+
+The call still succeeds, so there is still no `error` object. What changes is that the statement which would have worked on its own now reports `NotExecuted`, and the `COMMIT` refuses:
+
+```json title="Statement errors inside a transaction"
+{
+    "result": [
+        { "result": null, "status": "OK", "time": "8.304667ms", "type": null },
+        { "result": null, "status": "OK", "time": "0ns", "type": null },
+        {
+            "details": { "kind": "NotExecuted" },
+            "kind": "Query",
+            "result": "The query was not executed due to a failed transaction",
+            "status": "ERR",
+            "time": "10.880333ms",
+            "type": null
+        },
+        {
+            "kind": "Internal",
+            "result": "Found 'Mr. Muchtoolongname the Fourth' for field `name`, with record `user:long`, but field must conform to: $value.len() <= 20",
+            "status": "ERR",
+            "time": "923.041µs",
+            "type": null
+        },
+        {
+            "details": { "kind": "NotExecuted" },
+            "kind": "Query",
+            "result": "Cannot COMMIT: the transaction was aborted due to a prior error",
+            "status": "ERR",
+            "time": "0ns",
+            "type": null
+        }
+    ]
+}
+```
+
+Neither record exists afterwards, `user:short` included. The `DEFINE FIELD` is untouched, because it ran before `BEGIN`: only the statements inside the transaction are rolled back.
+
+This split is why each SDK offers two ways to read a query result: one that surfaces the first failure, and one that reports every statement. The names differ per language, and each SDK's error page covers its own.
+
+## The error object
+
+| Field | Description |
+| --- | --- |
+| `kind` | The error category. The primary thing to branch on. |
+| `code` | Numeric wire code, kept for backwards compatibility. |
+| `message` | A human-readable description liable to change. Be sure not to match on it unless you are able to update the match when upgrading versions. |
+| `details` | Structured detail for kinds that carry one, itself carrying a nested `kind`. |
+| `cause` | The underlying error, where one was attached. Nested errors use this same shape. |
+
+## Error kinds
+
+| Kind | Meaning |
+| --- | --- |
+| `Validation` | Parse error, invalid request, or invalid parameters |
+| `Configuration` | A feature or configuration is not supported |
+| `Query` | A query timed out, was cancelled, or was not executed |
+| `Serialization` | A value could not be serialised or deserialised |
+| `NotAllowed` | A permission or authorisation check failed |
+| `NotFound` | A resource does not exist |
+| `AlreadyExists` | A resource already exists |
+| `Connection` | A client-side connection failure |
+| `Thrown` | A `THROW` statement ran in SurrealQL |
+| `Internal` | An internal or unexpected failure |
+| `Context` | A wrapper carrying context around another error |
+
+`Internal` doubles as the catch-all for a kind the reader does not recognise, so code that handles the kinds it cares about and treats the rest as internal keeps working against a newer server.
+
+## Wire codes
+
+| Code | Name |
+| --- | --- |
+| `-32700` | Parse error |
+| `-32600` | Invalid request |
+| `-32601` | Method not found |
+| `-32602` | Method not allowed |
+| `-32603` | Invalid parameters |
+| `-32604` | Live query not supported |
+| `-32605` | Bad live query configuration |
+| `-32606` | Bad GraphQL configuration |
+| `-32000` | Internal error |
+| `-32001` | Client-side error |
+| `-32002` | Invalid authentication |
+| `-32003` | Query not executed |
+| `-32004` | Query timed out |
+| `-32005` | Query cancelled |
+| `-32006` | Thrown |
+| `-32007` | Serialization error |
+| `-32008` | Deserialization error |
+| `-32009` | Query transaction conflict |
+
+Two of these differ from the JSON-RPC conventions they resemble: `-32602` is method-not-allowed rather than invalid parameters, and invalid parameters is `-32603`. A code also does not always follow from the kind, since an error can be a `Validation` while carrying the generic `-32000`. Reading `kind` avoids both surprises.
+
+## In the SDKs
+
+Each SDK exposes these kinds through its own error type, and documents the two-layer behaviour in its own idiom.
+
+- [Rust](/docs/reference/rust/concepts/error-handling)
+- [JavaScript](/docs/reference/javascript/concepts/error-handling)
+- [Python](/docs/reference/python/concepts/error-handling)
+- [Go](/docs/reference/golang/concepts/error-handling)
+- [Java](/docs/reference/java/concepts/error-handling)
+- [Kotlin](/docs/reference/kotlin/concepts/error-handling)
+- [PHP](/docs/reference/php/v2/concepts/error-handling)
+- [Mojo](/docs/reference/mojo/concepts/error-handling)
