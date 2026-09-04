@@ -16,6 +16,7 @@ import { OptionsTable } from "~/components/OptionsTable";
 import { Since } from "~/components/Since";
 import { Synopsis } from "~/components/Synopsis";
 import { Version } from "~/components/Version";
+import { VersionBlock } from "~/components/VersionBlock";
 import { getIconScope } from "~/lib/icon-scope";
 import { getImageUrl } from "./image-urls";
 
@@ -189,5 +190,6 @@ export function registerMarkdownComponents(): MarkdownComponents {
         // the kit's renders a div there, which breaks hydration site-wide.
         Since: { component: Since },
         Version: { component: Version },
+        VersionBlock: { component: VersionBlock, block: true },
     });
 }

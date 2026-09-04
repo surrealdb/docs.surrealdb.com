@@ -260,6 +260,23 @@ export function flattenMdxComponents(markdown: string, sdkVersions: SdkVersionMa
         const value = parseAttrs(raw).label;
         return value ? `_(${value})_` : "";
     });
+    // Must run before the `Version` replacement below. `tag("Version")` matches
+    // `<VersionBlock …>` as well, because `ATTRS` absorbs the `Block` suffix as
+    // ordinary attribute text, so whichever of the two runs first wins. With the
+    // order reversed, a version block is replaced by a bare version number and
+    // the code fence is lost. That breaks only the raw `.md` output: the render
+    // path resolves components by exact tag name, so the page still looks right.
+    out = out.replace(tag("VersionBlock"), (_match, raw: string) => {
+        const attrs = parseAttrs(raw);
+        const code = attrs.code;
+        if (!code) {
+            return "";
+        }
+        const resolved = sdkVersions[attrs.sdk ?? "surrealdb"];
+        const version = resolved && resolved !== "unknown" ? resolved : "latest";
+        const body = dedent(unwrapExpression(code)).replaceAll("{{version}}", version);
+        return `\n\n\`\`\`${attrs.lang ?? ""}\n${body}\n\`\`\`\n\n`;
+    });
     out = out.replace(tag("Version"), (_match, raw: string) =>
         version(parseAttrs(raw), sdkVersions),
     );
