@@ -274,11 +274,11 @@ Guest access is used when you want to expose certain parts of a database to non-
 Even when this capability is allowed, a guest user can only execute functions or data operations like SELECT, CREATE, etc, and only if the `PERMISSIONS` clause for the resource being used in the query allows it.
 
 ```surql
-// Prepare tables with custom PERMISSIONS
+-- Prepare tables with custom PERMISSIONS
 test/test> DEFINE TABLE protected PERMISSIONS NONE;
 test/test> DEFINE TABLE public PERMISSIONS FULL;
 
-// When guest access is allowed
+-- When guest access is allowed
 $ surreal start --allow-guests
 
 test/test> CREATE public;
@@ -293,7 +293,7 @@ test/test> CREATE protected;
 test/test> SELECT * FROM protected;
 []
 
-// When guest access is denied
+-- When guest access is denied
 $ surreal start --deny-guests
 
 test/test> CREATE public;

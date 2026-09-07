@@ -146,14 +146,14 @@ When two lookups follow each other, or a filter follows a lookup, results can **
 
 ```surql
 CREATE 
-	// One president
+	-- One president
 	person:president, 
-	// Two managers
+	-- Two managers
 	person:manager1, person:manager2,
-	// Four employees
+	-- Four employees
 	person:employee1, person:employee2, person:employee3, person:employee4;
 
-// Employees work two to a manager, managers work two to a president
+-- Employees work two to a manager, managers work two to a president
 RELATE [person:manager1, person:manager2]->works_for->person:president;
 RELATE [person:employee1, person:employee2]->works_for->person:manager1;
 RELATE [person:employee3, person:employee4]->works_for->person:manager2;
@@ -171,15 +171,15 @@ You can approximate the same with nested `SELECT` / `map`, but nesting grows qui
 
 ```surql
 [person:employee1, person:employee2, person:employee3, person:employee4]
-	// Each $p is a single record: an array<record>
+	-- Each $p is a single record: an array<record>
     .map(|$p| SELECT VALUE out FROM works_for WHERE in = $p.id)
-	// Each $p is an array, so now you have to map each item inside that
+	-- Each $p is an array, so now you have to map each item inside that
     .map(|$p| $p.map(|$p| SELECT VALUE out FROM works_for
       WHERE in = $p.id))
-    // Now an array<array<array<record>>>
+    -- Now an array<array<array<record>>>
     .map(|$p| $p.map(|$p| $p.map(|$p| SELECT VALUE in FROM works_for
       WHERE out = $p.id)))
-    // Now an array<array<array<array<record>>>>
+    -- Now an array<array<array<array<record>>>>
     .map(|$p| $p.map(|$p| $p.map(|$p| $p.map(|$p| SELECT VALUE in
       FROM works_for WHERE out = $p.id))));
 ```

@@ -10,6 +10,7 @@ import { AgentBanner } from "~/components/AgentBanner";
 import { AgentPicker } from "~/components/AgentPicker";
 import { AgentPrompt } from "~/components/AgentPrompt";
 import { Boxes } from "~/components/Boxes";
+import { CodeWithOutput } from "~/components/CodeWithOutput";
 import { Edition } from "~/components/Edition";
 import { IconBox } from "~/components/IconBox";
 import { OptionsTable } from "~/components/OptionsTable";
@@ -127,9 +128,106 @@ function inlineSynopsisCommands(markdown: string): string {
     });
 }
 
+/**
+ * A fence title that marks the block as the result of the block above it.
+ *
+ * `output` matches anywhere in the title, because a qualifier carries information a
+ * bare label cannot: `Sample output` and `Possible output` say the value shown is one
+ * of several the reader might see, from a generated record id, a datetime or a live
+ * API. `Response` and `Result` have to be anchored, because several code blocks are
+ * titled for what they do with a response - `Handle Individual Responses`,
+ * `Map results onto a dataclass` - and pairing one of those would attach a second
+ * example to the first as though it were its output.
+ */
+const OUTPUT_TITLE = /\btitle="(?:[^"]*\boutput\b[^"]*|(?:Response|Result)\b[^"]*)"/i;
+
+/** Opening fence marker of a line, or `null` when the line does not open a fence. */
+function fenceMarker(line: string): string | null {
+    return line.match(/^(`{3,}|~{3,})/)?.[1] ?? null;
+}
+
+/** Index of the closing fence line, and whether the fence closed at all. */
+function readFence(
+    lines: string[],
+    open: number,
+    marker: string,
+): { end: number; unterminated: boolean } {
+    const closing = new RegExp(`^${marker[0] === "`" ? "`" : "~"}{${marker.length},}\\s*$`);
+
+    for (let i = open + 1; i < lines.length; i++) {
+        if (closing.test(lines[i] ?? "")) {
+            return { end: i, unterminated: false };
+        }
+    }
+
+    return { end: lines.length - 1, unterminated: true };
+}
+
+/**
+ * Wrap a code fence and the output fence that follows it in `<CodeWithOutput>`, so the
+ * pair renders as one block with a divider rather than as two separate blocks.
+ *
+ * Both fences still render through the viewer's own code path - the wrapper only
+ * supplies the surrounding chrome - so a paired block is highlighted and spaced like
+ * every other fence on the page, and its copy button still yields the code alone.
+ *
+ * The pairing is deliberately confined to the render path. `composeRawMarkdown` shares
+ * only the strip passes, so the `.md` endpoints and `llms-full.txt` keep the two fences
+ * an agent can tell apart: runnable code in one, the result it produces in the other.
+ */
+export function wrapOutputPairs(markdown: string): string {
+    const lines = markdown.split("\n");
+    const out: string[] = [];
+    let i = 0;
+
+    while (i < lines.length) {
+        const marker = fenceMarker(lines[i] ?? "");
+
+        if (!marker) {
+            out.push(lines[i] ?? "");
+            i++;
+            continue;
+        }
+
+        const code = readFence(lines, i, marker);
+        const gap = (lines[code.end + 1] ?? "").trim() === "" ? 1 : 0;
+        const outputOpen = code.end + 1 + gap;
+        const outputMarker = fenceMarker(lines[outputOpen] ?? "");
+        const output = outputMarker === null ? null : readFence(lines, outputOpen, outputMarker);
+
+        const pairs =
+            !code.unterminated &&
+            output !== null &&
+            !output.unterminated &&
+            !OUTPUT_TITLE.test(lines[i] ?? "") &&
+            OUTPUT_TITLE.test(lines[outputOpen] ?? "");
+
+        if (!pairs || output === null) {
+            out.push(...lines.slice(i, code.end + 1));
+            i = code.end + 1;
+            continue;
+        }
+
+        out.push(
+            "<CodeWithOutput>",
+            "",
+            ...lines.slice(i, code.end + 1),
+            "",
+            ...lines.slice(outputOpen, output.end + 1),
+            "",
+            "</CodeWithOutput>",
+        );
+        i = output.end + 1;
+    }
+
+    return out.join("\n");
+}
+
 export function resolveMarkdown(markdown: string) {
     const content = injectIconScope(
-        inlineSynopsisCommands(stripLanguageTestComments(stripLeadingH1(markdown))),
+        inlineSynopsisCommands(
+            wrapOutputPairs(stripLanguageTestComments(stripLeadingH1(markdown))),
+        ),
     );
     const tree = parseMarkdownTree(content);
     const source = markdownSourceFromString(content);
@@ -183,6 +281,7 @@ export function registerMarkdownComponents(): MarkdownComponents {
         AgentPrompt: { component: AgentPrompt, block: true },
         IconBox: { component: IconBox, block: true },
         Boxes: { component: Boxes, block: true, preserveNewlines: false },
+        CodeWithOutput: { component: CodeWithOutput, block: true, preserveNewlines: false },
         Synopsis: { component: Synopsis, block: true },
         OptionsTable: { component: OptionsTable, block: true },
         Edition: { component: Edition },

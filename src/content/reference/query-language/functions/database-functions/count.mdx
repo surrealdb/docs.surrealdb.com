@@ -57,8 +57,10 @@ value = "1"
 */
 
 count();
+```
 
--- 1
+```surql title="Output"
+1
 ```
 
 ```surql
@@ -70,8 +72,10 @@ value = "1"
 */
 
 count(true);
+```
 
--- 1
+```surql title="Output"
+1
 ```
 
 ```surql
@@ -83,8 +87,10 @@ value = "0"
 */
 
 count(10 > 15);
+```
 
--- 0
+```surql title="Output"
+0
 ```
 
 ```surql
@@ -123,7 +129,7 @@ FROM [
 GROUP ALL;
 ```
 
-```surql title="Response"
+```surql title="Output"
 [
 	{ count: 3 }
 ]
@@ -147,7 +153,7 @@ FROM [
 GROUP ALL;
 ```
 
-```surql title="Response"
+```surql title="Output"
 [
 	{ count: 2 }
 ]
@@ -176,7 +182,7 @@ FROM [
 GROUP BY country;
 ```
 
-```surql title="Response"
+```surql title="Output"
 [
 	{
 		country: 'GBR',
