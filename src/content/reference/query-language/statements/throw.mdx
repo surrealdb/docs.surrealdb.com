@@ -88,7 +88,7 @@ CREATE event:two SET time = d'2025-10-08T07:15:04.996995Z';
 THROW SELECT * FROM event;
 ```
 
-```surql title="Response"
+```surql title="Output"
 "An error occurred: [{ id: event:one, time: d'2025-10-08T07:15:04.994633Z' }, { id: event:two, time: d'2025-10-08T07:15:04.996995Z' }]"
 ```
 

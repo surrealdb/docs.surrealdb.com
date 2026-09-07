@@ -411,7 +411,7 @@ type::is_number(10);
 type::record("cat", "mr_meow");
 ```
 
-```surql title="Response"
+```surql title="Output"
 -------- Query --------
 
 [
@@ -508,7 +508,7 @@ Some modules expose constants (fixed values) as well as functions. Consts use th
 [math::pi, math::tau, math::e];
 ```
 
-```surql title="Response"
+```surql title="Output"
 [
 	3.141592653589793f,
 	6.283185307179586f,

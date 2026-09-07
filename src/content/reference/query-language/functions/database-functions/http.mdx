@@ -172,7 +172,7 @@ http::put('https://jsonplaceholder.typicode.com/posts/1', {
 });
 ```
 
-```surql title="Response"
+```surql title="Output"
 {
 	body: 'This is some awesome thinking!',
 	id: 1,
@@ -229,7 +229,7 @@ http::post('https://jsonplaceholder.typicode.com/posts/', {
 });
 ```
 
-```surql title="Response"
+```surql title="Output"
 {
 	body: 'This is some awesome thinking!',
 	id: 101,
@@ -286,7 +286,7 @@ http::patch('https://jsonplaceholder.typicode.com/posts/1', {
 });
 ```
 
-```surql title="RESPONSE"
+```surql title="Output"
 {
 	body: 'This is some awesome thinking!',
 	id: 1,
