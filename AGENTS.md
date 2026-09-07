@@ -190,6 +190,132 @@ flow), and on the page documenting `RETURN` itself. Prose that only narrates
 the keyword ("shows this function used in a `RETURN` statement") is trimmed
 along with it.
 
+**Showing output.** An example's result goes in its own fence directly below the
+code, titled `Output`:
+
+```surql
+math::sum([ 26.164, 13.746189, 23, 16.4, 41.42 ]);
+```
+
+```surql title="Output"
+120.730189f
+```
+
+The renderer joins an adjacent pair into one block with a divider, so the pair
+costs about two lines more than a trailing comment while staying unambiguous.
+Nothing to write for that: `wrapOutputPairs` inserts the `<CodeWithOutput>`
+wrapper while parsing, and the raw `.md` endpoints keep both fences so an agent
+can tell which half is runnable.
+
+`Output` is the plain label, and `Response` is kept only on the HTTP and RPC
+pages, where it is the counterpart of a `Request` block. Anything with the word
+`output` in it pairs and renders in full, so reach for a qualifier whenever the
+value shown is one of several a reader might see - `Sample output` and
+`Possible output` for a generated record id, a datetime or a live API,
+`Expected output` for a value a test asserts, `Error output` for a failure, or a
+condition spelled out as in `title="Output when $transfer_amount set to 150"`.
+`Response` and `Result` only pair at the start of a title, because a code block
+titled for what it does with a response (`Handle Individual Responses`,
+`Map results onto a dataclass`) would otherwise be joined to the example above
+it as though it were its output.
+
+The language names the format of the bytes, so `surql` for SurrealQL value
+notation, `json` for HTTP JSON, `text` or `bash` for terminal output.
+
+Where several statements in one block each have a result, the result stays a
+comment, marked `//-` so it is not read as commentary:
+
+```surql
+array::all([ 1, 2, 3, NONE, 'SurrealDB', 5 ]);
+//- false
+
+["all", "clear"].all();
+//- true
+```
+
+`//-` refers to the statement directly above it, always, and a `--` label
+describes the statement directly below it. That is what makes either signal
+decodable on its own: position and marker say the same thing, so a reader or an
+agent that goes by one of them lands in the same place. A result above its
+statement, or a label below it, breaks that.
+
+Everything after `//-` is the value, verbatim, and nothing else - no `Returns`,
+no trailing note, no parenthetical. The marker already says the line is a
+result, so `Returns` is always redundant, and a note riding along behind the
+value leaves the value unextractable: a reader cannot take the rest of the line,
+and no delimiter helps, because a value can itself end in `)`. Put the remark on
+a `--` label above the statement, where it has room:
+
+```surql
+-- Not inside an array, unlike a SELECT
+CREATE ONLY cat:one;
+//- { id: cat:one }
+```
+
+Because `//-` asserts that the statement returned this, a value a rerun would
+not reproduce needs the label above to say so - the inline counterpart of the
+`Possible output` and `Sample output` fence titles:
+
+```surql
+-- Possible output, since the timeout may or may not be exceeded
+sequence::nextval('mySeq3');
+//- 'The query was not executed because it exceeded the timeout'
+```
+
+Reserve that for when the varying thing *is* the value: a random datetime, a
+live query id, a timeout that may or may not fire. A generated record id sitting
+inside a returned record is incidental - the reader sees the same shape with a
+different suffix - and caveating those would put a note on most examples in the
+docs while telling the reader nothing they cannot see.
+
+SurrealQL takes `--`, `//` and `#` as line comments, all equivalent to the
+parser, and the docs spend two of them: **`--` for prose, `//-` for a result.**
+Reserve `//-` for a value the server returned or an error it raised; prose about
+the statement, a numbered step, or commented-out alternative code stays on `--`.
+A bare `//` therefore means something was missed, which makes the convention
+auditable with a single grep.
+
+Three reasons the two roles take different tokens rather than `--` and `-->`:
+
+- `--` is a **prefix** of `-->`, so any matcher has to test the longer form
+  first, and getting that ordering wrong fails in the worse direction - a prose
+  detector keyed on `^--` swallows results and reads them as commentary. `--`
+  and `//-` differ at the first character, so no ordering is involved.
+- A `>` is **entity-encoded in the rendered page**. A marker containing one
+  appears as `--&gt;` in the HTML a reader sees, so grepping the rendered page
+  for it silently finds nothing - the same trap this guide documents for
+  `" />`. `//-` escapes to nothing, so one string matches in the source, in the
+  raw `.md` and in the rendered HTML alike, and a check written once holds on
+  all three surfaces.
+- `-->` is already SurrealDB's own parse-error location pointer (` --> [3:12]`),
+  which appears inside error output on about ten pages. A marker that collides
+  with something the server prints is ambiguous exactly where output is being
+  quoted.
+
+Three places keep `//` and must not be swept onto `--`: the exact strings
+`// highlight-next-line`, `// highlight-start` and `// highlight-end`, which the
+viewer's highlighter matches literally; comments inside an embedded JavaScript
+`function() { … }` body, where `--` is a syntax error; and the
+[Comments](src/content/reference/query-language/language-primitives/comments.mdx)
+page, whose subject is the three forms themselves. Where a comment states an outcome without
+showing a value ("2: Statement will fail because the value for email was not
+valid"), it is narration and stays on `--`.
+
+A single result at the end of a block is a fence, not a comment, and the
+dividing line is attribution. With one statement there is nothing a fence can
+attribute wrongly, so it costs no clarity and gains two things: its copy button
+yields the query alone, where an inline `//-` would ride along as a comment
+holding a value that drifts, and `title="Output"` needs no legend in the raw
+`.md` a per-page fetch returns, where `//-` relies on the agent inferring it.
+With several statements each returning something, no fence can say which value
+came from which statement without restating them, so the marker is the only form
+that keeps the pairing - and it keeps the block paste-and-run, with its expected
+values alongside for an agent to diff against.
+
+On a block that sets up its data first, the fence labels the **last** statement,
+the same convention `RETURN` follows: three `CREATE`s and then the `SELECT`
+whose result is shown is one fence pair, not four.
+
 **Callouts.** Use `> [!NOTE]`, `> [!WARNING]`, and `> [!IMPORTANT]` for
 exceptions, security caveats, and breaking or easy-to-miss details.
 
@@ -407,6 +533,9 @@ every component in that file.
 | `<YouTube code="…" />`           | Embedded video. The `code` is the YouTube id.                 |
 | `<SurrealistMini query="…" />`   | Runnable query embed of a live editor.                        |
 
+`<CodeWithOutput>` is absent from that table on purpose: `wrapOutputPairs` inserts
+it around an output pair while parsing, and no page writes it by hand.
+
 > [!IMPORTANT]
 > Braced attribute values are parsed as **JSON**, not JavaScript. Object keys and
 > strings need double quotes; an invalid value is dropped with a console warning.
@@ -523,9 +652,13 @@ Markdown pipeline (`resolveMarkdown` in `src/utils/markdown.tsx`) returns
 
 1. `stripLeadingH1` - the rendered heading comes from frontmatter `title`.
 2. Strip leading language-test block comments out of fenced code.
-3. `inlineSynopsisCommands` - move `<Synopsis>` bodies into the `command` attribute.
-4. `injectIconScope` - quote `icon={{ … }}` keys and resolve icon identifiers to URLs.
-5. `parseMarkdownTree` and `extractHeadings` (both from `@surrealdb/ui`) for the page aside.
+3. `wrapOutputPairs` - wrap a code fence and the `title="Output"` fence below it in
+   `<CodeWithOutput>` so the pair renders as one block. Render-only:
+   `composeRawMarkdown` shares steps 1 and 2 but not this one, so the `.md`
+   endpoints keep the two fences separate.
+4. `inlineSynopsisCommands` - move `<Synopsis>` bodies into the `command` attribute.
+5. `injectIconScope` - quote `icon={{ … }}` keys and resolve icon identifiers to URLs.
+6. `parseMarkdownTree` and `extractHeadings` (both from `@surrealdb/ui`) for the page aside.
 
 Sidebar: `buildNavigation` in `src/utils/navigation.ts` builds sections from
 `getCollectionTree(id)`. The root folder becomes the first section, each top-level

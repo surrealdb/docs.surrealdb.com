@@ -128,8 +128,8 @@ CREATE (John:Person {name:‘John’}), (Jane:Person {name: ‘Jane’})
 ```
 
 ```surql
-// SurrealQL
-// Table implicitly created if it doesn't exist
+-- SurrealQL
+-- Table implicitly created if it doesn't exist
 INSERT INTO person [ {id: “John”, name: “John”}, {id: “Jane”, name: “Jane”} ]
 ```
 
@@ -141,7 +141,7 @@ MATCH (p:Person {name:‘Jane’}), (pr:Product {name:‘iPhone’}) CREATE (p)-
 ```
 
 ```surql
-// SurrealQL
+-- SurrealQL
 RELATE person:Jane->order->product:iPhone
 ```
 
@@ -153,7 +153,7 @@ CREATE INDEX personNameIndex FOR (p:Person) ON (p.name)
 ```
 
 ```surql
-// SurrealQL
+-- SurrealQL
 DEFINE INDEX idx_name ON TABLE person COLUMNS name
 ```
 
@@ -169,7 +169,7 @@ MATCH (p:Person) RETURN p
 ```
 
 ```surql
-// SurrealQL
+-- SurrealQL
 SELECT * FROM person
 ```
 
@@ -181,7 +181,7 @@ MATCH (p:Person) RETURN p.name
 ```
 
 ```surql
-// SurrealQL
+-- SurrealQL
 SELECT name FROM person
 ```
 
@@ -193,7 +193,7 @@ MATCH (p:Person) WHERE p.name = “Jane” RETURN p.name
 ```
 
 ```surql
-// SurrealQL
+-- SurrealQL
 SELECT name FROM person WHERE name = “Jane”
 ```
 
@@ -205,7 +205,7 @@ EXPLAIN MATCH (p:Person) WHERE p.name = "Jane" RETURN p.name
 ```
 
 ```surql
-// SurrealQL
+-- SurrealQL
 SELECT name FROM person WHERE name = "Jane" EXPLAIN
 ```
 
@@ -217,7 +217,7 @@ MATCH (p:Person) RETURN count(*) as person_count
 ```
 
 ```surql
-// SurrealQL
+-- SurrealQL
 SELECT count() AS person_count FROM person GROUP ALL
 ```
 
@@ -229,7 +229,7 @@ MATCH (p:Person) RETURN distinct p.name
 ```
 
 ```surql
-// SurrealQL
+-- SurrealQL
 SELECT array::distinct(name) FROM person GROUP ALL
 ```
 
@@ -241,7 +241,7 @@ MATCH (p:Person) RETURN p LIMIT 10
 ```
 
 ```surql
-// SurrealQL
+-- SurrealQL
 SELECT * FROM person LIMIT 10
 ```
 
@@ -253,7 +253,7 @@ MATCH (p:Person)-[:ORDER]->(pr:Product) RETURN p.name, pr.name
 ```
 
 ```surql
-// SurrealQL
+-- SurrealQL
 SELECT name, ->order->product.name FROM person
 ```
 
@@ -269,7 +269,7 @@ MATCH (p:Person)  WHERE p.name = "Jane"  SET p.last_name = 'Doe'  RETURN p
 ```
 
 ```surql
-// SurrealQL
+-- SurrealQL
 UPDATE person SET last_name = "Doe" WHERE name = "Jane"
 ```
 
@@ -281,7 +281,7 @@ MATCH (p:Person)   WHERE p.name = "Jane"   REMOVE p.last_name RETURN p
 ```
 
 ```surql
-// SurrealQL
+-- SurrealQL
 UPDATE person UNSET last_name WHERE name = "Jane"
 ```
 
@@ -297,7 +297,7 @@ MATCH (p:Person)  WHERE p.name = "Jane"  DELETE p
 ```
 
 ```surql
-// SurrealQL
+-- SurrealQL
 DELETE person WHERE name = "Jane"
 ```
 
@@ -309,7 +309,7 @@ MATCH (p:Person)  DELETE p
 ```
 
 ```surql
-// SurrealQL
+-- SurrealQL
 DELETE person
 ```
 
@@ -321,7 +321,7 @@ MATCH (p:Person)  DELETE p
 ```
 
 ```surql
-// SurrealQL
+-- SurrealQL
 REMOVE TABLE person
 ```
 
