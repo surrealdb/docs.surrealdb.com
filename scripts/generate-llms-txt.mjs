@@ -222,6 +222,18 @@ function collectionPosition(id) {
     }
 }
 
+/**
+ * Shallowest first, then by URL.
+ *
+ * Compared by code unit rather than `localeCompare`, because collation varies
+ * with the runtime's locale and this ordering has to be reproducible on any
+ * machine that runs `prebuild`.
+ */
+function byDepthThenUrl(a, b) {
+    if (a.depth !== b.depth) return a.depth - b.depth;
+    return a.url < b.url ? -1 : a.url > b.url ? 1 : 0;
+}
+
 function pagesFor(id, prefix) {
     const root = join(CONTENT_DIR, id);
 
@@ -253,7 +265,7 @@ function pagesFor(id, prefix) {
         });
     }
 
-    return pages.sort((a, b) => a.depth - b.depth || a.url.localeCompare(b.url));
+    return pages.sort(byDepthThenUrl);
 }
 
 /** Group collections by their first path segment, which is the top-level nav. */
@@ -304,10 +316,17 @@ const ORDER = ["index", "learn", "build", "manage", "explore", "reference", "age
 const rendered = ORDER.filter((key) => sections.has(key)).map((key) => {
     const seen = new Set();
 
+    // Sorted here rather than relying on `pagesFor`, which only orders one
+    // collection at a time. A section concatenates several - `learn` is five -
+    // in the order `readCollections` walked `src/pages`, which is `readdirSync`
+    // order and so depends on the filesystem. Without this the file is stable
+    // on the checkout that generated it and reordered on another, and
+    // `prebuild` rewrites it on every machine whose directory order differs.
+    // `EXTRA_PAGES` is appended after grouping, so it is placed here too.
     return {
         key,
         heading: `\n## ${SECTION_TITLES[key] ?? key}\n\n`,
-        pages: sections.get(key).pages.filter((page) => {
+        pages: [...sections.get(key).pages].sort(byDepthThenUrl).filter((page) => {
             if (seen.has(page.url)) return false;
             seen.add(page.url);
             return true;
@@ -347,7 +366,7 @@ function describableUrls() {
     const candidates = rendered
         .flatMap((section) => section.pages)
         .filter((page) => page.description)
-        .sort((a, b) => a.depth - b.depth || a.url.localeCompare(b.url));
+        .sort(byDepthThenUrl);
 
     for (const page of candidates) {
         const cost = `: ${summariseDescription(page.description)}`.length;

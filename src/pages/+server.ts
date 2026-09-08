@@ -17,6 +17,7 @@ import {
     suffixDocsLinks,
     withIndexPointer,
 } from "~/utils/collections";
+import { redirectDestinationForDev, resolveRedirect } from "../../redirects";
 
 const BASE = "/docs";
 
@@ -140,9 +141,41 @@ app.get("*", async (c, next) => {
     const entry = resolveCollectionEntry(path.replace(/^\/?index$/, ""));
 
     if (!entry) {
-        // A `.md` URL names a page that does not exist; a negotiated request
-        // may be for an asset or a non-content route, so let Vike answer it.
-        return negotiated ? next() : c.text("Not Found", 404);
+        // A negotiated request is for the page's own URL, which the redirect
+        // layer has already had its chance at, and may be for an asset or a
+        // non-content route - so let Vike answer it.
+        if (negotiated) {
+            return next();
+        }
+
+        // A moved page keeps its markdown form. Redirect sources are authored
+        // without the suffix, so the lookup goes on the stripped path and the
+        // suffix is put back on the destination.
+        //
+        // A wildcard rule carries a `.md` through on its own, because the
+        // suffix is just more path, but an exact rule is a literal string that
+        // the suffixed path never equals. That is why `/docs/self-hosted/
+        // overview.md` resolved while every renamed page's markdown form
+        // answered 404 - a difference no author would predict from the rules.
+        // Handled once here rather than by pairing each exact rule with a
+        // `.md` twin, which would double the table to fix one case at a time.
+        const moved = resolveRedirect(path);
+
+        if (moved) {
+            // `destination` should already carry `/docs`, but a handful of
+            // older rules omit it, and this response is the same
+            // browser-facing `Location` those rules get elsewhere.
+            // The table holds 301s for content moves and 302s for everything
+            // else; `statusCode` is a plain `number` there, and Hono wants one
+            // of its redirect codes.
+            return c.redirect(
+                `${redirectDestinationForDev(moved.destination)}.md`,
+                moved.statusCode === 301 ? 301 : 302,
+            );
+        }
+
+        // A `.md` URL naming a page that never existed.
+        return c.text("Not Found", 404);
     }
 
     // Resolved from the same file-backed cache the page render uses, so
