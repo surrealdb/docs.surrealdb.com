@@ -672,6 +672,48 @@ function withDocsDestination(rule: Redirect): Redirect {
     };
 }
 
+/** The source shape a markdown twin uses; see `withMarkdownTwins`. */
+const MD_WILDCARD = "/:path(.*\\.md)";
+
+/**
+ * Give every collapsing wildcard rule a `.md` twin, placed just before it.
+ *
+ * A wildcard whose destination carries `:path*` keeps a `.md` suffix on its
+ * own, because the suffix is only more path - `/self-hosted/overview.md` lands
+ * on `/docs/running/overview.md`. One that collapses a removed tree onto a
+ * fixed page drops it, so `/surrealist/removed.md` redirected to
+ * `/docs/explore/studio` and answered an agent asking for markdown with HTML.
+ * 33 rules collapse that way against 93 that carry, and nothing in either
+ * source says which kind it is.
+ *
+ * The twin matches `.md` paths only. `:path(.*\.md)` rather than `:path*.md`,
+ * which path-to-regexp also accepts but compiles to a pattern that additionally
+ * matches `/surrealist.md` - the markdown form of a page named `surrealist`,
+ * which belongs to that page and not to this rule.
+ *
+ * Derived rather than written out, so a wildcard added later gets its twin
+ * without anyone remembering that this has to be done. Sources already carrying
+ * `/docs` are skipped: they are inert in production, where the prefix is
+ * stripped before this project sees the request, and the dev middleware tries
+ * the stripped path first.
+ */
+function withMarkdownTwins(rules: Redirect[]): Redirect[] {
+    return rules.flatMap((rule) => {
+        const collapsing = rule.source.endsWith("/:path*") && !rule.destination.endsWith("/:path*");
+
+        if (!collapsing || rule.source.startsWith("/docs/")) {
+            return [rule];
+        }
+
+        const base = rule.source.slice(0, -"/:path*".length);
+
+        return [
+            { ...rule, source: `${base}${MD_WILDCARD}`, destination: `${rule.destination}.md` },
+            rule,
+        ];
+    });
+}
+
 /** Shared with vercel.ts (production) and the Vite dev server (local). */
 /**
  * Spectron → SurrealDB Agent Memory rename (August 2026). The docs moved from
@@ -897,7 +939,7 @@ function legacyIntegrationApiRedirects(): Redirect[] {
     ]);
 }
 
-export const docsRedirects: Redirect[] = [
+const baseRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
     { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
     ...overviewConsolidationRedirects(),
@@ -1026,7 +1068,9 @@ export const docsRedirects: Redirect[] = [
     // are single-word guesses, and a guess should only be answered once nothing
     // better matches.
     ...guessableEntryPointRedirects(),
-].map(withDocsDestination);
+];
+
+export const docsRedirects: Redirect[] = withMarkdownTwins(baseRedirects.map(withDocsDestination));
 
 export type ResolvedRedirect = { destination: string; statusCode: number };
 
@@ -1041,6 +1085,19 @@ export function resolveRedirect(pathname: string): ResolvedRedirect | null {
         const statusCode = rule.statusCode ?? 302;
         const source = rule.source;
         const destination = rule.destination;
+
+        // The markdown twins `withMarkdownTwins` adds. Matched explicitly
+        // rather than by parsing the regex, mirroring what path-to-regexp
+        // compiles this shape to: a path under the base that ends in `.md`.
+        if (source.endsWith(MD_WILDCARD)) {
+            const base = source.slice(0, -MD_WILDCARD.length);
+
+            if (normalized.startsWith(`${base}/`) && normalized.endsWith(".md")) {
+                return { destination, statusCode };
+            }
+
+            continue;
+        }
 
         if (source.endsWith("/:path*")) {
             const sourceBase = source.slice(0, -"/:path*".length);
