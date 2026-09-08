@@ -771,26 +771,19 @@ function enterpriseConsolidationRedirects(): Redirect[] {
         "upgrading-from-community",
     ];
 
-    const out: Redirect[] = removed.flatMap((slug) =>
-        [`/manage/enterprise/${slug}`, `/docs/manage/enterprise/${slug}`].map((source) => ({
-            source,
-            destination: "/docs/manage/enterprise",
-            statusCode: 301 as const,
-        })),
-    );
+    const out: Redirect[] = removed.map((slug) => ({
+        source: `/manage/enterprise/${slug}`,
+        destination: "/docs/manage/enterprise",
+        statusCode: 301 as const,
+    }));
 
     // This one had content, and the content said the real reference is in the
     // observability section, so send it there rather than to the index.
-    out.push(
-        ...[
-            "/manage/enterprise/security/audit-logging",
-            "/docs/manage/enterprise/security/audit-logging",
-        ].map((source) => ({
-            source,
-            destination: "/docs/manage/observability/audit-logging",
-            statusCode: 301 as const,
-        })),
-    );
+    out.push({
+        source: "/manage/enterprise/security/audit-logging",
+        destination: "/docs/manage/observability/audit-logging",
+        statusCode: 301,
+    });
 
     return out;
 }
@@ -814,13 +807,11 @@ function stutteringPathRedirects(): Redirect[] {
         ["build/integrations/agent-rules/agent-rules", "build/integrations/agent-rules"],
     ];
 
-    return moves.flatMap(([from, to]) =>
-        [`/${from}`, `/docs/${from}`].map((source) => ({
-            source,
-            destination: `/docs/${to}`,
-            statusCode: 301 as const,
-        })),
-    );
+    return moves.map(([from, to]) => ({
+        source: `/${from}`,
+        destination: `/docs/${to}`,
+        statusCode: 301 as const,
+    }));
 }
 
 /**
@@ -874,15 +865,11 @@ function guessableEntryPointRedirects(): Redirect[] {
         // maps it, and a second rule for the same source would never be read.
     ];
 
-    return entries.flatMap(([from, destination]) =>
-        // Both spellings: the www rewrite strips `/docs` in production, while
-        // dev and preview see the prefixed path.
-        [`/${from}`, `/docs/${from}`].map((source) => ({
-            source,
-            destination,
-            statusCode: 302 as const,
-        })),
-    );
+    return entries.map(([from, destination]) => ({
+        source: `/${from}`,
+        destination,
+        statusCode: 302 as const,
+    }));
 }
 
 /**
@@ -896,16 +883,18 @@ function guessableEntryPointRedirects(): Redirect[] {
  * `legacyPrefixRedirects("integrations", …)` so this wins.
  */
 function legacyIntegrationApiRedirects(): Redirect[] {
-    return ["integration", "integrations"].flatMap((prefix) =>
-        [`/${prefix}/apis`, `/docs/${prefix}/apis`].flatMap((source) => [
-            { source, destination: "/docs/reference/rest-api", statusCode: 301 as const },
-            {
-                source: `${source}/:path*`,
-                destination: "/docs/reference/rest-api",
-                statusCode: 301 as const,
-            },
-        ]),
-    );
+    return ["integration", "integrations"].flatMap((prefix) => [
+        {
+            source: `/${prefix}/apis`,
+            destination: "/docs/reference/rest-api",
+            statusCode: 301 as const,
+        },
+        {
+            source: `/${prefix}/apis/:path*`,
+            destination: "/docs/reference/rest-api",
+            statusCode: 301 as const,
+        },
+    ]);
 }
 
 export const docsRedirects: Redirect[] = [

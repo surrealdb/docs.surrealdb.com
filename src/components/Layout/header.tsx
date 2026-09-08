@@ -74,7 +74,15 @@ function normalizeHref(href: string) {
 }
 
 function entryHrefs(entry: NavEntry): string[] {
-    return isMenuGroup(entry) ? flattenMenuItems(entry).map((item) => item.href) : [entry.href];
+    if (!isMenuGroup(entry)) return [entry.href];
+
+    // The group's own hub page is a candidate alongside its children, or landing
+    // on `/docs/learn` matches nothing, falls through to the `/docs` catch-all,
+    // and highlights "Get started" instead. Children still win where both match,
+    // because the resolver takes the longest.
+    const hrefs = flattenMenuItems(entry).map((item) => item.href);
+
+    return entry.href ? [entry.href, ...hrefs] : hrefs;
 }
 
 /**
@@ -446,7 +454,8 @@ export function MobileNav({ navLinks }: MobileNavProps) {
                 {navLinks.map((entry, i) => {
                     const groupActive =
                         isMenuGroup(entry) &&
-                        flattenMenuItems(entry).some((item) => item.href === activeHref);
+                        (entry.href === activeHref ||
+                            flattenMenuItems(entry).some((item) => item.href === activeHref));
 
                     return (
                         <Fragment key={entry.label}>
