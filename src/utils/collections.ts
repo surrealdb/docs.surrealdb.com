@@ -1,6 +1,7 @@
 import type { CollectionMap } from "vike-content-collection";
 import { getCollection, getCollectionEntry } from "vike-content-collection";
 import type { SdkVersionMap } from "~/lib/versions";
+import { LLMS_TXT_URL } from "./agent-markdown";
 import { stripLanguageTestComments, stripLeadingH1 } from "./markdown";
 import { flattenMdxComponents } from "./mdx-to-markdown";
 
@@ -148,7 +149,7 @@ export function composeRawMarkdown(entry: CollectionEntry, sdkVersions?: SdkVers
  * be the same fact at a thousand times the cost.
  */
 export function withIndexPointer(markdown: string): string {
-    return `> Full SurrealDB documentation index: ${DOCS_ORIGIN}/docs/llms.txt\n\n${markdown}`;
+    return `> Full SurrealDB documentation index: ${LLMS_TXT_URL}\n\n${markdown}`;
 }
 
 const DOCS_ORIGIN = "https://surrealdb.com";

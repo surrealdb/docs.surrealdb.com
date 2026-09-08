@@ -63,7 +63,6 @@ export function Head() {
                 markdown responses this tag cannot. */}
             <link
                 rel="describedby"
-                type="text/plain"
                 href={LLMS_TXT_URL}
                 title="SurrealDB documentation index for LLMs"
             />

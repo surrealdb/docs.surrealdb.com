@@ -429,7 +429,10 @@ function sdkGettingStartedRedirects(): Redirect[] {
 function aiAgentsRedirects(): Redirect[] {
     const moves: [string, string][] = [
         ["build/ai-agents/connect-mcp-to-your-editor", "build/ai-agents/mcp/embedded"],
-        ["build/ai-agents/agent-rules", "build/integrations/agent-rules/agent-rules"],
+        // Points at the folder index, not at the old stuttering filename that
+        // `stutteringPathRedirects` now moves - otherwise this rule redirects
+        // to a path that immediately redirects again.
+        ["build/ai-agents/agent-rules", "build/integrations/agent-rules"],
     ];
 
     const out: Redirect[] = [];

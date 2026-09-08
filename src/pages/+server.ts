@@ -34,7 +34,10 @@ const app = new Hono();
  */
 app.use("*", async (c, next) => {
     await next();
-    c.res.headers.set("Link", AGENT_DISCOVERY_LINK_HEADER);
+    // Appended rather than set, so a `Link` header a route or the adapter has
+    // already attached - preload hints are the usual reason - survives beside
+    // this one instead of being replaced by it.
+    c.res.headers.append("Link", AGENT_DISCOVERY_LINK_HEADER);
 });
 
 /**
@@ -84,8 +87,14 @@ app.get(`${BASE}/llms-full.txt`, async (c) => {
  * The URL is quoted verbatim in the prompt the setup page and SurrealDB Studio
  * copy to the clipboard, so it is a stable address: change the document, not
  * the path.
+ *
+ * No index pointer on this one, unlike the `.md` pages. The document is a
+ * prompt rather than a page, and it reaches an agent through a clipboard, so a
+ * blockquote about the documentation index would be the first thing the agent
+ * read and the last thing it needed. The `Link` header advertises the index on
+ * this response anyway.
  */
-const agentInstructionsBody = withIndexPointer(`${suffixDocsLinks(agentInstructions.trimEnd())}\n`);
+const agentInstructionsBody = `${suffixDocsLinks(agentInstructions.trimEnd())}\n`;
 
 app.get(`${BASE}/agents/instructions.md`, (c) =>
     c.body(agentInstructionsBody, 200, {

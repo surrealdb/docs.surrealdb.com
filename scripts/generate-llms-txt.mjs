@@ -96,9 +96,18 @@ const DESCRIPTION_BUDGET = 70;
  * The cut keeps whole words because a truncated identifier is worse than a
  * missing one - an agent can act on `array::distinct` and cannot act on
  * `array::dist`.
+ *
+ * A sentence ends at a full stop followed by a capital, and at nothing else.
+ * Matching `!` and `?` too cut "The embed_schema! macro bakes your .surql
+ * schema files into the Rust binary" down to "The embed_schema!", which looks
+ * like a finished description and is not - Rust macros, and any method whose
+ * name ends in `?`, all read as sentence ends. Requiring a capital after the
+ * stop also leaves `.surql` and version numbers alone. Where no boundary
+ * matches, the budget below still trims, and a visible `...` is honest in a
+ * way a confident half-sentence is not.
  */
 function summariseDescription(description) {
-    const sentence = (description.match(/^.*?[.!?](?=\s)/)?.[0] ?? description).trim();
+    const sentence = (description.match(/^.*?\.(?=\s+[A-Z])/)?.[0] ?? description).trim();
 
     if (sentence.length <= DESCRIPTION_BUDGET) return sentence;
 
