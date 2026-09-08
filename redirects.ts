@@ -741,6 +741,58 @@ function overviewConsolidationRedirects(): Redirect[] {
 }
 
 /**
+ * The Enterprise subtree, collapsed onto one page.
+ *
+ * Twelve of its thirteen pages were a title, a description and an H1 with no
+ * body - `what-ee-is.mdx` was literally `# What EE is` and stopped - and the
+ * thirteenth was a signpost to the observability section. They were reachable,
+ * indexed, listed in the sidebar and in `llms.txt`, and answered nothing.
+ * Nothing outside the subtree linked to any of them.
+ *
+ * The index now carries what could be said accurately, and points at sales for
+ * what could not. A blank page is worse than a redirect to a page that tells
+ * you where to ask.
+ */
+function enterpriseConsolidationRedirects(): Redirect[] {
+    const removed = [
+        "capabilities/distributed-live-queries",
+        "licensing-and-activation",
+        "overview/contact-and-licensing",
+        "overview/feature-table",
+        "overview/what-ee-is",
+        "security/fips",
+        "security/trusted-execution",
+        "storage/file-storage",
+        "support/slas",
+        "support/support-tiers",
+        "upgrading-from-community",
+    ];
+
+    const out: Redirect[] = removed.flatMap((slug) =>
+        [`/manage/enterprise/${slug}`, `/docs/manage/enterprise/${slug}`].map((source) => ({
+            source,
+            destination: "/docs/manage/enterprise",
+            statusCode: 301 as const,
+        })),
+    );
+
+    // This one had content, and the content said the real reference is in the
+    // observability section, so send it there rather than to the index.
+    out.push(
+        ...[
+            "/manage/enterprise/security/audit-logging",
+            "/docs/manage/enterprise/security/audit-logging",
+        ].map((source) => ({
+            source,
+            destination: "/docs/manage/observability/audit-logging",
+            statusCode: 301 as const,
+        })),
+    );
+
+    return out;
+}
+
+/**
  * Pages whose filename repeated the folder they sat in, so the URL said the
  * same word twice: `…/authentication/authentication`,
  * `…/schema-design/schema-design`, `…/agent-rules/agent-rules`.
@@ -976,6 +1028,7 @@ export const docsRedirects: Redirect[] = [
         destination: "/learn/querying/surrealql/executing-queries/via-studio",
         statusCode: 301,
     },
+    ...enterpriseConsolidationRedirects(),
     ...stutteringPathRedirects(),
     // Last, so that every rule naming a real former path is tried first. These
     // are single-word guesses, and a guess should only be answered once nothing
