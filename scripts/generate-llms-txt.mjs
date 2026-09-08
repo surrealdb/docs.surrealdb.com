@@ -15,9 +15,9 @@
  * `+data.ts` calls, so a renamed collection cannot silently produce dead links
  * here - the same source the router uses is the source this reads.
  *
- * Depth is capped: this is an index, not an inventory. Deeper pages are reached
- * by following the sections, and every page is available as markdown by
- * appending `.md`, which the preamble explains.
+ * Every page is listed. Descriptions are not: they are spent shallowest-first
+ * out of what is left under `SIZE_BUDGET`, so the file stays inside the size an
+ * index is read at however much the documentation grows.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -29,14 +29,15 @@ const OUTPUT_FILE = "public/llms.txt";
 const SITE = "https://surrealdb.com";
 
 /**
- * How many path segments below a collection root to list.
+ * Character ceiling for the whole file.
  *
- * Two for the narrative sections, where the second level is where the actual
- * subjects live. One for reference, whose twelve SDK trees and the SurrealQL
- * statement list would otherwise account for most of the file - their landing
- * pages carry a reader onward, and every page is reachable as markdown anyway.
+ * The readiness checks treat an llms.txt over 100,000 characters as too large
+ * to be a useful index, and this file is close to that floor before a single
+ * description is written: 1,000-odd pages at about 90 characters of URL and
+ * title each. The remainder is what `describableUrls` has to spend, and the
+ * margin below 100,000 is what stops a few dozen new pages from breaching it.
  */
-const DEPTH = { default: 2, reference: 1 };
+const SIZE_BUDGET = 96_000;
 
 /** Collections that are not part of the documentation tree. */
 const SKIP_COLLECTIONS = new Set(["labs-items"]);
@@ -51,12 +52,42 @@ SurrealDB is a [multi-model database](${SITE}/features) that stores relational, 
 
 > Markdown for agents: every documentation page is also available as markdown. Append ".md" to any page path to fetch it directly, for example "${SITE}/docs/reference/query-language/statements/select.md". The same document is served on the page's own URL to a request sending an "Accept: text/markdown" header, with "Content-Type: text/markdown" and an "x-markdown-tokens" estimate. HTML stays the default for browsers. Links inside a markdown page already point at the ".md" variants, so following them keeps an agent in markdown. The complete documentation is also available as a single markdown document at "${SITE}/docs/llms-full.txt".
 
+This index lists every documentation page. Section landing pages carry a short description; the rest are titles only, so that the whole site fits in one index rather than a curated part of it. A missing description means nothing about the page - fetch any entry with ".md" appended to read it, or "${SITE}/docs/llms-full.txt" for everything at once.
+
 Working notes:
 
 - SurrealQL is the native query language. [GraphQL](${SITE}/docs/learn/querying/graphql/overview), [HTTP](${SITE}/docs/reference/rest-api/http-protocol), [RPC](${SITE}/docs/reference/rest-api/rpc-protocol) and [CBOR](${SITE}/docs/reference/rest-api/cbor-protocol) are also available.
 - Live queries push changes to subscribers rather than requiring polling.
 - The same database serves documents, graphs, vectors and time series inside one ACID transaction, so joins across models do not need a second store.
 `;
+
+/** Longest description this file will carry for one entry. */
+const DESCRIPTION_BUDGET = 70;
+
+/**
+ * Shorten a page description to what an index entry needs.
+ *
+ * A frontmatter description is written to be a meta description, where three
+ * clauses are fine. Across a thousand entries those later clauses are what
+ * pushes the file past the size an agent will read, and they are the least
+ * load-bearing part of the line: the index only has to support the choice of
+ * which page to fetch, and the first sentence already settles that.
+ *
+ * So: first sentence, then a word-boundary cut if that sentence is still long.
+ * The cut keeps whole words because a truncated identifier is worse than a
+ * missing one - an agent can act on `array::distinct` and cannot act on
+ * `array::dist`.
+ */
+function summariseDescription(description) {
+    const sentence = (description.match(/^.*?[.!?](?=\s)/)?.[0] ?? description).trim();
+
+    if (sentence.length <= DESCRIPTION_BUDGET) return sentence;
+
+    const cut = sentence.slice(0, DESCRIPTION_BUDGET);
+    const boundary = cut.lastIndexOf(" ");
+
+    return `${(boundary > 0 ? cut.slice(0, boundary) : cut).replace(/[,;:.]$/, "")}...`;
+}
 
 /** Read a page's frontmatter without pulling in a YAML parser. */
 function frontmatter(file) {
@@ -157,7 +188,7 @@ function collectionPosition(id) {
     }
 }
 
-function pagesFor(id, prefix, maxDepth) {
+function pagesFor(id, prefix) {
     const root = join(CONTENT_DIR, id);
 
     if (!existsSync(root)) return [];
@@ -172,7 +203,6 @@ function pagesFor(id, prefix, maxDepth) {
         const segments = rel.split("/").map(slugify);
 
         if (segments.at(-1) === "index") segments.pop();
-        if (segments.length > maxDepth) continue;
 
         const meta = frontmatter(file);
 
@@ -204,7 +234,7 @@ for (const [id, prefix] of collections) {
     if (SKIP_COLLECTIONS.has(id)) continue;
 
     const key = sectionOf(id);
-    const pages = pagesFor(id, prefix, DEPTH[key] ?? DEPTH.default);
+    const pages = pagesFor(id, prefix);
     if (!pages.length) continue;
 
     const group = sections.get(key) ?? { pages: [], position: collectionPosition(id) };
@@ -225,26 +255,79 @@ const SECTION_TITLES = {
 
 const ORDER = ["index", "learn", "build", "manage", "explore", "reference", "agent-memory"];
 
+/** Section list, deduplicated, in the order they are written. */
+const rendered = ORDER.filter((key) => sections.has(key)).map((key) => {
+    const seen = new Set();
+
+    return {
+        key,
+        heading: `\n## ${SECTION_TITLES[key] ?? key}\n\n`,
+        pages: sections.get(key).pages.filter((page) => {
+            if (seen.has(page.url)) return false;
+            seen.add(page.url);
+            return true;
+        }),
+    };
+});
+
+const bareLine = (page) => `- [${page.title}](${page.url})\n`;
+
+/**
+ * Decide which entries can afford a description.
+ *
+ * Every page is listed either way, so the floor is fixed: about 90 characters
+ * of URL and title per page, which at the current page count is most of the
+ * budget on its own. Descriptions are what is left over, and they are spent
+ * shallowest-first, because a section landing page is what an agent reads to
+ * decide where to go and a leaf is what it reads once it has decided.
+ *
+ * Spending a computed remainder rather than applying a fixed depth rule is what
+ * keeps this from breaking quietly. The previous rule capped which pages
+ * appeared at all, and left 568 of 1,013 unlisted - an agent reading the index
+ * saw 44% of the documentation with nothing to say so. A fixed depth would have
+ * the same failure mode against the size ceiling instead: correct when written,
+ * silently over it a few dozen pages later. This degrades to title-only, which
+ * costs detail and never costs coverage.
+ */
+function describableUrls() {
+    const headings = rendered.reduce((n, section) => n + section.heading.length, 0);
+    const bare = rendered.reduce(
+        (n, section) => n + section.pages.reduce((m, page) => m + bareLine(page).length, 0),
+        0,
+    );
+
+    let spent = PREAMBLE.length + headings + bare;
+    const chosen = new Set();
+
+    const candidates = rendered
+        .flatMap((section) => section.pages)
+        .filter((page) => page.description)
+        .sort((a, b) => a.depth - b.depth || a.url.localeCompare(b.url));
+
+    for (const page of candidates) {
+        const cost = `: ${summariseDescription(page.description)}`.length;
+
+        if (spent + cost > SIZE_BUDGET) continue;
+
+        spent += cost;
+        chosen.add(page.url);
+    }
+
+    return chosen;
+}
+
+const described = describableUrls();
+
 let out = PREAMBLE;
 let count = 0;
 
-for (const key of ORDER) {
-    const group = sections.get(key);
-    if (!group) continue;
+for (const section of rendered) {
+    out += section.heading;
 
-    const seen = new Set();
-    const pages = group.pages.filter((page) => {
-        if (seen.has(page.url)) return false;
-        seen.add(page.url);
-        return true;
-    });
-
-    out += `\n## ${SECTION_TITLES[key] ?? key}\n\n`;
-
-    for (const page of pages) {
-        out += page.description
-            ? `- [${page.title}](${page.url}): ${page.description}\n`
-            : `- [${page.title}](${page.url})\n`;
+    for (const page of section.pages) {
+        out += described.has(page.url)
+            ? `- [${page.title}](${page.url}): ${summariseDescription(page.description)}\n`
+            : bareLine(page);
         count += 1;
     }
 }
@@ -258,5 +341,5 @@ for (const [key, group] of sections) {
 
 writeFileSync(OUTPUT_FILE, out);
 console.log(
-    `[llms.txt] ${count} links across ${ORDER.filter((k) => sections.has(k)).length} sections`,
+    `[llms.txt] ${count} links across ${rendered.length} sections, ${described.size} described, ${out.length} characters`,
 );

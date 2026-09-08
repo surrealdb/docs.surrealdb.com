@@ -120,6 +120,14 @@ function legacySurrealdbTreeRedirects(): Redirect[] {
         // SurrealQL nested under the product prefix → the query language
         // reference, whose slugs mirror the old tree.
         ["surrealdb/surrealql", "reference/query-language", "prefix-path"],
+        // Security is the most-followed branch of the old tree - it is what
+        // "how do I authenticate with SurrealDB" resolves to in search results
+        // and in model training data. The catch-all below used to swallow it
+        // and answer with the product introduction, so an agent asking about
+        // authentication was handed a page that never mentions it (observed in
+        // an agent trace, September 2026). Named here so it lands on the
+        // security section instead.
+        ["surrealdb/security", "learn/security", "prefix"],
         // Remaining unmapped pages fold into the product introduction rather
         // than 404. The www rules for `installation`, `security`, and `cli`
         // run first in production, so this only catches what they miss.
@@ -732,6 +740,91 @@ function overviewConsolidationRedirects(): Redirect[] {
     ]);
 }
 
+/**
+ * Short, guessable entry points that nothing served.
+ *
+ * These are not legacy paths - none of them ever existed. They are the URLs a
+ * developer types and an agent constructs before it has seen the navigation,
+ * and every one of them answered 404 (verified September 2026). An agent trace
+ * looking for authentication docs spent eight web searches and 53% of its
+ * fetches on Google recovering paths it could not guess, having failed on
+ * `/docs/sdk`, `/docs/build` and `/docs/integration/apis`.
+ *
+ * A guess that lands is worth more than a guess that 404s even when the landing
+ * is approximate, so these aim at the section a reader asking that word wants
+ * rather than at an exact page. They are 302s for that reason: the destination
+ * is our current best answer to a word, not a page that moved.
+ */
+function guessableEntryPointRedirects(): Redirect[] {
+    const entries: [string, string][] = [
+        ["quickstart", "/docs"],
+        ["quick-start", "/docs"],
+        ["getting-started", "/docs"],
+        ["get-started", "/docs"],
+        ["intro", "/docs/what-is-surrealdb"],
+        ["introduction", "/docs/what-is-surrealdb"],
+        ["api", "/docs/reference/rest-api"],
+        ["apis", "/docs/reference/rest-api"],
+        ["rest", "/docs/reference/rest-api"],
+        ["http", "/docs/reference/rest-api/http-protocol"],
+        ["rpc", "/docs/reference/rest-api/rpc-protocol"],
+        ["auth", "/docs/learn/security/authentication/overview"],
+        ["authentication", "/docs/learn/security/authentication/overview"],
+        ["security", "/docs/learn/security"],
+        ["permissions", "/docs/learn/security/authorization/permissions-and-row-level-security"],
+        // The bare prefix. `sdk/:sdk` is already mapped by `sdkRedirects`.
+        ["sdk", "/docs/languages"],
+        ["sdks", "/docs/languages"],
+        ["clients", "/docs/languages"],
+        ["install", "/docs/running/overview"],
+        ["installation", "/docs/running/overview"],
+        ["docker", "/docs/running/docker"],
+        ["schema", "/docs/learn/schema-management"],
+        ["query", "/docs/reference/query-language"],
+        ["queries", "/docs/reference/query-language"],
+        ["functions", "/docs/reference/query-language/functions/database-functions"],
+        // The statements folder has no page of its own, so a link to it lands
+        // on whichever child sorts first (`DEFINE ACCESS`). The SurrealQL index
+        // lists them all, which is what someone typing this word wants.
+        ["statements", "/docs/reference/query-language"],
+        // `cli` is deliberately absent: `legacySurrealdbTreeRedirects` already
+        // maps it, and a second rule for the same source would never be read.
+    ];
+
+    return entries.flatMap(([from, destination]) =>
+        // Both spellings: the www rewrite strips `/docs` in production, while
+        // dev and preview see the prefixed path.
+        [`/${from}`, `/docs/${from}`].map((source) => ({
+            source,
+            destination,
+            statusCode: 302 as const,
+        })),
+    );
+}
+
+/**
+ * `integration(s)/apis` → the protocol reference.
+ *
+ * `/docs/integration/apis` redirected to `/docs/integrations/apis`, which the
+ * `integrations → build/integrations` prefix rule then sent to
+ * `/docs/build/integrations/apis` - a page that does not exist. The chain ended
+ * in a 404 while looking like a working redirect (verified September 2026).
+ * The API content lives in the protocol reference now, so say so. Spread before
+ * `legacyPrefixRedirects("integrations", …)` so this wins.
+ */
+function legacyIntegrationApiRedirects(): Redirect[] {
+    return ["integration", "integrations"].flatMap((prefix) =>
+        [`/${prefix}/apis`, `/docs/${prefix}/apis`].flatMap((source) => [
+            { source, destination: "/docs/reference/rest-api", statusCode: 301 as const },
+            {
+                source: `${source}/:path*`,
+                destination: "/docs/reference/rest-api",
+                statusCode: 301 as const,
+            },
+        ]),
+    );
+}
+
 export const docsRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
     { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
@@ -754,6 +847,7 @@ export const docsRedirects: Redirect[] = [
     { source: "/surrealist/:path*", destination: "/explore/studio", statusCode: 301 },
     ...legacyPrefixRedirects("surrealml", "explore/ml-models"),
     ...legacyIntegrationSdkRedirects(),
+    ...legacyIntegrationApiRedirects(),
     ...legacyPrefixRedirects("integrations", "build/integrations"),
     ...legacyPrefixRedirects("tutorials", "explore/tutorials"),
     ...sdkRedirects(),
@@ -854,6 +948,10 @@ export const docsRedirects: Redirect[] = [
         destination: "/learn/querying/surrealql/executing-queries/via-studio",
         statusCode: 301,
     },
+    // Last, so that every rule naming a real former path is tried first. These
+    // are single-word guesses, and a guess should only be answered once nothing
+    // better matches.
+    ...guessableEntryPointRedirects(),
 ].map(withDocsDestination);
 
 export type ResolvedRedirect = { destination: string; statusCode: number };

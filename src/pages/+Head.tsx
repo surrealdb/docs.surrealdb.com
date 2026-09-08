@@ -11,6 +11,7 @@ import "~/assets/styles/override.scss";
 import { ColorSchemeScript } from "@mantine/core";
 import { usePageContext } from "vike-react/usePageContext";
 import FavIcon from "~/assets/img/favicon.svg";
+import { LLMS_TXT_URL } from "~/utils/agent-markdown";
 import type { PageData } from "~/utils/data";
 import { BASE_URL, buildBreadcrumbJsonLd, buildCanonicalUrl } from "~/utils/meta";
 
@@ -53,6 +54,22 @@ export function Head() {
                 type="text/markdown"
                 href={markdownUrl}
                 title="Markdown version of this page"
+            />
+            {/* The curated index of every page, in the llms.txt convention.
+                `describedby` is the relation the llms.txt v2 specification
+                names for this; `llms-txt` beside it is unregistered but is what
+                most readiness tooling matches on. Both are also sent as a
+                `Link` header from src/pages/+server.ts, which reaches the
+                markdown responses this tag cannot. */}
+            <link
+                rel="describedby"
+                type="text/plain"
+                href={LLMS_TXT_URL}
+                title="SurrealDB documentation index for LLMs"
+            />
+            <link
+                rel="llms-txt"
+                href={LLMS_TXT_URL}
             />
             <meta
                 property="og:url"

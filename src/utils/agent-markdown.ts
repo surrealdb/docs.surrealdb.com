@@ -16,6 +16,35 @@ export const MARKDOWN_CONTENT_TYPE = "text/markdown; charset=utf-8";
  */
 export const MARKDOWN_CACHE_CONTROL = "public, max-age=300, stale-while-revalidate=60";
 
+/** Canonical page index, in the llms.txt convention. */
+export const LLMS_TXT_URL = "https://surrealdb.com/docs/llms.txt";
+
+/** The whole corpus as one document, in the llms-full.txt convention. */
+export const LLMS_FULL_TXT_URL = "https://surrealdb.com/docs/llms-full.txt";
+
+/**
+ * `Link` header advertising the page index to whoever holds a response.
+ *
+ * We already served markdown at `.md`, honoured `Accept: text/markdown` and
+ * published both index files, and nothing in a response said so - an agent had
+ * to know the convention in advance. A trace of Claude Code looking for our
+ * authentication docs read rendering-heavy HTML for 602k tokens and never found
+ * the markdown at all (September 2026).
+ *
+ * `describedby` is what the llms.txt v2 specification names for this, and it
+ * has an HTML counterpart in `+Head.tsx`. The `llms-txt` and `llms-full-txt`
+ * relations beside it are not registered with IANA, but they are what the
+ * tooling in this space actually matches on, so both spellings ship.
+ *
+ * A header rather than only a tag, because it reaches the markdown responses
+ * and `llms-full.txt` as well, none of which have a `<head>` to put a tag in.
+ */
+export const AGENT_DISCOVERY_LINK_HEADER = [
+    `<${LLMS_TXT_URL}>; rel="describedby"`,
+    `<${LLMS_TXT_URL}>; rel="llms-txt"`,
+    `<${LLMS_FULL_TXT_URL}>; rel="llms-full-txt"`,
+].join(", ");
+
 /**
  * Returns true when an `Accept` header explicitly asks for `text/markdown`
  * and does not prefer HTML over it. Browsers never list `text/markdown`, so

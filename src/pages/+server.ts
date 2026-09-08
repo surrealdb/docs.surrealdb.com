@@ -4,6 +4,7 @@ import type { Server } from "vike/types";
 import agentInstructions from "~/lib/agent-instructions.md?raw";
 import { fetchAllSdkVersions } from "~/lib/versions";
 import {
+    AGENT_DISCOVERY_LINK_HEADER,
     acceptsMarkdown,
     estimateTokens,
     MARKDOWN_CACHE_CONTROL,
@@ -14,11 +15,27 @@ import {
     composeRawMarkdown,
     resolveCollectionEntry,
     suffixDocsLinks,
+    withIndexPointer,
 } from "~/utils/collections";
 
 const BASE = "/docs";
 
 const app = new Hono();
+
+/**
+ * Advertise the page index on every response, HTML included.
+ *
+ * The HTML pages carry the same relation as a `<link>` tag from `+Head.tsx`,
+ * which is the form a reader's browser and most crawlers see. This covers
+ * everything else the app serves - the `.md` pages, `llms-full.txt`, the agent
+ * instructions - none of which has a document head to put a tag in.
+ *
+ * Registered before every route so the header lands on their responses too.
+ */
+app.use("*", async (c, next) => {
+    await next();
+    c.res.headers.set("Link", AGENT_DISCOVERY_LINK_HEADER);
+});
 
 /**
  * The full documentation corpus as one markdown document, following the
@@ -68,7 +85,7 @@ app.get(`${BASE}/llms-full.txt`, async (c) => {
  * copy to the clipboard, so it is a stable address: change the document, not
  * the path.
  */
-const agentInstructionsBody = `${suffixDocsLinks(agentInstructions.trimEnd())}\n`;
+const agentInstructionsBody = withIndexPointer(`${suffixDocsLinks(agentInstructions.trimEnd())}\n`);
 
 app.get(`${BASE}/agents/instructions.md`, (c) =>
     c.body(agentInstructionsBody, 200, {
@@ -122,7 +139,7 @@ app.get("*", async (c, next) => {
     // Resolved from the same file-backed cache the page render uses, so
     // `<Version>` markers report what the HTML reports.
     const sdkVersions = await fetchAllSdkVersions();
-    const markdown = composeRawMarkdown(entry, sdkVersions);
+    const markdown = withIndexPointer(composeRawMarkdown(entry, sdkVersions));
 
     return c.body(markdown, 200, {
         "Content-Type": MARKDOWN_CONTENT_TYPE,

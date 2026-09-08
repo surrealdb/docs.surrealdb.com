@@ -132,6 +132,25 @@ export function composeRawMarkdown(entry: CollectionEntry, sdkVersions?: SdkVers
     return `${suffixDocsLinks(document)}\n`;
 }
 
+/**
+ * Prepend the pointer to the page index that a single-page markdown response
+ * carries.
+ *
+ * An agent that arrives at one `.md` page by following a search result has no
+ * way to learn that a curated index of the whole site exists; this is the line
+ * that tells it, and it is what the `llms-txt-directive-md` readiness check
+ * looks for. It is a blockquote so that it reads as metadata rather than as the
+ * first sentence of the page.
+ *
+ * Applied at the response, not inside `composeRawMarkdown`, because
+ * `composeFullCorpusMarkdown` reuses that function for every page it embeds and
+ * already states this once in its own preamble - repeating it 1,000 times would
+ * be the same fact at a thousand times the cost.
+ */
+export function withIndexPointer(markdown: string): string {
+    return `> Full SurrealDB documentation index: ${DOCS_ORIGIN}/docs/llms.txt\n\n${markdown}`;
+}
+
 const DOCS_ORIGIN = "https://surrealdb.com";
 
 /**
