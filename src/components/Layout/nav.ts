@@ -70,6 +70,16 @@ export interface NavMenuSection {
 
 export interface NavMenuGroup {
     label: string;
+    /**
+     * The section's own hub page.
+     *
+     * Without it the label is a menu and nothing else, so the section has no
+     * address: `/docs/reference` answered 404 while "Reference" sat in the
+     * header, which left the section unlinkable, unrankable, and unguessable by
+     * an agent constructing a path. The menu still opens on hover; this is what
+     * a click resolves to.
+     */
+    href?: string;
     sections: NavMenuSection[];
 }
 
@@ -87,6 +97,7 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
     { label: "Get started", href: "/docs" },
     {
         label: "Learn",
+        href: "/docs/learn",
         sections: [
             {
                 heading: "Database",
@@ -139,6 +150,7 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
     },
     {
         label: "Build",
+        href: "/docs/build",
         sections: [
             {
                 heading: "Running",
@@ -183,6 +195,7 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
     },
     {
         label: "Manage",
+        href: "/docs/manage",
         sections: [
             {
                 heading: "Resources",
@@ -240,6 +253,7 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
     },
     {
         label: "Explore",
+        href: "/docs/explore",
         sections: [
             {
                 heading: "Tools",
@@ -273,6 +287,7 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
     },
     {
         label: "Reference",
+        href: "/docs/reference",
         sections: [
             {
                 heading: "Core",

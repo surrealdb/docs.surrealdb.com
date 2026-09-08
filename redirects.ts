@@ -741,6 +741,34 @@ function overviewConsolidationRedirects(): Redirect[] {
 }
 
 /**
+ * Pages whose filename repeated the folder they sat in, so the URL said the
+ * same word twice: `…/authentication/authentication`,
+ * `…/schema-design/schema-design`, `…/agent-rules/agent-rules`.
+ *
+ * The first of the three was the worse case, because the page is titled "Users"
+ * - the URL named neither the folder's subject nor the page's. The other two
+ * became their folder's index, which drops a segment as well as the repeat.
+ */
+function stutteringPathRedirects(): Redirect[] {
+    const moves: [string, string][] = [
+        ["learn/security/authentication/authentication", "learn/security/authentication/users"],
+        [
+            "learn/schema-management/schema-design/schema-design",
+            "learn/schema-management/schema-design",
+        ],
+        ["build/integrations/agent-rules/agent-rules", "build/integrations/agent-rules"],
+    ];
+
+    return moves.flatMap(([from, to]) =>
+        [`/${from}`, `/docs/${from}`].map((source) => ({
+            source,
+            destination: `/docs/${to}`,
+            statusCode: 301 as const,
+        })),
+    );
+}
+
+/**
  * Short, guessable entry points that nothing served.
  *
  * These are not legacy paths - none of them ever existed. They are the URLs a
@@ -948,6 +976,7 @@ export const docsRedirects: Redirect[] = [
         destination: "/learn/querying/surrealql/executing-queries/via-studio",
         statusCode: 301,
     },
+    ...stutteringPathRedirects(),
     // Last, so that every rule naming a real former path is tried first. These
     // are single-word guesses, and a guess should only be answered once nothing
     // better matches.

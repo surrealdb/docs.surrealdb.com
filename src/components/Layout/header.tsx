@@ -141,11 +141,19 @@ function NavLink({ label, href, activeHref }: NavItem & { activeHref: string | n
 
 function NavDropdown({
     label,
+    href,
     sections,
     activeHref,
 }: NavMenuGroup & { activeHref: string | null }) {
-    const active = flattenMenuItems({ label, sections }).some((item) => item.href === activeHref);
+    const active =
+        href === activeHref ||
+        flattenMenuItems({ label, sections }).some((item) => item.href === activeHref);
     const [hover, setHover] = useState(false);
+
+    // The menu opens on hover, so a click is free to mean what a click on a
+    // navigation item normally means: go to the section. Without a hub page to
+    // point at, the label stays a button that only opens the menu.
+    const target = href ? { component: "a" as const, href } : { component: "button" as const };
 
     return (
         <Menu
@@ -162,7 +170,7 @@ function NavDropdown({
         >
             <Menu.Target>
                 <Anchor
-                    component="button"
+                    {...target}
                     fz={14}
                     py="sm"
                     px="xs"
@@ -452,6 +460,18 @@ export function MobileNav({ navLinks }: MobileNavProps) {
                                     active={groupActive}
                                     defaultOpened={groupActive}
                                 >
+                                    {/* Tapping the group label expands it here
+                                        rather than navigating, so the hub page
+                                        the desktop label links to needs its own
+                                        row to be reachable at all. */}
+                                    {entry.href && (
+                                        <MantineNavLink
+                                            label={`${entry.label} overview`}
+                                            href={entry.href}
+                                            bdrs="xs"
+                                            active={entry.href === activeHref}
+                                        />
+                                    )}
                                     {entry.sections.map((section, sectionIndex) => (
                                         <Fragment key={section.heading}>
                                             <Text
