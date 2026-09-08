@@ -144,3 +144,68 @@ DEFINE FIELD OVERWRITE product ON search_miss TYPE string;
 DEFINE FIELD OVERWRITE date    ON search_miss TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX OVERWRITE search_miss_query ON search_miss FIELDS query CONCURRENTLY;
+
+-- ────────────────────────────────────────────────────────────
+-- LINKS edge
+--
+-- One relation per internal link, from the page that holds the
+-- link to the page it points at. A graph edge rather than an
+-- array of record links on `page`, because the metadata below
+-- belongs to the link itself: the same two pages can be joined
+-- by a prominent card and by a passing mention halfway down a
+-- long page, and those are not equally findable.
+--
+-- `offset_ratio` and `first_screen` measure where the link sits
+-- in its source page, which is the effort a reader spends before
+-- seeing it. Weigh them for prose only: the last row of a long
+-- reference table always scores badly and is perfectly usable,
+-- because a reader on that page is scanning the table already.
+--
+-- The queries the graph exists to answer. They live here because
+-- nothing in the codebase runs them - the scripts populate the
+-- table, and the questions are asked by hand afterwards.
+--
+-- Hardest pages to reach. `weight` is the effort of one link, so
+-- a page's cheapest route in is the minimum over its inbound
+-- edges. Project `out`, not `out.id()`: under GROUP BY the latter
+-- collects into an array instead of a scalar.
+--
+--     SELECT out, math::min(weight) AS effort, count() AS inbound
+--     FROM links GROUP BY out ORDER BY effort DESC;
+--
+-- Pages with no contextual route in: reachable by search or by a
+-- guessed URL, but never linked to from anywhere. Expect exactly
+-- one row, the docs homepage, being the graph's root.
+--
+--     SELECT VALUE id.id() FROM page WHERE array::len(<-links) = 0;
+--
+-- Whether one page reaches another, and by what route. The
+-- traversal returns the path itself, start excluded and
+-- destination last, or NONE when nothing connects the two. NONE
+-- is what an island looks like: react-native and expo linked to
+-- each other and to nothing else until this turned them up.
+--
+--     page:⟨index:index⟩.{..+shortest=page:⟨index:frameworks/expo⟩}(->links->page);
+-- ────────────────────────────────────────────────────────────
+
+DEFINE TABLE OVERWRITE links TYPE RELATION IN page OUT page SCHEMAFULL;
+
+DEFINE FIELD OVERWRITE text         ON links TYPE string;   -- the link's visible text
+DEFINE FIELD OVERWRITE kind         ON links TYPE "prose" | "card" | "table" | "list";
+DEFINE FIELD OVERWRITE offset_ratio ON links TYPE float;    -- 0.0 at the top of the page, 1.0 at the end
+DEFINE FIELD OVERWRITE offset_chars ON links TYPE int;      -- characters from the top, which the ratio alone cannot give
+DEFINE FIELD OVERWRITE first_screen ON links TYPE bool;     -- within the first screenful of the page
+DEFINE FIELD OVERWRITE anchor       ON links TYPE option<string>;  -- fragment, when the link targets a section
+DEFINE FIELD OVERWRITE date         ON links TYPE datetime DEFAULT time::now();
+
+-- Effort to notice this link, lowest is easiest. A card or a list entry is
+-- navigation the reader is already scanning; a table row is a reference entry;
+-- a prose link depends on having read the surrounding sentence, and costs more
+-- the further down the page it sits. Set by search/scripts/links.ts so the
+-- formula lives in one place and `math::min(weight)` gives a page's cheapest
+-- route in.
+DEFINE FIELD OVERWRITE weight       ON links TYPE float;
+
+-- "Which pages link here" is the question this table exists to answer.
+DEFINE INDEX OVERWRITE links_out ON links FIELDS out CONCURRENTLY;
+DEFINE INDEX OVERWRITE links_kind ON links FIELDS kind CONCURRENTLY;

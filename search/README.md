@@ -41,6 +41,10 @@ section. Code blocks are excluded from indexed text.
 - **`page`** and **`section`** tables with BM25 full-text indexes (title,
   breadcrumb, description, content, path) and HNSW vector indexes (1536
   dimensions, cosine distance).
+- **`links`** relation, one per internal link, from the page holding it to the
+  page it points at. Search does not read it; it answers findability questions
+  the search index cannot, such as which pages have no contextual route in.
+  Populated separately by `bun run search:links`.
 
 Full-text scoring weights:
 
@@ -120,6 +124,7 @@ production search endpoint at `https://surrealdb.com/docs/api/search`.
 | ------------------------ | ---------------------------------------------- |
 | `bun run search:schema`  | Apply `search/schema.surql` to local SurrealDB |
 | `bun run search:index`   | Crawl content and upsert into SurrealDB        |
+| `bun run search:links`   | Populate the `links` relation from the content |
 | `bun run search:serve`   | Start local search API on port 4322            |
 
 ### Re-indexing
@@ -179,6 +184,7 @@ search/
 ├── crawler.ts      # Markdown → page + section records
 ├── embed.ts        # OpenAI text-embedding-3-small wrapper
 ├── indexer.ts      # Incremental upsert into SurrealDB
+├── links.ts        # Internal links → `links` relation, with position and kind
 └── handler.ts      # Shared search handler (Vercel fn + local server)
 
 api/

@@ -673,6 +673,34 @@ are inert. Sitemap URLs come from `+sitemapUrls.ts` instead
 (`collectionSitemapUrls` in `src/utils/sitemap.ts`, which filters `__category`
 entries) - add one for every new page group.
 
+## Link graph
+
+`search/schema.surql` carries a `links` relation next to the search tables: one
+record per internal link, from the page holding it to the page it points at,
+populated by `bun run search:links` (after `search:index`, since the endpoints
+are `page` records). It exists to answer findability questions the search index
+cannot - which pages nothing links to, and how much effort a reader spends
+noticing the cheapest link that reaches them.
+
+Each edge carries the link's `text`, its `kind` (`prose`, `card`, `table`,
+`list`), how far into the page it sits (`offset_chars` and `offset_ratio`), and
+a `weight` giving the effort to notice it. Two rules were learned the hard way
+and are easy to reintroduce:
+
+- **Weigh position for prose only.** The last row of a 32-row methods table sits
+  at 97% of the page and is perfectly usable, because a reader there is scanning
+  the table already. Penalising it ranks every long reference index as the worst
+  page in the docs.
+- **Weigh distance, not proportion.** 94% of a 2,400-character page is one
+  scroll; 94% of a 124,000-character page is a different problem. The weight
+  scales with characters past the first screenful, saturating at 30,000.
+
+A line that is only links and separators (`→ [A] · [B] · [C]`) counts as
+navigation rather than prose, and links a component renders rather than the
+markdown spelling out - `<AgentPicker />` is the current case - are declared in
+`COMPONENT_LINKS` in `search/scripts/links.ts`. Without that, a page whose only
+route in is a component-rendered list looks unreachable.
+
 ### vike-content-collection APIs
 
 **Used:** `defineCollection`, `getCollection`, `getCollectionEntry`,

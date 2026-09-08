@@ -31,7 +31,7 @@ import type { CrawledEntry, CrawledPage, CrawledSection } from "../src/types";
 
 type MarkdownNode = NonNullable<ReturnType<typeof parseMarkdownTree>["topNode"]["firstChild"]>;
 
-const CONTENT_DIR = join(import.meta.dirname, "../../src/content");
+export const CONTENT_DIR = join(import.meta.dirname, "../../src/content");
 
 // A content collection is any directory under src/content/ that
 // contains a +Content.ts file (the vike-content-collection marker).
@@ -82,7 +82,7 @@ interface PageFrontmatter {
  * nest inside one another, so recursion stops once a marker is
  * found. Excluded collections are filtered out.
  */
-async function discoverCollections(): Promise<string[]> {
+export async function discoverCollections(): Promise<string[]> {
     const collections: string[] = [];
 
     async function scan(dir: string) {
@@ -106,7 +106,7 @@ async function discoverCollections(): Promise<string[]> {
 }
 
 /** Recursively yields all .md and .mdx file paths in a directory. */
-async function* walkMarkdown(dir: string): AsyncGenerator<string> {
+export async function* walkMarkdown(dir: string): AsyncGenerator<string> {
     const entries = await readdir(dir, { withFileTypes: true });
 
     for (const entry of entries) {
@@ -340,7 +340,7 @@ function buildBreadcrumb(
     return parts.join(" > ");
 }
 
-function buildSlug(filePath: string, collectionDir: string): string {
+export function buildSlug(filePath: string, collectionDir: string): string {
     let slug = relative(collectionDir, filePath).replace(/\.mdx?$/, "");
 
     if (slug.endsWith("/index")) {
@@ -355,7 +355,7 @@ function buildSlug(filePath: string, collectionDir: string): string {
     return slug;
 }
 
-function buildUrl(collection: string, slug: string): string {
+export function buildUrl(collection: string, slug: string): string {
     const prefix = URL_PREFIX_OVERRIDES[collection] ?? collection;
     const segments = [URL_BASE, prefix, slug].filter(Boolean);
     return segments.join("/");
