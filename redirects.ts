@@ -769,6 +769,14 @@ export const docsRedirects: Redirect[] = [
     ...aiAgentsRedirects(),
     ...cloudAndDeploymentRedirects(),
     ...agentMemoryRedirects(),
+    // `meta::tb()` and `meta::id()` were renamed to `record::` in 2.x. Both old
+    // names still work, so the note on the record page says so rather than the
+    // reference page staying behind to document a discouraged spelling.
+    {
+        source: "/reference/query-language/functions/database-functions/meta",
+        destination: "/docs/reference/query-language/functions/database-functions/record",
+        statusCode: 301,
+    },
     // "Types after 3.0" split into a concepts page and an attribute reference.
     // The old slug dropped the dot in the filename, so it was served at
     // `rust-after-30`.
