@@ -43,6 +43,25 @@ const SIZE_BUDGET = 96_000;
 const SKIP_COLLECTIONS = new Set(["labs-items"]);
 
 /**
+ * Pages that exist as routes but not as entries in a documentation collection,
+ * so the walk below cannot find them.
+ *
+ * `/docs/labs` renders the `labs-items` collection as a listing rather than
+ * being a page in it, which left it in the sitemap and absent from the index.
+ * Keyed by section so it lands under the right heading.
+ */
+const EXTRA_PAGES = {
+    explore: [
+        {
+            url: `${SITE}/docs/labs`,
+            title: "SurrealDB Labs",
+            description: "Talks, videos and experiments from the team and the community.",
+            depth: 0,
+        },
+    ],
+};
+
+/**
  * Preamble. Prose, so it stays hand-written - it is the only part of this file
  * a person should edit.
  */
@@ -111,11 +130,17 @@ function frontmatter(file) {
     return meta;
 }
 
-/** Mirrors `github-slugger` for the shapes that appear in these paths. */
+/**
+ * Mirrors `github-slugger` for the shapes that appear in these paths.
+ *
+ * Underscores survive - they are word characters, so the slugger keeps them.
+ * Stripping them here produced `listenlive` for `listen_live.mdx`, a URL that
+ * 404s, and the depth cap used to hide the mistake by never listing the page.
+ */
 function slugify(segment) {
     return segment
         .toLowerCase()
-        .replace(/[^a-z0-9\s-]/g, "")
+        .replace(/[^a-z0-9\s\-_]/g, "")
         .trim()
         .replace(/\s+/g, "-");
 }
@@ -241,6 +266,17 @@ for (const [id, prefix] of collections) {
 
     group.pages.push(...pages);
     sections.set(key, group);
+}
+
+for (const [key, pages] of Object.entries(EXTRA_PAGES)) {
+    const group = sections.get(key);
+
+    if (!group) {
+        console.warn(`[llms.txt] EXTRA_PAGES names section "${key}", which has no collections`);
+        continue;
+    }
+
+    group.pages.push(...pages);
 }
 
 const SECTION_TITLES = {
