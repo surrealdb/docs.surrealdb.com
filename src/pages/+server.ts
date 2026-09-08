@@ -12,6 +12,7 @@ import {
 } from "~/utils/agent-markdown";
 import {
     composeFullCorpusMarkdown,
+    composeLabsMarkdown,
     composeRawMarkdown,
     resolveCollectionEntry,
     suffixDocsLinks,
@@ -136,6 +137,21 @@ app.get("*", async (c, next) => {
         new RegExp(`^${BASE}`),
         "",
     );
+    // Labs is a React listing over `labs-items`, not a documentation
+    // collection, so the resolver below cannot see it. It is listed in
+    // `llms.txt` all the same, and the index promises `.md` on any entry, so
+    // it is answered here - by both entry points, like every other page.
+    if (path === "/labs") {
+        const labs = composeLabsMarkdown();
+
+        return c.body(labs, 200, {
+            "Content-Type": MARKDOWN_CONTENT_TYPE,
+            "Cache-Control": MARKDOWN_CACHE_CONTROL,
+            "X-Markdown-Tokens": String(estimateTokens(labs)),
+            ...(suffixed ? { "X-Robots-Tag": "noindex" } : { Vary: "Accept" }),
+        });
+    }
+
     // The docs root cannot carry the suffix on its own path, so `/docs/index.md`
     // addresses it - the same convention the apex site uses for its homepage.
     const entry = resolveCollectionEntry(path.replace(/^\/?index$/, ""));
