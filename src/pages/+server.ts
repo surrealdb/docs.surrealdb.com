@@ -142,7 +142,9 @@ app.get("*", async (c, next) => {
     // `llms.txt` all the same, and the index promises `.md` on any entry, so
     // it is answered here - by both entry points, like every other page.
     if (path === "/labs") {
-        const labs = composeLabsMarkdown();
+        // Wrapped like every other page: an agent that reaches this listing
+        // from a search result learns the index exists the same way.
+        const labs = withIndexPointer(composeLabsMarkdown());
 
         return c.body(labs, 200, {
             "Content-Type": MARKDOWN_CONTENT_TYPE,

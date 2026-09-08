@@ -56,7 +56,7 @@ const EXTRA_PAGES = {
             url: `${SITE}/docs/labs`,
             title: "SurrealDB Labs",
             description: "Talks, videos and experiments from the team and the community.",
-            depth: 0,
+            depth: 1,
         },
     ],
 };
@@ -261,16 +261,45 @@ function pagesFor(id, prefix) {
             url: `${SITE}/docs${path ? `/${path}` : ""}`,
             title: meta.title,
             description: meta.description ?? "",
-            depth: segments.length,
+            // Counted on the URL rather than on the slug, because a section
+            // holds several collections and a slug's depth is measured from
+            // its own collection root. `/docs/learn/data-models` is that
+            // collection's index, so its slug depth is 0, which sorted it
+            // above `/docs/learn` - the hub that introduces it.
+            depth: path ? path.split("/").length : 0,
         });
     }
 
     return pages.sort(byDepthThenUrl);
 }
 
+/** The sections, in the order they are written. */
+const ORDER = ["index", "learn", "build", "manage", "explore", "reference", "agent-memory"];
+
 /** Group collections by their first path segment, which is the top-level nav. */
 function sectionOf(id) {
     return id === "index" ? "index" : id.split("/")[0];
+}
+
+/**
+ * The section a page is listed under.
+ *
+ * The collection id decides normally, but the five section hubs - `/docs/learn`,
+ * `/docs/build` and the rest - live in the root `index` collection, because a
+ * `+Content.ts` one level up would recurse into the collections beneath it and
+ * index every page twice. Their id therefore says "Get started" while their URL
+ * says otherwise, and an agent scanning `## Learn` for the Learn hub did not
+ * find it there.
+ *
+ * So the URL wins where its leading segment names a section, and the id is the
+ * fallback - which is what keeps the rest of the `index` collection
+ * (`/docs/languages/*`, `/docs/running/*`, `/docs/frameworks/*`) under Get
+ * started, where it belongs and where no section heading would take it.
+ */
+function sectionForPage(url, fallback) {
+    const [first] = url.slice(`${SITE}/docs`.length).replace(/^\//, "").split("/");
+
+    return ORDER.includes(first) ? first : fallback;
 }
 
 const collections = readCollections();
@@ -279,14 +308,15 @@ const sections = new Map();
 for (const [id, prefix] of collections) {
     if (SKIP_COLLECTIONS.has(id)) continue;
 
-    const key = sectionOf(id);
-    const pages = pagesFor(id, prefix);
-    if (!pages.length) continue;
+    const fallback = sectionOf(id);
 
-    const group = sections.get(key) ?? { pages: [], position: collectionPosition(id) };
+    for (const page of pagesFor(id, prefix)) {
+        const key = sectionForPage(page.url, fallback);
+        const group = sections.get(key) ?? { pages: [], position: collectionPosition(id) };
 
-    group.pages.push(...pages);
-    sections.set(key, group);
+        group.pages.push(page);
+        sections.set(key, group);
+    }
 }
 
 for (const [key, pages] of Object.entries(EXTRA_PAGES)) {
@@ -310,9 +340,7 @@ const SECTION_TITLES = {
     "agent-memory": "Agent Memory",
 };
 
-const ORDER = ["index", "learn", "build", "manage", "explore", "reference", "agent-memory"];
-
-/** Section list, deduplicated, in the order they are written. */
+/** Section list, deduplicated. */
 const rendered = ORDER.filter((key) => sections.has(key)).map((key) => {
     const seen = new Set();
 
