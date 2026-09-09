@@ -124,7 +124,18 @@ export function DefaultLayout({
                                 </Title>
                                 <CopyPageMenu />
                             </Group>
-                            {data.description && <Text fz="xl">{data.description}</Text>}
+                            {/*
+                             * The frontmatter description is deliberately not
+                             * rendered. It feeds `<meta name="description">`,
+                             * the search index and `llms.txt`, which all want
+                             * dense front-loaded terms, while the orienting
+                             * sentence a reader needs is the page's own opening
+                             * paragraph - which the docs voice already
+                             * requires. Rendering both gave every page two
+                             * openers, and on an eighth of them the
+                             * description restated the first H2 sitting
+                             * directly beneath it.
+                             */}
                             <Box
                                 mt="xl"
                                 component="main"

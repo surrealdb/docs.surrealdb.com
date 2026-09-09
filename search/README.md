@@ -151,7 +151,7 @@ search is retired, a merge to `main` updates both:
 | This one | `postbuild` on the Vercel production build | `/docs/api/search`, which the site's UI calls today |
 | The API's | `.github/workflows/reindex-docs.yml` calling `POST /api/docs/v1/reindex` | `api.surrealdb.com/api/docs/v1/search`, and the `search_documentation` MCP tool |
 
-The two do not collide, because they write to different databases — but both pay
+The two do not collide, because they write to different databases - but both pay
 for OpenAI embeddings, so retiring this one is worth doing.
 
 The workflow signs its request the way a GitHub webhook would: HMAC-SHA256 over
@@ -173,7 +173,7 @@ script treats that as success.
 | `OPENAI_API_KEY`      | OpenAI API key for embeddings           |
 
 `DOCS_WEBHOOK_SECRET` is a GitHub Actions repository secret rather than a
-Vercel variable, because the workflow — not the build — is what uses it.
+Vercel variable, because the workflow - not the build - is what uses it.
 
 ## File structure
 
