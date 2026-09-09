@@ -118,6 +118,17 @@ and who it is for. Reference pages put syntax or API surface near the top, then
 work through examples. Guides and quickstarts use prerequisites, numbered steps,
 and expected output. Troubleshooting pages follow symptom → cause → resolution.
 
+That opening sentence is the only orientation a reader gets, because the
+frontmatter `description` is **not rendered on the page**. It feeds
+`<meta name="description">`, the search index and `llms.txt`, all of which want
+dense front-loaded terms, and it was displayed as a subtitle between April and
+September 2026. Rendering it gave every page two openers, and on an eighth of
+them the description restated the first `##` sitting directly beneath it. So
+write the description for a search result and an index, and write the first
+paragraph for the reader - a page that dives straight into its first `##` now
+has nothing to orient anyone. `bun run generate:llms` regenerates the index
+after a description changes.
+
 **Prose style.** Short paragraphs, mostly declarative sentences. Define terms on
 first use. Prefer concrete claims ("datetimes drop from nanoseconds to
 milliseconds") over vague importance ("crucial for modern workflows"). Use
@@ -726,12 +737,12 @@ entries) - add one for every new page group.
 Four things advertise the markdown rendering, and they are easy to break one at
 a time:
 
-| What | Where |
-| --- | --- |
-| `<link rel="describedby">` and `rel="llms-txt"` | `src/pages/+Head.tsx` |
-| `Link:` header on every response | the `app.use("*")` middleware in `src/pages/+server.ts` |
-| `> Full SurrealDB documentation index: …` atop each `.md` | `withIndexPointer` in `src/utils/collections.ts` |
-| The index itself | `public/llms.txt` |
+| What                                                      | Where                                                   |
+| --------------------------------------------------------- | ------------------------------------------------------- |
+| `<link rel="describedby">` and `rel="llms-txt"`           | `src/pages/+Head.tsx`                                   |
+| `Link:` header on every response                          | the `app.use("*")` middleware in `src/pages/+server.ts` |
+| `> Full SurrealDB documentation index: …` atop each `.md` | `withIndexPointer` in `src/utils/collections.ts`        |
+| The index itself                                          | `public/llms.txt`                                       |
 
 The first three exist because the fourth is useless to an agent that never
 learns it is there. Content negotiation, `.md` URLs, `x-markdown-tokens` and
