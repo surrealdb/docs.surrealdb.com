@@ -120,6 +120,14 @@ function legacySurrealdbTreeRedirects(): Redirect[] {
         // SurrealQL nested under the product prefix → the query language
         // reference, whose slugs mirror the old tree.
         ["surrealdb/surrealql", "reference/query-language", "prefix-path"],
+        // Security is the most-followed branch of the old tree - it is what
+        // "how do I authenticate with SurrealDB" resolves to in search results
+        // and in model training data. The catch-all below used to swallow it
+        // and answer with the product introduction, so an agent asking about
+        // authentication was handed a page that never mentions it (observed in
+        // an agent trace, September 2026). Named here so it lands on the
+        // security section instead.
+        ["surrealdb/security", "learn/security", "prefix"],
         // Remaining unmapped pages fold into the product introduction rather
         // than 404. The www rules for `installation`, `security`, and `cli`
         // run first in production, so this only catches what they miss.
@@ -421,7 +429,10 @@ function sdkGettingStartedRedirects(): Redirect[] {
 function aiAgentsRedirects(): Redirect[] {
     const moves: [string, string][] = [
         ["build/ai-agents/connect-mcp-to-your-editor", "build/ai-agents/mcp/embedded"],
-        ["build/ai-agents/agent-rules", "build/integrations/agent-rules/agent-rules"],
+        // Points at the folder index, not at the old stuttering filename that
+        // `stutteringPathRedirects` now moves - otherwise this rule redirects
+        // to a path that immediately redirects again.
+        ["build/ai-agents/agent-rules", "build/integrations/agent-rules"],
     ];
 
     const out: Redirect[] = [];
@@ -661,6 +672,48 @@ function withDocsDestination(rule: Redirect): Redirect {
     };
 }
 
+/** The source shape a markdown twin uses; see `withMarkdownTwins`. */
+const MD_WILDCARD = "/:path(.*\\.md)";
+
+/**
+ * Give every collapsing wildcard rule a `.md` twin, placed just before it.
+ *
+ * A wildcard whose destination carries `:path*` keeps a `.md` suffix on its
+ * own, because the suffix is only more path - `/self-hosted/overview.md` lands
+ * on `/docs/running/overview.md`. One that collapses a removed tree onto a
+ * fixed page drops it, so `/surrealist/removed.md` redirected to
+ * `/docs/explore/studio` and answered an agent asking for markdown with HTML.
+ * 33 rules collapse that way against 93 that carry, and nothing in either
+ * source says which kind it is.
+ *
+ * The twin matches `.md` paths only. `:path(.*\.md)` rather than `:path*.md`,
+ * which path-to-regexp also accepts but compiles to a pattern that additionally
+ * matches `/surrealist.md` - the markdown form of a page named `surrealist`,
+ * which belongs to that page and not to this rule.
+ *
+ * Derived rather than written out, so a wildcard added later gets its twin
+ * without anyone remembering that this has to be done. Sources already carrying
+ * `/docs` are skipped: they are inert in production, where the prefix is
+ * stripped before this project sees the request, and the dev middleware tries
+ * the stripped path first.
+ */
+function withMarkdownTwins(rules: Redirect[]): Redirect[] {
+    return rules.flatMap((rule) => {
+        const collapsing = rule.source.endsWith("/:path*") && !rule.destination.endsWith("/:path*");
+
+        if (!collapsing || rule.source.startsWith("/docs/")) {
+            return [rule];
+        }
+
+        const base = rule.source.slice(0, -"/:path*".length);
+
+        return [
+            { ...rule, source: `${base}${MD_WILDCARD}`, destination: `${rule.destination}.md` },
+            rule,
+        ];
+    });
+}
+
 /** Shared with vercel.ts (production) and the Vite dev server (local). */
 /**
  * Spectron → SurrealDB Agent Memory rename (August 2026). The docs moved from
@@ -732,7 +785,161 @@ function overviewConsolidationRedirects(): Redirect[] {
     ]);
 }
 
-export const docsRedirects: Redirect[] = [
+/**
+ * The Enterprise subtree, collapsed onto one page.
+ *
+ * Twelve of its thirteen pages were a title, a description and an H1 with no
+ * body - `what-ee-is.mdx` was literally `# What EE is` and stopped - and the
+ * thirteenth was a signpost to the observability section. They were reachable,
+ * indexed, listed in the sidebar and in `llms.txt`, and answered nothing.
+ * Nothing outside the subtree linked to any of them.
+ *
+ * The index now carries what could be said accurately, and points at sales for
+ * what could not. A blank page is worse than a redirect to a page that tells
+ * you where to ask.
+ */
+function enterpriseConsolidationRedirects(): Redirect[] {
+    const removed = [
+        "capabilities/distributed-live-queries",
+        "licensing-and-activation",
+        "overview/contact-and-licensing",
+        "overview/feature-table",
+        "overview/what-ee-is",
+        "security/fips",
+        "security/trusted-execution",
+        "storage/file-storage",
+        "support/slas",
+        "support/support-tiers",
+        "upgrading-from-community",
+    ];
+
+    const out: Redirect[] = removed.map((slug) => ({
+        source: `/manage/enterprise/${slug}`,
+        destination: "/docs/manage/enterprise",
+        statusCode: 301 as const,
+    }));
+
+    // This one had content, and the content said the real reference is in the
+    // observability section, so send it there rather than to the index.
+    out.push({
+        source: "/manage/enterprise/security/audit-logging",
+        destination: "/docs/manage/observability/audit-logging",
+        statusCode: 301,
+    });
+
+    return out;
+}
+
+/**
+ * Pages whose filename repeated the folder they sat in, so the URL said the
+ * same word twice: `…/authentication/authentication`,
+ * `…/schema-design/schema-design`, `…/agent-rules/agent-rules`.
+ *
+ * The first of the three was the worse case, because the page is titled "Users"
+ * - the URL named neither the folder's subject nor the page's. The other two
+ * became their folder's index, which drops a segment as well as the repeat.
+ */
+function stutteringPathRedirects(): Redirect[] {
+    const moves: [string, string][] = [
+        ["learn/security/authentication/authentication", "learn/security/authentication/users"],
+        [
+            "learn/schema-management/schema-design/schema-design",
+            "learn/schema-management/schema-design",
+        ],
+        ["build/integrations/agent-rules/agent-rules", "build/integrations/agent-rules"],
+    ];
+
+    return moves.map(([from, to]) => ({
+        source: `/${from}`,
+        destination: `/docs/${to}`,
+        statusCode: 301 as const,
+    }));
+}
+
+/**
+ * Short, guessable entry points that nothing served.
+ *
+ * These are not legacy paths - none of them ever existed. They are the URLs a
+ * developer types and an agent constructs before it has seen the navigation,
+ * and every one of them answered 404 (verified September 2026). An agent trace
+ * looking for authentication docs spent eight web searches and 53% of its
+ * fetches on Google recovering paths it could not guess, having failed on
+ * `/docs/sdk`, `/docs/build` and `/docs/integration/apis`.
+ *
+ * A guess that lands is worth more than a guess that 404s even when the landing
+ * is approximate, so these aim at the section a reader asking that word wants
+ * rather than at an exact page. They are 302s for that reason: the destination
+ * is our current best answer to a word, not a page that moved.
+ */
+function guessableEntryPointRedirects(): Redirect[] {
+    const entries: [string, string][] = [
+        ["quickstart", "/docs"],
+        ["quick-start", "/docs"],
+        ["getting-started", "/docs"],
+        ["get-started", "/docs"],
+        ["intro", "/docs/what-is-surrealdb"],
+        ["introduction", "/docs/what-is-surrealdb"],
+        ["api", "/docs/reference/rest-api"],
+        ["apis", "/docs/reference/rest-api"],
+        ["rest", "/docs/reference/rest-api"],
+        ["http", "/docs/reference/rest-api/http-protocol"],
+        ["rpc", "/docs/reference/rest-api/rpc-protocol"],
+        ["auth", "/docs/learn/security/authentication/overview"],
+        ["authentication", "/docs/learn/security/authentication/overview"],
+        ["security", "/docs/learn/security"],
+        ["permissions", "/docs/learn/security/authorization/permissions-and-row-level-security"],
+        // The bare prefix. `sdk/:sdk` is already mapped by `sdkRedirects`.
+        ["sdk", "/docs/languages"],
+        ["sdks", "/docs/languages"],
+        ["clients", "/docs/languages"],
+        ["install", "/docs/running/overview"],
+        ["installation", "/docs/running/overview"],
+        ["docker", "/docs/running/docker"],
+        ["schema", "/docs/learn/schema-management"],
+        ["query", "/docs/reference/query-language"],
+        ["queries", "/docs/reference/query-language"],
+        ["functions", "/docs/reference/query-language/functions/database-functions"],
+        // The statements folder has no page of its own, so a link to it lands
+        // on whichever child sorts first (`DEFINE ACCESS`). The SurrealQL index
+        // lists them all, which is what someone typing this word wants.
+        ["statements", "/docs/reference/query-language"],
+        // `cli` is deliberately absent: `legacySurrealdbTreeRedirects` already
+        // maps it, and a second rule for the same source would never be read.
+    ];
+
+    return entries.map(([from, destination]) => ({
+        source: `/${from}`,
+        destination,
+        statusCode: 302 as const,
+    }));
+}
+
+/**
+ * `integration(s)/apis` → the protocol reference.
+ *
+ * `/docs/integration/apis` redirected to `/docs/integrations/apis`, which the
+ * `integrations → build/integrations` prefix rule then sent to
+ * `/docs/build/integrations/apis` - a page that does not exist. The chain ended
+ * in a 404 while looking like a working redirect (verified September 2026).
+ * The API content lives in the protocol reference now, so say so. Spread before
+ * `legacyPrefixRedirects("integrations", …)` so this wins.
+ */
+function legacyIntegrationApiRedirects(): Redirect[] {
+    return ["integration", "integrations"].flatMap((prefix) => [
+        {
+            source: `/${prefix}/apis`,
+            destination: "/docs/reference/rest-api",
+            statusCode: 301 as const,
+        },
+        {
+            source: `/${prefix}/apis/:path*`,
+            destination: "/docs/reference/rest-api",
+            statusCode: 301 as const,
+        },
+    ]);
+}
+
+const baseRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
     { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
     ...overviewConsolidationRedirects(),
@@ -754,6 +961,7 @@ export const docsRedirects: Redirect[] = [
     { source: "/surrealist/:path*", destination: "/explore/studio", statusCode: 301 },
     ...legacyPrefixRedirects("surrealml", "explore/ml-models"),
     ...legacyIntegrationSdkRedirects(),
+    ...legacyIntegrationApiRedirects(),
     ...legacyPrefixRedirects("integrations", "build/integrations"),
     ...legacyPrefixRedirects("tutorials", "explore/tutorials"),
     ...sdkRedirects(),
@@ -854,7 +1062,15 @@ export const docsRedirects: Redirect[] = [
         destination: "/learn/querying/surrealql/executing-queries/via-studio",
         statusCode: 301,
     },
-].map(withDocsDestination);
+    ...enterpriseConsolidationRedirects(),
+    ...stutteringPathRedirects(),
+    // Last, so that every rule naming a real former path is tried first. These
+    // are single-word guesses, and a guess should only be answered once nothing
+    // better matches.
+    ...guessableEntryPointRedirects(),
+];
+
+export const docsRedirects: Redirect[] = withMarkdownTwins(baseRedirects.map(withDocsDestination));
 
 export type ResolvedRedirect = { destination: string; statusCode: number };
 
@@ -869,6 +1085,19 @@ export function resolveRedirect(pathname: string): ResolvedRedirect | null {
         const statusCode = rule.statusCode ?? 302;
         const source = rule.source;
         const destination = rule.destination;
+
+        // The markdown twins `withMarkdownTwins` adds. Matched explicitly
+        // rather than by parsing the regex, mirroring what path-to-regexp
+        // compiles this shape to: a path under the base that ends in `.md`.
+        if (source.endsWith(MD_WILDCARD)) {
+            const base = source.slice(0, -MD_WILDCARD.length);
+
+            if (normalized.startsWith(`${base}/`) && normalized.endsWith(".md")) {
+                return { destination, statusCode };
+            }
+
+            continue;
+        }
 
         if (source.endsWith("/:path*")) {
             const sourceBase = source.slice(0, -"/:path*".length);

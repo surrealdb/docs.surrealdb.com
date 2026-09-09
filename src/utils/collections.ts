@@ -1,6 +1,8 @@
 import type { CollectionMap } from "vike-content-collection";
-import { getCollection, getCollectionEntry } from "vike-content-collection";
+import { getCollection, getCollectionEntry, sortCollection } from "vike-content-collection";
 import type { SdkVersionMap } from "~/lib/versions";
+import { LLMS_TXT_URL } from "./agent-markdown";
+import { labCategories } from "./labs";
 import { stripLanguageTestComments, stripLeadingH1 } from "./markdown";
 import { flattenMdxComponents } from "./mdx-to-markdown";
 
@@ -90,10 +92,20 @@ export function resolveCollectionEntry(pathname: string): CollectionEntry | unde
  * links (`](/docs/…)`) and JSX/HTML `href` attributes, preserving any trailing
  * `#anchor` or `?query`, and leaving root (`/docs`), directory (`/docs/…/`) and
  * already-suffixed links untouched.
+ *
+ * A link whose last segment carries an extension is left alone too, because it
+ * addresses a file rather than a page. `/docs/llms.txt` and
+ * `/docs/llms-full.txt` are the two that matter: they are the indexes this
+ * whole convention exists to point an agent at, and suffixing them produced
+ * `/docs/llms.txt.md`, which nothing serves. An extension is unambiguous here
+ * because a slug never contains a dot - `github-slugger` drops them, so `v1.x`
+ * becomes `v1x`.
  */
 export function suffixDocsLinks(markdown: string): string {
-    const appendMd = (path: string) =>
-        path.endsWith(".md") || path.endsWith("/") ? path : `${path}.md`;
+    const appendMd = (path: string) => {
+        const last = path.slice(path.lastIndexOf("/") + 1);
+        return last.includes(".") || path.endsWith("/") ? path : `${path}.md`;
+    };
 
     return markdown
         .replace(/(\]\()(\/docs\/[^)\s#?]+)/g, (_match, open, path) => `${open}${appendMd(path)}`)
@@ -132,6 +144,66 @@ export function composeRawMarkdown(entry: CollectionEntry, sdkVersions?: SdkVers
     return `${suffixDocsLinks(document)}\n`;
 }
 
+/**
+ * Prepend the pointer to the page index that a single-page markdown response
+ * carries.
+ *
+ * An agent that arrives at one `.md` page by following a search result has no
+ * way to learn that a curated index of the whole site exists; this is the line
+ * that tells it, and it is what the `llms-txt-directive-md` readiness check
+ * looks for. It is a blockquote so that it reads as metadata rather than as the
+ * first sentence of the page.
+ *
+ * Applied at the response, not inside `composeRawMarkdown`, because
+ * `composeFullCorpusMarkdown` reuses that function for every page it embeds and
+ * already states this once in its own preamble - repeating it 1,000 times would
+ * be the same fact at a thousand times the cost.
+ */
+export function withIndexPointer(markdown: string): string {
+    return `> Full SurrealDB documentation index: ${LLMS_TXT_URL}\n\n${markdown}`;
+}
+
+/**
+ * The Labs listing as markdown.
+ *
+ * Labs is a React page over the `labs-items` collection rather than an entry in
+ * a documentation collection, so `resolveCollectionEntry` cannot reach it and it
+ * had no `.md` of its own. `llms.txt` lists it and its preamble tells an agent
+ * that appending `.md` works on any entry, so the choice was to write this or to
+ * drop Labs back out of the index - and the listing is the answer to "what talks
+ * and examples exist", which is worth more in markdown than in a card grid.
+ *
+ * Grouped by `labCategories` in its declared order, matching the page.
+ */
+export function composeLabsMarkdown(): string {
+    const items = sortCollection(getCollection("labs-items"), "title", "asc");
+
+    const sections = labCategories.flatMap((category) => {
+        const lines = items
+            .filter((item) => item.metadata.category === category)
+            .map((item) => {
+                const { title, url, description, author } = item.metadata;
+                // `author` is either the literal "surrealdb" or an object.
+                const by = author === "surrealdb" ? "SurrealDB" : author.name;
+                const link = url ? `[${title}](${url})` : title;
+
+                // A couple of author names end in an initial, so the
+                // sentence period would double up.
+                const credit = by.endsWith(".") ? `By ${by}` : `By ${by}.`;
+
+                return `- ${link} - ${description ? `${description} ` : ""}${credit}`;
+            });
+
+        return lines.length ? [`## ${category}\n\n${lines.join("\n")}`] : [];
+    });
+
+    return [
+        "# SurrealDB Labs",
+        "Talks, videos and experiments from the team and the community. Each entry links out to its own source.",
+        ...sections,
+    ].join("\n\n");
+}
+
 const DOCS_ORIGIN = "https://surrealdb.com";
 
 /**
@@ -164,6 +236,8 @@ export function composeFullCorpusMarkdown(sdkVersions?: SdkVersionMap): string {
             sections.push(`---\n\nSource: ${url}\n\n${page}`);
         }
     }
+
+    sections.push(`---\n\nSource: ${DOCS_ORIGIN}/docs/labs\n\n${composeLabsMarkdown().trimEnd()}`);
 
     return `${sections.join("\n\n")}\n`;
 }

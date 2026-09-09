@@ -75,6 +75,15 @@ function resolveSection(breadcrumbs: string[], collectionId: string): string | u
         return meaningful.at(-1);
     }
 
+    // The root collection is not a section, it is where the sections start, so
+    // there is nothing true to qualify its pages with. Every fallback below
+    // ends up prettifying the directory name, which is how the docs root came
+    // to be titled "Getting started | Index | Database" - a page named after a
+    // folder nobody navigates to, on the most linked-to page in the docs.
+    if (collectionId === "index") {
+        return undefined;
+    }
+
     // The collection's own landing page already carries the proper name
     // ("JavaScript SDK", "PHP SDK"), so prefer it to prettifying the
     // directory name, which would title-case "Javascript".
