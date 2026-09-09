@@ -21,7 +21,7 @@ const ENDPOINT_PATH = "/api/docs/v1/reindex";
 /**
  * Resolved from REINDEX_ENVIRONMENT, which the workflow fills from its
  * workflow_dispatch input. A push carries no input, so the value arrives empty
- * and production is used — the same choice a merge should make.
+ * and production is used - the same choice a merge should make.
  */
 const HOSTS = {
     production: "https://api.surrealdb.com",
@@ -40,7 +40,7 @@ function isEnvironment(value: string): value is Environment {
  *
  * This lives here rather than in a workflow expression so it can be exercised.
  * A GitHub expression is untestable, and this workflow only ever runs after a
- * merge — there is no run on the pull request to catch a mistake in it.
+ * merge - there is no run on the pull request to catch a mistake in it.
  */
 function resolveUrl(): string {
     const override = process.env.REINDEX_URL?.trim();
@@ -169,7 +169,7 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
 
         // The endpoint took the delivery and discarded it. That means this
         // script sent the wrong event name or the wrong ref, which is a bug
-        // here rather than a transient failure — do not retry it.
+        // here rather than a transient failure - do not retry it.
         fail(
             `The endpoint discarded the request (reason: ${body.reason ?? "unknown"}). ` +
                 `Check the X-GitHub-Event header and the ref in the payload.`,
@@ -199,7 +199,7 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     if (attempt < MAX_ATTEMPTS) {
         const note =
             response.status === 409 ? "another index run holds the lease" : "the endpoint is busy";
-        log(`Attempt ${attempt} got ${response.status} — ${note}. Waiting to try again.`);
+        log(`Attempt ${attempt} got ${response.status} - ${note}. Waiting to try again.`);
         await sleep(RETRY_DELAY_MS);
     }
 }
