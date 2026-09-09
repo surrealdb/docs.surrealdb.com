@@ -4,8 +4,8 @@ You are an AI coding agent, and the person you are working with has asked you to
 
 Setup connects two things:
 
-1. **Agent Skills** — packaged knowledge of SurrealQL, vector search, and the SurrealDB Python SDK, so the code you write matches how SurrealDB behaves.
-2. **The SurrealDB MCP Server** — tools you can call against the user's SurrealDB Cloud account: deploy and manage instances, run SurrealQL against them, read metrics and logs, and check usage.
+1. **Agent Skills** - packaged knowledge of SurrealQL, vector search, and the SurrealDB Python SDK, so the code you write matches how SurrealDB behaves.
+2. **The SurrealDB MCP Server** - tools you can call against the user's SurrealDB Cloud account: deploy and manage instances, run SurrealQL against them, read metrics and logs, and check usage.
 
 Install both unless the user asks for one of them.
 
@@ -168,11 +168,11 @@ The server acts as the user: it sees only the organisations they belong to, resp
 
 Most clients open a browser window for sign-in. Tell the user what to do in theirs:
 
-- **Claude Code** — run `/mcp`, choose **surrealdb**, and approve the connection.
-- **Cursor** — open **Settings → MCP**, find **surrealdb**, and click **Connect**. The indicator turns green.
-- **VS Code** — reload the window, start the server from the MCP view, and approve the connection.
-- **Windsurf** — restart, then connect from **Settings → MCP**.
-- **Anything else** — the client prompts on first use, or offers a connect action in its MCP settings.
+- **Claude Code** - run `/mcp`, choose **surrealdb**, and approve the connection.
+- **Cursor** - open **Settings → MCP**, find **surrealdb**, and click **Connect**. The indicator turns green.
+- **VS Code** - reload the window, start the server from the MCP view, and approve the connection.
+- **Windsurf** - restart, then connect from **Settings → MCP**.
+- **Anything else** - the client prompts on first use, or offers a connect action in its MCP settings.
 
 If the client cannot open a browser, or the setup has to run unattended, the user creates a personal access token at [account.surrealdb.com/tokens](https://account.surrealdb.com/tokens) and passes it as a header:
 
@@ -229,7 +229,7 @@ Tell the user, briefly:
 
 ## Reference: what the MCP server can do
 
-You never call these by hand — the client offers them, and most clients show the call before it runs. Read-only tools are marked safe, so a client can approve them without asking every time.
+You never call these by hand - the client offers them, and most clients show the call before it runs. Read-only tools are marked safe, so a client can approve them without asking every time.
 
 | Group | Tools cover |
 | --- | --- |
@@ -271,10 +271,10 @@ Every stdio call runs with owner-level access, because there is no network hands
 
 ## Where to read more
 
-- [Agent setup](/docs/agents) — this document as a page, with per-agent steps
-- [SurrealDB MCP Server](/docs/build/ai-agents/mcp) — the hosted server in full
-- [Embedded MCP](/docs/build/ai-agents/mcp/embedded) — the server inside SurrealDB
-- [Agent Skills](/docs/build/ai-agents/agent-skills) — what each skill covers
-- [AI agents](/docs/build/ai-agents) — frameworks, memory, and what the database gives an agent
-- [SurrealDB Agent Memory](/docs/agent-memory) — memory that persists across sessions
-- [SurrealDB documentation](https://surrealdb.com/docs/llms.txt) — the full documentation index, as markdown
+- [Agent setup](/docs/agents) - this document as a page, with per-agent steps
+- [SurrealDB MCP Server](/docs/build/ai-agents/mcp) - the hosted server in full
+- [Embedded MCP](/docs/build/ai-agents/mcp/embedded) - the server inside SurrealDB
+- [Agent Skills](/docs/build/ai-agents/agent-skills) - what each skill covers
+- [AI agents](/docs/build/ai-agents) - frameworks, memory, and what the database gives an agent
+- [SurrealDB Agent Memory](/docs/agent-memory) - memory that persists across sessions
+- [SurrealDB documentation](https://surrealdb.com/docs/llms.txt) - the full documentation index, as markdown
