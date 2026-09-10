@@ -25,7 +25,7 @@ The `DEFINE TABLE` statement allows you to declare your table by name, enabling 
 DEFINE TABLE [ OVERWRITE | IF NOT EXISTS ] @name
 	[ DROP ]
 	[ SCHEMAFULL | SCHEMALESS ]
-	[ TYPE [ ANY | NORMAL | RELATION [ IN | FROM ] @table [ OUT | TO ] @table [ ENFORCED ]]]
+	[ TYPE [ ANY | NORMAL | RELATION [ IN | FROM ] @table [ OUT | TO ] @table [ ENFORCED ] [ LIGHTWEIGHT ]]]
 	[ AS SELECT @projections
 		FROM @tables
 		[ WHERE @condition ]
@@ -770,6 +770,71 @@ The endpoint check is an admission gate on the write path, so it is deferred dur
 
 > [!WARNING]
 > Before SurrealDB 3.3.0, restoring an export of a database containing an `ENFORCED` relation table silently dropped its edges whenever the relation table sorted before its endpoint tables - `knows` before `person`, for example. The vertices and their counts restored correctly, so the loss only showed up on a traversal. If you restored such an export on an earlier version, check the edge counts before relying on the result.
+
+## Using LIGHTWEIGHT for relations without properties
+
+<Since v="v3.3.0" />
+
+A relation can be specified as `LIGHTWEIGHT`, in which it becomes an edge that stores nothing but the connection between its two endpoints. There is no edge record, so the edge cannot carry properties, and the table cannot take a `DEFINE FIELD`, a `DEFINE INDEX` or a `DEFINE EVENT`.
+
+```surql
+DEFINE TABLE follows TYPE RELATION IN person OUT person LIGHTWEIGHT;
+```
+
+The saving in storage is the reward for opting into these constraints. The reason is that **the edge's id becomes the pair of endpoints**, written `follows:[in, out]`, so identity and connection are the same value. That makes `RELATE` idempotent:
+
+```surql
+CREATE person:one, person:two RETURN NONE;
+RELATE person:one->follows->person:two;
+```
+
+```surql title="Output"
+[{ id: follows:[person:one, person:two], in: person:one, out: person:two }]
+```
+
+Running that `RELATE` again returns the same record, because the id it would write is the one already there. On a classic relation the same two statements produce two separate edges with two generated ids. Supplying your own non-canonical id on a lightweight table is rejected, so the guarantee holds however the edge is written.
+
+This is the behaviour that the [unique-key pattern](/docs/reference/query-language/statements/relate#handling-duplicate-edge-record-ids) builds by hand on a classic relation, using a composite id or a field plus a unique index. `LIGHTWEIGHT` makes it a property of the table, with no index to define and keep in step.
+
+`LIGHTWEIGHT` implies [`ENFORCED`](#using-enforced-to-ensure-that-related-records-exist), because a vertex deletion is the only cleanup a record-less edge has. `IN` and `OUT` are therefore required, and can be widened but not narrowed while the table holds edges. The pair renders canonically as `ENFORCED LIGHTWEIGHT` and parses in either order.
+
+### What a lightweight relation rejects
+
+The clause is a promise that the edge will never need a record, and everything that assumes one raises an error rather than failing quietly:
+
+| Rejected | Why |
+| --- | --- |
+| A data clause on `RELATE`, and `CREATE` / `INSERT RELATION` / `UPDATE` / `UPSERT` | There is no record to write fields to |
+| `DEFINE FIELD`, `DEFINE INDEX`, `DEFINE EVENT` on the table | Same, and an index has no record to point at |
+| `SCHEMAFULL`, `CHANGEFEED`, `DROP`, and `AS` clauses | Each presumes stored records |
+| A `LIVE SELECT` subscription on the table | Not supported on a record-less relation |
+| Clearing the flag on a table that holds edges | The edges have no records to fall back to |
+| Setting it on a table that already holds edges | The existing edges have non-canonical ids |
+| Narrowing `IN` or `OUT` while edges exist | The endpoint tables are what make a full scan possible |
+| `REMOVE TABLE` while edges exist | The edges live under the endpoint tables' keys, which a table wipe cannot reach |
+| Using a lightweight edge as the endpoint of another relation | An edge on an edge would break the record-less scan |
+
+Reads are unaffected, because the engine synthesizes the record a query expects. A point read by canonical id returns the endpoints as well as the id:
+
+```surql
+SELECT * FROM ONLY follows:[person:one, person:two];
+```
+
+```surql title="Output"
+{ id: follows:[person:one, person:two], in: person:one, out: person:two }
+```
+
+Idiom access resolves against that same synthesized record, so `follows:[person:one, person:two].out.id` returns `person:two`, and `record::exists` answers as it would for a stored edge. Counts, [record ranges](/docs/reference/query-language/language-primitives/data-types/record-ids#record-ranges) and ordering all work, reading the relation from its endpoint tables, and table-level `PERMISSIONS` are enforced as they are on a classic relation.
+
+`DELETE` works in every form: by id, by traversal, by whole table, and through a vertex cascade. Only writes are not permitted:
+
+```surql
+UPDATE follows:[person:one, person:two] SET weight = 1;
+```
+
+```surql title="Error output"
+"a LIGHTWEIGHT relation's edges cannot be updated: they carry no data beyond `id`, `in` and `out`"
+```
 
 ## Inserting data from undefined fields on a `SCHEMAFULL` table
 
