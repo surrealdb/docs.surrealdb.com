@@ -1,0 +1,171 @@
+---
+position: 14
+title: Upgrading to SurrealKit 1.0
+description: "What changes when moving a SurrealKit project from 0.7 to 1.0: the removed seed.surql fallback, rejected DATABASE_* variables, a --folder flag that now works, stricter test assertions, and library API changes."
+---
+
+# Upgrading to SurrealKit 1.0
+
+Most of a 0.7 project needs no change. Every 0.7 command still works, and running `surrealkit sync` on an existing project after upgrading re-applies nothing and prunes nothing. This page covers the parts that do need attention, and the new features you can adopt afterwards.
+
+Two of the changes are silent, in the sense that a project keeps running but does something different. Read [Rename the `DATABASE_*` variables](#rename-the-database-variables) and [Check whether you pass `--folder`](#check-whether-you-pass-folder) even if nothing appears broken.
+
+## Install the beta
+
+SurrealKit 1.0 is a prerelease, so it has to be requested by version:
+
+```bash
+cargo binstall surrealkit --version 1.0.0-beta.1
+```
+
+## Move `database/seed.surql`
+
+The single-file seed fallback was deprecated in 0.6, where it printed a warning on every run, and is now removed. Move it into the [seed directory](/docs/manage/schema-migration/seeding):
+
+```bash
+mkdir -p database/seed
+git mv database/seed.surql database/seed/000_init.surql
+```
+
+Seed tracking is keyed by file path, so the moved file counts as a new one and runs again on the next `surrealkit seed`. If the seed is not idempotent, re-key it first rather than letting it re-run:
+
+```surql
+UPDATE __seed SET key = 'database/seed/000_init.surql'
+  WHERE key = 'database/seed.surql';
+```
+
+## Rename the `DATABASE_*` variables {#rename-the-database-variables}
+
+`DATABASE_HOST`, `DATABASE_NAME`, `DATABASE_NAMESPACE`, `DATABASE_USER`, `DATABASE_PASSWORD` and `DATABASE_AUTH_LEVEL` are no longer accepted. Rename each to its `SURREALDB_*` equivalent.
+
+SurrealKit fails when it finds one set without its replacement, rather than ignoring it:
+
+```text title="Error output"
+the DATABASE_* environment variables were removed in SurrealKit 1.0, but these are still set with no SURREALDB_* replacement:
+  DATABASE_HOST -> SURREALDB_HOST
+  DATABASE_NAME -> SURREALDB_NAME
+Rename them. They are rejected rather than ignored because ignoring them would silently fall back to the defaults and connect to the wrong database.
+```
+
+Failing is deliberate. An ignored `DATABASE_HOST` would fall back to the default endpoint, so a deployment would connect to the wrong database instead of stopping. Setting both spellings is accepted, and `SURREALDB_*` wins.
+
+## Check whether you pass `--folder` {#check-whether-you-pass-folder}
+
+`--folder` never took effect before 1.0: it was parsed and then discarded, so SurrealKit always used `SURREALDB_FOLDER` or `./database`. It works now.
+
+A project that passed `--folder ./db` while SurrealKit was really syncing `./database` will now sync `./db`. If that directory holds no schema files, SurrealKit refuses before opening a connection rather than pruning the database to match:
+
+```text title="Error output"
+refusing filesystem sync: schema_module=default resolved_schema_dir=./db/schema source_count=0; check --folder / SURREALDB_FOLDER and module selection, or pass --allow-empty-prune if the empty source set is intentional
+```
+
+Point `--folder` at the right directory, drop the flag, or pass `--allow-empty-prune` when the empty source set is intentional.
+
+## If you use the tester
+
+### Missing paths and headers now fail
+
+Through 0.7, an assertion on a JSON path or a response header that did not exist passed silently. The check compared "not found" against an unset `exists` field and matched, so the `equals`, `contains` or `regex` comparison was never reached:
+
+```toml
+[[cases.assertions]]
+path = "0.owner"     # a typo, or a query that matched zero rows
+equals = "user:alice"
+```
+
+On 0.7 that reported a pass. On 1.0 it fails with `path '0.owner' not found`. The same applies to `header_assertions` against a header the response never sent.
+
+> [!IMPORTANT]
+> If assertions go red on upgrade, they were most likely never being evaluated. Check the actual shape of the result before concluding that SurrealKit regressed.
+
+To assert that something is genuinely absent, say so explicitly:
+
+```toml
+[[cases.assertions]]
+path = "0.secret"
+exists = false
+```
+
+`exists = false` is the only specification that passes on a missing path or header. There is no suite-level opt-out, and unknown keys in an assertion are rejected when the suite is parsed.
+
+### Tests sync before they run
+
+`surrealkit test` now performs a filesystem sync first, so the empty source set check applies to it as well. A suite whose fixtures own the complete schema, with nothing in `database/schema`, needs `--no-sync`.
+
+### Permission matrices probe differently
+
+`permissions_matrix` cases were reworked to handle row-level security, where a filtered result is indistinguishable from a rejected one. Create probes now recreate a record with the same fields, update probes write a marker field first, records created during the matrix are cleaned up, and a permission that skips is reported differently from one that throws. An existing matrix can report a different verdict on 1.0 as a result. Re-read any that change before adjusting them.
+
+## If you use the Rust library
+
+### `Rollout` no longer writes to disk
+
+This is the one silent behaviour change for library users. `Rollout::start`, `Rollout::complete` and `Rollout::rollback` used to default to `./database` and create `./database/setup.surql` in the caller's working directory. They are now purely in-database:
+
+```rust
+// 1.0: writes nothing to disk
+Rollout::new(spec, files).start(&db).await?;
+
+// 1.0: opt back into the filesystem workflow
+Rollout::new(spec, files).folder("database").start(&db).await?;
+```
+
+### Renamed and removed items
+
+| 0.7 | 1.0 |
+| --- | --- |
+| `constants::deprecated_seed_surql_path` | Removed |
+| `tester::build_filter_input` | `FilterInput::from_opts` |
+| `rollout::run_baseline(db, folder)` | `run_baseline(db, folder, &module)` |
+| `rollout::run_abandon_rollout(db, id)` | `run_abandon_rollout(db, &module, id)` |
+| `SyncOpts { .. }` | Gains `module` and `allow_empty_prune` |
+
+### The library is silent by default
+
+Progress output moved to the `log` facade, so a library consumer sees nothing unless a logger is installed. Set `RUST_LOG=surrealkit=info` and initialise a logger to get the previous output back. The CLI is unaffected.
+
+### A new `cli` cargo feature
+
+`clap` and its supporting crates are now optional, behind a `cli` feature that is on by default. A library-only consumer can drop them:
+
+```toml
+[dependencies]
+surrealkit = { version = "1.0.0-beta.1", default-features = false, features = ["kv-mem"] }
+```
+
+> [!WARNING]
+> The `surrealkit` binary declares `cli` as a required feature. Installing with `--no-default-features` and without `cli` builds no binary at all.
+
+## If you use the Vite plugin
+
+- The package now declares `Apache-2.0`. It previously declared `Unlicense`, which did not match the repository.
+- `@biomejs/biome` moved to `devDependencies`. It was never imported at runtime, and as a dependency it forced consumers to download the Biome binary. Your lockfile will change.
+- New `schemas`, `targets` and `all` options map to `--schema`, `--target` and `--all`. The default watch globs now cover `database/modules/*/schema` as well as `database/schema`.
+
+## Adopting the new features
+
+Nothing below is required, and each is additive.
+
+[Schema modules](/docs/manage/schema-migration/modules-and-targets) leave your existing schema in the default module with its metadata untouched, and new modules live alongside it:
+
+```toml title="surrealkit.toml"
+[schema.billing]
+depends_on = ["core"]
+```
+
+[Targets](/docs/manage/schema-migration/modules-and-targets) name the databases to apply modules to, taking their passwords from the environment:
+
+```toml title="surrealkit.toml"
+[target.acme]
+ns = "acme"
+db = "prod"
+pass_env = "ACME_DB_PASSWORD"
+```
+
+Both live in [`surrealkit.toml`](/docs/manage/schema-migration/configuration), which is now discovered by walking up from the working directory rather than being read from that directory alone.
+
+## Next steps
+
+- [Configuration](/docs/manage/schema-migration/configuration): the full `surrealkit.toml` key reference
+- [Schema modules and targets](/docs/manage/schema-migration/modules-and-targets): several schemas across several databases
+- [Seeding](/docs/manage/schema-migration/seeding): the seed directory and the tracking table
