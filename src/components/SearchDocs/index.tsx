@@ -11,17 +11,12 @@ import {
     VisuallyHidden,
 } from "@mantine/core";
 import { useDebouncedValue, useHotkeys, useInputState, useOs } from "@mantine/hooks";
-import {
-    Spotlight,
-    type SpotlightActionData,
-    type SpotlightFilterFunction,
-    spotlight,
-} from "@mantine/spotlight";
+import { Spotlight, type SpotlightActionData, spotlight } from "@mantine/spotlight";
 import { Icon, iconArrowLeft, iconSearch } from "@surrealdb/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { usePageContext } from "vike-react/usePageContext";
-import { getProductFromPath } from "~/utils/product";
+import { getProductFromPath, PRODUCT_META } from "~/utils/product";
 import { RateLimitError, SearchError, type SearchResult, searchDocs } from "~/utils/search";
 import { SearchResultCard } from "./SearchResult";
 import classes from "./style.module.scss";
@@ -50,8 +45,6 @@ function mapResultsToActions(results: SearchResult[], query: string): SpotlightA
         ),
     })) as SpotlightActionData[];
 }
-
-const noFilter: SpotlightFilterFunction = (_query, actions) => actions;
 
 export function SearchDocs(props: UnstyledButtonProps) {
     const [search, setSearch] = useInputState("");
@@ -181,34 +174,68 @@ export function SearchDocs(props: UnstyledButtonProps) {
                     ? `${actions.length} result${actions.length === 1 ? "" : "s"} for ${debouncedSearch}`
                     : ""}
             </VisuallyHidden>
-            <Spotlight
-                actions={hasQuery ? actions : []}
-                nothingFound={nothingFound}
-                filter={noFilter}
+            {/* Composed rather than the `<Spotlight>` shorthand, which renders
+                the search, the list and the empty state and nothing else -
+                the scope line needs a footer beneath them. */}
+            <Spotlight.Root
                 scrollable
                 maxHeight={500}
                 transitionProps={{ transition: "fade-down" }}
-                overlayProps={{ blur: 0 }}
+                overlayProps={{ blur: 0, backgroundOpacity: 0.5 }}
                 classNames={{
                     inner: classes.searchScreen,
+                    body: classes.searchBody,
                     actionsList: classes.searchList,
+                    action: classes.searchAction,
                     content: classes.searchContent,
                     search: classes.searchInput,
                     empty: classes.searchEmpty,
+                    footer: classes.searchFooter,
                 }}
-                searchProps={{
-                    placeholder: "Search the docs",
-                    leftSection: loading ? <Loader size="xs" /> : <Icon path={iconSearch} />,
-                    autoFocus: true,
-                    onChange: setSearch,
-                    value: search,
-                    className: classes.searchInput,
-                    rightSection: <Kbd>Esc</Kbd>,
-                    mod: {
-                        expanded: actions.length > 0 && hasQuery,
-                    },
-                }}
-            />
+            >
+                <Spotlight.Search
+                    placeholder="Search the docs"
+                    leftSection={loading ? <Loader size="xs" /> : <Icon path={iconSearch} />}
+                    autoFocus
+                    onChange={setSearch}
+                    value={search}
+                    className={classes.searchInput}
+                    rightSection={<Kbd>Esc</Kbd>}
+                    mod={{ expanded: actions.length > 0 && hasQuery }}
+                />
+                {actions.length > 0 ? (
+                    <Spotlight.ActionsList>
+                        {actions.map(({ id, ...action }) => (
+                            <Spotlight.Action
+                                key={id}
+                                {...action}
+                            />
+                        ))}
+                    </Spotlight.ActionsList>
+                ) : (
+                    <Spotlight.Empty>{nothingFound}</Spotlight.Empty>
+                )}
+                {/* The index is shared but the query is scoped to whichever
+                    product the reader is currently in, so the panel says which
+                    one rather than leaving a missing page look like a gap. */}
+                <Spotlight.Footer>
+                    <Text
+                        fz="xs"
+                        c="dimmed"
+                    >
+                        Searching{" "}
+                        <Text
+                            span
+                            inherit
+                            c="bright"
+                            fw={500}
+                        >
+                            {PRODUCT_META[product].label}
+                        </Text>{" "}
+                        documentation
+                    </Text>
+                </Spotlight.Footer>
+            </Spotlight.Root>
         </>
     );
 }
