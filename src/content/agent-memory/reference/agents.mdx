@@ -215,7 +215,7 @@ POST /api/v1/{context_id}/keys/{name}/rotate?ttl_seconds=2592000
 7. **Idempotent retries without idempotency keys** - duplicate writes may return **`409`**; use idempotency headers where documented.
 8. **`use_reranker: true` without server reranker** - requires `SPECTRON_RERANKER_URL` + `SPECTRON_RERANKER_MODEL` or it falls back to bi-encoder order.
 9. **MCP JSON-RPC errors for business failures** - not-found and auth failures return **`isError: true`** with `error.status`, not JSON-RPC `-32603`.
-10. **`POST /forget` without checking dry run** - pass **`dryRun: true`** (or `spectron forget --dry-run`) to preview; omitting it expires records immediately.
+10. **`POST /forget` without checking dry run** - pass **`dryRun: true`** (or `agent-memory forget --dry-run`) to preview; omitting it expires records immediately.
 11. **Per-Context OCR/STT config** - multimodal HTTP providers are **deployment env vars** (`SPECTRON_OCR_*`, `SPECTRON_CLIP_*`, `SPECTRON_STT_*`), not Context patch fields.
 
 ---
