@@ -190,9 +190,29 @@ export function SearchDocs(props: UnstyledButtonProps) {
                     content: classes.searchContent,
                     search: classes.searchInput,
                     empty: classes.searchEmpty,
-                    footer: classes.searchFooter,
                 }}
             >
+                {/* The index is shared but the query is scoped to whichever
+                    product the reader is currently in, so the panel names the
+                    one it is searching rather than leaving another product's
+                    page looking like a gap in the results. */}
+                <Box className={classes.searchScope}>
+                    <Text
+                        fz="xs"
+                        c="dimmed"
+                    >
+                        Searching{" "}
+                        <Text
+                            span
+                            inherit
+                            c="bright"
+                            fw={500}
+                        >
+                            {PRODUCT_META[product].label}
+                        </Text>{" "}
+                        documentation
+                    </Text>
+                </Box>
                 <Spotlight.Search
                     placeholder="Search the docs"
                     leftSection={loading ? <Loader size="xs" /> : <Icon path={iconSearch} />}
@@ -215,26 +235,6 @@ export function SearchDocs(props: UnstyledButtonProps) {
                 ) : (
                     <Spotlight.Empty>{nothingFound}</Spotlight.Empty>
                 )}
-                {/* The index is shared but the query is scoped to whichever
-                    product the reader is currently in, so the panel says which
-                    one rather than leaving a missing page look like a gap. */}
-                <Spotlight.Footer>
-                    <Text
-                        fz="xs"
-                        c="dimmed"
-                    >
-                        Searching{" "}
-                        <Text
-                            span
-                            inherit
-                            c="bright"
-                            fw={500}
-                        >
-                            {PRODUCT_META[product].label}
-                        </Text>{" "}
-                        documentation
-                    </Text>
-                </Spotlight.Footer>
             </Spotlight.Root>
         </>
     );
