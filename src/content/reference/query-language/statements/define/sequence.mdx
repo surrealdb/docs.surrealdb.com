@@ -15,7 +15,7 @@ The key features of a sequence are as follows:
 * Batch allocation: Nodes request ranges of sequence values at once, reducing network chatter and coordination overhead.
 * Node ownership tagging: Every batch is tagged with the requesting node's UUID to prevent overlap between nodes.
 * Durable Persistence: Sequence metadata is stored in the underlying key-value store to survive restarts and network partitions.
-* Concurrent, thread-safe access: A DashMap caches active sequences, allowing lock-free reads on the hot path.
+* Concurrent, thread-safe access: each node caches the sequences it is serving, so consecutive values are handed out without returning to the store.
 * Exponential back-off with full jitter: When a batch-allocation attempt fails, the node retries with an exponential delay that includes full jitter to avoid thundering-herd effects across the cluster.
 * Automatic cleanup: Listens for namespace and database-removal events and purges the corresponding sequence state.
 
@@ -85,6 +85,97 @@ sequence::nextval("seq");        -- 2
 UPDATE my:counter SET val += 1;  -- 1
 ```
 
+## Resetting a sequence with `OVERWRITE`
+
+`DEFINE SEQUENCE ... OVERWRITE` does not only replace the configuration: it discards the position the sequence has reached and starts counting again from `START`.
+
+```surql
+DEFINE SEQUENCE mySeq4 BATCH 10 START 1;
+sequence::nextval('mySeq4');
+sequence::nextval('mySeq4');
+
+DEFINE SEQUENCE OVERWRITE mySeq4 BATCH 10 START 1;
+sequence::nextval('mySeq4');
+```
+
+```surql title="Output"
+1
+2
+1
+```
+
+That makes `OVERWRITE` the way to move a sequence to a new position - give it a `START` above every value already in use:
+
+```surql
+DEFINE SEQUENCE OVERWRITE mySeq4 BATCH 10 START 500;
+sequence::nextval('mySeq4');
+```
+
+```surql title="Output"
+500
+```
+
+Because it restarts counting, an `OVERWRITE` with a `START` at or below values the sequence has already issued will hand those values out a second time.
+
+<Since v="v3.3.0" />
+
+An `OVERWRITE` applies to a sequence that is already serving. On earlier versions it takes effect only after the node restarts.
+
+## Reading where a sequence stands
+
+<Since v="v3.3.0" />
+
+`INFO FOR DB STRUCTURE` reports each sequence's `resume` value: the lowest value no node has issued. That is the bound to reposition a sequence to, and the value an export records as `START`. `start` continues to report the value in the definition.
+
+On a cluster `resume` is not necessarily the value the next `sequence::nextval` returns, because a node still holding a batch it reserved earlier serves from that batch, below the bound.
+
+```surql
+DEFINE SEQUENCE mySeq5 BATCH 10 START 100;
+sequence::nextval('mySeq5');
+sequence::nextval('mySeq5');
+INFO FOR DB STRUCTURE.sequences;
+```
+
+```surql title="Output"
+[
+    {
+        batch: '10',
+        name: 'mySeq5',
+        resume: '102',
+        start: '100',
+        timeout: NONE
+    }
+]
+```
+
+## Sequences and exports
+
+<Since v="v3.3.0" />
+
+An export records each sequence at the position it has reached, so importing it leaves the sequence counting on from the data that came with it.
+
+On earlier versions an export records the `START` the sequence was declared with, so an import rewinds it while the imported records keep the values already allocated from it. Where the sequence feeds a record id, the first write after the import fails with `Database record ... already exists`; where it feeds an ordinary field, the sequence silently repeats values already in that column. After importing a dump taken on an earlier version, reposition each sequence before writing to the restored database.
+
+Take the new `START` from the data the sequence feeds. Where it feeds an ordinary field, read that field:
+
+```surql
+LET $next = math::max(SELECT VALUE no FROM inv) + 1;
+DEFINE SEQUENCE OVERWRITE invoice_no BATCH 1000 START $next;
+```
+
+Where it feeds a record id, take the id out of the record first:
+
+```surql
+LET $next = math::max(SELECT VALUE record::id(id) FROM thing) + 1;
+DEFINE SEQUENCE OVERWRITE order_id BATCH 1000 START $next;
+```
+
+Repeat this for every sequence in the imported database.
+
+> [!IMPORTANT]
+> Before v3.3.0, `DEFINE SEQUENCE ... OVERWRITE` does not take effect on a running node: the node keeps serving from the position it held, and the new `START` applies only after a restart. On those versions, restart the instance after repositioning and confirm with `sequence::nextval` before resuming writes.
+
 ## See also
 
 * [Sequence functions](/docs/reference/query-language/functions/database-functions/sequence)
+* [`ALTER SEQUENCE`](/docs/reference/query-language/statements/alter/sequence)
