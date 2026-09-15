@@ -1,0 +1,214 @@
+---
+position: 3
+title: Configuration
+description: "The surrealkit.toml project file: where SurrealKit looks for it, how to supply it inside a container, and every section it accepts - variables, typegen, schema modules and database targets."
+---
+
+# Configuration
+
+`surrealkit.toml` declares what a SurrealKit project contains. Template variables and type generation settings have always lived here. Since 1.0 the file also declares [schema modules and database targets](/docs/manage/schema-migration/modules-and-targets), which makes its location worth knowing rather than incidental.
+
+Every section is optional. A project with no config file, or one holding only `[variables]` and `[typegen]`, behaves the way it did before 1.0: one unnamed schema module applied to one database taken from the environment.
+
+## Where SurrealKit looks for it
+
+`surrealkit init` writes `surrealkit.toml` to the current directory, next to `database/` rather than inside it:
+
+```text
+surrealkit.toml    # project configuration
+database/
+├── schema/
+├── rollouts/
+├── snapshots/
+├── seed/
+├── tests/
+└── setup.surql
+```
+
+SurrealKit starts at the working directory and walks up to the filesystem root, taking the first `surrealkit.toml` it finds. Running a command from `apps/api/` in a monorepo therefore finds the config at the repository root. Before 1.0 the file was read from the working directory only.
+
+There is no flag for pointing at a different file. To use another config, change directory first.
+
+> [!WARNING]
+> The upward walk applies to `[schema.*]` and `[target.*]` only. `[variables]` and `[typegen]` are still read from the working directory alone, so running from a subdirectory applies your modules but silently drops your template variables and stops generating TypeScript. Run project commands from the directory that holds `surrealkit.toml` until this is resolved.
+
+## Inside a container
+
+The published image is built on `gcr.io/distroless/cc-debian12:nonroot` and sets no working directory of its own, so a container inherits `/home/nonroot` from the base image. Config discovery starts there, which means a mounted `surrealkit.toml` has to land at `/home/nonroot/surrealkit.toml`:
+
+```bash
+docker run --rm \
+  -v "$(pwd)/database:/database:ro" \
+  -v "$(pwd)/surrealkit.toml:/home/nonroot/surrealkit.toml:ro" \
+  ghcr.io/surrealdb/surrealkit:1.0.0-beta.1 \
+  --host wss://production-6xk2.aws-euw1.surreal.cloud \
+  --ns main --db main --user root --pass secret sync
+```
+
+Setting a working directory is the alternative, and lets you mount the project once at its own shape:
+
+```bash
+docker run --rm -w /project \
+  -v "$(pwd):/project" \
+  ghcr.io/surrealdb/surrealkit:1.0.0-beta.1 \
+  --host wss://production-6xk2.aws-euw1.surreal.cloud \
+  --ns main --db main --user root --pass secret --folder /project/database sync
+```
+
+The schema mount target is `/database` in the first example because the image sets `SURREALDB_FOLDER=/database`. Point `--folder` somewhere else, as the second example does, and that default no longer applies. Get the endpoint for a Cloud instance with [`surrealctl instance endpoint`](/docs/reference/cli/surrealctl/commands/instance).
+
+> [!NOTE]
+> A read-only mount suits `sync` against an existing project. It conflicts with `[typegen] typescript`, which writes into the mounted tree, and with the `setup.surql` that `sync` scaffolds when the file is absent. Drop `:ro` for either.
+
+## Sections
+
+| Section | Purpose |
+| --- | --- |
+| `[variables]` | Default values for [template variables](/docs/manage/schema-migration/template-variables) |
+| `[typegen]` | [Type generation](/docs/manage/schema-migration/typegen) output directory and formatter |
+| `[schema.<name>]` | A named [schema module](/docs/manage/schema-migration/modules-and-targets) |
+| `[target.<name>]` | A named [database target](/docs/manage/schema-migration/modules-and-targets) |
+
+Unknown keys and unknown sections are rejected when the file is parsed, so a misspelt key fails the command rather than being ignored.
+
+### `[variables]`
+
+A free-form map of template variable names to values. Keys are matched case-insensitively, so `schema_prefix` and `SCHEMA_PREFIX` set the same variable. This is the lowest-priority source: `--var` and `SURREALKIT_VAR_*` both outrank it.
+
+```toml
+[variables]
+schema_prefix = "myapp"
+environment = "development"
+```
+
+### `[typegen]`
+
+<OptionsTable
+	title="Keys"
+	options={[
+		{ "name": "typescript", "type": "path", "description": "Directory for the generated `index.ts`. Setting it enables TypeScript output for `typegen` and `sync`." },
+		{ "name": "format", "type": "string", "description": "Formatter run on the generated file. The file path is appended to the command as its last argument. Failures are warnings, never errors." }
+	]}
+/>
+
+```toml
+[typegen]
+typescript = "src/types"
+format = "biome check --write"
+```
+
+### `[schema.<name>]`
+
+<Since v="v1.0" />
+
+Declares one schema module. The section name is the module name.
+
+<OptionsTable
+	title="Keys"
+	options={[
+		{ "name": "path", "type": "path", "default": "<folder>/modules/<name>/schema", "description": "Where this module's `.surql` files live. A relative path resolves against the project folder; an absolute path is used as given." },
+		{ "name": "depends_on", "type": "string[]", "default": "[]", "description": "Modules that must be applied before this one. Selecting a module also selects everything it depends on." }
+	]}
+/>
+
+Module names are lowercase `a-z`, `0-9`, `_` and `-`, must start with a letter or a digit, and are at most 64 characters. `meta` is reserved. The charset is narrow because the name appears in metadata partition keys, lock keys, and as a directory name.
+
+```toml
+[schema.core]
+
+[schema.billing]
+depends_on = ["core"]
+```
+
+### `[target.<name>]`
+
+<Since v="v1.0" />
+
+Declares one database to apply modules to. Every field is optional and falls back to the ambient connection, so a target usually names only its namespace and database.
+
+<OptionsTable
+	title="Keys"
+	options={[
+		{ "name": "host", "type": "string", "description": "Database endpoint URL. Inherits `--host` when unset." },
+		{ "name": "ns", "type": "string", "description": "Namespace. Inherits `--ns` when unset." },
+		{ "name": "db", "type": "string", "description": "Database name. Inherits `--db` when unset." },
+		{ "name": "user", "type": "string", "description": "Username. Inherits `--user` when unset." },
+		{ "name": "pass_env", "type": "string", "description": "Name of an environment variable holding this target's password. Passwords are never read from the config file itself." },
+		{ "name": "auth_level", "type": "string", "description": "One of `root`, `namespace` (or `ns`), `database` (or `db`), and `none` (also spelled `no-auth` or `noauth`)." },
+		{ "name": "schemas", "type": "string[]", "description": "Restrict which modules apply to this target. All declared modules apply when unset." },
+		{ "name": "primary", "type": "boolean", "description": "Use this target when neither `--target` nor `--all` is given. Defaults to false, and at most one target may set it." }
+	]}
+/>
+
+```toml
+[target.acme]
+ns = "acme"
+db = "prod"
+pass_env = "ACME_DB_PASSWORD"
+primary = true
+
+[target.warehouse]
+ns = "internal"
+db = "analytics"
+schemas = ["core", "analytics"]
+pass_env = "WAREHOUSE_DB_PASSWORD"
+```
+
+## Passwords
+
+A `pass` or `password` key under `[target.*]` is rejected. SurrealKit scans for it before parsing the rest of the file, so the error names the fix and lists every offending target at once:
+
+```text title="Error output"
+passwords must not be committed to source control, but surrealkit.toml sets them inline:
+  [target.acme] pass
+  [target.globex] password
+Use environment indirection instead:
+    pass_env = "MY_DB_PASSWORD"
+```
+
+The offending value is never echoed. Name an environment variable with `pass_env` instead, and set it wherever the command runs. A `pass_env` that names an unset variable fails before any connection is opened, so a misconfigured target cannot leave a fan-out half applied.
+
+## Validation
+
+The whole file is validated before a database connection is attempted, so a mistake costs a failed command rather than a partial write:
+
+- Module names must satisfy the charset and length rules above, and must not be `meta`.
+- A `depends_on` entry must name a declared module, and a module cannot depend on itself.
+- Dependency cycles are rejected, with the cycle named in the error.
+- A `schemas` entry under `[target.*]` must name a declared module.
+- At most one target may set `primary = true`.
+- Any unknown key or section is a parse error.
+
+## A complete file
+
+```toml title="surrealkit.toml"
+[variables]
+app_name = "acme"
+
+[typegen]
+typescript = "src/types"
+format = "biome check --write"
+
+[schema.core]
+# path defaults to database/modules/core/schema
+
+[schema.billing]
+depends_on = ["core"]
+
+[target.acme]
+ns = "acme"
+db = "prod"
+pass_env = "ACME_DB_PASSWORD"
+primary = true
+
+[target.globex]
+ns = "globex"
+db = "prod"
+pass_env = "GLOBEX_DB_PASSWORD"
+```
+
+## Next steps
+
+- [Schema modules and targets](/docs/manage/schema-migration/modules-and-targets): apply several schemas across several databases
+- [Template variables](/docs/manage/schema-migration/template-variables): parameterise schema files per environment
+- [Type generation](/docs/manage/schema-migration/typegen): emit JSON and TypeScript from a live database
