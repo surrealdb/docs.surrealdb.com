@@ -48,6 +48,59 @@ Apply SOLID where it fits:
 
 All user-facing text uses **British English** spelling (`-ise`, `-our`, `-re`, `-ogue`).
 
+### Plain English for an international audience
+
+Write for an international technical audience. Most readers are proficient in English
+as a second language, so prefer plain, literal English to natural-sounding idiom.
+Where the choice is between idiomatic English and slightly plainer literal English,
+take the literal one.
+
+The test is whether **some word in the phrase still carries the meaning**. `at a
+glance` passes: `glance` means what it says, so a reader who knows the word can decode
+the phrase. `run up a bill` fails: neither `run` nor `up` suggests accumulating a
+debt, so the phrase only works for someone who has already met it as a unit. Write
+the second kind out literally.
+
+Phrases where no word carries the meaning:
+
+| Avoid                               | Use                   |
+| ----------------------------------- | --------------------- |
+| reach for X                         | use X                 |
+| earns its keep                      | is worth the cost     |
+| worth a look, worth keeping in mind | look at, remember     |
+| does the heavy lifting              | does most of the work |
+| pulls its weight                    | is worth including    |
+| under the hood                      | internally            |
+| out of the box                      | by default            |
+| in the wild                         | in production         |
+| moving parts                        | components            |
+| the X story                         | how X works           |
+
+`under the hood` is listed despite being common in technical writing. It is a
+metaphor about a car, and `hood` is the American name for the part British English
+calls a bonnet, so it asks a reader to know both the idiom and a dialect these docs
+do not otherwise use.
+
+A second kind of phrase is decodable but says something untrue. `stays cheap` is
+about money, and the subject is usually time or work, so write `stays fast` or
+`costs little` and mean it. The same goes for `expensive` where the cost is
+milliseconds rather than currency.
+
+**Ordinary phrasal verbs are fine.** `sign in`, `set up`, `roll back`, `fall back`,
+`look up` and `back up` are the plainest way to say those things, and several are
+terms of art with definitions elsewhere in the docs. The rule is about phrases whose
+meaning has to be memorised, not about verbs that take a particle.
+
+Two rules the tables cannot express:
+
+- **Do not use a physical-action verb metaphorically.** Write "use X when…", not "reach for X when…".
+- **Do not trade one tic for another.** `worth X-ing` is what tends to appear once bare imperatives are removed, turning "Look at the values" into "The values are worth a look". Both are avoidable: "The values here are strings, a number, an array and a date."
+
+None of this asks for formal or robotic prose. Ordinary, concise English with
+concrete verbs and explicit relationships is the target, and writing that reads like
+a translated manual is a worse result than the idiom it replaced. Quoted material and
+error text stay as they are.
+
 ### Dashes
 
 Use the standard hyphen (`-`) everywhere. Em dashes (`—`) and en dashes (`–`) do
@@ -220,7 +273,7 @@ can tell which half is runnable.
 
 `Output` is the plain label, and `Response` is kept only on the HTTP and RPC
 pages, where it is the counterpart of a `Request` block. Anything with the word
-`output` in it pairs and renders in full, so reach for a qualifier whenever the
+`output` in it pairs and renders in full, so use a qualifier whenever the
 value shown is one of several a reader might see - `Sample output` and
 `Possible output` for a generated record id, a datetime or a live API,
 `Expected output` for a value a test asserts, `Error output` for a failure, or a
@@ -626,7 +679,7 @@ Pick the attribute delimiter the query itself does not contain: `"` normally, or
 A `url` embed also costs the raw `.md` endpoints. The converter in `src/utils/mdx-to-markdown.ts` recovers the query from `?query=` as a fallback, but it then also emits the whole percent-encoded URL as a "Run this example" link - between 500 and 1,700 characters of unreadable blob per embed. The `query` form emits a clean ` ```surql ` fence and nothing else.
 
 > [!WARNING]
-> **No blank lines inside the attribute.** MDX ends a JSX flow element at a blank line, so a query containing one closes the attribute early: the editor gets the first part, and the rest of the query plus the literal `" />` render as body text on the page. Separate sections of a long query with `--` comments instead. This is the one failure here that is visible to a reader, and it still passed review twice because the leaked text reads like prose at a glance.
+> **No blank lines inside the attribute.** MDX ends a JSX flow element at a blank line, so a query containing one closes the attribute early: the editor gets the first part, and the rest of the query plus the literal `" />` render as body text on the page. Separate sections of a long query with `--` comments instead. This is the one failure here that is visible to a reader, and it still passed review twice because the leaked text reads like prose unless you look closely.
 
 > [!WARNING]
 > **Never write `` query={`…`} ``.** A braced value must be JSON, and a template literal is not, so the value is dropped and the embed renders as an empty editor. Four embeds on one page were dead this way. Use a quoted string.
