@@ -237,6 +237,7 @@ INFO FOR INDEX unique_name ON user;
 -------- Query 1 --------
 { 
     building: {
+        compacting: false,
         initial: 0,
         pending: 0,
         status: 'indexing', 
@@ -247,6 +248,7 @@ INFO FOR INDEX unique_name ON user;
 -------- Query 2 --------
 { 
     building: {
+        compacting: false,
         initial: 100,
         pending: 20,
         status: 'indexing', 
@@ -257,6 +259,7 @@ INFO FOR INDEX unique_name ON user;
 -------- Query 3 --------
 { 
     building: {
+        compacting: false,
         initial: 100,
         pending: 4,
         status: 'indexing', 
@@ -267,10 +270,52 @@ INFO FOR INDEX unique_name ON user;
 -------- Query 4 --------
 {
     building: {
+        compacting: false,
         status: 'ready'
     }
 }
 ```
+
+#### Vector index compaction
+
+<Since v="v3.3.0" />
+
+`status` and `compacting` answer two different questions.
+
+`status: 'ready'` means the index is built and queries may use it. `compacting` means it still holds record updates that have not been folded into its structure yet.
+
+This matters for [HNSW and DISKANN](/docs/reference/query-language/statements/define/indexes#vector-search-indexes) indexes. A vector index answers a k-nearest-neighbour search over its graph **plus** any updates not yet merged into that graph, and those are compared one by one rather than navigated. While enough of them are outstanding, a query returns the same results but takes considerably longer. A background process folds them in, after which the field reads `false`.
+
+So after a large insert or update into a vector-indexed table, `status: 'ready'` on its own does not mean the index has returned to full speed:
+
+```surql
+DEFINE INDEX idx_embedding ON TABLE article FIELDS embedding HNSW DIMENSION 4;
+CREATE |article:10000| SET embedding = [rand::float(), rand::float(), rand::float(), rand::float()] RETURN NONE;
+INFO FOR INDEX idx_embedding ON article;
+```
+
+```surql title="Possible output"
+{
+    building: {
+        compacting: true,
+        initial: 0,
+        pending: 0,
+        status: 'ready',
+        updated: 0
+    }
+}
+```
+
+Note that `pending` reads `0` here. `pending` counts writes that arrived *while* a `CONCURRENTLY` build was running, which is a different queue — it does not report work left to compact.
+
+To wait for a vector index to reach full query speed, poll until both conditions hold:
+
+```surql
+LET $info = (INFO FOR INDEX idx_embedding ON article).building;
+RETURN $info.status = 'ready' AND $info.compacting = false;
+```
+
+Indexes other than HNSW and DISKANN do not defer work this way, and always report `compacting: false`.
 
 ### The `STRUCTURE` clause
 
