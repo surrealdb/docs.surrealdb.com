@@ -48,6 +48,35 @@ Apply SOLID where it fits:
 
 All user-facing text uses **British English** spelling (`-ise`, `-our`, `-re`, `-ogue`).
 
+### Records and fields, not rows and columns
+
+SurrealDB stores **records** in tables, and a record holds **fields**. Those are
+the words the docs use, and by a wide margin: in September 2026 the content had
+4,037 mentions of "record" against 179 of "row", and 1,673 of "field" against
+135 of "column". A row of columns pictures a table of scalars, which is the
+wrong shape for a value holding nested objects, arrays, record links and graph
+edges.
+
+"Row" and "column" stay where the relational model genuinely is the subject:
+
+- **Row-level security**, which is the established name of the feature.
+- The [Postgres wire protocol](src/content/reference/rest-api/postgres-protocol.mdx),
+  and comparison or migration pages set against a relational database, where
+  tabular framing is the point.
+- Quoting SQL, or another database's own wording.
+
+### Do not use a type name loosely
+
+`set`, `array`, `object`, `record`, `range`, `duration` and the rest are
+SurrealQL types, so a reader takes them literally. Reaching for one as a casual
+collective noun states something false about the value.
+
+A group's collected values are an **array**: it keeps insertion order and keeps
+duplicates, so two records named `'Alice'` in one group give
+`['Alice', 'Alice']`. Calling that a set implies the deduplication a `set`
+actually performs. Where the unique values are wanted, `array::group()` is the
+function that gives them.
+
 ### Plain English for an international audience
 
 Write for an international technical audience. Most readers are proficient in English
