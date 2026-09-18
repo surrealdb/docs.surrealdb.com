@@ -1,0 +1,199 @@
+---
+position: 7
+title: Schema modules and targets
+description: "Split a SurrealKit project into independently tracked schema modules and apply them across several SurrealDB databases, with dependency ordering, per-target credentials and fan-out control."
+---
+
+# Schema modules and targets
+
+<Since v="v1.0" />
+
+A SurrealKit project applies one set of schema files to one database. That covers most projects and needs no configuration. When a project outgrows it, [`surrealkit.toml`](/docs/manage/schema-migration/configuration) can declare **schema modules** - independently tracked sets of `.surql` files - and **targets** - named databases to apply them to.
+
+The two combine into a matrix. Selecting two modules and three targets gives six pairs, applied one at a time.
+
+## The default project
+
+With no `[schema.*]` sections, a project has a single unnamed module at `database/schema`, applied to the connection given by `--host`, `--ns` and `--db`. This is the pre-1.0 layout and nothing about it changed, so an existing project keeps working untouched. Everything below is additive.
+
+## Declaring modules
+
+Each `[schema.<name>]` section names a module. Files live under `database/modules/<name>/`:
+
+```toml title="surrealkit.toml"
+[schema.core]
+
+[schema.billing]
+depends_on = ["core"]
+```
+
+```text
+database/
+├── schema/                    # the default module, unchanged
+└── modules/
+    ├── core/
+    │   └── schema/
+    └── billing/
+        └── schema/
+```
+
+Each module gets its own directories for the artefacts that belong to a schema. Tests and `setup.surql` belong to the project rather than to any one module, so they are not module-scoped:
+
+| Directory | Default module | Module `billing` |
+| --- | --- | --- |
+| Schema | `database/schema` | `database/modules/billing/schema` |
+| Rollouts | `database/rollouts` | `database/modules/billing/rollouts` |
+| Snapshots | `database/snapshots` | `database/modules/billing/snapshots` |
+| Seed | `database/seed` | `database/modules/billing/seed` |
+
+Named modules sit under `modules/` rather than inside `database/schema` because the default module walks its schema directory recursively. Nesting a named module inside it would make the default module collect those files and claim ownership of them. Set `[schema.<name>] path` to put a module somewhere else entirely.
+
+### Dependencies
+
+`depends_on` orders application, so a module is never applied before something it depends on. Selecting a module also selects its dependencies, the way `cargo build -p` does. Pass `--no-deps` to select only what you named. Independent modules are ordered alphabetically so runs are reproducible, and dependency cycles are rejected before anything touches a database.
+
+## Independent tracking
+
+Each module owns its own metadata, which is what makes modules safe to mix in one database: **a module only ever prunes its own objects**. Without that, syncing one schema against a database another schema had populated would remove the other's tables.
+
+SurrealKit partitions the `__entity` table by module. The `ns` field is a partition key here, unrelated to a SurrealDB namespace:
+
+| Tracked data | Default module | Module `billing` |
+| --- | --- | --- |
+| File hashes | `sync` | `sync@billing` |
+| Managed entities | `schema` | `schema@billing` |
+| Locks | `lock` | `lock@billing` |
+
+Pre-1.0 rows already sit in the unqualified partitions, which is why adopting modules needs no migration: existing schema stays the default module with its metadata intact.
+
+> [!WARNING]
+> Do not rename a module, and do not change which module is the default, once it has been applied. A module's name determines where its metadata lives, so renaming presents the whole module as stale and the next sync drops its database objects. Create the new module and migrate to it deliberately instead.
+
+## Declaring targets
+
+Each `[target.<name>]` section names a database. A target inherits everything it does not set from the ambient connection, so it usually names only `ns` and `db`:
+
+```toml title="surrealkit.toml"
+[target.acme]
+ns = "acme"
+db = "prod"
+pass_env = "ACME_DB_PASSWORD"
+primary = true
+
+[target.globex]
+ns = "globex"
+db = "prod"
+pass_env = "GLOBEX_DB_PASSWORD"
+```
+
+Passwords are read from the environment through `pass_env`, never from the file. A literal `pass` or `password` key is rejected, and a `pass_env` naming an unset variable fails before any connection opens, so a misconfigured target cannot leave a fan-out half applied. See [Configuration](/docs/manage/schema-migration/configuration) for the full key reference.
+
+A target can also point at a different instance entirely, which is the usual shape for promoting the same schema from staging to production:
+
+```toml title="surrealkit.toml"
+[target.staging]
+host = "wss://staging-4pq7.aws-euw1.surreal.cloud"
+ns = "main"
+db = "main"
+pass_env = "STAGING_DB_PASSWORD"
+
+[target.production]
+host = "wss://production-6xk2.aws-euw1.surreal.cloud"
+ns = "main"
+db = "main"
+pass_env = "PRODUCTION_DB_PASSWORD"
+```
+
+Get the endpoint for a Cloud instance with [`surrealctl instance endpoint`](/docs/reference/cli/surrealctl/commands/instance).
+
+### Restricting modules per target
+
+`schemas` limits which modules apply to a target. An analytics database that needs the shared tables but not the billing ones declares only what it wants:
+
+```toml title="surrealkit.toml"
+[target.warehouse]
+ns = "internal"
+db = "analytics"
+schemas = ["core", "analytics"]
+pass_env = "WAREHOUSE_DB_PASSWORD"
+```
+
+## Selecting what to apply
+
+<OptionsTable
+	title="Selection flags"
+	options={[
+		{ "name": "--schema", "short": "-s", "value": "<NAME>", "description": "Apply this module. Repeat for several. Accepts `default` for the unnamed module." },
+		{ "name": "--no-deps", "description": "Apply only the modules named with `--schema`, without pulling in their `depends_on` entries." },
+		{ "name": "--target", "short": "-t", "value": "<NAME>", "description": "Apply to this target. Repeat for several." },
+		{ "name": "--all", "description": "Apply every declared module to every declared target." },
+		{ "name": "--keep-going", "description": "Continue to the next target after one fails, instead of stopping." }
+	]}
+/>
+
+```bash
+surrealkit sync                              # every declared module, primary target
+surrealkit sync --schema billing             # billing, and core because billing depends on it
+surrealkit sync --schema billing --no-deps   # billing alone
+surrealkit sync --target acme                # every module, one target
+surrealkit sync --all                        # the full matrix
+surrealkit sync --all --keep-going           # do not stop at the first failure
+```
+
+Omitting `--schema` selects every declared module, or the default module when none are declared. Targets resolve in this order, first match winning:
+
+1. Every `--target` given.
+2. Every declared target, when `--all` is passed.
+3. The target marked `primary = true`.
+4. The only declared target, when exactly one exists.
+5. The ambient connection from `--host`, `--ns` and `--db`.
+
+## How a fan-out runs
+
+Targets are applied one at a time. Within a target, modules stop at the first failure, because they are dependency-ordered and the rest would build on a broken base. Targets also stop at the first failure unless you pass `--keep-going`.
+
+There is no transaction across databases, so a failed run can leave some targets applied and others not. Every operation is idempotent, so re-running after a fix is safe.
+
+When a run covers more than one pair, SurrealKit prints a summary and exits non-zero if any pair failed:
+
+```text title="Output"
+  schema   target   status
+  ------   ------   ------
+  core     acme     ok
+  billing  acme     FAILED
+
+1 ok, 1 failed
+```
+
+## Empty source sets
+
+Before opening any connection, SurrealKit resolves every selected module and refuses if one has no `.surql` files. A wrong working directory or `--folder` value would otherwise look like a schema that had been deleted, and sync would prune the database to match:
+
+```text title="Error output"
+refusing filesystem sync: schema_module=billing resolved_schema_dir=./database/modules/billing/schema source_count=0; check --folder / SURREALDB_FOLDER and module selection, or pass --allow-empty-prune if the empty source set is intentional
+```
+
+Pass `--allow-empty-prune` when the empty source set is deliberate and you do want everything removed. The check also covers `--dry-run`, `--no-prune` and the first sync of a `--watch` session, because an empty selection cannot otherwise be told apart from a wrong path. A selection where no module applies to any target stays an error rather than a successful no-op.
+
+## Beta limitations
+
+`--schema`, `--target`, `--all` and `--keep-going` are accepted on every subcommand, but not every subcommand acts on them yet. In `1.0.0-beta.1`:
+
+| Command | Honours `--schema` | Honours `--target` and `--all` |
+| --- | --- | --- |
+| `sync` | Yes | Yes |
+| `rollout baseline` | Yes | No |
+| Other `rollout` verbs | No | No |
+| `seed` | No | No |
+| `typegen` | No | No |
+| `test` | No | No |
+
+Everything in the "No" column uses the ambient connection from `--host`, `--ns` and `--db`, and the default module's directories. `surrealkit seed --schema billing` therefore seeds `database/seed` rather than `database/modules/billing/seed`, and `surrealkit typegen --target acme` introspects the ambient database. Pass the connection explicitly for those commands until this is resolved.
+
+`--watch` refuses a selection covering more than one module or target, because watching a whole matrix on a timer is rarely what you want.
+
+## Next steps
+
+- [Configuration](/docs/manage/schema-migration/configuration): the full `surrealkit.toml` key reference
+- [Sync](/docs/manage/schema-migration/sync): apply schema files to a database
+- [Rollouts](/docs/manage/schema-migration/rollouts): phased migrations for shared databases
