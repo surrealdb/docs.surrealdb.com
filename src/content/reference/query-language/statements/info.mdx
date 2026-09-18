@@ -210,7 +210,7 @@ INFO FOR USER db_user;
 
 `INFO FOR INDEX` returns the status for an index: started, initial indexing, update indexing, built, or error.
 
-This command only applies when the [`CONCURRENTLY`](/docs/reference/query-language/statements/define/indexes#using-concurrently-clause) clause is used in a `DEFINE INDEX` command. Without this clause, the following statement will not be executed until the index is fully created, or fails. In this case, the `INFO FOR INDEX` statement will return an empty object: `{}`.
+Progress reporting only applies when the [`CONCURRENTLY`](/docs/reference/query-language/statements/define/indexes#using-concurrently-clause) clause is used in a `DEFINE INDEX` command. Without this clause, the following statement will not be executed until the index is fully created, or fails, so by the time `INFO FOR INDEX` runs the index is already built and reports `status: 'ready'` rather than any intermediate progress.
 
 
 ```surql
@@ -237,6 +237,7 @@ INFO FOR INDEX unique_name ON user;
 -------- Query 1 --------
 { 
     building: {
+        compacting: false,
         initial: 0,
         pending: 0,
         status: 'indexing', 
@@ -247,6 +248,7 @@ INFO FOR INDEX unique_name ON user;
 -------- Query 2 --------
 { 
     building: {
+        compacting: false,
         initial: 100,
         pending: 20,
         status: 'indexing', 
@@ -257,6 +259,7 @@ INFO FOR INDEX unique_name ON user;
 -------- Query 3 --------
 { 
     building: {
+        compacting: false,
         initial: 100,
         pending: 4,
         status: 'indexing', 
@@ -267,10 +270,52 @@ INFO FOR INDEX unique_name ON user;
 -------- Query 4 --------
 {
     building: {
+        compacting: false,
         status: 'ready'
     }
 }
 ```
+
+#### Vector index compaction
+
+<Since v="v3.3.0" />
+
+`status` and `compacting` answer two different questions.
+
+`status: 'ready'` means the index is built and queries may use it. `compacting: true` means the index still stores record updates separately, because they have not been merged into its structure yet.
+
+This matters for [HNSW and DISKANN](/docs/reference/query-language/statements/define/indexes#vector-search-indexes) indexes. A vector index answers a k-nearest-neighbour search using its graph **and** any updates not yet merged into that graph. The graph is searched efficiently, but each unmerged update has to be compared against the query individually, so while many of them are outstanding a query returns the same results but takes considerably longer. A background process merges them, after which the field reads `false`.
+
+So after a large insert or update into a vector-indexed table, `status: 'ready'` on its own does not mean the index is answering at its usual speed:
+
+```surql
+DEFINE INDEX idx_embedding ON TABLE article FIELDS embedding HNSW DIMENSION 4;
+CREATE |article:10000| SET embedding = [rand::float(), rand::float(), rand::float(), rand::float()] RETURN NONE;
+INFO FOR INDEX idx_embedding ON article;
+```
+
+```surql title="Possible output"
+{
+    building: {
+        compacting: true,
+        initial: 0,
+        pending: 0,
+        status: 'ready',
+        updated: 0
+    }
+}
+```
+
+Note that `pending` reads `0` here. `pending` counts writes that arrived while a `CONCURRENTLY` build was running, which is a different set of updates. It does not report how much is left to compact.
+
+To wait until a vector index answers at its usual speed, check both fields:
+
+```surql
+LET $info = (INFO FOR INDEX idx_embedding ON article).building;
+RETURN $info.status = 'ready' AND $info.compacting = false;
+```
+
+Indexes other than HNSW and DISKANN do not defer work this way, and always report `compacting: false`.
 
 ### The `STRUCTURE` clause
 
