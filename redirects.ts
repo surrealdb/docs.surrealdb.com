@@ -985,6 +985,15 @@ const baseRedirects: Redirect[] = [
         destination: "/docs/reference/query-language/functions/database-functions/record",
         statusCode: 301,
     },
+    // `surreal format` was removed from the CLI shortly after it shipped. The
+    // parser holds no comment nodes, so the command could only re-emit each
+    // statement from its syntax tree, and with `--write` that silently changed
+    // what a script meant. `surqlfmt` is the formatter that remains.
+    {
+        source: "/reference/cli/surrealdb-cli/commands/format",
+        destination: "/docs/reference/cli/formatter/overview",
+        statusCode: 301,
+    },
     // "Types after 3.0" split into a concepts page and an attribute reference.
     // The old slug dropped the dot in the filename, so it was served at
     // `rust-after-30`.

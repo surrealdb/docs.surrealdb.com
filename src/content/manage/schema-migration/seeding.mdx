@@ -1,0 +1,109 @@
+---
+position: 8
+title: Seeding
+description: "surrealkit seed applies .surql data files to a database. Each file runs once and re-runs only when its content changes, tracked by hash in the __seed table, so seeding is safe on every deploy."
+---
+
+# Seeding
+
+Seeding applies `.surql` data files to a database: reference data, default records, a demo dataset. It is separate from [schema sync](/docs/manage/schema-migration/sync), which manages definitions rather than rows.
+
+```bash
+surrealkit seed --user root --pass secret
+```
+
+## Seed files
+
+Seed files live in `database/seed/`, which `surrealkit init` scaffolds. Only files ending in `.surql` are read, and only at the top level of the directory - subdirectories are ignored. Files run in lexicographic order by filename, so a numeric prefix fixes the sequence when one file depends on another:
+
+```text
+database/seed/
+├── 000_regions.surql
+├── 010_plans.surql
+└── 020_demo_users.surql
+```
+
+## Each file runs once
+
+<Since v="v1.0" />
+
+`surrealkit seed` is idempotent. SurrealKit records every file it applies in a `__seed` table and skips the ones that have not changed since, so the command is safe to run on every deploy:
+
+```bash
+surrealkit seed --user root --pass secret
+```
+
+```text title="Output"
+Seeding from database/seed (3 files found)
+  skipping database/seed/000_regions.surql (unchanged)
+  skipping database/seed/010_plans.surql (unchanged)
+  executing database/seed/020_demo_users.surql
+Seeded 1 file(s); 2 unchanged
+```
+
+> [!IMPORTANT]
+> Before 1.0, `surrealkit seed` re-ran every file on every invocation. If you used it to reset a development database, that no longer happens - use `--force` below.
+
+A file is tracked by its path, and compared by a hash of its contents. Editing a file re-runs it; renaming or moving one makes SurrealKit see a removal and a new file, so the new path runs again.
+
+The hash is taken from the file on disk, before [template variables](/docs/manage/schema-migration/template-variables) are substituted. Changing a `--var` value therefore does not re-run a seed on its own. Edit the file, or use `--force`.
+
+## Forcing a re-run
+
+`--force` ignores the tracking table and applies every file:
+
+```bash
+surrealkit seed --force --user root --pass secret
+```
+
+Seed files that are not written to be idempotent will duplicate their data when re-run. Prefer `UPSERT` over `CREATE`, or `CREATE` with an explicit record id, so that a forced run converges rather than accumulates.
+
+## The tracking table
+
+SurrealKit creates `__seed` in the target database:
+
+```surql
+DEFINE TABLE IF NOT EXISTS __seed SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS key ON __seed TYPE string;
+DEFINE FIELD IF NOT EXISTS hash ON __seed TYPE string;
+DEFINE FIELD IF NOT EXISTS applied_at ON __seed TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS by_seed_key ON __seed FIELDS key UNIQUE;
+```
+
+The table is created on the first write of a run rather than upfront, so a run where every file is unchanged performs no schema changes and needs no `DEFINE` privileges. Reads tolerate its absence and treat every file as new.
+
+Like the other SurrealKit metadata tables, `__seed` is managed by the tool and should not be edited directly, except when [upgrading from an older layout](/docs/manage/schema-migration/upgrading).
+
+## Template variables
+
+Seed files support the same `${VAR}` substitution as schema files, so environment-specific values can be parameterised:
+
+```surql
+-- database/seed/000_regions.surql
+CREATE region:eu SET name = 'Europe', bucket = '${asset_bucket}';
+```
+
+## Embedding seeds in a binary
+
+An application that ships without its `database/` directory can bake the seed files into the binary at compile time with the `embed_seed!` macro, the counterpart to [`embed_schema!`](/docs/manage/schema-migration/embed-schema-macro):
+
+```rust
+// Reads database/seed/**/*.surql relative to Cargo.toml at compile time.
+surrealkit::embed_seed!();
+
+async fn run(db: &surrealkit::Surreal<surrealkit::engine::any::Any>) -> anyhow::Result<()> {
+    embedded_seed::seed(db).await?;
+    Ok(())
+}
+```
+
+Embedded seeds are tracked in `__seed` exactly as filesystem seeds are, so an application can call this on every start.
+
+> [!NOTE]
+> `surrealkit seed` reads `database/seed` regardless of `--schema`, so a project using [schema modules](/docs/manage/schema-migration/modules-and-targets) cannot yet seed a named module's directory from the CLI in `1.0.0-beta.1`. Use the library's `Seed` builder, or point `--folder` at the module.
+
+## Next steps
+
+- [Sync](/docs/manage/schema-migration/sync): apply schema definitions to a database
+- [Template variables](/docs/manage/schema-migration/template-variables): parameterise files per environment
+- [Using SurrealKit as a library](/docs/manage/schema-migration/library): drive seeding from Rust

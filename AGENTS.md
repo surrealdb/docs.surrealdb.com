@@ -48,6 +48,88 @@ Apply SOLID where it fits:
 
 All user-facing text uses **British English** spelling (`-ise`, `-our`, `-re`, `-ogue`).
 
+### Records and fields, not rows and columns
+
+SurrealDB stores **records** in tables, and a record holds **fields**. Those are
+the words the docs use, and by a wide margin: in September 2026 the content had
+4,037 mentions of "record" against 179 of "row", and 1,673 of "field" against
+135 of "column". A row of columns pictures a table of scalars, which is the
+wrong shape for a value holding nested objects, arrays, record links and graph
+edges.
+
+"Row" and "column" stay where the relational model genuinely is the subject:
+
+- **Row-level security**, which is the established name of the feature.
+- The [Postgres wire protocol](src/content/reference/rest-api/postgres-protocol.mdx),
+  and comparison or migration pages set against a relational database, where
+  tabular framing is the point.
+- Quoting SQL, or another database's own wording.
+
+### Do not use a type name loosely
+
+`set`, `array`, `object`, `record`, `range`, `duration` and the rest are
+SurrealQL types, so a reader takes them literally. Reaching for one as a casual
+collective noun states something false about the value.
+
+A group's collected values are an **array**: it keeps duplicates and orders by
+record id, so two records named `'Alice'` in one group give
+`['Alice', 'Alice']`. Calling that a set implies the deduplication a `set`
+actually performs. Where the unique values are wanted, `array::group()` is the
+function that gives them.
+
+### Plain English for an international audience
+
+Write for an international technical audience. Most readers are proficient in English
+as a second language, so prefer plain, literal English to natural-sounding idiom.
+Where the choice is between idiomatic English and slightly plainer literal English,
+take the literal one.
+
+The test is whether **some word in the phrase still carries the meaning**. `at a
+glance` passes: `glance` means what it says, so a reader who knows the word can decode
+the phrase. `run up a bill` fails: neither `run` nor `up` suggests accumulating a
+debt, so the phrase only works for someone who has already met it as a unit. Write
+the second kind out literally.
+
+Phrases where no word carries the meaning:
+
+| Avoid                               | Use                   |
+| ----------------------------------- | --------------------- |
+| reach for X                         | use X                 |
+| earns its keep                      | is worth the cost     |
+| worth a look, worth keeping in mind | look at, remember     |
+| does the heavy lifting              | does most of the work |
+| pulls its weight                    | is worth including    |
+| under the hood                      | internally            |
+| out of the box                      | by default            |
+| in the wild                         | in production         |
+| moving parts                        | components            |
+| the X story                         | how X works           |
+
+`under the hood` is listed despite being common in technical writing. It is a
+metaphor about a car, and `hood` is the American name for the part British English
+calls a bonnet, so it asks a reader to know both the idiom and a dialect these docs
+do not otherwise use.
+
+A second kind of phrase is decodable but says something untrue. `stays cheap` is
+about money, and the subject is usually time or work, so write `stays fast` or
+`costs little` and mean it. The same goes for `expensive` where the cost is
+milliseconds rather than currency.
+
+**Ordinary phrasal verbs are fine.** `sign in`, `set up`, `roll back`, `fall back`,
+`look up` and `back up` are the plainest way to say those things, and several are
+terms of art with definitions elsewhere in the docs. The rule is about phrases whose
+meaning has to be memorised, not about verbs that take a particle.
+
+Two rules the tables cannot express:
+
+- **Do not use a physical-action verb metaphorically.** Write "use X when…", not "reach for X when…".
+- **Do not trade one tic for another.** `worth X-ing` is what tends to appear once bare imperatives are removed, turning "Look at the values" into "The values are worth a look". Both are avoidable: "The values here are strings, a number, an array and a date."
+
+None of this asks for formal or robotic prose. Ordinary, concise English with
+concrete verbs and explicit relationships is the target, and writing that reads like
+a translated manual is a worse result than the idiom it replaced. Quoted material and
+error text stay as they are.
+
 ### Dashes
 
 Use the standard hyphen (`-`) everywhere. Em dashes (`—`) and en dashes (`–`) do
@@ -170,6 +252,21 @@ chronological, version-gated syntax keeps its `<Since>` marker, and statement
 choice (`CREATE`/`INSERT`/`UPSERT`) is never swapped - those differ on
 existing records.
 
+**Spelled-out defaults.** A clause that only restates the default belongs on the
+page teaching that clause, and nowhere else. `DEFINE INDEX … HNSW DIMENSION 4
+DIST COSINE` and `DEFINE INDEX … HNSW DIMENSION 4 DIST COSINE TYPE F32 EFC 150
+M 12 M0 24` build the same index: `INFO FOR TABLE` renders the second for both,
+because those four clauses are what the first one already means. Writing them
+out triples the statement and tells a reader that a vector index needs six
+decisions before it will work.
+
+The page that documents the clause is the exception, and needs the long form to
+have anything to explain. It earns it by saying so - naming which clauses are
+defaults, and showing the short form beside the long one - so the reader leaves
+knowing the difference rather than copying whichever they saw first. Everywhere
+else, write the shortest statement that produces the behaviour the page is
+about.
+
 **`IF` blocks.** Always write a conditional as `IF @condition { … }`, with any
 `ELSE IF` and `ELSE` taking blocks of their own. The older
 `IF @condition THEN @expression ELSE @expression END` form still parses, but it
@@ -220,7 +317,7 @@ can tell which half is runnable.
 
 `Output` is the plain label, and `Response` is kept only on the HTTP and RPC
 pages, where it is the counterpart of a `Request` block. Anything with the word
-`output` in it pairs and renders in full, so reach for a qualifier whenever the
+`output` in it pairs and renders in full, so use a qualifier whenever the
 value shown is one of several a reader might see - `Sample output` and
 `Possible output` for a generated record id, a datetime or a live API,
 `Expected output` for a value a test asserts, `Error output` for a failure, or a
@@ -359,6 +456,54 @@ in a sentence and links; the mechanism is written out once.
 **What to avoid.** Promotional language, tutorial-script openers ("Let's dive
 in"), padded significance, and first-person opinion in reference material.
 Match existing pages in the same section when unsure.
+
+**Write for a reader, not a listener.** A sentence that makes a claim needs a
+subject and a finite verb. A speaker can deliver "Eight questions, phrased the
+way a customer would phrase them" and supply the missing *are* with intonation,
+and a slide can carry it because the speaker is standing beside it. A page has
+no delivery, so the reader meets a noun phrase where a claim was meant and has
+to assemble the sentence before reading it.
+
+| Avoid                                                   | Use                                                                              |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `Eight questions, phrased the way a customer would:`     | `The eight questions are phrased the way a customer would phrase them:`          |
+| `Same run, one row per question:`                        | `The same run gives one row per question:`                                       |
+| `Lesson 04's hop, unchanged:`                            | `This is lesson 04's hop, unchanged:`                                            |
+| `One expression, no hardcoded depth, no duplicated nodes.` | `One expression covers all three depths, and each document comes back once.`    |
+| `Measure it:`                                            | `You can measure it with the query below:`                                       |
+
+The telegraphic triad (`One X, no Y, no Z`) is the same fault at its most
+compressed, and it fails twice over: it has no verb, and with no stated subject
+the negations land on the reader, which the rule below covers. It also invites
+inaccuracy, because a phrase with no verb asserts nothing precisely enough to
+check - `no hardcoded depth` survived review on a page whose next paragraph said
+the depth *must* be a literal.
+
+**What stays.** Headings, table cells, list items, fence titles, `<Synopsis>`
+lines, and a short label introducing a list or a code block (`A few details:`,
+`Three things to know:`, `Some working numbers:`). Those are captions rather
+than sentences: they assert nothing of their own, and the colon hands the
+content to what follows. The test is whether the line makes a claim - if it
+does, it needs a subject and a verb.
+
+An imperative has a finite verb and belongs in a numbered step (`Load the
+schema:`, `Save the statements above as schema.surql`). What fails is the bare
+imperative standing in for the explanation: `Measure it:` orders the reader
+around a page where the sentence should have said what the measurement shows.
+
+**No in-group asides.** "and nobody notices for a quarter", "each of these has
+bitten someone", "this saves you a page at 3 am" assume the reader shares a
+working life - fiscal quarters, an on-call rotation, a particular kind of
+employer - and they read as an invitation into a club rather than as
+information. This is the idiom rule with one cost added: a reader whose job
+looks different is told in passing that the page was not written for them. Write
+the consequence instead, which is the part that carried the information - "an
+evaluation set kept outside the database can go on naming documents that were
+deleted months ago and still look valid".
+
+This is about the narrator's voice, not about example data. A stored record whose
+content reads `A Friday deploy caused a two-hour outage in March` is realistic
+sample data and stays.
 
 **Do not presume the reader's situation.** The test is *who the sentence is
 about*, not whether it contains a negative. Attributing a state, a practice, or a
@@ -626,7 +771,7 @@ Pick the attribute delimiter the query itself does not contain: `"` normally, or
 A `url` embed also costs the raw `.md` endpoints. The converter in `src/utils/mdx-to-markdown.ts` recovers the query from `?query=` as a fallback, but it then also emits the whole percent-encoded URL as a "Run this example" link - between 500 and 1,700 characters of unreadable blob per embed. The `query` form emits a clean ` ```surql ` fence and nothing else.
 
 > [!WARNING]
-> **No blank lines inside the attribute.** MDX ends a JSX flow element at a blank line, so a query containing one closes the attribute early: the editor gets the first part, and the rest of the query plus the literal `" />` render as body text on the page. Separate sections of a long query with `--` comments instead. This is the one failure here that is visible to a reader, and it still passed review twice because the leaked text reads like prose at a glance.
+> **No blank lines inside the attribute.** MDX ends a JSX flow element at a blank line, so a query containing one closes the attribute early: the editor gets the first part, and the rest of the query plus the literal `" />` render as body text on the page. Separate sections of a long query with `--` comments instead. This is the one failure here that is visible to a reader, and it still passed review twice because the leaked text reads like prose unless you look closely.
 
 > [!WARNING]
 > **Never write `` query={`…`} ``.** A braced value must be JSON, and a template literal is not, so the value is dropped and the embed renders as an empty editor. Four embeds on one page were dead this way. Use a quoted string.
