@@ -529,6 +529,74 @@ UPDATE person:tobie PATCH [
 ]
 ```
 
+### Operations
+
+A patch is an array of operations, each naming its target with a [JSON Pointer](https://datatracker.ietf.org/doc/html/rfc6901) - a `/`-separated path into the record, so `/settings/marketing` reaches the `marketing` field inside `settings`. SurrealDB accepts the six operations of the JSON Patch specification plus `change`:
+
+| Operation | Takes | Does |
+| --- | --- | --- |
+| `add` | `path`, `value` | Sets the member at `path` on an object, or inserts at that position in an array |
+| `remove` | `path` | Deletes the field at `path` |
+| `replace` | `path`, `value` | Overwrites the field at `path` |
+| `copy` | `from`, `path` | Reads the value at `from` and writes it to `path` |
+| `move` | `from`, `path` | Reads the value at `from`, writes it to `path`, and deletes `from` |
+| `test` | `path`, `value` | Fails the whole patch unless the field at `path` already equals `value` |
+| `change` | `path`, `value` | Applies a text diff to the string at `path` |
+
+An unknown operation fails the statement with `The JSON Patch contains invalid operations`, and so does a `test` whose value does not match, which is what makes `test` useful as a guard in front of the operations that follow it.
+
+```surql
+CREATE person:tobie SET name = 'Tobie', company = 'SurrealDB', nickname = 'Tobie';
+
+UPDATE person:tobie PATCH [
+	{ "op": "replace", "path": "/company", "value": "SurrealDB Ltd" },
+	{ "op": "copy", "from": "/name", "path": "/display_name" },
+	{ "op": "remove", "path": "/nickname" }
+];
+```
+
+```surql title="Output"
+[
+	{
+		company: 'SurrealDB Ltd',
+		display_name: 'Tobie',
+		id: person:tobie,
+		name: 'Tobie'
+	}
+]
+```
+
+#### Pointers into arrays
+
+<Since v="v3.3.0" />
+
+A segment addresses a position in an array only in the canonical spelling RFC 6901 gives it, so a member named `007`, `+3` or `-1` stays addressable as a member rather than being read as an index. The segment `-` addresses the position after the last element.
+
+`add`, and the destination of `copy` and `move`, **insert** at the position and shift the elements after it, rather than overwriting the element already there. `move` removes its source before writing its destination, so a destination in the same array counts against the array that removal left behind.
+
+`replace` needs an element to exist at the position it names and fails otherwise, matching the bounds `add` already enforced. On an object it still creates a missing member.
+
+Two pointers are refused rather than guessed at: one whose prefix reaches every element of a sequence, since it names no single position, and a destination inside its own source, which would otherwise nest a copy of the source inside itself each time it ran.
+
+Writing to a [set](/docs/reference/query-language/language-primitives/data-types/sets) by position reaches whichever element sorts into that place, so a set is rebuilt once the patch has been applied.
+
+> [!WARNING]
+> Before 3.3.0 a pointer through an array index did not apply at all, and `replace` corrupted the record on top of that, giving every element of the array a member named after the index segment. Replacing the whole array was the only reliable way to change one property of one element.
+
+### Read pointers and field permissions
+
+Three `PATCH` operations read from a pointer as well as writing: `copy` and `move` read the path in their `from`, and `test` reads its `path`. Each of those reads resolves against the caller's permitted view of the record, and the statement fails with a not-allowed error where the pointer reaches a field the caller cannot `select`.
+
+This holds for a pointer at the restricted field itself, at an ancestor object that holds it, and at a nested leaf beneath it.
+
+The check walks the operations in order against a copy of the record, judging each pointer as the record stands when that operation runs. A patch is a sequence, so an earlier insertion or removal shifts every later element by one, and a pointer that reached nothing when the patch arrived can come to reach a restricted field by the time its own operation runs.
+
+`add` and `change` also read a pointer, but each writes its result back to the path it read, so neither moves a value out of the field it came from and neither is gated.
+
+The other data clauses reduce rather than refuse: a `SET`, `CONTENT`, `MERGE` or `REPLACE` right-hand side sees `NONE` where a field is restricted. `PATCH` fails the statement instead, because substituting `NONE` would store a value the caller never asked for, and for `move` would delete the source field as well. The failure reveals that a field is restricted, which a plain `SELECT` already shows by omitting it, rather than the value.
+
+Every statement that takes a `PATCH` clause behaves this way, so the same applies to [`CREATE`](/docs/reference/query-language/statements/create), [`UPSERT`](/docs/reference/query-language/statements/upsert), [`RELATE`](/docs/reference/query-language/statements/relate) and [`INSERT`](/docs/reference/query-language/statements/insert).
+
 ## Alter the `RETURN` value
 
 By default, the update statement returns the record value once the changes have been made. To change the return value of each record, use the `RETURN` clause, specifying `NONE`, `BEFORE`, `AFTER`, `DIFF`, a comma-separated list of specific fields or ad-hoc fields, or `VALUE` for a single field without its key name.

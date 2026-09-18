@@ -71,8 +71,8 @@ edges.
 SurrealQL types, so a reader takes them literally. Reaching for one as a casual
 collective noun states something false about the value.
 
-A group's collected values are an **array**: it keeps duplicates and orders by
-record id, so two records named `'Alice'` in one group give
+A group's collected values are an **array**: it keeps insertion order and keeps
+duplicates, so two records named `'Alice'` in one group give
 `['Alice', 'Alice']`. Calling that a set implies the deduplication a `set`
 actually performs. Where the unique values are wanted, `array::group()` is the
 function that gives them.
