@@ -252,6 +252,21 @@ chronological, version-gated syntax keeps its `<Since>` marker, and statement
 choice (`CREATE`/`INSERT`/`UPSERT`) is never swapped - those differ on
 existing records.
 
+**Spelled-out defaults.** A clause that only restates the default belongs on the
+page teaching that clause, and nowhere else. `DEFINE INDEX … HNSW DIMENSION 4
+DIST COSINE` and `DEFINE INDEX … HNSW DIMENSION 4 DIST COSINE TYPE F32 EFC 150
+M 12 M0 24` build the same index: `INFO FOR TABLE` renders the second for both,
+because those four clauses are what the first one already means. Writing them
+out triples the statement and tells a reader that a vector index needs six
+decisions before it will work.
+
+The page that documents the clause is the exception, and needs the long form to
+have anything to explain. It earns it by saying so - naming which clauses are
+defaults, and showing the short form beside the long one - so the reader leaves
+knowing the difference rather than copying whichever they saw first. Everywhere
+else, write the shortest statement that produces the behaviour the page is
+about.
+
 **`IF` blocks.** Always write a conditional as `IF @condition { … }`, with any
 `ELSE IF` and `ELSE` taking blocks of their own. The older
 `IF @condition THEN @expression ELSE @expression END` form still parses, but it
