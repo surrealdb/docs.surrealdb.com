@@ -87,9 +87,12 @@ function compile() {
         // `cleanUrls` / `trailingSlash`, which Vercel applies ahead of the
         // user's own rules. Prefix-agnostic, so these match the request path
         // as it arrives, `/docs` and all.
+        // Clean URLs first, then the trailing slash - the order
+        // `getTransformedRoutes` uses. Reversed, a path matching both takes two
+        // hops where Vercel takes one.
         normalise: withSrc([
-            ...convertTrailingSlash(trailingSlash),
             ...convertCleanUrls(cleanUrls, trailingSlash),
+            ...convertTrailingSlash(trailingSlash),
         ]).map((route) => ({
             src: route.src,
             dest: route.headers?.Location ?? "",

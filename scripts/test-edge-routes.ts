@@ -39,6 +39,11 @@ function expectNoRedirect(path: string) {
 expectRedirect("/docs/running/", "/docs/running", 308);
 expectRedirect("/docs/index", "/docs", 308);
 
+// A path matching both normalisation rules resolves in one hop, which is what
+// Vercel does - it converts clean URLs before trailing slashes. Emitting them
+// the other way round sent `/docs/index/` to `/docs/index` and only then on.
+expectRedirect("/docs/index/", "/docs", 308);
+
 // A literal rule (the O(1) map), reached with the `/docs` prefix still on.
 expectRedirect("/self-hosted", "/docs/running", 301);
 
