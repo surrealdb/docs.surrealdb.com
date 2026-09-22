@@ -32,6 +32,23 @@ const BASE = "/docs";
  */
 const IS_CLOUDFLARE = import.meta.env.DEPLOY_TARGET === "cloudflare";
 
+/**
+ * The hostname the documentation used to live on, kept as a redirect.
+ *
+ * On Vercel this is a domain setting rather than anything in the repo, so it
+ * has no counterpart in the redirect table and would simply have stopped
+ * happening on Cloudflare. Every `docs.surrealdb.com/<path>` goes to
+ * `surrealdb.com/docs/<path>` with a 301, which is what that host answers
+ * today - the documentation is served at `/docs` on the apex domain, and one
+ * canonical address for a page is what keeps its ranking signals together.
+ *
+ * A path that already carries `/docs` is not prefixed twice. The live host
+ * answers those with a stale rule that predates this table; doubling the
+ * prefix instead would produce `/docs/docs/...`, which is a 404 either way.
+ */
+const LEGACY_DOCS_HOST = "docs.surrealdb.com";
+const CANONICAL_DOCS_ORIGIN = "https://surrealdb.com";
+
 const app = new Hono();
 
 /**
@@ -45,6 +62,15 @@ const app = new Hono();
 if (IS_CLOUDFLARE) {
     app.use("*", async (c, next) => {
         const url = new URL(c.req.url);
+
+        if (url.hostname === LEGACY_DOCS_HOST) {
+            const path =
+                url.pathname === BASE || url.pathname.startsWith(`${BASE}/`)
+                    ? url.pathname
+                    : `${BASE}${url.pathname === "/" ? "" : url.pathname}`;
+            return c.redirect(`${CANONICAL_DOCS_ORIGIN}${path}${url.search}`, 301);
+        }
+
         const redirect = matchRedirect(url.pathname);
         if (redirect) return redirectResponse(redirect, url);
         return next();

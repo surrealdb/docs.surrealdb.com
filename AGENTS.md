@@ -30,6 +30,22 @@ bun run deploy:cloudflare  # build, then wrangler deploy
 `DEPLOY_TARGET=cloudflare` is what selects the Workers build. The details that
 matter:
 
+- **`docs.surrealdb.com` redirects here.** Every `docs.surrealdb.com/<path>`
+  301s to `surrealdb.com/docs/<path>`, which is what that host answers today.
+  This one had no source to port: it is a Vercel *domain setting* and appears
+  nowhere in the repo, so the move would have silently dropped it and the old
+  documentation host would have stopped resolving. `wrangler.jsonc` gives this
+  Worker that hostname as its only zone route, and `+server.ts` answers it with
+  a redirect and serves nothing else there. A path that already carries `/docs`
+  is not prefixed twice.
+
+  The apex Worker reaches this one through `DOCS_ORIGIN` and drops the incoming
+  `Host` header when it proxies, so a documentation request arrives on the
+  `workers.dev` hostname and never matches this branch. (`wrangler dev` makes
+  this confusing locally: with a route configured it simulates that hostname for
+  every request, so the redirect appears to fire for everything. Remove `routes`
+  from the emitted config to see the real behaviour.)
+
 - **The documentation is still served through the apex project.** It lives at
   `surrealdb.com/docs`, not on a subdomain. On Vercel the apex project rewrites
   `/docs/*` here with the prefix stripped; on Cloudflare its Worker owns
