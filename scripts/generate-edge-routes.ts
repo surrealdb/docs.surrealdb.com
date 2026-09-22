@@ -22,7 +22,6 @@ import { fileURLToPath } from "node:url";
 import type { RouteWithSrc } from "@vercel/routing-utils";
 import {
     convertCleanUrls,
-    convertHeaders,
     convertRedirects,
     convertTrailingSlash,
 } from "@vercel/routing-utils/dist/superstatic.js";
@@ -98,10 +97,6 @@ function compile() {
             dest: route.headers?.Location ?? "",
             status: route.status ?? 308,
         })),
-        headers: withSrc(convertHeaders(headerRules)).map((route) => ({
-            src: route.src,
-            headers: route.headers,
-        })),
     };
 }
 
@@ -171,11 +166,13 @@ function renderHeadersFile(): string {
             }
             // Over-long values are dropped by the assets layer with only a
             // build-time warning, so they are left out here and recorded
-            // instead. Both sites hit this with their Content-Security-Policy.
-            // Losing it on a stylesheet or a bundle costs nothing - a browser
-            // enforces CSP on documents, not on subresources - and the Worker
-            // applies the full table, this value included, to the HTML it
-            // renders, where the policy is the one that matters.
+            // instead. The Content-Security-Policy hits this. It costs nothing
+            // here: the rule covers `/assets/*`, which is stylesheets and
+            // bundles, and a browser enforces CSP on documents rather than on
+            // subresources. This project ships no HTML under `public/`, so
+            // there is no document for the policy to apply to - unlike the
+            // apex site, which routes its static pages through the Worker for
+            // exactly this reason.
             if (`  ${key}: ${value}`.length > MAX_HEADERS_LINE) {
                 omitted.push(`${rule.source} -> ${key} (${value.length} chars)`);
                 lines.push(
@@ -192,8 +189,8 @@ function renderHeadersFile(): string {
 
     if (omitted.length > 0) {
         console.warn(
-            `[edge-routes] ${omitted.length} header value(s) too long for _headers, ` +
-                `served by the Worker only: ${omitted.join(", ")}`,
+            `[edge-routes] ${omitted.length} header value(s) too long for _headers ` +
+                `and omitted from it: ${omitted.join(", ")}`,
         );
     }
 
@@ -216,6 +213,5 @@ if (process.env.DEPLOY_TARGET === "cloudflare") {
 
 console.log(
     `[edge-routes] ${Object.keys(compiled.exactRedirects).length} exact redirects, ` +
-        `${compiled.redirects.length} pattern redirects, ${compiled.headers.length} header rules ` +
-        "-> generated/edge-routes.json",
+        `${compiled.redirects.length} pattern redirects -> generated/edge-routes.json`,
 );

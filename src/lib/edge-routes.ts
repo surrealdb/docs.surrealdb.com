@@ -22,16 +22,14 @@ type CompiledRule = {
     src: string;
     dest?: string;
     status?: number;
-    /** Position in `vercel.ts`, used to resolve ties the way Vercel does. */
+    /** Position in the redirect table, used to resolve ties the way Vercel does. */
     order?: number;
-    headers?: Record<string, string>;
 };
 
 type CompiledRoutes = {
     exactRedirects: Record<string, { dest: string; status: number; order: number }>;
     redirects: CompiledRule[];
     normalise: CompiledRule[];
-    headers: CompiledRule[];
 };
 
 /**
