@@ -10,13 +10,20 @@ interface ConnectOptions {
  * (index-time). Defaults to a local instance with root credentials.
  */
 /**
- * How long to wait for a connection before giving up.
+ * How long to wait for a connection before giving up, in the Workers runtime.
  *
- * A wrong or unreachable endpoint otherwise hangs rather than failing: the
- * Cloudflare Workers runtime cancels a request whose handler never resolves
- * and logs "your Worker's code had hung", which says nothing about the
- * database. A rejected promise becomes an ordinary 500 with the cause in the
- * logs, and `getDb` clears the cached promise so the next request retries.
+ * A wrong or unreachable endpoint otherwise hangs rather than failing there:
+ * the runtime cancels a request whose handler never resolves and logs "your
+ * Worker's code had hung", which says nothing about the database. A rejected
+ * promise becomes an ordinary 500 with the cause in the logs, and `getDb`
+ * clears the cached promise so the next request retries.
+ *
+ * Deliberately not applied elsewhere. Node and Bun let the SDK retry on its
+ * own schedule, and the indexer depends on that: `bun run build` in CI reaches
+ * no database and the SDK spends about a minute on it before the build carries
+ * on. Imposing this deadline there turned that into a hard failure - a change
+ * to how the indexer behaves, which has nothing to do with the runtime this
+ * timeout exists for.
  */
 const CONNECT_TIMEOUT_MS = 10_000;
 
@@ -54,6 +61,17 @@ export async function connectDb(options: ConnectOptions = {}): Promise<Surreal> 
     const username = process.env.SURREAL_USERNAME ?? "root";
     const password = process.env.SURREAL_PASSWORD ?? "root";
 
+    const connecting = db.connect(endpoint, {
+        namespace,
+        database,
+        authentication: () => ({ username, password }),
+    });
+
+    if (!isWorkers()) {
+        await connecting;
+        return db;
+    }
+
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(
@@ -66,14 +84,7 @@ export async function connectDb(options: ConnectOptions = {}): Promise<Surreal> 
     });
 
     try {
-        await Promise.race([
-            db.connect(endpoint, {
-                namespace,
-                database,
-                authentication: () => ({ username, password }),
-            }),
-            timeout,
-        ]);
+        await Promise.race([connecting, timeout]);
     } finally {
         clearTimeout(timer);
     }
