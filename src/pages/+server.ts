@@ -2,6 +2,7 @@ import vike, { type App } from "@vikejs/hono";
 import { Hono } from "hono";
 import type { Server } from "vike/types";
 import agentInstructions from "~/lib/agent-instructions.md?raw";
+import { matchRedirect, redirectResponse } from "~/lib/edge-routes";
 import { fetchAllSdkVersions } from "~/lib/versions";
 import {
     AGENT_DISCOVERY_LINK_HEADER,
@@ -22,7 +23,78 @@ import { redirectDestinationForDev, resolveRedirect } from "../../redirects";
 
 const BASE = "/docs";
 
+/**
+ * Whether this bundle is the Cloudflare Workers build. Replaced at build time
+ * by Vite's `define`, so the branches below are dropped entirely from the
+ * Vercel bundle rather than evaluated per request.
+ */
+const IS_CLOUDFLARE = import.meta.env.DEPLOY_TARGET === "cloudflare";
+
+/**
+ * Where `/docs/api/*` is still served from on Cloudflare.
+ *
+ * `api/search.ts` and `api/feedback.ts` are Vercel Node functions that talk to
+ * SurrealDB over a WebSocket through the `surrealdb` SDK and call OpenAI for
+ * embeddings. Neither has been verified on workerd - the SDK opens the socket
+ * with the global `WebSocket` constructor, which Workers reach through a
+ * `fetch` upgrade instead - so the Worker proxies both to the Vercel deployment
+ * rather than shipping an untested port of them. Search and the feedback widget
+ * keep working during the move.
+ *
+ * ponytail: proxy hop to Vercel for two endpoints. Port them to the Worker (or
+ * move them behind the same Lambda the apex site's `/api/docs/search` already
+ * uses) before Vercel is switched off.
+ */
+const VERCEL_API_ORIGIN = "https://docs-surrealdb.vercel.app";
+
 const app = new Hono();
+
+/**
+ * The redirect and prefix rules Vercel serves from `vercel.ts`, which the
+ * Workers build has to apply itself - Cloudflare has no layer in front of the
+ * Worker. Registered first so it runs before anything else can answer.
+ *
+ * `src/lib/edge-routes.ts` matches against the same table, compiled from the
+ * same `redirects.ts`, so a moved page resolves identically on both platforms.
+ */
+if (IS_CLOUDFLARE) {
+    app.use("*", async (c, next) => {
+        const url = new URL(c.req.url);
+        const redirect = matchRedirect(url.pathname);
+        if (redirect) return redirectResponse(redirect, url);
+        return next();
+    });
+
+    app.all(`${BASE}/api/*`, async (c) => {
+        const url = new URL(c.req.url);
+        const headers = new Headers(c.req.raw.headers);
+        headers.delete("host");
+        // The runtime decodes a compressed response before this code sees it,
+        // so the upstream encoding headers would misdescribe the body. Ask for
+        // an identity response and drop them on the way back.
+        headers.delete("accept-encoding");
+
+        const upstream = await fetch(
+            new Request(`${VERCEL_API_ORIGIN}${url.pathname.slice(BASE.length)}${url.search}`, {
+                method: c.req.method,
+                headers,
+                body:
+                    c.req.method === "GET" || c.req.method === "HEAD" ? undefined : c.req.raw.body,
+                redirect: "manual",
+            }),
+        );
+
+        const responseHeaders = new Headers(upstream.headers);
+        responseHeaders.delete("content-encoding");
+        responseHeaders.delete("content-length");
+        responseHeaders.delete("transfer-encoding");
+        return new Response(upstream.body, {
+            status: upstream.status,
+            statusText: upstream.statusText,
+            headers: responseHeaders,
+        });
+    });
+}
 
 /**
  * Advertise the page index on every response, HTML included.

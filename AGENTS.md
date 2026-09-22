@@ -14,6 +14,59 @@ bun run qc    # check code quality
 
 Always run `bun run qa` then `bun run qc` before finishing any task.
 
+## Deployment targets
+
+Vercel serves production. A Cloudflare Workers build exists alongside it and is
+not deployed yet; both are built from the same source and the same route table,
+so neither can drift while the move is in progress.
+
+```bash
+bun run build              # Vercel (default, unchanged)
+bun run build:cloudflare   # Cloudflare Workers -> dist/client + dist/server
+bun run dev:cloudflare     # build, then wrangler dev against the built Worker
+bun run deploy:cloudflare  # build, then wrangler deploy
+```
+
+`DEPLOY_TARGET=cloudflare` is what selects the Workers build. The details that
+matter:
+
+- **The documentation is still served through the apex project.** It lives at
+  `surrealdb.com/docs`, not on a subdomain. On Vercel the apex project rewrites
+  `/docs/*` here with the prefix stripped; on Cloudflare its Worker owns
+  `surrealdb.com/*` and proxies `/docs/*` here the same way, to the URL in its
+  `DOCS_ORIGIN` binding. This Worker takes no route on the zone.
+
+  Giving it `surrealdb.com/docs*` directly would be a hop cheaper, and is the
+  obvious thing to reach for - but 616 of the redirects under `/docs/` are
+  defined in the *apex* repo (601 in its `redirects.json` alone, covering the
+  1.x/2.x/3.x trees and the `/docs/integration/*` history). Cloudflare routes to
+  the most specific match, so this Worker would swallow them and every one of
+  those URLs would start 404ing. Those rules have to move repos before the hop
+  can go.
+
+- **`vercel.ts` stays the single source of truth for redirects.** Vercel reads it
+  at deploy time; Cloudflare has no such layer, so
+  `scripts/generate-edge-routes.ts` compiles the same table with
+  `@vercel/routing-utils` - the package Vercel itself uses - into
+  `generated/edge-routes.json`, and `src/lib/edge-routes.ts` matches against it
+  in `+server.ts`. Add a redirect to `redirects.ts` and both platforms get it.
+
+  This is *not* `resolveRedirect` from `redirects.ts`, which only understands an
+  exact path or a trailing `/:path*`. Rules with a parameter mid-path
+  (`/docs/sdk/:sdk`) match in the compiled table and do not in that one.
+  `scripts/test-edge-routes.ts` pins that difference.
+
+- **`/docs/api/*` is still Vercel.** `api/search.ts` and `api/feedback.ts` reach
+  SurrealDB over a WebSocket through the `surrealdb` SDK and call OpenAI; neither
+  is verified on workerd, so the Worker proxies both to the Vercel deployment
+  rather than shipping an untested port. They have to move before Vercel can be
+  switched off.
+
+- **Static files** are served by the Workers Assets layer ahead of the Worker.
+  `html_handling` in `wrangler.jsonc` reproduces `cleanUrls` + `trailingSlash`,
+  and the generated `public/_headers` carries the `vercel.ts` header table.
+  Both `public/_headers` and `generated/` are build output and gitignored.
+
 ## References
 
 - [Mantine](https://mantine.dev/llms.txt): UI
