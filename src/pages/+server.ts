@@ -2,6 +2,8 @@ import vike, { type App } from "@vikejs/hono";
 import { Hono } from "hono";
 import type { Server } from "vike/types";
 import agentInstructions from "~/lib/agent-instructions.md?raw";
+import { handleFeedbackRequest } from "~/lib/api/feedback";
+import { handleSearchRequest } from "~/lib/api/search";
 import { matchRedirect, redirectResponse } from "~/lib/edge-routes";
 import { fetchAllSdkVersions } from "~/lib/versions";
 import {
@@ -30,23 +32,6 @@ const BASE = "/docs";
  */
 const IS_CLOUDFLARE = import.meta.env.DEPLOY_TARGET === "cloudflare";
 
-/**
- * Where `/docs/api/*` is still served from on Cloudflare.
- *
- * `api/search.ts` and `api/feedback.ts` are Vercel Node functions that talk to
- * SurrealDB over a WebSocket through the `surrealdb` SDK and call OpenAI for
- * embeddings. Neither has been verified on workerd - the SDK opens the socket
- * with the global `WebSocket` constructor, which Workers reach through a
- * `fetch` upgrade instead - so the Worker proxies both to the Vercel deployment
- * rather than shipping an untested port of them. Search and the feedback widget
- * keep working during the move.
- *
- * ponytail: proxy hop to Vercel for two endpoints. Port them to the Worker (or
- * move them behind the same Lambda the apex site's `/api/docs/search` already
- * uses) before Vercel is switched off.
- */
-const VERCEL_API_ORIGIN = "https://docs-surrealdb.vercel.app";
-
 const app = new Hono();
 
 /**
@@ -65,35 +50,17 @@ if (IS_CLOUDFLARE) {
         return next();
     });
 
-    app.all(`${BASE}/api/*`, async (c) => {
-        const url = new URL(c.req.url);
-        const headers = new Headers(c.req.raw.headers);
-        headers.delete("host");
-        // The runtime decodes a compressed response before this code sees it,
-        // so the upstream encoding headers would misdescribe the body. Ask for
-        // an identity response and drop them on the way back.
-        headers.delete("accept-encoding");
-
-        const upstream = await fetch(
-            new Request(`${VERCEL_API_ORIGIN}${url.pathname.slice(BASE.length)}${url.search}`, {
-                method: c.req.method,
-                headers,
-                body:
-                    c.req.method === "GET" || c.req.method === "HEAD" ? undefined : c.req.raw.body,
-                redirect: "manual",
-            }),
-        );
-
-        const responseHeaders = new Headers(upstream.headers);
-        responseHeaders.delete("content-encoding");
-        responseHeaders.delete("content-length");
-        responseHeaders.delete("transfer-encoding");
-        return new Response(upstream.body, {
-            status: upstream.status,
-            statusText: upstream.statusText,
-            headers: responseHeaders,
-        });
-    });
+    // The JSON endpoints, served by the Worker rather than proxied.
+    //
+    // Both are `Request -> Response` functions shared with the Vercel
+    // deployment (`api/search.ts` and `api/feedback.ts` are thin adapters over
+    // the same modules), so there is one implementation and the Worker does not
+    // depend on Vercel being up. They reach SurrealDB over the SDK's HTTP
+    // engine, which is plain `fetch`; `SURREAL_ENDPOINT` has to be an
+    // `https://` URL here, because Workers have no outbound `WebSocket`
+    // constructor for the SDK's other engine to use.
+    app.all(`${BASE}/api/search`, (c) => handleSearchRequest(c.req.raw));
+    app.all(`${BASE}/api/feedback`, (c) => handleFeedbackRequest(c.req.raw));
 }
 
 /**

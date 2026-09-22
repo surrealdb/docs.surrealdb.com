@@ -44,28 +44,51 @@ matter:
   those URLs would start 404ing. Those rules have to move repos before the hop
   can go.
 
-- **`vercel.ts` stays the single source of truth for redirects.** Vercel reads it
-  at deploy time; Cloudflare has no such layer, so
-  `scripts/generate-edge-routes.ts` compiles the same table with
-  `@vercel/routing-utils` - the package Vercel itself uses - into
-  `generated/edge-routes.json`, and `src/lib/edge-routes.ts` matches against it
-  in `+server.ts`. Add a redirect to `redirects.ts` and both platforms get it.
+- **The routing tables are platform-neutral.** `redirects.ts` holds the
+  redirects and `routes.ts` the URL-shape flags and header rules; neither names
+  a host. `vercel.ts` is a thin view of them, and
+  `scripts/generate-edge-routes.ts` compiles the same tables into
+  `generated/edge-routes.json` for `src/lib/edge-routes.ts` to match inside the
+  Worker. Add a redirect to `redirects.ts` and both platforms get it; delete
+  `vercel.ts` and the Worker is unaffected.
+
+  The compiler uses `@vercel/routing-utils` because the ~1000 existing rules are
+  written in the `source` syntax it implements, and a hand-rolled matcher for
+  that syntax is the thing that silently mis-routes a URL. It is a build-time
+  devDependency that turns patterns into regular expressions - no network, and
+  nothing at runtime imports it - so it is unaffected by the Vercel deployment
+  going away.
 
   This is *not* `resolveRedirect` from `redirects.ts`, which only understands an
   exact path or a trailing `/:path*`. Rules with a parameter mid-path
   (`/docs/sdk/:sdk`) match in the compiled table and do not in that one.
   `scripts/test-edge-routes.ts` pins that difference.
 
-- **`/docs/api/*` is still Vercel.** `api/search.ts` and `api/feedback.ts` reach
-  SurrealDB over a WebSocket through the `surrealdb` SDK and call OpenAI; neither
-  is verified on workerd, so the Worker proxies both to the Vercel deployment
-  rather than shipping an untested port. They have to move before Vercel can be
-  switched off.
+- **`/docs/api/*` runs on both, from one implementation.** The handlers are
+  plain `Request -> Response` functions in `src/lib/api/`; `api/search.ts` and
+  `api/feedback.ts` are Vercel adapters over them, and `+server.ts` mounts the
+  same modules on the Worker. Nothing proxies back to Vercel.
+
+  `SURREAL_ENDPOINT` **must be `https://` on Cloudflare.** The SDK picks its
+  engine from the scheme, and Workers cannot open an outbound WebSocket - the
+  SDK does not fail when it tries, it waits forever, which the runtime reports
+  as "your Worker's code had hung" with no mention of the database. `connectDb`
+  rejects a `ws://` endpoint there with a message that names the setting, and
+  applies a connect timeout so any other unreachable endpoint is a 500 rather
+  than a hang.
 
 - **Static files** are served by the Workers Assets layer ahead of the Worker.
   `html_handling` in `wrangler.jsonc` reproduces `cleanUrls` + `trailingSlash`,
-  and the generated `public/_headers` carries the `vercel.ts` header table.
-  Both `public/_headers` and `generated/` are build output and gitignored.
+  and the generated `public/_headers` carries the header table. Both
+  `public/_headers` and `generated/` are build output and gitignored.
+
+  Two traps in that file, both handled by the generator: Cloudflare
+  *concatenates* the values of every matching rule where Vercel lets the first
+  match win, so rules are emitted in reverse with an explicit unset; and it
+  silently drops any line over 2000 characters, which the CSP exceeds. The CSP
+  is left out with a comment naming why, and the Worker applies the full table
+  to the HTML it renders - which is where a browser enforces CSP anyway, not on
+  a stylesheet.
 
 ## References
 
