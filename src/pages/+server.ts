@@ -42,12 +42,16 @@ const IS_CLOUDFLARE = import.meta.env.DEPLOY_TARGET === "cloudflare";
  * today - the documentation is served at `/docs` on the apex domain, and one
  * canonical address for a page is what keeps its ranking signals together.
  *
+ * The apex is derived by dropping the `docs.` prefix rather than hardcoded, so
+ * the `surrealdb.dev` test domain behaves the same way without a second rule:
+ * `docs.surrealdb.dev` lands on `surrealdb.dev/docs`, keeping a request inside
+ * the domain it started in.
+ *
  * A path that already carries `/docs` is not prefixed twice. The live host
  * answers those with a stale rule that predates this table; doubling the
  * prefix instead would produce `/docs/docs/...`, which is a 404 either way.
  */
-const LEGACY_DOCS_HOST = "docs.surrealdb.com";
-const CANONICAL_DOCS_ORIGIN = "https://surrealdb.com";
+const LEGACY_DOCS_PREFIX = "docs.";
 
 const app = new Hono();
 
@@ -63,12 +67,13 @@ if (IS_CLOUDFLARE) {
     app.use("*", async (c, next) => {
         const url = new URL(c.req.url);
 
-        if (url.hostname === LEGACY_DOCS_HOST) {
+        if (url.hostname.startsWith(LEGACY_DOCS_PREFIX)) {
+            const apex = url.hostname.slice(LEGACY_DOCS_PREFIX.length);
             const path =
                 url.pathname === BASE || url.pathname.startsWith(`${BASE}/`)
                     ? url.pathname
                     : `${BASE}${url.pathname === "/" ? "" : url.pathname}`;
-            return c.redirect(`${CANONICAL_DOCS_ORIGIN}${path}${url.search}`, 301);
+            return c.redirect(`https://${apex}${path}${url.search}`, 301);
         }
 
         const redirect = matchRedirect(url.pathname);

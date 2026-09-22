@@ -39,6 +39,11 @@ matter:
   a redirect and serves nothing else there. A path that already carries `/docs`
   is not prefixed twice.
 
+  The apex is derived by dropping the `docs.` prefix rather than hardcoded, so
+  `docs.surrealdb.dev` lands on `surrealdb.dev/docs` - the `surrealdb.dev` test
+  domain the apex repo serves - and a request stays inside the domain it started
+  in. That domain needs no rule of its own here.
+
   The apex Worker reaches this one through `DOCS_ORIGIN` and drops the incoming
   `Host` header when it proxies, so a documentation request arrives on the
   `workers.dev` hostname and never matches this branch. (`wrangler dev` makes
