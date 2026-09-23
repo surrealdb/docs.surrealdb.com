@@ -435,8 +435,24 @@ The failure to watch for is at the short end, because it is the one that looks
 harmless. A page under about 200 words that carries no example of its own is
 usually a heading that escaped its parent, and it costs more than it looks:
 another sidebar row, another entry in `llms.txt`, another click, and a search
-result that answers nothing. Fold it into the page above it. There were 259 of
-these in September 2026, a quarter of the site.
+result that answers nothing. Fold it into the page above it.
+
+There were **42** of these in September 2026, about 4% of the documentation
+tree. An earlier draft of this section said 259, which was the count of pages
+under 200 words with the no-example condition dropped - 289 by the same
+measure today. The figure travelled: it was quoted back into planning as the
+size of the prize, which made folding look like the largest lever available
+when it is one of the smaller ones.
+
+Fewer of the 42 are foldable than the number suggests, and the exceptions are
+worth knowing before a sweep. A section `index.mdx` is a landing page, not a
+stray. The five hub pages in the root `index` collection are hardcoded as
+top-nav hrefs in `nav.ts`, so folding one puts the label back to naming a page
+that does not exist. A folder's only `overview.mdx` is its landing page under
+another name. And a short page can be a deliberate peer in a set: `cloud` and
+`sandbox` are two of the ways to run SurrealDB, listed beside `docker` and
+`in-memory`, so folding them removes options from a comparison. What is left
+after those is roughly a third of the flagged pages.
 
 Length on its own is not a reason to split. A reference index - every
 environment variable, every function in a family, every method on a client - is
