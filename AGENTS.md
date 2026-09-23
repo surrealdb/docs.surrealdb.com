@@ -457,6 +457,54 @@ in a sentence and links; the mechanism is written out once.
 in"), padded significance, and first-person opinion in reference material.
 Match existing pages in the same section when unsure.
 
+**Write for a reader, not a listener.** A sentence that makes a claim needs a
+subject and a finite verb. A speaker can deliver "Eight questions, phrased the
+way a customer would phrase them" and supply the missing *are* with intonation,
+and a slide can carry it because the speaker is standing beside it. A page has
+no delivery, so the reader meets a noun phrase where a claim was meant and has
+to assemble the sentence before reading it.
+
+| Avoid                                                   | Use                                                                              |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `Eight questions, phrased the way a customer would:`     | `The eight questions are phrased the way a customer would phrase them:`          |
+| `Same run, one row per question:`                        | `The same run gives one row per question:`                                       |
+| `Lesson 04's hop, unchanged:`                            | `This is lesson 04's hop, unchanged:`                                            |
+| `One expression, no hardcoded depth, no duplicated nodes.` | `One expression covers all three depths, and each document comes back once.`    |
+| `Measure it:`                                            | `You can measure it with the query below:`                                       |
+
+The telegraphic triad (`One X, no Y, no Z`) is the same fault at its most
+compressed, and it fails twice over: it has no verb, and with no stated subject
+the negations land on the reader, which the rule below covers. It also invites
+inaccuracy, because a phrase with no verb asserts nothing precisely enough to
+check - `no hardcoded depth` survived review on a page whose next paragraph said
+the depth *must* be a literal.
+
+**What stays.** Headings, table cells, list items, fence titles, `<Synopsis>`
+lines, and a short label introducing a list or a code block (`A few details:`,
+`Three things to know:`, `Some working numbers:`). Those are captions rather
+than sentences: they assert nothing of their own, and the colon hands the
+content to what follows. The test is whether the line makes a claim - if it
+does, it needs a subject and a verb.
+
+An imperative has a finite verb and belongs in a numbered step (`Load the
+schema:`, `Save the statements above as schema.surql`). What fails is the bare
+imperative standing in for the explanation: `Measure it:` orders the reader
+around a page where the sentence should have said what the measurement shows.
+
+**No in-group asides.** "and nobody notices for a quarter", "each of these has
+bitten someone", "this saves you a page at 3 am" assume the reader shares a
+working life - fiscal quarters, an on-call rotation, a particular kind of
+employer - and they read as an invitation into a club rather than as
+information. This is the idiom rule with one cost added: a reader whose job
+looks different is told in passing that the page was not written for them. Write
+the consequence instead, which is the part that carried the information - "an
+evaluation set kept outside the database can go on naming documents that were
+deleted months ago and still look valid".
+
+This is about the narrator's voice, not about example data. A stored record whose
+content reads `A Friday deploy caused a two-hour outage in March` is realistic
+sample data and stays.
+
 **Do not presume the reader's situation.** The test is *who the sentence is
 about*, not whether it contains a negative. Attributing a state, a practice, or a
 misconception to the reader is the fault. Samsung's writing style guide gives the
