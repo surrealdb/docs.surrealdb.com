@@ -27,8 +27,18 @@ bun run dev:cloudflare     # build, then wrangler dev against the built Worker
 bun run deploy:cloudflare  # build, then wrangler deploy
 ```
 
-`DEPLOY_TARGET=cloudflare` is what selects the Workers build. The details that
-matter:
+`DEPLOY_TARGET=cloudflare` is what selects the Workers build.
+
+**CI does not build the Workers target.** Cloudflare's own Git integration will
+do that once it is connected, shortly before the first deploy, the same way
+Vercel builds every push today - so a second build here would be duplicated
+work. What CI keeps is `bun run test:routes`, which exercises the compiled
+redirect table; that tests the table rather than the bundle, and it is the half
+that can regress from an edit to `redirects.ts` alone. Run
+`bun run build:cloudflare` yourself after touching `src/pages/+server.ts`,
+`wrangler.jsonc` or the generator, because nothing else will until then.
+
+The details that matter:
 
 - **`docs.surrealdb.com` redirects here.** Every `docs.surrealdb.com/<path>`
   301s to `surrealdb.com/docs/<path>`, which is what that host answers today.
