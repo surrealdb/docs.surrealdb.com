@@ -732,9 +732,15 @@ Two things to check alongside a move:
 - The `www.surrealdb.com` repo has its own `/docs/*` redirects in
   `redirects.json`, and they run first. When you move a page a www entry already
   points at, repoint that entry instead of leaving a second hop.
-- A missing page does not 404 - `resolveDataFromCollection` 302s up to the parent
-  path - so a missed redirect is silent. Diff the URL set before and after
-  instead of watching for 404s.
+- A missing page **404s**, so a missed redirect is loud rather than silent.
+  Watching for 404s is a real check. The one exception is a folder with no page
+  of its own, which 301s to its first child.
+
+  This used to be a 302 one segment up, applied to every miss, and the change is
+  the reason to trust 404s now: a stale link landed on a section index that said
+  nothing about what was asked for, and a crawler recorded a redirect rather
+  than a gap. Twelve unreachable tutorials went unnoticed for seven weeks that
+  way, each answering 302 and resolving to a page that returned 200.
 
 ## Content components
 
@@ -849,8 +855,11 @@ export default async function data(context: PageContext) {
 
 1. Strips the URL prefix (the optional third argument, defaulting to the
    collection id) to get the slug, then looks up `getCollectionEntry(id, slug)`.
-2. On a miss, 302s one path segment up - `getParentUrl` re-attaches the `/docs`
-   base - and only throws a 404 when there is no parent.
+2. On a miss, 301s to the folder's first child when the path names a folder with
+   no page of its own (`resolveFolderLanding`), which is the page the sidebar
+   already points at. Every other miss throws a 404, so a page that has really
+   moved belongs in `redirects.ts`, where the destination is stated rather than
+   guessed at.
 3. Sets the page `title` and `description` through `useConfig`, suffixing the
    title per product (`src/utils/product.ts`).
 4. Builds the sidebar with `buildNavigation(id, prefix)`.
