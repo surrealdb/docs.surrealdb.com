@@ -70,7 +70,7 @@ console.log('Transaction committed successfully');
 
 Cancel and discard all changes made in the transaction.
 
-After canceling, the transaction cannot be used again.
+After cancelling, the transaction cannot be used again.
 
 ```ts title="Method Syntax"
 txn.cancel()
