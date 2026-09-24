@@ -1474,7 +1474,7 @@ math::mode([ 1, 40, 60, 10, 2, 901, 2 ]);
 
 ## `math::nearestrank`
 
-The `math::nearestrank` function returns the nearest rank of an array of numbers by pullinng the closest extant record from the dataset at the %-th percentile.
+The `math::nearestrank` function returns the nearest rank of an array of numbers by pulling the closest extant record from the dataset at the %-th percentile.
 
 ```surql title="API DEFINITION"
 math::nearestrank(array<number>, $percentile: number) -> number

@@ -185,7 +185,7 @@ This function uses the original value as the first argument. If the original clo
 //- 'An error occurred: value::expect assertion failed'
 ```
 
-A user-defined error string can added after the closure if more context is desired.
+A user-defined error string can be added after the closure if more context is desired.
 
 ```surql
 { name: "Loki" }
