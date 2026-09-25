@@ -29,13 +29,12 @@ export function DefaultLayout({
     const [sidebarOpened, { toggle: toggleSidebar, close: closeSidebar }] = useDisclosure();
     const { urlPathname } = usePageContext();
 
+    // Scrolling is left to Vike's client router, which scrolls to the URL's hash
+    // or to the top after a navigation and restores the position on back and
+    // forward. Scrolling here as well would also run on the first render, where
+    // it cancels the browser's scroll to a linked heading.
     // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on route change
     useEffect(() => {
-        // The CSS reduced-motion override cannot reach an explicit JS
-        // `behavior: "smooth"`, so honour the preference here too.
-        const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-        window.scrollTo({ top: 0, behavior: reduced ? "auto" : "smooth" });
         closeSidebar();
     }, [urlPathname]);
 
