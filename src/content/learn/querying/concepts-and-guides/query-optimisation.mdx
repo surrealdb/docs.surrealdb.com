@@ -47,6 +47,46 @@ This will still need a strategy to keep the flag up to date, but allows you to a
 - Define indexes that match real filter and sort patterns; see [`DEFINE INDEX`](/docs/reference/query-language/statements/define/indexes).
 - The [`WITH`](/docs/reference/query-language/clauses/with) clause can force or restrict which index the planner uses when you need predictable behaviour (for example comparing plans with `EXPLAIN`).
 
+## How SurrealDB combines indexes
+
+<Since v="v3.3.0" />
+
+When a `WHERE` clause holds several conditions that indexes can answer, SurrealDB can use all of those indexes together rather than choosing one and checking the other conditions record by record. Each record in a table has a numeric document ID that every index on the table shares. Reading an index for one condition gives a bitmap of the IDs that match it, and bitmaps combine with set operations that read no records. Only the records left after the last operation are fetched, and the full `WHERE` clause is checked again on each of them, as are the table and field permissions.
+
+The conditions combine as follows:
+
+- `AND` intersects the bitmaps, starting from the index with the most selective condition.
+- `OR`, at the top level or inside an `AND`, can become a union when every branch has an index, so a record that matches several branches is fetched once.
+- `AND NOT` subtracts one bitmap from another. The subtracted condition must be a full-text `@@` match, or be on a field whose declared type cannot hold an array, such as `TYPE string` or `TYPE bool`. An array value has one index entry per element, so its bitmap would remove records the condition does not match.
+- A single-hop graph condition such as `->wrote->post CONTAINS post:one` becomes a bitmap of the records connected to that record, and is intersected with the index bitmaps. It needs at least one index-backed condition beside it.
+- A `count()` with `GROUP ALL` is the size of the final bitmap when every condition is represented exactly: an indexed field with a declared type that cannot hold an array, or a full-text `@@` match. The count then reads no records.
+
+```surql
+DEFINE FIELD category ON article TYPE string;
+DEFINE FIELD published ON article TYPE bool;
+DEFINE INDEX idx_category ON article FIELDS category;
+DEFINE INDEX idx_published ON article FIELDS published;
+
+EXPLAIN SELECT count() FROM article WHERE category = 'databases' AND published = true GROUP ALL;
+```
+
+```surql title="Output"
+"IndexCountScan [ctx: Db] [source: article, condition: category = 'databases' AND published = true]
+    BitmapAnd [ctx: Db]
+        BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'databases']
+        BitmapIndexScan [ctx: Db] [index: idx_published, access: = true]
+"
+```
+
+The planner keeps its other plans where they are faster: when an index already returns the records in the `ORDER BY` order, including `ORDER BY id`, when a `LIMIT` has no `ORDER BY` so that the scan can stop early, and when the statement has a `WITH` clause or a `VERSION` clause.
+
+Index reads are bounded by `SURREAL_BITMAP_BRANCH_BUDGET`, 250,000 entries by default, where `0` removes the limit. In an `AND`, the first index is always read in full. A later branch that reads more than the limit, or more than 64 times the number of records left so far, is dropped, and its condition is checked on each fetched record instead. In a top-level `OR`, a branch that passes the limit makes the query fall back to reading the indexes separately. The limit keeps a condition that matches most of the table from making the combined plan slower than the plan it replaced. See [environment variables](/docs/reference/cli/surrealdb-cli/environment-variables).
+
+The same bitmaps also [pre-filter vector searches](/docs/learn/data-models/vector-search/similarity-search#pre-filtering-with-an-index). The plan operators are listed under [bitmap index fusion](/docs/reference/query-language/clauses/explain#bitmap-index-fusion) in the `EXPLAIN` reference.
+
+> [!NOTE]
+> An index built by SurrealDB 3.2 keeps answering queries on 3.3 without a rebuild, but it does not record the document IDs that these plans read, so it takes no part in them. An optional [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild) brings it into these plans. An index defined on 3.3 takes part from the start.
+
 ## Fast table counts
 
-For `SELECT count() … GROUP ALL` over a whole table, a `COUNT` index maintains a running total instead of scanning every record each time. See the note under [`SELECT` - `COUNT` index](/docs/reference/query-language/statements/select#using-a-count-index-to-speed-up-count-in-group-all-queries). From 3.2.5, a bare `count()` projection can [imply `GROUP ALL`](/docs/reference/query-language/statements/select#bare-count-implies-group-all).
+For `SELECT count() … GROUP ALL` over a whole table, a `COUNT` index maintains a running total instead of scanning every record each time. See the note under [`SELECT` - `COUNT` index](/docs/reference/query-language/statements/select#using-a-count-index-to-speed-up-count-in-group-all-queries).

@@ -1,7 +1,7 @@
 ---
 position: 5
 title: DEFINE BUCKET
-description: "A DEFINE BUCKET statement can be used to set endpoints with custom middleware and permissions."
+description: "The DEFINE BUCKET statement defines a named file bucket backed by memory, a local folder, or Amazon S3, S3-compatible, Google Cloud Storage or Azure Blob Storage object storage, with permissions."
 ---
 
 # DEFINE BUCKET statement
@@ -37,7 +37,7 @@ DEFINE BUCKET [ OVERWRITE | IF NOT EXISTS ] @name
 
 ## Example usage
 
-A bucket backend can be set as "memory" for non-persistent in-memory storage, or as "file:/", followed by the path, for storage on disk.
+A bucket backend can be set as "memory" for non-persistent in-memory storage, as "file:/" followed by the path for storage on disk, or as an object storage URL for Amazon S3, an S3-compatible service, Google Cloud Storage or Azure Blob Storage.
 
 ### Memory backend
 
@@ -103,11 +103,102 @@ $env:SURREAL_BUCKET_FOLDER_ALLOWLIST = "/"
 surreal start --user root --pass secret --allow-experimental files
 ```
 
+### Cloud object storage backends
+
+<Since v="v3.3.0" />
+
+A bucket can keep its files in Amazon S3 or an S3-compatible service (such as MinIO, Backblaze B2, Wasabi or Cloudflare R2), in Google Cloud Storage, or in Azure Blob Storage. The scheme of the `BACKEND` URL selects the service:
+
+| Scheme | Service |
+| --- | --- |
+| `s3://`, `s3+https://` | Amazon S3, or an S3-compatible service reached over HTTPS |
+| `s3+http://` | An S3-compatible service reached over plain HTTP, such as a local MinIO |
+| `gs://`, `gcs://` | Google Cloud Storage |
+| `az://`, `azure://` | Azure Blob Storage |
+
+These backends exist in native builds of SurrealDB only. A WebAssembly build of the engine has the memory backend alone, so a cloud or `file:` URL fails there as an unsupported backend. The memory and file backends are unchanged.
+
+`DEFINE BUCKET` checks the URL when it runs, so a malformed URL or an unknown scheme is an error at that point. No request reaches the service until a file operation runs, so a wrong key or a missing bucket shows up there instead.
+
+> [!WARNING]
+> The `BACKEND` URL is stored with the bucket definition exactly as written, and `INFO FOR DB` returns it, so any credentials in the URL are visible to every user allowed to run `INFO FOR DB`. Where the server can take credentials from its environment or from an instance role, leave them out of the URL.
+
+#### Amazon S3 and S3-compatible services
+
+```text title="URL format"
+s3:/<bucket>[?<parameters>]
+s3://[<access_key>:<secret_key>@]<endpoint>[:<port>]/<bucket>[?<parameters>]
+```
+
+The bucket name is the first path segment. The host, when present, is a custom endpoint for an S3-compatible service, and requests to it use path-style addressing. With no host, requests go to the AWS endpoint for the region, unless the server's environment sets `AWS_ENDPOINT`. Because the host is always an endpoint, `s3://my-bucket` names an endpoint and no bucket, and fails; for AWS S3 itself, write `s3:/my-bucket`.
+
+| Parameter | Description |
+| --- | --- |
+| `region` | The region, used to sign requests and, with no host, to choose the AWS endpoint. Defaults to `us-east-1`. The `AWS_REGION` and `AWS_DEFAULT_REGION` environment variables are not consulted. |
+| `prefix` | A key prefix inside the bucket. Every file in the SurrealDB bucket is stored under it. |
+| `access_key`, `secret_key` | Credentials, as an alternative to `<access_key>:<secret_key>@` before the host. Both must be given. |
+
+Credentials in the URL take precedence. Without them, the standard AWS credential sources apply: the `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN` environment variables, a web identity token (`AWS_WEB_IDENTITY_TOKEN_FILE` with `AWS_ROLE_ARN`), an ECS task role or EKS pod identity, or an EC2 instance profile. The shared credentials file (`~/.aws/credentials`) is not read.
+
+```surql
+-- AWS S3, with credentials from the environment or an instance role
+DEFINE BUCKET invoices BACKEND "s3:/acme-invoices?region=eu-west-2&prefix=surrealdb/invoices";
+
+-- MinIO running locally over plain HTTP, with credentials before the host
+DEFINE BUCKET uploads BACKEND "s3+http://surrealdb:strongPassword@localhost:9000/uploads";
+```
+
+#### Google Cloud Storage
+
+```text title="URL format"
+gs://<bucket>[?<parameters>]
+```
+
+The bucket name is the host. `gcs://` is an alias for `gs://`.
+
+| Parameter | Description |
+| --- | --- |
+| `prefix` | A key prefix inside the bucket. |
+| `service_account` | The path to a service account key file (JSON) on the server. |
+| `service_account_key` | A service account key, as inline JSON. It cannot be combined with `service_account`. |
+| `anonymous` | Send unsigned requests, for a publicly readable bucket. The flag is on when present with no value, `true` or `1`. |
+
+Without `service_account` or `service_account_key`, the standard Google Cloud credential sources apply: the `GOOGLE_SERVICE_ACCOUNT`, `GOOGLE_SERVICE_ACCOUNT_KEY` or `GOOGLE_APPLICATION_CREDENTIALS` environment variables, the application default credentials written by `gcloud auth application-default login`, or the metadata server on Google Cloud compute.
+
+```surql
+DEFINE BUCKET reports BACKEND "gs://acme-reports?prefix=surrealdb&service_account=/etc/surrealdb/gcs-service-account.json";
+```
+
+#### Azure Blob Storage
+
+```text title="URL format"
+az://<account>/<container>[?<parameters>]
+```
+
+The storage account name is the host and the container name is the first path segment. `azure://` is an alias for `az://`.
+
+| Parameter | Description |
+| --- | --- |
+| `prefix` | A key prefix inside the container. |
+| `access_key` | The storage account access key. |
+| `sas_token` | A shared access signature (SAS) token. |
+| `anonymous` | Send unsigned requests, for a container that allows public read access. The flag is on when present with no value, `true` or `1`. |
+| `use_emulator` | Connect to the Azurite emulator at `http://127.0.0.1:10000`, or at the `AZURITE_BLOB_STORAGE_URL` environment variable when set. The flag is on when present with no value, `true` or `1`. |
+
+Without `access_key` or `sas_token`, the standard Azure credential sources apply: the `AZURE_STORAGE_ACCOUNT_KEY` environment variable, a service principal or workload identity configured through the `AZURE_*` environment variables, or a managed identity.
+
+```surql
+DEFINE BUCKET media BACKEND "az://acmemedia/uploads?prefix=surrealdb";
+```
+
+> [!NOTE]
+> Query parameter values are percent-decoded, so a value containing `+` or `&` has to encode it as `%2B` or `%26`. AWS secret keys and Azure account keys often contain `+`, and a SAS token is itself a query string, so percent-encode the whole token as one value. Credentials written before the host are not decoded at all, so an S3 secret key containing `/` belongs in the `secret_key` parameter instead.
+
 ### Global backend
 
 A global backend can also be selected, allowing all namespaces and databases access to the same file storage.
 
-If no backend is selected, the database will search for the environment variable `SURREAL_GLOBAL_BUCKET` and assign this as the global bucket. In this case, files will have a `namespace/database` prefix added (e.g. `my_global_bucket:/test_ns/test_db/somefile.txt`). A second `SURREAL_GLOBAL_BUCKET_ENFORCED` environment variable can also be used, which when set to `true` will enforce usage of the global bucket.
+If no backend is selected, the database will search for the environment variable `SURREAL_GLOBAL_BUCKET` and assign this as the global bucket. In this case, files will have a `namespace/database` prefix added (e.g. `my_global_bucket:/test_ns/test_db/somefile.txt`). A second `SURREAL_GLOBAL_BUCKET_ENFORCED` environment variable can also be used, which when set to `true` will enforce usage of the global bucket. `SURREAL_GLOBAL_BUCKET` accepts the same URLs as `BACKEND`, so the global bucket can also be one of the [cloud object storage backends](#cloud-object-storage-backends).
 
 If a global backend is set, then a `DEFINE BUCKET` statement can be as short as `DEFINE BUCKET` plus its local name, as the rest of the logic is done via environment variables.
 

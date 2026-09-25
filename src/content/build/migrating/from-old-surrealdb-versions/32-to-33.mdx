@@ -1,37 +1,227 @@
 ---
 position: 4
 title: 3.2 to 3.3
-description: What changes on disk and in behaviour when a 3.2 installation moves to 3.3, and which steps are automatic.
+description: What changes when a 3.2 deployment moves to 3.3, from the data migrations that run at first start and the optional index rebuilds to rolling-upgrade limits and behaviour changes in SurrealQL, permissions, security, configuration and the SDKs.
 ---
 
 # Upgrading from `3.2` to `3.3`
 
-`3.3` is a minor release, so a `3.2` datastore opens on `3.3` without an export and import. This page covers the two migrations that run against stored data, and one default that changes. For everything else, see the [release notes](/releases) and the [general upgrade guide](/docs/build/migrating/from-old-surrealdb-versions/overview).
+`3.3` is a minor release, so a `3.2` datastore opens on `3.3` without an export and import. The first `3.3.0` node to start applies a few data migrations automatically, and the rest of the upgrade consists of behaviour changes that a deployment or an application may need to account for. This page describes each one briefly and links to the page that documents it in full. New features are listed in the [release notes](/releases), and the [upgrade overview](/docs/build/migrating/from-old-surrealdb-versions/overview) covers upgrades in general.
 
-Upgrade the binary with [`surreal upgrade`](/docs/reference/cli/surrealdb-cli/commands/upgrade) as usual.
+The [`surreal upgrade`](/docs/reference/cli/surrealdb-cli/commands/upgrade) command installs the new binary as usual.
 
-## Full-text, HNSW and DiskANN indexes keep their 3.2 layout
+## Before you upgrade
 
-`3.3` serves full-text, HNSW and DiskANN indexes written by `3.2` on the layout they already have, so an upgrade needs no index work to return correct results. The new layout is opt-in through [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild), which you can run when it suits the workload rather than as part of the upgrade.
+These steps apply before the first `3.3.0` node starts against a `3.2` datastore:
 
-The cache for HNSW and DiskANN is scoped by stored format version, so readers before and after a rebuild stay isolated from each other.
+1. Take and verify a [`surreal export`](/docs/reference/cli/surrealdb-cli/commands/export) if a return to `3.2` might be needed, because `3.2` cannot read a datastore correctly once `3.3.0` has started against it. See [Rolling back to `3.2`](#rolling-back-to-32).
+2. In a cluster, let running index builds finish, and plan to upgrade every node before creating sequences, relying on silo modules, changing the schema or writing to HNSW and DiskANN indexes. See [Clusters and rolling upgrades](#clusters-and-rolling-upgrades).
+3. Remove `versioned=true` and any non-zero `retention`, or the matching `SURREAL_DATASTORE_VERSIONED` and `SURREAL_DATASTORE_RETENTION` values, from any server started on `mem://`, or move it to SurrealKV or RocksDB, because `3.3.0` refuses them on the in-memory backend. See [In-memory storage no longer supports `VERSION`](#in-memory-storage-no-longer-supports-version).
+4. On a deployment configured for a `3.3.0` beta, remove `mutable_permissions` from `--allow-experimental`, `--deny-experimental`, `SURREAL_CAPS_ALLOW_EXPERIMENTAL` and `SURREAL_CAPS_DENY_EXPERIMENTAL`, since `3.3.0` does not recognise that value and the server does not start with it.
+5. For SurrealDB Enterprise, configure a licence key and let the first start reach `api.keygen.sh`. See [SurrealDB Enterprise](#surrealdb-enterprise).
 
-> [!NOTE]
-> Beta releases `3.3.0-beta.1` through `3.3.0-beta.3` rejected these indexes at query time and required an immediate rebuild. A datastore upgraded through one of those betas is unaffected once it reaches `3.3.0`, since the layout was preserved rather than converted.
+## Data migrations at first start
 
-## Silo module definitions are rekeyed
+The first `3.3.0` node to start against a `3.2` datastore applies the pending data migrations before it serves queries, and no flag is needed. Each applied migration is recorded in the datastore, so it runs once per datastore however many nodes share it, and a migration that an interrupted start did not finish runs again on the next start.
 
-A module definition stored by `3.2.4` or earlier is keyed by a derivation that changed in `3.3.0`. Upgrading to `3.3.0` runs a migration that rekeys those definitions to the name every statement derives, which is what keeps them reachable.
+| Migration | What it changes | Work on a `3.2` datastore |
+| --- | --- | --- |
+| 1 | Copies each sequence definition out of the table keyspace | Proportional to the number of tables whose names begin with `sq` |
+| 2 | Moves each silo module definition to the key its name derives | Proportional to the number of module definitions |
+| 3 | Gives each table's doc-ID mappings an injective key | None, because only a `3.3.0` pre-release writes those mappings |
 
-The migration runs once, on first start against the older data, and needs no flag.
+The migrations run within the startup operation timeout, which is set with `--startup-operation-timeout` or [`SURREAL_STARTUP_OPERATION_TIMEOUT`](/docs/reference/cli/surrealdb-cli/environment-variables#command-environment-variables) and is 60 seconds by default. The timeout matters mainly on a datastore written by a `3.3.0` pre-release, where migration 3 copies one mapping for each record that a full-text, HNSW or DiskANN index holds. A restart keeps what an earlier attempt copied but still pays for the rest, so a start that times out during a migration needs a higher timeout rather than another attempt with the same one.
+
+While the migrations run, the server starts accepting connections after 5 seconds at most and answers most requests with `503` until startup finishes, as described in [Startup and health checks](#startup-and-health-checks).
+
+### Sequence definitions move out of the table keyspace
+
+Up to `3.2`, a sequence definition was stored at the same key position as a table name. On a database holding a table whose name begins with `sq`, listing sequences therefore read that table's records and failed, which broke `INFO FOR DB`, `surreal export`, `REMOVE DATABASE` and `REMOVE NAMESPACE`. Migration 1 copies each [sequence](/docs/reference/query-language/statements/define/sequence) definition to a location of its own and leaves the original where it was, so existing sequences keep working on nodes of either version and [`sequence::nextval`](/docs/reference/query-language/functions/database-functions/sequence) continues from its previous value.
+
+Two effects remain after the migration:
+
+- A `DEFINE SEQUENCE` run while `3.2` nodes are still serving is visible to `3.3.0` nodes only, because only they read the new location. Running the statement once every node is upgraded, or running it again then, makes the sequence visible everywhere.
+- On a versioned backend, `INFO FOR DB VERSION <t>` and `sequence::nextval` resolved at a timestamp before the migration committed find no sequences. Reads at the present time are unaffected.
+
+### Silo module definitions are rekeyed
+
+`3.3.0` adds `::` before the version segment of a silo module path, so a definition that `3.2.4` or earlier stored as `silo::acme::widgets<1.2.3>` is looked up as `silo::acme::widgets::<1.2.3>`. Until the definition moves, `INFO FOR DB` lists it while a call to one of its exports, `REMOVE MODULE` and `ALTER MODULE` report that it does not exist. Migration 2 moves each such definition to the key its name derives, and leaves its permissions, comment and `UNSIGNED` flag as they were. Where a `DEFINE MODULE … OVERWRITE` has already written a second copy, the reachable copy is kept and the other is removed.
+
+`mod::` modules are unaffected. Because the migration moves the definition rather than copying it, a node older than `3.3.0` stops resolving silo modules once the migration has run. On a versioned backend, a silo module call resolved at a timestamp before the migration committed does not find the module. The new path syntax is covered in [Surrealism modules](#surrealism-modules-experimental).
 
 > [!IMPORTANT]
 > The migration reached its final form in `3.3.0-beta.4`. On `3.3.0-beta.3` and earlier it was registered against a later version than the running server, so it never ran and the affected definitions stayed unreachable. Upgrading straight to `3.3.0` runs it.
 
-## ISO GQL is on by default
+### Rolling back to `3.2`
+
+> [!IMPORTANT]
+> A datastore cannot return to `3.2` once a `3.3.0` node has started against it. A `3.2` build checks only the datastore's major version, which the migrations leave unchanged, so it starts on a migrated datastore and reads it wrongly: silo modules moved by migration 2 cannot be reached, sequences defined on `3.3.0` are missing, and definitions written by `3.3.0` cannot be decoded. The way back to `3.2` is to restore an export taken before the upgrade into a new datastore created by `3.2`.
+
+From `3.3.0`, a build records the migrations it applies, and a build that lacks one of the recorded migrations, such as `3.3.0` on a datastore that a later release has migrated, refuses to start with `The data stored on disk was migrated by a newer version of SurrealDB … and cannot be read by this one`.
+
+## Indexes
+
+### Full-text, HNSW and DiskANN indexes keep their 3.2 layout
+
+`3.3` serves full-text, HNSW and DiskANN indexes written by `3.2` on the layout they already have, so the upgrade requires no rebuild. A rebuild is optional: it lets an index join the new query plans, and it repairs the two faults from earlier releases described in [Vector indexes over record IDs that hold a number](#vector-indexes-over-record-ids-that-hold-a-number) and [Record IDs that differ only in a nested number's type](#record-ids-that-differ-only-in-a-nested-numbers-type). The cache for HNSW and DiskANN is scoped by stored format version, so readers before and after a rebuild stay isolated from each other.
+
+> [!NOTE]
+> Beta releases `3.3.0-beta.1` through `3.3.0-beta.3` rejected these indexes at query time and required an immediate rebuild. A datastore upgraded through one of those betas is unaffected once it reaches `3.3.0`, since the layout was preserved rather than converted.
+
+### Rebuilding a 3.2 index lets it join the new plans
+
+`3.3` gives each table one doc-ID space that all of its indexes share. Only an index that is defined or rebuilt on `3.3` records its entries in that space, and only such an index takes part in [bitmap index fusion](/docs/learn/querying/concepts-and-guides/query-optimisation#how-surrealdb-combines-indexes), where the planner combines several indexes in one query, and in [index pre-filtered vector search](/docs/learn/data-models/vector-search/similarity-search#pre-filtering-with-an-index). This applies to standard and `UNIQUE` indexes as well as to full-text, HNSW and DiskANN indexes. An index built by `3.2` keeps answering queries through the plans it used before, and [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild) moves it into the shared space, which can happen when it suits the workload rather than as part of the upgrade. The plan operators are listed under [Bitmap index fusion](/docs/reference/query-language/clauses/explain#bitmap-index-fusion) in the `EXPLAIN` reference.
+
+### Vector indexes over record IDs that hold a number
+
+An HNSW or DiskANN index written by `3.1.0-beta.1` through `3.2.4` over records whose IDs hold a number inside an array or object, such as `chunk:[42, 'intro']` or `doc:{tenant: 1}`, keeps a stale doc-ID mapping for those records. A kNN query leaves them out without an error and returns fewer records than the `k` it asked for. The fault comes from those releases rather than from the upgrade. Upgrading does not repair the mapping, and running `REBUILD INDEX <name> ON <table>` once per affected index does.
+
+### Record IDs that differ only in a nested number's type
+
+Two records whose IDs differ only in the numeric type of a nested value, such as `c:[1]` and `c:[1dec]`, or `c:{k: 1}` and `c:{k: 1f}`, share one doc-ID in any index built before `3.3`, so one of the two is missing from that index's results. A rebuild on `3.3` separates them in a full-text index only. A standard, HNSW or DiskANN index still treats them as one record however it was built, so one of the two stays missing and a kNN query can return the other twice. A `UNIQUE` index is unaffected, because its entries are keyed by the indexed values alone.
+
+### Datastores written by a 3.3.0 pre-release
+
+A datastore written by a `3.3.0` beta can carry index damage that no stable release leaves behind, wherever an indexed record's ID holds a number inside an array or object. Once every node runs `3.3.0`, running `REBUILD INDEX` once for each full-text, HNSW or DiskANN index on such a table repairs the mapping.
+
+### Graph adjacency caches start empty
+
+The adjacency caches that [`INLINE EDGES` and `INLINE REFERENCES`](/docs/reference/query-language/statements/define/table#using-inline-edges-and-inline-references-to-cache-adjacency) add in `3.3` are set per table, so no table defined on `3.2` has one. Once a table has the clause, each record's cache is built the first time one of its edges or references is written, and until then a traversal from that record scans its keys as before.
+
+## Clusters and rolling upgrades
+
+A cluster can be upgraded one node at a time, but `3.2` and `3.3.0` nodes do not fully interoperate while both are serving. These limits apply until every node runs `3.3.0`:
+
+- **HNSW and DiskANN indexes.** Once an upgraded node writes to an HNSW or DiskANN index, a `3.2` node fails kNN queries against that index, writes to any record the index already has an update queued for, and its own compaction of that queue. The failures come and go as compaction drains the queue and later writes refill it, so a quiet interval does not mean they have stopped. Upgrading every node ends them, and so does stopping both queries and writes to those indexes from the older nodes, while routing only reads away is not enough. No durable data is harmed, and an older node recovers once it is upgraded.
+- **Index builds.** A build still running while a `3.2` node serves writes can finish with wrong entries for records whose IDs hold a number inside an array or object: a `COUNT` index can count such a record twice or not at all, full-text relevance statistics drift, and a `UNIQUE` build can fail by reporting the record as a duplicate of itself. Letting builds finish before the rollout avoids this, and so does running `REBUILD INDEX` on any build that was in flight once every node runs `3.3.0`. A rebuild started while an older node still serves writes is exposed to the same problem.
+- **Sequences.** A sequence defined during the rollout is visible to `3.3.0` nodes only, as described in [Sequence definitions move out of the table keyspace](#sequence-definitions-move-out-of-the-table-keyspace).
+- **Silo modules.** Older nodes stop resolving silo modules once migration 2 has run, as described in [Silo module definitions are rekeyed](#silo-module-definitions-are-rekeyed).
+- **Schema changes.** `3.3.0` stores user, access method, analyzer, table, field and index definitions in newer encodings than `3.2`, and a `3.2` node that reads a definition written by a `3.3.0` node fails with an `Invalid revision` error. This includes a table that a `3.3.0` node creates implicitly on its first write, so schema changes and writes to new tables are safest once every node is upgraded.
+
+## Startup and health checks
+
+From `3.3.0`, the startup work that follows opening the datastore runs in the background: the version check and data migrations, the default namespace and database, the root credentials, node registration and any import set with `--import-file`. With no import configured, the server waits up to 5 seconds for that work before it accepts connections, so an ordinary start is ready as soon as it accepts them. When the work takes longer, or an import is configured, the server accepts connections anyway, answers every path except `/`, `/status`, `/health`, `/version`, `/ready` and `/metrics` with `503 Service Unavailable` and `Retry-After: 1`, and reports `503` from `/ready` until startup finishes. In `3.2.4`, the version check, the defaults and node registration ran before the server accepted connections, so a slow start refused them instead.
+
+This changes what the health endpoints report:
+
+- [`/health`](/docs/reference/rest-api/http-protocol#health) answers during startup, so a `200` means that the storage engine responds, not that startup has finished. [`/ready`](/docs/reference/rest-api/http-protocol#ready) is the endpoint that reports whether it has.
+- `/ready` returns `503` rather than `500` when the node's own cluster membership record is missing.
+- A failure to initialise the datastore stops the process. A failed import or credential initialisation leaves a running server that never becomes ready, which `/ready` reports and `/health` does not.
+
+## SurrealQL behaviour changes
+
+### In-memory storage no longer supports `VERSION`
+
+The in-memory backend (`mem://`) no longer supports [`VERSION` clauses](/docs/reference/query-language/statements/select#the-version-clause), and a server started on it with `versioned` set to `true` or a non-zero `retention`, whether through the options or the matching `SURREAL_DATASTORE_VERSIONED` or `SURREAL_DATASTORE_RETENTION` variable, fails to start. `versioned=false` and a zero retention are accepted. In Rust, `Surreal::new::<Mem>(()).versioned()` fails when the client is created rather than at the first `VERSION` query. SurrealKV and RocksDB support versioned reads when started with `?versioned=true`, as described under [Datastore configuration](/docs/reference/cli/surrealdb-cli/commands/start#datastore-configuration) and [About SurrealMX](/docs/running/in-memory#about-surrealmx).
+
+### `UPDATE` and `UPSERT` evaluate `WHERE` first
+
+`UPDATE` and `UPSERT` check the `WHERE` condition before they evaluate the data clause, so a data clause with side effects runs only for the records the condition matches, and a data clause that would be rejected no longer raises an error for a record the condition excludes. Both clauses read one image of the record taken before the statement writes, and computed fields are part of that image. In `3.2`, a full table scan evaluated the data clause for every scanned record, and a computed field read `NONE` in the data clause while holding its value in the condition. [Evaluation order](/docs/reference/query-language/statements/update#evaluation-order) and [One image of the record](/docs/reference/query-language/statements/update#one-image-of-the-record) cover `UPDATE`, and the [`UPSERT` page](/docs/reference/query-language/statements/upsert#evaluation-order) has the same section.
+
+### Field clauses run in dependency order
+
+When a record is written, its `DEFAULT`, `VALUE` and `COMPUTED` clauses run in dependency order, so a field whose clause reads another field is evaluated after that field, where `3.2` evaluated fields in name order. `ASSERT` clauses run in a second pass once every field holds its final value. Events, live queries and changefeeds now receive computed fields in `$before` and `$after`, which `3.2` reported as `NONE`. See [Field evaluation order](/docs/reference/query-language/statements/define/field#field-evaluation-order).
+
+### Function changes
+
+- The seven `duration::set_*` functions and `object::matches` were accepted by the parser but never implemented, so a call failed when it ran. They are now parse errors, which means that a query naming one of them fails as a whole before any of its statements runs.
+- Vector functions return an error instead of `NaN` for input they cannot compute: [`vector::divide`](/docs/reference/query-language/functions/database-functions/vector#vectordivide) with a zero in the divisor, [`vector::normalize`](/docs/reference/query-language/functions/database-functions/vector#vectornormalize), [`vector::angle`](/docs/reference/query-language/functions/database-functions/vector#vectorangle) and [`vector::project`](/docs/reference/query-language/functions/database-functions/vector#vectorproject) with a zero-magnitude vector, and [`vector::similarity::pearson`](/docs/reference/query-language/functions/database-functions/vector#vectorsimilaritypearson) with degenerate input such as a constant vector.
+- [`vector::similarity::jaccard`](/docs/reference/query-language/functions/database-functions/vector#vectorsimilarityjaccard) treats its inputs as sets, so `vector::similarity::jaccard([1, 2], [2, 2])` returns `0.5` where `3.2` returned `1.0`.
+- `vector::distance::chebyshev([], [])` and `vector::magnitude([])` return `0`, where `3.2` returned the most negative float and `-0f` respectively.
+- [`time::nano`](/docs/reference/query-language/functions/database-functions/time#timenano) returns an error for a datetime outside the years 1677 to 2262, which a 64-bit nanosecond count cannot represent, instead of returning `0`.
+
+### `ACCESS` statements on a missing access method
+
+[`ACCESS … REVOKE`](/docs/reference/query-language/statements/access#revoke) and [`ACCESS … PURGE`](/docs/reference/query-language/statements/access#purge) on an access method that does not exist return an error such as `The access method 'x' does not exist in the database 'y'`, where `3.2` returned an empty result. `PURGE` also no longer creates a missing namespace, and reports that the namespace does not exist instead.
+
+### ISO GQL is on by default
 
 GQL no longer needs an experimental capability. On `3.2.x` it was reached with `--allow-experimental gql`; from `3.3.0` it is available without one, and the `gql` experimental tag is still accepted but does nothing.
 
 A deployment that served no GQL on `3.2.x` by leaving the experimental tag unset now serves it, so closing it is an explicit step. The executor has four entry surfaces with separate switches, listed under [GQL entry surfaces](/docs/learn/security/authorization/capabilities#gql-entry-surfaces).
 
 The [`eval::gql()`](/docs/reference/query-language/functions/database-functions/eval) function is the exception: eval stays denied for every subject by default, including under `--allow-all`.
+
+## Permissions
+
+### Writes in permission clauses
+
+A `FOR create`, `FOR update` or `FOR delete` [permission clause](/docs/reference/query-language/statements/define/table#writes-inside-a-permission-clause) may perform writes, such as recording an audit entry, which `3.2.0` to `3.2.4` refused when the table was defined. A `FOR select` clause that writes is accepted by `DEFINE` and fails when a read evaluates it, with `A PERMISSIONS clause cannot contain a statement that modifies data`.
+
+### `COMPUTED` fields that write
+
+`DEFINE FIELD` refuses a `COMPUTED` body that writes directly, with an error saying that `COMPUTED` bodies must be read-only. A body that reaches a write through a function call is accepted and fails when the field is read, with `A COMPUTED clause cannot contain a statement that modifies data`. On `3.2.4`, a writing `COMPUTED` body performed its write on every read. A `COMPUTED` body also runs with the reading user's permissions, capped at those of the user who defined the field. See [Restrictions on computed fields](/docs/reference/query-language/statements/define/field#restrictions-on-computed-fields) and [A computed body is capped at the definer's permissions](/docs/reference/query-language/statements/define/field#a-computed-body-is-capped-at-the-definers-permissions).
+
+## Security-related behaviour changes
+
+Several security fixes in `3.3.0` change what a request is allowed to do, or how a refusal is reported:
+
+- **Nesting depth.** A value nested more than 256 levels deep, including inside a record ID, is rejected when written, with `The value is nested too deeply`. A deeper value that is already stored returns the same error when read, where `3.2` could stop the server. See [Nesting depth](/docs/reference/query-language/language-primitives/data-types/values#nesting-depth).
+- **Cross-tenant refusals.** A request for a namespace or database outside the caller's access is refused with the `NotAllowed` error kind, which is HTTP `403`, gRPC `PERMISSION_DENIED` and Postgres `42501`, in place of HTTP `400`, an internal error and `XX000`. The JSON-RPC error code `-32000` and the message are unchanged.
+- **`USE` checks.** The [`USE`](/docs/reference/query-language/statements/use) statement, the RPC [`use`](/docs/reference/rest-api/rpc-protocol#use) method and `USE DEFAULT` are checked against the level the session authenticated at, and a system user who asks for a namespace or database outside that level is refused with `You don't have permission to change to the … namespace`. Root users and anonymous sessions are unaffected.
+- **HTTP headers.** `Surreal-NS` and `Surreal-DB` headers that name a namespace or database outside the authenticated level are rejected with `401` during authentication.
+- **`MATCHES` on restricted fields.** A [`MATCHES`](/docs/reference/query-language/language-primitives/operators#matches) (`@@`) condition on a field that the caller has no `SELECT` permission for is refused with `There was no suitable index supporting the expression`, so a full-text index no longer reveals values the caller cannot read.
+- **Refresh token revocation.** The RPC `revoke` method verifies the refresh token it is given, and any failure returns an authentication error, so revoking a token requires the token itself. See [`WITH REFRESH`](/docs/reference/query-language/statements/define/access/record#with-refresh-token).
+- **Access method identities.** A session authenticated through a JWT or bearer access method at root, namespace or database level is identified by the method and the token's `sub` claim, as in `api/alice`, rather than by the method alone. Audit records and other places that name the session's principal change accordingly, and a token without `sub` is still identified by the method name.
+- **Network capabilities.** A port-specific `--deny-net` rule also applies when the host is named another way, and to JWKS URLs that rely on a default port. IPv6 transition addresses (NAT64, 6to4 and Teredo) count as private when the IPv4 address they embed is private. See [Network](/docs/learn/security/authorization/capabilities#network).
+- **SCRAM for Postgres clients.** System users defined on `3.2` have no SCRAM-SHA-256 verifier, so the Postgres wire protocol listener added in `3.3.0` authenticates them with a cleartext password until the password is set again with `PASSWORD` or a verifier is imported with [`PASSSCRAM`](/docs/reference/query-language/statements/define/user#importing-a-scram-verifier-with-passscram).
+
+## Configuration and metrics
+
+### The query timeout bounds the whole request
+
+When [`--query-timeout`](/docs/reference/cli/surrealdb-cli/environment-variables#command-environment-variables) is set, it is also a wall-clock limit on the whole request for `POST /sql`, the `/sql` WebSocket, `/gql`, `/graphql` and every RPC method over WebSocket, HTTP `/rpc` and gRPC, including `signin`, `signup` and `authenticate`. The RPC `begin`, `commit` and `cancel` methods and GraphQL subscriptions are exempt. A request to `/sql` or `/gql` that runs out of time returns `504 Gateway Timeout` where `3.2` returned `400`. The limit applies only when the option is set. See [Request timeouts](/docs/reference/rest-api/http-protocol#request-timeouts).
+
+### Renamed and changed settings
+
+- `SURREAL_FTS_DOC_IDS_BATCH_SIZE` is renamed [`SURREAL_TABLE_DOC_IDS_BATCH_SIZE`](/docs/reference/cli/surrealdb-cli/environment-variables#batch-config), with the same default of 1000, because the doc-ID space now belongs to the table rather than to one full-text index. The old name is no longer read.
+- A zero value for `--node-membership-check-interval`, `--node-membership-cleanup-interval`, `--changefeed-gc-interval` or `--reclaim-interval` disables that background job. On `3.2.4`, a zero value stopped the server at startup.
+- The storage thread pool no longer pins its workers to CPU cores. `3.2.4` pinned one worker per core on hosts with 16 or more cores when the pool size equalled the core count, which is the default. `SURREAL_KVS_THREADPOOL_SIZE` is unchanged.
+
+### Metrics and `INFO`
+
+- `surrealdb_transaction_total` labels a rolled-back transaction `outcome="cancelled"`, where `3.2` counted it as `success`. Read-only work and internal probes end in a rollback, so `outcome="success"` reads noticeably lower after the upgrade and now counts only committed transactions. `outcome=~"success|cancelled"` counts every finished transaction, as `outcome="success"` did before. See [Transaction metrics](/docs/manage/observability/metrics#transaction---surrealdbtransaction).
+- The `building` object that [`INFO FOR INDEX`](/docs/reference/query-language/statements/info#index-information) returns always includes a `compacting` boolean.
+
+### Binary size
+
+Released binaries, the Homebrew package and the Docker images embed the Chinese, Japanese and Korean dictionaries for the [`SEGMENT` tokenizer](/docs/reference/query-language/statements/define/analyzer#segmentlanguage), which adds about 150 MB: 82 MB for Korean, 45 MB for Japanese and 22 MB for Chinese. The npm WebAssembly package, the Nix build and the default features of the Rust crates do not include them. A build without them can load [dictionaries](/docs/reference/query-language/statements/define/analyzer#dictionaries) from the directory set by [`SURREAL_SEGMENT_DICTIONARY_PATH`](/docs/reference/cli/surrealdb-cli/environment-variables#file-config), and a `DEFINE ANALYZER` that names a language with no dictionary fails.
+
+## SDKs and embedding
+
+### JavaScript
+
+The embedded engines are now built from the SurrealDB repository and published at the engine's version as `@surrealdb/node-native` and `@surrealdb/wasm-native`. Applications keep installing [`@surrealdb/node` and `@surrealdb/wasm`](/docs/reference/javascript/concepts/embedded-engines), which depend on them. The Node.js native binary, about 45 MB, arrives through a per-platform `@surrealdb/node-native-<platform>` package listed as an optional dependency, so an install that omits optional dependencies has no binary to load.
+
+The `strict` option, which the Node.js engine accepted and ignored, is removed, so TypeScript code that still passes it fails type checking.
+
+### Rust
+
+- Futures returned by the SDK are `Send` but no longer `Sync`: a pending future can move to another thread, but a reference to it cannot be shared between threads.
+- Engines implement the `SurrealEngine` trait from the new `surrealdb-engine-api` crate. The crate carries no stability guarantee and matters only to code that implements an engine.
+- `surrealdb-core` no longer re-exports items from `surrealdb-rpc` under `surrealdb_core::rpc` or its `dbs`, `api`, `iam` and `kvs::export` modules, so code that used them depends on `surrealdb-rpc` directly.
+- The `surrealdb-mcp` crate re-exports types from version 3 of `rmcp`.
+
+Code that [embeds](/docs/reference/rust/embedding) `surrealdb-core` directly also sees these changes to the `Datastore` API:
+
+- `Datastore::transaction` no longer takes a `LockType` argument.
+- `get_capabilities()` returns `Arc<Capabilities>`, and `set_capabilities()` replaces the capabilities of a running datastore.
+- Builders return `Arc<Datastore>`, and background maintenance starts with the datastore unless the builder calls `without_maintenance_tasks()`. The signatures of `run_datastore_router` and `unstable_from_datastore` change to match.
+- `execute_with_cancel`, `execute_with_transaction` and `process_plan` are replaced by a `QueryRequest` passed to `Datastore::run` or `Datastore::run_streaming`, while `execute` and `process` remain.
+
+### Surrealism modules (experimental)
+
+[`DEFINE MODULE`](/docs/reference/query-language/statements/define/module#statement-syntax) changes in three ways that affect statements written for `3.2`:
+
+- The module file follows `FROM` instead of `AS`, as in `DEFINE MODULE mod::color FROM f"modules:/color.surli" UNSIGNED;`.
+- The [`UNSIGNED`](/docs/reference/query-language/statements/define/module#the-unsigned-keyword) keyword is required.
+- A [silo package](/docs/reference/query-language/statements/define/module#silo-packages) path puts `::` before the version, as in `silo::acme::widgets::<1.2.3>`, and packages are fetched over HTTPS from the endpoint set by `SURREAL_SURREALISM_SILO_ENDPOINT`.
+
+Silo modules that are already stored are moved to their new key by migration 2, as described in [Silo module definitions are rekeyed](#silo-module-definitions-are-rekeyed).
+
+## SurrealDB Enterprise
+
+- **Licence key.** An Enterprise node needs a valid licence key, set with `SURREAL_LICENSE_KEY` or `SURREAL_LICENSE_KEY_FILE`, and a node without one refuses to start. The node validates the key online against `api.keygen.sh`, so the first start after the upgrade needs to reach it. A `3.3.0-beta.4` node cannot validate a production licence, so beta.4 nodes need upgrading before one is used. The [Enterprise Edition](/docs/manage/enterprise) page describes licensing under Licence key.
+- **`SURREAL_REMOTE_BUCKETS_READONLY` is removed.** Remote buckets that it made read-only become writable, so a bucket that needs to stay read-only takes the `READONLY` clause of [`DEFINE BUCKET`](/docs/reference/query-language/statements/define/bucket#statement-syntax).
+
+Changes to SurrealDS clusters are listed in the [release notes](/releases).
