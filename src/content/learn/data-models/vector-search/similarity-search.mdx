@@ -126,10 +126,15 @@ SELECT id, flag, vector::distance::knn() AS distance FROM actor
 
 ### How the filter is applied
 
-Because `embedding` is indexed, the `flag = true` condition is *not* applied after the nearest neighbours have been gathered. Instead SurrealDB pushes it down *into* the approximate (HNSW or DISKANN) search, so candidates that fail the condition are discarded as the graph is traversed and never occupy one of the `K` result slots. This keeps the result both correct and efficient:
+Because `embedding` is indexed, the `flag = true` condition is *not* applied after the nearest neighbours have been gathered. Instead SurrealDB applies it *during* the approximate (HNSW or DISKANN) search, so candidates that fail the condition are discarded as the graph is traversed and never occupy one of the `K` result slots. This keeps the result both correct and efficient:
 
 * Correct, because you still receive up to `K` records that match the condition.
 * Efficient, since the search does not spend its slots on records that would only be filtered out afterwards.
+
+SurrealDB applies the condition in one of two ways:
+
+* **Checked on each candidate.** The search reads the record of each candidate it visits and tests the condition. The example above runs this way, because `flag` has no index of its own.
+* **Pre-filtered through an index.** When another index gives exactly the records that the condition matches, SurrealDB reads that index first into an allow-list, and the search admits only records on the list without reading them. See [pre-filtering with an index](#pre-filtering-with-an-index).
 
 ### Confirming the pushed-down filter with `EXPLAIN`
 
@@ -150,6 +155,54 @@ EXPLAIN SELECT id, flag, vector::distance::knn() AS distance FROM actor
                 KnnScan [ctx: Db] [index: hnsw_pts, k: 2, ef: 40, dimension: 4, predicate: flag = true]'
 ```
 
-The `predicate: flag = true` on the `KnnScan` line is the condition being evaluated inside the index search. If the attribute is missing, the condition is not being pushed down (for example, when the vector field is not indexed). A DISKANN index produces an identical `KnnScan` line.
+The `predicate: flag = true` on the `KnnScan` line is the condition being evaluated inside the index search. If the attribute is missing and no bitmap operator appears beneath `KnnScan`, the condition is not applied during the search (for example, when the vector field is not indexed). A DISKANN index produces an identical `KnnScan` line.
+
+### Pre-filtering with an index
+
+<Since v="v3.3.0" />
+
+A condition is pre-filtered when an index identifies exactly the records it matches. That is the case for:
+
+* An equality or range condition, or an `OR` of them, on a field that has a standard or unique index and a declared type that cannot hold an array, such as `TYPE bool` or `TYPE string`. An array value has one index entry per element, so without that type the index could list records the condition does not match.
+* A full-text `@@` condition on a field with a full-text index.
+
+A `NOT` condition, or any other condition, is still checked on each candidate. When a `WHERE` clause mixes the two kinds, the qualifying conditions form the allow-list and the rest are checked on each candidate. A query with a `WITH` clause or a `VERSION` clause is not pre-filtered.
+
+Defining a type and an index for `flag` in the example above is enough for its condition to qualify:
+
+```surql
+DEFINE FIELD flag ON actor TYPE bool;
+DEFINE INDEX idx_flag ON actor FIELDS flag;
+
+EXPLAIN ANALYZE SELECT id, flag, vector::distance::knn() AS distance FROM actor
+  WHERE flag = true AND embedding <|2,40|> $person_embedding ORDER BY distance;
+```
+
+```surql title="Sample output"
+'SelectProject [ctx: Db] [projections: id, flag, distance] {rows: 2, batches: 1, elapsed: 393.21µs}
+    SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 2, batches: 1, elapsed: 369.46µs}
+        Compute [ctx: Db] [fields: distance = vector::distance::knn(...)] {rows: 2, batches: 1, elapsed: 334.87µs}
+            Filter [ctx: Db] [predicate: flag = true] {rows: 2, batches: 1, elapsed: 303.08µs}
+                KnnScan [ctx: Db] [index: hnsw_pts, k: 2, ef: 40, dimension: 4, prefilter_tier: exact] {rows: 2, batches: 1, elapsed: 276.58µs}
+                    BitmapIndexScan [ctx: Db] [index: idx_flag, access: = true] {rows: 3, batches: 0, elapsed: 0ns}
+
+Total rows: 2'
+```
+
+The condition now appears as a `BitmapIndexScan` beneath `KnnScan`, which found the three actors with `flag = true`. `KnnScan` carries no `predicate`, because no condition is left to check during the search.
+
+The `prefilter_tier` attribute, reported under `EXPLAIN ANALYZE`, shows how the search used the allow-list. The choice depends on the number of records on it:
+
+| `prefilter_tier` | Records on the allow-list | What the search does |
+| --- | --- | --- |
+| `exact` | Up to 2,000 | Computes the distance to each allowed record without using the vector index, so the result is the exact nearest `K`. |
+| `graph` | Up to 100,000 | Searches the vector index, admitting only allowed records, with the search width `ef` multiplied by 4 to make up for the candidates the list rejects. The boosted width is at most 1,024, and never less than the `ef` in the query. |
+| `graph_unboosted` | More than 100,000 | Searches the vector index, admitting only allowed records, with the `ef` in the query. |
+| `fallback` | Not built | An index read passed the `SURREAL_BITMAP_BRANCH_BUDGET` limit, so every condition is checked on each candidate, as it is without pre-filtering. |
+
+The thresholds are set with `SURREAL_KNN_PREFILTER_EXACT_THRESHOLD`, `SURREAL_KNN_PREFILTER_EF_BOOST_THRESHOLD`, `SURREAL_KNN_PREFILTER_EF_BOOST` and `SURREAL_KNN_PREFILTER_EF_MAX`, and `SURREAL_KNN_PREFILTER_ENABLED=false` turns pre-filtering off. See [environment variables](/docs/reference/cli/surrealdb-cli/environment-variables). The allow-list is built with the same bitmaps that [combine indexes](/docs/learn/querying/concepts-and-guides/query-optimisation#how-surrealdb-combines-indexes) in other queries.
+
+> [!NOTE]
+> Indexes built by SurrealDB 3.2 keep working on 3.3 without a rebuild, but a search is only pre-filtered when both the vector index and the index on the filtered field were defined or rebuilt on 3.3. An optional [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild) brings a 3.2 index into pre-filtered search.
 
 For HNSW and DISKANN configuration and the KNN cheat sheet, see [Vector indexes](/docs/learn/data-models/vector-search/vector-indexes).
