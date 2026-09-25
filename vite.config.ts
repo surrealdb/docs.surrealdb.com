@@ -9,13 +9,32 @@ import { viteDevRedirects } from "./plugins/vite-dev-redirects";
 
 loadEnvFile(".env.shared");
 
-export default defineConfig(({ mode }) => ({
+/**
+ * Which platform this build targets. Vercel is the default and the deployed
+ * one; `DEPLOY_TARGET=cloudflare` selects the Workers build instead
+ * (`bun run build:cloudflare`). See CLAUDE.md, "Deployment targets".
+ */
+const isCloudflare = process.env.DEPLOY_TARGET === "cloudflare";
+
+export default defineConfig(async ({ mode }) => ({
     base: "/docs",
+    // Read by src/pages/+server.ts to drop the Cloudflare-only request layer
+    // out of the Vercel bundle entirely rather than branching per request.
+    define: {
+        "import.meta.env.DEPLOY_TARGET": JSON.stringify(isCloudflare ? "cloudflare" : "vercel"),
+    },
     plugins: [
         viteDevRedirects(mode),
         vike(),
         react(),
-        vercel(),
+        // Exactly one deploy adapter is active. Both emit a build from the same
+        // `ssr` environment, so running them together would have each rewriting
+        // the other's output.
+        ...(isCloudflare
+            ? (await import("@cloudflare/vite-plugin")).cloudflare({
+                  viteEnvironment: { name: "ssr" },
+              })
+            : [vercel()]),
         vikeContentCollectionPlugin({
             contentDir: "src/content",
             lastModified: true,
@@ -62,7 +81,10 @@ export default defineConfig(({ mode }) => ({
     },
     ssr: {
         noExternal: ["@surrealdb/ui", "@mantine/core", "@mantine/hooks", "@mantine/spotlight"],
-        external: ["vike-content-collection"],
+        // A Worker has no `node_modules` to resolve at runtime, so everything is
+        // bundled and the Cloudflare plugin rejects `external` outright. On
+        // Vercel the dependency stays external, as it was.
+        ...(isCloudflare ? {} : { external: ["vike-content-collection"] }),
     },
     environments: {
         vercel_node: {
