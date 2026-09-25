@@ -193,9 +193,7 @@ The `chat()` call returns `reply`, `citations`, `memoryUpdates`, `sessionId`, an
 
 When a user's situation changes significantly - they change jobs, finish a project, move city - you can explicitly forget stale facts rather than waiting for the supersession chain to handle it via new turns.
 
-`forget` is **query-driven**, not field-driven: you describe what to forget in
-natural language and SurrealDB Agent Memory matches the facts within the caller's
-`memory:forget` region.
+`forget` is **query-driven**, not field-driven: you describe what to forget in natural language and SurrealDB Agent Memory matches the facts within the caller's `memory:forget` region.
 
 ```python
 # Preview first - dry_run returns the would-be count without writing
@@ -213,14 +211,9 @@ console.log(preview.deleted);
 await memory.forget("Alice's employer");
 ```
 
-To erase an entire branch rather than matched facts, use the scope-level route
-**`POST /scopes/forget`** with the subtree path (`user/alice/`), or delete a single
-entity with **`DELETE /entities/{type}/{name}`**.
+To erase an entire branch rather than matched facts, use the scope-level route **`POST /scopes/forget`** with the subtree path (`user/alice/`), or delete a single entity with **`DELETE /entities/{type}/{name}`**.
 
-`forget` soft-deletes the matched facts (sets `valid_until` to now) and removes
-them from future retrievals, keeping prior rows for audit. Pass `purge=True` to
-also remove the supersession history - that is the right-to-be-forgotten path and
-is irreversible.
+`forget` soft-deletes the matched facts (sets `valid_until` to now) and removes them from future retrievals, keeping prior rows for audit. Pass `purge=True` to also remove the supersession history - that is the right-to-be-forgotten path and is irreversible.
 
 ## Memory categories in a personal assistant
 

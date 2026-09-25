@@ -154,7 +154,7 @@ CREATE INDEX personNameIndex FOR (p:Person) ON (p.name)
 
 ```surql
 -- SurrealQL
-DEFINE INDEX idx_name ON TABLE person COLUMNS name
+DEFINE INDEX idx_name ON TABLE person FIELDS name
 ```
 
 ### Read
@@ -329,7 +329,7 @@ REMOVE TABLE person
 
 Surreal Sync can be used to export Neo4j nodes and relationships to SurrealDB.
 
-It supports inconsistent full syncs and consistent incremental syncs, and together provides ability to reproduce consistent snapshots from the source Neo4j graph onto the target SurrealDB tables.
+It supports inconsistent full syncs and consistent incremental syncs, and together these provide the ability to reproduce consistent snapshots from the source Neo4j graph onto the target SurrealDB tables.
 
 For more on how to import data from Neo4j to SurrealDB, please see the following pages in the Surreal Sync repo.
 

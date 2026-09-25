@@ -7,13 +7,14 @@ description: The RPC protocol allows for easy bidirectional communication with S
 
 # RPC protocol
 
-The RPC protocol allows for network protocol agnostic communication with SurrealDB. It is used internally by our client SDKs, and supports both HTTP and WebSocket based communication. Combined with the power of our [CBOR protocol](./cbor) specification, the RPC protocol provides a fully type-safe and efficient way to interact with SurrealDB over the network.
+The RPC protocol allows for network protocol agnostic communication with SurrealDB. It is used internally by our client SDKs, and is served over WebSocket, HTTP and, from 3.3.0, [gRPC](#grpc-transport). Combined with the [CBOR protocol](./cbor) specification, the RPC protocol provides a fully type-safe and efficient way to interact with SurrealDB over the network.
 
 ## Session variables
 
-SurrealDB's session variables provide a robust mechanism for managing session-specific data. Think of them as temporary storage tied directly to a user's active connection, ideal for tasks like maintaining application state, storing user preferences, or holding temporary data relevant only to the current session.
+SurrealDB's session variables hold session-specific data. They act as temporary storage tied to a user's active connection, for tasks such as maintaining application state, storing user preferences, or holding temporary data relevant only to the current session.
 
-A key characteristic of session variables is their scope: they are strictly confined to the individual connection. This isolation ensures that one user's session data remains private and does not interfere with others, allowing for personalized experiences within a multi-user environment.
+Session variables are strictly confined to the individual connection, so one user's session data remains private and does not interfere with other connections.
+
 You can interact with session variables in the following ways:
 
 1.  **Explicit Session-Wide Management:**
@@ -25,7 +26,7 @@ You can interact with session variables in the following ways:
     *   Methods [`query`](#query), [`select`](#select), [`insert`](#insert), [`create`](#create), [`upsert`](#upsert), [`update`](#update), [`relate`](#relate), and [`delete`](#delete), accept an optional `vars` parameter. This parameter is an object containing key-value pairs, where each key represents the variable name (without the leading `$`) and the value is the data to be assigned.
     *   Variables passed via this parameter are defined *only* for the execution context of that specific method call. They temporarily override any session-wide variable with the same name for that request but do not permanently alter the session state. These variables are automatically discarded once the method execution completes.
 
-To utilize a session variable within a query or method, prefix its name with a dollar sign (`$`), for example, `$user_id`.
+To use a session variable within a query or method, prefix its name with a dollar sign (`$`), for example, `$user_id`.
 ## Supported methods
 
 You can use the RPC protocol to perform the following actions:
@@ -95,6 +96,14 @@ You can use the RPC protocol to perform the following actions:
             <td scope="row" data-label="Description">Execute a custom query with optional variables</td>
         </tr>
         <tr>
+            <td scope="row" data-label="Function"><a href="#query_cancel"><code>query_cancel [ id ]</code></a></td>
+            <td scope="row" data-label="Description">Stop a streaming query that is running on the same connection</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Function"><a href="#query_stream"><code>query_stream [ sql, vars ]</code></a></td>
+            <td scope="row" data-label="Description">Execute a custom query and receive its results as frames while it runs</td>
+        </tr>
+        <tr>
             <td scope="row" data-label="Function"><a href="#relate"><code>relate [ in, relation, out, data? ]</code></a></td>
             <td scope="row" data-label="Description"> Create graph relationships between created records </td>
         </tr>
@@ -151,6 +160,7 @@ How much a single RPC call may carry depends on the transport it arrives over.
 | --------- | ------------- | -------------------- |
 | WebSocket `/rpc` | 128 MiB per message | `SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE` |
 | HTTP `POST /rpc` | 4 MiB per request body | `SURREAL_HTTP_MAX_RPC_BODY_SIZE` |
+| gRPC <Since v="v3.3.0" /> | The HTTP `/rpc` limit, so 4 MiB per message unless that is raised, in each direction | `SURREAL_GRPC_MAX_MESSAGE_SIZE` |
 
 The WebSocket ceiling is roughly thirty times the HTTP one, which is why the SDKs default to the WebSocket engine. If a payload is rejected over HTTP, moving the same call onto a WebSocket connection is usually enough.
 
@@ -173,6 +183,24 @@ let db = Surreal::new::<Ws>(("127.0.0.1:8000", config)).await?;
 Raising a client limit above the server's ceiling does not help, as the server still rejects the message. Raise both in this case, or keep messages under the lower of the two.
 
 For request bodies on the other HTTP endpoints, see [Request size limits](/docs/reference/rest-api/http-protocol#request-size-limits).
+
+<br />
+
+## gRPC transport
+
+<Since v="v3.3.0" />
+
+The server also serves the RPC protocol over gRPC, as the `surrealdb.protocol.rpc.v1.SurrealDBService` service defined in the [surrealdb-protocol](https://github.com/surrealdb/surrealdb-protocol) repository. gRPC shares the listener, port and TLS configuration of the HTTP and WebSocket endpoints: it runs over HTTP/2, which the server negotiates by the connection preface on a plaintext port and by ALPN on a TLS one, so no second port is configured. gRPC calls pass through the same middleware as the other endpoints, including the startup gate and the handling of the `Authorization` header. Denying the `rpc` [HTTP route](/docs/learn/security/authorization/capabilities#http-route-names) closes gRPC along with both `/rpc` endpoints, and the [RPC method names](/docs/learn/security/authorization/capabilities#rpc-method-names) restrict gRPC calls as they do WebSocket ones.
+
+Clients connect with a `grpc://` address, or `grpcs://` for TLS. The [Rust SDK](/docs/reference/rust/methods/connect#connecting-over-grpc) supports both through its `protocol-grpc` feature, and [`surreal sql --endpoint`](/docs/reference/cli/surrealdb-cli/commands/sql#capabilities-and-remote-connections) accepts them too.
+
+A few details:
+
+- `SURREAL_GRPC_MAX_MESSAGE_SIZE` limits every message the server receives and every message it sends. It defaults to the value of `SURREAL_HTTP_MAX_RPC_BODY_SIZE`, and the server reports it to clients as `Limits.max_message_bytes` in the `GetCapabilities` handshake, so a client knows the limit before it sends anything. The server splits query results across as many messages as they need, so the limit bounds a single request, record or live query notification rather than a whole result. A client can also set a figure of its own, which bounds the responses it accepts, as described for the [Rust SDK](/docs/reference/rust/methods/connect#connecting-over-grpc).
+- Compression is negotiated per client. The server accepts requests compressed with zstd or gzip, answers in whichever of the two the client lists in `grpc-accept-encoding`, and sends uncompressed messages to a client that lists neither.
+- `SURREAL_GRPC_MAX_ATTACHED_SESSIONS` and `SURREAL_GRPC_NOTIFICATION_BUFFER` bound the sessions attached across all gRPC connections and the live query notifications buffered for a slow subscriber. All three variables are listed under [HTTP server config](/docs/reference/cli/surrealdb-cli/environment-variables#http-server-config).
+- The service's `Health` method is the gRPC health check, and the `health` [HTTP route](/docs/learn/security/authorization/capabilities#http-route-names) allows or denies it together with `GET /health`. The server does not implement the standard `grpc.health.v1.Health` service, so a probe that calls that service, such as a Kubernetes `grpc` probe, fails with `Unimplemented`. Probe [`GET /health`](/docs/reference/rest-api/http-protocol#health) or [`GET /ready`](/docs/reference/rest-api/http-protocol#ready) over HTTP instead.
+- The server does not offer gRPC server reflection, so a tool such as `grpcurl` needs the `.proto` files from the [surrealdb-protocol](https://github.com/surrealdb/surrealdb-protocol) repository.
 
 <br />
 
@@ -679,11 +707,6 @@ See [Errors](/docs/reference/rest-api/errors) for the full error shape, the list
 - The `id` is generated based on the `table`, `in`, and `out` fields.
 - The relation is inserted into the `friendship` table.
 
-The `insert_relation` method is a powerful way to insert new relation records into your database, allowing you to specify the relation table and include detailed data for each relation. By understanding the parameters and how the method operates, you can effectively manage relationships between records in your database.
-
-> [!NOTE]
-> This method is particularly useful in databases that support graph-like relations, enabling complex data modelling and querying capabilities.
-
 <br />
 
 ## `invalidate`
@@ -769,7 +792,7 @@ let [ name, value ]
 
 ## `live` <label label="websocket only" /> {#live}
 
-This methods initiates a live query for a specified table name.
+This method initiates a live query for a specified table name.
 
 ```json title="Method Syntax"
 live[ table ]
@@ -1075,7 +1098,7 @@ ping
 
 ## `query`
 
-This methods sends a custom SurrealQL query.
+This method sends a custom SurrealQL query.
 
 ```json title="Method Syntax"
 query [ sql, vars ]
@@ -1105,7 +1128,7 @@ query [ sql, vars ]
                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
-                A set of variables used by the query
+                An object that maps variable names to the values the query uses
             </td>
         </tr>
     </tbody>
@@ -1151,6 +1174,148 @@ query [ sql, vars ]
       }
   ]
 }
+```
+
+## `query_cancel` <label label="websocket only" /> {#query_cancel}
+
+<Since v="v3.3.0" />
+
+This method stops a [`query_stream`](#query_stream) request that is still running on the same connection.
+
+```json title="Method syntax"
+query_cancel [ id ]
+```
+
+### Parameters
+<table>
+    <thead>
+        <tr>
+            <th colspan="2">Parameter</th>
+            <th colspan="2">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td colspan="2" scope="row" data-label="Parameter">
+                <code>id</code>
+                <label label="required" />
+            </td>
+            <td colspan="2" scope="row" data-label="Description">
+                The request <code>id</code> of the streaming query to stop, with the same value and type the <code>query_stream</code> request used
+            </td>
+        </tr>
+    </tbody>
+</table>
+
+The method returns `null` once the stream has been told to stop. The stream then ends with an `end` frame whose error is `The streaming query was stopped before it completed`, which retracts every statement that had not finished. A connection can stop only its own streams, and an `id` with no stream in progress, including one that has just finished, returns the error `No streaming query with this request id is in progress`.
+
+### Example usage
+```json title="Request"
+{
+    "id": 2,
+    "method": "query_cancel",
+    "params": [1]
+}
+```
+
+```json title="Response"
+{
+    "id": 2,
+    "result": null
+}
+```
+
+## `query_stream` <label label="websocket only" /> {#query_stream}
+
+<Since v="v3.3.0" />
+
+This method runs a query in the same way as [`query`](#query), but answers with a sequence of frames sent while the query runs instead of one response at the end, so the first records reach the client before the last statement has finished. Only the WebSocket `/rpc` endpoint serves it, and HTTP `POST /rpc` reports `Method not found`. Neither the Rust nor the JavaScript SDK calls this method over WebSocket. The Rust SDK's [`.stream_items()`](/docs/reference/rust/methods/query#stream-items) streams incrementally on the embedded engines and over gRPC, and the JavaScript SDK's [streaming query responses](/docs/reference/javascript/concepts/executing-queries#streaming-query-responses) do so on the embedded Node.js and browser engines, which produce the same frames locally.
+
+```json title="Method syntax"
+query_stream [ sql, vars ]
+```
+
+### Parameters
+<table>
+    <thead>
+        <tr>
+            <th colspan="2">Parameter</th>
+            <th colspan="2">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td colspan="2" scope="row" data-label="Parameter">
+                <code>sql</code>
+                <label label="required" />
+            </td>
+            <td colspan="2" scope="row" data-label="Description">
+                The query to execute against SurrealDB
+            </td>
+        </tr>
+        <tr>
+            <td colspan="2" scope="row" data-label="Parameter">
+                <code>vars</code>
+               <label label="optional" />
+            </td>
+            <td colspan="2" scope="row" data-label="Description">
+                An object that maps variable names to the values the query uses
+            </td>
+        </tr>
+    </tbody>
+</table>
+
+The request needs an `id`, because every frame carries it, and one without an `id` is refused. A second `query_stream` that reuses the `id` of a stream still running on the connection is refused with `A streaming query with this request id is already in progress`. A request that carries a `txn` runs inside that client transaction, and the client waits for the `end` frame before it sends `commit`, because a `commit` that arrives while the stream is running ends the transaction the stream is still using. A failure before execution starts, such as a parse error or a denied capability, is answered with an ordinary error response and no frames.
+
+### Frames
+
+Each frame arrives as an ordinary response carrying the request's `id`, and its `result` is an object whose `stream` field names the frame type:
+
+| `stream` | Fields | Meaning |
+| --- | --- | --- |
+| `begin` | `statements`, `version` | The stream is open. `statements` is an upper bound, because control flow such as a `RETURN` can skip the rest of a block, so the number of statements is best counted from `finished` frames. `version` is the revision of the frame protocol, currently `1`. |
+| `rows` | `index`, `values` | Records produced by statement `index`, with more possibly to follow. A statement's first `rows` frame carries up to 16 records, and each later one up to twice as many as the one before, to a limit of 256. |
+| `value` | `index`, `value` | The single value of a statement that does not return a list, such as `RETURN 1 + 2`. A statement sends `rows` frames or one `value` frame, never both. |
+| `finished` | `index`, `time`, `type`, `single`, `error` | Statement `index` is final. `single` is `true` when its value is one value rather than a list, `type` is `"live"` or `"kill"` for those statements and `null` for any other, and `error` is present only when the statement failed. |
+| `end` | `results`, `time`, `error` | The stream is complete, and nothing follows. `results` is the number of `finished` frames delivered, and `error` is present only when the stream did not complete normally. |
+
+Records are provisional until their statement's `finished` frame arrives:
+
+- A `finished` frame with an `error` retracts every record already sent for that statement.
+- An `end` frame with an `error` retracts every statement that has no `finished` frame, while the statements that finished stand. This covers a timeout, a [`query_cancel`](#query_cancel), a transaction that could not commit, and a stream the server stopped because its frames could not be delivered, which reports `The streaming query was stopped before it completed`.
+- An `end` error can also name `LIVE SELECT` subscriptions that were discarded because their session ended, since their statements had already finished and cannot be retracted.
+
+New frame types and fields can be added without changing `version`, so a client ignores a `stream` value or a field it does not recognise. Every `finished` frame carries `single`, because a statement that sent no `rows` or `value` frame has no other way to say whether its value is an empty list or a single value.
+
+### Limits
+
+- `SURREAL_WEBSOCKET_MAX_CONCURRENT_STREAMS`, 32 by default, limits how many streams one connection runs at once. A request over the limit is refused with `Too many concurrent streaming queries` rather than queued.
+- `SURREAL_WEBSOCKET_STREAM_SEND_TIMEOUT`, 30 seconds by default, stops a stream that has waited that long to send one frame, which is what happens when the client stops reading. It applies whether or not `--query-timeout` is set.
+- `--query-timeout`, when set, limits the whole stream, including the time spent waiting to send frames.
+- `query_stream` is an [RPC method capability](/docs/learn/security/authorization/capabilities#rpc-method-names) of its own, and the query runs through the `query` method's gate as well, so denying either method denies streaming.
+
+Both environment variables are listed under [WebSocket config](/docs/reference/cli/surrealdb-cli/environment-variables#websocket-config).
+
+### Example usage
+```json title="Request"
+{
+    "id": 1,
+    "method": "query_stream",
+    "params": [
+        "SELECT * FROM person; RETURN 1 + 2;"
+    ]
+}
+```
+
+The server sends these frames in order, one message each:
+
+```json title="Response"
+{ "id": 1, "result": { "statements": 2, "stream": "begin", "version": 1 } }
+{ "id": 1, "result": { "index": 0, "stream": "rows", "values": [{ "id": "person:jane", "name": "Jane" }, { "id": "person:john", "name": "John" }] } }
+{ "id": 1, "result": { "index": 0, "single": false, "stream": "finished", "time": "215.042µs", "type": null } }
+{ "id": 1, "result": { "index": 1, "stream": "value", "value": 3 } }
+{ "id": 1, "result": { "index": 1, "single": true, "stream": "finished", "time": "18.5µs", "type": null } }
+{ "id": 1, "result": { "results": 2, "stream": "end", "time": "402.917µs" } }
 ```
 
 ## `relate`
@@ -1450,7 +1615,7 @@ select [ thing ]
 
 This method allows you to sign in as a root, namespace, or database user, or with a record access method.
 
-The object returned will contain a `token` property and an optional `refresh` property.
+The result is the authentication token as a string. When a record access method is defined `WITH REFRESH`, the result is instead an object holding the token as `access` and a [refresh token](/docs/reference/query-language/statements/define/access/record#with-refresh-token) as `refresh`.
 
 ```json title="Method Syntax"
 signin [ NS, DB, AC, ... ]
@@ -1539,7 +1704,7 @@ signin [ NS, DB, AC, ... ]
 ```json title="Response"
 {
     "id": 1,
-    "result": null
+    "result": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpYXQiOjE3OTAyMjQ0NjIsIm5iZiI6MTc5MDIyNDQ2MiwiZXhwIjoxNzkwMjI4MDYyLCJpc3MiOiJTdXJyZWFsREIiLCJqdGkiOiJmZWM2MDlmNS0zY2VhLTQwYTItOTc0MC00ZjliMWNmNGFhOWUiLCJJRCI6InJvb3QifQ.wJD-0zmqmGc1qE4XHt1zI6HBvA_YnOsHuxYwYBHqreAqxTgG04B_lb1-SfTLtHX_f319T15xaHaNhkeOUEmggg"
 }
 ```
 
@@ -1575,7 +1740,7 @@ signin [ NS, DB, AC, ... ]
 
 This method allows you to sign a user up using the `SIGNUP` query defined in a record access method.
 
-The object returned will contain an optional `token` property and an optional `refresh` property.
+The result is the authentication token as a string. When the record access method is defined `WITH REFRESH`, the result is instead an object holding the token as `access` and a [refresh token](/docs/reference/query-language/statements/define/access/record#with-refresh-token) as `refresh`.
 
 ```json title="Method Syntax"
 signup [ NS, DB, AC, ... ]

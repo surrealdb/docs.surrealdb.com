@@ -48,6 +48,35 @@ Apply SOLID where it fits:
 
 All user-facing text uses **British English** spelling (`-ise`, `-our`, `-re`, `-ogue`).
 
+### Records and fields, not rows and columns
+
+SurrealDB stores **records** in tables, and a record holds **fields**. Those are
+the words the docs use, and by a wide margin: in September 2026 the content had
+4,037 mentions of "record" against 179 of "row", and 1,673 of "field" against
+135 of "column". A row of columns pictures a table of scalars, which is the
+wrong shape for a value holding nested objects, arrays, record links and graph
+edges.
+
+"Row" and "column" stay where the relational model genuinely is the subject:
+
+- **Row-level security**, which is the established name of the feature.
+- The [Postgres wire protocol](src/content/reference/rest-api/postgres-protocol.mdx),
+  and comparison or migration pages set against a relational database, where
+  tabular framing is the point.
+- Quoting SQL, or another database's own wording.
+
+### Do not use a type name loosely
+
+`set`, `array`, `object`, `record`, `range`, `duration` and the rest are
+SurrealQL types, so a reader takes them literally. Reaching for one as a casual
+collective noun states something false about the value.
+
+A group's collected values are an **array**: it keeps insertion order and keeps
+duplicates, so two records named `'Alice'` in one group give
+`['Alice', 'Alice']`. Calling that a set implies the deduplication a `set`
+actually performs. Where the unique values are wanted, `array::group()` is the
+function that gives them.
+
 ### Plain English for an international audience
 
 Write for an international technical audience. Most readers are proficient in English
@@ -222,6 +251,21 @@ documenting a construct keeps that construct first, migration pages stay
 chronological, version-gated syntax keeps its `<Since>` marker, and statement
 choice (`CREATE`/`INSERT`/`UPSERT`) is never swapped - those differ on
 existing records.
+
+**Spelled-out defaults.** A clause that only restates the default belongs on the
+page teaching that clause, and nowhere else. `DEFINE INDEX … HNSW DIMENSION 4
+DIST COSINE` and `DEFINE INDEX … HNSW DIMENSION 4 DIST COSINE TYPE F32 EFC 150
+M 12 M0 24` build the same index: `INFO FOR TABLE` renders the second for both,
+because those four clauses are what the first one already means. Writing them
+out triples the statement and tells a reader that a vector index needs six
+decisions before it will work.
+
+The page that documents the clause is the exception, and needs the long form to
+have anything to explain. It earns it by saying so - naming which clauses are
+defaults, and showing the short form beside the long one - so the reader leaves
+knowing the difference rather than copying whichever they saw first. Everywhere
+else, write the shortest statement that produces the behaviour the page is
+about.
 
 **`IF` blocks.** Always write a conditional as `IF @condition { … }`, with any
 `ELSE IF` and `ELSE` taking blocks of their own. The older
@@ -412,6 +456,54 @@ in a sentence and links; the mechanism is written out once.
 **What to avoid.** Promotional language, tutorial-script openers ("Let's dive
 in"), padded significance, and first-person opinion in reference material.
 Match existing pages in the same section when unsure.
+
+**Write for a reader, not a listener.** A sentence that makes a claim needs a
+subject and a finite verb. A speaker can deliver "Eight questions, phrased the
+way a customer would phrase them" and supply the missing *are* with intonation,
+and a slide can carry it because the speaker is standing beside it. A page has
+no delivery, so the reader meets a noun phrase where a claim was meant and has
+to assemble the sentence before reading it.
+
+| Avoid                                                   | Use                                                                              |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `Eight questions, phrased the way a customer would:`     | `The eight questions are phrased the way a customer would phrase them:`          |
+| `Same run, one row per question:`                        | `The same run gives one row per question:`                                       |
+| `Lesson 04's hop, unchanged:`                            | `This is lesson 04's hop, unchanged:`                                            |
+| `One expression, no hardcoded depth, no duplicated nodes.` | `One expression covers all three depths, and each document comes back once.`    |
+| `Measure it:`                                            | `You can measure it with the query below:`                                       |
+
+The telegraphic triad (`One X, no Y, no Z`) is the same fault at its most
+compressed, and it fails twice over: it has no verb, and with no stated subject
+the negations land on the reader, which the rule below covers. It also invites
+inaccuracy, because a phrase with no verb asserts nothing precisely enough to
+check - `no hardcoded depth` survived review on a page whose next paragraph said
+the depth *must* be a literal.
+
+**What stays.** Headings, table cells, list items, fence titles, `<Synopsis>`
+lines, and a short label introducing a list or a code block (`A few details:`,
+`Three things to know:`, `Some working numbers:`). Those are captions rather
+than sentences: they assert nothing of their own, and the colon hands the
+content to what follows. The test is whether the line makes a claim - if it
+does, it needs a subject and a verb.
+
+An imperative has a finite verb and belongs in a numbered step (`Load the
+schema:`, `Save the statements above as schema.surql`). What fails is the bare
+imperative standing in for the explanation: `Measure it:` orders the reader
+around a page where the sentence should have said what the measurement shows.
+
+**No in-group asides.** "and nobody notices for a quarter", "each of these has
+bitten someone", "this saves you a page at 3 am" assume the reader shares a
+working life - fiscal quarters, an on-call rotation, a particular kind of
+employer - and they read as an invitation into a club rather than as
+information. This is the idiom rule with one cost added: a reader whose job
+looks different is told in passing that the page was not written for them. Write
+the consequence instead, which is the part that carried the information - "an
+evaluation set kept outside the database can go on naming documents that were
+deleted months ago and still look valid".
+
+This is about the narrator's voice, not about example data. A stored record whose
+content reads `A Friday deploy caused a two-hour outage in March` is realistic
+sample data and stays.
 
 **Do not presume the reader's situation.** The test is *who the sentence is
 about*, not whether it contains a negative. Attributing a state, a practice, or a

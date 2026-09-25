@@ -14,7 +14,7 @@ In .NET, SurrealDB can be run as an [in-memory database](#memory-provider), or i
 ## Memory provider
 
 The memory provider is a simple in-memory database that is useful in some contexts.
-It can be extremely useful for testing scenarios, or for small applications that do not require persistence.
+It is useful for testing scenarios, or for small applications that do not require persistence.
 
 ```bash
 dotnet add package SurrealDb.Embedded.InMemory

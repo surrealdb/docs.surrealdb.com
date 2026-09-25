@@ -8,7 +8,7 @@ description: "The `EXPLAIN` clause is used to explain the plan used for a query.
 
 The `EXPLAIN` clause is used to explain the plan used for a query. It is particularly useful when you want to understand how a query is executed and how it is optimised by the database.
 
-When `EXPLAIN` is used, the statement returns an explanation, essentially revealing the execution plan to provide transparency and understanding of the query performance.
+When `EXPLAIN` is used, the statement returns the execution plan instead of the query result, showing how the query will be performed.
 
 ## Syntax
 
@@ -16,7 +16,7 @@ When `EXPLAIN` is used, the statement returns an explanation, essentially reveal
 @query EXPLAIN [FULL]
 ```
 
-Using the `EXPLAIN` clause in addition to the `FULL` keyword is expeciallly useful when you want to understand the performance of a query and can provide more details when debugging.
+Using the `EXPLAIN` clause in addition to the `FULL` keyword is especially useful when you want to understand the performance of a query and can provide more details when debugging.
 
 ## Examples
 
@@ -185,6 +185,55 @@ SELECT * FROM person WHERE email='tobie@surrealdb.com' EXPLAIN FULL;
 }
 ```
 
+### Bitmap index fusion
+
+<Since v="v3.3.0" />
+
+When a `WHERE` clause combines conditions that different indexes can answer, the plan can use all of those indexes instead of driving the query from one of them. Each index is read into a bitmap of the records that match it, the bitmaps are combined with set operations, and only the records left at the end are fetched. [How SurrealDB combines indexes](/docs/learn/querying/concepts-and-guides/query-optimisation#how-surrealdb-combines-indexes) explains when the planner chooses this plan.
+
+The example below uses the [`EXPLAIN ANALYZE` statement](/docs/reference/query-language/statements/explain), because its text format shows the plan tree compactly. The `EXPLAIN` clause returns the same operators as nested objects.
+
+```surql
+DEFINE FIELD category ON article TYPE string;
+DEFINE FIELD published ON article TYPE bool;
+DEFINE INDEX idx_category ON article FIELDS category;
+DEFINE INDEX idx_published ON article FIELDS published;
+
+INSERT INTO article [
+	{ id: 1, category: 'databases', published: true },
+	{ id: 2, category: 'databases', published: false },
+	{ id: 3, category: 'networking', published: true },
+	{ id: 4, category: 'databases', published: true }
+];
+
+EXPLAIN ANALYZE SELECT id FROM article WHERE category = 'databases' AND published = true;
+```
+
+```surql title="Sample output"
+"SelectProject [ctx: Db] [projections: id] {rows: 2, batches: 1, elapsed: 10.17µs}
+    Filter [ctx: Db] [predicate: category = 'databases' AND published = true] {rows: 2, batches: 1, elapsed: 33.58µs}
+        BitmapResolve [ctx: Db] [table: article] {rows: 2, batches: 1, elapsed: 322.25µs}
+            BitmapAnd [ctx: Db] {rows: 2, batches: 0, elapsed: 0ns}
+                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'databases'] {rows: 3, batches: 0, elapsed: 0ns}
+                BitmapIndexScan [ctx: Db] [index: idx_published, access: = true] {rows: 3, batches: 0, elapsed: 0ns}
+
+Total rows: 2"
+```
+
+Under `EXPLAIN ANALYZE`, the `rows` of a bitmap operator is the number of candidate records it produced. Each index matched three articles, the intersection left two, and those two are the only records that `BitmapResolve` fetched. The `Filter` above it checks the whole `WHERE` clause again on each fetched record, so a condition that was left out of the bitmaps is still applied.
+
+| Operator | What it produces |
+| --- | --- |
+| `BitmapResolve` | Evaluates the bitmap tree beneath it, then fetches the remaining records of `table` for the rest of the plan. |
+| `BitmapIndexScan` | The records that match the `access` condition in a standard or unique `index`. |
+| `BitmapFullTextScan` | The records that match the `query` in a full-text `index`, for a `@@` condition. |
+| `BitmapGraphScan` | The records connected to the `source` record through the `edges` tables in one hop, for a condition such as `->wrote->post CONTAINS post:one`. |
+| `BitmapAnd` | The records present in every child. |
+| `BitmapOr` | The records present in any child. |
+| `BitmapAndNot` | The records in the first child that are not in the second. |
+
+The same bitmap operators appear beneath `IndexCountScan` when a `count()` is answered from indexes alone, and beneath `KnnScan` when a vector search is [pre-filtered](#pre-filtered-knn-searches). A branch that stopped reading its index because it passed the `SURREAL_BITMAP_BRANCH_BUDGET` limit reports `dropped: true` under `EXPLAIN ANALYZE`, and a top-level `OR` plan that fell back to reading its indexes separately reports `union_tier: fallback` on `BitmapResolve`.
+
 ### K-nearest neighbours (KNN) searches
 
 <Since v="v3.1.5" />
@@ -267,3 +316,33 @@ SELECT id, flag, vector::distance::knn() AS distance FROM pts
 ```
 
 The innermost `KnnScan` operator carries the `predicate: 'flag = true'` attribute - the condition that is evaluated inside the index search. The same condition also appears on the `Filter` operator above it. Adding `EXPLAIN FULL` includes per-operator `metrics`. The query plan is identical for a DISKANN index. For a guided walkthrough, see [Filtering through vector search](/docs/learn/data-models/vector-search/similarity-search#how-the-filter-is-applied).
+
+#### Pre-filtered KNN searches
+
+<Since v="v3.3.0" />
+
+When another index gives exactly the records that the extra condition matches, the plan pre-filters instead. That index is read before the search into an allow-list of matching records, which appears as a bitmap operator beneath `KnnScan`, and the vector search only admits records on the list. The `predicate` attribute then holds only the conditions that are still checked on each candidate. Under `EXPLAIN ANALYZE`, `KnnScan` also reports the `prefilter_tier` it used: `exact`, `graph`, `graph_unboosted` or `fallback`.
+
+In the example above, `flag` has no index. Giving it a type and an index is enough for the condition to be pre-filtered:
+
+```surql
+DEFINE FIELD flag ON pts TYPE bool;
+DEFINE INDEX idx_flag ON pts FIELDS flag;
+
+EXPLAIN ANALYZE SELECT id, flag, vector::distance::knn() AS distance FROM pts
+	WHERE flag = true AND point <|2,40|> [2, 3, 4, 5]
+	ORDER BY distance;
+```
+
+```surql title="Sample output"
+'SelectProject [ctx: Db] [projections: id, flag, distance] {rows: 2, batches: 1, elapsed: 3.96ms}
+    SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 2, batches: 1, elapsed: 3.93ms}
+        Compute [ctx: Db] [fields: distance = vector::distance::knn(...)] {rows: 2, batches: 1, elapsed: 3.50ms}
+            Filter [ctx: Db] [predicate: flag = true] {rows: 2, batches: 1, elapsed: 3.46ms}
+                KnnScan [ctx: Db] [index: idx_pt, k: 2, ef: 40, dimension: 4, prefilter_tier: exact] {rows: 2, batches: 1, elapsed: 3.43ms}
+                    BitmapIndexScan [ctx: Db] [index: idx_flag, access: = true] {rows: 2, batches: 0, elapsed: 0ns}
+
+Total rows: 2'
+```
+
+The `BitmapIndexScan` found the two records with `flag = true`, and `KnnScan` has no `predicate` because no condition is left to check during the search. An allow-list this small takes the `exact` tier, which computes the distance to each allowed record without using the vector index. [Pre-filtering with an index](/docs/learn/data-models/vector-search/similarity-search#pre-filtering-with-an-index) describes the four tiers and which conditions qualify.

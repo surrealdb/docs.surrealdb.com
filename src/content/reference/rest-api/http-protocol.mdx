@@ -179,6 +179,34 @@ SurrealDB Cloud instances run the defaults listed above.
 
 <br />
 
+## Request timeouts
+
+<Since v="v3.3.0" />
+
+When the server is started with [`--query-timeout`](/docs/reference/cli/surrealdb-cli/environment-variables#command-environment-variables) (`SURREAL_QUERY_TIMEOUT`), the same duration also limits the wall-clock time of a whole request on these endpoints:
+
+- [`POST /sql`](#sql) and the `/sql` WebSocket.
+- [`POST /gql`](#gql).
+- [`POST /graphql`](#graphql), for a single request and for a batch.
+- `POST /rpc`, for every [RPC method](/docs/reference/rest-api/rpc-protocol), in the same way as on the WebSocket `/rpc` endpoint and over gRPC. This includes `signin`, `signup` and `authenticate`.
+
+No wall-clock limit applies unless the option is set. The RPC `begin`, `commit` and `cancel` methods are exempt, because stopping a commit part-way is unsafe, although each statement run inside the explicit transaction is still limited on its own. GraphQL subscriptions over WebSocket and the [`POST /signin`](#signin) and [`POST /signup`](#signup) endpoints are not covered by the wall-clock limit.
+
+When the limit ends a request to `POST /sql` or `POST /gql`, the response is `504 Gateway Timeout` with an error body, where earlier releases answered a timed-out request with `400`. The status is `504` rather than `503` because load balancers commonly read `503` as an unhealthy node, and one slow query is no reason to take a node out of rotation. With `--query-timeout 5s`, the body reads:
+
+```json title="Response"
+{
+	"code": 504,
+	"details": "Query timeout",
+	"description": "The request exceeded the configured query timeout. Reduce the work performed by the request or raise the timeout.",
+	"information": "The query was not executed because it exceeded the timeout: 5s"
+}
+```
+
+A `/graphql` request that runs out of time returns a GraphQL response whose error message reads `The GraphQL request was not executed because it exceeded the timeout: 5s`. A `POST /rpc` call returns an RPC error response with the message `The query was not executed because it exceeded the timeout: 5s`, and the `/sql` WebSocket sends the same message as text.
+
+<br />
+
 ## `GET /status` {#status}
 
 This HTTP RESTful endpoint checks whether the database web server is running, returning a 200 status code.
@@ -204,9 +232,9 @@ date: Tue, 03 Feb 2026 02:10:33 GMT
 
 ## `GET /health` {#health}
 
-This HTTP RESTful endpoint checks whether the database server and storage engine are running.
+This HTTP RESTful endpoint checks whether the storage engine responds, by reading one key in a read-only transaction. It returns `200` when the read succeeds and `500` when it fails, or `403` when the `health` route is denied by [capabilities](/docs/learn/security/authorization/capabilities#http-route-names).
 
-The endpoint returns a `200` status code on success and a `500` status code on failure.
+`/health` stays reachable while the server is still starting up, so a `200` shows that the storage engine answers, not that startup has finished. [`GET /ready`](#ready) is the endpoint that reports whether it has.
 
 ```bash title="Request"
 curl -I http://localhost:8000/health
@@ -229,14 +257,21 @@ date: Tue, 03 Feb 2026 02:15:08 GMT
 
 <Since v="v3.2.0" />
 
-This HTTP RESTful endpoint is the startup and readiness probe. It returns `200` once deferred startup work (such as import and credential initialisation) has completed and, when a heartbeat budget is configured, the node's cluster heartbeat is fresh. It returns `503` while still starting up or when the heartbeat is stale, and `500` if the heartbeat cannot be read.
+This HTTP RESTful endpoint is the startup and readiness probe. It returns `200` when both of these hold:
 
-Contrast with [`GET /status`](#status) (process and listener liveness only) and [`GET /health`](#health) (storage backend reachability only). Query and auth endpoints are gated with `503` until startup completes, while `/ready` stays reachable throughout so orchestrators can distinguish *starting* from *failed*.
+- The startup work that follows opening the datastore has finished. From 3.3.0 this covers the version check and any data migrations, the default namespace and database, the root credentials, node registration, and any import set with `--import-file`.
+- The node's cluster heartbeat is recent. The node refreshes it every `--node-membership-refresh-interval`, 3 seconds by default, and `/ready` treats it as stale once it is more than three intervals old.
+
+It returns `503` while startup is still running, when the heartbeat is stale, or when the node has no cluster membership record, and `500` when the heartbeat cannot be read. A node with no cluster membership record returned `500` before 3.3.0. <Since v="v3.3.0" /> SurrealDB Enterprise adds conditions of its own, such as a valid [licence](/docs/manage/enterprise).
+
+Until startup finishes, every other path except `/`, `/status`, `/health`, `/version` and `/metrics` returns `503` with `Retry-After: 1`, so query and authentication requests wait for the node while `/ready` stays reachable and orchestrators can tell a starting node from a failed one. With no import configured, the server waits up to 5 seconds for startup before it accepts connections, so an ordinary start reports `200` from the first probe. <Since v="v3.3.0" /> A start with an import accepts connections straight away, and one that runs past 5 seconds accepts them at that point, and both report `503` until startup finishes. A failure to initialise the datastore stops the process, while a failed import or credential initialisation leaves the server running and `/ready` at `503`.
+
+Contrast with [`GET /status`](#status) (process and listener liveness only) and [`GET /health`](#health) (storage backend reachability only).
 
 The CLI [`surreal isready`](/docs/reference/cli/surrealdb-cli/commands/isready) command calls this endpoint.
 
 ```bash title="Request"
-curl -I http://localhost:8000/ready
+curl -i http://localhost:8000/ready
 ```
 
 ```bash title="Output (ready)"
@@ -250,9 +285,12 @@ content-length: 0
 
 ```bash title="Output (still starting)"
 HTTP/1.1 503 Service Unavailable
-retry-after: 1
-content-length: 0
+content-type: application/json
+
+{"code":503,"details":"Service unavailable","description":"The server is still starting up and cannot serve this request yet. Retry once the instance is ready.","information":"The server is still starting up and is not ready to serve requests"}
 ```
+
+A gated endpoint returns the same body with a `retry-after: 1` header, which `/ready` itself does not send.
 
 <br />
 
@@ -542,6 +580,8 @@ POST /signin
 
 This HTTP RESTful endpoint is used to access an existing account inside the SurrealDB database server.
 
+When [authentication rate limiting](/docs/reference/cli/surrealdb-cli/environment-variables#authentication-rate-limiting-environment-variables) is enabled, an attempt beyond the client address's budget is refused with `429 Too Many Requests` and a `Retry-After` header giving the number of seconds to wait, and the error body says that too many authentication attempts were made from this client address. `/signin` and [`/signup`](#signup) draw on the same budget. <Since v="v3.3.0" />
+
 ### Headers
 
 <table>
@@ -628,7 +668,7 @@ This HTTP RESTful endpoint is used to access an existing account inside the Surr
 
 ### Example with a record user
 
-The following example will work as long as as an access method has been defined and a record user has been signed up using the [`/signup`](#signup) endpoint.
+The following example will work as long as an access method has been defined and a record user has been signed up using the [`/signup`](#signup) endpoint.
 
 ```bash title="Request"
 curl -X POST -H "Accept: application/json" -d '{"ns":"main","db":"main","ac":"users","user":"johndoe","pass":"123456"}' http://localhost:8000/signin
@@ -683,7 +723,7 @@ curl -X POST -H "Accept: application/json" -d '{"ns":"main","user":"johndoe","pa
 
 ### Example usage via postman
 
-After you have defined the users permissions for the record user, you can use the `POST /signin` endpoint to sign in as a user.
+After you have defined the permissions for the record user, you can use the `POST /signin` endpoint to sign in as a user.
 
 Using the [user credentials](/docs/learn/security/authentication/users#record-users) created add the following to the request body:
 ```json
@@ -702,6 +742,8 @@ Using the [user credentials](/docs/learn/security/authentication/users#record-us
 ## `POST /signup` {#signup}
 
 This HTTP RESTful endpoint is used to create an account inside the SurrealDB database server.
+
+When [authentication rate limiting](/docs/reference/cli/surrealdb-cli/environment-variables#authentication-rate-limiting-environment-variables) is enabled, an attempt beyond the client address's budget is refused with `429 Too Many Requests` and a `Retry-After` header giving the number of seconds to wait. `/signup` shares its budget with [`/signin`](#signin). <Since v="v3.3.0" />
 
 ### Header
 
@@ -2101,7 +2143,7 @@ SurMlFile.upload("./linear_test.surml", url, 5)
 
 ## `GET /ml/export/:name/:version` {#ml-export}
 
-This HTTP RESTful endpoint exports a SurrealML machine learning model from a specific Namespace and Database. The output file with be a SurrealML file packaged in the `.surml` file format. As machine learning files can be large, the endpoint outputs a chunked HTTP response.
+This HTTP RESTful endpoint exports a SurrealML machine learning model from a specific Namespace and Database. The output file will be a SurrealML file packaged in the `.surml` file format. As machine learning files can be large, the endpoint outputs a chunked HTTP response.
 
 ### Headers
 

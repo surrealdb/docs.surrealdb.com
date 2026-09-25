@@ -193,9 +193,7 @@ session = await client.sessions.create(
 
 ```
 
-Session metadata is set when the session is created and cannot be patched
-afterwards - there is no update endpoint. To track counters that change during a
-run, write them as attributes instead, where they get a supersession chain:
+Session metadata is set when the session is created and cannot be patched afterwards - there is no update endpoint. To track counters that change during a run, write them as attributes instead, where they get a supersession chain:
 
 ```python
 await memory.remember(
@@ -218,8 +216,7 @@ print(f"Relations: {len(state.knowledge['relations'])}")
 print(f"Open uncertainties: {len(state.unknowns)}")
 ```
 
-There is no cross-session diff endpoint. Each write returns its own delta, so
-accumulate those as the run proceeds:
+There is no cross-session diff endpoint. Each write returns its own delta, so accumulate those as the run proceeds:
 
 ```python
 result = await memory.remember(finding, session_id=session.id)

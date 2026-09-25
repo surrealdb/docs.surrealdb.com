@@ -37,7 +37,7 @@ The information returned from an `INFO` command is an object containing items th
 > Before SurrealDB v3.0.0, the output of an `INFO FOR` was only able to be used as a standalone statement and not in a dynamic context, such as inside other queries or as the value of a parameter.
 
 > [!NOTE]
-> From SurrealDB 3.2.2, `INFO FOR ROOT`, `INFO FOR NS`, `INFO FOR DB`, and `INFO FOR USER` always show password hashes as `PASSHASH '[REDACTED]'` (including for root). That keeps schema listings from exposing credential material to every role that can run `INFO`. The hash is still stored, while a privileged [export](/docs/reference/cli/surrealdb-cli/commands/export) still includes the real `PASSHASH` so backups can restore users. Note that Argon2 hashes remain one-way and salted, so redaction is about who can read the PHC string, not about treating a hash as a plaintext password.
+> From SurrealDB 3.2.2, `INFO FOR ROOT`, `INFO FOR NS`, `INFO FOR DB`, and `INFO FOR USER` always show password hashes as `PASSHASH '[REDACTED]'` (including for root). That keeps schema listings from exposing credential material to every role that can run `INFO`. The hash is still stored, while a privileged [export](/docs/reference/cli/surrealdb-cli/commands/export) still includes the real `PASSHASH` so backups can restore users. Note that Argon2 hashes remain one-way and salted, so redaction is about who can read the PHC string, not about treating a hash as a plaintext password. From 3.3.0, a user's [SCRAM verifier](/docs/reference/query-language/statements/define/user#scram-credentials-for-postgres-clients) is shown the same way, as `PASSSCRAM '[REDACTED]'`, and an export includes the real verifier.
 
 ## Example usage
 
@@ -83,7 +83,7 @@ INFO FOR ROOT;
 		threads: 32
 	},
 	users: {
-		root: "DEFINE USER root ON ROOT PASSHASH '[REDACTED]' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION NONE"
+		root: "DEFINE USER root ON ROOT PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION NONE"
 	}
 }
 ```
@@ -112,7 +112,7 @@ INFO FOR NS;
     },
     users: {
         n: "DEFINE USER n ON NAMESPACE ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE",
-        username: "DEFINE USER username ON NAMESPACE PASSHASH '[REDACTED]' ROLES EDITOR DURATION FOR TOKEN 1m, FOR SESSION 12h"
+        username: "DEFINE USER username ON NAMESPACE PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES EDITOR DURATION FOR TOKEN 1m, FOR SESSION 12h"
     }
 }
 ```
@@ -147,7 +147,7 @@ INFO FOR DB;
         person: 'DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE'
     },
     users: {
-        db_user: "DEFINE USER db_user ON DATABASE PASSHASH '[REDACTED]' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION NONE"
+        db_user: "DEFINE USER db_user ON DATABASE PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION NONE"
     }
 }
 ```
@@ -203,26 +203,37 @@ INFO FOR USER db_user;
 ```
 
 ```surql title="Sample output"
-"DEFINE USER db_user ON DATABASE PASSHASH '[REDACTED]' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION NONE"
+"DEFINE USER db_user ON DATABASE PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION NONE"
 ```
 
 ### Index information
 
 `INFO FOR INDEX` returns the status for an index: started, initial indexing, update indexing, built, or error.
 
-Progress reporting only applies when the [`CONCURRENTLY`](/docs/reference/query-language/statements/define/indexes#using-concurrently-clause) clause is used in a `DEFINE INDEX` command. Without this clause, the following statement will not be executed until the index is fully created, or fails, so by the time `INFO FOR INDEX` runs the index is already built and reports `status: 'ready'` rather than any intermediate progress.
-
+The status is most useful when the [`CONCURRENTLY`](/docs/reference/query-language/statements/define/indexes#using-concurrently-clause) clause is used in a `DEFINE INDEX` command. Without this clause, the following statement will not be executed until the index is fully created, or fails, so `INFO FOR INDEX` reports an index that is already `ready`.
 
 ```surql
-CREATE |user:50000| SET name = id.id() RETURN NONE;
+CREATE |user:50000| SET name = rand::uuid() RETURN NONE;
 DEFINE INDEX unique_name ON TABLE user FIELDS name UNIQUE;
 INFO FOR INDEX unique_name ON TABLE user;
+```
+
+```surql title="Output"
+{
+    building: {
+        compacting: false,
+        initial: 50000,
+        pending: 0,
+        status: 'ready',
+        updated: 0
+    }
+}
 ```
 
 However, when the `CONCURRENTLY` clause is used, the index will build in the background while other statements are permitted to run. In this case, the `INFO FOR INDEX` statement will provide the current status on the index. The following code sample shows such an example in which an index is defined on a large number of records. A [`SLEEP`](/docs/reference/query-language/statements/sleep) statement is run in between each `INFO FOR INDEX` command to show the progress after each 50 millisecond interval.
 
 ```surql
-CREATE |user:50000| SET name = id.id() RETURN NONE;
+CREATE |user:50000| SET name = rand::uuid() RETURN NONE;
 DEFINE INDEX unique_name ON TABLE user FIELDS name UNIQUE CONCURRENTLY;
 INFO FOR INDEX unique_name ON user;
 SLEEP 50ms;
@@ -235,35 +246,30 @@ INFO FOR INDEX unique_name ON user;
 
 ```surql title="Possible output"
 -------- Query 1 --------
-{ 
+{
     building: {
         compacting: false,
-        initial: 0,
-        pending: 0,
-        status: 'indexing', 
-        updated: 0
+        status: 'cleaning'
     }
 }
 
 -------- Query 2 --------
-{ 
+{
     building: {
         compacting: false,
-        initial: 100,
-        pending: 20,
-        status: 'indexing', 
-        updated: 0
+        initial: 8266,
+        pending: 0,
+        status: 'indexing'
     }
 }
 
 -------- Query 3 --------
-{ 
+{
     building: {
         compacting: false,
-        initial: 100,
-        pending: 4,
-        status: 'indexing', 
-        updated: 16
+        initial: 16516,
+        pending: 0,
+        status: 'indexing'
     }
 }
 
@@ -271,27 +277,23 @@ INFO FOR INDEX unique_name ON user;
 {
     building: {
         compacting: false,
-        status: 'ready'
+        initial: 24516,
+        pending: 0,
+        status: 'indexing'
     }
 }
 ```
 
-#### Vector index compaction
+Once the build has finished, the status is `ready`, as in the first example.
 
 <Since v="v3.3.0" />
 
-`status` and `compacting` answer two different questions.
-
-`status: 'ready'` means the index is built and queries may use it. `compacting: true` means the index still stores record updates separately, because they have not been merged into its structure yet.
-
-This matters for [HNSW and DISKANN](/docs/reference/query-language/statements/define/indexes#vector-search-indexes) indexes. A vector index answers a k-nearest-neighbour search using its graph **and** any updates not yet merged into that graph. The graph is searched efficiently, but each unmerged update has to be compared against the query individually, so while many of them are outstanding a query returns the same results but takes considerably longer. A background process merges them, after which the field reads `false`.
-
-So after a large insert or update into a vector-indexed table, `status: 'ready'` on its own does not mean the index is answering at its usual speed:
+The `compacting` field is `true` while an HNSW or DISKANN index holds record updates that have not yet been merged into its graph. A KNN search reads those updates alongside the graph and computes their distances one by one, so after a large write, such as a bulk import, searches are slower until background index compaction has merged them and the field returns to `false`. Compaction runs after writes, and at least once in every interval set by the `--index-compaction-interval` option of `surreal start`, which is 5 seconds by default. For every other kind of index the field is always `false`.
 
 ```surql
-DEFINE INDEX idx_embedding ON TABLE article FIELDS embedding HNSW DIMENSION 4;
-CREATE |article:10000| SET embedding = [rand::float(), rand::float(), rand::float(), rand::float()] RETURN NONE;
-INFO FOR INDEX idx_embedding ON article;
+DEFINE INDEX idx_embedding ON document FIELDS embedding HNSW DIMENSION 2;
+CREATE |document:2000| SET embedding = [rand::float(), rand::float()] RETURN NONE;
+INFO FOR INDEX idx_embedding ON document;
 ```
 
 ```surql title="Possible output"
@@ -306,16 +308,14 @@ INFO FOR INDEX idx_embedding ON article;
 }
 ```
 
-Note that `pending` reads `0` here. `pending` counts writes that arrived while a `CONCURRENTLY` build was running, which is a different set of updates. It does not report how much is left to compact.
+Note that `pending` reads `0` in that output. `pending` counts writes that arrived while a `CONCURRENTLY` build was running, which is a different set of updates. It does not report how much is left to compact, so it cannot be used to tell whether a vector index has finished merging.
 
 To wait until a vector index answers at its usual speed, check both fields:
 
 ```surql
-LET $info = (INFO FOR INDEX idx_embedding ON article).building;
+LET $info = (INFO FOR INDEX idx_embedding ON document).building;
 RETURN $info.status = 'ready' AND $info.compacting = false;
 ```
-
-Indexes other than HNSW and DISKANN do not defer work this way, and always report `compacting: false`.
 
 ### The `STRUCTURE` clause
 

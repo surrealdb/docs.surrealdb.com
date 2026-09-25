@@ -190,6 +190,30 @@ The catalogue is grouped by signal family. Each subsection lists the Prometheus 
             <td scope="row" data-label="Notes">Resident set size of the process.</td>
         </tr>
         <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_process_memory_allocated_bytes</code><Since v="v3.3.0" /></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels">-</td>
+            <td scope="row" data-label="Notes">Tracked memory: live Rust-heap allocations, counted at the size class the allocator reserved for each, plus external memory reporters such as the RocksDB block cache. This is the value compared against <code>SURREAL_MEMORY_THRESHOLD</code>.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_process_memory_requested_bytes</code><Since v="v3.3.0" /></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels">-</td>
+            <td scope="row" data-label="Notes">Bytes requested for live heap allocations, before the allocator rounded each request up to a size class.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_process_memory_reserved_bytes</code><Since v="v3.3.0" /></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels">-</td>
+            <td scope="row" data-label="Notes">Reserved Rust-heap bytes: the size classes that live requests were rounded up into, without the external memory reporters.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_process_memory_threshold_bytes</code><Since v="v3.3.0" /></td>
+            <td scope="row" data-label="Type">gauge</td>
+            <td scope="row" data-label="Labels">-</td>
+            <td scope="row" data-label="Notes">The configured <code>SURREAL_MEMORY_THRESHOLD</code> in bytes, or <code>0</code> when the memory guard is disabled. Constant for the life of the process.</td>
+        </tr>
+        <tr>
             <td scope="row" data-label="Name"><code>surrealdb_process_cpu_percent</code></td>
             <td scope="row" data-label="Type">gauge</td>
             <td scope="row" data-label="Labels">-</td>
@@ -211,6 +235,12 @@ The catalogue is grouped by signal family. Each subsection lists the Prometheus 
 </table>
 
 The cadence of the process snapshot can be tuned with `SURREAL_PROCESS_METRICS_REFRESH_INTERVAL` (seconds; default `5`, floored at 1).
+
+The four `surrealdb_process_memory_*_bytes` gauges added in 3.3.0 are not on the [public allowlist](#public-metrics-allowlist), because together they show how close an instance is to refusing queries, so only an authenticated scrape returns them. The allocated, requested and reserved gauges report `0` in a build compiled without allocation tracking. Read together, they answer three questions:
+
+- `surrealdb_process_memory_allocated_bytes / surrealdb_process_memory_threshold_bytes` is how close the instance is to the threshold. Once tracked memory passes it, queries fail with a memory threshold error.
+- `surrealdb_process_memory_bytes - surrealdb_process_memory_allocated_bytes` is resident memory the tracker cannot see, such as allocator overhead, thread stacks and RocksDB memory outside its caches. This is the headroom to leave between `SURREAL_MEMORY_THRESHOLD` and a container memory limit.
+- `surrealdb_process_memory_reserved_bytes - surrealdb_process_memory_requested_bytes` is internal fragmentation. Use the reserved gauge rather than the allocated one here, because the allocated gauge also counts the external reporters.
 
 ### Statement - `surrealdb.statement`
 
@@ -439,6 +469,47 @@ The cadence of the process snapshot can be tuned with `SURREAL_PROCESS_METRICS_R
     </tbody>
 </table>
 
+### Bucket - `surrealdb.bucket`
+
+<Edition value="community" /> <Since v="v3.3.0" />
+
+One event is recorded per object-store operation that a [file bucket](/docs/reference/query-language/statements/define/bucket) performs, including those behind the global bucket. Bucket operations run below the session layer, so these families carry no `namespace`, `database` or `user` labels. They are not on the public allowlist, so only an authenticated scrape returns them.
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+            <th scope="col">Notes</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_bucket_operations_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>backend, op, outcome</code></td>
+            <td scope="row" data-label="Notes">Incremented once per operation, successful or not.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_bucket_sent_bytes_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels">same as above</td>
+            <td scope="row" data-label="Notes">Bytes given to a successful <code>put</code> or <code>put_if_not_exists</code>. A <code>put_if_not_exists</code> that finds the file already present still counts its bytes.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_bucket_received_bytes_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels">same as above</td>
+            <td scope="row" data-label="Notes">Bytes downloaded from the backend. Recorded only for a successful <code>get</code> that found the file.</td>
+        </tr>
+    </tbody>
+</table>
+
+- `backend` is the storage provider taken from the URL scheme: `s3`, `gcs`, `azure`, `file` or `memory`. It is never the bucket name.
+- `op` is one of `put`, `put_if_not_exists`, `get`, `head`, `delete`, `exists`, `copy`, `copy_if_not_exists`, `rename`, `rename_if_not_exists` or `list`.
+- `outcome` is `success` or `error`.
+
 ### HTTP - `surrealdb.http`
 
 <Edition value="community" />
@@ -484,7 +555,7 @@ The cadence of the process snapshot can be tuned with `SURREAL_PROCESS_METRICS_R
 
 <Edition value="community" />
 
-`surrealdb_live_query_orphaned_total` increments when a live-query registration cannot be torn down cleanly after a WebSocket disconnect, leaving a catalog row that still receives notifications. Alert on sustained growth.
+`surrealdb_live_query_orphaned_total` increments when a live-query registration cannot be torn down cleanly after a WebSocket disconnect, leaving a catalog record that still receives notifications. Alert on sustained growth.
 
 <table>
     <thead>
@@ -718,6 +789,23 @@ The slow-query pipeline exposes the same shape as the audit pipeline under the `
 | `surrealdb_slow_query_appended` | gauge | Cumulative records written to the sink. |
 | `surrealdb_slow_query_append_errors` | gauge | Cumulative sink-write failures. **Alert on any non-zero rate**. |
 
+### Licence - `surrealdb.license`
+
+<Edition value="enterprise" /> <Since v="v3.3.0" />
+
+These observable gauges describe the [licence](/docs/manage/enterprise#licence-key) state of an Enterprise node. They are the only place licence state is reported, and an anonymous scrape does not return them. A refused start is reported only through the exit status and the startup log, because the startup check runs before the HTTP listener is bound. Timestamps are absolute Unix seconds rather than countdowns, and a timestamp that does not apply is omitted rather than reported as `0`.
+
+| Name | Type | Labels | Notes |
+| --- | --- | --- | --- |
+| `surrealdb_license_state` | gauge | `state` | One-hot: `1` for the current state and `0` for the others. `state` is one of `valid`, `expiry_grace`, `offline_grace`, `revoked` or `unlicensed`. Absent until the licence has been checked. |
+| `surrealdb_license_expires_at_seconds` | gauge | - | When the licence expires. |
+| `surrealdb_license_grace_ends_at_seconds` | gauge | - | When the grace period in effect ends. |
+| `surrealdb_license_shutdown_at_seconds` | gauge | - | When the node shuts down, after a confirmed revocation or once the offline allowance has run out. The process exits at the first revalidation after this time, so read it as the earliest exit time. |
+| `surrealdb_license_last_validated_at_seconds` | gauge | - | The signed timestamp of the most recent verified response from keygen.sh, fresh or cached. This is keygen.sh's clock, not the node's. |
+| `surrealdb_license_generation` | gauge | - | Monotonic count of licence state updates, which tells an unchanged licence apart from a stalled reporter. |
+| `surrealdb_license_enforcing` | gauge | - | `1` when the build acts on the licence verdict, `0` when it only reports it. |
+| `surrealdb_license_trust_override` | gauge | - | `1` when the build's licence trust anchors were replaced at compile time. Always `0` on a released image. |
+
 ### Per-tenant rollups - `surrealdb.tenant`
 
 <Edition value="enterprise" />
@@ -743,7 +831,7 @@ For cloud and multi-tenant deployments the recommendation is a three-tier whitel
 
 - **Tier 1 - Always public.** The allowlisted six above.
 - **Tier 2 - Customer-visible (per-tenant, via proxy filter).** A subset of labelled families exposed to customers showing their own usage. Every metric in this tier carries `namespace` and `database` labels and the cloud proxy MUST filter on those before responding to a customer request - there is no server-side mechanism today that restricts a labelled family to a single tenant. Strip the `user` label before exposing. Suggested subset: `surrealdb_statement_*`, `surrealdb_transaction_total`, `surrealdb_transaction_duration_seconds`, `surrealdb_transaction_conflicts_total`, `surrealdb_query_*`, `surrealdb_http_request_total`, `surrealdb_network_received_bytes_total`, `surrealdb_network_sent_bytes_total`, `surrealdb_live_query_active`, `surrealdb_slow_query_total`.
-- **Tier 3 - Operator-only.** Everything else: all `surrealdb_ds_*`, all pipeline self-metrics, `surrealdb_rpc_*` (full method dimension), `surrealdb_auth_*` (failure rates can be probed by an attacker), `surrealdb_graphql_*`, `surrealdb_mcp_*`, `surrealdb_storage_*`, `surrealdb_http_active_requests` (real-time concurrency snapshot), and the KV-layer `surrealdb_transaction_*` counters. Reach these over an internal sidecar or private network with root credentials.
+- **Tier 3 - Operator-only.** Everything else: all `surrealdb_ds_*`, all pipeline self-metrics, `surrealdb_rpc_*` (full method dimension), `surrealdb_auth_*` (failure rates can be probed by an attacker), `surrealdb_graphql_*`, `surrealdb_mcp_*`, `surrealdb_storage_*`, `surrealdb_bucket_*`, `surrealdb_license_*`, the tracked-memory gauges (`surrealdb_process_memory_allocated_bytes`, `_requested_bytes`, `_reserved_bytes` and `_threshold_bytes`), `surrealdb_http_active_requests` (real-time concurrency snapshot), and the KV-layer `surrealdb_transaction_*` counters. Reach these over an internal sidecar or private network with root credentials.
 
 ## Cardinality and sensitivity
 
@@ -751,7 +839,7 @@ For cloud and multi-tenant deployments the recommendation is a three-tier whitel
 | --- | --- | --- |
 | **Tenant-identifying** | `namespace`, `database`, `user` on every labelled family | Strip or filter at the proxy before exposing to a customer. Anonymous scrapers cannot see any family carrying these labels because the families are absent from the public allowlist. |
 | **High-cardinality** | `peer` (cluster family, bounded by cluster size), `http_route`, `rpc_method` | Fine internally. External exposure should be conditional on the route or method set already being public. |
-| **Workload inference** | All process gauges (uptime, memory, CPU) | Already on the allowlist, but in a single-tenant-per-pod deployment they correlate with tenant workload. Acceptable trade-off in most architectures. |
+| **Workload inference** | The allowlisted process gauges (uptime, memory, CPU) | Already on the allowlist, but in a single-tenant-per-pod deployment they correlate with tenant workload. Acceptable trade-off in most architectures. |
 | **PII risk** | Audit and slow-query *records* carry SQL when `*_INCLUDE_SQL=true`. The pipeline self-metrics are safe; the records themselves go to the file sink and (opt-in) OTLP logs, not to `/metrics`. | Run the [three-pass redactor](/docs/manage/observability/audit-logging#redaction); alert on `*_append_errors`. |
 | **Default-deny** | Multi-tenant deployments | Set `SURREAL_METRICS_ENABLED=false` on customer-facing pods; serve scrapes from an internal sidecar bound to a non-tenant-visible interface. |
 
@@ -766,6 +854,8 @@ A starter set for production:
 - `surrealdb_ds_cluster_peers_unresolved > 0` for more than a startup window - DNS or connectivity gap.
 - `rate(surrealdb_audit_dropped[5m]) > 0` or `rate(surrealdb_audit_append_errors[5m]) > 0` - audit records being lost.
 - `surrealdb_audit_queue_depth` sustained above ~50% of `SURREAL_AUDIT_QUEUE_CAPACITY` - sink is falling behind.
+- `surrealdb_process_memory_allocated_bytes / surrealdb_process_memory_threshold_bytes > 0.9 and surrealdb_process_memory_threshold_bytes > 0` sustained - tracked memory is close to the point where queries fail.
+- `surrealdb_license_state{state="valid"} == 0` - an Enterprise node's licence is not currently verified as valid, so its next start may be refused. A `surrealdb_license_shutdown_at_seconds` series means an exit is scheduled.
 
 ## Migration from 3.0
 
