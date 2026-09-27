@@ -11,6 +11,7 @@ import {
     brandSwift,
     iconLangMojo,
 } from "@surrealdb/ui";
+import rustDark from "~/assets/img/icon/brand/rust-dark.svg";
 import { getProductFromPath } from "~/utils/product";
 
 export interface NavItem {
@@ -35,7 +36,7 @@ export interface NavMenuItem {
      * Brand logo drawn in full colour in a square tile to the left of the
      * label. Takes precedence over `icon`.
      */
-    image?: string;
+    image?: string | { light: string; dark: string };
     /** Icon path for the tile, for a brand the UI kit publishes no logo for. */
     icon?: string;
     /** Colour for `icon`: a Mantine colour key or a CSS colour. */
@@ -278,7 +279,8 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                     {
                         label: "Rust",
                         href: "/docs/reference/rust",
-                        image: brandRust,
+                        // The kit's mark is light grey; light mode takes a dark copy.
+                        image: { light: rustDark, dark: brandRust },
                     },
                     {
                         label: "JavaScript",

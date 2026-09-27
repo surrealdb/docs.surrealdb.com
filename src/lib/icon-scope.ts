@@ -21,6 +21,7 @@ import {
     brandWebAssembly,
     brandWindows,
 } from "@surrealdb/ui";
+import rustDark from "~/assets/img/icon/brand/rust-dark.svg";
 import { getImageUrl } from "~/utils/image-urls";
 
 const ICON_BASE = "~/assets/img/icon";
@@ -177,7 +178,8 @@ const KIT_BRANDS: Record<string, string | { light: string; dark: string }> = {
     php: brandPHP,
     python: brandPython,
     reactjs: brandReact,
-    rust: brandRust,
+    // The kit's Rust mark is light grey, so light mode takes a dark copy of it.
+    rust: { light: rustDark, dark: brandRust },
     solidjs: brandSolidJS,
     swift: brandSwift,
     typescript: brandTypescript,

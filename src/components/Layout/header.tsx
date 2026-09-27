@@ -352,11 +352,24 @@ function NavPanel({ group, inset, activeHref, panelId, onClose }: NavPanelProps)
                                                     >
                                                         {(item.image || item.icon) && (
                                                             <Box className={classes.navItemTile}>
-                                                                {item.image ? (
+                                                                {typeof item.image === "string" ? (
                                                                     <Image
                                                                         src={item.image}
                                                                         alt=""
                                                                     />
+                                                                ) : item.image ? (
+                                                                    <>
+                                                                        <Image
+                                                                            src={item.image.light}
+                                                                            alt=""
+                                                                            darkHidden
+                                                                        />
+                                                                        <Image
+                                                                            src={item.image.dark}
+                                                                            alt=""
+                                                                            lightHidden
+                                                                        />
+                                                                    </>
                                                                 ) : (
                                                                     <Icon
                                                                         path={item.icon as string}
