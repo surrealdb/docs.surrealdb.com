@@ -36,7 +36,7 @@ export function AgentBanner() {
 
             <Title
                 order={2}
-                fz={24}
+                fz={25}
                 fw={500}
                 c="bright"
                 mt="md"
@@ -62,21 +62,17 @@ export function AgentBanner() {
                 <AgentPrompt label="Copy setup prompt" />
                 <Anchor
                     href="/docs/agents"
-                    variant="vibrant"
                     fz="sm"
                     fw={500}
+                    underline="never"
+                    className={classes.moreLink}
                 >
-                    <Group
-                        gap={6}
-                        wrap="nowrap"
-                        component="span"
-                    >
-                        Learn more about SurrealDB for agents
-                        <Icon
-                            path={iconArrowRight}
-                            size="sm"
-                        />
-                    </Group>
+                    <span className={classes.linkLabel}>Learn more about SurrealDB for agents</span>
+                    <Icon
+                        path={iconArrowRight}
+                        size="sm"
+                        className={classes.linkArrow}
+                    />
                 </Anchor>
             </Group>
         </Box>

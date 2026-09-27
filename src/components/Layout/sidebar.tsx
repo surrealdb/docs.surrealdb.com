@@ -65,7 +65,7 @@ export function SidebarSectionHeading({ icon, children }: SidebarSectionHeadingP
             )}
             <Text
                 component="h3"
-                fz={15}
+                fz={16}
                 fw={600}
             >
                 {children}

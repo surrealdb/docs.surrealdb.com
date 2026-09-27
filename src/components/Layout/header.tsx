@@ -8,20 +8,29 @@ import {
     Divider,
     Flex,
     Group,
+    Image,
     Loader,
     NavLink as MantineNavLink,
-    Menu,
     Stack,
     Text,
-    ThemeIcon,
 } from "@mantine/core";
 import { Icon, iconChevronDown, iconOpen } from "@surrealdb/ui";
-import { Fragment, useState } from "react";
+import {
+    type CSSProperties,
+    type FocusEvent,
+    Fragment,
+    type KeyboardEvent,
+    type MouseEvent,
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
+} from "react";
 import { ClientOnly } from "vike-react/ClientOnly";
 import { usePageContext } from "vike-react/usePageContext";
 import { SurrealDBLogo } from "~/components/Logo";
 import { SearchDocs } from "~/components/SearchDocs";
-import { ColorSchemeToggle } from "../ColorSchemeToggle";
+import { ColorSchemeToggle, HEADER_CONTROL_SIZE } from "../ColorSchemeToggle";
 import {
     flattenMenuItems,
     isMenuGroup,
@@ -65,6 +74,25 @@ function NavItemBadge({ badge }: { badge: NavMenuBadge }) {
 }
 
 const HEADER_INSET = 32;
+
+/**
+ * Menu timing, matched to www.surrealdb.com's `--duration-normal` and
+ * `--cubic-default`. The panel's height carries the motion: it grows out of the
+ * header on open and resizes between menus, so switching menus changes what is
+ * in the panel without replaying its entrance. The columns slide in on a stagger
+ * (`.nav-section` and `.nav-footer` in the stylesheet).
+ */
+const NAV_PANEL_DURATION = 450;
+const NAV_PANEL_EASING = "cubic-bezier(0.525, 0, 0, 1)";
+
+/** The first column's delay and the step between columns, as on the apex site. */
+const NAV_FADE_DELAY = 180;
+const NAV_FADE_STEP = 60;
+
+const NAV_PANEL_ID = "docs-nav-panel";
+
+/** Grace period for the pointer to cross from a label into the panel. */
+const NAV_CLOSE_DELAY = 120;
 
 const SIGN_IN_URL =
     "https://studio.surrealdb.com/signin?_gl=1*6c6cw1*FPAU*MjUyNzg4NDQ3LjE3NzA3MzU0OTI.*_ga*MTUwNTkxNTcyNS4xNzcwNzM1NDky*_ga_J1NWM32T1V*czE3NzE4NDcxMTMkbzQ2JGcxJHQxNzcxODQ3MjAwJGo1NiRsMCRoNjUwODcxODU5*_fplc*dEpHdFVZdTN2eEolMkJBWkNUY1R5NUhKbmJySSUyRk56eEN6ZHlEcU52cTJzbUV0dXpOcmZhSU5MeXZFdW90bFdPZWRpbE4yTzA1dmZ1MiUyRlc5RnM3djhEZ2NVeGZhdmoyNW1rcFFsSmhwUXJzR1BoR2ZIWUdsMXYyZ0tJSXFmOW93JTNEJTNE";
@@ -133,7 +161,7 @@ function NavLink({ label, href, activeHref }: NavItem & { activeHref: string | n
     return (
         <Anchor
             href={href}
-            fz={14}
+            fz={15}
             py="sm"
             px="xs"
             fw={400}
@@ -147,16 +175,19 @@ function NavLink({ label, href, activeHref }: NavItem & { activeHref: string | n
     );
 }
 
-function NavDropdown({
-    label,
-    href,
-    sections,
-    activeHref,
-}: NavMenuGroup & { activeHref: string | null }) {
+interface NavDropdownProps {
+    group: NavMenuGroup;
+    activeHref: string | null;
+    open: boolean;
+    panelId: string;
+    onOpen: () => void;
+    onClose: () => void;
+}
+
+function NavDropdown({ group, activeHref, open, panelId, onOpen, onClose }: NavDropdownProps) {
+    const { label, href } = group;
     const active =
-        href === activeHref ||
-        flattenMenuItems({ label, sections }).some((item) => item.href === activeHref);
-    const [hover, setHover] = useState(false);
+        href === activeHref || flattenMenuItems(group).some((item) => item.href === activeHref);
 
     // The menu opens on hover, so a click is free to mean what a click on a
     // navigation item normally means: go to the section. Without a hub page to
@@ -164,147 +195,306 @@ function NavDropdown({
     const target = href ? { component: "a" as const, href } : { component: "button" as const };
 
     return (
-        <Menu
-            opened={hover}
-            onChange={setHover}
-            shadow="lg"
-            offset={18}
-            position="bottom-start"
-            withinPortal
-            trigger="click-hover"
-            transitionProps={{
-                transition: "pop-top-left",
+        <Anchor
+            {...target}
+            fz={15}
+            py="sm"
+            px="xs"
+            fw={400}
+            underline="never"
+            className={classes.navLink}
+            data-active={active || undefined}
+            aria-current={active ? "page" : undefined}
+            aria-expanded={open}
+            aria-controls={panelId}
+            mod={{ hover: open, active }}
+            onMouseEnter={onOpen}
+            onFocus={onOpen}
+            onKeyDown={(event: KeyboardEvent<HTMLElement>) => {
+                if (event.key === "Escape") onClose();
+
+                // Arrow down moves into the panel, so the menu is reachable
+                // without tabbing through every label first.
+                if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    document.querySelector<HTMLElement>(`#${panelId} a`)?.focus();
+                }
             }}
         >
-            <Menu.Target>
-                <Anchor
-                    {...target}
-                    fz={14}
-                    py="sm"
-                    px="xs"
-                    fw={400}
-                    underline="never"
-                    className={classes.navLink}
-                    data-active={active || undefined}
-                    aria-current={active ? "page" : undefined}
-                    mod={{ hover, active }}
-                >
-                    <Flex
-                        align="center"
-                        gap={4}
-                    >
-                        {label}
-                        <Icon
-                            path={iconChevronDown}
-                            size="xs"
-                            className={classes.navLinkChevron}
-                        />
-                    </Flex>
-                </Anchor>
-            </Menu.Target>
-            <Menu.Dropdown
-                bdrs={4}
-                className={classes.navDropdown}
+            <Flex
+                align="center"
+                gap={4}
             >
-                <Flex className={classes.navSections}>
-                    {sections.map((section) => {
-                        const wide = section.items.length > 5;
-
-                        return (
-                            <Box
-                                key={section.heading}
-                                className={classes.navSection}
-                                data-wide={wide || undefined}
-                            >
-                                {section.heading && (
-                                    <Text
-                                        component="div"
-                                        className={classes.navSectionLabel}
-                                        ff="monospace"
-                                        fz="sm"
-                                    >
-                                        {section.heading}
-                                    </Text>
-                                )}
-                                <Box
-                                    className={classes.navSectionItems}
-                                    data-wide={wide || undefined}
-                                >
-                                    {section.items.map((item) => {
-                                        const itemActive = item.href === activeHref;
-                                        return (
-                                            <Menu.Item
-                                                key={item.href}
-                                                component="a"
-                                                href={item.href}
-                                                className={classes.navItem}
-                                                data-active={itemActive || undefined}
-                                                aria-current={itemActive ? "page" : undefined}
-                                                leftSection={
-                                                    <ThemeIcon
-                                                        variant="light"
-                                                        className={classes.navItemChip}
-                                                        data-active={itemActive || undefined}
-                                                    >
-                                                        {/* The tint belongs to the
-                                                            glyph, not the chip, so
-                                                            every chip stays uniform.
-                                                            The active chip paints the
-                                                            product accent and owns
-                                                            its own glyph colour. */}
-                                                        <Icon
-                                                            path={item.icon}
-                                                            size="lg"
-                                                            color={
-                                                                itemActive
-                                                                    ? undefined
-                                                                    : item.iconColor
-                                                            }
-                                                        />
-                                                    </ThemeIcon>
-                                                }
-                                                rightSection={
-                                                    item.external ? (
-                                                        <Icon path={iconOpen} />
-                                                    ) : undefined
-                                                }
-                                            >
-                                                {/* `.mantine-Menu-itemLabel` stacks its children
-                                                    in a column, so the badge needs its own row
-                                                    to sit beside the label. */}
-                                                <Group
-                                                    gap="xs"
-                                                    wrap="nowrap"
-                                                >
-                                                    <Text
-                                                        component="span"
-                                                        className={classes.navItemLabel}
-                                                    >
-                                                        {item.label}
-                                                    </Text>
-                                                    {item.badge && (
-                                                        <NavItemBadge badge={item.badge} />
-                                                    )}
-                                                </Group>
-                                                {item.description && (
-                                                    <Text
-                                                        component="span"
-                                                        className={classes.navItemDescription}
-                                                    >
-                                                        {item.description}
-                                                    </Text>
-                                                )}
-                                            </Menu.Item>
-                                        );
-                                    })}
-                                </Box>
-                            </Box>
-                        );
-                    })}
-                </Flex>
-            </Menu.Dropdown>
-        </Menu>
+                {label}
+                <Icon
+                    path={iconChevronDown}
+                    size="xs"
+                    className={classes.navLinkChevron}
+                />
+            </Flex>
+        </Anchor>
     );
+}
+
+interface NavPanelProps {
+    group: NavMenuGroup | null;
+    /** Distance from the viewport edge to the first nav label's text. */
+    inset: number | null;
+    activeHref: string | null;
+    panelId: string;
+    onClose: () => void;
+}
+
+/**
+ * The one menu panel the header owns, laid out like the www.surrealdb.com
+ * menus: a column per section under a small uppercase heading, text-only
+ * items, and a row at the foot that leads to the section's hub page.
+ *
+ * There is a single panel for every menu rather than one per label, so moving
+ * between labels swaps the columns and eases the height to fit, instead of
+ * closing one panel and opening another from nothing.
+ */
+function NavPanel({ group, inset, activeHref, panelId, onClose }: NavPanelProps) {
+    const innerRef = useRef<HTMLDivElement>(null);
+    const [height, setHeight] = useState(0);
+
+    // The last group stays rendered while the panel closes, so its contents
+    // do not vanish before the height has eased back into the header.
+    const [shown, setShown] = useState<NavMenuGroup | null>(group);
+    if (group && group !== shown) setShown(group);
+
+    useEffect(() => {
+        const inner = innerRef.current;
+        if (!inner) return;
+
+        const observer = new ResizeObserver(() => setHeight(inner.offsetHeight));
+        observer.observe(inner);
+        return () => observer.disconnect();
+    }, []);
+
+    const open = group !== null;
+
+    return (
+        <Box
+            id={panelId}
+            className={classes.navDropdown}
+            data-open={open || undefined}
+            inert={!open}
+            onClick={(event: MouseEvent<HTMLElement>) => {
+                // A link in the panel navigates without a page load, so the
+                // header stays mounted: close the menu and drop the link's
+                // focus, or the panel would sit over the page it just opened.
+                const link = (event.target as HTMLElement).closest("a");
+                if (!link) return;
+                link.blur();
+                onClose();
+            }}
+            style={{
+                height: open ? height : 0,
+                transition: `height ${NAV_PANEL_DURATION}ms ${NAV_PANEL_EASING}`,
+            }}
+            onKeyDown={(event: KeyboardEvent<HTMLElement>) => {
+                if (event.key === "Escape") onClose();
+            }}
+        >
+            <Box
+                ref={innerRef}
+                className={classes.navPanel}
+                style={inset === null ? undefined : { paddingLeft: inset }}
+            >
+                {shown && (
+                    // Keyed on the menu, so its columns slide in afresh when
+                    // the pointer moves to another label.
+                    <Fragment key={shown.label}>
+                        <Box className={classes.navColumns}>
+                            {shown.sections.map((section, index) => {
+                                const wide = section.items.length > 5;
+
+                                return (
+                                    <Box
+                                        key={section.heading}
+                                        className={classes.navSection}
+                                        data-wide={wide || undefined}
+                                        style={
+                                            {
+                                                "--nav-fade-delay": `${NAV_FADE_DELAY + index * NAV_FADE_STEP}ms`,
+                                            } as CSSProperties
+                                        }
+                                    >
+                                        {section.heading && (
+                                            <Text
+                                                component="div"
+                                                className={classes.navSectionLabel}
+                                            >
+                                                {section.heading}
+                                            </Text>
+                                        )}
+                                        <Box
+                                            className={classes.navSectionItems}
+                                            data-wide={wide || undefined}
+                                        >
+                                            {section.items.map((item) => {
+                                                const itemActive = item.href === activeHref;
+                                                return (
+                                                    <Anchor
+                                                        key={item.href}
+                                                        href={item.href}
+                                                        underline="never"
+                                                        className={
+                                                            item.image || item.icon
+                                                                ? `${classes.navItem} ${classes.navItemWithIcon}`
+                                                                : classes.navItem
+                                                        }
+                                                        data-active={itemActive || undefined}
+                                                        aria-current={
+                                                            itemActive ? "page" : undefined
+                                                        }
+                                                    >
+                                                        {(item.image || item.icon) && (
+                                                            <Box className={classes.navItemTile}>
+                                                                {item.image ? (
+                                                                    <Image
+                                                                        src={item.image}
+                                                                        alt=""
+                                                                    />
+                                                                ) : (
+                                                                    <Icon
+                                                                        path={item.icon as string}
+                                                                        color={item.iconColor}
+                                                                    />
+                                                                )}
+                                                            </Box>
+                                                        )}
+                                                        <Group
+                                                            gap="xs"
+                                                            wrap="nowrap"
+                                                        >
+                                                            <Text
+                                                                component="span"
+                                                                className={classes.navItemLabel}
+                                                            >
+                                                                {item.label}
+                                                            </Text>
+                                                            {item.badge && (
+                                                                <NavItemBadge badge={item.badge} />
+                                                            )}
+                                                            {item.external && (
+                                                                <Icon
+                                                                    path={iconOpen}
+                                                                    size="sm"
+                                                                    className={
+                                                                        classes.navItemExternal
+                                                                    }
+                                                                />
+                                                            )}
+                                                        </Group>
+                                                        {item.description && (
+                                                            <Text
+                                                                component="span"
+                                                                className={
+                                                                    classes.navItemDescription
+                                                                }
+                                                            >
+                                                                {item.description}
+                                                            </Text>
+                                                        )}
+                                                    </Anchor>
+                                                );
+                                            })}
+                                        </Box>
+                                    </Box>
+                                );
+                            })}
+                        </Box>
+                        {shown.href && (
+                            <Box
+                                className={classes.navFooter}
+                                style={
+                                    {
+                                        "--nav-fade-delay": `${NAV_FADE_DELAY}ms`,
+                                    } as CSSProperties
+                                }
+                            >
+                                <Anchor
+                                    href={shown.href}
+                                    underline="never"
+                                    className={classes.navItem}
+                                >
+                                    <Text
+                                        component="span"
+                                        className={classes.navItemLabel}
+                                    >
+                                        {shown.label} overview
+                                    </Text>
+                                </Anchor>
+                            </Box>
+                        )}
+                    </Fragment>
+                )}
+            </Box>
+        </Box>
+    );
+}
+
+/**
+ * Where the first nav label's text starts, measured rather than derived, so
+ * the panel's columns line up under "Get started" at every width.
+ */
+function useNavInset() {
+    const listRef = useRef<HTMLDivElement>(null);
+    const [inset, setInset] = useState<number | null>(null);
+
+    useEffect(() => {
+        const list = listRef.current;
+        if (!list) return;
+
+        const measure = () => {
+            const label = list.querySelector("a");
+            if (!label) return;
+            const padding = Number.parseFloat(getComputedStyle(label).paddingLeft) || 0;
+            setInset(label.getBoundingClientRect().left + padding);
+        };
+
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(document.documentElement);
+        return () => observer.disconnect();
+    }, []);
+
+    return { listRef, inset };
+}
+
+/**
+ * Which menu is open, with a short grace period on close so the pointer can
+ * cross the gap between a label and the panel.
+ */
+function useOpenMenu() {
+    const [openLabel, setOpenLabel] = useState<string | null>(null);
+    const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+    const cancel = useCallback(() => clearTimeout(timer.current), []);
+
+    const open = useCallback(
+        (label: string) => {
+            cancel();
+            setOpenLabel(label);
+        },
+        [cancel],
+    );
+
+    const close = useCallback(() => {
+        cancel();
+        setOpenLabel(null);
+    }, [cancel]);
+
+    const scheduleClose = useCallback(() => {
+        cancel();
+        timer.current = setTimeout(() => setOpenLabel(null), NAV_CLOSE_DELAY);
+    }, [cancel]);
+
+    useEffect(() => cancel, [cancel]);
+
+    return { openLabel, open, close, scheduleClose, cancel };
 }
 
 function useCurrentProduct() {
@@ -321,12 +511,33 @@ export interface HeaderProps {
 export function Header({ navLinks, opened, onToggle }: HeaderProps) {
     const product = useCurrentProduct();
     const activeHref = useActiveHref(navLinks);
+    const menu = useOpenMenu();
+    const nav = useNavInset();
+    const { urlPathname } = usePageContext();
+
+    // Any navigation closes the menu, including one started from a label.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: runs on each path change
+    useEffect(() => {
+        menu.close();
+    }, [urlPathname, menu.close]);
+    const openGroup =
+        navLinks.find(
+            (entry): entry is NavMenuGroup => isMenuGroup(entry) && entry.label === menu.openLabel,
+        ) ?? null;
 
     return (
         <Box
             component="header"
             aria-label="Main navigation"
             h="var(--docs-header-height)"
+            onMouseEnter={menu.cancel}
+            onMouseLeave={menu.scheduleClose}
+            onBlur={(event: FocusEvent<HTMLElement>) => {
+                // Close once focus leaves the header and its panel entirely.
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                    menu.close();
+                }
+            }}
         >
             <Group
                 align="center"
@@ -363,6 +574,7 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                     gap="lg"
                     visibleFrom="lg"
                     className={classes.navList}
+                    ref={nav.listRef}
                 >
                     {navLinks.map((entry) => (
                         <Box
@@ -371,14 +583,20 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                         >
                             {isMenuGroup(entry) ? (
                                 <NavDropdown
-                                    {...entry}
+                                    group={entry}
                                     activeHref={activeHref}
+                                    open={menu.openLabel === entry.label}
+                                    panelId={NAV_PANEL_ID}
+                                    onOpen={() => menu.open(entry.label)}
+                                    onClose={menu.close}
                                 />
                             ) : (
-                                <NavLink
-                                    {...entry}
-                                    activeHref={activeHref}
-                                />
+                                <Box onMouseEnter={menu.close}>
+                                    <NavLink
+                                        {...entry}
+                                        activeHref={activeHref}
+                                    />
+                                </Box>
                             )}
                         </Box>
                     ))}
@@ -395,7 +613,10 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                     />
                     <ClientOnly
                         fallback={
-                            <ActionIcon aria-label="Toggle color scheme">
+                            <ActionIcon
+                                aria-label="Toggle color scheme"
+                                size={HEADER_CONTROL_SIZE}
+                            >
                                 <Loader size="xs" />
                             </ActionIcon>
                         }
@@ -423,6 +644,20 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                     />
                 </Group>
             </Group>
+            <Box
+                className={classes.navBackdrop}
+                data-visible={openGroup !== null || undefined}
+                aria-hidden
+                onMouseEnter={menu.scheduleClose}
+                onClick={menu.close}
+            />
+            <NavPanel
+                group={openGroup}
+                inset={nav.inset}
+                activeHref={activeHref}
+                panelId={NAV_PANEL_ID}
+                onClose={menu.close}
+            />
         </Box>
     );
 }

@@ -1,37 +1,15 @@
 import type { MantineColor } from "@mantine/core";
 import {
-    iconAI,
-    iconAPI,
-    iconAtom,
-    iconAuthKeyhole,
-    iconBraces,
-    iconChart,
-    iconCommand,
-    iconConsole,
-    iconIntegration,
-    iconLangDotNet,
-    iconLangGo,
-    iconLangJava,
-    iconLangJavaScript,
-    iconLangKotlin,
+    brandDotNet,
+    brandGo,
+    brandJava,
+    brandJavaScript,
+    brandKotlin,
+    brandPHP,
+    brandPython,
+    brandRust,
+    brandSwift,
     iconLangMojo,
-    iconLangPHP,
-    iconLangPython,
-    iconLangRust,
-    iconLangSwift,
-    iconMemory,
-    iconOffice,
-    iconOrganization,
-    iconPlugin,
-    iconProgressClock,
-    iconQuery,
-    iconSandbox,
-    iconServer,
-    iconStudio,
-    iconSurreal,
-    iconTable,
-    iconTransfer,
-    iconVideo,
 } from "@surrealdb/ui";
 import { getProductFromPath } from "~/utils/product";
 
@@ -53,11 +31,14 @@ export interface NavMenuItem {
     href: string;
     description?: string;
     external?: boolean;
-    icon: string;
     /**
-     * Mantine colour key used to tint the item's icon - e.g. `"orange"`.
-     * Omit it to use the neutral chip, which is the default for most items.
+     * Brand logo drawn in full colour in a square tile to the left of the
+     * label. Takes precedence over `icon`.
      */
+    image?: string;
+    /** Icon path for the tile, for a brand the UI kit publishes no logo for. */
+    icon?: string;
+    /** Colour for `icon`: a Mantine colour key or a CSS colour. */
     iconColor?: MantineColor;
     /** Renders a small pill beside the label. */
     badge?: NavMenuBadge;
@@ -106,25 +87,21 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         label: "Querying",
                         href: "/docs/learn/querying",
                         description: "Mutate and query your data.",
-                        icon: iconQuery,
                     },
                     {
                         label: "Schema management",
                         href: "/docs/learn/schema-management",
                         description: "Define namespaces, tables, and indexes.",
-                        icon: iconTable,
                     },
                     {
                         label: "Data models",
                         href: "/docs/learn/data-models",
                         description: "Model documents, graphs, vectors, and more.",
-                        icon: iconBraces,
                     },
                     {
                         label: "Security",
                         href: "/docs/learn/security",
                         description: "Configure authentication, scopes, and access.",
-                        icon: iconAuthKeyhole,
                     },
                 ],
             },
@@ -135,14 +112,12 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         label: "Agent Memory",
                         href: "/docs/agent-memory",
                         description: "The AI memory and knowledge layer.",
-                        icon: iconSurreal,
                         external: true,
                     },
                     {
                         label: "Extensions",
                         href: "/docs/learn/extensions",
                         description: "Extend SurrealDB with functions and plugins.",
-                        icon: iconPlugin,
                     },
                 ],
             },
@@ -159,7 +134,6 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         label: "Embedding SurrealDB",
                         href: "/docs/build/embedding",
                         description: "Embed the engine natively or with WebAssembly.",
-                        icon: iconMemory,
                     },
                 ],
             },
@@ -170,13 +144,11 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         label: "Migrating",
                         href: "/docs/build/migrating",
                         description: "Import data and schemas from other databases.",
-                        icon: iconTransfer,
                     },
                     {
                         label: "Integrations",
                         href: "/docs/build/integrations",
                         description: "Connect SDKs, frameworks, and tools.",
-                        icon: iconIntegration,
                     },
                 ],
             },
@@ -187,7 +159,6 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         label: "AI Agents",
                         href: "/docs/build/ai-agents",
                         description: "Integrate SurrealDB with your agents.",
-                        icon: iconAI,
                     },
                 ],
             },
@@ -204,13 +175,11 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         label: "Instances",
                         href: "/docs/manage/instances",
                         description: "Create, scale, and monitor your database instances.",
-                        icon: iconServer,
                     },
                     {
                         label: "Organisations",
                         href: "/docs/manage/organisations",
                         description: "Manage members, roles, and billing for your team.",
-                        icon: iconOrganization,
                     },
                 ],
             },
@@ -221,20 +190,17 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         label: "surrealctl",
                         href: "/docs/manage/surrealctl",
                         description: "Manage instances and organisations from the command line.",
-                        icon: iconCommand,
                         badge: "new",
                     },
                     {
                         label: "Observability",
                         href: "/docs/manage/observability",
                         description: "Monitor metrics, logs, and slow queries.",
-                        icon: iconChart,
                     },
                     {
                         label: "Schema migration",
                         href: "/docs/manage/schema-migration",
                         description: "Promote schema updates safely.",
-                        icon: iconProgressClock,
                     },
                 ],
             },
@@ -245,7 +211,6 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         label: "Self-hosted instance",
                         href: "/docs/manage/self-hosted",
                         description: "Run and operate SurrealDB on your own infrastructure.",
-                        icon: iconOffice,
                     },
                 ],
             },
@@ -262,7 +227,6 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         label: "SurrealDB Studio",
                         href: "/docs/explore/studio",
                         description: "Explore data in the official SurrealDB dashboard.",
-                        icon: iconStudio,
                     },
                 ],
             },
@@ -273,13 +237,11 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         label: "Tutorials & demos",
                         href: "/docs/explore/tutorials",
                         description: "Follow hands-on walkthroughs and demos.",
-                        icon: iconVideo,
                     },
                     {
                         label: "SurrealDB Labs",
                         href: "/docs/labs",
                         description: "Preview experimental features and lab notes.",
-                        icon: iconAtom,
                     },
                 ],
             },
@@ -296,88 +258,73 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         label: "SurrealQL",
                         href: "/docs/reference/query-language",
                         description: "Explore the official SurrealQL query language.",
-                        icon: iconSandbox,
                     },
                     {
                         label: "APIs & protocols",
                         href: "/docs/reference/rest-api",
                         description:
                             "REST, HTTP, RPC, CBOR and Postgres wire protocols, and the error format they share.",
-                        icon: iconAPI,
                     },
                     {
                         label: "CLI Tools",
                         href: "/docs/reference/cli",
                         description: "Command reference for surrealctl, surreal, and surqlfmt.",
-                        icon: iconConsole,
                     },
                 ],
             },
             {
-                // Tints are Mantine colour keys, resolved to the scheme-aware
-                // `-light` pair, so each SDK reads as its own language without
-                // breaking contrast in either theme.
                 heading: "SDKs",
                 items: [
                     {
                         label: "Rust",
                         href: "/docs/reference/rust",
-                        icon: iconLangRust,
-                        iconColor: "orange",
+                        image: brandRust,
                     },
                     {
                         label: "JavaScript",
                         href: "/docs/reference/javascript",
-                        icon: iconLangJavaScript,
-                        iconColor: "yellow",
+                        image: brandJavaScript,
                     },
                     {
                         label: "Go",
                         href: "/docs/reference/golang",
-                        icon: iconLangGo,
-                        iconColor: "cyan",
+                        image: brandGo,
                     },
                     {
                         label: ".NET",
                         href: "/docs/reference/dotnet",
-                        icon: iconLangDotNet,
-                        iconColor: "grape",
+                        image: brandDotNet,
                     },
                     {
                         label: "Java",
                         href: "/docs/reference/java",
-                        icon: iconLangJava,
-                        iconColor: "red",
+                        image: brandJava,
                     },
                     {
                         label: "Kotlin",
                         href: "/docs/reference/kotlin",
-                        icon: iconLangKotlin,
-                        iconColor: "violet",
+                        image: brandKotlin,
                     },
                     {
                         label: "PHP",
                         href: "/docs/reference/php",
-                        icon: iconLangPHP,
-                        iconColor: "indigo",
+                        image: brandPHP,
                     },
                     {
                         label: "Mojo",
                         href: "/docs/reference/mojo",
                         icon: iconLangMojo,
-                        iconColor: "orange",
+                        iconColor: "#ff6a2c",
                     },
                     {
                         label: "Python",
                         href: "/docs/reference/python",
-                        icon: iconLangPython,
-                        iconColor: "blue",
+                        image: brandPython,
                     },
                     {
                         label: "Swift",
                         href: "/docs/reference/swift",
-                        icon: iconLangSwift,
-                        iconColor: "orange",
+                        image: brandSwift,
                     },
                 ],
             },

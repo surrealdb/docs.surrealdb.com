@@ -31,7 +31,7 @@ function AgentCard({ agent }: AgentCardProps) {
                 >
                     <AgentBrand
                         agent={agent.id}
-                        size={28}
+                        size={20}
                     />
                     <Box miw={0}>
                         <Text
