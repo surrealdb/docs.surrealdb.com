@@ -30,6 +30,7 @@ export function AgentBanner() {
                         agent={agent.id}
                         size={20}
                         alt={agent.name}
+                        mono
                     />
                 ))}
             </Group>

@@ -1,7 +1,5 @@
 import { Box, type BoxProps, Group, NavLink, Stack, Text } from "@mantine/core";
-import { Icon } from "@surrealdb/ui";
 import { usePageContext } from "vike-react/usePageContext";
-import { SECTION_ICONS } from "~/utils/icons";
 import type { NavLink as NavLinkItem, NavSection } from "~/utils/navigation";
 import { ProductSwitcherSegmented } from "./product-switcher";
 import { getProductFromPath } from "./products";
@@ -43,12 +41,14 @@ export function SidebarPane({ children, ...props }: SidebarPaneProps) {
 }
 
 export interface SidebarSectionHeadingProps {
-    icon?: string;
     children: React.ReactNode;
 }
 
-/** Heading row for a sidebar section, shared with the labs filter rail. */
-export function SidebarSectionHeading({ icon, children }: SidebarSectionHeadingProps) {
+/**
+ * Heading row for a sidebar section, shared with the labs filter rail. Text
+ * only: the section headings carry no icons.
+ */
+export function SidebarSectionHeading({ children }: SidebarSectionHeadingProps) {
     return (
         <Group
             align="center"
@@ -57,12 +57,6 @@ export function SidebarSectionHeading({ icon, children }: SidebarSectionHeadingP
             mb="sm"
             px="sm"
         >
-            {icon && (
-                <Icon
-                    path={icon}
-                    size="sm"
-                />
-            )}
             <Text
                 component="h3"
                 fz={16}
@@ -131,11 +125,9 @@ function SidebarNavLink({ link }: { link: NavLinkItem }) {
 }
 
 function SidebarSection({ section }: { section: NavSection }) {
-    const icon = section.icon ? SECTION_ICONS.get(section.icon) : undefined;
-
     return (
         <Box component="section">
-            <SidebarSectionHeading icon={icon}>{section.title}</SidebarSectionHeading>
+            <SidebarSectionHeading>{section.title}</SidebarSectionHeading>
             <Stack gap="xs">
                 {section.links.map((link) => (
                     <SidebarNavLink
