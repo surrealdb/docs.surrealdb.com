@@ -1,6 +1,9 @@
 import { ActionIcon, Menu, useComputedColorScheme, useMantineColorScheme } from "@mantine/core";
 import { Icon, iconCheck, iconMoon, iconSun } from "@surrealdb/ui";
 
+/** The header search box's height, so the toggle beside it is a matching square. */
+export const HEADER_CONTROL_SIZE = 38;
+
 export function ColorSchemeToggle() {
     const { colorScheme, setColorScheme } = useMantineColorScheme();
     const computedScheme = useComputedColorScheme();
@@ -11,7 +14,10 @@ export function ColorSchemeToggle() {
             transitionProps={{ transition: "scale-y" }}
         >
             <Menu.Target>
-                <ActionIcon aria-label="Toggle color scheme">
+                <ActionIcon
+                    aria-label="Toggle color scheme"
+                    size={HEADER_CONTROL_SIZE}
+                >
                     <Icon path={computedScheme === "dark" ? iconMoon : iconSun} />
                 </ActionIcon>
             </Menu.Target>

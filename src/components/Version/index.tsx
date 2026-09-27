@@ -23,7 +23,7 @@ export function Version({ sdk, prefix }: VersionProps) {
     return (
         <Box
             component="code"
-            bg="var(--surreal-glass-subtle)"
+            bg="var(--docs-card)"
             p="0px var(--mantine-spacing-sm)"
             bdrs="var(--mantine-radius-xs)"
         >

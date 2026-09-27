@@ -1,5 +1,4 @@
 import { Box, type BoxProps, Checkbox, Stack } from "@mantine/core";
-import { iconBraces, iconGrid, iconList } from "@surrealdb/ui";
 import { SIDEBAR_INSET, SidebarPane, SidebarSectionHeading } from "~/components/Layout/sidebar";
 import { labLanguages, labTopics } from "~/utils/labs";
 import classes from "./style.module.scss";
@@ -14,17 +13,16 @@ export interface FilterSidebarProps extends BoxProps {
 }
 
 interface FilterSectionProps {
-    icon: string;
     title: string;
     value: string[];
     onChange: (v: string[]) => void;
     options: readonly string[] | { value: string; label: string }[];
 }
 
-function FilterSection({ icon, title, value, onChange, options }: FilterSectionProps) {
+function FilterSection({ title, value, onChange, options }: FilterSectionProps) {
     return (
         <Box component="section">
-            <SidebarSectionHeading icon={icon}>{title}</SidebarSectionHeading>
+            <SidebarSectionHeading>{title}</SidebarSectionHeading>
             <Checkbox.Group
                 value={value}
                 onChange={onChange}
@@ -75,7 +73,6 @@ export function FilterSidebar({
                 px={SIDEBAR_INSET}
             >
                 <FilterSection
-                    icon={iconList}
                     title="Filters"
                     value={authorFilter}
                     onChange={setAuthorFilter}
@@ -85,14 +82,12 @@ export function FilterSidebar({
                     ]}
                 />
                 <FilterSection
-                    icon={iconBraces}
                     title="Languages"
                     value={languageFilter}
                     onChange={setLanguageFilter}
                     options={labLanguages}
                 />
                 <FilterSection
-                    icon={iconGrid}
                     title="Topics"
                     value={topicFilter}
                     onChange={setTopicFilter}
