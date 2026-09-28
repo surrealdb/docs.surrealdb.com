@@ -31,13 +31,27 @@ const SITE = "https://surrealdb.com";
 /**
  * Character ceiling for the whole file.
  *
- * The readiness checks treat an llms.txt over 100,000 characters as too large
- * to be a useful index, and this file is close to that floor before a single
- * description is written: 1,000-odd pages at about 90 characters of URL and
- * title each. The remainder is what `describableUrls` has to spend, and the
- * margin below 100,000 is what stops a few dozen new pages from breaching it.
+ * The readiness checks are `agent-ecosystem/afdocs`, which scores llms.txt size
+ * in three bands: pass at 50,000 characters or under, warn to 100,000, fail
+ * above it. Listing every page costs about 88,000 characters in links and
+ * titles alone, so **pass is unreachable** while the index stays complete, and
+ * warn is the permanent state. Descriptions are spent out of what is left.
+ *
+ * 99,000 is therefore chosen against the fail threshold rather than the pass
+ * one: it is the most description budget available without leaving the band the
+ * file already sits in. Every character between here and 100,000 is free, and
+ * the 1,000 left over is roughly eleven new pages of runway at about 87
+ * characters of floor each.
+ *
+ * Raising it past 100,000 is a real option rather than a broken one - nothing
+ * fails to work, the check simply scores fail - but it buys less than it looks:
+ * 110,000 describes about 31% of pages and 120,000 about 45%, while describing
+ * all of them needs roughly 160,000. Splitting per section does not help the
+ * score either, because afdocs only ever looks at `{base}/llms.txt`,
+ * `{origin}/llms.txt` and `{origin}/docs/llms.txt` - a nested index file is
+ * never discovered.
  */
-const SIZE_BUDGET = 96_000;
+const SIZE_BUDGET = 99_000;
 
 /** Collections that are not part of the documentation tree. */
 const SKIP_COLLECTIONS = new Set(["labs-items"]);
@@ -234,6 +248,27 @@ function byDepthThenUrl(a, b) {
     return a.url < b.url ? -1 : a.url > b.url ? 1 : 0;
 }
 
+/**
+ * Orders the queue that `describableUrls` spends its budget down.
+ *
+ * Separate from `byDepthThenUrl` on purpose: that one fixes the order pages
+ * are *listed* in, which is the reader's path through the index and should not
+ * move because a page was marked important. This one decides only which pages
+ * are offered a description before the budget runs out.
+ */
+function byPriorityThenDepth(a, b) {
+    // Defaulted here rather than trusted from the page object, because
+    // `EXTRA_PAGES` is written by hand and carries no `priority`. Subtracting
+    // an absent one gives `NaN`, and a comparator that returns `NaN` sorts
+    // arbitrarily - which showed up as unrelated pages trading descriptions.
+    const pa = a.priority ?? Number.POSITIVE_INFINITY;
+    const pb = b.priority ?? Number.POSITIVE_INFINITY;
+
+    if (pa !== pb) return pa - pb;
+
+    return byDepthThenUrl(a, b);
+}
+
 function pagesFor(id, prefix) {
     const root = join(CONTENT_DIR, id);
 
@@ -261,6 +296,11 @@ function pagesFor(id, prefix) {
             url: `${SITE}/docs${path ? `/${path}` : ""}`,
             title: meta.title,
             description: meta.description ?? "",
+            // Unset sorts last, so an unprioritised page keeps the depth
+            // ordering it had before this field existed.
+            priority: Number.isFinite(Number(meta.priority))
+                ? Number(meta.priority)
+                : Number.POSITIVE_INFINITY,
             // Counted on the URL rather than on the slug, because a section
             // holds several collections and a slug's depth is measured from
             // its own collection root. `/docs/learn/data-models` is that
@@ -394,7 +434,7 @@ function describableUrls() {
     const candidates = rendered
         .flatMap((section) => section.pages)
         .filter((page) => page.description)
-        .sort(byDepthThenUrl);
+        .sort(byPriorityThenDepth);
 
     for (const page of candidates) {
         const cost = `: ${summariseDescription(page.description)}`.length;
