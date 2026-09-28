@@ -435,8 +435,24 @@ The failure to watch for is at the short end, because it is the one that looks
 harmless. A page under about 200 words that carries no example of its own is
 usually a heading that escaped its parent, and it costs more than it looks:
 another sidebar row, another entry in `llms.txt`, another click, and a search
-result that answers nothing. Fold it into the page above it. There were 259 of
-these in September 2026, a quarter of the site.
+result that answers nothing. Fold it into the page above it.
+
+There were **42** of these in September 2026, about 4% of the documentation
+tree. An earlier draft of this section said 259, which was the count of pages
+under 200 words with the no-example condition dropped - 289 by the same
+measure today. The figure travelled: it was quoted back into planning as the
+size of the prize, which made folding look like the largest lever available
+when it is one of the smaller ones.
+
+Fewer of the 42 are foldable than the number suggests, and the exceptions are
+worth knowing before a sweep. A section `index.mdx` is a landing page, not a
+stray. The five hub pages in the root `index` collection are hardcoded as
+top-nav hrefs in `nav.ts`, so folding one puts the label back to naming a page
+that does not exist. A folder's only `overview.mdx` is its landing page under
+another name. And a short page can be a deliberate peer in a set: `cloud` and
+`sandbox` are two of the ways to run SurrealDB, listed beside `docker` and
+`in-memory`, so folding them removes options from a comparison. What is left
+after those is roughly a third of the flagged pages.
 
 Length on its own is not a reason to split. A reference index - every
 environment variable, every function in a family, every method on a client - is
@@ -716,9 +732,15 @@ Two things to check alongside a move:
 - The `www.surrealdb.com` repo has its own `/docs/*` redirects in
   `redirects.json`, and they run first. When you move a page a www entry already
   points at, repoint that entry instead of leaving a second hop.
-- A missing page does not 404 - `resolveDataFromCollection` 302s up to the parent
-  path - so a missed redirect is silent. Diff the URL set before and after
-  instead of watching for 404s.
+- A missing page **404s**, so a missed redirect is loud rather than silent.
+  Watching for 404s is a real check. The one exception is a folder with no page
+  of its own, which 301s to its first child.
+
+  This used to be a 302 one segment up, applied to every miss, and the change is
+  the reason to trust 404s now: a stale link landed on a section index that said
+  nothing about what was asked for, and a crawler recorded a redirect rather
+  than a gap. Twelve unreachable tutorials went unnoticed for seven weeks that
+  way, each answering 302 and resolving to a page that returned 200.
 
 ## Content components
 
@@ -833,8 +855,11 @@ export default async function data(context: PageContext) {
 
 1. Strips the URL prefix (the optional third argument, defaulting to the
    collection id) to get the slug, then looks up `getCollectionEntry(id, slug)`.
-2. On a miss, 302s one path segment up - `getParentUrl` re-attaches the `/docs`
-   base - and only throws a 404 when there is no parent.
+2. On a miss, 301s to the folder's first child when the path names a folder with
+   no page of its own (`resolveFolderLanding`), which is the page the sidebar
+   already points at. Every other miss throws a 404, so a page that has really
+   moved belongs in `redirects.ts`, where the destination is stated rather than
+   guessed at.
 3. Sets the page `title` and `description` through `useConfig`, suffixing the
    title per product (`src/utils/product.ts`).
 4. Builds the sidebar with `buildNavigation(id, prefix)`.

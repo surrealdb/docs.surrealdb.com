@@ -871,6 +871,27 @@ function stutteringPathRedirects(): Redirect[] {
  * rather than at an exact page. They are 302s for that reason: the destination
  * is our current best answer to a word, not a page that moved.
  */
+/**
+ * Two more pages folded for the same reason. `blink` became a section of the
+ * demos index it sat under; `ai-agents/ai-frameworks` was a middleman that
+ * listed the frameworks and then told the reader to start from the integrations
+ * overview instead, so it now redirects to that overview directly.
+ */
+function shortPageFoldRedirects(): Redirect[] {
+    return [
+        {
+            source: "/explore/tutorials/demos/blink",
+            destination: "/explore/tutorials/demos/overview#blink-note-taking-app",
+            statusCode: 301,
+        },
+        {
+            source: "/build/ai-agents/ai-frameworks",
+            destination: "/build/integrations/ai-frameworks/overview",
+            statusCode: 301,
+        },
+    ];
+}
+
 function guessableEntryPointRedirects(): Redirect[] {
     const entries: [string, string][] = [
         ["quickstart", "/docs"],
@@ -1073,6 +1094,7 @@ const baseRedirects: Redirect[] = [
     },
     ...enterpriseConsolidationRedirects(),
     ...stutteringPathRedirects(),
+    ...shortPageFoldRedirects(),
     // Last, so that every rule naming a real former path is tried first. These
     // are single-word guesses, and a guess should only be answered once nothing
     // better matches.

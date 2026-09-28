@@ -84,7 +84,7 @@ export function LabCard({ item }: LabCardProps) {
         >
             <Paper
                 className={classes.root}
-                radius="var(--surreal-radius-card)"
+                radius={0}
                 p="lg"
             >
                 <Group

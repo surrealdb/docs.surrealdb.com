@@ -17,7 +17,7 @@ export function FooterLink({ children, href, ...props }: FooterLinkProps) {
             href={href}
             target={isExternal ? "_blank" : undefined}
             rel={isExternal ? "noopener noreferrer external" : undefined}
-            fz={14}
+            fz={15}
             lh={1.55}
             c="slate.4"
             underline="never"

@@ -6,11 +6,14 @@ import {
     brandCursorLight,
     brandGithubDark,
     brandGithubLight,
+    brandOpenAiDark,
+    brandOpenAiLight,
     brandVSCode,
     brandZedDark,
     brandZedLight,
     pictoWindsurfSolid,
 } from "@surrealdb/ui";
+import classes from "./style.module.scss";
 
 /** A mark that needs a different artwork per theme, named by the theme it suits. */
 interface ThemedMark {
@@ -38,6 +41,15 @@ const AGENT_BRANDS: Record<string, string | ThemedMark> = {
     zed: { light: brandZedDark, dark: brandZedLight },
 };
 
+/**
+ * Overrides for the one-colour rendering. The Codex mark is a filled blob with
+ * its glyph knocked out, so flattening it to one colour erases the glyph; in
+ * one colour it is drawn as its maker's mark instead.
+ */
+const MONO_BRANDS: Record<string, ThemedMark> = {
+    codex: { light: brandOpenAiDark, dark: brandOpenAiLight },
+};
+
 export interface AgentBrandProps {
     /** Agent id, matching the page slug under `/docs/agents`. */
     agent: string;
@@ -45,6 +57,11 @@ export interface AgentBrandProps {
     size: number;
     /** Accessible name. Leave unset for a mark shown beside its own label. */
     alt?: string;
+    /**
+     * Draw the mark in one colour - white on dark, black on light - for a row
+     * of marks that should read as a set rather than as competing brands.
+     */
+    mono?: boolean;
 }
 
 /**
@@ -54,8 +71,9 @@ export interface AgentBrandProps {
  * than a colour-scheme hook: the choice is then made in CSS, so the server and
  * the client render the same markup and the mark is correct on the first paint.
  */
-export function AgentBrand({ agent, size, alt = "" }: AgentBrandProps) {
-    const mark = AGENT_BRANDS[agent];
+export function AgentBrand({ agent, size, alt = "", mono = false }: AgentBrandProps) {
+    const mark = (mono && MONO_BRANDS[agent]) || AGENT_BRANDS[agent];
+    const className = mono ? classes.mono : undefined;
 
     if (!mark) {
         return null;
@@ -69,6 +87,7 @@ export function AgentBrand({ agent, size, alt = "" }: AgentBrandProps) {
                 w={size}
                 h={size}
                 fit="contain"
+                className={className}
             />
         );
     }
@@ -81,6 +100,7 @@ export function AgentBrand({ agent, size, alt = "" }: AgentBrandProps) {
                 w={size}
                 h={size}
                 fit="contain"
+                className={className}
                 darkHidden
             />
             <Image
@@ -89,6 +109,7 @@ export function AgentBrand({ agent, size, alt = "" }: AgentBrandProps) {
                 w={size}
                 h={size}
                 fit="contain"
+                className={className}
                 lightHidden
             />
         </>
