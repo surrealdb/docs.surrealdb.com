@@ -14,7 +14,7 @@ The full grammar and edge cases live under [`LIVE SELECT`](/docs/reference/query
 
 ## Starting a subscription
 
-By default, creates and updates deliver the full record; deletes return nothing unless you add a clause like `RETURN BEFORE`. You receive a UUID as soon as the live query is registered. This UUID can later be passed in to a [`KILL`](/docs/reference/query-language/statements/kill) statement when you want to stop.
+With `LIVE SELECT *`, every notification carries the full record: the new state for a create or an update, and the record as it was before deletion for a delete. The table must already exist, for example through a `DEFINE TABLE` statement or an earlier write, or the statement fails with `The table 'person' does not exist`. You receive a UUID as soon as the live query is registered. This UUID can later be passed in to a [`KILL`](/docs/reference/query-language/statements/kill) statement when you want to stop.
 
 ```surql
 LIVE SELECT * FROM person;
@@ -35,12 +35,12 @@ LIVE SELECT DIFF FROM person;
 ```
 
 ```surql title="Output"
-'b87cbb0d-ca15-4f0a-8f86-caa680672aa5'
+u'b87cbb0d-ca15-4f0a-8f86-caa680672aa5'
 ```
 
 ## Filtering with WHERE
 
-You can narrow the subscription the same way you would a normal `SELECT`: only rows that match your predicate participate.
+You can narrow the subscription the same way you would a normal `SELECT`: only records that match your predicate participate.
 
 ```surql
 LIVE SELECT * FROM person WHERE age > 18;
@@ -51,6 +51,24 @@ LIVE SELECT * FROM person WHERE age > 18;
 Notifications reflect committed work, so a live event will not take place if a transaction is rolled back.
 
 Under heavy concurrency, the system makes a best effort to preserve sensible ordering, but you should not assume a total order across all writers that matches commit order in every edge case.
+
+### Field permissions
+
+A notification carries the record that changed, and each subscriber gets its own copy of it, reduced to the fields that subscriber may select. `$value`, `$after` and `$before` are bound to that same reduced copy, so none of them holds a field the notification itself would not carry.
+
+This matters because a live query's projection and `WHERE` clause are both written by the subscriber, and either can read one of those parameters. A field the subscriber cannot select reads as `NONE` in both:
+
+```surql
+-- Reads a restricted field into the notification, under a name of the caller's choosing
+LIVE SELECT $after.hidden AS leaked FROM test;
+
+-- Reads nothing into the notification, but decides whether one is sent at all
+LIVE SELECT * FROM test WHERE $after.hidden = 1;
+```
+
+The two would leak differently, which is why the parameters are bound to the reduced copy rather than the projection being restricted. A projection carries the value out, and renaming it with `AS` would take it past the check that drops restricted fields by name. A `WHERE` clause carries nothing out, so the record stays clean, and the subscriber would instead learn a value it cannot select from which changes produced a notification and which did not.
+
+On the delete side `$before` covers both, since it is the only parameter still holding the record as it was.
 
 ## Parameters in live queries
 

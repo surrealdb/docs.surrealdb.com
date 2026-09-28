@@ -16,7 +16,7 @@ function MarkdownImage(node: MediaDescriptor) {
     const shared = {
         alt: resolved.alt ?? "",
         title: resolved.title,
-        radius: "md",
+        radius: 0,
         maw: "100%",
         my: "md",
     } as const;
@@ -56,7 +56,7 @@ export function DocMarkdown() {
             components={registerMarkdownComponents()}
             onResolveMedia={resolveImageDescriptor}
             renderers={{ image: MarkdownImage }}
-            fz={15}
+            fz={16}
             lh={1.5}
             p={0}
         />

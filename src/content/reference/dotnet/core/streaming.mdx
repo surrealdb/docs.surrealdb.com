@@ -43,7 +43,7 @@ This feature is useful for building real-time applications that need to respond 
 
 ## `.ListenLive<T>()` {#listen-live}
 
-Listen responses from an existing live query.
+Listens to responses from an existing live query.
 
 ```csharp title="Method Syntax"
 db.ListenLive<T>(queryUuid)
@@ -535,7 +535,7 @@ await using var liveQuery = await db.LiveTable<Person>("person");
 
 ## `.Kill()` {#kill}
 
-Kills a running live query by it's UUID.
+Kills a running live query by its UUID.
 
 ```csharp title="Method Syntax"
 await db.Kill(queryUuid)

@@ -122,7 +122,7 @@ For edges like `friends_with`, it may be unclear whether a `person` is on the `i
 SELECT *, <->friends_with<->person AS friends FROM person;
 ```
 
-Each row lists the other people in the relation, regardless of which side they were on:
+Each record lists the other people in the relation, regardless of which side they were on:
 
 ```surql
 [
@@ -348,7 +348,7 @@ Walkthrough:
 
 * Open `user`, then `user:mcuserson`.
 * Open the **Relations** tab (outgoing `->`).
-* Follow `wrote` into its edge row, then `comment` to the comment row, matching `->wrote->comment`.
+* Follow `wrote` into its edge record, then `comment` to the comment record, matching `->wrote->comment`.
 
 Working backward in the Explorer is a good way to assemble a path while learning the syntax.
 

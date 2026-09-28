@@ -47,7 +47,7 @@ SELECT
 FROM ONLY person:1;
 ```
 
-Recursive syntax is not only shorthand: it can return a **single nested object** that repeats down a path:
+Recursive syntax can also return a **single nested object** that repeats down a path:
 
 ```surql
 -- Range to start at a depth of one, try to go down to depth of three

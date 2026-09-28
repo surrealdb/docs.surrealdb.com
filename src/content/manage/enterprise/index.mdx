@@ -1,7 +1,7 @@
 ---
 position: 1
 title: Enterprise Edition
-description: "What Enterprise Edition adds over Community: distributed live queries. S3-backed file storage, audit logging, FIPS-validated cryptography, trusted execution, and contractual support."
+description: "What Enterprise Edition adds over Community: distributed live queries, audit logging, FIPS-validated cryptography, trusted execution and contractual support, plus the licence key it needs to start, the SURREAL_LICENSE_* variables and the Docker Hub image."
 ---
 
 # Enterprise Edition <Edition value="enterprise" />
@@ -14,10 +14,45 @@ Enterprise Edition is the same server with a licence key applied. The binary dif
 | --- | --- | --- |
 | **Audit logging** | An identity-bound record of every authenticated action - statements, queries, transactions, RPC calls, sign-ins, sessions and HTTP requests - written to a durable NDJSON sink, with optional SHA-256 hash chaining and PII redaction. | [Audit logging](/docs/manage/observability/audit-logging) |
 | **Distributed live queries** | Live queries that resolve across every node in a cluster rather than the node holding the subscription. | Contact sales |
-| **File storage** | S3-compatible backends for file and blob objects, addressed through `DEFINE BUCKET`. | [`DEFINE BUCKET`](/docs/reference/query-language/statements/define/bucket) |
 | **FIPS mode** | FIPS 140-2 validated cryptographic modules, and the switch that enforces their use. | Contact sales |
 | **Trusted execution** | Running the server inside a trusted execution environment, with attestation. | Contact sales |
 | **Contractual support** | Support tiers with defined response times by severity, and uptime commitments. | Contact sales |
+
+S3-compatible bucket backends were available in Enterprise builds only before 3.3.0. From 3.3.0 the Community build includes them, alongside Google Cloud Storage and Azure Blob Storage, and Enterprise uses the same backends. See [`DEFINE BUCKET`](/docs/reference/query-language/statements/define/bucket#cloud-object-storage-backends).
+
+## Licence key
+
+<Since v="v3.3.0" />
+
+An Enterprise build needs a valid licence key to start. Three environment variables configure licensing:
+
+| Variable | Value |
+| --- | --- |
+| `SURREAL_LICENSE_KEY` | The licence key. |
+| `SURREAL_LICENSE_KEY_FILE` | The absolute path to a file containing the key, such as a mounted Kubernetes Secret. |
+| `SURREAL_LICENSE_STATE_PATH` | Optional. The absolute path of the attestation cache file, which lets a node start while the licence service is unreachable. |
+
+Setting both `SURREAL_LICENSE_KEY` and `SURREAL_LICENSE_KEY_FILE` is a startup error, and so is a relative `SURREAL_LICENSE_KEY_FILE` path or a key file that is unreadable or empty. The key is read once at startup, so replacing it means updating the variable or file and restarting the node. Everything else about licensing, including the validation service, the grace periods and the revalidation interval, is fixed in the binary.
+
+The node validates the key online against keygen.sh (`api.keygen.sh`) and checks the signature on each response against a key built into the binary. A first start therefore needs network access to `api.keygen.sh`. While it runs, the node revalidates every 30 minutes, with 10% jitter.
+
+With `SURREAL_LICENSE_STATE_PATH` set, the node stores the last signed response at that path and verifies it again whenever it reads it back. The file is created with mode `0600`, because it contains the licence key. Put it on a persistent volume, because a cache in a container's writable layer is lost when the container is recreated. Without the variable there is no cache, and every start needs keygen.sh to be reachable. A relative path, or one that is not writable, stops the node from starting.
+
+| Licence state | At startup | On a running node |
+| --- | --- | --- |
+| Valid | Starts. | Keeps serving. |
+| No key configured | Refuses to start. | - |
+| Expired | Refuses to start. There is no expiry grace period. | Keeps serving and logs a warning. The next start is refused. |
+| Suspended, banned or not found | Refuses to start. | Once two consecutive checks two minutes apart confirm it, `/ready` returns `503`, and the process exits with status `3` 24 hours later. Reinstating the licence within that time restores service without a restart. |
+| keygen.sh unreachable | Starts if the cache holds a valid attestation whose signed response is less than 24 hours old, and refuses otherwise. | Keeps serving for 24 hours from the last verified response. Then `/ready` returns `503`, and the process exits with status `3` three hours later unless keygen.sh answers in the meantime. |
+
+A refused start exits with status `1`. The 24-hour offline allowance is one budget measured from keygen.sh's signed timestamp, so a restart during an outage continues it rather than starting a new one. A `503` from `/ready` takes the node out of a readiness-gated load balancer, while clients that connect to it directly are still served until the process exits.
+
+An attestation cached by v3.3.0-beta.4 is not accepted by v3.3.0, so the first start after that upgrade needs keygen.sh to be reachable.
+
+Licence state is reported only through the `surrealdb_license_*` gauges on `/metrics`, which an anonymous scrape does not return. See [Licence metrics](/docs/manage/observability/metrics#licence---surrealdblicense).
+
+The Enterprise build is published on Docker Hub as [`surrealdb/surrealdb-enterprise`](https://hub.docker.com/r/surrealdb/surrealdb-enterprise). [Run with Docker](/docs/manage/self-hosted/docker#running-surrealdb-enterprise) has an example that passes the licence key.
 
 ## Observability is where most of it is written down
 

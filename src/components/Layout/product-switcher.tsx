@@ -85,7 +85,7 @@ export function ProductSwitcherSegmented({ current }: ProductSwitcherSegmentedPr
                         href={product.homeHref}
                         onClick={(event) => handleSwitch(event, id)}
                         underline="never"
-                        fz={14}
+                        fz={15}
                         fw={500}
                         className={classes.productSwitchItem}
                         data-active={active || undefined}

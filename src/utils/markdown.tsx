@@ -15,6 +15,7 @@ import { Edition } from "~/components/Edition";
 import { IconBox } from "~/components/IconBox";
 import { OptionsTable } from "~/components/OptionsTable";
 import { Since } from "~/components/Since";
+import { SurrealistMini } from "~/components/SurrealistMini";
 import { Synopsis } from "~/components/Synopsis";
 import { Version } from "~/components/Version";
 import { VersionBlock } from "~/components/VersionBlock";
@@ -288,6 +289,9 @@ export function registerMarkdownComponents(): MarkdownComponents {
         // Overrides the kit's Since: markdown puts the badge inside <p>, and
         // the kit's renders a div there, which breaks hydration site-wide.
         Since: { component: Since },
+        // Wraps the kit's embed so it sits on the card surface; the iframe's
+        // own background cannot be styled from here.
+        SurrealistMini: { component: SurrealistMini, block: true },
         Version: { component: Version },
         VersionBlock: { component: VersionBlock, block: true },
     });
