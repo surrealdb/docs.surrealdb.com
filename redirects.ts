@@ -827,6 +827,20 @@ function enterpriseConsolidationRedirects(): Redirect[] {
         statusCode: 301,
     });
 
+    // Enterprise docs moved from being nested under organisations to top-level manage/enterprise
+    out.push(
+        {
+            source: "/manage/organisations/enterprise",
+            destination: "/docs/manage/enterprise",
+            statusCode: 301,
+        },
+        {
+            source: "/manage/organisations/enterprise/:path*",
+            destination: "/docs/manage/enterprise/:path*",
+            statusCode: 301,
+        },
+    );
+
     return out;
 }
 

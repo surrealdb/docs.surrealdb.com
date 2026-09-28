@@ -114,6 +114,7 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         href: "/docs/agent-memory",
                         description: "The AI memory and knowledge layer.",
                         external: true,
+                        badge: "new",
                     },
                     {
                         label: "Extensions",
@@ -181,6 +182,12 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         label: "Organisations",
                         href: "/docs/manage/organisations",
                         description: "Manage members, roles, and billing for your team.",
+                    },
+                    {
+                        label: "Enterprises",
+                        href: "/docs/manage/enterprise",
+                        description: "Manage your enterprises and their single sign-on.",
+                        badge: "new",
                     },
                 ],
             },
