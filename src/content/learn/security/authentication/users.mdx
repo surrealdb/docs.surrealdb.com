@@ -367,6 +367,21 @@ The `$auth` parameter points to the record belonging to the current authenticate
 
 When the `$auth` parameter is set, you can access any of the fields of the record corresponding to the authenticated user (e.g. `$auth.name` or `$auth.email`) via that parameter.
 
+`$auth` itself is the user's record ID, such as `user:o57nbpz66v6a2l0l9kog`. Reading a field through it, including `$auth.id`, fetches the user record, and so needs the user to be allowed to select that record. On a table with no permissions for record users, which includes a table created implicitly on the first write, `$auth.email` and `$auth.id` are `NONE`. Use `$auth` itself wherever the record ID is enough, and give the user table a `select` permission where the fields are needed:
+
+```surql
+DEFINE TABLE user SCHEMALESS
+    PERMISSIONS FOR select WHERE id = $auth;
+```
+
+A common use is to store the user who created a record. A field with `VALUE $auth READONLY` sets it to the signed-in user on creation and refuses any later change:
+
+```surql
+DEFINE FIELD author ON post VALUE $auth READONLY;
+```
+
+A record user who runs `CREATE post SET title = 'Hi'` gets a post whose `author` is their own record ID, and a user cannot set `author` to anyone else.
+
 ### Expiration
 
 Authenticated sessions remain valid for a certain duration. This duration is `NONE` by default, meaning that sessions will not expire unless otherwise specified. This duration can be customised on both the `DEFINE USER` and `DEFINE ACCESS` statements to any specific value defining the maximum duration of an authenticated session associated with that user or access method. After the defined duration, the authenticated session will expire. For example, the `DEFINE USER example DURATION FOR SESSION 1d` clause will ensure that any authenticated sessions for the `example` user will expire after a day.
