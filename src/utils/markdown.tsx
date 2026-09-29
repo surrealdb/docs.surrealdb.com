@@ -11,9 +11,11 @@ import { AgentPicker } from "~/components/AgentPicker";
 import { AgentPrompt } from "~/components/AgentPrompt";
 import { Boxes } from "~/components/Boxes";
 import { CodeWithOutput } from "~/components/CodeWithOutput";
+import { DemoEmbed } from "~/components/DemoEmbed";
 import { Edition } from "~/components/Edition";
 import { IconBox } from "~/components/IconBox";
 import { OptionsTable } from "~/components/OptionsTable";
+import { ShowcaseCard } from "~/components/ShowcaseCard";
 import { Since } from "~/components/Since";
 import { SurrealistMini } from "~/components/SurrealistMini";
 import { Synopsis } from "~/components/Synopsis";
@@ -283,6 +285,10 @@ export function registerMarkdownComponents(): MarkdownComponents {
         IconBox: { component: IconBox, block: true },
         Boxes: { component: Boxes, block: true, preserveNewlines: false },
         CodeWithOutput: { component: CodeWithOutput, block: true, preserveNewlines: false },
+        // A showcase demo: its own finished page, framed on the card surface
+        // with tabs between its pages. A raw <iframe> would be stripped.
+        DemoEmbed: { component: DemoEmbed, block: true },
+        ShowcaseCard: { component: ShowcaseCard, block: true },
         Synopsis: { component: Synopsis, block: true },
         OptionsTable: { component: OptionsTable, block: true },
         Edition: { component: Edition },

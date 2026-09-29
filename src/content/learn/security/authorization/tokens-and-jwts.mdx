@@ -20,6 +20,38 @@ A typical JWT access definition names:
 
 That design works well with **third-party identity providers** - Auth0, AWS Cognito, Okta, Azure AD, and similar systems that issue OIDC/OAuth2 JWTs. You configure issuer, audience, signing keys, and claim bindings once; users authenticate with the provider, receive a JWT, and present it to SurrealDB without storing end-user passwords in your database.
 
+### Firebase and Supabase
+
+Firebase Authentication and Supabase Auth also issue JWTs that SurrealDB can verify, in the same way as the [Auth0](/docs/explore/tutorials/tutorials/auth0-integration) and [AWS Cognito](/docs/explore/tutorials/tutorials/aws-cognito-integration) guides show. Two things have to be in place:
+
+- **SurrealDB claims in the token.** SurrealDB uses the `ns`, `db` and `ac` claims to find the access method that verifies the token, and refuses a token without them. Add them as custom claims: in Firebase with the Admin SDK's `setCustomUserClaims()`, and in Supabase with a Custom Access Token Hook. The namespaced form (`https://surrealdb.com/ns` and so on) is also accepted.
+- **The provider's signing keys.** Point the access method at the provider's JWKS URL, and check the issuer and audience in `AUTHENTICATE`.
+
+```surql
+-- Firebase: tokens are signed with Google's rotating keys
+DEFINE ACCESS firebase ON DATABASE TYPE RECORD
+    WITH JWT URL "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"
+    AUTHENTICATE {
+        IF $token.iss != "https://securetoken.google.com/<YOUR_PROJECT_ID>"
+            OR $token.aud != "<YOUR_PROJECT_ID>" {
+            THROW "Invalid token";
+        };
+        RETURN type::record("user", $token.sub);
+    };
+
+-- Supabase: projects with asymmetric signing keys publish a JWKS
+DEFINE ACCESS supabase ON DATABASE TYPE RECORD
+    WITH JWT URL "https://<YOUR_PROJECT_REF>.supabase.co/auth/v1/.well-known/jwks.json"
+    AUTHENTICATE {
+        IF $token.iss != "https://<YOUR_PROJECT_REF>.supabase.co/auth/v1" {
+            THROW "Invalid token";
+        };
+        RETURN type::record("user", $token.sub);
+    };
+```
+
+A Supabase project that still signs tokens with the legacy shared JWT secret uses `WITH JWT ALGORITHM HS256 KEY "<YOUR_JWT_SECRET>"` instead of the URL.
+
 Keep token lifetimes and key rotation in mind: short-lived access tokens and explicit issuer/audience checks reduce the impact of a leaked JWT, and asymmetric verification lets SurrealDB trust keys published via JWKS when your provider rotates them.
 
 When you need **database-managed authentication** (for example sign-up and credential checks implemented as part of your data model), use **`DEFINE ACCESS … TYPE RECORD`**. That path issues and validates access in coordination with records in your database while still producing a session compatible with the same permission model as JWT access. Many deployments combine both: system operators use **root** or scoped database users, end users authenticate via **RECORD** or brokered **JWT** access, and **`PERMISSIONS`** enforce row- and field-level rules for everyone.
