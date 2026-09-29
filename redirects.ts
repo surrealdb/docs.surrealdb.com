@@ -601,7 +601,11 @@ function cloudAndDeploymentRedirects(): Redirect[] {
             "exact",
         ],
         ["build/deployment/self-hosted/overview", "manage/self-hosted", "exact"],
-        // `docker` and `kubernetes` keep their slugs, so the folder rule covers them.
+        // The self-hosted Docker page was a near copy of the Running one, and was
+        // merged into it. Both rules precede the folder rule below.
+        ["build/deployment/self-hosted/docker", "running/docker", "exact"],
+        ["manage/self-hosted/docker", "running/docker", "exact"],
+        // `kubernetes` keeps its slug, so the folder rule covers it.
         ["build/deployment/self-hosted", "manage/self-hosted", "prefix"],
 
         // The deployment section index became the Deployment models page. There is
