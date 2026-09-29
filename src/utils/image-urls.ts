@@ -1,5 +1,14 @@
 import {
     brandDocker,
+    brandGoogle,
+    brandKeycloak,
+    brandMicrosoftAzure,
+    brandOIDC,
+    brandOktaDark,
+    brandOktaLight,
+    brandPingFederate,
+    brandSAML,
+    brandWindows,
     pictoAISolid,
     pictoAtomSolid,
     pictoClisdbSolid,
@@ -74,6 +83,15 @@ const UI_ASSETS: Record<string, string> = {
     pictoUpdateSolid,
     pictoVectorSearch: pictoVectorSearchSolid,
     pictoVectorSearchSolid,
+    brandGoogle: brandGoogle,
+    brandMicrosoftAzure: brandMicrosoftAzure,
+    brandOktaDark: brandOktaDark,
+    brandOktaLight: brandOktaLight,
+    brandWindows: brandWindows,
+    brandKeycloak: brandKeycloak,
+    brandPingFederate: brandPingFederate,
+    brandOIDC: brandOIDC,
+    brandSAML: brandSAML,
 };
 
 /**
