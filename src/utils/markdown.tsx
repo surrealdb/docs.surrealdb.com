@@ -65,10 +65,10 @@ export function stripLeadingH1(markdown: string): string {
     return source.slice(line.to, source.length).replace(/^\n+/, "");
 }
 
-/** Quote `light` / `dark` keys inside `icon={{ … }}` so the value is valid JSON. */
+/** Quote `light` / `dark` keys and strip trailing commas inside `icon={{ … }}` so the value is valid JSON. */
 function quoteIconObjectKeys(markdown: string): string {
     return markdown.replace(/icon=\{\{([\s\S]*?)\}\}/g, (_match, inner: string) => {
-        const quoted = inner.replace(/\b(light|dark)\s*:/g, '"$1":');
+        const quoted = inner.replace(/\b(light|dark)\s*:/g, '"$1":').replace(/,(\s*)$/, "$1");
         return `icon={{${quoted}}}`;
     });
 }

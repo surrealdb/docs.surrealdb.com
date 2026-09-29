@@ -49,11 +49,14 @@ import {
     iconMemory,
     iconModel,
     iconNamespace,
+    iconOffice,
+    iconOrganization,
     iconPackageClosed,
     iconPlugin,
     iconPlus,
     iconQuery,
     iconRelation,
+    iconSandbox,
     iconSearch,
     iconServer,
     iconSidekick,
@@ -140,6 +143,9 @@ export const SECTION_ICONS = new Map([
     ["variable", iconVariable],
     ["video", iconVideo],
     ["wrench", iconWrench],
+    ["office", iconOffice],
+    ["sandbox", iconSandbox],
+    ["organization", iconOrganization],
 ] as const);
 
 export const SECTION_ICONS_NAMES = Array.from(SECTION_ICONS.keys());

@@ -132,7 +132,25 @@ export function buildNavigation(id: string, baseUrl?: string): NavSection[] {
         if (isHidden(child)) continue;
 
         if (isFolder(child)) {
-            sections.push(buildSection(child, base));
+            const category = getCategoryEntry(child);
+            if (category?.metadata.icon) {
+                sections.push(buildSection(child, base));
+            } else {
+                const children = sortByPosition(collectLinks(child, base));
+                const href = child.entry
+                    ? join(base, child.entry.slug)
+                    : (children[0]?.path ?? join(base));
+
+                rootLinks.push({
+                    value: {
+                        title:
+                            category?.metadata.title ?? child.entry?.metadata.title ?? child.name,
+                        path: href,
+                        children: children.length > 0 ? children : undefined,
+                    },
+                    position: category?.metadata.position ?? 0,
+                });
+            }
         } else {
             const { metadata, slug } = child.entry;
 
