@@ -68,3 +68,55 @@ A good rule of thumb is to do the following:
 * Introduce reactivity where it adds clear value.
 * Move well-understood logic into [events](/docs/learn/schema-management/events-and-triggers/defining-events) or [live queries](/docs/learn/querying/real-time/live-queries) once the behaviour is predictable.
 * Avoid large or highly coupled chains of events.
+
+## Records that expire
+
+SurrealDB does not yet have a time-to-live (TTL) setting or a built-in scheduler, so a record stays until something deletes it. Two patterns cover most needs in the meantime: hide a record's value once it is too old, or delete old records as new ones arrive.
+
+### Hiding expired values with a computed field
+
+A [`COMPUTED`](/docs/learn/schema-management/computed-data/computed-fields) field is worked out each time the record is read, so it can compare the current time with a stored timestamp. The field below returns the invite code for an hour and `NONE` after that, and a second field says whether the invite has expired:
+
+```surql
+DEFINE FIELD created_at ON invite DEFAULT time::now();
+DEFINE FIELD code ON invite COMPUTED IF time::now() - created_at < 1h { secret } ELSE { NONE };
+DEFINE FIELD expired ON invite COMPUTED time::now() - created_at >= 1h;
+
+CREATE invite:old SET secret = 'OLD123', created_at = time::now() - 2h;
+CREATE invite:new SET secret = 'NEW456';
+
+SELECT id, code, expired FROM invite;
+```
+
+```surql title="Output"
+[
+	{ code: 'NEW456', expired: false, id: invite:new },
+	{ code: NONE, expired: true, id: invite:old }
+]
+```
+
+A query can then leave expired records out with `WHERE !expired`. The expired record and its `secret` are still stored, so give `secret` a [field permission](/docs/reference/query-language/statements/define/field) if it must not be read directly.
+
+### Deleting old records with an event
+
+An [event](/docs/reference/query-language/statements/define/event) can delete the records that have expired each time a new record is created:
+
+```surql
+DEFINE FIELD created_at ON session DEFAULT time::now();
+DEFINE INDEX session_created ON session FIELDS created_at;
+
+DEFINE EVENT expire_old ON session WHEN $event = 'CREATE' THEN {
+    DELETE session WHERE created_at < time::now() - 1h;
+};
+
+CREATE session:old SET created_at = time::now() - 2h;
+CREATE session:recent SET created_at = time::now() - 10m;
+
+SELECT VALUE id FROM session;
+```
+
+```surql title="Output"
+[session:recent]
+```
+
+The expired `session:old` is deleted when `session:recent` is created. The index on `created_at` keeps the `DELETE` fast, because it runs on every create. Old records stay until the next record is created, so a table that stops receiving writes keeps them. For cleanup on a fixed schedule instead, run the `DELETE` statement from an external scheduler such as `cron`, for example with [`surreal sql`](/docs/reference/cli/surrealdb-cli/commands/sql).
