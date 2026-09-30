@@ -2,6 +2,9 @@ import vike, { type App } from "@vikejs/hono";
 import { Hono } from "hono";
 import type { Server } from "vike/types";
 import agentInstructions from "~/lib/agent-instructions.md?raw";
+import { handleFeedbackRequest } from "~/lib/api/feedback";
+import { handleSearchRequest } from "~/lib/api/search";
+import { matchRedirect, redirectResponse } from "~/lib/edge-routes";
 import { fetchAllSdkVersions } from "~/lib/versions";
 import {
     AGENT_DISCOVERY_LINK_HEADER,
@@ -22,7 +25,74 @@ import { redirectDestinationForDev, resolveRedirect } from "../../redirects";
 
 const BASE = "/docs";
 
+/**
+ * Whether this bundle is the Cloudflare Workers build. Replaced at build time
+ * by Vite's `define`, so the branches below are dropped entirely from the
+ * Vercel bundle rather than evaluated per request.
+ */
+const IS_CLOUDFLARE = import.meta.env.DEPLOY_TARGET === "cloudflare";
+
+/**
+ * The hostname the documentation used to live on, kept as a redirect.
+ *
+ * On Vercel this is a domain setting rather than anything in the repo, so it
+ * has no counterpart in the redirect table and would simply have stopped
+ * happening on Cloudflare. Every `docs.surrealdb.com/<path>` goes to
+ * `surrealdb.com/docs/<path>` with a 301, which is what that host answers
+ * today - the documentation is served at `/docs` on the apex domain, and one
+ * canonical address for a page is what keeps its ranking signals together.
+ *
+ * The apex is derived by dropping the `docs.` prefix rather than hardcoded, so
+ * the `surrealdb.dev` test domain behaves the same way without a second rule:
+ * `docs.surrealdb.dev` lands on `surrealdb.dev/docs`, keeping a request inside
+ * the domain it started in.
+ *
+ * A path that already carries `/docs` is not prefixed twice. The live host
+ * answers those with a stale rule that predates this table; doubling the
+ * prefix instead would produce `/docs/docs/...`, which is a 404 either way.
+ */
+const LEGACY_DOCS_PREFIX = "docs.";
+
 const app = new Hono();
+
+/**
+ * The redirect and prefix rules Vercel serves from `vercel.ts`, which the
+ * Workers build has to apply itself - Cloudflare has no layer in front of the
+ * Worker. Registered first so it runs before anything else can answer.
+ *
+ * `src/lib/edge-routes.ts` matches against the same table, compiled from the
+ * same `redirects.ts`, so a moved page resolves identically on both platforms.
+ */
+if (IS_CLOUDFLARE) {
+    app.use("*", async (c, next) => {
+        const url = new URL(c.req.url);
+
+        if (url.hostname.startsWith(LEGACY_DOCS_PREFIX)) {
+            const apex = url.hostname.slice(LEGACY_DOCS_PREFIX.length);
+            const path =
+                url.pathname === BASE || url.pathname.startsWith(`${BASE}/`)
+                    ? url.pathname
+                    : `${BASE}${url.pathname === "/" ? "" : url.pathname}`;
+            return c.redirect(`https://${apex}${path}${url.search}`, 301);
+        }
+
+        const redirect = matchRedirect(url.pathname);
+        if (redirect) return redirectResponse(redirect, url);
+        return next();
+    });
+
+    // The JSON endpoints, served by the Worker rather than proxied.
+    //
+    // Both are `Request -> Response` functions shared with the Vercel
+    // deployment (`api/search.ts` and `api/feedback.ts` are thin adapters over
+    // the same modules), so there is one implementation and the Worker does not
+    // depend on Vercel being up. They reach SurrealDB over the SDK's HTTP
+    // engine, which is plain `fetch`; `SURREAL_ENDPOINT` has to be an
+    // `https://` URL here, because Workers have no outbound `WebSocket`
+    // constructor for the SDK's other engine to use.
+    app.all(`${BASE}/api/search`, (c) => handleSearchRequest(c.req.raw));
+    app.all(`${BASE}/api/feedback`, (c) => handleFeedbackRequest(c.req.raw));
+}
 
 /**
  * Advertise the page index on every response, HTML included.

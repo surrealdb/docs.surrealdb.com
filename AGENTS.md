@@ -14,6 +14,113 @@ bun run qc    # check code quality
 
 Always run `bun run qa` then `bun run qc` before finishing any task.
 
+## Deployment targets
+
+Vercel serves production. A Cloudflare Workers build exists alongside it and is
+not deployed yet; both are built from the same source and the same route table,
+so neither can drift while the move is in progress.
+
+```bash
+bun run build              # Vercel (default, unchanged)
+bun run build:cloudflare   # Cloudflare Workers -> dist/client + dist/server
+bun run dev:cloudflare     # build, then wrangler dev against the built Worker
+bun run deploy:cloudflare  # build, then wrangler deploy
+```
+
+`DEPLOY_TARGET=cloudflare` is what selects the Workers build.
+
+**CI does not build the Workers target.** Cloudflare's own Git integration will
+do that once it is connected, shortly before the first deploy, the same way
+Vercel builds every push today - so a second build here would be duplicated
+work. What CI keeps is `bun run test:routes`, which exercises the compiled
+redirect table; that tests the table rather than the bundle, and it is the half
+that can regress from an edit to `redirects.ts` alone. Run
+`bun run build:cloudflare` yourself after touching `src/pages/+server.ts`,
+`wrangler.jsonc` or the generator, because nothing else will until then.
+
+The details that matter:
+
+- **`docs.surrealdb.com` redirects here.** Every `docs.surrealdb.com/<path>`
+  301s to `surrealdb.com/docs/<path>`, which is what that host answers today.
+  This one had no source to port: it is a Vercel *domain setting* and appears
+  nowhere in the repo, so the move would have silently dropped it and the old
+  documentation host would have stopped resolving. `wrangler.jsonc` gives this
+  Worker that hostname as its only zone route, and `+server.ts` answers it with
+  a redirect and serves nothing else there. A path that already carries `/docs`
+  is not prefixed twice.
+
+  The apex is derived by dropping the `docs.` prefix rather than hardcoded, so
+  `docs.surrealdb.dev` lands on `surrealdb.dev/docs` - the `surrealdb.dev` test
+  domain the apex repo serves - and a request stays inside the domain it started
+  in. That domain needs no rule of its own here.
+
+  The apex Worker reaches this one through `DOCS_ORIGIN` and drops the incoming
+  `Host` header when it proxies, so a documentation request arrives on the
+  `workers.dev` hostname and never matches this branch. (`wrangler dev` makes
+  this confusing locally: with a route configured it simulates that hostname for
+  every request, so the redirect appears to fire for everything. Remove `routes`
+  from the emitted config to see the real behaviour.)
+
+- **The documentation is still served through the apex project.** It lives at
+  `surrealdb.com/docs`, not on a subdomain. On Vercel the apex project rewrites
+  `/docs/*` here with the prefix stripped; on Cloudflare its Worker owns
+  `surrealdb.com/*` and proxies `/docs/*` here the same way, to the URL in its
+  `DOCS_ORIGIN` binding. This Worker takes no route on the zone.
+
+  Giving it `surrealdb.com/docs*` directly would be a hop cheaper, and is the
+  obvious thing to reach for - but 616 of the redirects under `/docs/` are
+  defined in the *apex* repo (601 in its `redirects.json` alone, covering the
+  1.x/2.x/3.x trees and the `/docs/integration/*` history). Cloudflare routes to
+  the most specific match, so this Worker would swallow them and every one of
+  those URLs would start 404ing. Those rules have to move repos before the hop
+  can go.
+
+- **The routing tables are platform-neutral.** `redirects.ts` holds the
+  redirects and `routes.ts` the URL-shape flags and header rules; neither names
+  a host. `vercel.ts` is a thin view of them, and
+  `scripts/generate-edge-routes.ts` compiles the same tables into
+  `generated/edge-routes.json` for `src/lib/edge-routes.ts` to match inside the
+  Worker. Add a redirect to `redirects.ts` and both platforms get it; delete
+  `vercel.ts` and the Worker is unaffected.
+
+  The compiler uses `@vercel/routing-utils` because the ~1000 existing rules are
+  written in the `source` syntax it implements, and a hand-rolled matcher for
+  that syntax is the thing that silently mis-routes a URL. It is a build-time
+  devDependency that turns patterns into regular expressions - no network, and
+  nothing at runtime imports it - so it is unaffected by the Vercel deployment
+  going away.
+
+  This is *not* `resolveRedirect` from `redirects.ts`, which only understands an
+  exact path or a trailing `/:path*`. Rules with a parameter mid-path
+  (`/docs/sdk/:sdk`) match in the compiled table and do not in that one.
+  `scripts/test-edge-routes.ts` pins that difference.
+
+- **`/docs/api/*` runs on both, from one implementation.** The handlers are
+  plain `Request -> Response` functions in `src/lib/api/`; `api/search.ts` and
+  `api/feedback.ts` are Vercel adapters over them, and `+server.ts` mounts the
+  same modules on the Worker. Nothing proxies back to Vercel.
+
+  `SURREAL_ENDPOINT` **must be `https://` on Cloudflare.** The SDK picks its
+  engine from the scheme, and Workers cannot open an outbound WebSocket - the
+  SDK does not fail when it tries, it waits forever, which the runtime reports
+  as "your Worker's code had hung" with no mention of the database. `connectDb`
+  rejects a `ws://` endpoint there with a message that names the setting, and
+  applies a connect timeout so any other unreachable endpoint is a 500 rather
+  than a hang.
+
+- **Static files** are served by the Workers Assets layer ahead of the Worker.
+  `html_handling` in `wrangler.jsonc` reproduces `cleanUrls` + `trailingSlash`,
+  and the generated `public/_headers` carries the header table. Both
+  `public/_headers` and `generated/` are build output and gitignored.
+
+  Two traps in that file, both handled by the generator: Cloudflare
+  *concatenates* the values of every matching rule where Vercel lets the first
+  match win, so rules are emitted in reverse with an explicit unset; and it
+  silently drops any line over 2000 characters, which the CSP exceeds. The CSP
+  is left out with a comment naming why, and the Worker applies the full table
+  to the HTML it renders - which is where a browser enforces CSP anyway, not on
+  a stylesheet.
+
 ## References
 
 - [Mantine](https://mantine.dev/llms.txt): UI

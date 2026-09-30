@@ -1,4 +1,4 @@
-import type { Redirect } from "@vercel/config/v1";
+import type { Redirect } from "./routes";
 
 /**
  * Legacy path prefixes from src-old (see src-old/content/config.ts urlForCollection)
