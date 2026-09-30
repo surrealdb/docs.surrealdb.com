@@ -11,6 +11,7 @@ import {
     iconBrandStackOverflow,
     iconBrandX,
     iconBrandYouTube,
+    iconComment,
 } from "@surrealdb/ui";
 import { SurrealDBLogo } from "~/components/Logo";
 import { FooterLink } from "./link";
@@ -87,11 +88,18 @@ const COLUMNS: FooterColumn[] = [
 
 /**
  * Community row, matching the apex site: icon-and-label chips rather than bare
- * glyphs, in the same order, so the two footers read as one index.
+ * glyphs, in the same order, so the two footers read as one index. The apex
+ * footer does not have GitHub Discussions yet, so add it there as well to keep
+ * the two footers the same.
  */
 const COMMUNITY = [
     { label: "Discord", href: "https://discord.gg/surrealdb", icon: iconBrandDiscord },
     { label: "GitHub", href: "https://github.com/surrealdb", icon: iconBrandGitHub },
+    {
+        label: "GitHub Discussions",
+        href: "https://github.com/orgs/surrealdb/discussions",
+        icon: iconComment,
+    },
     { label: "X", href: "https://x.com/surrealdb", icon: iconBrandX },
     { label: "YouTube", href: "https://www.youtube.com/@surrealdb", icon: iconBrandYouTube },
     {

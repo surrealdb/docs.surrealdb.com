@@ -87,6 +87,60 @@ An error occurred: This invite code is not valid
 
 The same pattern works in `SIGNIN`, for example to refuse a user whose account is disabled. The [`AUTHENTICATE` clause](#with-authenticate-clause) runs after both of them and can also refuse a session.
 
+### Password reset
+
+A record access method has no built-in password reset, but the `SIGNIN` clause can accept a one-time reset token as well as a password. The reset works in two steps:
+
+1. **Your backend creates the token.** When a user asks for a reset, a backend service signed in as a [system user](/docs/learn/security/authentication/users#system-users) stores a random token with an expiry time, and sends the user a link that contains it. SurrealDB does not send email, so this step belongs to the application.
+2. **The user signs in with the token.** The client signs in with `reset_token` and the new password. `SIGNIN` checks the token, deletes it so that it works only once, and saves the new password. The client receives a token for the session, as with a normal sign-in.
+
+```surql
+DEFINE TABLE user SCHEMAFULL PERMISSIONS FOR select, update WHERE id = $auth;
+DEFINE FIELD email ON user TYPE string;
+DEFINE FIELD pass ON user TYPE string;
+DEFINE INDEX unique_email ON user FIELDS email UNIQUE;
+
+-- Record users have no access to this table
+DEFINE TABLE password_reset SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD user ON password_reset TYPE record<user>;
+DEFINE FIELD token ON password_reset TYPE string;
+DEFINE FIELD expires_at ON password_reset TYPE datetime;
+DEFINE INDEX unique_token ON password_reset FIELDS token UNIQUE;
+
+DEFINE ACCESS account ON DATABASE TYPE RECORD
+	SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+	SIGNIN {
+		IF $reset_token {
+			LET $reset = (SELECT * FROM ONLY password_reset WHERE token = $reset_token AND expires_at > time::now() LIMIT 1);
+			IF $reset IS NONE {
+				THROW "This reset link is not valid or has expired";
+			};
+			DELETE $reset.id;
+			RETURN UPDATE ONLY $reset.user SET pass = crypto::argon2::generate($pass);
+		};
+		RETURN SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass);
+	}
+	DURATION FOR TOKEN 15m, FOR SESSION 12h;
+```
+
+The backend creates the token with a statement like the one below, then puts the returned `token` in the link it sends. If no user has the email address, the statement fails because `user` must be a record, and the backend can reply to the request in the same way in both cases, so that the reply does not show which addresses have an account.
+
+```surql
+CREATE password_reset SET
+	user = (SELECT VALUE id FROM ONLY user WHERE email = $email LIMIT 1),
+	token = rand::string(40),
+	expires_at = time::now() + 30m
+RETURN token;
+```
+
+The client then signs in with the parameters `reset_token` and `pass`. A token that is wrong, already used or expired fails with this error:
+
+```text title="Error output"
+An error occurred: This reset link is not valid or has expired
+```
+
+After the reset, the old password no longer signs in, and the new password signs in with `email` and `pass` as usual.
+
 ### With JSON web token
 
 Successful authentication with a record access method results in SurrealDB generating a JSON Web Token (JWT or, in the context of SurrealDB, just "token") that can be used until its expiration to authenticate as the record user without the need of providing any additional credentials. These tokens can also be issued by third parties and trusted by SurrealDB in order to allow for the authentication process to take place outside of SurrealDB, while the resulting access claims can be provided to SurrealDB inside of a token that it can trust. This feature is provided by the `WITH JWT` clause, which behaves similarly to [the JWT access method](/docs/reference/query-language/statements/define/access/jwt), including the [`AUDIENCE`](/docs/reference/query-language/statements/define/access/jwt#audience-validation) clause for restricting which `aud` claim values are accepted.

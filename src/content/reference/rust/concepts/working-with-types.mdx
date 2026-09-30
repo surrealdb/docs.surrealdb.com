@@ -120,6 +120,63 @@ Ok(Some(MyOwnDateTime(1760330504574)))
 Err(InternalError("Couldn't convert Object(Object({\"id\": RecordId(RecordId { table: \"person\", key: String(\"tcblzaktx3ponin9dyci\") })})) to MyOwnDateTime"))
 ```
 
+## Datetimes with chrono
+
+`chrono::DateTime<Utc>` implements `SurrealValue`, and converts to and from a SurrealQL `datetime`. A field of that type in a struct that derives `SurrealValue` is stored as a `datetime`, so it can be compared with other datetimes in a query. Add `chrono` as a dependency of your project to use the type.
+
+```rust
+use chrono::{DateTime, TimeZone, Utc};
+use surrealdb::engine::any::connect;
+use surrealdb::opt::auth::Root;
+use surrealdb::types::{RecordId, SurrealValue};
+
+#[derive(Debug, SurrealValue)]
+struct Event {
+    name: String,
+    at: DateTime<Utc>,
+}
+
+#[derive(Debug, SurrealValue)]
+struct EventRecord {
+    id: RecordId,
+    name: String,
+    at: DateTime<Utc>,
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("ws://localhost:8000").await?;
+
+    db.signin(Root {
+        username: "root".to_string(),
+        password: "secret".to_string(),
+    })
+    .await?;
+
+    db.use_ns("ns").use_db("db").await?;
+
+    let _: Option<EventRecord> = db
+        .create("event")
+        .content(Event {
+            name: "Launch".to_string(),
+            at: Utc.with_ymd_and_hms(2025, 10, 18, 4, 24, 17).unwrap(),
+        })
+        .await?;
+
+    // The field is a datetime, so it compares with a bound DateTime<Utc>
+    // or with a d'' literal
+    let recent: Vec<EventRecord> = db
+        .query("SELECT * FROM event WHERE at > $since")
+        .bind(("since", Utc.with_ymd_and_hms(2025, 10, 15, 0, 0, 0).unwrap()))
+        .await?
+        .take(0)?;
+    dbg!(recent);
+    Ok(())
+}
+```
+
+A datetime that reaches SurrealDB as a string is stored as a string. This happens with a field of type `String` holding a formatted date, such as the output of `to_rfc3339()`, and with records written by the 2.x SDK from a struct that derived `serde::Serialize`. A string is never greater than a datetime, so a query such as `WHERE at > d'2025-10-15'` does not find it. To keep a string field while querying it as a datetime, cast it in the query with `<datetime> at`, or define the field with `TYPE datetime` so that SurrealDB refuses a string for it when it is written, which shows the problem immediately.
+
 ## Record IDs as strings
 
 A record's `id` is a `RecordId`, made of a `table` and a `key`, so a struct field that holds it has to be a `RecordId` rather than a `String`. Reading it into a `String` field fails with `Failed to deserialize field 'id' ...: Expected string, got record`. There are two ways to work with the ID as a string instead.
