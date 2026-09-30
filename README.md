@@ -6,7 +6,7 @@
 	<a href="https://surrealdb.com#gh-light-mode-only" target="_blank">
         <img width="300" src="https://surrealdb.com/static/logo/light.svg" alt="SurrealDB Logo">
     </a>
-</p>
+</p> 
 
 <h3 align="center">
     SurrealDB is the ultimate cloud <br> database for tomorrow's applications
