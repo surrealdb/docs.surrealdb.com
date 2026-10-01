@@ -252,6 +252,26 @@ chronological, version-gated syntax keeps its `<Since>` marker, and statement
 choice (`CREATE`/`INSERT`/`UPSERT`) is never swapped - those differ on
 existing records.
 
+**Section order.** Within a page, order sections from the most common task to
+the most specialised, so a reader who stops early has read what they are most
+likely to need. The opening paragraph, `Requirements` and syntax stay at the
+top, and `See also` or related-pages lists stay at the end.
+
+Recency breaks ties, not rules. Among sections of similar difficulty, a newer
+feature - one carrying a recent `<Since>` - goes lower, because fewer readers
+are on a version that has it. A new feature that is now the recommended way to
+do something goes where the recommendation belongs instead, usually first; see
+**Example ordering**.
+
+Sections that depend on each other move together. A section depends on the one
+before it when it reuses that section's example data, extends the same
+statement, or refers back to it ("the query above", "this field"). Such a run
+sorts by its first section and keeps its internal order. A warning or limit
+stays beside the section it qualifies, however far down that section sits.
+
+Reordering breaks no links, because anchors come from heading text, but check
+each moved section for references to content that is no longer above it.
+
 **Spelled-out defaults.** A clause that only restates the default belongs on the
 page teaching that clause, and nowhere else. `DEFINE INDEX … HNSW DIMENSION 4
 DIST COSINE` and `DEFINE INDEX … HNSW DIMENSION 4 DIST COSINE TYPE F32 EFC 150
