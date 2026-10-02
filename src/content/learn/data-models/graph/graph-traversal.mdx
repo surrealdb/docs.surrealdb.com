@@ -54,7 +54,36 @@ FROM user:1;
 ]
 ```
 
-To be sure there is only one, add a [`UNIQUE` index](/docs/reference/query-language/statements/define/indexes#unique-index) on the edge's `in` field, so that a user cannot have a second `has_card` edge.
+Taking `[0]` assumes there is only one. If a user has a second card, `[0]` returns one of the two and the other is ignored without an error. To make the query fail instead, select from the traversal with [`ONLY`](/docs/reference/query-language/statements/select#the-only-clause), which returns a single value and returns an error if the traversal holds more than one:
+
+```surql
+SELECT (SELECT VALUE name FROM ONLY ->has_card->card) AS name FROM user:1;
+```
+
+```surql title="Output"
+[
+	{
+		name: 'visa'
+	}
+]
+```
+
+After a second card is related to the same user, the same query returns an error:
+
+```surql
+CREATE card:2 SET name = 'amex';
+RELATE user:1->has_card->card:2;
+
+SELECT (SELECT VALUE name FROM ONLY ->has_card->card) AS name FROM user:1;
+```
+
+```surql title="Error output"
+'Expected a single result output when using the ONLY keyword'
+```
+
+A user with no card gets `NONE` rather than an error. [`SPLIT`](/docs/reference/query-language/statements/select#the-split-clause) does not help here: it does not split the array that a traversal returns, and on a stored array it returns one result per element rather than an error.
+
+To prevent a second card instead of detecting it, add a [`UNIQUE` index](/docs/reference/query-language/statements/define/indexes#unique-index) on the edge's `in` field, so that a user cannot have a second `has_card` edge.
 
 ## Chaining paths
 
@@ -62,6 +91,53 @@ From comments, find authors and then all of their comments:
 
 ```surql
 SELECT <-wrote<-user->wrote->comment FROM comment;
+```
+
+## Traverse directly from a record id
+
+Traversal can start at one or more record IDs **without** wrapping everything in `SELECT`:
+
+```surql
+CREATE ONLY user:mcuserson SET name = "User McUserson";
+CREATE ONLY comment:one SET 
+    text = "I learned something new!", 
+    created_at = time::now();
+CREATE ONLY cat:pumpkin SET name = "Pumpkin";
+
+RELATE user:mcuserson->wrote->comment:one SET
+	location = "Arizona",
+	os = "Windows 11",
+	mood = "happy";
+
+RELATE user:mcuserson->likes->cat:pumpkin;
+```
+
+```surql
+-- Equivalent to:
+-- SELECT VALUE <-wrote<-user FROM ONLY comment:one;
+comment:one<-wrote<-user;
+
+-- Equivalent to:
+-- SELECT VALUE ->likes->cat FROM ONLY user:mcuserson;
+user:mcuserson->likes->cat;
+```
+
+```surql title="Output"
+-------- Query --------
+
+[user:mcuserson]
+
+-------- Query --------
+
+[cat:pumpkin]
+```
+
+To include fields when starting from an id, use destructuring:
+
+```surql
+-- Equivalent to:
+-- SELECT name, ->likes->cat AS cats FROM ONLY user:mcuserson;
+user:mcuserson.{ name, cats: ->likes->cat };
 ```
 
 ## Filtering a traversal
@@ -163,110 +239,6 @@ SELECT VALUE id FROM thing WHERE !<-child_of;
 ```
 
 Each record checks only its own edges, so the query does not need to collect the ids of every child first.
-
-## Querying symmetric (“between equals”) relations
-
-For edges like `friends_with`, it may be unclear whether a `person` is on the `in` or `out` side. The `<->` operator traverses **both** directions on that edge table:
-
-```surql
-SELECT *, <->friends_with<->person AS friends FROM person;
-```
-
-Each record lists the other people in the relation, regardless of which side they were on:
-
-```surql
-[
-	{
-		friends: [
-			person:one,
-			person:two
-		],
-		id: person:one
-	},
-	{
-		friends: [
-			person:one,
-			person:two
-		],
-		id: person:two
-	}
-]
-```
-
-To drop the current record’s own id from the list, use [`array::complement()`](/docs/reference/query-language/functions/database-functions/array#arraycomplement):
-
-```surql
-SELECT 
-	*, 
-	array::complement(<->friends_with<->person, [id]) AS friends
-FROM person;
-```
-
-```surql title="Output"
-[
-	{
-		friends: [
-			person:two
-		],
-		id: person:one
-	},
-	{
-		friends: [
-			person:one
-		],
-		id: person:two
-	}
-]
-```
-
-For more on this pattern, see the [`RELATE` statement](/docs/reference/query-language/statements/relate#bidirectional-relation-querying) and [Chapter 7 of Aeon's Surreal Renaissance](/learn/book/chapter-07#bidirectional-querying-when-a-relationship-is-equal).
-
-## Traverse directly from a record id
-
-Traversal can start at one or more record IDs **without** wrapping everything in `SELECT`:
-
-```surql
-CREATE ONLY user:mcuserson SET name = "User McUserson";
-CREATE ONLY comment:one SET 
-    text = "I learned something new!", 
-    created_at = time::now();
-CREATE ONLY cat:pumpkin SET name = "Pumpkin";
-
-RELATE user:mcuserson->wrote->comment:one SET
-	location = "Arizona",
-	os = "Windows 11",
-	mood = "happy";
-
-RELATE user:mcuserson->likes->cat:pumpkin;
-```
-
-```surql
--- Equivalent to:
--- SELECT VALUE <-wrote<-user FROM ONLY comment:one;
-comment:one<-wrote<-user;
-
--- Equivalent to:
--- SELECT VALUE ->likes->cat FROM ONLY user:mcuserson;
-user:mcuserson->likes->cat;
-```
-
-```surql title="Output"
--------- Query --------
-
-[user:mcuserson]
-
--------- Query --------
-
-[cat:pumpkin]
-```
-
-To include fields when starting from an id, use destructuring:
-
-```surql
--- Equivalent to:
--- SELECT name, ->likes->cat AS cats FROM ONLY user:mcuserson;
-user:mcuserson.{ name, cats: ->likes->cat };
-```
 
 ## Automatic flattening in graph queries
 
@@ -408,6 +380,63 @@ ORDER BY shared DESC;
 ```
 
 The `.filter()` removes the starting post, which the path also reaches through each of its own tags. A `SELECT` over an array of record IDs reads the records, so `title` is available to group by.
+
+## Querying symmetric (“between equals”) relations
+
+For edges like `friends_with`, it may be unclear whether a `person` is on the `in` or `out` side. The `<->` operator traverses **both** directions on that edge table:
+
+```surql
+SELECT *, <->friends_with<->person AS friends FROM person;
+```
+
+Each record lists the other people in the relation, regardless of which side they were on:
+
+```surql
+[
+	{
+		friends: [
+			person:one,
+			person:two
+		],
+		id: person:one
+	},
+	{
+		friends: [
+			person:one,
+			person:two
+		],
+		id: person:two
+	}
+]
+```
+
+To drop the current record’s own id from the list, use [`array::complement()`](/docs/reference/query-language/functions/database-functions/array#arraycomplement):
+
+```surql
+SELECT 
+	*, 
+	array::complement(<->friends_with<->person, [id]) AS friends
+FROM person;
+```
+
+```surql title="Output"
+[
+	{
+		friends: [
+			person:two
+		],
+		id: person:one
+	},
+	{
+		friends: [
+			person:one
+		],
+		id: person:two
+	}
+]
+```
+
+For more on this pattern, see the [`RELATE` statement](/docs/reference/query-language/statements/relate#bidirectional-relation-querying) and [Chapter 7 of Aeon's Surreal Renaissance](/learn/book/chapter-07#bidirectional-querying-when-a-relationship-is-equal).
 
 ## Graph paths in schema fields
 
