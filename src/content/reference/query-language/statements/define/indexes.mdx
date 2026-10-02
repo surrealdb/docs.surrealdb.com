@@ -65,6 +65,14 @@ The following example creates a non-unique index for an age field on a user tabl
 DEFINE INDEX userAgeIndex ON TABLE user FIELDS age;
 ```
 
+Besides `=` and comparisons such as `>` and `<`, a standard index is used for a range with `IN`, and for a string prefix with [`string::starts_with()`](/docs/reference/query-language/functions/database-functions/string#stringstarts_with). Before SurrealDB 3.3.1, these two scanned the whole table.
+
+```surql
+-- Both use the index from 3.3.1
+SELECT * FROM user WHERE age IN 18..30;
+SELECT * FROM user WHERE string::starts_with(name, 'Ann');
+```
+
 ### Unique index
 
 Ensures each value in the index is unique. A unique index helps enforce uniqueness across records by preventing duplicate entries in fields such as user IDs, email addresses, and other unique identifiers.
@@ -178,7 +186,21 @@ CREATE post:2 SET tags = ['b', 'c'];
 Database index `unique_tag` already contains 'b', with record `post:1`
 ```
 
-To make the array as a whole unique instead, so that two records cannot have the same set of tags but may share some, index a field that holds the array as a single value. Sorting it first makes `['b', 'a']` the same as `['a', 'b']`:
+To make the array as a whole unique instead, so that two records cannot have the same tags but may share some, end the field with [`...`](/docs/reference/query-language/language-primitives/idioms#flattening). The index then has one entry for the whole array:
+
+```surql
+DEFINE INDEX unique_tags ON post FIELDS tags... UNIQUE;
+
+CREATE post:1 SET tags = ['a', 'b'];
+CREATE post:2 SET tags = ['b', 'c'];
+CREATE post:3 SET tags = ['a', 'b'];
+```
+
+```text title="Error output"
+Database index `unique_tags` already contains ['a', 'b'], with record `post:1`
+```
+
+[`INFO FOR TABLE`](/docs/reference/query-language/statements/info) shows this index as `FIELDS tags…`, with a single ellipsis character, which SurrealQL also accepts in place of `...`. The order of the elements counts, so `['b', 'a']` is a different value from `['a', 'b']`. To treat the two as the same, index a field that holds the array sorted and converted to a single value:
 
 ```surql
 DEFINE FIELD tag_key ON post VALUE <string> tags.sort();
@@ -200,6 +222,24 @@ value = "NONE"
 -- Create an index on the account and email fields of the user table
 DEFINE INDEX test ON user FIELDS account, email UNIQUE;
 ```
+
+When more than one of the fields holds an array, the index has one entry for every combination of their elements. A record with `tags = ['a', 'b']` and `authors = ['x', 'y']` gives four entries, so a `UNIQUE` index refuses any later record that repeats one of those four pairs:
+
+```surql
+DEFINE INDEX tag_author ON post FIELDS tags, authors UNIQUE;
+
+CREATE post:1 SET tags = ['a', 'b'], authors = ['x', 'y'];
+CREATE post:2 SET tags = ['a'], authors = ['y'];
+```
+
+```text title="Error output"
+Database index `tag_author` already contains ['a', 'y'], with record `post:1`
+```
+
+A query that uses such an index returns each record once, however many of its entries match.
+
+> [!WARNING]
+> Before SurrealDB 3.3.1, an index over two or more array fields stored only some of the combinations, so the `CREATE post:2` above succeeded. An index written by an earlier release stays incomplete after upgrading until you run [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild) on it. Earlier releases could also return a record once for each matching entry when a query used a composite index with an array field, such as `FIELDS account, emails.*.address` queried by `account` alone. That needs no action after upgrading.
 
 #### Array-element composite indexes
 
@@ -405,6 +445,9 @@ Vector search indexes in SurrealDB support efficient [k-nearest neighbors](https
 
 > [!NOTE]
 > After a large insert or update, a vector index stores the new records separately until a background process merges them into its graph. Searches return correct results throughout, but are slower until that merge completes. [`INFO FOR INDEX`](/docs/reference/query-language/statements/info#index-information) reports this as `building.compacting`, which is separate from `building.status`.
+
+> [!WARNING]
+> From 3.0.0 until 3.3.1, an HNSW or DISKANN index lost track of records when more than nine of them held an identical vector. KNN results left out the tenth and later records, and could return fewer than `k` results after such records were deleted. SurrealDB 3.3.1 fixes this for new writes, but an index that was already affected stays that way until it is rebuilt. After upgrading, run [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild) on each vector index whose table can hold more than nine records with the same vector, such as duplicated embeddings or a placeholder vector.
 
 ### Types
 
