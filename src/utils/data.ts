@@ -6,6 +6,7 @@ import { type DocHeading, resolveMarkdown } from "./markdown";
 import { BASE_URL, type BreadcrumbItem, getSuffixedMetaTitle } from "./meta";
 import { buildNavigation, type NavSection, resolveFolderLanding } from "./navigation";
 import { getProductFromPath } from "./product";
+import { getRelated, type RelatedItem } from "./related";
 
 export interface PageData {
     content: string;
@@ -17,6 +18,8 @@ export interface PageData {
     breadcrumbItems: BreadcrumbItem[];
     title: string;
     description: string;
+    /** University lessons and blog posts on the same subject, if any. */
+    related: RelatedItem[];
 }
 
 /** Base the docs are served from - `base` in `vite.config.ts`. */
@@ -222,6 +225,9 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         breadcrumbItems,
         title: entry.metadata.title ?? "",
         description: description ?? "",
+        related: getRelated(
+            [DOCS_BASE, ...prefixSegments, ...path.split("/")].filter(Boolean).join("/"),
+        ),
     };
 }
 
