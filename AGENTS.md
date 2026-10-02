@@ -235,6 +235,15 @@ needs a second one, or a more realistic one, anything obviously a password works
 the user being signed in as. This one drifts back easily, so check the
 surrounding examples rather than copying whichever is nearest.
 
+**Names that read as something else.** Read every new identifier the way a
+reader skims it, with its punctuation turned into the letter it looks like, and
+rename it if the result is a rude word. A `$` reads as an S, so `LET $hits = ...`
+reads at a glance as "shits"; `$results` says the same thing without the
+problem. The same check applies to record IDs, table and field names, and
+anything else a reader sees in code, where `0` can pass for O and `1` or `|`
+for l. The test is a casual glance, not a strained reading: `$example` does not
+become anything, so it stays.
+
 **Example ordering.** SurrealQL often has several equivalents of the
 same operation, and readers - agents included, since the docs are served raw
 through the `.md` endpoints and `llms.txt` - take the first example shown as
