@@ -437,7 +437,7 @@ if (process.env.RELATED_DEBUG) {
     writeFileSync(process.env.RELATED_DEBUG, JSON.stringify(candidates, null, 1));
 }
 
-writeFileSync(OUTPUT_FILE, `${JSON.stringify(output, null, "\t")}\n`);
+writeFileSync(OUTPUT_FILE, `${JSON.stringify(output, null, 4)}\n`);
 
 const counts = Object.values(output).flat();
 console.log(
