@@ -843,6 +843,12 @@ function enterpriseConsolidationRedirects(): Redirect[] {
             destination: "/docs/manage/enterprise/:path*",
             statusCode: 301,
         },
+        // Enterprise roles became teams.
+        {
+            source: "/manage/enterprise/roles",
+            destination: "/docs/manage/enterprise/teams",
+            statusCode: 301,
+        },
     );
 
     return out;
