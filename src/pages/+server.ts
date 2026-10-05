@@ -18,6 +18,7 @@ import {
     suffixDocsLinks,
     withIndexPointer,
 } from "~/utils/collections";
+import { withRelated } from "~/utils/related";
 import { redirectDestinationForDev, resolveRedirect } from "../../redirects";
 
 const BASE = "/docs";
@@ -199,7 +200,13 @@ app.get("*", async (c, next) => {
     // Resolved from the same file-backed cache the page render uses, so
     // `<Version>` markers report what the HTML reports.
     const sdkVersions = await fetchAllSdkVersions();
-    const markdown = withIndexPointer(composeRawMarkdown(entry, sdkVersions));
+    const docsPath = `/docs/${path.replace(/^\/?index$/, "").replace(/^\/+|\/+$/g, "")}`.replace(
+        /\/$/,
+        "",
+    );
+    const markdown = withIndexPointer(
+        withRelated(composeRawMarkdown(entry, sdkVersions), docsPath),
+    );
 
     return c.body(markdown, 200, {
         "Content-Type": MARKDOWN_CONTENT_TYPE,
