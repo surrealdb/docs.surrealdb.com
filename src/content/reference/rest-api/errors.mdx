@@ -114,6 +114,28 @@ Neither record exists afterwards, `user:short` included. The `DEFINE FIELD` is u
 
 This split is why each SDK offers two ways to read a query result: one that surfaces the first failure, and one that reports every statement. The names differ per language, and each SDK's error page covers its own.
 
+### Over HTTP
+
+The [HTTP endpoints](/docs/reference/rest-api/http-protocol) `/sql` and `/key` use the same two layers. When the request itself fails, the response has an HTTP error status: `400` for a parse error, `401` for credentials that do not authenticate, and `413` for a body over the [size limit](/docs/reference/rest-api/http-protocol#request-size-limits). Once the request is accepted, the response is `200 OK` even when a statement fails. This includes a `THROW`, a record that already exists, a namespace or table that does not exist, and a statement that runs past `--query-timeout`. Each failure is reported in that statement's entry in the response array, with `status` set to `"ERR"`:
+
+```bash
+curl -X POST -u "root:secret" -H "Accept: application/json" -d 'THROW "Order not found"' http://localhost:8000/sql
+```
+
+```json title="Response"
+[
+    {
+        "kind": "Thrown",
+        "result": "An error occurred: Order not found",
+        "status": "ERR",
+        "time": "101.75µs",
+        "type": null
+    }
+]
+```
+
+A `GET /key/:table/:id` for a record that does not exist is not an error. It returns `200` with an empty `result` array. Code that calls these endpoints must therefore check `status` on each entry as well as the HTTP status.
+
 ## The error object
 
 | Field | Description |
@@ -142,6 +164,59 @@ This split is why each SDK offers two ways to read a query result: one that surf
 
 `Internal` doubles as the catch-all for a kind the reader does not recognise, so code that handles the kinds it cares about and treats the rest as internal keeps working against a newer server.
 
+## Error details
+
+`details` names the specific reason within the kind. It has its own `kind`, and its own `details` where the reason carries values. Details nest, so a failed sign-in over RPC is a `NotAllowed` error whose reason is `Auth`, whose reason in turn is `InvalidAuth`:
+
+```json title="A failed sign-in"
+{
+    "kind": "NotAllowed",
+    "code": -32002,
+    "message": "There was a problem with authentication",
+    "details": {
+        "kind": "Auth",
+        "details": { "kind": "InvalidAuth" }
+    },
+    "cause": null
+}
+```
+
+A reason with values carries them in the inner `details`. A duplicate record, for example, gives `{ "kind": "AlreadyExists", "details": { "kind": "Record", "details": { "id": "user:a" } } }`.
+
+| Kind | Reason | Values |
+| --- | --- | --- |
+| `Validation` | `Parse`, `InvalidRequest`, `InvalidParams`, `NamespaceEmpty`, `DatabaseEmpty` | |
+| `Validation` | `InvalidParameter` | `name` |
+| `Validation` | `InvalidContent`, `InvalidMerge` | `value` |
+| `Configuration` | `LiveQueryNotSupported`, `BadLiveQueryConfig`, `BadGraphqlConfig`, `DialectNotSupported` (from 3.3.0) | |
+| `Query` | `NotExecuted`, `Cancelled`, `TransactionConflict` | |
+| `Query` | `TimedOut` | `duration` |
+| `Serialization` | `Serialization`, `Deserialization` | |
+| `NotAllowed` | `Scripting` | |
+| `NotAllowed` | `Method`, `Function`, `Target` | `name` |
+| `NotAllowed` | `Auth` | A further reason, listed below |
+| `NotFound` | `Method`, `Table`, `Namespace`, `Database` | `name` |
+| `NotFound` | `Record` | `id` |
+| `NotFound` | `Session` | `id`, which can be empty |
+| `NotFound` | `Transaction` | |
+| `AlreadyExists` | `Table`, `Namespace`, `Database` | `name` |
+| `AlreadyExists` | `Record`, `Session` | `id` |
+| `Connection` | `Uninitialised`, `AlreadyConnected`, `ConnectionFailed` | |
+
+`Connection` errors are raised by an SDK on the client, not sent by the server. `Thrown`, `Internal` and `Context` carry no reason.
+
+The reasons inside `Auth` are:
+
+| Reason | Values |
+| --- | --- |
+| `TokenExpired`, `SessionExpired`, `InvalidAuth`, `UnexpectedAuth`, `MissingUserOrPass`, `NoSigninTarget`, `InvalidPass`, `TokenMakingFailed`, `InvalidSignup` | |
+| `InvalidRole` | `name` |
+| `NotAllowed` | `actor`, `action`, `resource` |
+
+A few reasons tell a client what to do next. `TransactionConflict` means that the operation can be retried. `TokenExpired` and `SessionExpired` mean that the client needs to sign in again.
+
+Not every error carries a reason. A parse error sent over RPC, for example, arrives as a `Validation` error with no `details`, so check that `details` is present before reading it. New reasons are added as the server grows, so treat a reason you do not recognise as an error of its kind, in the same way as an unknown kind is treated as `Internal`.
+
 ## Wire codes
 
 | Code | Name |
@@ -164,6 +239,7 @@ This split is why each SDK offers two ways to read a query result: one that surf
 | `-32007` | Serialization error |
 | `-32008` | Deserialization error |
 | `-32009` | Query transaction conflict |
+| `-32607` | Dialect not supported (from 3.3.0) |
 
 Two of these differ from the JSON-RPC conventions they resemble: `-32602` is method-not-allowed rather than invalid parameters, and invalid parameters is `-32603`. A code also does not always follow from the kind, since an error can be a `Validation` while carrying the generic `-32000`. Reading `kind` avoids both surprises.
 
