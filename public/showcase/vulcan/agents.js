@@ -11,14 +11,16 @@
 	const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
 	// Every pairing of model and setup that has scored runs, in the order the page discusses them.
 	const ORDER = [
-		["claude-sonnet-5", "memory"],
 		["claude-haiku-4-5-20251001", "memory"],
-		["claude-opus-5-5", "history"],
+		["claude-sonnet-5", "memory"],
+		["claude-opus-5-5", "memory"],
+		["claude-haiku-4-5-20251001", "history"],
 		["claude-sonnet-5", "history"],
+		["claude-opus-5-5", "history"],
+		["claude-haiku-4-5-20251001", "page"],
 		["claude-sonnet-5", "page"],
 		["claude-opus-5-5", "page"],
-	];
-	const TOOLS = { memory: "Agent Memory", history: "Page + history", page: "Today's page" };
+	];	const TOOLS = { memory: "Agent Memory", history: "Page + history", page: "Today's page" };
 	const configs = ORDER.filter(([m, s]) => runs.some((r) => r.model === m && r.setup === s)).map(([model, setup]) => {
 		const mine = runs.filter((r) => r.model === model && r.setup === setup);
 		const tags = [...new Set(mine.map((r) => r.run))];
@@ -45,74 +47,86 @@
 		.join("");
 	$("sum").innerHTML = `<tr><th>Agent</th><th>Score, mean of 3 runs</th><th>Tool calls</th><th>Input tokens</th><th>Time</th><th>Cost</th></tr>${rowsHtml}<tr><td colspan="6" style="color:var(--dim);font-size:12.5px;text-align:left;border:0">Tool calls, tokens, time and cost are means per question.</td></tr>`;
 
-	// Accuracy against cost.
+	// Accuracy against cost: one line for each set of tools, joining its models.
 	{
-		const W = 640;
-		const H = 300;
-		const L = 54;
-		const B = 40;
-		const maxCost = Math.max(...configs.map((c) => c.cost)) * 1.15;
-		// Cost falls from left to right, so the best corner, accurate and cheap, is the top right.
-		const x = (v) => W - 20 - ((W - L - 20) * v) / maxCost;
-		const y = (v) => H - B - ((H - B - 14) * v) / 38;
+		const W = 820;
+		const H = 410;
+		const L = 64;
+		const R = 20;
+		const T = 44;
+		const B = 34;
+		const maxCost = Math.max(...configs.map((c) => c.cost)) * 1.12;
+		// Cost falls from left to right, so the most accurate and cheapest results are at the top right.
+		const x = (v) => W - R - ((W - L - R) * v) / maxCost;
+		const y = (v) => H - B - ((H - B - T) * v) / 38;
 		const colour = { memory: "var(--accent)", history: "var(--accent2)", page: "var(--ink2)" };
-		let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Score against cost per question for each agent">`;
-		// A shaded grid behind the points, blended between four corner colours:
-		// accurate and cheap at the top right, costly and inaccurate at the bottom left.
+		let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Score against cost per question for each set of tools and model">`;
+		// A shaded grid, blended between four corner colours, brightest green at the top right.
 		{
 			const corners = { tl: [201, 162, 39], tr: [143, 181, 115], bl: [208, 119, 95], br: [127, 168, 184] };
 			const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
-			const x0 = L;
-			const x1 = W - 20;
-			const y0 = 14;
-			const y1 = H - B;
 			const cols = 24;
 			const rows = 12;
-			const cw = (x1 - x0) / cols;
-			const ch = (y1 - y0) / rows;
+			const cw = (W - R - L) / cols;
+			const ch = (H - B - T) / rows;
 			for (let r = 0; r < rows; r++) {
 				for (let c = 0; c < cols; c++) {
-					const tx = (c + 0.5) / cols;
-					const ty = (r + 0.5) / rows;
-					const rgb = mix(mix(corners.tl, corners.tr, tx), mix(corners.bl, corners.br, tx), ty).map(Math.round);
-					svg += `<rect x="${x0 + c * cw}" y="${y0 + r * ch}" width="${cw}" height="${ch}" fill="rgb(${rgb})" fill-opacity="0.34" stroke="var(--bg)" stroke-opacity="0.5" stroke-width="1"/>`;
+					const rgb = mix(mix(corners.tl, corners.tr, (c + 0.5) / cols), mix(corners.bl, corners.br, (c + 0.5) / cols), (r + 0.5) / rows).map(Math.round);
+					svg += `<rect x="${L + c * cw}" y="${T + r * ch}" width="${cw}" height="${ch}" fill="rgb(${rgb})" fill-opacity="0.3" stroke="var(--bg)" stroke-opacity="0.5" stroke-width="1"/>`;
 				}
 			}
-			const corner = (x, y, anchor, text) => `<text x="${x}" y="${y}" text-anchor="${anchor}" class="zone">${text}</text>`;
-			svg += corner(x0 + 8, y0 + 16, "start", "Accurate and costly");
-			svg += corner(x1 - 8, y0 + 16, "end", "Accurate and cheap");
-			svg += corner(x0 + 8, y1 - 8, "start", "Costly and inaccurate");
-			svg += corner(x1 - 8, y1 - 8, "end", "Cheap and inaccurate");
 		}
-		for (let v = 0; v <= 38; v += 10) svg += `<line x1="${L}" x2="${W - 20}" y1="${y(v)}" y2="${y(v)}" class="g"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
+		for (let v = 0; v <= 38; v += 10) svg += `<text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
 		const step = maxCost > 0.3 ? 0.1 : 0.05;
 		for (let v = 0; v <= maxCost; v += step) svg += `<text x="${x(v)}" y="${H - B + 18}" text-anchor="middle">$${v.toFixed(2)}</text>`;
-		svg += `<text x="${(L + W) / 2}" y="${H - 4}" text-anchor="middle">Cost per question, falling to the right</text><text x="14" y="${(H - B) / 2}" text-anchor="middle" transform="rotate(-90 14 ${(H - B) / 2})">Score out of 38</text>`;
-		// Place each label beside its point, trying the right, the left, then above
-		// and below, and take the first spot that covers no other point or label.
-		const width = (t) => t.length * 6.6;
+		// What each direction means, along the top and up the left side.
+		svg += `<text x="${(L + W - R) / 2}" y="${T - 16}" text-anchor="middle" class="ax">← Higher cost · Cost per question · Lower cost →</text>`;
+		svg += `<text x="20" y="${(T + H - B) / 2}" text-anchor="middle" class="ax" transform="rotate(-90 20 ${(T + H - B) / 2})">← Less accurate · Score out of 38 · More accurate →</text>`;
+
 		const pts = configs.map((c) => ({ c, cx: x(c.cost), cy: y(c.score) }));
-		const placed = [];
-		const clear = (bx0, by, bw) =>
-			bx0 > L &&
-			bx0 + bw < W - 20 &&
-			!placed.some((b) => bx0 < b.x1 && bx0 + bw > b.x0 && Math.abs(by - b.y) < 15) &&
-			!pts.some((p) => p.cx > bx0 - 8 && p.cx < bx0 + bw + 8 && p.cy > by - 18 && p.cy < by + 8);
-		for (const p of [...pts].sort((a, b) => b.c.score - a.c.score)) {
-			const w = width(p.c.label);
-			const spots = [
-				[p.cx + 11, p.cy + 4],
-				[p.cx - 11 - w, p.cy + 4],
-				[p.cx - w / 2, p.cy - 12],
-				[p.cx - w / 2, p.cy + 22],
-			];
-			const [bx, by] = spots.find(([sx, sy]) => clear(sx, sy, w)) || spots[0];
-			placed.push({ x0: bx, x1: bx + w, y: by });
-			svg += `<circle cx="${p.cx}" cy="${p.cy}" r="6.5" fill="${colour[p.c.setup]}"/>`;
-			p.label = `<text x="${bx}" y="${by}" class="pl">${esc(p.c.label)}</text>`;
+		const groups = ["memory", "history", "page"].map((setup) => pts.filter((p) => p.c.setup === setup).sort((a, b) => a.cx - b.cx));
+		for (const g of groups) {
+			if (g.length > 1) svg += `<polyline points="${g.map((p) => `${p.cx},${p.cy}`).join(" ")}" fill="none" stroke="${colour[g[0].c.setup]}" stroke-width="2" stroke-opacity="0.75"/>`;
 		}
-		svg += pts.map((p) => p.label).join("");
-		$("chart").innerHTML = `${svg}</svg>`;
+		for (const p of pts) svg += `<circle cx="${p.cx}" cy="${p.cy}" r="6" fill="${colour[p.c.setup]}"/>`;
+
+		// Labels: each set of tools above its line, each model beside its dot. Every label tries
+		// spots nearest first and takes the first that stays in the plot and covers nothing.
+		const placed = [];
+		const clash = (bx0, by, bw) =>
+			(bx0 < L + 2 || bx0 + bw > W - R - 2 || by < T + 12 || by > H - B - 4 ? 10 : 0) +
+			placed.filter((q) => bx0 < q.x1 && bx0 + bw > q.x0 && Math.abs(by - q.y) < 14).length +
+			pts.filter((q) => q.cx > bx0 - 7 && q.cx < bx0 + bw + 7 && q.cy > by - 16 && q.cy < by + 7).length;
+		const put = (text, w, spots, cls, fill) => {
+			let best = spots[0];
+			let score = Infinity;
+			for (const [sx, sy] of spots) {
+				const c = clash(sx, sy, w);
+				if (c < score) [score, best] = [c, [sx, sy]];
+				if (c === 0) break;
+			}
+			placed.push({ x0: best[0], x1: best[0] + w, y: best[1] });
+			return `<text x="${best[0]}" y="${best[1]}" class="${cls}"${fill ? ` style="fill:${fill}"` : ""}>${esc(text)}</text>`;
+		};
+		let labels = "";
+		for (const g of groups) {
+			if (!g.length) continue;
+			const name = TOOLS[g[0].c.setup];
+			const w = name.length * 7.6;
+			const top = Math.min(...g.map((p) => p.cy));
+			const mid = g.reduce((a, p) => a + p.cx, 0) / g.length;
+			const left = [g[0].cx - w - 14, g[0].cy + 16];
+			const spots = [[mid - w / 2, top - 30], [mid - w / 2, top - 44], left, [g[g.length - 1].cx + 12, g[g.length - 1].cy - 12]];
+			// The history line sits just below the memory line, so its name goes to the left of the line instead of above it.
+			if (g[0].c.setup === "history") spots.unshift(left);
+			labels += put(name, w, spots, "gl", colour[g[0].c.setup]);
+		}
+		for (const p of pts) {
+			const name = DATA.models[p.c.model];
+			const w = name.length * 6.3;
+			labels += put(name, w, [[p.cx - w / 2, p.cy + 20], [p.cx - w / 2, p.cy - 12], [p.cx + 10, p.cy + 4], [p.cx - 10 - w, p.cy + 4], [p.cx - w / 2, p.cy + 33], [p.cx - w / 2, p.cy - 25]], "pl");
+		}
+		$("chart").innerHTML = `${svg}${labels}</svg>`;
 	}
 
 	// Every question, scored for every agent.
@@ -194,10 +208,10 @@
 	let current = "C2";
 	let run = "1";
 	const has = (m, setup) => configs.some((c) => c.model === m && c.setup === setup);
-	const textModels = ["claude-sonnet-5", "claude-opus-5-5"].filter((m) => has(m, "page"));
-	const memoryModels = ["claude-sonnet-5", "claude-haiku-4-5-20251001"].filter((m) => has(m, "memory"));
-	let textModel = textModels[0];
-	let memoryModel = memoryModels[0];
+	// One model choice for all three columns, so the answers compare like with like.
+	const MODELS = ["claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-5-5"];
+	const models = MODELS.filter((m) => SETUPS.every((s) => has(m, s)));
+	let model = models.includes("claude-sonnet-5") ? "claude-sonnet-5" : models[0];
 	const sections = [];
 	for (const q of DATA.questions) {
 		let sec = sections.find((s) => s.name === q.section);
@@ -218,8 +232,7 @@
 		const b = e.target.closest("button");
 		if (!b) return;
 		if (b.dataset.run) run = b.dataset.run;
-		if (b.dataset.text) textModel = b.dataset.text;
-		if (b.dataset.mem) memoryModel = b.dataset.mem;
+		if (b.dataset.model) model = b.dataset.model;
 		render();
 	});
 
@@ -248,10 +261,9 @@
 		$("runs").innerHTML =
 			"<span>Run</span>" +
 			["1", "2", "3"].map((n) => `<button data-run="${n}" aria-selected="${n === run}">${n}</button>`).join("") +
-			choice("Model for the text agents", "text", textModels, textModel) +
-			choice("Model with Agent Memory", "mem", memoryModels, memoryModel);
+			choice("Model", "model", models, model);
 		$("cols").innerHTML = SETUPS.map((s) => {
-			const m = s === "memory" ? memoryModel : textModel;
+			const m = model;
 			const r = pick(m, s, current, run);
 			const all = ["1", "2", "3"].map((n) => pick(m, s, current, n)?.score ?? "-");
 			return `<section class="col ${s === "memory" ? "mem" : ""}">
