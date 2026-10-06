@@ -8,17 +8,13 @@ description: Build and verify an AI agent memory service with Encore APIs, Pub/S
 
 [Encore](https://encore.dev/) is a platform that lets engineers and their agents build and verify complete backends using type-safe APIs and infrastructure primitives defined in application code. In this guide, Encore provides the APIs, Pub/Sub ingestion, and scheduled retention workflow around SurrealDB's vector and graph capabilities.
 
-The complete application is available in the [Encore examples repository](https://github.com/encoredev/examples/tree/main/ts/surrealdb-agent-memory). It uses eight-dimensional vectors to keep the requests readable. Change both `EMBEDDING_DIMENSIONS` and the HNSW index dimension before connecting a production embedding model.
+The example application stores durable memory for AI agents. Each memory contains text and a vector embedding, with graph relationships connecting it to the entities it mentions. Memories are written asynchronously through Pub/Sub, recalled through vector similarity or graph traversal, and removed by a scheduled retention job.
 
-## Requirements
+## Run the example
 
-- [Encore CLI](https://encore.dev/docs/install)
-- Docker, or a separate SurrealDB 3.3 instance
-- Node.js 22 or later
+You need the [Encore CLI](https://encore.dev/docs/install), Docker and Node.js 22 or later.
 
-## Start the application
-
-Start an in-memory SurrealDB instance:
+Start a local SurrealDB 3.3 instance:
 
 ```bash
 docker run --rm --name encore-surrealdb-memory \
@@ -27,7 +23,9 @@ docker run --rm --name encore-surrealdb-memory \
   start --user root --pass secret memory
 ```
 
-Create the example application in another terminal, install its dependencies and start Encore:
+This starts a temporary SurrealDB instance at `http://localhost:8000`. Its data is discarded when the container stops.
+
+In another terminal, create and run the example application:
 
 ```bash
 encore app create agent-memory --example=ts/surrealdb-agent-memory
@@ -36,90 +34,13 @@ npm install
 encore run
 ```
 
-The application connects to `http://127.0.0.1:8000` as `root` with the password `secret` when Encore is running locally. Encore starts the APIs and local Pub/Sub and cron infrastructure; SurrealDB continues running in the Docker container.
+Encore starts the APIs and local Pub/Sub and cron infrastructure. The application connects to the SurrealDB container as `root` with the password `secret`.
 
-## How memory is stored
+## How the integration works
 
-The `remember` API accepts the memory text, its embedding, any extracted entity names and an optional expiry time. It publishes the request to an at-least-once Encore Pub/Sub topic and returns after the event has been queued:
+The `remember` API accepts memory text, its embedding, extracted entity names and an optional expiry time. It publishes the request to an at-least-once Encore Pub/Sub topic, whose subscriber writes the memory and its `mentions` relationships to SurrealDB.
 
-```typescript
-const memoriesToStore = new Topic<MemoryEvent>("memories-to-store", {
-    deliveryGuarantee: "at-least-once",
-});
-
-export const remember = api(
-    { expose: true, method: "POST", path: "/agents/:agentID/memories" },
-    async (params: RememberParams): Promise<{ memoryID: string; status: string }> => {
-        const memoryID = `m_${randomUUID().replaceAll("-", "")}`;
-        await memoriesToStore.publish({
-            ...params,
-            memoryID,
-            entities: normalizeEntities(params.entities ?? []),
-        });
-        return { memoryID, status: "queued" };
-    },
-);
-```
-
-A subscriber writes each event to SurrealDB. The memory record contains the vector, and `mentions` relationships connect it to its entities. Stable record and relationship IDs make the transaction safe to repeat if Pub/Sub retries an event:
-
-```surql
-BEGIN;
-
-UPSERT $memory CONTENT {
-  agent_id: $agent_id,
-  text: $text,
-  embedding: $embedding,
-  created_at: time::now(),
-  expires_at: $expires_at
-};
-
-FOR $entity_data IN $entities {
-  LET $entity = type::record("entity", $entity_data.slug);
-  LET $edge = type::record("mentions", [$memory_id, $entity_data.slug]);
-  UPSERT $entity MERGE { name: $entity_data.name };
-  RELATE OR UPDATE $memory->$edge->$entity SET linked_at = time::now();
-};
-
-COMMIT;
-```
-
-## Store and recall memories
-
-Store two memories for the same agent:
-
-```bash
-curl -X POST http://localhost:4000/agents/research-agent/memories \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "text": "Encore runs the agent backend in the team AWS account.",
-    "embedding": [0.98, 0.02, 0, 0, 0, 0, 0, 0],
-    "entities": ["Encore", "AWS"]
-  }'
-
-curl -X POST http://localhost:4000/agents/research-agent/memories \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "text": "SurrealDB stores vector and graph context for the agent.",
-    "embedding": [0.94, 0.06, 0, 0, 0, 0, 0, 0],
-    "entities": ["SurrealDB", "Encore"]
-  }'
-```
-
-The API returns a generated `memoryID` and the status `queued`. The subscriber writes asynchronously, so allow it to finish before recalling a newly stored memory.
-
-Recall the memories nearest to another vector:
-
-```bash
-curl -X POST http://localhost:4000/agents/research-agent/recall \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "embedding": [0.95, 0.05, 0, 0, 0, 0, 0, 0],
-    "limit": 5
-  }'
-```
-
-The recall query uses the HNSW index and restricts results to the current agent. It also follows the `mentions` relationships so each result includes its entities:
+Stable record and relationship IDs make this write safe to repeat if Pub/Sub retries an event. Recall can then combine an HNSW vector search with graph traversal in one SurrealQL query:
 
 ```surql
 SELECT id, text, created_at, expires_at,
@@ -133,45 +54,52 @@ ORDER BY distance
 LIMIT $limit;
 ```
 
-Retrieve every active memory that mentions Encore by traversing the graph in the other direction:
+An Encore cron job calls the retention API every 24 hours to delete expired memories. The [complete example](https://github.com/encoredev/examples/tree/main/ts/surrealdb-agent-memory) contains the API definitions, Pub/Sub subscriber, retry-safe transaction, schema and tests.
+
+## Store and recall a memory
+
+Store a memory for an agent:
 
 ```bash
-curl http://localhost:4000/agents/research-agent/entities/encore/memories
+curl -X POST http://localhost:4000/agents/research-agent/memories \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "text": "SurrealDB stores vector and graph context for the agent.",
+    "embedding": [0.94, 0.06, 0, 0, 0, 0, 0, 0],
+    "entities": ["SurrealDB", "Encore"]
+  }'
 ```
 
-## Test retention and retries
-
-An Encore cron job calls the retention API every 24 hours to delete expired memory records. Cron jobs do not fire automatically in local or preview environments, so call the same API directly during local verification:
+The API returns a generated `memoryID` and the status `queued`. Once the subscriber has written the event, recall the nearest memories:
 
 ```bash
-curl -X POST http://localhost:4000/memories/prune
+curl -X POST http://localhost:4000/agents/research-agent/recall \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "embedding": [0.95, 0.05, 0, 0, 0, 0, 0, 0],
+    "limit": 5
+  }'
 ```
 
-Run the checks and unit tests:
+The example uses eight-dimensional vectors to keep requests readable. Change both `EMBEDDING_DIMENSIONS` and the HNSW index dimension before connecting a production embedding model.
+
+Run the checks and tests with:
 
 ```bash
 encore check
 encore test
 ```
 
-Set `SURREAL_TEST_URL` to include the integration tests against the running SurrealDB instance. These tests replay a memory event to verify that retries leave one memory and one set of relationships:
-
-```bash
-SURREAL_TEST_URL=http://127.0.0.1:8000 encore test
-```
-
 ## Connect to SurrealDB Cloud
 
-Set the database endpoint and database token as Encore secrets before deploying the application:
+Set the SurrealDB endpoint and database token as Encore secrets before deploying the application:
 
 ```bash
 encore secret set --type dev,prod SurrealDBURL
 encore secret set --type dev,prod SurrealDBToken
 ```
 
-`SurrealDBURL` is the endpoint used by the JavaScript SDK. `SurrealDBToken` must be a database token with access to the `encore` namespace and `agent_memory` database. A personal access token beginning with `sdbp_` authenticates the SurrealDB Cloud control plane and cannot be used as the application's database token.
-
-Encore uses the API, Pub/Sub and cron declarations when it provisions the application infrastructure in AWS or GCP. The deployed backend connects to the SurrealDB instance configured by these secrets.
+`SurrealDBToken` must be a database token with access to the `encore` namespace and `agent_memory` database. A personal access token beginning with `sdbp_` authenticates the SurrealDB Cloud control plane and cannot be used as the application's database token.
 
 ## Resources
 
