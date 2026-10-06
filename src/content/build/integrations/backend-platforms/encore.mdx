@@ -40,6 +40,36 @@ Encore starts the APIs and local Pub/Sub and cron infrastructure. The applicatio
 
 The `remember` API accepts memory text, its embedding, extracted entity names and an optional expiry time. It publishes the request to an at-least-once Encore Pub/Sub topic, whose subscriber writes the memory and its `mentions` relationships to SurrealDB.
 
+The API, topic and subscriber are defined together in the application code:
+
+```typescript
+import { randomUUID } from "node:crypto";
+import { api } from "encore.dev/api";
+import { CronJob } from "encore.dev/cron";
+import { Subscription, Topic } from "encore.dev/pubsub";
+
+const memoriesToStore = new Topic<MemoryEvent>("memories-to-store", {
+    deliveryGuarantee: "at-least-once",
+});
+
+export const remember = api(
+    { expose: true, method: "POST", path: "/agents/:agentID/memories" },
+    async (params: RememberParams): Promise<{ memoryID: string; status: string }> => {
+        const memoryID = `m_${randomUUID().replaceAll("-", "")}`;
+        await memoriesToStore.publish({
+            ...params,
+            memoryID,
+            entities: normalizeEntities(params.entities ?? []),
+        });
+        return { memoryID, status: "queued" };
+    },
+);
+
+new Subscription(memoriesToStore, "store-memory-in-surrealdb", {
+    handler: async (event) => storeMemory(await getSurreal(), event),
+});
+```
+
 Stable record and relationship IDs make this write safe to repeat if Pub/Sub retries an event. Recall can then combine an HNSW vector search with graph traversal in one SurrealQL query:
 
 ```surql
@@ -54,7 +84,24 @@ ORDER BY distance
 LIMIT $limit;
 ```
 
-An Encore cron job calls the retention API every 24 hours to delete expired memories. The [complete example](https://github.com/encoredev/examples/tree/main/ts/surrealdb-agent-memory) contains the API definitions, Pub/Sub subscriber, retry-safe transaction, schema and tests.
+An Encore cron job calls the retention API every 24 hours to delete expired memories:
+
+```typescript
+export const pruneExpired = api(
+    { expose: true, method: "POST", path: "/memories/prune" },
+    async (): Promise<{ deleted: number }> => ({
+        deleted: await pruneExpiredMemories(await getSurreal()),
+    }),
+);
+
+new CronJob("prune-agent-memory", {
+    title: "Remove expired agent memories",
+    every: "24h",
+    endpoint: pruneExpired,
+});
+```
+
+The [complete example](https://github.com/encoredev/examples/tree/main/ts/surrealdb-agent-memory) contains the remaining API definitions, retry-safe transaction, schema and tests.
 
 ## Store and recall a memory
 
