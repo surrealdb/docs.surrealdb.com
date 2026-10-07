@@ -1,7 +1,7 @@
 ---
 position: 4
 title: Surrealism attribute reference
-description: "Reference for the #[surrealism] attribute options, including writeable functions, comments, init hooks, and namespaced exports."
+description: "Reference for the #[surrealism] attribute options, including database access through a transaction, comments, init hooks, and namespaced exports."
 ---
 
 # Surrealism attribute reference
@@ -23,19 +23,81 @@ fn can_drive(age: i64) -> bool {
 
 After packaging and `DEFINE MODULE`, this function is callable through your module path.
 
-## `writeable`
+## Querying the database
 
-Mark functions that perform writes with `writeable`:
+<Since v="v3.4.0" />
+
+A function that takes a `Transaction` as its first parameter can run SurrealQL inside the transaction of the query that called it. A function without one cannot query the database.
 
 ```rust
-#[surrealism(writeable)]
-fn kv_set_value(key: String, value: String) -> bool {
-    // implementation snipped
-    true
+use anyhow::Result;
+use surrealism::{surrealism, Transaction};
+use surrealdb_types::Value;
+
+#[surrealism]
+async fn top_customers(tx: Transaction, limit: i64) -> Result<Value> {
+    tx.sql_with_vars("SELECT * FROM customer LIMIT $limit", [("limit", limit)]).await
 }
 ```
 
-This metadata is used by the query planner so read-only and write-capable functions can be scheduled with appropriate transaction modes.
+The handle has four async methods:
+
+| Method | Use |
+| --- | --- |
+| `tx.sql(query)` | Run a SurrealQL query and convert the result into the return type. |
+| `tx.sql_with_vars(query, vars)` | The same, with parameters given as key and value pairs. |
+| `tx.run(fnc, args)` | Call a function, such as `fn::user_exists`, with a tuple of arguments. |
+| `tx.run_versioned(fnc, version, args)` | Call a function at a given version. |
+
+Calls awaited together run at the same time when none of them can write. Calls that can write, and every `tx.run` call, run one after the other. Queries are still limited by the module's `allow_arbitrary_queries` and `allow_functions` capabilities.
+
+The handle is valid only during the call. A function that stores it and uses it after returning stops with an error.
+
+### Read-only and writeable functions
+
+`Transaction` on its own gives read-only access. To modify data, declare the parameter as `Transaction<ReadWrite>`:
+
+```rust
+use anyhow::Result;
+use surrealism::{surrealism, ReadWrite, Transaction};
+use surrealdb_types::Value;
+
+#[surrealism]
+async fn create_user(tx: Transaction<ReadWrite>, name: String) -> Result<String> {
+    let exists: bool = tx.run("fn::user_exists", (name.clone(),)).await?;
+    if exists {
+        return Ok(format!("User {name} already exists"));
+    }
+    let _: Value = tx.sql_with_vars("CREATE user SET name = $name", [("name", name.clone())]).await?;
+    Ok(format!("Created user {name}"))
+}
+```
+
+The parameter type is recorded in the module's exports manifest, so SurrealDB knows which functions can write before it calls them. A read-only function that tries to modify data fails with this error:
+
+```text title="Error output"
+A read-only Surrealism function cannot modify data; the function must declare that it requires a writeable transaction
+```
+
+The check covers every statement that modifies data, and also the functions that have a side effect: `api::invoke`, `eval::surql`, `eval::gql`, the `file::` functions that write, copy, rename or delete, `http::post`, `http::put`, `http::patch`, `http::delete` and `sequence::nextval`. A function name used in method syntax is checked in the same way.
+
+> [!NOTE]
+> Before SurrealDB 3.4, write access was declared with `#[surrealism(writeable)]`, and module code queried the database through the free functions `surrealism::sql()`, `surrealism::sql_with_vars()` and `surrealism::run()`. These have been removed. See [Upgrading a module to 3.4](#upgrading-a-module-to-34).
+
+### Using your own async runtime
+
+`#[surrealism]` keeps the other attributes on a function, so a function can start its own runtime, for example to use a crate that needs Tokio:
+
+```rust
+#[tokio::main(flavor = "current_thread")]
+#[surrealism]
+async fn fetch_status(url: String) -> Result<String, String> {
+    // implementation omitted
+    Ok(url)
+}
+```
+
+`#[tokio::main]` has to come first, above `#[surrealism]`, so that `#[surrealism]` receives the plain `fn` that `#[tokio::main]` produces. Use the `current_thread` flavour, because the default multi-threaded runtime needs threads that a module does not have. A function with its own runtime cannot take a `Transaction`. Use the `Transaction` methods on their own for database access, as they run on the host's async support and need no runtime in the module.
 
 ## `comment = "..."`
 
@@ -64,7 +126,7 @@ fn warm_cache() {
 }
 ```
 
-Use this for one-time setup such as preloading attached files or priming in-module caches.
+Use this for one-time setup such as preloading attached files or priming in-module caches. An `init` function cannot be `async` and cannot take a `Transaction`.
 
 ## Namespaced modules
 
@@ -96,6 +158,25 @@ Exports are prefixed by namespace, for example:
 
 - `math::add`
 - `math::util::negate`
+
+## Upgrading a module to 3.4
+
+<Since v="v3.4.0" />
+
+Modules built for SurrealDB 3.3 or earlier have to be rebuilt with the new version of the `surrealism` crate. SurrealDB 3.4 refuses to load an older `.surli` file with the error `Unsupported ABI version: expected 3, got 2`.
+
+| Before 3.4 | From 3.4 |
+| --- | --- |
+| `#[surrealism(writeable)]` | A `Transaction<ReadWrite>` parameter |
+| `surrealism::sql(query)` | `tx.sql(query).await` |
+| `surrealism::sql_with_vars(query, vars)` | `tx.sql_with_vars(query, vars).await` |
+| `surrealism::run(fnc, version, args)` | `tx.run(fnc, args).await` or `tx.run_versioned(fnc, version, args).await` |
+| `surrealism::kv::get()`, `set()` and the other `kv` functions | Records, through `Transaction<ReadWrite>`, or a `static` for state that only needs to last while the module is loaded |
+| `surrealism::tokio` | A `tokio` dependency of your own, with `#[tokio::main(flavor = "current_thread")]` |
+
+The module key-value store is removed. The `max_kv_entries` and `max_kv_value_bytes` capabilities in `surrealism.toml` and the `SURREAL_SURREALISM_MAX_KV_ENTRIES` and `SURREAL_SURREALISM_MAX_KV_VALUE_BYTES` environment variables no longer have any effect.
+
+A function that wrote data without declaring it now fails with the read-only error shown in [Read-only and writeable functions](#read-only-and-writeable-functions).
 
 ## Related docs
 
