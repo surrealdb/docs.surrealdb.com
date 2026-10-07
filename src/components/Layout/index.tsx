@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { usePageContext } from "vike-react/usePageContext";
 import { PageContentActions } from "~/components/ContentActions";
 import { PageAside } from "~/components/PageAside";
+import { RelatedContent } from "~/components/RelatedContent";
 import type { PageData } from "~/utils/data";
 import { CopyPageMenu } from "../CopyPageMenu";
 import { PageNavigation } from "./page-navigation";
@@ -143,6 +144,7 @@ export function DefaultLayout({
                             >
                                 {children}
                             </Box>
+                            <RelatedContent items={data.related ?? []} />
                             <Divider my="3xl" />
                             <PageContentActions contentPath={data.contentPath} />
                             <PageNavigation navigation={data.navigation} />

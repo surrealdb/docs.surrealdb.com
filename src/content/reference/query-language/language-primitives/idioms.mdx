@@ -565,6 +565,29 @@ SELECT *, string::uppercase(name) FROM person;
 
 To learn more about string method chaining in SurrealQL, see the [string functions](/docs/reference/query-language/functions/database-functions/string#method-chaining) section.
 
+## Optional parts
+
+> [!NOTE]
+> Until SurrealDB 3.0.0, this operator was a single `?` question mark. Since this version, it was changed to `.?` to avoid conflicts with the `??` operator when parsing.
+
+The `.?` operator is used to indicate that a part is optional (it may not exist). It also allows you to safely access nested data without having to check if the nested data exists and exit an idiom path early when the result is NONE.
+
+```surql
+SELECT person.spouse.?.name FROM person;
+```
+
+This idiom safely accesses `person.spouse.name` if `spouse` exists; otherwise, it returns `NONE`.
+
+## Using optional parts
+
+If some `person` records have a `spouse` field and others do not:
+
+```surql
+SELECT name, spouse.?.name AS spouse_name FROM person;
+```
+
+This idiom will return `NONE` for `spouse_name` if the `spouse` field is not present.
+
 ## Graph navigation
 
 SurrealDB can also be used in the context of graph databases, where data is stored and navigated using graph traversal idioms. The [`RELATE` statement](/docs/reference/query-language/statements/relate) is used to create relationships between records. This allows you to traverse related records efficiently without needing to pull data from multiple tables and merging that data together using SQL JOINs.
@@ -1001,27 +1024,6 @@ person:one.{
 }
 ```
 
-> [!NOTE]
-> Until SurrealDB 3.0.0, this operator was a single `?` question mark. Since this version, it was changed to `.?` to avoid conflicts with the `??` operator when parsing.
-
-The `.?` operator is used to indicate that a part is optional (it may not exist). It also allows you to safely access nested data without having to check if the nested data exists and exit an idiom path early when the result is NONE.
-
-```surql
-SELECT person.spouse.?.name FROM person;
-```
-
-This idiom safely accesses `person.spouse.name` if `spouse` exists; otherwise, it returns `NONE`.
-
-## Using optional parts
-
-If some `person` records have a `spouse` field and others do not:
-
-```surql
-SELECT name, spouse.?.name AS spouse_name FROM person;
-```
-
-This idiom will return `NONE` for `spouse_name` if the `spouse` field is not present.
-
 ## Recursive paths
 
 A recursive path allows record link or graph traversal down to a specified depth, as opposed to manually putting together a query to navigate down each level.
@@ -1034,6 +1036,25 @@ The following shows a recursive query that returns the names of people known by 
 -- Get all names of people second to Tobie
 person:tobie.{2}(->friends_with->person).name;
 ```
+
+Other graph databases call these queries variable-length patterns or k-hop queries. Cypher's `(a)-[:knows*1..3]->(b)`, which gives every record one to three hops away, is `.{1..3+collect}` in SurrealQL. Without `+collect`, a range returns only the records at the deepest level it reaches:
+
+```surql
+CREATE person:a, person:b, person:c, person:d;
+RELATE person:a->knows->person:b;
+RELATE person:b->knows->person:c;
+RELATE person:c->knows->person:d;
+
+-- Every record one to three hops away
+person:a.{1..3+collect}->knows->person;
+//- [person:b, person:c, person:d]
+
+-- Only the records at the deepest level reached
+person:a.{1..3}->knows->person;
+//- [person:d]
+```
+
+The same queries can also be written in [GQL](/docs/learn/querying/gql/overview), whose variable-length quantifier is `->{1,3}`.
 
 As the syntax of recursive queries tends to be complex to the untrained eye, this section will explain them in order of difficulty, beginning with what queries were necessary before recursive paths were added in SurrealDB version 2.1.
 
@@ -1659,6 +1680,22 @@ LET $you = SELECT VALUE id FROM ONLY person WHERE name = 'you' LIMIT 1;
 LET $star = SELECT VALUE id FROM ONLY person WHERE name = 'star' LIMIT 1;
 $you.{..+shortest=$star}->knows->person;
 ```
+
+Where several paths have the same shortest length, `+shortest` returns only one of them. To get all of them, take the length of the shortest path and use it as the depth for `+path`, which then returns every path of exactly that many steps. Then keep the paths that end at the target. The depth must be a literal number, so this takes two queries. With one more edge added to the network above, two paths of three steps reach `person:star`:
+
+```surql
+RELATE person:friend1->knows->person:acquaintance3;
+
+LET $shortest = person:you.{..+shortest=person:star}->knows->person;
+$shortest.len();
+//- 3
+
+LET $paths = person:you.{3+path}->knows->person;
+$paths.filter(|$p| $p.last() = person:star);
+//- [[person:friend2, person:acquaintance3, person:star], [person:friend1, person:acquaintance3, person:star]]
+```
+
+The paths are stored in a parameter before filtering because a method written directly after a recursive path is applied inside the recursion, not to its result.
 
 #### +collect
 

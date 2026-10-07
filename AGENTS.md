@@ -235,6 +235,15 @@ needs a second one, or a more realistic one, anything obviously a password works
 the user being signed in as. This one drifts back easily, so check the
 surrounding examples rather than copying whichever is nearest.
 
+**Names that read as something else.** Read every new identifier the way a
+reader skims it, with its punctuation turned into the letter it looks like, and
+rename it if the result is a rude word. A `$` reads as an S, so `LET $hits = ...`
+reads at a glance as "shits"; `$results` says the same thing without the
+problem. The same check applies to record IDs, table and field names, and
+anything else a reader sees in code, where `0` can pass for O and `1` or `|`
+for l. The test is a casual glance, not a strained reading: `$example` does not
+become anything, so it stays.
+
 **Example ordering.** SurrealQL often has several equivalents of the
 same operation, and readers - agents included, since the docs are served raw
 through the `.md` endpoints and `llms.txt` - take the first example shown as
@@ -951,6 +960,30 @@ The budget is a real constraint, not a formality. About 90 characters of URL and
 title per page is the floor, so at the current page count most of the ceiling is
 already spent before a description is written. If the file needs to get smaller,
 the lever is fewer pages or shorter URLs, not a shorter preamble.
+
+## Related lessons and posts
+
+A page can end with a box linking to SurrealDB University lessons and blog posts
+on the same subject, and the page's `.md` ends with the same links. The pairs
+live in `src/data/related.json`, which `bun run generate:related` rebuilds and
+which is committed, so every new pair shows up in a pull request diff. A page
+with no pair shows no box.
+
+The script scores each docs page against each `##` section of every lesson and
+post with TF-IDF, and keeps pairs at 0.28 or above. Scoring whole items paired
+pages with long book chapters that only shared vocabulary, so sections are what
+make the score mean something, and the link goes to the matched section's
+anchor. The threshold came from reading sampled pairs per score band; lower it
+only after doing the same.
+
+- **A wrong pair** goes in `exclude` in `src/data/related-overrides.json`, as
+  `["/docs/page/path", "/learn/or/blog/path"]`, rather than into the scoring.
+- **Blog posts from before 3.0.0** are left out, because most show syntax that
+  has since changed. Add a post's slug to `includePosts` once it has been
+  checked against the current version.
+- Lessons and posts are cached in `generated/related-sources`. Run with
+  `RELATED_REFRESH=1` when regenerating for a commit, so the file reflects what
+  is published.
 
 ## Link graph
 

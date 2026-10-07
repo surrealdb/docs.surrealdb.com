@@ -3,6 +3,7 @@ import { MarkdownViewer, type MediaDescriptor } from "@surrealdb/ui";
 import { useData } from "vike-react/useData";
 import type { PageData } from "~/utils/data";
 import { registerMarkdownComponents, resolveImageDescriptor } from "~/utils/markdown";
+import classes from "./style.module.scss";
 
 /**
  * Content images, rendered locally instead of by the viewer for one reason:
@@ -51,6 +52,7 @@ export function DocMarkdown() {
 
     return (
         <MarkdownViewer
+            className={classes.markdown}
             content={content}
             jsxMode="render"
             components={registerMarkdownComponents()}

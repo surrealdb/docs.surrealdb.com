@@ -200,6 +200,14 @@ Errors: {2: InternalError("Tried to set `$x`, but couldn't coerce value: Expecte
 Successes: IndexedResults { results: {0: (DbResultStats { execution_time: Some(301.375µs), query_type: Some(Other) }, Ok(None)), 3: (DbResultStats { execution_time: Some(2.278083ms), query_type: Some(Other) }, Ok(Array(Array([Object(Object({"id": RecordId(RecordId { table: Table("person"), key: String("yq7gxgm3ffkr4kibumeb") })}))]))))}, live_queries: {} }
 ```
 
+To take a result without defining a struct, use [`Value`](https://docs.rs/surrealdb/latest/surrealdb/types/enum.Value.html) or `serde_json::Value` as the type. `.take()` accepts any type that implements `SurrealValue`, and both of these do. A web framework can return a `serde_json::Value` as JSON without further conversion, but a record ID in it arrives as a string. A `Value` keeps every SurrealDB type. The page on [flexible typing](/docs/reference/rust/concepts/flexible-typing) shows more ways to work without a struct.
+
+```rust
+let mut result = db.query("SELECT * FROM person").await?;
+// Each record as JSON, with record IDs as strings such as "person:tobie"
+let people: Vec<serde_json::Value> = result.take(0)?;
+```
+
 ## Binding parameters (`.bind()`) {#binding-parameters}
 
 The [`.bind()`](https://docs.rs/surrealdb/latest/surrealdb/method/struct.Query.html#method.bind) method sets the parameters that a query refers to with SurrealQL's `$` syntax. It accepts anything that implements `IntoVariables`, which covers any type implementing `SurrealValue` that converts into an object, plus key-value pairs.
@@ -288,6 +296,37 @@ let mut result = db
 
 > [!NOTE]
 > A binding error is not raised at the point of the `.bind()` call. It is held until the query is awaited, and surfaces there as the result of the whole query.
+
+The SDK sends the bindings to the server as they are, and neither side checks them against the query. A parameter that the query uses but that was never bound is `NONE`, and a binding that the query never uses is ignored, so a misspelled name gives no error:
+
+```rust
+// $name was never bound, because the binding is called "nmae"
+let name: Option<String> = db
+    .query("RETURN $name")
+    .bind(("nmae", "Ann"))
+    .await?
+    .take(0)?;
+// None
+```
+
+A parameter can also name what a `DEFINE`, `REMOVE` or `INFO` statement acts on, such as `DEFINE TABLE $table`. See [Names from parameters](/docs/reference/query-language/statements/define/overview#names-from-parameters).
+
+A parameter holds a value, so it cannot stand in for the list of fields in a `SELECT`. `SELECT $fields FROM user` returns the value of `$fields` itself, in a field called `fields`. To choose the fields at run time, pass their names as an array to [`type::fields()`](/docs/reference/query-language/functions/database-functions/type#typefields), which reads each string as a field path. A field path can name any field on the record, so check requested names against the fields the caller is allowed to see before binding them.
+
+```rust
+use surrealdb::types::{Value, vars};
+
+// Names already checked against an allowlist
+let fields = vec!["name", "skills"];
+
+let users: Vec<Value> = db
+    .query("SELECT type::fields($fields) FROM type::table($table)")
+    .bind(vars! { fields: fields, table: "user" })
+    .await?
+    .take(0)?;
+```
+
+An `Option` binds as its value, or as `NONE` when it is `None`. So `.bind(("nick", None::<String>))` gives `$nick IS NONE` as `true`, and `CREATE person SET nick = $nick` creates a record with no `nick` field rather than one holding the string `"NONE"`.
 
 ## Per-statement stats (`.with_stats()`)
 

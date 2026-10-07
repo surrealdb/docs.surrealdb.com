@@ -275,6 +275,22 @@ LIMIT 10;
 
 `CONTAINSALL` / `ALLINSIDE` may still apply a residual filter above the union when intersection semantics require it. See [operators](/docs/reference/query-language/language-primitives/operators) and [`EXPLAIN`](/docs/reference/query-language/statements/explain) to confirm the planner choice.
 
+A composite index can include more than one array field, and a record can hold arrays in all of them. A query uses the index for the condition on the first field, and checks the condition on the second field against each record that the index returns:
+
+```surql
+DEFINE INDEX tags_sizes ON product FIELDS tags.*, sizes.*;
+CREATE product:jumper SET tags = ["wool", "winter"], sizes = ["S", "M"];
+CREATE product:shirt SET tags = ["cotton"], sizes = ["M", "L"];
+
+EXPLAIN SELECT id FROM product WHERE tags CONTAINS "wool" AND sizes CONTAINS "M";
+```
+
+```text title="Output"
+SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: sizes CONTAINS 'M']
+        IndexScan [ctx: Db] [index: tags_sizes, access: ['wool'], direction: Forward]
+```
+
 ### Count index
 
 <Since v="v3.0.0" />
@@ -451,6 +467,28 @@ DEFINE INDEX userNameIndex ON TABLE user FIELDS name FULLTEXT ANALYZER example_a
 - `HIGHLIGHTS`: Allows keyword highlighting in search results output when using the [`search::highlight`](/docs/reference/query-language/functions/database-functions/search#searchhighlight) function
 - `FIELDS`: a full-text search index can only be used on one field at a time. To use full-text search on more than one field, use a separate `DEFINE INDEX` statement for each one.
 
+#### A field that is unique and searchable
+
+An index has a single kind, such as `UNIQUE` or `FULLTEXT`. For a field that has to be both unique and searchable, define two indexes on it:
+
+```surql
+DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+DEFINE INDEX title_unique ON book FIELDS title UNIQUE;
+DEFINE INDEX title_search ON book FIELDS title FULLTEXT ANALYZER simple BM25;
+
+CREATE book:1 SET title = 'The Grey Book';
+SELECT id FROM book WHERE title @@ 'grey';
+```
+
+```surql title="Output"
+[{ id: book:1 }]
+```
+
+Both indexes are used without naming them: the query planner chooses the index by the operator in the condition, so `WHERE title = 'The Grey Book'` uses `title_unique` and `WHERE title @@ 'grey'` uses `title_search`. [`WITH INDEX`](/docs/reference/query-language/statements/select#the-with-clause) is not needed here, and naming the index that cannot serve the operator, as in `WITH INDEX title_search` with `=`, makes the query scan the table instead.
+
+> [!WARNING]
+> Writing both kinds in one statement, as in `DEFINE INDEX title ON book FIELDS title UNIQUE FULLTEXT ANALYZER simple`, does not return an error, but only the last kind is kept. That index is full-text only and accepts duplicate titles. Check the stored definition with `INFO FOR TABLE`.
+
 #### `FULLTEXT` vs. `SEARCH`
 
 Since version 3.0.0, using `FULLTEXT ANALYZER` is the syntax used for a text analyzer. The `FULLTEXT` clause allows for more performant [concurrent full-text search](https://github.com/surrealdb/surrealdb/pull/5571), as well as the ability to [use the `OR` operator](https://github.com/surrealdb/surrealdb/pull/6179).
@@ -596,7 +634,6 @@ LET $pt = [2,3,4,5];
 SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt;
 SELECT id FROM pts WHERE point <|2|> $pt EXPLAIN;" />
 
-
 ## Verifying Index Utilization in Queries
 
 The [`EXPLAIN` clause](/docs/reference/query-language/statements/select#the-explain-clause) from SurrealQL shows the execution plan of the query, including whether it uses an index.
@@ -629,6 +666,55 @@ It also reveals details about which `operation` was used by the query planner an
 ]
 ```
 
+## Using the `ANY`/`ALL` operators for string indexes
+
+<Since v="v2.4.0" />
+
+An index on a string field is used by `=` and by `IN` with an array of values. The containment operators `CONTAINS`, `CONTAINSANY`, `ALLINSIDE` and `ANYINSIDE` return the same records on such a field, but they scan the table, because they only use an index defined on the elements of an array field (such as `tags.*`). `CONTAINS` on a string is a substring match.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: account:billy, name: 'Billy McConnell' }]"
+
+[[test.results]]
+value = "[{ id: account:billy, name: 'Billy McConnell' }]"
+
+[[test.results]]
+value = "[{ id: account:billy, name: 'Billy McConnell' }]"
+
+[[test.results]]
+value = "[{ id: account:billy, name: 'Billy McConnell' }], [{ detail: { direction: 'forward', table: 'account' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 1 }, operation: 'Fetch' }]"
+
+[[test.results]]
+value = "[{ detail: { plan: { index: 'name_index', operator: 'union', value: ['Billy McConnell'] }, table: 'account' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 1 }, operation: 'Fetch' }]"
+
+*/
+
+DEFINE FIELD name ON account TYPE string;
+DEFINE INDEX name_index ON account FIELDS name;
+
+CREATE account:billy SET name = "Billy McConnell";
+
+-- IN uses the index
+EXPLAIN SELECT * FROM account WHERE name IN ["Billy McConnell"];
+//- "SelectProject [ctx: Db] [projections: *]\n    IndexScan [ctx: Db] [index: name_index, access: = 'Billy McConnell', direction: Forward]\n"
+
+-- CONTAINSANY scans the table
+EXPLAIN SELECT * FROM account WHERE name CONTAINSANY ["Billy McConnell"];
+//- "SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: account, direction: Forward, predicate: name CONTAINSANY ['Billy McConnell'], pre_decode_filter: yes]\n"
+```
+
+> [!NOTE]
+> In SurrealDB 2.4 and later 2.x releases, `CONTAINSANY`, `ALLINSIDE` and `ANYINSIDE` with the values in an array used an index on a string field, and `CONTAINS` did not. From 3.0.0, use `=` or `IN` to query a string index.
+
 ## Rebuilding Indexes
 
 
@@ -646,7 +732,6 @@ error = ""The index 'userEmailIndex' does not exist""
 
 REBUILD INDEX userEmailIndex ON user;
 ```
-
 
 ## Using `IF NOT EXISTS` clause
 
@@ -739,55 +824,6 @@ When both stages are complete, the index status changes to **ready**, meaning th
 	}
 }
 ```
-
-## Using the `ANY`/`ALL` operators for string indexes
-
-<Since v="v2.4.0" />
-
-An index on a string field is used by `=` and by `IN` with an array of values. The containment operators `CONTAINS`, `CONTAINSANY`, `ALLINSIDE` and `ANYINSIDE` return the same records on such a field, but they scan the table, because they only use an index defined on the elements of an array field (such as `tags.*`). `CONTAINS` on a string is a substring match.
-
-```surql
-/**[test]
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "[{ id: account:billy, name: 'Billy McConnell' }]"
-
-[[test.results]]
-value = "[{ id: account:billy, name: 'Billy McConnell' }]"
-
-[[test.results]]
-value = "[{ id: account:billy, name: 'Billy McConnell' }]"
-
-[[test.results]]
-value = "[{ id: account:billy, name: 'Billy McConnell' }], [{ detail: { direction: 'forward', table: 'account' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 1 }, operation: 'Fetch' }]"
-
-[[test.results]]
-value = "[{ detail: { plan: { index: 'name_index', operator: 'union', value: ['Billy McConnell'] }, table: 'account' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 1 }, operation: 'Fetch' }]"
-
-*/
-
-DEFINE FIELD name ON account TYPE string;
-DEFINE INDEX name_index ON account FIELDS name;
-
-CREATE account:billy SET name = "Billy McConnell";
-
--- IN uses the index
-EXPLAIN SELECT * FROM account WHERE name IN ["Billy McConnell"];
-//- "SelectProject [ctx: Db] [projections: *]\n    IndexScan [ctx: Db] [index: name_index, access: = 'Billy McConnell', direction: Forward]\n"
-
--- CONTAINSANY scans the table
-EXPLAIN SELECT * FROM account WHERE name CONTAINSANY ["Billy McConnell"];
-//- "SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: account, direction: Forward, predicate: name CONTAINSANY ['Billy McConnell'], pre_decode_filter: yes]\n"
-```
-
-> [!NOTE]
-> In SurrealDB 2.4 and later 2.x releases, `CONTAINSANY`, `ALLINSIDE` and `ANYINSIDE` with the values in an array used an index on a string field, and `CONTAINS` did not. From 3.0.0, use `=` or `IN` to query a string index.
 
 ## The `DEFER` clause
 
