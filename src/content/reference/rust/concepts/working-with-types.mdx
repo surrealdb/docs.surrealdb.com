@@ -10,7 +10,11 @@ The [surrealdb-types](https://crates.io/crates/surrealdb-types) crate holds the 
 
 ## The `SurrealValue` trait
 
-`SurrealValue` is the trait that converts a Rust type to and from a SurrealDB value. Deriving it is all that is needed to use a Rust type for serialisation and deserialisation. To customise how a type is converted, such as renaming fields or tagging enum variants, see [SurrealValue attributes](/docs/reference/rust/concepts/surrealvalue-attributes).
+`SurrealValue` is the trait that converts a Rust type to and from a SurrealDB value. Deriving it is all that is needed to use a Rust type for serialisation and deserialisation.
+
+The SDK does not generate Rust structs from a database schema. The struct for each table is written by hand and derives `SurrealValue`, and a field whose type does not match the stored value fails at deserialisation with an error that names the field. [`surrealkit typegen`](/docs/manage/schema-migration/typegen) describes a schema as JSON and generates TypeScript types, but not Rust. The opposite direction is available: `kind_of()` gives the SurrealQL type of a Rust type, as shown in [Getting the SurrealQL type of a Rust type](#getting-the-surrealql-type-of-a-rust-type).
+
+To customise how a type is converted, such as renaming fields, flattening a nested struct into its parent or tagging enum variants, see [SurrealValue attributes](/docs/reference/rust/concepts/surrealvalue-attributes). The derive does not read `#[serde(...)]` attributes, so a field marked `#[serde(flatten)]` needs `#[surreal(flatten)]` instead. This also works for a generic field, as in `struct RecordData<V: SurrealValue> { id: RecordId, #[surreal(flatten)] data: V }`.
 
 ```rust
 use surrealdb::engine::any::connect;
@@ -120,6 +124,38 @@ Ok(Some(MyOwnDateTime(1760330504574)))
 Err(InternalError("Couldn't convert Object(Object({\"id\": RecordId(RecordId { table: \"person\", key: String(\"tcblzaktx3ponin9dyci\") })})) to MyOwnDateTime"))
 ```
 
+https://github.com/orgs/surrealdb/discussions/3389
+### Getting the SurrealQL type of a Rust type
+
+`kind_of()` returns a `Kind`, and `to_sql()` on a `Kind` gives the SurrealQL type as a string, ready for a `DEFINE FIELD ... TYPE` clause. An `Option<String>` gives `none | string`, which is the form SurrealQL also stores for `option<string>`.
+
+```rust
+use surrealdb::types::{RecordId, SurrealValue, ToSql};
+
+#[derive(SurrealValue)]
+struct Person {
+    id: RecordId,
+    name: String,
+    nickname: Option<String>,
+    tags: Vec<String>,
+}
+
+fn main() {
+    println!("{}", Option::<String>::kind_of().to_sql());
+    println!("{}", Vec::<String>::kind_of().to_sql());
+    println!("{}", RecordId::kind_of().to_sql());
+    println!("{}", Person::kind_of().to_sql());
+}
+```
+
+```text title="Output"
+none | string
+array<string>
+record
+{id: record, name: string, nickname: none | string, tags: array<string>}
+```
+--END--
+
 ## Record IDs as strings
 
 A record's `id` is a `RecordId`, made of a `table` and a `key`, so a struct field that holds it has to be a `RecordId` rather than a `String`. Reading it into a `String` field fails with `Failed to deserialize field 'id' ...: Expected string, got record`. There are two ways to work with the ID as a string instead.
@@ -159,6 +195,17 @@ let people: Vec<PersonSummary> = response.take(0)?;
 ```
 
 A key that needs escaping keeps its backticks in the full form, as in ``person:`a-b` ``, while `record::id` returns the key as it was written (`a-b`). Use the full form for a value that is later turned back into a record ID, since the key alone does not say which table it belongs to.
+
+`RecordId::parse_simple()` turns the full form back into a `RecordId`. It splits the string at the first colon outside backticks and removes backtick escaping. It returns an error for a string with no colon:
+
+```rust
+use surrealdb::types::RecordId;
+
+let id = RecordId::parse_simple("person:tobie")?;
+let person: Option<Person> = db.select(id).await?;
+```
+
+The key is always parsed as a string. For example, `person:1` becomes a record ID with the string key `'1'`, and that ID does not match a record created with the number key `1`. For a key that is not a string, build the ID with `RecordId::new()`, or pass the whole string to `type::record()` in the query. That function reads the key as SurrealQL, so `type::record('person:1')` returns `person:1` with a number key.
 
 ### Numeric record IDs
 
