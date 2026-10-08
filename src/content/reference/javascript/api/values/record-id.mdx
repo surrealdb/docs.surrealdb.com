@@ -5,7 +5,7 @@ description: Type-safe record identifiers with table name and ID components.
 ---
 
 
-# `RecordId<Tb, Id>` {#recordid}
+# `RecordId<Tb, Id, T>` {#recordid}
 
 The `RecordId` class provides type-safe record identifiers in SurrealDB. Each record ID consists of a table name and an ID value, represented as `table:id` in SurrealQL.
 
@@ -14,12 +14,16 @@ The `RecordId` class provides type-safe record identifiers in SurrealDB. Each re
 import { RecordId } from 'surrealdb';
 ```
 
-**Source:** [value/record-id.ts](https://github.com/surrealdb/surrealdb.js/blob/main/packages/sdk/src/value/record-id.ts)
+**Source:** [value/record-id.ts](https://github.com/surrealdb/surrealdb.js/blob/main/packages/sqon/src/value/record-id.ts)
 
 ## Type parameters
 
 - `Tb extends string` - The table name (string literal type for type safety)
 - `Id` - The ID value type (string, number, object, etc.)
+- `T` - The type of the records in the table (optional, defaults to `unknown`). It is taken from the [`Table`](/docs/reference/javascript/api/values/table) the record ID is created from. See [Typed record IDs](#typed).
+
+> [!NOTE]
+> `T` is a compile-time annotation only. It is not validated against the data returned by the server.
 
 ## Constructor
 
@@ -43,7 +47,7 @@ new RecordId(table, id)
     <tbody>
         <tr>
             <td><code>table</code> <label label="required" /></td>
-            <td><code>Tb | Table&lt;Tb&gt;</code></td>
+            <td><code>Tb | Table&lt;Tb, T&gt;</code></td>
             <td>The table name, either as a string or a <code>Table</code> instance.</td>
         </tr>
         <tr>
@@ -80,13 +84,57 @@ const nested = new RecordId('links', new RecordId('users', 'alice'));
 const typedUser = new RecordId<'users', string>('users', 'john');
 ```
 
+### Typed record IDs {#typed}
+
+A record ID created from a [typed table](/docs/reference/javascript/api/values/table#typed) keeps the table's record type. The methods that take a record ID then infer their result type, so you don't need to pass the record type on each call.
+
+```ts
+interface User {
+    name: string;
+    email: string;
+}
+
+const users = Table.of<User>()('users');
+const id = new RecordId(users, 'john');   // RecordId<"users", string, User>
+
+const user = await db.select(id);         // User | undefined (with `id`)
+await db.update(id).merge({ name: 'John' });
+await db.delete(id);
+```
+
+`select`, `create`, `update`, `upsert` and `delete` all infer the record type this way.
+
+There are several ways to create a record ID, and they differ in the type they produce:
+
+| Form | Resulting type |
+| --- | --- |
+| `new RecordId('users', 'john')` | `RecordId<'users', string, unknown>` |
+| `new RecordId<'users', string>('users', 'john')` | `RecordId<'users', string, unknown>` |
+| `new RecordId(Table.of<User>()('users'), 'john')` | `RecordId<'users', string, User>` |
+| `const id: RecordId<'users', string, User> = new RecordId('users', 'john')` | `RecordId<'users', string, User>` |
+| `new RecordId<'users', string, User>('users', 'john')` | `RecordId<'users', string, User>` |
+| `new RecordId(new Table<User>('users'), 'john')` | `RecordId<string, string, User>` |
+| `new RecordId(new Table('users'), 1)` | `RecordId<'users', number, unknown>` |
+
+There is no `new RecordId<User>(...)` shorthand, because the first type parameter is the table name. Take the record type from a typed table, or annotate the variable. A record ID built from a table declared as `new Table<User>('users')` keeps the record type, but its table name is only typed as `string`.
+
+A typed record ID can be used where an untyped one is expected, but not where a different record type or table name is expected:
+
+```ts
+const a: RecordId = id;                                  // OK
+const b: RecordId<'users', string, Post> = id;           // Error: wrong record type
+const c: RecordId<'user', string, User> = new RecordId('users', 'john');   // Error: 'users' is not 'user'
+```
+
+If you pass an explicit type on the call, such as `db.select<Post>(id)`, that type takes precedence over the record ID's own. Prefer letting the type come from the record ID.
+
 ## Properties
 
 ### `table` {#table}
 
 The table name component, returned as a `Table` instance.
 
-**Type:** `Table<Tb>`
+**Type:** `Table<Tb, T>`
 
 ```ts
 const userId = new RecordId('users', 'john');
@@ -327,7 +375,7 @@ try {
 
 ## RecordIdRange {#recordidrange}
 
-The `RecordIdRange` class represents a range of record IDs for querying multiple records.
+The `RecordIdRange` class represents a range of record IDs for querying multiple records. It takes the same type parameters as `RecordId`: `RecordIdRange<Tb, Id, T>`, where `Id` is the type of the bounds and `T` is the record type, taken from the `Table` it is created from.
 
 Bounds are specified using the `BoundIncluded` and `BoundExcluded` classes, or `undefined` for unbounded:
 - `new BoundIncluded(value)` - inclusive bound (`>=` or `<=`)
@@ -352,7 +400,7 @@ new RecordIdRange(table, begin, end)
     <tbody>
         <tr>
             <td><code>table</code> <label label="required" /></td>
-            <td><code>Tb | Table&lt;Tb&gt;</code></td>
+            <td><code>Tb | Table&lt;Tb, T&gt;</code></td>
             <td>The table name, either as a string or a <code>Table</code> instance.</td>
         </tr>
         <tr>
@@ -410,6 +458,22 @@ await db.delete(new RecordIdRange(
     new BoundExcluded('2024-02-01'),
 ));
 ```
+
+### Typed ranges {#typed-ranges}
+
+A range created from a [typed table](/docs/reference/javascript/api/values/table#typed) keeps the record type, in the same way as a [typed record ID](#typed):
+
+```ts
+const users = Table.of<User>()('users');
+
+const range = new RecordIdRange(users, new BoundIncluded('a'), new BoundExcluded('f'));
+// RecordIdRange<"users", string, User>
+
+const some = await db.select(range);      // User[] (with `id`)
+await db.delete(range);
+```
+
+`select`, `update`, `upsert` and `delete` infer the record type from a range. A range created from a plain table name, such as `new RecordIdRange('users', ...)`, is `RecordIdRange<'users', string, unknown>`, and you can still pass the type on the call: `db.select<User>(range)`.
 
 ## Best practices
 
