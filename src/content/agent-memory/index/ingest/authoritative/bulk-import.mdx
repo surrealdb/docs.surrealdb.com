@@ -6,7 +6,7 @@ description: "Importing large quantities of documents or knowledge nodes into Su
 
 # Bulk import
 
-When populating a new Context or migrating from an existing system, you typically need to ingest many documents or knowledge nodes at once. SurrealDB Agent Memory's ingestion pipeline is designed for concurrent usage, and both the document upload endpoint and the triple-write path on `/facts` support high-throughput ingestion patterns.
+Populating a new Context, or migrating from another system, means ingesting many documents or structured records at once. This page covers uploading documents concurrently, writing structured records as triples on `/facts`, and keeping a large import safe to re-run.
 
 ## Uploading many documents
 
@@ -109,6 +109,60 @@ The recommended concurrency ceiling for standard deployments is 10-20 concurrent
 
 For structured catalogue or policy data you already trust, use **`POST /api/v1/{context_id}/facts`** with `infer: "triples"` (or batch multiple utterances via **`/facts/batch`**). The reconciler persists entities, attributes, and relations in the unified graph with `source.kind = "document"` or operator-provided provenance.
 
+### Triples or documents
+
+Data that already has a structure, such as a product catalogue, a policy table, or a list of settings with the versions that had them, can reach Agent Memory in two ways:
+
+- **As documents.** A language model reads the text and extracts entities, attributes and relations from it.
+- **As triples.** A triple is one fact in three parts: an `entity`, a `key`, and either a `value` or a `target` entity, after the subject, predicate and object of RDF. Agent Memory stores each triple as given, with no language model involved.
+
+When the records exist before any text does, writing them out as sentences so that document extraction can rebuild them repeats work that is already done. Each document then costs a model call, takes longer to process, and can be read wrongly, for structure that the source data held exactly. Send records like these as triples, and keep document upload for material whose structure is not known in advance, such as reports, notes and transcripts. Where both exist, for example a settings table together with the release notes that explain each change, send the table as triples and the release notes as documents.
+
+### Validity ranges
+
+A relation triple can carry `valid_from` and `valid_until`, the period during which the relation held in the world. This records a fact that started and ended as a single triple. The example below records that SurrealDB 1.1.0 (released 2024-01-09) added the environment variable `SURREAL_WEBSOCKET_MAX_CONCURRENT_REQUESTS` and 2.2.0 (released 2025-02-11) removed it:
+
+```http
+POST /api/v1/{context_id}/facts
+Content-Type: application/json
+Authorization: Bearer <key>
+
+{
+  "infer": "triples",
+  "scopes": [["version-history"]],
+  "triples": [
+    { "entity": { "type": "product", "name": "SurrealDB" },
+      "key": "has_environment_variable",
+      "target": { "type": "environment_variable", "name": "SURREAL_WEBSOCKET_MAX_CONCURRENT_REQUESTS" },
+      "valid_from": "2024-01-09T00:00:00Z",
+      "valid_until": "2025-02-11T00:00:00Z" },
+    { "entity": { "type": "environment_variable", "name": "SURREAL_WEBSOCKET_MAX_CONCURRENT_REQUESTS" },
+      "key": "help_text",
+      "value": "How many concurrent tasks can be handled on each WebSocket (defaults to 24)" }
+  ]
+}
+```
+
+Leave out `valid_until` for a relation that still holds. Both fields apply to relations only: an attribute such as `help_text` takes the time it was learned from the request's `observed_at`, and a later triple with the same entity and key supersedes it.
+
+### Registering the scope
+
+A scope has to exist before a triple can be written to it. Create it once with `POST /api/v1/{context_id}/scopes`, before the first batch:
+
+```http
+POST /api/v1/{context_id}/scopes
+Content-Type: application/json
+Authorization: Bearer <key>
+
+{ "path": "version-history" }
+```
+
+A request that names a scope that has not been created is rejected with an `unknown scope node` error.
+
+### Batch size
+
+A request returns only after every triple in it is stored, so the time a request takes grows with the number of triples it holds. Batches of a few hundred triples keep each request well inside common client and proxy timeouts, and a batch that fails can be sent again on its own. Writes reconcile by entity and key, so re-sending a batch does not create duplicates (see [Deduplication](#deduplication)).
+
 ```http
 POST /api/v1/{context_id}/facts
 Content-Type: application/json
@@ -168,8 +222,8 @@ relations = [
     if record.get("category_slug")
 ]
 
-# Upsert in batches of 1000
-BATCH_SIZE = 1000
+# Upsert in batches of 200
+BATCH_SIZE = 200
 for i in range(0, len(nodes), BATCH_SIZE):
     batch_nodes = nodes[i:i + BATCH_SIZE]
     batch_relations = [r for r in relations if any(
@@ -198,7 +252,7 @@ for i in range(0, len(nodes), BATCH_SIZE):
 ### JavaScript
 
 ```javascript
-const BATCH_SIZE = 1000;
+const BATCH_SIZE = 200;
 
 for (let i = 0; i < nodes.length; i += BATCH_SIZE) {
     const batchNodes = nodes.slice(i, i + BATCH_SIZE);
