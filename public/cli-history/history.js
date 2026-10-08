@@ -149,7 +149,8 @@
 			$("v-table").innerHTML = head + "<tbody>" + list.map((it) => row(it, i)).join("") + "</tbody>";
 			return;
 		}
-		const [from, to] = tags[j].date <= tags[i].date ? [j, i] : [i, j];
+		// Tags are in version order, so a comparison always reads as an upgrade
+		const [from, to] = j < i ? [j, i] : [i, j];
 		const added = sort(pool.filter((it) => !present(it, from) && present(it, to)));
 		const removed = sort(pool.filter((it) => present(it, from) && !present(it, to)));
 		const changed = sort(pool.filter((it) => present(it, from) && present(it, to) && defaultAt(it, from) !== defaultAt(it, to)));
