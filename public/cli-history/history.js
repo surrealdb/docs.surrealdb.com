@@ -142,7 +142,10 @@
 		const row = (it, at, mark = "") => `<tr><td>${mark}<code>${esc(shown(it.key))}</code></td><td>${kindName(it)}</td><td>${showDefault(defaultAt(it, at))}</td><td class="col-help"><span class="help">${esc(it.help || "")}</span></td></tr>`;
 		if (j < 0) {
 			const list = sort(pool.filter((it) => present(it, i)));
-			$("v-summary").textContent = `${ver(tags[i])} has ${list.filter(isEnv).length} environment variables and ${list.filter(isFlag).length} flags and arguments${q ? " that match the filter" : ""}.`;
+			const envCount = `${list.filter(isEnv).length} environment variables`;
+			const flagCount = `${list.filter(isFlag).length} flags and arguments`;
+			const counts = { all: `${envCount} and ${flagCount}`, env: envCount, flag: flagCount }[vKind()];
+			$("v-summary").textContent = `${ver(tags[i])} has ${counts}${q ? " that match the filter" : ""}.`;
 			$("v-table").innerHTML = head + "<tbody>" + list.map((it) => row(it, i)).join("") + "</tbody>";
 			return;
 		}
