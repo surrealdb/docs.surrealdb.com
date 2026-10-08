@@ -149,8 +149,8 @@
 			$("v-table").innerHTML = head + "<tbody>" + list.map((it) => row(it, i)).join("") + "</tbody>";
 			return;
 		}
-		// Tags are in version order, so a comparison always reads as an upgrade
-		const [from, to] = j < i ? [j, i] : [i, j];
+		// From the selected release to the one compared with, so a downgrade reads as one too
+		const [from, to] = [i, j];
 		const added = sort(pool.filter((it) => !present(it, from) && present(it, to)));
 		const removed = sort(pool.filter((it) => present(it, from) && !present(it, to)));
 		const changed = sort(pool.filter((it) => present(it, from) && present(it, to) && defaultAt(it, from) !== defaultAt(it, to)));
