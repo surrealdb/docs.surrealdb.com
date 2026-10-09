@@ -1,0 +1,146 @@
+---
+position: 12
+title: Surqlize live queries
+description: Subscribe to real-time changes with db.live() in Surqlize, which compiles to LIVE SELECT and delivers typed notifications, with filters, projections, diffs, async iteration, and reconnect behaviour.
+---
+
+# Surqlize live queries
+
+`db.live()` opens a [`LIVE SELECT`](/docs/reference/query-language/statements/live-select) subscription and resolves to a typed `LiveSubscription`. Each notification carries the action, the record id, and the record parsed against your schema.
+
+> [!NOTE]
+> Live queries need a WebSocket connection. The table must exist before you subscribe, so define it up front, for example with `DEFINE TABLE`.
+
+## Subscribing
+
+`db.live()` takes a table name, a record id, or a table name and an id, like `select()`. Awaiting it starts the subscription.
+
+```ts title="Subscribe to a table"
+const sub = await db.live("user");
+
+// Handle notifications. The return value stops this handler.
+const off = sub.subscribe((msg) => {
+    // msg.action:   "CREATE" | "UPDATE" | "DELETE" | "KILLED"
+    // msg.recordId: the affected RecordId
+    // msg.value:    the affected record, parsed against the schema
+    if (msg.action === "KILLED") return;
+    console.log(msg.action, msg.value);
+});
+
+// Stop receiving notifications on this handler
+off();
+
+// Or end the subscription
+await sub.kill();
+```
+
+The `value` of a notification is typed from the table, once you have ruled out `KILLED`:
+
+```ts title="Typed notifications"
+sub.subscribe((msg) => {
+    if (msg.action === "KILLED") return;
+    msg.value.name; // string
+    msg.value.age;  // number
+});
+```
+
+### Handling KILLED
+
+`KILLED` means the server ended the subscription, for example because its table was removed. It is the last message a subscription emits, and it has no record, so `recordId` and `value` exist only after you rule it out. `LiveMessage` is a union, so the compiler enforces this.
+
+`sub.isAlive` becomes `false` when a subscription ends, whether through `kill()`, because the server ended it, or because the request scope it was made through was aborted.
+
+### Async iteration
+
+A subscription is async-iterable, so you can read it with `for await`.
+
+```ts title="Read notifications in a loop"
+for await (const msg of await db.live("user")) {
+    if (msg.action === "KILLED") break;
+    console.log(msg.action, msg.value);
+}
+```
+
+### Subscribing in one step
+
+Calling `.subscribe(handler)` on the builder starts the query and returns a function that both removes the handler and kills the subscription.
+
+```ts title="Subscribe and stop"
+const stop = await db
+    .live("user")
+    .where((user) => user.age.gte(18))
+    .subscribe((msg) => {
+        if (msg.action !== "KILLED") console.log(msg.action, msg.value);
+    });
+
+// later
+stop();
+```
+
+## Filtering, projecting, and fetching
+
+A live query takes `.where()`, `.return()`, and `.fetch()`, as `select` does. `.where()` accepts both [fluent and object filters](/docs/reference/javascript/libraries/surqlize/querying#filtering-with-where).
+
+```ts title="Filter, project, and fetch"
+// Only notify for adult users
+const adults = await db.live("user").where((user) => user.age.gte(18));
+
+// Project a subset of fields
+const names = await db.live("user").return((user) => ({
+    name: user.name,
+    email: user.email,
+}));
+
+// Resolve record links in notifications
+const posts = await db.live("post").fetch("author");
+```
+
+> [!NOTE]
+> Filtering or projecting a live query relies on query parameters, which need SurrealDB 3.0 or later. `FETCH` needs 2.2.0 or later. On older servers a parameterised live query is accepted but never delivers notifications.
+
+## Receiving diffs
+
+`.diff()` delivers [JSON Patch](https://jsonpatch.com) operations instead of full records, which renders `LIVE SELECT DIFF`.
+
+```ts title="Subscribe to diffs"
+const sub = await db.live("user").diff();
+
+sub.subscribe((msg) => {
+    // msg.value is an array of JSON Patch operations
+});
+```
+
+## Reconnecting
+
+A subscription to a table, with any of `.where()`, `.fetch()`, and `.diff()`, is managed by the SDK. When the connection drops and returns, the SDK registers the live query again and notifications keep arriving. The `id` of the subscription changes when that happens. Changes made while the connection was down are not replayed.
+
+A subscription with a `.return()` projection cannot be expressed that way, so it is unmanaged. It stops delivering after a reconnect, and `isAlive` stays `true`. Check `sub.isManaged` where this matters, or subscribe to the whole record and project it on the client.
+
+```ts title="Check whether a subscription is managed"
+const adults = await db.live("user").where((user) => user.age.gte(18));
+adults.isManaged; // true
+
+const names = await db.live("user").return((user) => ({ name: user.name }));
+names.isManaged; // false
+```
+
+For the SDK's own live query API, see [live queries](/docs/reference/javascript/concepts/live-queries) in the SDK documentation.
+
+## Ending subscriptions with a request
+
+A subscription made through [`db.withSignal(signal)`](/docs/reference/javascript/libraries/surqlize/request-options#tying-requests-to-a-signal) is killed when the signal aborts, so it cannot outlive its client.
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Cancellation, timeouts, and retries"
+        description="Tie queries and subscriptions to the lifetime of a request."
+        href="/docs/reference/javascript/libraries/surqlize/request-options"
+    />
+    <IconBox
+        title="Querying"
+        description="Filters and projections work the same way as in a select."
+        href="/docs/reference/javascript/libraries/surqlize/querying"
+    />
+</Boxes>

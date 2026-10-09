@@ -1,0 +1,304 @@
+---
+position: 5
+title: Querying
+description: Build SELECT queries in Surqlize with typed field access, fluent and object-based filters, ordering, pagination, projections with return(), fetching linked records, and single-record results with only().
+---
+
+# Querying
+
+`db.select()` starts a `SELECT` query. You refine it with chained methods and run it by awaiting it. Every method returns a new query, so you can keep a partly built query and extend it in different directions.
+
+```ts title="A select query"
+const adults = await db
+    .select("user")
+    .where((user) => user.age.gte(18))
+    .orderBy("age", "DESC")
+    .limit(20);
+// adults: the full user record, for up to 20 users
+```
+
+The callbacks receive a typed view of the record, so field names, operators, and the types of the values you compare with are checked against your [schema](/docs/reference/javascript/libraries/surqlize/schema).
+
+> [!NOTE]
+> SurrealDB reports an error when you select from a table that does not exist yet. Define the table first, or write a record to it.
+
+## Selecting records
+
+`select()` accepts a table name, a record id, or a table name and an id.
+
+```ts title="Ways to start a select"
+import { RecordId } from "surrealdb";
+
+db.select("user");                          // every record in the table
+db.select("user", "ada");                   // the record user:ada
+db.select(new RecordId("user", "ada"));     // the same, with a RecordId
+db.select(["user", "company"]);             // several tables at once
+```
+
+Selecting from several tables gives records that have the merged fields of every table you name.
+
+Awaiting a query runs it. `.execute()` does the same and returns a promise, which is useful where you want an explicit call.
+
+```ts title="Run a query"
+const users = await db.select("user");
+const sameUsers = await db.select("user").execute();
+```
+
+## Single records
+
+A query returns an array, even when you select one record by id. Three options give you a single record instead:
+
+- **`.only()`** adds `ONLY` to the statement, and the result is a single object rather than an array.
+- **`.then.val()`** runs the query and takes the first item of the array, or `undefined` when the array is empty.
+- **`.then.at(index)`** takes the item at an index. Negative indexes count from the end.
+
+```ts title="Get a single record"
+const ada = await db.select("user", "ada").only();
+// ada: the user record
+
+const maybeAda = await db.select("user", "ada").then.val();
+// maybeAda: the user record, or undefined
+
+const newest = await db.select("user").orderBy("created", "DESC").then.at(0);
+```
+
+`.only()` changes the query that is sent to SurrealDB, while `.then.val()` and `.then.at()` choose from the array on the client. The `.only()` modifier is also available on `create`, `update`, `upsert`, `delete`, and `relate`.
+
+## Filtering with where
+
+`where()` takes a callback that returns a condition. The fields of the record are properties of its argument, and each type has its own methods.
+
+```ts title="Fluent conditions"
+db.select("user").where((user) => user.age.gte(18));
+db.select("user").where((user) => user.name.first.eq("Ada"));
+db.select("user").where((user) => user.role.inside(["admin", "owner"]));
+```
+
+Every type supports these comparison methods:
+
+| Method | SurrealQL |
+| ------ | --------- |
+| `eq(value)` | `=` |
+| `ne(value)` | `!=` |
+| `ex(value)` | `==` (exact match) |
+| `gt(value)`, `gte(value)` | `>`, `>=` |
+| `lt(value)`, `lte(value)` | `<`, `<=` |
+| `inside(values)`, `notInside(values)` | `IN`, `NOT IN` |
+| `trueish()`, `falseish()` | `!!`, `!` |
+| `and(condition)`, `or(condition)`, `not()` | Logical operators |
+
+Strings add `startsWith()`, `endsWith()`, `contains()`, and `search()`. Arrays add `contains()`, `containsNot()`, `containsAll()`, `containsAny()`, `containsNone()`, `allInside()`, `anyInside()`, `noneInside()`, and `isEmpty()`. See [functions](/docs/reference/javascript/libraries/surqlize/functions) for the full set of type-specific methods.
+
+### Combining conditions
+
+A query has one condition. Calling `.where()` a second time replaces the first, so combine conditions in one call.
+
+The standalone `and()` and `or()` functions take two or more conditions and produce SurrealQL with explicit parentheses.
+
+```ts title="Compound conditions"
+import { and, or } from "surqlize";
+
+db.select("user").where((user) =>
+    and(
+        user.age.gte(18),
+        or(user.role.eq("admin"), user.role.eq("moderator")),
+        user.email.endsWith("@example.com"),
+    ),
+);
+```
+
+Chaining `.and()` and `.or()` on a condition also works, for example `user.age.gte(18).and(user.isActive.eq(true))`.
+
+### Object-based filters
+
+`where()` and `orderBy()` also accept plain objects, which suit filters that come from data such as a query string, a form, or a JSON body. They compile to the same SurrealQL as the fluent callbacks, and you can mix both styles in one query. The objects are type-checked against your schema.
+
+```ts title="Object-based filter and sort"
+const rows = await db
+    .select("user")
+    .where({
+        name: { first: "Ada" },
+        email: { endsWith: "@example.com" },
+        age: { gte: 18, lt: 65 },
+        role: "admin",
+    })
+    .orderBy({ age: "desc", name: { last: "asc" } })
+    .limit(20);
+```
+
+Keys at the same level are combined with `AND`. A bare value is shorthand for `{ eq: value }`, and several operators on one field are combined with `AND`. Combine groups with `and`, `or`, and `not`:
+
+```ts title="Groups in an object filter"
+db.select("user").where({
+    or: [{ role: "admin" }, { age: { gt: 65 } }],
+    not: { status: "banned" },
+});
+```
+
+The available operators mirror the fluent methods: `eq`, `ne`, `ex`, `gt`, `gte`, `lt`, `lte`, `inside`, and `notInside` on every field, `startsWith`, `endsWith`, `contains`, and `search` on strings, and `contains`, `containsNot`, `containsAll`, `containsAny`, `containsNone`, `allInside`, `anyInside`, and `noneInside` on arrays. You can filter and sort by the fields of an object, and of a record link, in place, for example `author: { age: { gt: 30 } }`.
+
+Some details about object filters:
+
+- A field whose value is `undefined` is skipped. An object that sets no condition, including empty `and` and `or` groups, produces no `WHERE` clause, so you can pass optional parameters straight through.
+- A key that names a field always takes precedence over an operator or combinator of the same name.
+- Unknown fields, unsupported operators, and invalid directions throw an `OrmError`, and the type checker rejects them.
+- Directions are `"asc"` and `"desc"`, and upper case works too. They apply in key order.
+- `.where()` takes object filters on `update`, `delete`, and `live` queries as well.
+
+## Ordering
+
+`orderBy()` takes a field name and a direction, a callback for nested fields, or an object.
+
+```ts title="Ordering"
+db.select("user").orderBy("age", "DESC");
+
+db.select("user")
+    .orderBy("lastName", "ASC")
+    .orderBy("firstName", "ASC");
+
+db.select("user").orderBy((user) => user.name.last, "ASC");
+
+db.select("user").orderBy({ age: "desc", name: { last: "asc" } });
+```
+
+`orderByNumeric()` and `orderByCollate()` add the `NUMERIC` and `COLLATE` modes. They take a field name and a direction, and are available in the fluent form only.
+
+```ts title="Numeric and collated ordering"
+db.select("user").orderByNumeric("age", "DESC");
+db.select("user").orderByCollate("name", "ASC");
+```
+
+## Pagination
+
+`start()` skips a number of records and `limit()` caps how many are returned.
+
+```ts title="Pagination"
+const page = await db.select("user").orderBy("created", "DESC").start(40).limit(20);
+```
+
+## Projections with return
+
+`return()` chooses the fields of the result. The callback returns an object, and the result type follows its shape. Values can be fields, nested fields, or [function](/docs/reference/javascript/libraries/surqlize/functions) calls.
+
+```ts title="Project specific fields"
+const names = await db.select("user").return((user) => ({
+    fullName: user.name.first.join(" ", user.name.last),
+    email: user.email,
+}));
+// names: { fullName: string; email: string }[]
+```
+
+A query with a projection returns plain objects, not [class instances](/docs/reference/javascript/libraries/surqlize/schema#linking-a-class-to-a-table).
+
+### Nested selects
+
+A record link can run a query of its own. Without `.only()`, the nested query gives an array for each record. With `.only()`, it gives one object, which fits a link that always points at one record.
+
+```ts title="Select through a record link"
+const posts = await db.select("post").return((post) => ({
+    title: post.title,
+    author: post.author
+        .select()
+        .only()
+        .return((author) => ({ id: author.id, name: author.name })),
+}));
+// posts: { title: string; author: { id: RecordId<"user">; name: { first: string; last: string } } }[]
+```
+
+## Fetching linked records
+
+`fetch()` replaces record links with the records they point at, and the result type changes to match.
+
+```ts title="Fetch a linked record"
+const posts = await db.select("post").fetch("author");
+posts[0].author.name; // the author is a full user record, not a RecordId
+```
+
+`fetch()` takes several paths, and nested paths too. Like SurrealDB, fetching a nested path expands every link along the way.
+
+```ts title="Fetch several and nested paths"
+// purchased is an edge from user to product, and product has an author link
+const purchases = await db.select("purchased").fetch("out", "out.author");
+
+purchases[0].out.title;       // string: the product was fetched
+purchases[0].out.author.name; // string: the author inside it was fetched too
+purchases[0].in;              // RecordId<"user">: left as a link
+```
+
+Links wrapped in `option<...>` or `array<...>` are resolved as well, so `fetch("tags")` on an `array<record<tag>>` field gives an array of full `tag` records.
+
+You can combine `fetch()` with `return()` to pick fields from the fetched records. The projection is typed against the fetched shape:
+
+```ts title="Project from fetched records"
+const authorships = db
+    .select("authored")
+    .fetch("in", "out")
+    .return((edge) => ({
+        user: edge.in.name,
+        post: edge.out.title,
+        role: edge.role,
+    }));
+```
+
+## Splitting and grouping
+
+`split()` returns one record for each element of an array field, and `groupBy()` and `groupAll()` add the `GROUP BY` and `GROUP ALL` clauses.
+
+```ts title="Split and group"
+import { count } from "surqlize";
+
+db.select("post").split("tags");
+db.select("user").groupAll().return((user) => ({ total: count(user) }));
+```
+
+> [!NOTE]
+> Surqlize renders a `return()` projection as `SELECT VALUE { ... }`. SurrealDB accepts that together with `GROUP ALL` for `count()`, but not together with `SPLIT`, with `GROUP BY`, or with the other aggregate functions. Use `split()` and `groupBy()` on whole-record selects, or run the aggregate as SurrealQL with the SDK.
+
+## Combining clauses
+
+Clauses can be chained in any order, and the query renders them in the order SurrealQL requires.
+
+```ts title="Several clauses together"
+const query = db
+    .select("post")
+    .where((post) => post.title.startsWith("Hello"))
+    .orderBy("created", "DESC")
+    .limit(20)
+    .fetch("author");
+```
+
+## Inspecting a query
+
+`toString()` renders the SurrealQL of a query without running it. Values are sent as bound parameters, so the string shows names such as `$_v1` in place of values.
+
+```ts title="Render a query"
+const query = db.select("user").where((user) => user.age.gte(18));
+
+console.log(query.toString());
+```
+
+```surql title="Generated SurrealQL"
+(SELECT * FROM $_v0 WHERE $this.age >= $_v1)
+```
+
+`prepare()` returns an SDK `BoundQuery` with the query string and its bindings, which you can send with the SDK yourself, for example `surreal.query(query.prepare())`. The result is typed from the ORM's inferred schema, but the SDK result is not parsed by Surqlize.
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Mutations"
+        description="Write data with create, insert, update, upsert, and delete."
+        href="/docs/reference/javascript/libraries/surqlize/mutations"
+    />
+    <IconBox
+        title="Functions"
+        description="Use SurrealDB functions inside conditions and projections."
+        href="/docs/reference/javascript/libraries/surqlize/functions"
+    />
+    <IconBox
+        title="Edges and graph"
+        description="Traverse relations inside a select."
+        href="/docs/reference/javascript/libraries/surqlize/edges-and-graph"
+    />
+</Boxes>

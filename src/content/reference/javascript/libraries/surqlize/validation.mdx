@@ -1,0 +1,129 @@
+---
+position: 14
+title: Runtime validation
+description: Check data against a Surqlize schema before it is written with db.validated(), and validate data at the edge of your application with safeParse() and parse(), including ValidationError and the create, update, and row modes.
+---
+
+# Runtime validation
+
+TypeScript checks your data when you compile. Data that comes from a form, an API request, or `JSON.parse` is only checked when you check it. Surqlize can validate the data a write carries against the table schema before it is sent to SurrealDB. It is off by default.
+
+Results that come back from the database are always parsed against the schema, whether or not validation is on. This page is about the data you send.
+
+## Validating every write
+
+`db.validated()` returns a view of the ORM in which `create`, `insert`, `update`, `upsert`, and `relate` check their data first. It shares the connection with the ORM it came from, as `withSignal()` does.
+
+```ts title="Turn on validation"
+const db = orm(surreal, user).validated();
+
+await db.create("user").content({ name: 42, address: { city: 1 }, tags: ["a", 2] });
+```
+
+```text title="Error output"
+ValidationError: Invalid data for table "user": 4 validation errors
+  - name: expected string, received 42
+  - age: expected number, received undefined
+  - address.city: expected string, received 1
+  - tags[1]: expected string, received 2
+```
+
+The query is not sent. Validation also applies in [batches](/docs/reference/javascript/libraries/surqlize/transactions), inside transactions, to `.prepare()`, and it survives `withSignal()`.
+
+A single query can opt in or out, whatever the ORM is set to:
+
+```ts title="Validate one query"
+await db.create("user").validated().content(input);
+await db.validated().create("user").validated(false).content(trustedInput);
+```
+
+## What is checked
+
+| Data | Checked as |
+| ---- | ---------- |
+| `create().content()`, `insert()` rows, `relate().content()` | The full input: every field must be present and valid, except `option<...>` fields, fields with a `.default()`, and `id` (and `in` and `out` on edges). |
+| `update` and `upsert` with `.content()`, `.merge()`, or `.replace()` | A partial record: only the fields present are checked. |
+| `.set()` and `.onDuplicate()` | Each assigned field, including dotted paths such as `"address.city"`. The operands of `+=` and `-=` are checked for number and array fields. |
+
+A few details:
+
+- Nested objects, arrays, tuples, unions, record links (including the table that is linked), and tables linked to a class are all checked.
+- Computed fields are read-only, so supplying a value for one is an issue.
+- Fields that the schema does not declare are ignored, and so are `.patch()` operations.
+- Values that SurrealDB evaluates itself, such as `expr(...)` defaults and subquery expressions, are not checked on the client.
+- Validation never changes your data. What is checked is what is sent, and defaults are still filled in by the query.
+
+## ValidationError
+
+`ValidationError` extends `OrmError`. It does not stop at the first problem. `error.issues` lists every failing field, and `error.table` names the table.
+
+Each issue has these properties:
+
+| Property | Description |
+| -------- | ----------- |
+| `path` | Where the value sits, such as `address.city`, `tags[1]`, or `[2].age` for the third row of an `insert`. `(root)` stands for the data itself. |
+| `expected` | What the schema expects there, such as `number` or `string or number`. |
+| `received` | The value that was found, or `undefined` when the field is missing. |
+| `message` | A readable one-line description. |
+
+```ts title="Read the issues"
+import { ValidationError } from "surqlize";
+
+try {
+    await db.create("user").content(body);
+} catch (error) {
+    if (error instanceof ValidationError) {
+        for (const issue of error.issues) {
+            console.log(issue.path, issue.expected, issue.received);
+        }
+    }
+}
+```
+
+## Validating data yourself
+
+Tables and edges have the same check as standalone methods, for example at the edge of your API. `safeParse()` returns a result and never throws. `parse()` returns the typed data or throws the same `ValidationError`.
+
+```ts title="Validate a request body"
+const result = user.safeParse(body); // mode "create" by default
+
+if (!result.success) {
+    return respond(400, result.error.issues);
+}
+
+await db.create("user").content(result.data); // result.data has the type of the create input
+
+const input = user.parse(body); // the typed data, or a thrown ValidationError
+```
+
+The `mode` option says what the data is, and the type of `data` follows it:
+
+| Mode | Data | Type of `data` |
+| ---- | ---- | -------------- |
+| `"create"` (default) | The input of a create or insert. Fields with a default and optional fields can be left out, and computed fields are rejected. | `CreateInput` |
+| `"update"` | A partial write. | A partial record |
+| `"row"` | A whole stored record, including `id` and computed fields. | The record type |
+
+```ts title="Validate partial writes and stored records"
+user.safeParse(patch, { mode: "update" });
+user.safeParse(row, { mode: "row" });
+```
+
+Validation does not convert the data: it returns what you passed. The one exception is `"row"` mode on a table [linked to a class](/docs/reference/javascript/libraries/surqlize/schema#linking-a-class-to-a-table), where the data is hydrated into an instance of the class, as selects do. The other modes return the data as given.
+
+The `table.validate(value)` type guard, and the `validate()` and `parse()` methods of the `t.*` types, work as before. Unlike `ValidationError`, the `TypeParseError` that `t.*` types throw stops at the first mismatch. See [error handling](/docs/reference/javascript/libraries/surqlize/error-handling).
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Mutations"
+        description="How each write method treats required fields."
+        href="/docs/reference/javascript/libraries/surqlize/mutations#how-to-write-data"
+    />
+    <IconBox
+        title="Type inference"
+        description="Get the type of the create input and the stored record."
+        href="/docs/reference/javascript/libraries/surqlize/type-inference"
+    />
+</Boxes>

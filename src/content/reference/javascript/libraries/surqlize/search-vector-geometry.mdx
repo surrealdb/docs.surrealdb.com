@@ -1,0 +1,146 @@
+---
+position: 10
+title: Search, vector, and geometry
+description: Use full-text matching, vector similarity and distance functions, geometry points with geo.distance, and durations in Surqlize queries, and see what these helpers do not cover.
+---
+
+# Search, vector, and geometry
+
+Surqlize has typed helpers for full-text matching, vector comparison, geographic points, and durations. They build on SurrealDB's functions and indexes. Surqlize does not define indexes for you, so create them with `DEFINE ANALYZER` and `DEFINE INDEX` statements, then query them through the ORM.
+
+## Full-text matching
+
+The `.search()` method on a string field renders the `@@` match operator. SurrealDB uses a full-text index on that field to resolve it.
+
+```surql title="Define an analyzer and a full-text index"
+DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+DEFINE INDEX body_idx ON article FIELDS body FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
+```
+
+```ts title="Match against an indexed field"
+const article = table("article", {
+    title: t.string(),
+    body: t.string(),
+});
+
+const db = orm(surreal, article);
+
+const hits = await db
+    .select("article")
+    .where((article) => article.body.search("database"))
+    .return((article) => ({ title: article.title }));
+```
+
+```surql title="Generated SurrealQL"
+(SELECT VALUE { title: $this.title } FROM $_v0 WHERE body @@ $_v1)
+```
+
+`.search()` also works in an [object filter](/docs/reference/javascript/libraries/surqlize/querying#object-based-filters), as `{ body: { search: "database" } }`.
+
+> [!NOTE]
+> Surqlize exports a `search` function family (`search.analyze`, `search.highlight`, `search.offsets`, and `search.score`). SurrealDB's highlight, offsets, and score functions need a numbered match reference, such as `@1@`, in the condition. `.search()` does not render one, so those functions cannot yet be tied to it. To use them, run the query as SurrealQL through the SDK.
+
+## Vector similarity and distance
+
+The `vector` family has the SurrealDB vector functions: similarity (`similarityCosine`, `similarityJaccard`, `similarityPearson`, and `similaritySpearman`), distance (`distanceEuclidean`, `distanceManhattan`, `distanceChebyshev`, `distanceHamming`, `distanceMahalanobis`, and `distanceMinkowski`), and the arithmetic functions `dot`, `magnitude`, and `angle`.
+
+A vector field is an array of numbers. A plain JavaScript array is not an expression, so wrap the query vector with `db.value()` before you pass it to a function.
+
+```ts title="Compare an embedding with a query vector"
+import { vector } from "surqlize";
+
+const document = table("document", {
+    title: t.string(),
+    embedding: t.array(t.number()),
+});
+
+const db = orm(surreal, document);
+const queryVector = db.value([0.12, 0.8, 0.31]);
+
+const similar = await db
+    .select("document")
+    .where((doc) => vector.similarityCosine(doc.embedding, queryVector).gt(0.8))
+    .return((doc) => ({
+        title: doc.title,
+        similarity: vector.similarityCosine(doc.embedding, queryVector),
+    }));
+```
+
+> [!NOTE]
+> These functions compute a value for each record they are applied to. Surqlize does not render the nearest-neighbour operator (`<|k|>`), and `orderBy()` cannot sort by a function call. To rank by similarity, sort the returned array on the client, or run an indexed nearest-neighbour query as SurrealQL through the SDK.
+
+## Geometry points
+
+`t.point()` describes a native SurrealDB point, which the SDK represents as a `GeometryPoint`. Coordinates are ordered longitude first, then latitude.
+
+`geo.distance()` returns the distance in metres. It accepts a `GeometryPoint` or a `[longitude, latitude]` pair on either side, and casts the values in the database where it needs to.
+
+```ts title="Find places near a point"
+import { GeometryPoint } from "surrealdb";
+import { geo, orm, table, t } from "surqlize";
+
+const place = table("place", {
+    name: t.string(),
+    location: t.point(),
+    coordinates: t.array([t.number(), t.number()]),
+});
+
+const db = orm(surreal, place);
+
+await db.create("place").set({
+    name: "Rome",
+    location: new GeometryPoint([12.5, 41.9]),
+    coordinates: [12.5, 41.9],
+});
+
+const center = new GeometryPoint([12.5, 41.95]);
+
+const nearby = await db
+    .select("place")
+    .where((place) => geo.distance(place.location, center).lt(10_000));
+
+const nearbyByCoordinates = await db
+    .select("place")
+    .where((place) => geo.distance(place.coordinates, [12.5, 41.95]).lt(10_000));
+```
+
+Use `t.point()` for a field that holds a point value. For raw coordinate data, use `t.array([t.number(), t.number()])`. `type_.point(value)` renders `type::point(value)` explicitly. Polygons, lines, and the other geometry types do not have a `t.*` builder yet.
+
+## Durations
+
+`t.duration()` describes a SurrealDB duration, which the SDK represents as a `Duration`. The `duration` family has functions that extract a part of a duration as a number: `duration.days()`, `hours()`, `mins()`, `secs()`, `millis()`, `micros()`, `nanos()`, `weeks()`, and `years()`.
+
+```ts title="Read parts of a duration"
+import { Duration } from "surrealdb";
+import { duration, orm, table, t } from "surqlize";
+
+const task = table("task", {
+    title: t.string(),
+    timeout: t.duration(),
+});
+
+const db = orm(surreal, task);
+
+await db.create("task").set({ title: "Backup", timeout: new Duration("90m") });
+
+const timeouts = await db.select("task").return((task) => ({
+    title: task.title,
+    seconds: duration.secs(task.timeout),
+}));
+// timeouts[0].seconds is 5400
+```
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Functions"
+        description="The other built-in functions."
+        href="/docs/reference/javascript/libraries/surqlize/functions"
+    />
+    <IconBox
+        title="Schema"
+        description="Field types, including points and durations."
+        href="/docs/reference/javascript/libraries/surqlize/schema"
+    />
+</Boxes>

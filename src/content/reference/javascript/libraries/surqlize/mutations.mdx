@@ -1,0 +1,231 @@
+---
+position: 6
+title: Mutations
+description: Write data with Surqlize using create, insert, update, upsert, and delete, and choose between set, content, merge, replace, and patch, which differ in how strictly they check required fields.
+---
+
+# Mutations
+
+Surqlize has a query builder for each SurrealQL write statement: `create`, `insert`, `update`, `upsert`, and `delete`. Creating graph edges with `relate` is covered in [edges and graph](/docs/reference/javascript/libraries/surqlize/edges-and-graph).
+
+Like `select`, each one is an immutable builder that runs when you await it. All of the examples on this page assume a `db` created as in [connections](/docs/reference/javascript/libraries/surqlize/connections), and that a write returns an array unless you add `.only()`.
+
+## How to write data
+
+The statements that write a single record or several records share the same methods for supplying data. They differ in what the data replaces and in how strictly the type checker treats missing fields.
+
+| Method | Required fields | Type of the argument |
+| ------ | --------------- | -------------------- |
+| `.content()` | Enforced on `create`, optional on `update` and `upsert` | The record |
+| `.set()` | Not enforced | A partial record, per field. `+=` and `-=` and dotted paths work. |
+| `.merge()` | Not enforced | A partial record |
+| `.replace()` | Not enforced | A partial record |
+| `.patch()` | Not checked at all | JSON Patch operations, with the `path` as a plain string |
+
+Only `.content()` requires the full record on `create`. Its input type is the fields of the table, minus those with a `.default()` or an `option<...>` type, and minus `id` and computed fields. The other methods are deliberately permissive, to mirror SurrealQL and so that the database can supply the rest, for example through its own `DEFINE FIELD ... DEFAULT`. Use `.content()` when you want the compiler to enforce required fields.
+
+With [runtime validation](/docs/reference/javascript/libraries/surqlize/validation) turned on, `.content()` is checked as a full record, `.set()` field by field, and `.patch()` is not checked.
+
+A query can use one of these methods only. Calling `.content()` after `.set()` throws an `OrmError`.
+
+> [!WARNING]
+> Surqlize parses the result of a write against the schema. When a write leaves a required field unset, the record is stored but the promise rejects, because the stored record does not match the schema. Add `.return("none")` or a `.return()` projection if you write partial records.
+
+## Create
+
+`create()` makes a new record with a generated id, or with the id you pass as the second argument.
+
+```ts title="Create records"
+const [alice] = await db.create("user").set({
+    name: "Alice",
+    email: "alice@example.com",
+    age: 30,
+    created: new Date(),
+});
+
+const [post] = await db.create("post").content({
+    title: "Hello world",
+    body: "First post",
+    author: new RecordId("user", "alice"),
+});
+
+const [ada] = await db.create("user", "ada").set({
+    name: "Ada",
+    email: "ada@example.com",
+    age: 36,
+});
+```
+
+Add `.only()` to get one object instead of an array.
+
+```ts title="Create a single object"
+const ada = await db.create("user", "ada").only().set({
+    name: "Ada",
+    email: "ada@example.com",
+    age: 36,
+});
+// ada: the user record, not an array
+```
+
+## Insert
+
+`insert()` writes one record or many in a single `INSERT` statement. Pass the data as an object or an array of objects, or use `.fields()` and `.values()` for the tuple form.
+
+```ts title="Insert records"
+await db.insert("user", { name: "Alice", email: "alice@example.com", age: 30 });
+
+await db.insert("user", [
+    { name: "Bob", email: "bob@example.com", age: 25 },
+    { name: "Charlie", email: "charlie@example.com", age: 28 },
+]);
+
+await db
+    .insert("user")
+    .fields(["name", "email", "age"])
+    .values(
+        ["Alice", "alice@example.com", 30],
+        ["Bob", "bob@example.com", 25],
+    );
+```
+
+### Handling conflicts
+
+When a record with the same id already exists, `.ignore()` skips it without an error, and `.onDuplicate()` updates it instead. `.onDuplicate()` takes the same values as `.set()`, including the `+=` and `-=` operators.
+
+```ts title="Ignore or update duplicates"
+await db
+    .insert("user", { id: "ada", name: "Ada", email: "ada@example.com", age: 36 })
+    .ignore();
+
+await db
+    .insert("user", { id: "ada", name: "Ada", email: "ada@example.com", age: 36 })
+    .onDuplicate({
+        age: { "+=": 1 },
+        lastSeen: new Date(),
+    });
+```
+
+## Update
+
+`update()` changes one record, selected by id, or every record that matches a `where()`. Without either, it changes the whole table.
+
+```ts title="Update records"
+await db.update("user", "ada").set({ age: 37 });
+
+await db
+    .update("user")
+    .where((user) => user.age.lt(18))
+    .set({ status: "minor" });
+
+await db.update("user", "ada").merge({ email: "ada@example.org" });
+```
+
+`.content()` replaces the whole record, and `.patch()` applies [JSON Patch](https://jsonpatch.com) operations. `.unset()` removes fields.
+
+```ts title="Content, patch, and unset"
+await db.update("user", "ada").content({
+    name: "Ada Lovelace",
+    email: "ada@example.com",
+    age: 37,
+});
+
+await db.update("user", "ada").patch([
+    { op: "replace", path: "/age", value: 38 },
+    { op: "remove", path: "/oldField" },
+]);
+
+await db.update("user", "ada").set({ name: "Ada" }).unset(["oldField"]);
+```
+
+When `.unset()` follows `.set()`, Surqlize writes the unset fields as `field = NONE` inside the `SET` clause, because SurrealQL does not allow `SET` and `UNSET` in the same statement.
+
+### Operators
+
+The `+=` and `-=` operators change a value in the database, so you do not read it first. They work on numbers and arrays.
+
+```ts title="Increment and append"
+await db.update("user", "ada").set({
+    age: { "+=": 1 },
+    tags: { "+=": ["developer"] },
+    oldTags: { "-=": ["beginner"] },
+});
+```
+
+## Upsert
+
+`upsert()` creates the record if it does not exist and updates it if it does. It takes the same data methods and `where()` as `update()`.
+
+```ts title="Upsert records"
+await db.upsert("user", "alice").set({
+    name: "Alice",
+    email: "alice@example.com",
+    age: 30,
+});
+
+await db.upsert("pageview", "homepage").set({
+    count: { "+=": 1 },
+    lastViewed: new Date(),
+});
+
+await db
+    .upsert("user")
+    .where((user) => user.email.eq("alice@example.com"))
+    .set({ lastSeen: new Date() });
+```
+
+## Delete
+
+`delete()` removes a record by id, or every record that matches a `where()`.
+
+```ts title="Delete records"
+await db.delete("user", "alice");
+
+await db.delete("user").where((user) => user.age.lt(13));
+```
+
+`DELETE ONLY` is most useful with `.return("before")`, to get the deleted record back as a single object.
+
+```ts title="Return the deleted record"
+const deleted = await db.delete("user", "alice").only().return("before");
+// deleted: the user record that was removed
+```
+
+## Choosing what a write returns
+
+By default a write returns the record after the change. `.return()` takes a mode or a projection.
+
+| Argument | Result |
+| -------- | ------ |
+| `"after"` | The record after the change. This is the default. |
+| `"before"` | The record before the change. Nothing exists before a `create`, so use it with the other statements. |
+| `"none"` | Nothing. |
+| `"diff"` | A list of JSON Patch operations describing the change. |
+| A callback | A projection, as with [`select`](/docs/reference/javascript/libraries/surqlize/querying#projections-with-return) |
+
+```ts title="Return modes"
+await db.update("user", "ada").set({ age: 38 }).return("none");
+
+const before = await db.update("user", "ada").set({ age: 39 }).return("before");
+
+const projected = await db
+    .update("user", "ada")
+    .set({ age: 40 })
+    .return((user) => ({ name: user.name, age: user.age }));
+```
+
+`create`, `update`, `upsert`, `delete`, and `insert` all take `.return()`. Writes with a mode of `"diff"` are not parsed against the schema.
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Runtime validation"
+        description="Check written data against the schema before it is sent."
+        href="/docs/reference/javascript/libraries/surqlize/validation"
+    />
+    <IconBox
+        title="Transactions and batches"
+        description="Apply several writes together."
+        href="/docs/reference/javascript/libraries/surqlize/transactions"
+    />
+</Boxes>

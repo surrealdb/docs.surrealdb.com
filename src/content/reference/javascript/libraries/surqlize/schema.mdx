@@ -1,0 +1,217 @@
+---
+position: 3
+title: Schema
+description: Define SurrealDB tables in Surqlize with table() and the t.* type builders, including nested objects, arrays, unions, record links, defaults, computed fields, and tables linked to a class.
+---
+
+# Schema
+
+A Surqlize schema is a set of `table()` definitions, and [`edge()`](/docs/reference/javascript/libraries/surqlize/edges-and-graph) definitions for graph relations. Each one maps the fields of a table to type builders from `t`, and TypeScript derives every query type from them.
+
+Defining a table in Surqlize does not create it in the database. Surqlize describes the shape of the data so that queries can be checked and results parsed. Create tables and constraints with `DEFINE TABLE` and `DEFINE FIELD` statements, for example in a migration.
+
+## Defining a table
+
+`table()` takes the table name and an object of fields.
+
+```ts title="Define a table"
+import { table, t } from "surqlize";
+
+const user = table("user", {
+    name: t.string(),
+    age: t.number(),
+    isActive: t.bool(),
+    created: t.date(),
+    address: t.object({
+        street: t.string(),
+        city: t.string(),
+    }),
+    tags: t.array(t.string()),
+    bio: t.option(t.string()),
+    status: t.union([t.literal("active"), t.literal("inactive"), t.literal("pending")]),
+    authorId: t.record("author"),
+});
+```
+
+Every table has an `id` field of type `RecordId<"user">`, which you do not declare.
+
+## Field types
+
+| Builder | TypeScript type | Notes |
+| ------- | --------------- | ----- |
+| `t.string()` | `string` | |
+| `t.number()` | `number` | |
+| `t.bool()` | `boolean` | |
+| `t.date()` | `Date` | A SurrealDB datetime. |
+| `t.duration()` | `Duration` | The SDK's `Duration` class. |
+| `t.uuid()` | `Uuid` | The SDK's `Uuid` class. |
+| `t.point()` | `GeometryPoint` | A native SurrealDB point. See [search, vector, and geometry](/docs/reference/javascript/libraries/surqlize/search-vector-geometry). |
+| `t.null()`, `t.none()` | `null`, `undefined` | `t.none()` is SurrealDB's `NONE`. |
+| `t.never()` | `never` | |
+| `t.option(type)` | The type, or `undefined` | The value may be missing (`NONE`). |
+| `t.object({ ... })` | An object type | Fields can be nested to any depth. |
+| `t.array(type)` | `type[]` | An array of one type. |
+| `t.array([a, b])` | `[a, b]` | A tuple, with a type for each position. |
+| `t.union([a, b])` | A union of the given types | |
+| `t.literal(value)` | The literal type | A string, number, or boolean. |
+| `t.record("table")` | `RecordId<"table">` | A link to a record in another table. |
+| `t.record(["a", "b"])` | `RecordId` of either table | A link to a record in one of several tables. |
+
+A union of literals is the way to describe a field that takes one of a fixed set of values:
+
+```ts title="A field with fixed values"
+const ticket = table("ticket", {
+    priority: t.union([t.literal("low"), t.literal("normal"), t.literal("high")]),
+});
+```
+
+## Optional fields
+
+`t.option()` marks a field that can be missing. Its value type includes `undefined`, and the field can be left out when you create a record.
+
+```ts title="Optional fields"
+const profile = table("profile", {
+    handle: t.string(),
+    bio: t.option(t.string()),
+});
+
+await db.create("profile").content({ handle: "ada" });
+```
+
+## Default values
+
+Call `.default()` on any field type to give it a default. The field becomes optional when you create a record, while the type you read back stays non-optional.
+
+```ts title="Default values"
+import { expr, t, table } from "surqlize";
+
+const account = table("account", {
+    name: t.string(),
+    isVerified: t.bool().default(false),
+    createdAt: t.date().default(() => new Date()),
+    seenAt: t.date().default(expr("time::now()")),
+});
+
+await db.create("account").content({ name: "Ada" });
+// The result has type { id, name: string, isVerified: boolean, createdAt: Date, seenAt: Date }
+```
+
+A default can be one of three things:
+
+- **A static value**, such as `false`.
+- **A function**, which is called each time a query is built.
+- **A SurrealQL expression** wrapped in `expr()`, which SurrealDB evaluates when it runs the query.
+
+Defaults are filled in by the query itself, so no `DEFINE FIELD ... DEFAULT` is needed. They apply to `CREATE` (with `.content()`, `.merge()`, `.set()`, or no data) and to `INSERT` (the object and `.fields().values()` forms) whenever the field is omitted or `undefined`. An explicit value always wins. They do not apply to `UPSERT`, `UPDATE`, `RELATE`, `.replace()`, or `.patch()`.
+
+`.default()` returns a copy of the type, so a field type shared between tables is never changed.
+
+> [!WARNING]
+> The text passed to `expr()` is inserted into the query as it is. Only pass trusted, fixed SurrealQL, never user input.
+
+## Computed fields
+
+A computed field is read-only: SurrealDB derives its value from an expression each time the record is read. It maps to `DEFINE FIELD ... COMPUTED`, which needs SurrealDB 3.0 or later. Add one with `.computed(name, type, expression)`.
+
+The expression receives the row, rendered as `$this`, and the ORM, so it can run subqueries.
+
+```ts title="Computed fields"
+import { type Orm, table, t } from "surqlize";
+
+const post = table("post", { title: t.string(), author: t.record("user") });
+
+const user = table("user", { first: t.string(), last: t.string() })
+    .computed("fullName", t.string(), (row) => row.first.concat(" ", row.last))
+    .computed("postCount", t.number(), (row, db: Orm<[typeof post]>) =>
+        db
+            .select("post")
+            .where((p) => p.author.eq(row.id))
+            .return((p) => p.id)
+            .wrap()
+            .len(),
+    );
+```
+
+Computed fields are part of the row type of selects, and can be used in `where`, `orderBy`, and `return` like any other field. They are left out of the input types of `create`, `update`, `upsert`, `insert`, and `relate`, so writing one is a compile-time error.
+
+```ts title="Using a computed field"
+const popular = await db.select("user").where((u) => u.postCount.gt(0));
+// popular[0].fullName is a string
+
+await db.create("user").set({ first: "Ada", last: "Lovelace" });
+await db.create("user").set({ fullName: "Ada Lovelace" }); // type error
+```
+
+The field must exist in the database before it can be read. Create it with `db.defineComputed()`, which defines the computed fields of every registered table, or of the tables you name. It uses `DEFINE FIELD OVERWRITE`, so it is safe to run more than once.
+
+```ts title="Define computed fields"
+await db.defineComputed();
+await db.defineComputed("user");
+```
+
+```surql title="Generated SurrealQL"
+DEFINE FIELD OVERWRITE fullName ON TABLE user COMPUTED (string::concat($this.first, " ", $this.last))
+```
+
+To put the statements in a migration instead, call `user.computedStatements(db)`, which returns them as an array of strings.
+
+A few details:
+
+- The `db` argument of the expression is untyped, because the tables are registered after they are defined. Annotate the parameter, as in `db: Orm<[typeof post]>`, to type the tables it queries.
+- The expression is inlined into the `DEFINE` statement, so it cannot use query parameters.
+- Any table the expression reads must exist when you define the field.
+
+## Linking a class to a table
+
+Pass a class as the third argument of `table()` to give records methods and computed properties. Records selected from the table, and records returned by a write to it, are instances of the class. Instances of the class are accepted as record content.
+
+```ts title="Link a class to a table"
+import { orm, table, t } from "surqlize";
+
+class User {
+    given_name!: string;
+    family_name!: string;
+
+    get fullName() {
+        return `${this.given_name} ${this.family_name}`;
+    }
+}
+
+const user = table(
+    "user",
+    { given_name: t.string(), family_name: t.string() },
+    User,
+);
+
+const db = orm(surreal, user);
+
+const [ada] = await db.select("user", "ada");
+ada instanceof User; // true
+ada.fullName; // "Ada Lovelace", typed as string
+
+const input = Object.assign(new User(), { given_name: "Grace", family_name: "Hopper" });
+await db.create("user").content(input);
+```
+
+Type inference works as before and needs no code generation: the record type is the fields declared in the table plus the instance type of the class.
+
+- Records are created without running the class constructor, so declare fields with `!` rather than with initialisers.
+- An instance passed as content is sent as its own enumerable properties. Getters and methods are not stored.
+- Hydration also applies to records resolved with `.fetch()`, each with its own class. Queries that use a `.return()` projection return plain objects.
+- Methods that run queries themselves, such as `this.update()` or a static `findByEmail()`, are not provided. Write them against your `db` instance, for example with `db.select("user").where(...)`.
+- With [runtime validation](/docs/reference/javascript/libraries/surqlize/validation#validating-data-yourself), `safeParse` and `parse` in `"row"` mode return an instance of the class.
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Connections"
+        description="Register tables with orm() and connect through a session."
+        href="/docs/reference/javascript/libraries/surqlize/connections"
+    />
+    <IconBox
+        title="Edges and graph"
+        description="Define edges between tables."
+        href="/docs/reference/javascript/libraries/surqlize/edges-and-graph"
+    />
+</Boxes>

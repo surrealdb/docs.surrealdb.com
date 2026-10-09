@@ -1,0 +1,122 @@
+---
+position: 13
+title: Surqlize transactions and batches
+description: Run several Surqlize queries atomically with db.batch() in one request, or with db.transaction() when you need intermediate results to decide whether to commit or cancel.
+---
+
+# Surqlize transactions and batches
+
+Surqlize has two ways to run several queries as a unit. A **batch** sends all queries in one request and applies them atomically, but gives you no results until it finishes. A **transaction** stays open on the server, so you can read the result of each query and decide what to do next before you commit or cancel.
+
+| | Batch | Transaction |
+| --- | --- | --- |
+| Round trips | One | One per query, plus commit |
+| Intermediate results | No | Yes |
+| Can be retried as a unit | Yes | No |
+
+## Batches
+
+`db.batch()` takes any number of queries and resolves to a tuple of their results, typed in order. Either every query takes effect or none does.
+
+```ts title="Run queries in a batch"
+const [created, updated, users] = await db.batch(
+    db.create("user").set({ name: "Alice", age: 30 }),
+    db.update("user", "bob").set({ age: 31 }),
+    db.select("user"),
+);
+// each result is typed according to its own query
+```
+
+A batch is sent as one request using the SDK's stateless `transaction()`, so it works over HTTP as well as WebSockets. When it fails, the promise rejects with the error that made it fail, and none of its statements take effect.
+
+Because a batch is a single request, it is safe to replay. Use `.retry()` to re-send it after a conflict with a concurrent transaction. A batch also takes `.signal()` and `.requestTimeout()`. See [cancellation, timeouts, and retries](/docs/reference/javascript/libraries/surqlize/request-options).
+
+```ts title="Retry a batch"
+const [created] = await db
+    .batch(db.create("user").set({ name: "Alice", age: 30 }))
+    .retry()
+    .requestTimeout(5_000);
+```
+
+To see the SurrealQL of a batch before you run it, call `toString()`:
+
+```ts title="Inspect a batch"
+const batch = db.batch(
+    db.create("user").set({ name: "Alice" }),
+    db.update("user", "bob").set({ age: 31 }),
+);
+
+console.log(batch.toString());
+```
+
+```surql title="Generated SurrealQL"
+BEGIN TRANSACTION; CREATE $_v0 SET name = $_v1; UPDATE $_v2 SET age = $_v3; COMMIT TRANSACTION;
+```
+
+## Transactions
+
+`db.transaction()` opens a server-side transaction through the SDK's `beginTransaction()`. The limits that apply to open transactions are described in [transactions](/docs/reference/javascript/concepts/transactions) in the SDK documentation.
+
+### Callback form
+
+With a callback, the transaction commits when the callback returns and cancels when it throws.
+
+```ts title="Run a transaction with a callback"
+const user = await db.transaction(async (tx) => {
+    const [user] = await tx.create("user").set({ name: "Alice", age: 30 });
+
+    // Use the result to decide what to do next
+    if (user.age > 25) {
+        await tx.update(user.id).set({ status: "senior" });
+    }
+
+    return user;
+});
+```
+
+### Manual form
+
+Without a callback, `db.transaction()` returns the transaction, and you commit or cancel it yourself.
+
+```ts title="Commit or cancel a transaction"
+import { RecordId } from "surrealdb";
+
+const tx = await db.transaction();
+
+try {
+    const [user] = await tx.create("user").set({ name: "Alice", age: 30 });
+    await tx.relate("authored", user.id, new RecordId("post", "hello"));
+    await tx.commit();
+} catch (error) {
+    await tx.cancel();
+    throw error;
+}
+```
+
+The transaction object has the query builders of `db`: `select`, `create`, `insert`, `update`, `upsert`, `delete`, `relate`, and `run`. It does not have `batch`, which is itself atomic. A transaction cannot be nested, so `tx.batch()` throws an `OrmError`. Run the queries on `tx` instead.
+
+> [!NOTE]
+> Do not retry a query inside a transaction. A conflict has already failed the transaction, so retry the whole transaction instead.
+
+### Cancelling work with a signal
+
+`tx.withSignal(signal)` returns a handle on the same transaction in which every query is abandoned when the signal aborts. `commit()` and `cancel()` work on either handle. They are not tied to the signal, so a request that is being abandoned cannot leave the outcome of a commit in doubt.
+
+## Runtime validation
+
+A transaction keeps the validation setting of the ORM that opened it. `tx.validated()` returns a handle on the same transaction with validation switched on or off. See [runtime validation](/docs/reference/javascript/libraries/surqlize/validation).
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Cancellation, timeouts, and retries"
+        description="Control how long and how hard the client waits."
+        href="/docs/reference/javascript/libraries/surqlize/request-options"
+    />
+    <IconBox
+        title="Transactions in the SDK"
+        description="The SDK's own transaction API."
+        href="/docs/reference/javascript/concepts/transactions"
+    />
+</Boxes>
