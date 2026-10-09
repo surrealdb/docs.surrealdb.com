@@ -182,6 +182,12 @@ function flattenTabs(markdown: string): string {
     return out.replace(wrapper("Tabs"), "");
 }
 
+/** Renders a `<ShowcaseCard>` as a list item; the thumbnail is decorative. */
+function showcaseCard(attrs: Record<string, string>): string {
+    if (!attrs.title || !attrs.href) return "";
+    return `\n- [${attrs.title}](${attrs.href})${attrs.description ? ` - ${attrs.description}` : ""}`;
+}
+
 /** Renders an `<IconBox>` link card as a list item. */
 function iconBox(attrs: Record<string, string>): string {
     const label = attrs.title ?? attrs.subtitle;
@@ -288,6 +294,7 @@ export function flattenMdxComponents(markdown: string, sdkVersions: SdkVersionMa
     // Components that emit links or code, applied last so the markdown they
     // introduce is not itself a candidate for rewriting.
     out = out.replace(tag("IconBox"), (_match, raw: string) => iconBox(parseAttrs(raw)));
+    out = out.replace(tag("ShowcaseCard"), (_match, raw: string) => showcaseCard(parseAttrs(raw)));
     out = out.replace(tag("SurrealistMini"), (_match, raw: string) =>
         surrealistMini(parseAttrs(raw)),
     );

@@ -6,7 +6,9 @@ description: "The RELATE statement can be used to generate graph edges between t
 
 # `RELATE` statement
 
-The `RELATE` statement can be used to generate graph edges between two records in the database. This allows you to traverse related records efficiently without needing to pull data from multiple tables and merging that data together using SQL JOINs.
+The `RELATE` statement can be used to generate graph edges between two records in the database. This allows you to traverse related records efficiently without needing to pull data from multiple tables and merge that data together using SQL JOINs.
+
+For what `RELATE` does when an edge with the same ID already exists, and how it compares with the other statements that write records, see [Writing records that may already exist](/docs/reference/query-language/statements/overview#writing-records-that-may-already-exist).
 
 Edges created using the RELATE statement are nearly identical to tables created using other statements, and can contain data. The key differences are that:
 
@@ -52,50 +54,6 @@ RELATE [ ONLY ] [ OR UPDATE ] @from_record -> @table | @edge_record -> @to_recor
 
 > [!NOTE]
 > If a `RELATE` on the create path sets `id` to an **existing** edge record (for example `RELATE a->edge->b SET id = edge:existing`), SurrealDB returns a record-exists error instead of overwriting that edge. Use [`UPDATE`](/docs/reference/query-language/statements/update) when you intend to modify an existing relation.
-
-## Handling duplicate edge record IDs
-
-<Since v="v3.1.5" />
-
-You can supply the edge record ID directly in the `RELATE` path instead of letting SurrealDB generate one. This is useful when the ID should act like a built-in unique key for the relationship, for example a composite of the `in` and `out` records:
-
-```surql
-RELATE person:one->likes:[person:one, post:one]->post:one
-  SET liked_at = time::now();
-
-RELATE person:one->likes:[person:one, post:one]->post:one
-  SET liked_at = time::now();
-```
-
-As of SurrealDB 3.1.5, redoing a `RELATE` statement on an existing ID will update the edge, but emit a warning. This will become a hard error in a later version of SurrealDB.
-
-To specifically opt in to update semantics on an existing edge and not emit a warning, you can add `OR UPDATE` after `RELATE`.
-
-```surql
-RELATE person:one->likes:[person:one, post:one]->post:one
-  SET liked_at = time::now();
-
--- Has `OR UPDATE`: will not emit a warning
-RELATE OR UPDATE person:one->likes:[person:one, post:one]->post:one
-  SET liked_at = time::now();
-```
-
-If you prefer a hard error at this point, [`INSERT RELATION`](/docs/reference/query-language/statements/insert#insert-relation-tables) can be used:
-
-```surql
-INSERT RELATION INTO likes {
-  in: person:two,
-  out: post:one,
-  id: [person:two, post:one]
-};
-
--- Returns an error
-INSERT RELATION INTO likes {
-  in: person:two,
-  out: post:one,
-  id: [person:two, post:one]
-};
-```
 
 ## Example usage
 
@@ -199,6 +157,8 @@ RETURN person:aristotle->wrote->article;
 
 By default, the edge table gets created as a schemaless table when you execute the `RELATE` statement. You can make the table schemafull by [defining a schema](/docs/reference/query-language/statements/define/table).
 
+### Unique relationships
+
 A common use case is to make sure only unique relationships get created. You can do that by [defining an index](/docs/reference/query-language/statements/define/indexes).
 
 ```surql
@@ -211,8 +171,16 @@ value = "NONE"
 
 DEFINE INDEX unique_relationships
     ON TABLE wrote
-    COLUMNS in, out UNIQUE;
+    FIELDS in, out UNIQUE;
 ```
+
+Relating the same two records a second time then fails:
+
+```text title="Error output"
+Database index `unique_relationships` already contains [person:aristotle, article:on_sleep_and_sleeplessness], with record `wrote:usdo1cyf3dbt0sk0iawm`
+```
+
+For a relationship with no direction, such as `friends_with`, where `a->b` and `b->a` are the same relationship, see [Bidirectional relation querying](#bidirectional-relation-querying), which builds a unique key from the two records in sorted order.
 
 As edge tables are bidirectional by default, there is nothing stopping a query like the following in which an article writes a person instead of the other way around.
 
@@ -328,11 +296,44 @@ RELATE [cat:mr_meow, cat:mrs_meow]->parent_of->[cat:kitten, cat:kitten2];
 ]
 ```
 
+### Relating a record to an edge
+
+An edge is a record, so it can be the `in` or `out` of another edge. This suits an edge that describes something other records need to point at. In the example below, an `offer` edge holds the price at which a shop sells a material, and a `uses` edge records how much of that offer a project used:
+
+```surql
+CREATE shop:hardware, material:timber, project:shed;
+
+-- offer:one is an edge
+RELATE shop:hardware->offer:one->material:timber SET price = 12;
+-- Relate that edge to another edge
+RELATE project:shed->uses->offer:one SET quantity = 10;
+
+SELECT
+	->uses->offer.{ price, shop: in, material: out } AS offers,
+	math::sum(->uses.map(|$u| $u.quantity * $u.out.price)) AS cost
+FROM project:shed;
+```
+
+```surql title="Output"
+[
+	{
+		cost: 120,
+		offers: [
+			{ material: material:timber, price: 12, shop: shop:hardware }
+		]
+	}
+]
+```
+
+Traversals continue through the edge in both directions, so `->uses->offer->material` reaches the material from the project, and `offer:one<-uses<-project` reaches the projects from the offer. A `TYPE RELATION` table can name an edge table as its endpoint, as in `DEFINE TABLE uses TYPE RELATION IN project OUT offer`.
+
+Deletes cascade through both levels. Deleting `shop:hardware` deletes the `offer:one` edge, because one of its ends no longer exists, and that deletes every `uses` edge that points to the offer.
+
 ## Adding data using `SET` and `CONTENT`
 
 Graph edges are standalone tables that can hold other fields besides the default `in`, `out`, and `id`. These can be added during a `RELATE` statement or during an `UPDATE` in the same manner as any other SurrealDB table.
 
-Let's look at the two ways you can add record data in the `RELATE` statement. Both of these queries will produce the same result. Use `CONTENT` to pass the record data as a single object, and `SET` to assign or compute each field on its own line.
+There are two ways to add record data in the `RELATE` statement. Both of these queries will produce the same result. Use `CONTENT` to pass the record data as a single object, and `SET` to assign or compute each field on its own line.
 
 ```surql
 /**[test]
@@ -467,10 +468,9 @@ RELATE person:l19zjikkw1p1h9o6ixrg->wrote->article:8nkk6uj4yprt49z7y3zm
 }
 ```
 
-
 ## Creating a single relation with the `ONLY` keyword
 
-Using the ONLY keyword, just an object for the relation in question will be returned. This, instead of an array with a single object.
+Using the ONLY keyword returns just an object for the relation in question, instead of an array with a single object.
 
 ```surql
 /**[test]
@@ -507,6 +507,51 @@ LET $article = SELECT VALUE id FROM article;
 -- We get 100 records in the wrote edge table (10*10 = 100)
 -- In this case it would mean that each article would have 10 authors
 RELATE $person->wrote->$article SET time.written = time::now();
+```
+
+### Expressions at the ends of a relation
+
+A record ID, an array of record IDs and a parameter can stand at either end of a `RELATE` as they are. Any other expression has to be wrapped in parentheses, which includes a field path, a function call and a subquery:
+
+| Expression | Without parentheses | With parentheses |
+| --- | --- | --- |
+| `person:ann`, `[person:ann, person:bob]`, `$person` | Works | Works |
+| A field path, such as `$after.from` | Parse error: ``Unexpected token `.`, expected a relation arrow`` | `($after.from)` |
+| A function call, such as `type::record("person", "ann")` | Parse error: ``Unexpected token `::`, expected :`` | `(type::record("person", "ann"))` |
+| A subquery | Parse error, with a message that points at the end of the statement | `(SELECT VALUE id FROM person WHERE name = "Ann")` |
+
+The edge table can be an expression in parentheses as well, such as `->(type::table("knows"))->`.
+
+This comes up most often in an [event](/docs/reference/query-language/statements/define/event), which builds a relation from the fields of the record that triggered it. Where those fields hold the keys of the records rather than record IDs, [`type::record()`](/docs/reference/query-language/functions/database-functions/type#typerecord) turns them into record IDs:
+
+```surql
+DEFINE EVENT follow_made ON follow_request WHEN $event = "CREATE" THEN {
+	RELATE (type::record("member", $after.from))->follows->(type::record("member", $after.to))
+		SET since = time::now();
+};
+
+CREATE member:ann, member:bob;
+CREATE follow_request SET from = "ann", to = "bob";
+
+SELECT in, out FROM follows;
+```
+
+```surql title="Output"
+[
+	{
+		in: member:ann,
+		out: member:bob
+	}
+]
+```
+
+[`INSERT RELATION`](/docs/reference/query-language/statements/insert#insert-relation-tables) needs no parentheses, because `in` and `out` are ordinary fields of the object it inserts:
+
+```surql
+INSERT RELATION INTO follows {
+	in: type::record("member", $after.from),
+	out: type::record("member", $after.to)
+};
 ```
 
 ## Modifying output with the [`RETURN`](/docs/reference/query-language/statements/return) clause
@@ -600,7 +645,7 @@ Using a `TIMEOUT` is particularly useful when experimenting with complex queries
 
 ## Deleting graph edges
 
-You can also delete graph edges between two records in the database by using the [DELETE statement](/docs/reference/query-language/statements/delete).
+SurrealQL has no `UNRELATE` statement. An edge is a record in its edge table, so removing a relationship means deleting that record with the [`DELETE` statement](/docs/reference/query-language/statements/delete).
 
 For example the graph edge below:
 
@@ -687,7 +732,6 @@ SELECT * FROM likes;
 ]
 ```
 
-
 ## Using RELATE on non-existent records
 
 As mentioned at the top of the page, `RELATE` can be used for records that do not yet exist. While this behaviour can be overridden by using the `ENFORCED` keyword, it can be useful in certain situations.
@@ -769,6 +813,50 @@ CREATE house:["Middle of nowhere", 0] SET floors = 4, bedrooms = 12;
 		street: []
 	}
 ]
+```
+
+## Handling duplicate edge record IDs
+
+<Since v="v3.1.5" />
+
+You can supply the edge record ID directly in the `RELATE` path instead of letting SurrealDB generate one. This is useful when the ID should act like a built-in unique key for the relationship, for example a composite of the `in` and `out` records:
+
+```surql
+RELATE person:one->likes:[person:one, post:one]->post:one
+  SET liked_at = time::now();
+
+RELATE person:one->likes:[person:one, post:one]->post:one
+  SET liked_at = time::now();
+```
+
+As of SurrealDB 3.1.5, redoing a `RELATE` statement on an existing ID will update the edge, but emit a warning. This will become a hard error in a later version of SurrealDB.
+
+To specifically opt in to update semantics on an existing edge and not emit a warning, you can add `OR UPDATE` after `RELATE`.
+
+```surql
+RELATE person:one->likes:[person:one, post:one]->post:one
+  SET liked_at = time::now();
+
+-- Has `OR UPDATE`: will not emit a warning
+RELATE OR UPDATE person:one->likes:[person:one, post:one]->post:one
+  SET liked_at = time::now();
+```
+
+If you prefer a hard error at this point, [`INSERT RELATION`](/docs/reference/query-language/statements/insert#insert-relation-tables) can be used:
+
+```surql
+INSERT RELATION INTO likes {
+  in: person:two,
+  out: post:one,
+  id: [person:two, post:one]
+};
+
+-- Returns an error
+INSERT RELATION INTO likes {
+  in: person:two,
+  out: post:one,
+  id: [person:two, post:one]
+};
 ```
 
 ## Querying graphs
@@ -1542,16 +1630,18 @@ RELATE person:one->knows->person:three SET
     has_dated = true;
 ```
 
-With these fields in place, it is possible to use a `WHERE` clause to do refined searches on relationships of a certain type.
+With these fields in place, a `WHERE` clause inside the arrows does refined searches on relationships of a certain type. The condition sits in parentheses, as part of the path, so it becomes the edge scan's own predicate and the edges that fail it are never followed.
 
 ```surql
 SELECT 
 	->knows->person AS knows,
-	->knows[WHERE has_dated]->person AS has_dated,
-	->knows[WHERE same_high_school
-	  AND has_dated]->person AS dated_and_same_school
+	->(knows WHERE has_dated)->person AS has_dated,
+	->(knows WHERE same_high_school
+	  AND has_dated)->person AS dated_and_same_school
  FROM person:one;
 ```
+
+The same condition can be written in square brackets - `->knows[WHERE has_dated]->person` - but that is the generic [array filter](/docs/reference/query-language/language-primitives/data-types/arrays#filtering-and-mapping-with-array-functions) applied after walking every edge. Both return the same records, and on a record with many edges only the parenthesised form stays fast.
 
 ```surql title="Output"
 [
@@ -1612,8 +1702,8 @@ RELATE person:one->knows->person:three SET
 With these objects, a jealous `person:two` could do a check on `person:one` to see how many relationships with `has_dated` have an end time that overlaps with the `has_dated` period of `person:one` and `person:two`.
 
 ```surql
-SELECT id, ->knows[WHERE same_high_school
-  AND has_dated.to > d'2020-12-25']->person FROM person:one;
+SELECT id, ->(knows WHERE same_high_school
+  AND has_dated.to > d'2020-12-25')->person FROM person:one;
 ```
 
 ### Recursive graph queries
@@ -1625,7 +1715,8 @@ Take the following example which creates five cities, each of which is connected
 ```surql
 -- Note: 1..6 used to be inclusive until SurrealDB 3.0.0
 -- Now creates 1 up to but not including 6
-CREATE |city:1..=6| SET name = <string>id.id() + 'ville';
+CREATE |city:1..6|;
+UPDATE city SET name = <string>id.id() + 'ville';
 FOR $pair IN (<array>(1..=5)).windows(2) {
   	LET $city1 = type::record("city", $pair[0]);
     LET $city2 = type::record("city", $pair[1]);
@@ -1779,7 +1870,7 @@ SELECT @.{1..5}.{
 ]
 ```
 
-As noted above, a `TIMEOUT` can be set for queries that may be computationally expensive. This is particularly useful when experimenting with recursive queries, which, if care is not taken, can run all the way to the maximum possible depth of 256.
+As noted above, a `TIMEOUT` can be set for queries that may be computationally intensive. This is particularly useful when experimenting with recursive queries, which, if care is not taken, can run all the way to the maximum possible depth of 256.
 
 Take the following example with two `person` records that like each other. Following the `likes` edge will run until the query recurses 256 times and gives up.
 
@@ -1813,7 +1904,7 @@ person:one.{..}->likes->person;
 'Exceeded the idiom recursion limit of 256.'
 ```
 
-Take the following example in which three `person` records of created, each of which likes the other two `person` records. A query on the `->likes->person` path shows that the number of records doubles each time.
+Take the following example in which three `person` records are created, each of which likes the other two `person` records. A query on the `->likes->person` path shows that the number of records doubles each time.
 
 ```surql
 CREATE |person:1..4|;
@@ -1878,8 +1969,6 @@ SELECT @.{..}.{ id, likes: ->likes->person.@ } FROM person TIMEOUT 1s;
 ```
 
 ### Graph clauses
-
-<Since v="v2.2.0" />
 
 The same clauses available to a `SELECT` statement can be used inside a graph query. Take the following relations for example:
 
@@ -1968,7 +2057,7 @@ SELECT ->knows.* FROM person:one;
 ]
 ```
 
-However, clauses available in [`SELECT` statements](/docs/reference/query-language/statements/select) such as `WHERE`, `LIMIT`, `GROUP BY`, aliases and so on can be used, making a graph clause a most flexible option.
+However, clauses available in [`SELECT` statements](/docs/reference/query-language/statements/select) such as `WHERE`, `LIMIT`, `GROUP BY`, aliases and so on can be used, making a graph clause the most flexible option.
 
 ```surql
 SELECT ->(SELECT *, time::now() AS queried_at
@@ -2017,6 +2106,24 @@ SELECT ->(SELECT count() as count, know_in_person
   FROM person;
 SELECT ->(likes LIMIT 1) AS likes FROM person;
 SELECT ->(likes START 1) AS likes FROM person;
+```
+
+The short form `->(likes ...)` takes `WHERE`, `LIMIT` and `START`. Sorting needs the full `SELECT` form, and the path can continue after it to the records at the other end, in the order of the edges:
+
+```surql
+CREATE plan:p, workout:a, workout:b, workout:c;
+RELATE plan:p->contain->workout:b SET index = 2;
+RELATE plan:p->contain->workout:a SET index = 3;
+RELATE plan:p->contain->workout:c SET index = 1;
+
+-- Parse error: ORDER BY needs the SELECT form
+-- SELECT VALUE ->(contain ORDER BY index)->workout FROM ONLY plan:p;
+
+SELECT VALUE ->(SELECT * FROM contain ORDER BY index)->workout FROM ONLY plan:p;
+```
+
+```surql title="Output"
+[workout:c, workout:b, workout:a]
 ```
 
 Multiple graph tables can be selected by separating each table with a comma, in the same way as in any other `SELECT` statement. In addition, all tables can be selected by using `?` as a wildcard operator.

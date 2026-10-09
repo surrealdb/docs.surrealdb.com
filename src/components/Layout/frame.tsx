@@ -1,8 +1,7 @@
 import { Anchor, Box, Drawer } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { type CSSProperties, useEffect } from "react";
+import { useEffect } from "react";
 import { usePageContext } from "vike-react/usePageContext";
-import globulesImg from "~/assets/img/globules.webp";
 import { Footer } from "~/components/Footer";
 import { Header, MobileNav } from "./header";
 import { navLinksForPath } from "./nav";
@@ -48,12 +47,6 @@ export function PageFrame({ children }: { children: React.ReactNode }) {
         <Box
             className={classes.layout}
             data-product={product}
-            style={
-                {
-                    "--bg-image": `url(${globulesImg})`,
-                    "--bg-opacity": 0.15,
-                } as CSSProperties
-            }
         >
             {/* First tab stop on every page: keyboard and screen-reader users
                 jump past the header and the whole sidebar tree (WCAG 2.4.1). */}

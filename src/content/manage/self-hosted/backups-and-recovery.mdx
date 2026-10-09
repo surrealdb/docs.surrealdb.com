@@ -6,7 +6,7 @@ description: "Create and restore SurrealQL backups with the CLI, plan backup str
 
 # Backups & recovery
 
-Reliable backups are central to operating self-hosted SurrealDB. The CLI provides logical backups as SurrealQL using [`surreal export`](/docs/reference/cli/surrealdb-cli/commands/export), which dumps namespaces, databases, schemas, and data in a form you can version, diff, and store outside the database.
+The CLI provides logical backups of a self-hosted server as SurrealQL using [`surreal export`](/docs/reference/cli/surrealdb-cli/commands/export), which dumps namespaces, databases, schemas, and data in a form you can version, diff, and store outside the database.
 
 Schedule exports when traffic is lower if large datasets make exports lengthy, and ensure the export process has sufficient disk space and time to finish without overlapping the next run.
 
@@ -23,3 +23,33 @@ For **disaster recovery**, keep copies off-site and logically separated from pro
 Validate backup **integrity** periodically: restore to a non-production instance and run application-level checks. Corruption or partial writes are easier to catch in rehearsal than during an incident.
 
 Align retention with policy: keep enough history for audits and incident investigation, but prune or tier old exports so storage costs stay predictable. Where legal holds apply, flag those backups and exclude them from automated deletion.
+
+## What a dump does not restore
+
+An export holds the current state of each record and the definitions of the database, with two exceptions to plan for.
+
+**Access signing keys.** An export writes each [`DEFINE ACCESS`](/docs/reference/query-language/statements/define/access) statement with `'[REDACTED]'` in place of its key, so no dump holds a key. From SurrealDB 3.3.1, importing one of these statements fails with an error naming the access, the access is not created, and the rest of the import carries on. After a restore, define each such access again with its real key, kept somewhere other than the database. An access that verifies tokens through a JWKS URL holds no key and restores normally.
+
+> [!WARNING]
+> Before SurrealDB 3.3.1, importing a dump created each access with the literal string `[REDACTED]` as its key. Anyone who knows that string can sign tokens for such an access. If a database was restored from a dump on an earlier version, define its accesses again with new keys.
+
+**Record history.** An export holds no earlier versions of a record, even on a datastore that keeps them. From 3.3.1, `surreal export --versions` fails rather than writing an ordinary dump.
+
+Two other details affect who can restore a dump and how large its transactions are:
+
+* A database with its own `COMMENT`, `CHANGEFEED` or `STRICT` clause is exported with a `DEFINE DATABASE OVERWRITE` statement that sets those clauses on the target database. That statement needs a namespace or root user, so import such a dump as one of those rather than as a database user.
+* Where [`SURREAL_TRANSACTION_MAX_WRITE_KEYS`](/docs/reference/cli/surrealdb-cli/environment-variables) is set, a dump from a version before 3.3.1 can exceed it on import, because its `INSERT` statements were sized without counting the keys a `REFERENCE` field writes. Take a new export after upgrading, or raise the limit while restoring the older dump.
+
+## Backing up an embedded database
+
+An application that embeds SurrealDB, rather than connecting to a server, makes the same export from its own code. The SDKs have export and import methods that write and read the same SurrealQL file as the CLI, such as `.export()` and `.import()` in the [Rust SDK](/docs/reference/rust/methods/export):
+
+```rust
+// Write a backup of the current namespace and database
+db.export("backup.surql").await?;
+
+// Restore it into another datastore
+restored.import("backup.surql").await?;
+```
+
+To copy the files of a RocksDB or SurrealKV datastore directly instead, copy the directory only while no process has the datastore open. A copy taken while the application is writing can be missing writes that were still in memory.

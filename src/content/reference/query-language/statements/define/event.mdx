@@ -172,6 +172,8 @@ In this example:
 
 - We perform multiple actions when a purchase is created: establishing relationships using the [RELATE](/docs/reference/query-language/statements/relate) statement and creating a log entry.
 
+A `RELATE` inside an event often builds the ends of the relation from fields of `$after`. A field path such as `$after.from` has to be wrapped in parentheses there, as `($after.from)`. See [Expressions at the ends of a relation](/docs/reference/query-language/statements/relate#expressions-at-the-ends-of-a-relation) for the rule and an example, and for `INSERT RELATION`, which needs no parentheses.
+
 ## Specific events
 
 You can trigger events based on specific events. You can use the variable $event to detect what type of event is triggered on the table.
@@ -259,46 +261,17 @@ SELECT * FROM post;
 ]
 ```
 
-## Using `IF NOT EXISTS` clause
-
-
-The `IF NOT EXISTS` clause can be used to define an event only if it does not already exist. You should use the `IF NOT EXISTS` clause when defining an event in SurrealDB if you want to ensure that the event is only created if it does not already exist. If the event already exists, the `DEFINE EVENT` statement will return an error.
-
-It's particularly useful when you want to safely attempt to define a event without manually checking its existence first.
-
-On the other hand, you should not use the `IF NOT EXISTS` clause when you want to ensure that the event definition is updated regardless of whether it already exists. In such cases, you might prefer using the `OVERWRITE` clause, which allows you to define a event and overwrite an existing one if it already exists, ensuring that the latest version of the event definition is always in use
-
-```surql
-/**[test]
-
-[[test.results]]
-value = "NONE"
-
-*/
-
--- Create a EVENT if it does not already exist
-DEFINE EVENT IF NOT EXISTS example ON example THEN {};
-```
-
-## Using `OVERWRITE` clause
-
-The `OVERWRITE` clause can be used to define an event and overwrite an existing one if it already exists. You should use the `OVERWRITE` clause when you want to modify an existing event definition. If the event already exists, the `DEFINE EVENT` statement will overwrite the existing event definition with the new one.
-
-```surql
-/**[test]
-
-[[test.results]]
-value = "NONE"
-
-*/
-
--- Create an EVENT and overwrite if it already exists
-DEFINE EVENT OVERWRITE example ON example THEN {};
-```
-
 ## Events and permissions
 
 Queries inside the event always execute without any permission checks, even when triggered by changes made by the currently authenticated user. This can be very useful to perform additional checks and changes that involve tables/records that are inaccessible for the user.
+
+Inside the event, [`$auth`](/docs/reference/query-language/language-primitives/parameters#auth) is the user whose change triggered it, not the user who defined the event. For a change made by a record user, `$auth` is that user's record ID, and for a change made by a system user such as root, it is `NONE`. This also holds for an [async event](#async-events), which runs later in its own transaction. An event can therefore record who made a change:
+
+```surql
+DEFINE EVENT log_author ON note THEN {
+	CREATE note_log SET note = $after.id, author = $auth;
+};
+```
 
 Consider a CREATE query sent by a record user that has CREATE access to the `comment` table only:
 
@@ -337,6 +310,34 @@ DEFINE EVENT on_comment_created ON TABLE comment
     };
 ```
 
+## Keeping secret values out of records
+
+The record that triggers an event is stored with all of its fields, including any secret in it, such as a new password for a reset. Unsetting the field inside the event removes it from the stored record, but the statement that wrote the record still returns it, because events run after the statement:
+
+```surql
+DEFINE EVENT reset ON reset_password WHEN $event = "CREATE" THEN {
+	UPDATE user SET pass = crypto::argon2::generate($after.password) WHERE email = $after.email;
+	UPDATE $after.id UNSET password;
+};
+```
+
+When the secret is only needed to make a change, pass it to a [defined function](/docs/reference/query-language/statements/define/function) as an argument instead of writing it to a record. The function can still record that the change happened:
+
+```surql
+DEFINE FUNCTION fn::reset_password($email: string, $password: string) {
+	UPDATE user SET pass = crypto::argon2::generate($password) WHERE email = $email;
+	CREATE reset_log SET email = $email, at = time::now();
+};
+```
+
+An event that copies a record somewhere else, such as an audit log, can leave a field out with [`.remove()`](/docs/reference/query-language/functions/database-functions/object#objectremove):
+
+```surql
+DEFINE EVENT audit ON user WHEN $event = "UPDATE" THEN {
+	CREATE audit SET before = $before.remove("pass"), after = $after.remove("pass");
+};
+```
+
 ## Accessing `$input` in events
 
 <Since v="v3.0.0" />
@@ -372,6 +373,43 @@ Output:
 ]
 ```
 
+## Using `IF NOT EXISTS` clause
+
+
+The `IF NOT EXISTS` clause can be used to define an event only if it does not already exist. You should use the `IF NOT EXISTS` clause when defining an event in SurrealDB if you want to ensure that the event is only created if it does not already exist. If the event already exists, the `DEFINE EVENT` statement will return an error.
+
+It's particularly useful when you want to safely attempt to define an event without manually checking its existence first.
+
+On the other hand, you should not use the `IF NOT EXISTS` clause when you want to ensure that the event definition is updated regardless of whether it already exists. In such cases, you might prefer using the `OVERWRITE` clause, which allows you to define an event and overwrite an existing one if it already exists, ensuring that the latest version of the event definition is always in use.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+*/
+
+-- Create a EVENT if it does not already exist
+DEFINE EVENT IF NOT EXISTS example ON example THEN {};
+```
+
+## Using `OVERWRITE` clause
+
+The `OVERWRITE` clause can be used to define an event and overwrite an existing one if it already exists. You should use the `OVERWRITE` clause when you want to modify an existing event definition. If the event already exists, the `DEFINE EVENT` statement will overwrite the existing event definition with the new one.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+*/
+
+-- Create an EVENT and overwrite if it already exists
+DEFINE EVENT OVERWRITE example ON example THEN {};
+```
+
 ## Async events
 
 <Since v="v3.0.0" />
@@ -389,8 +427,9 @@ Some more notes on the characteristics of async events:
 * Atomicity: The event is enqueued within the same transaction as the document change. If the transaction fails, the event is never queued.
 * Consistency: Asynchronous events run in a separate transaction from the original change. They see the database state at the time they are executed.
 * Ordering: Events are generally processed in the order they were created, though parallel processing may occur within a single batch.
+* Delivery: An event runs at least once, and can run more than once. If the event's transaction fails to commit because of a write conflict with another event, it runs again in a new transaction. From SurrealDB 3.3.1 these conflict retries do not count against the `RETRY` clause. The database changes of a failed attempt are rolled back, but side effects outside the database, such as an [`http::post()`](/docs/reference/query-language/functions/database-functions/http#httppost) call, are not, so make those safe to repeat.
 
-The easiest way to demonstrate that async events do not occur in the same transaction is by causing one to [throw](/docs/reference/query-language/statements/throw) an error. As an error inside any part of a transaction will cause the transaction to fail and roll back, the following event which fails about 50% of the time would cause the `CREATE` statement that follows to fail if it were not async. As an async event, however, the events that follow the statement are each run in their own transaction
+The easiest way to demonstrate that async events do not occur in the same transaction is by causing one to [throw](/docs/reference/query-language/statements/throw) an error. As an error inside any part of a transaction will cause the transaction to fail and roll back, the following event which fails about 50% of the time would cause the `CREATE` statement that follows to fail if it were not async. As an async event, however, the events that follow the statement are each run in their own transaction.
 
 ```surql
 DEFINE TABLE did_not_throw;

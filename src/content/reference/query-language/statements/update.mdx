@@ -6,7 +6,7 @@ description: "The UPDATE statement can be used to update records in the database
 
 # `UPDATE` statement
 
-The `UPDATE` statement can be used to update existing records in the database. If the record does not exist, the statement will succeed but no records will be updated.
+The `UPDATE` statement can be used to update existing records in the database. If the record does not exist, the statement will succeed but no records will be updated. To compare it with the other statements that write records, see [Writing records that may already exist](/docs/reference/query-language/statements/overview#writing-records-that-may-already-exist).
 
 > [!NOTE]
 > This statement can not be used to create graph relationships. For that, use the [`RELATE`](/docs/reference/query-language/statements/relate) or [`INSERT`](/docs/reference/query-language/statements/insert) statement.
@@ -48,7 +48,7 @@ UPDATE [ ONLY ] @targets
 
 ## Example usage
 
-Let's look at some examples of how to use the `UPDATE` statement. First we'll create two `person` records with the [`CREATE`](/docs/reference/query-language/statements/create) statement so that the examples will produce a meaningful output.
+The examples below show how to use the `UPDATE` statement. They start by creating two `person` records with the [`CREATE`](/docs/reference/query-language/statements/create) statement so that the examples produce meaningful output.
 
 ```surql
 /**[test]
@@ -78,7 +78,7 @@ CREATE person:tobie CONTENT {
 };
 ```
 
-Let's say we wanted to update the `person` table with a new field `enjoys` (an array), a new skill `breathing` to the existing `skills` field (another array), add a new numeric field called `dollars`, and a `last_name` field that relies on the existing `name` field to set its value.
+Suppose we want to update the `person` table with a new field `enjoys` (an array), a new skill `breathing` to the existing `skills` field (another array), add a new numeric field called `dollars`, and a `last_name` field that relies on the existing `name` field to set its value.
 
 To do this we would use the following query.
 
@@ -217,6 +217,64 @@ UPDATE person:tobie UNSET company;
 ]
 ```
 
+To rename a field on every record of a table, copy it to the new name and set the old name to `NONE` in the same statement. Every expression in `SET` reads the record as it was before the statement, so `username = name` still reads the old value even though `name` is removed in the same statement:
+
+```surql
+CREATE user:1 SET name = 'Ann';
+CREATE user:2 SET name = 'Bob';
+
+UPDATE user SET username = name, name = NONE;
+```
+
+```surql title="Output"
+[
+	{ id: user:1, username: 'Ann' },
+	{ id: user:2, username: 'Bob' }
+]
+```
+
+On a schemafull table, define the new field and [remove](/docs/reference/query-language/statements/remove) the definition of the old one before the `UPDATE`. While the old field is still defined with a type such as `string`, setting it to `NONE` fails. The stored values stay readable after the definition is removed, so the `UPDATE` can still copy them.
+
+### Updating objects inside an array
+
+Setting a field through an array path, such as `partnerships.pl`, sets the same value on every object in the array. The value is calculated once for the whole record, so a path that reads the array in the value gives an array, not the value of the current element:
+
+```surql
+CREATE deal:one SET amount = 400, partnerships = [
+	{ share: 0.5, pl: 0 },
+	{ share: 0.25, pl: 0 }
+];
+
+UPDATE deal:one SET partnerships.pl = amount * partnerships.share;
+//- "Cannot perform multiplication with 'int' and 'array'"
+```
+
+To calculate a value for each element, replace the array with a [`.map()`](/docs/reference/query-language/functions/database-functions/array#arraymap) over it. The closure can read the other fields of the record, such as `amount`, and `+` on two objects keeps the fields of the first and adds or replaces the fields of the second:
+
+```surql
+UPDATE deal:one SET partnerships = partnerships.map(|$p| $p + { pl: amount * $p.share });
+```
+
+```surql title="Output"
+[
+	{
+		amount: 400,
+		id: deal:one,
+		partnerships: [
+			{ pl: 200f, share: 0.5f },
+			{ pl: 100f, share: 0.25f }
+		]
+	}
+]
+```
+
+To change only some elements, filter the path with `[WHERE]` or pick one by its index:
+
+```surql
+UPDATE deal:one SET partnerships[WHERE share > 0.3].pl = 0;
+UPDATE deal:one SET partnerships[1].pl = 0;
+```
+
 ## Conditional update with `WHERE` clause
 
 The `UPDATE` statement supports conditional matching of records using a `WHERE` clause. If the expression in the `WHERE` clause evaluates to `true`, then the respective record will be updated.
@@ -290,7 +348,7 @@ Validation of the data clause is deferred in the same way, so a data clause that
 
 The `WHERE` condition and the data clause read the same image of the record, taken before the statement changes anything. Reads therefore never observe the statement's own writes, and both clauses agree on what the record contains.
 
-This has always held for ordinary fields - `SET a = a + 1, b = a + 1` assigns `b` from the old `a`. [Computed fields](/docs/reference/query-language/statements/define/field#restrictions-on-computed-fields) are now part of that image too, so a data clause and a condition both see their pre-mutation values.
+This has held for ordinary fields since 3.0.0, so `SET a = a + 1, b = a + 1` assigns `b` from the old `a`. Before 3.0.0 the assignments ran in the order they were written, and `b` read the new `a` (see [the 2.x to 3.x upgrade notes](/docs/build/migrating/from-old-surrealdb-versions/2x-to-3x#21-set-expressions-read-the-record-from-before-the-statement)). [Computed fields](/docs/reference/query-language/statements/define/field#restrictions-on-computed-fields) are now part of that image too, so a data clause and a condition both see their pre-mutation values.
 
 ```surql
 DEFINE FIELD can_drive ON person COMPUTED age >= 18;
@@ -392,6 +450,77 @@ UPDATE person:gladys CONTENT { age: 70 };
 </TabItem>
 </Tabs>
 
+## MERGE clause
+
+Instead of specifying the full record data using `CONTENT` or one field at a time using `SET`, it is also possible to merge-update only specific fields by using the `MERGE` keyword followed by an object containing the fields which are to be upserted.
+
+```surql
+-- Update certain fields on all records
+UPDATE person MERGE {
+	settings: {
+		marketing: true,
+	},
+};
+
+-- Update certain fields on a specific record
+UPDATE person:tobie MERGE {
+	settings: {
+		marketing: true,
+	},
+};
+```
+
+```surql title="Output"
+[
+	{
+		company: 'SurrealDB',
+		id: person:i5z3i64cpqpo8jtr6jww,
+		name: 'John',
+		settings: {
+			marketing: true
+		},
+		skills: [
+			'Rust',
+			'Go',
+			'JavaScript'
+		]
+	},
+	{
+		company: 'SurrealDB',
+		id: person:tobie,
+		name: 'Tobie',
+		settings: {
+			marketing: true
+		},
+		skills: [
+			'Rust',
+			'Go',
+			'JavaScript'
+		]
+	}
+]
+```
+
+`MERGE` combines objects at every level, so a nested object in the merge keeps the fields it does not mention. An array is a single value rather than a set of fields, so an array in the merge replaces the stored array whole, including an array of objects:
+
+```surql
+CREATE doc:1 SET tags = ['a', 'b'], meta = { x: 1, y: 2 };
+
+UPDATE doc:1 MERGE { meta: { y: 3 }, tags: ['c'] };
+```
+
+```surql title="Output"
+[
+	{
+		id: doc:1,
+		meta: { x: 1, y: 3 },
+		tags: ['c']
+	}
+]
+```
+
+To add to an array or remove from it instead of replacing it, use `SET tags += 'd'` or `SET tags -= 'a'`.
+
 ## REPLACE clause
 
 Originally an alias for `CONTENT`, the `REPLACE` clause maintains the previous behaviour regarding `READONLY` fields. If the content following `REPLACE` does not match a record's `READONLY` fields, an error will be generated.
@@ -444,60 +573,54 @@ UPDATE person:gladys REPLACE { age: 70,
 ]
 ```
 
-## MERGE clause
+## Alter the `RETURN` value
 
-Instead of specifying the full record data using `CONTENT` or one field at a time using `SET`, it is also possible to merge-update only specific fields by using the `MERGE` keyword followed by on object containing the fields which are to be upserted.
+By default, the update statement returns the record value once the changes have been made. To change the return value of each record, use the `RETURN` clause, specifying `NONE`, `BEFORE`, `AFTER`, `DIFF`, a comma-separated list of specific fields or ad-hoc fields, or `VALUE` for a single field without its key name.
 
 ```surql
--- Update certain fields on all records
-UPDATE person MERGE {
-	settings: {
-		marketing: true,
-	},
-};
+-- Don't return any result
+UPDATE person SET skills += 'reading' RETURN NONE;
 
--- Update certain fields on a specific record
-UPDATE person:tobie MERGE {
-	settings: {
-		marketing: true,
-	},
-};
+-- Return the changeset diff
+UPDATE person SET skills += 'reading' RETURN DIFF;
+
+-- Return the record before changes were applied
+UPDATE person SET skills += 'reading' RETURN BEFORE;
+
+-- Return the record after changes were applied (the default)
+UPDATE person SET skills += 'reading' RETURN AFTER;
+
+-- Return the value of the 'skills' field without the field name
+UPDATE person SET skills += 'reading' RETURN VALUE skills;
+
+-- Return a specific field only from the updated records
+UPDATE person:tobie SET skills = ['skiing',
+  'music'] RETURN name,
+  interests;
 ```
 
-```surql title="Output"
-[
-	{
-		company: 'SurrealDB',
-		id: person:i5z3i64cpqpo8jtr6jww,
-		name: 'John',
-		settings: {
-			marketing: true
-		},
-		skills: [
-			'Rust',
-			'Go',
-			'JavaScript'
-		]
-	},
-	{
-		company: 'SurrealDB',
-		id: person:tobie,
-		name: 'Tobie',
-		settings: {
-			marketing: true
-		},
-		skills: [
-			'Rust',
-			'Go',
-			'JavaScript'
-		]
-	}
-]
+## Counting the records a statement changed
+
+`UPDATE` returns one entry for each record it changed, so the length of its output is the number of records changed. The same works for [`DELETE`](/docs/reference/query-language/statements/delete) with `RETURN BEFORE`, since a `DELETE` returns nothing by default:
+
+```surql
+CREATE |item:1..=5| SET old = true;
+
+(UPDATE item SET checked = true WHERE old).len();
+//- 5
+
+(DELETE item WHERE old RETURN BEFORE).len();
+//- 5
+
+(DELETE item WHERE old RETURN BEFORE).len();
+//- 0
 ```
+
+For an `UPDATE`, add `RETURN VALUE id` to keep the output small when only the count is needed. For a `DELETE`, keep `RETURN BEFORE`: the deleted records no longer have an `id`, so `RETURN VALUE id` returns `NONE` for each of them.
 
 ## PATCH clause
 
-You can also specify changes to be applied to your query response, using the PATCH command which works similar to the [JSON Patch specification](https://jsonpatch.com/)
+You can also specify changes to be applied to your query response, using the PATCH command, which works similarly to the [JSON Patch specification](https://jsonpatch.com/).
 
 ```surql
 -- Patch the JSON response
@@ -529,31 +652,94 @@ UPDATE person:tobie PATCH [
 ]
 ```
 
-## Alter the `RETURN` value
+### Operations
 
-By default, the update statement returns the record value once the changes have been made. To change the return value of each record, use the `RETURN` clause, specifying `NONE`, `BEFORE`, `AFTER`, `DIFF`, a comma-separated list of specific fields or ad-hoc fields, or `VALUE` for a single field without its key name.
+A patch is an array of operations, each naming its target with a [JSON Pointer](https://datatracker.ietf.org/doc/html/rfc6901) - a `/`-separated path into the record, so `/settings/marketing` reaches the `marketing` field inside `settings`. SurrealDB accepts the six operations of the JSON Patch specification plus `change`:
+
+| Operation | Takes | Does |
+| --- | --- | --- |
+| `add` | `path`, `value` | Sets the member at `path` on an object, or inserts at that position in an array |
+| `remove` | `path` | Deletes the field at `path` |
+| `replace` | `path`, `value` | Overwrites the field at `path` |
+| `copy` | `from`, `path` | Reads the value at `from` and writes it to `path` |
+| `move` | `from`, `path` | Reads the value at `from`, writes it to `path`, and deletes `from` |
+| `test` | `path`, `value` | Fails the whole patch unless the field at `path` already equals `value` |
+| `change` | `path`, `value` | Applies a text diff to the string at `path` |
+
+An unknown operation fails the statement with `The JSON Patch contains invalid operations`, and so does a `test` whose value does not match, which is what makes `test` useful as a guard in front of the operations that follow it.
 
 ```surql
--- Don't return any result
-UPDATE person SET skills += 'reading' RETURN NONE;
+CREATE person:tobie SET name = 'Tobie', company = 'SurrealDB', nickname = 'Tobie';
 
--- Return the changeset diff
-UPDATE person SET skills += 'reading' RETURN DIFF;
-
--- Return the record before changes were applied
-UPDATE person SET skills += 'reading' RETURN BEFORE;
-
--- Return the record after changes were applied (the default)
-UPDATE person SET skills += 'reading' RETURN AFTER;
-
--- Return the value of the 'skills' field without the field name
-UPDATE person SET skills += 'reading' RETURN VALUE skills;
-
--- Return a specific field only from the updated records
-UPDATE person:tobie SET skills = ['skiing',
-  'music'] RETURN name,
-  interests;
+UPDATE person:tobie PATCH [
+	{ "op": "replace", "path": "/company", "value": "SurrealDB Ltd" },
+	{ "op": "copy", "from": "/name", "path": "/display_name" },
+	{ "op": "remove", "path": "/nickname" }
+];
 ```
+
+```surql title="Output"
+[
+	{
+		company: 'SurrealDB Ltd',
+		display_name: 'Tobie',
+		id: person:tobie,
+		name: 'Tobie'
+	}
+]
+```
+
+The value of a `change` operation is a text patch in the format of the [diff-match-patch](https://github.com/google/diff-match-patch) library. Each hunk starts with an `@@` header giving character positions, followed by lines that start with a space for unchanged text, `-` for removed text and `+` for added text.
+
+```surql
+CREATE person:tobie SET company = "SurrealDB";
+
+UPDATE person:tobie PATCH [
+	{ "op": "change", "path": "/company", "value": "@@ -2,8 +2,12 @@\n urrealDB\n+ Ltd\n" }
+];
+```
+
+```surql title="Output"
+[
+	{
+		company: 'SurrealDB Ltd',
+		id: person:tobie
+	}
+]
+```
+
+[`value::diff()`](/docs/reference/query-language/functions/database-functions/value#valuediff) produces this format, so `UPDATE person:tobie PATCH value::diff({ company: 'SurrealDB' }, { company: 'SurrealDB Ltd' })` applies the same change. A diff whose context does not match the current string leaves the field unchanged, and the statement does not report an error.
+
+#### Pointers into arrays
+
+<Since v="v3.3.0" />
+
+A segment addresses a position in an array only in the canonical spelling RFC 6901 gives it, so a member named `007`, `+3` or `-1` stays addressable as a member rather than being read as an index. The segment `-` addresses the position after the last element.
+
+`add`, and the destination of `copy` and `move`, **insert** at the position and shift the elements after it, rather than overwriting the element already there. `move` removes its source before writing its destination, so a destination in the same array counts against the array that removal left behind.
+
+`replace` needs an element to exist at the position it names and fails otherwise, matching the bounds `add` already enforced. On an object it still creates a missing member.
+
+Two pointers are refused rather than guessed at: one whose prefix reaches every element of a sequence, since it names no single position, and a destination inside its own source, which would otherwise nest a copy of the source inside itself each time it ran.
+
+Writing to a [set](/docs/reference/query-language/language-primitives/data-types/sets) by position reaches whichever element sorts into that place, so a set is rebuilt once the patch has been applied.
+
+> [!WARNING]
+> Before 3.3.0 a pointer through an array index did not apply at all, and `replace` corrupted the record on top of that, giving every element of the array a member named after the index segment. Replacing the whole array was the only reliable way to change one property of one element.
+
+### Read pointers and field permissions
+
+Three `PATCH` operations read from a pointer as well as writing: `copy` and `move` read the path in their `from`, and `test` reads its `path`. Each of those reads resolves against the caller's permitted view of the record, and the statement fails with a not-allowed error where the pointer reaches a field the caller cannot `select`.
+
+This holds for a pointer at the restricted field itself, at an ancestor object that holds it, and at a nested leaf beneath it.
+
+The check walks the operations in order against a copy of the record, judging each pointer as the record stands when that operation runs. A patch is a sequence, so an earlier insertion or removal shifts every later element by one, and a pointer that reached nothing when the patch arrived can come to reach a restricted field by the time its own operation runs.
+
+`add` and `change` also read a pointer, but each writes its result back to the path it read, so neither moves a value out of the field it came from and neither is gated.
+
+The other data clauses reduce rather than refuse: a `SET`, `CONTENT`, `MERGE` or `REPLACE` right-hand side sees `NONE` where a field is restricted. `PATCH` fails the statement instead, because substituting `NONE` would store a value the caller never asked for, and for `move` would delete the source field as well. The failure reveals that a field is restricted, which a plain `SELECT` already shows by omitting it, rather than the value.
+
+Every statement that takes a `PATCH` clause behaves this way, so the same applies to [`CREATE`](/docs/reference/query-language/statements/create), [`UPSERT`](/docs/reference/query-language/statements/upsert), [`RELATE`](/docs/reference/query-language/statements/relate) and [`INSERT`](/docs/reference/query-language/statements/insert).
 
 ## Using a timeout
 
@@ -566,15 +752,15 @@ UPDATE person
 	TIMEOUT 5s;
 ```
 
-## UPDATE inside database exports
-
-As `UPDATE` before version 2.0.0 used to create a specified record ID if it did not exist, it was used in the `.surql` files generated by the [`surreal export`](/docs/reference/cli/surrealdb-cli/commands/export) command to export existing records in a database. As of version 2.0.0, the [`INSERT`](/docs/reference/query-language/statements/insert) statement is used instead.
-
 ## The `EXPLAIN` clause
 
 When `EXPLAIN` is used:
 
-1. The `UPDATE` statement returns an explanation, essentially revealing the execution plan to provide transparency and understanding of the query performance.
+1. The `UPDATE` statement returns an explanation of its execution plan, which shows how the query will be performed.
 2. The records are not updated.
 
 `EXPLAIN` can be followed by `FULL` to see the number of executed rows.
+
+## UPDATE inside database exports
+
+As `UPDATE` before version 2.0.0 used to create a specified record ID if it did not exist, it was used in the `.surql` files generated by the [`surreal export`](/docs/reference/cli/surrealdb-cli/commands/export) command to export existing records in a database. As of version 2.0.0, the [`INSERT`](/docs/reference/query-language/statements/insert) statement is used instead.

@@ -21,12 +21,15 @@ cargo add surrealdb --features kv-mem
 cargo add surrealdb --features kv-rocksdb
 ```
 
-You will need to add the following additional dependencies:
+RocksDB is a C++ library, so `kv-rocksdb` compiles it as part of your build and needs a C++ compiler and `libclang` on the build machine. [SurrealKV](/docs/running/file-backed#surrealkv) is written in Rust and stores data on disk without either. Enable it with `cargo add surrealdb --features kv-surrealkv` and connect with the `SurrealKv` engine.
+
+You will need to add the following additional dependency:
 
 ```bash
-cargo add serde --features derive
 cargo add tokio --features macros,rt-multi-thread
 ```
+
+The structs in the example derive [`SurrealValue`](/docs/reference/rust/concepts/surrealvalue-attributes), which the SDK uses to convert Rust types to and from SurrealDB values. Types that only derive serde's `Serialize` and `Deserialize` do not implement it, and passing one to a method such as `.content()` or `.select()` fails to compile with `the trait bound ...: SurrealValue is not satisfied`.
 
 <br />
 
@@ -35,8 +38,7 @@ cargo add tokio --features macros,rt-multi-thread
 Open `src/main.rs` and replace everything in there with the following code to try out some basic operations using the SurrealDB SDK with an embedded database. Look at [integrations to connect to a database](/docs/reference/rust).
 
 ```rust
-use serde::{Deserialize, Serialize};
-use surrealdb::types::RecordId;
+use surrealdb::types::{RecordId, SurrealValue};
 use surrealdb::Surreal;
 
 // For an in memory database
@@ -45,25 +47,25 @@ use surrealdb::engine::local::Mem;
 // For a RocksDB file
 // use surrealdb::engine::local::RocksDb;
 
-#[derive(Debug, Serialize)]
-struct Name<'a> {
-    first: &'a str,
-    last: &'a str,
+#[derive(Debug, SurrealValue)]
+struct Name {
+    first: String,
+    last: String,
 }
 
-#[derive(Debug, Serialize)]
-struct Person<'a> {
-    title: &'a str,
-    name: Name<'a>,
+#[derive(Debug, SurrealValue)]
+struct Person {
+    title: String,
+    name: Name,
     marketing: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, SurrealValue)]
 struct Responsibility {
     marketing: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, SurrealValue)]
 struct Record {
     #[allow(dead_code)]
     id: RecordId,
@@ -84,10 +86,10 @@ async fn main() -> surrealdb::Result<()> {
     let created: Option<Record> = db
         .create("person")
         .content(Person {
-            title: "Founder & CEO",
+            title: "Founder & CEO".to_string(),
             name: Name {
-                first: "Tobie",
-                last: "Morgan Hitchcock",
+                first: "Tobie".to_string(),
+                last: "Morgan Hitchcock".to_string(),
             },
             marketing: true,
         })
@@ -123,6 +125,48 @@ cargo run
 ```
 
 <br />
+
+## Logging and one process per datastore
+
+The embedded engine logs through the [`tracing`](https://docs.rs/tracing) crate, so its output appears once your program installs a subscriber. With [`tracing-subscriber`](https://docs.rs/tracing-subscriber) and its `env-filter` feature, the `RUST_LOG` environment variable chooses the level:
+
+```rust
+use tracing_subscriber::EnvFilter;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
+    // Connect and query as usual
+    Ok(())
+}
+```
+
+```sh
+RUST_LOG=surrealdb=info cargo run
+```
+
+`info` shows the datastore starting up. `trace` also shows each statement as it is parsed and executed, which is useful for debugging a query but produces a lot of output, and it only works in a debug build such as plain `cargo run`. SurrealDB enables the `release_max_level_debug` feature of `tracing`, which removes trace-level logging from release builds at compile time. Cargo combines a crate's features across the whole build, so this also applies to `trace!` calls in your own code when your program depends on SurrealDB.
+
+The limit applies when `debug_assertions` is off, not to optimised builds as such. To trace an optimised build, add a profile that inherits from `release` and keeps debug assertions on:
+
+```toml
+[profile.release-trace]
+inherits = "release"
+debug-assertions = true
+```
+
+```sh
+RUST_LOG=surrealdb=trace cargo run --profile release-trace
+```
+
+Within one process, the RocksDB and SurrealKV engines run many queries at once, including concurrent writes from many users to the same records, so the application has no single writer to wait for.
+
+The datastore itself can only be open in one process at a time. RocksDB and SurrealKV lock the directory, so a second process that opens the same path, such as a `surreal start` server pointed at it while your application runs, fails with an error like `Database at mydb/LOCK is already locked by another process`. To share the data between processes, or to look at it in [SurrealDB Studio](/docs/explore/studio) during development, run the database as a server with [`surreal start`](/docs/reference/cli/surrealdb-cli/commands/start) and connect your application to it over `ws://`. With `surrealdb::engine::any::connect`, only the connection string changes between the embedded and the server setup, as [Tips and tricks on using the Rust SDK](https://surrealdb.com/blog/tips-and-tricks-on-using-the-rust-sdk#interchangeable-engines) shows. Stop the application's embedded connection before starting the server on the same path, because the lock is held for as long as the datastore is open.
+
+The lock also applies within a single process. A second `Surreal::new()` or `connect()` call on a path that is already open fails. RocksDB reports `IO error: lock hold by current process ... LOCK: No locks available`, and SurrealKV reports `Database at mydb/LOCK is already locked by another process` even though the same process holds the lock. Open the datastore once and clone the client wherever another handle is needed, because a clone shares the open datastore. Tests often hit this error, because each `#[tokio::test]` function that runs its own setup code opens the path again. Give each test its own directory, or connect with `memory` so that every test has a separate in-memory datastore.
 
 ## SDK methods
 
@@ -385,27 +429,27 @@ db.signup(credentials)
 
 ### Example usage
 ```rust
-use serde::Serialize;
-use surrealdb::opt::auth::Scope;
+use surrealdb::opt::auth::Record;
+use surrealdb::types::SurrealValue;
 
-#[derive(Serialize)]
-struct Credentials<'a> {
-    email: &'a str,
-    pass: &'a str,
+#[derive(SurrealValue)]
+struct Credentials {
+    email: String,
+    pass: String,
 }
 
-let jwt = db.signup(Scope {
-    namespace: "main",
-    database: "main",
-    access: "user",
+let jwt = db.signup(Record {
+    namespace: "main".to_string(),
+    database: "main".to_string(),
+    access: "user".to_string(),
     params: Credentials {
-        email: "info@surrealdb.com",
-        pass: "123456",
+        email: "info@surrealdb.com".to_string(),
+        pass: "123456".to_string(),
     },
 }).await?;
 
 // ⚠️: It is important to note that the token should be handled securely and protected from unauthorized access.
-let token = jwt.as_insecure_token();
+let token = jwt.access.as_insecure_token();
 ```
 
 <br />
@@ -441,27 +485,27 @@ db.signin(credentials)
 
 ### Example usage
 ```rust
-use serde::Serialize;
-use surrealdb::opt::auth::Scope;
+use surrealdb::opt::auth::Record;
+use surrealdb::types::SurrealValue;
 
-#[derive(Serialize)]
-struct Credentials<'a> {
-    email: &'a str,
-    pass: &'a str,
+#[derive(SurrealValue)]
+struct Credentials {
+    email: String,
+    pass: String,
 }
 
-let jwt = db.signin(Scope {
-    namespace: "main",
-    database: "main",
-    access: "user",
+let jwt = db.signin(Record {
+    namespace: "main".to_string(),
+    database: "main".to_string(),
+    access: "user".to_string(),
     params: Credentials {
-        email: "info@surrealdb.com",
-        pass: "123456",
+        email: "info@surrealdb.com".to_string(),
+        pass: "123456".to_string(),
     },
 }).await?;
 
 // ⚠️: It is important to note that the token should be handled securely and protected from unauthorized access.
-let token = jwt.as_insecure_token();
+let token = jwt.access.as_insecure_token();
 ```
 
 <br />

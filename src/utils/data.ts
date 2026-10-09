@@ -6,6 +6,7 @@ import { type DocHeading, resolveMarkdown } from "./markdown";
 import { BASE_URL, type BreadcrumbItem, getSuffixedMetaTitle } from "./meta";
 import { buildNavigation, type NavSection, resolveFolderLanding } from "./navigation";
 import { getProductFromPath } from "./product";
+import { getRelated, type RelatedItem } from "./related";
 
 export interface PageData {
     content: string;
@@ -17,6 +18,8 @@ export interface PageData {
     breadcrumbItems: BreadcrumbItem[];
     title: string;
     description: string;
+    /** University lessons and blog posts on the same subject, if any. */
+    related: RelatedItem[];
 }
 
 /** Base the docs are served from - `base` in `vite.config.ts`. */
@@ -104,37 +107,6 @@ function resolveSection(breadcrumbs: string[], collectionId: string): string | u
             .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
             .join(" ")
     );
-}
-
-export function getParentPathname(pathname: string): string | null {
-    const pathOnly = pathname.includes("://") ? new URL(pathname).pathname : pathname;
-    const trimmed = pathOnly.replace(/\/+$/, "");
-
-    if (trimmed === "" || trimmed === "/") {
-        return null;
-    }
-
-    const i = trimmed.lastIndexOf("/");
-
-    if (i <= 0) {
-        return "/";
-    }
-
-    return trimmed.slice(0, i) || "/";
-}
-
-/**
- * One path segment up, as a browser URL.
- *
- * `getParentPathname` walks Vike's `urlPathname`, which has the base
- * stripped. A `Location` header needs the base back on, or walking up from
- * a missing page lands outside the docs entirely (`/docs/agent-memory/typo`
- * would redirect to `/agent-memory`, which no route serves).
- */
-export function getParentUrl(pathname: string): string | null {
-    const parent = getParentPathname(pathname);
-
-    return parent === null ? null : `${DOCS_BASE}${parent}`;
 }
 
 /**
@@ -253,6 +225,9 @@ export function resolveDataFromCollection<K extends keyof CollectionMap>(
         breadcrumbItems,
         title: entry.metadata.title ?? "",
         description: description ?? "",
+        related: getRelated(
+            [DOCS_BASE, ...prefixSegments, ...path.split("/")].filter(Boolean).join("/"),
+        ),
     };
 }
 

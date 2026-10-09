@@ -50,9 +50,9 @@ The following chart shows MySQL data types along with the equivalent or near-equ
 
 ## Importing from MySQL using Surreal Sync
 
-Surreal Sync can be used to exports MySQL tables to SurrealDB.
+Surreal Sync can be used to export MySQL tables to SurrealDB.
 
-It supports inconsistent full syncs and consistent incremental syncs, and together provides ability to reproduce consistent snapshots from the source MySQL tables onto the target SurrealDB tables.
+It supports inconsistent full syncs and consistent incremental syncs, and together these provide the ability to reproduce consistent snapshots from the source MySQL tables onto the target SurrealDB tables.
 
 For more on how to import data from MySQL to SurrealDB, please see the following pages in the Surreal Sync repo.
 

@@ -11,10 +11,13 @@ import { AgentPicker } from "~/components/AgentPicker";
 import { AgentPrompt } from "~/components/AgentPrompt";
 import { Boxes } from "~/components/Boxes";
 import { CodeWithOutput } from "~/components/CodeWithOutput";
+import { DemoEmbed } from "~/components/DemoEmbed";
 import { Edition } from "~/components/Edition";
 import { IconBox } from "~/components/IconBox";
 import { OptionsTable } from "~/components/OptionsTable";
+import { ShowcaseCard } from "~/components/ShowcaseCard";
 import { Since } from "~/components/Since";
+import { SurrealistMini } from "~/components/SurrealistMini";
 import { Synopsis } from "~/components/Synopsis";
 import { Version } from "~/components/Version";
 import { VersionBlock } from "~/components/VersionBlock";
@@ -62,10 +65,10 @@ export function stripLeadingH1(markdown: string): string {
     return source.slice(line.to, source.length).replace(/^\n+/, "");
 }
 
-/** Quote `light` / `dark` keys inside `icon={{ … }}` so the value is valid JSON. */
+/** Quote `light` / `dark` keys and strip trailing commas inside `icon={{ … }}` so the value is valid JSON. */
 function quoteIconObjectKeys(markdown: string): string {
     return markdown.replace(/icon=\{\{([\s\S]*?)\}\}/g, (_match, inner: string) => {
-        const quoted = inner.replace(/\b(light|dark)\s*:/g, '"$1":');
+        const quoted = inner.replace(/\b(light|dark)\s*:/g, '"$1":').replace(/,(\s*)$/, "$1");
         return `icon={{${quoted}}}`;
     });
 }
@@ -282,12 +285,19 @@ export function registerMarkdownComponents(): MarkdownComponents {
         IconBox: { component: IconBox, block: true },
         Boxes: { component: Boxes, block: true, preserveNewlines: false },
         CodeWithOutput: { component: CodeWithOutput, block: true, preserveNewlines: false },
+        // A showcase demo: its own finished page, framed on the card surface
+        // with tabs between its pages. A raw <iframe> would be stripped.
+        DemoEmbed: { component: DemoEmbed, block: true },
+        ShowcaseCard: { component: ShowcaseCard, block: true },
         Synopsis: { component: Synopsis, block: true },
         OptionsTable: { component: OptionsTable, block: true },
         Edition: { component: Edition },
         // Overrides the kit's Since: markdown puts the badge inside <p>, and
         // the kit's renders a div there, which breaks hydration site-wide.
         Since: { component: Since },
+        // Wraps the kit's embed so it sits on the card surface; the iframe's
+        // own background cannot be styled from here.
+        SurrealistMini: { component: SurrealistMini, block: true },
         Version: { component: Version },
         VersionBlock: { component: VersionBlock, block: true },
     });

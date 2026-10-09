@@ -37,7 +37,7 @@ SHOW CHANGES FOR TABLE reading SINCE d"2025-09-07T01:23:52Z" LIMIT 10;
 SHOW CHANGES FOR TABLE reading SINCE 1 LIMIT 10;
 ```
 
-If the datetime is after the changefeed was created and lines up with your retention window, you get a list of entries, each with `changes` and a `versionstamp` (where you are in the log). How each mutation is encoded depends on your [`DEFINE TABLE ... CHANGEFEED`](/docs/reference/query-language/statements/define/table#example-usage) options; when differences are stored (`INCLUDE ORIGINAL`), an update to an existing row carries a **reverse diff** from the current state to the state immediately before that write. The [`SHOW`](/docs/reference/query-language/statements/show) reference covers this in full. The following shape is representative:
+If the datetime is after the changefeed was created and lines up with your retention window, you get a list of entries, each with `changes` and a `versionstamp` (where you are in the log). How each mutation is encoded depends on your [`DEFINE TABLE ... CHANGEFEED`](/docs/reference/query-language/statements/define/table#example-usage) options; when differences are stored (`INCLUDE ORIGINAL`), an update to an existing record carries a **reverse diff** from the current state to the state immediately before that write. The [`SHOW`](/docs/reference/query-language/statements/show) reference covers this in full. The following shape is representative:
 
 ```surql title="Output"
 [
@@ -91,3 +91,82 @@ If the datetime is after the changefeed was created and lines up with your reten
 	}
 ]
 ```
+## Copying changes to another instance
+
+A change feed can keep a second SurrealDB instance up to date with the first. Each round reads the changes from the source with `SHOW CHANGES`, and applies them to the target in one transaction, together with the versionstamp to continue from next time. An `update` entry holds the whole record after the write, so `UPSERT` with that record recreates it on the target, and a `delete` entry holds the ID of the removed record.
+
+Keeping the versionstamp in a record on the target, here `sync_state:reading`, means it changes in the same transaction as the data. If a round fails partway, neither moves, and the next round starts from the same place.
+
+A program has to run the rounds, because each one connects to two instances, and `SINCE` only accepts a literal value. The program reads the versionstamp from the target and writes it into the text of the `SHOW CHANGES` query, rather than passing it as a parameter.
+
+<Tabs syncKey="changefeed-sync">
+<TabItem label="SurrealQL">
+
+```surql
+-- 1. On the target: where to continue from
+sync_state:reading.since ?? 0;
+
+-- 2. On the source: the changes from that versionstamp on.
+-- SINCE includes the entry with this versionstamp itself.
+SHOW CHANGES FOR TABLE reading SINCE 117368726935830530 LIMIT 1000;
+
+-- 3. On the target: apply the changes and store the next
+-- versionstamp, which is the last one returned plus 1
+BEGIN;
+FOR $change IN $changes {
+	IF $change.update {
+		UPSERT $change.update.id CONTENT $change.update;
+	} ELSE IF $change.delete {
+		DELETE $change.delete.id;
+	};
+};
+UPSERT sync_state:reading SET since = $next;
+COMMIT;
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from surrealdb import AsyncSurreal
+
+APPLY = """
+BEGIN;
+FOR $change IN $changes {
+	IF $change.update {
+		UPSERT $change.update.id CONTENT $change.update;
+	} ELSE IF $change.delete {
+		DELETE $change.delete.id;
+	};
+};
+UPSERT sync_state:reading SET since = $next;
+COMMIT;
+"""
+
+async def sync(source, target):
+    since = await target.query("sync_state:reading.since ?? 0")
+    batch = await source.query(
+        f"SHOW CHANGES FOR TABLE reading SINCE {since} LIMIT 1000"
+    )
+    if not batch:
+        return
+    # Keep only record changes, and leave out changes to the table definition
+    changes = [
+        change
+        for entry in batch
+        for change in entry["changes"]
+        if "update" in change or "delete" in change
+    ]
+    await target.query(
+        APPLY, {"changes": changes, "next": batch[-1]["versionstamp"] + 1}
+    )
+```
+
+Call `sync()` in a loop, with one connection to each instance.
+
+</TabItem>
+</Tabs>
+
+Entries that change the table definition, such as `define_table`, are not applied, so define the table on the target separately.
+
+The source keeps changes only for the duration given in its `CHANGEFEED` clause. If the program stops for longer than that, the changes it missed are gone, and the target has to be copied again with an [export](/docs/reference/cli/surrealdb-cli/commands/export) before the program starts again.

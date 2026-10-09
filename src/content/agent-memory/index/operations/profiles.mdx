@@ -167,20 +167,14 @@ That flat shape is deliberate for **prompt injection** - one dense briefing bloc
 
 ## Scope filtering
 
-`GET /profile` takes **no scope parameter**. The profile always covers everything
-the calling key can read, so the shape of a profile is determined by the key's
-`memory:read` grants, not by a per-request argument.
+`GET /profile` takes **no scope parameter**. The profile always covers everything the calling key can read, so the shape of a profile is determined by the key's `memory:read` grants, not by a per-request argument.
 
 ```python
 # Whatever this key can read
 profile = await memory.profile()
 ```
 
-To build different profile shapes for different agent roles, give each role a key
-whose read region matches it. A customer-facing agent holding a key granted
-`org/acme/user/alice` receives that user's full profile; an administrative agent
-holding a key granted only `org/acme` receives org-scoped context without any
-individual user's personal data.
+To build different profile shapes for different agent roles, give each role a key whose read region matches it. A customer-facing agent holding a key granted `org/acme/user/alice` receives that user's full profile; an administrative agent holding a key granted only `org/acme` receives org-scoped context without any individual user's personal data.
 
 ## Profile versus context
 

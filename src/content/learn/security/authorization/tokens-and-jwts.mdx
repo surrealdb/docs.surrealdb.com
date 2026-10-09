@@ -8,7 +8,7 @@ description: "How SurrealDB authenticates clients with JWTs, DEFINE ACCESS TYPE 
 
 SurrealDB can authenticate clients using **JSON Web Tokens (JWTs)**. Your application or identity provider issues a signed JWT; SurrealDB verifies the signature and builds a **session** from the token’s claims so subsequent queries run with the correct identity and scope. The same mechanism applies whether the client connects over HTTP, WebSocket, or other supported interfaces: the token establishes **who** is calling before **authorisation** runs.
 
-You register JWT-based access with **`DEFINE ACCESS … TYPE JWT`** (see [`DEFINE ACCESS`](/docs/reference/query-language/statements/define/access)). SurrealDB validates the token’s signature and standard claims (such as issuer and audience) according to your definition. Verification supports **symmetric** algorithms such as **HS256** with a shared secret, and **asymmetric** algorithms such as **RS256** and **ES256** using a configured public key or JWKS - matching how major providers sign tokens at scale. Choose the model that matches your key management: shared secrets for internal services, public-key verification when keys are rotated by an external IdP.
+You register JWT-based access with **`DEFINE ACCESS … TYPE JWT`** (see [`DEFINE ACCESS`](/docs/reference/query-language/statements/define/access)). SurrealDB validates the token’s signature and standard claims (such as issuer and audience) according to your definition. Verification supports **symmetric** algorithms such as **HS256** with a shared secret, and **asymmetric** algorithms such as **RS256** and **ES256** using a configured public key or JWKS, which is how major identity providers sign their tokens. Choose the model that matches your key management: shared secrets for internal services, public-key verification when keys are rotated by an external IdP.
 
 A typical JWT access definition names:
 
@@ -19,6 +19,38 @@ A typical JWT access definition names:
 **Claims** from the JWT are mapped into SurrealDB **session variables** (including **`$auth`**) so [permissions](/docs/learn/security/authorization/permissions-and-row-level-security) and queries see a consistent view of the user whether authentication came from SurrealDB or from elsewhere. Typical mappings include subject, roles, and custom namespaces your application relies on for **authorisation**. The exact claim names depend on your issuer; configure the mapping in `DEFINE ACCESS` so your policies read stable fields regardless of whether the upstream token uses flat or nested JSON.
 
 That design works well with **third-party identity providers** - Auth0, AWS Cognito, Okta, Azure AD, and similar systems that issue OIDC/OAuth2 JWTs. You configure issuer, audience, signing keys, and claim bindings once; users authenticate with the provider, receive a JWT, and present it to SurrealDB without storing end-user passwords in your database.
+
+### Firebase and Supabase
+
+Firebase Authentication and Supabase Auth also issue JWTs that SurrealDB can verify, in the same way as the [Auth0](/docs/explore/tutorials/tutorials/auth0-integration) and [AWS Cognito](/docs/explore/tutorials/tutorials/aws-cognito-integration) guides show. Two things have to be in place:
+
+- **SurrealDB claims in the token.** SurrealDB uses the `ns`, `db` and `ac` claims to find the access method that verifies the token, and refuses a token without them. Add them as custom claims: in Firebase with the Admin SDK's `setCustomUserClaims()`, and in Supabase with a Custom Access Token Hook. The namespaced form (`https://surrealdb.com/ns` and so on) is also accepted.
+- **The provider's signing keys.** Point the access method at the provider's JWKS URL, and check the issuer and audience in `AUTHENTICATE`.
+
+```surql
+-- Firebase: tokens are signed with Google's rotating keys
+DEFINE ACCESS firebase ON DATABASE TYPE RECORD
+    WITH JWT URL "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"
+    AUTHENTICATE {
+        IF $token.iss != "https://securetoken.google.com/<YOUR_PROJECT_ID>"
+            OR $token.aud != "<YOUR_PROJECT_ID>" {
+            THROW "Invalid token";
+        };
+        RETURN type::record("user", $token.sub);
+    };
+
+-- Supabase: projects with asymmetric signing keys publish a JWKS
+DEFINE ACCESS supabase ON DATABASE TYPE RECORD
+    WITH JWT URL "https://<YOUR_PROJECT_REF>.supabase.co/auth/v1/.well-known/jwks.json"
+    AUTHENTICATE {
+        IF $token.iss != "https://<YOUR_PROJECT_REF>.supabase.co/auth/v1" {
+            THROW "Invalid token";
+        };
+        RETURN type::record("user", $token.sub);
+    };
+```
+
+A Supabase project that still signs tokens with the legacy shared JWT secret uses `WITH JWT ALGORITHM HS256 KEY "<YOUR_JWT_SECRET>"` instead of the URL.
 
 Keep token lifetimes and key rotation in mind: short-lived access tokens and explicit issuer/audience checks reduce the impact of a leaked JWT, and asymmetric verification lets SurrealDB trust keys published via JWKS when your provider rotates them.
 

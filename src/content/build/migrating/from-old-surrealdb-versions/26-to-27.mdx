@@ -1,0 +1,67 @@
+---
+position: 3
+title: 2.6 to 2.7
+description: What changes when a 2.6 deployment moves to 2.7, from namespace and database removal in the background and reusing a removed name to rolling back to 2.6, mixed-version clusters and the clean-up that runs after the upgrade.
+---
+
+# Upgrading from `2.6` to `2.7`
+
+`2.7` is a minor release on the `2.x` line, so a `2.6` datastore opens on `2.7.0` without an export and import. The main change is to `REMOVE NAMESPACE` and `REMOVE DATABASE`, which now return as soon as the definition is removed and leave the data to a background task. This page describes what that changes for a deployment and an application, including the one-way step it adds to the upgrade. New features and fixes are listed in the [release notes](/releases/2.7).
+
+The [`surreal upgrade`](/docs/reference/cli/surrealdb-cli/commands/upgrade) command installs the new binary as usual.
+
+## Before you upgrade
+
+1. Take and verify a backup of the whole datastore if a return to `2.6` might be needed, because `2.6` cannot safely open a datastore that `2.7.0` has used. A single [`surreal export`](/docs/reference/cli/surrealdb-cli/commands/export) covers one database, so it is not a complete backup on its own. See [Rolling back to `2.6`](#rolling-back-to-26).
+2. In a cluster, plan to upgrade every node before removing a namespace or database. See [Clusters and rolling upgrades](#clusters-and-rolling-upgrades).
+3. Check any script or test suite that removes a namespace or database and then defines it again straight away. See [Reusing a removed name](#reusing-a-removed-name).
+
+## Removal runs in the background
+
+From `2.7.0`, `REMOVE NAMESPACE` and `REMOVE DATABASE` delete the definition and queue the data for a background task, in one transaction. The work the statement does no longer depends on how much data the namespace or database holds, so removing a large database returns at once. In `2.6`, the statement deleted every key in its own transaction, so on a large database it could run without finishing or fail with `Failed to commit transaction due to a read or write conflict`.
+
+On `2.7.0`, the removed namespace or database is unreachable as soon as the statement commits. Queries find no records in it, and nobody can sign in as one of its users or through one of its access methods. In a cluster, this holds only once every node runs `2.7.0`, as described in [Clusters and rolling upgrades](#clusters-and-rolling-upgrades).
+
+The background task then deletes the data in batches of 1,000 keys, and a run that stops part way resumes where it left off after a restart. Each run deletes up to 100,000 keys. The task runs every 60 seconds by default, and deletion starts on the run after the one that first finds the removal, so with the default interval it starts one to two minutes after the removal. [`SURREAL_RECLAIM_INTERVAL`](/docs/reference/cli/surrealdb-cli/environment-variables#command-environment-variables) or `--reclaim-interval` changes the interval, and an embedded Rust application sets it with `Config::reclaim_interval`. A shorter interval deletes a large namespace or database sooner.
+
+Two details differ from `2.6`:
+
+- Every removal deletes all stored versions of the removed data, so on a versioned SurrealKV datastore the history of a removed database is deleted with it. In `2.6`, only `AND EXPUNGE` did this.
+- `REMOVE NAMESPACE ... AND EXPUNGE` and `REMOVE DATABASE ... AND EXPUNGE` are still accepted, but they now return before the data is deleted, like every other removal.
+
+`REMOVE TABLE` and `REMOVE INDEX` are unchanged, and still delete their data in the removing transaction.
+
+## Reusing a removed name
+
+When a namespace or database is defined under the name of one that is still being deleted, the statement first deletes what is left of the old one, within its own transaction. This applies to `DEFINE NAMESPACE` and `DEFINE DATABASE` and, when the server does not run with `--strict`, to the first write that creates a namespace or database implicitly. A namespace or database created under a reused name therefore always starts empty.
+
+That clean-up deletes at most 10,000 keys per transaction. If more is left, the statement fails with the error below, and the same statement succeeds once the background task has deleted the rest:
+
+```text title="Error output"
+The name 'test/test' cannot be reused until the data of the removed namespace or database has been reclaimed
+```
+
+A script that removes and recreates a small database, such as a test fixture, stays within the limit. For a larger one, wait for the background task, use a different name, or set a shorter reclaim interval.
+
+## Rolling back to `2.6`
+
+> [!IMPORTANT]
+> A datastore cannot safely return to `2.6` once `2.7.0` has run on it. A `2.6` build does not know that a removal can leave data on disk, so it serves any data that `2.7.0` has not yet deleted: the users of a removed database can sign in again, and a namespace or database defined under the same name receives the old records. `2.6` also never deletes that data. The way back to `2.6` is to restore a backup of the whole datastore taken before the upgrade.
+
+The backup can take either of two forms:
+
+- **A storage snapshot**, taken while the `2.6` server is stopped, such as a copy of the RocksDB or SurrealKV data directory or a TiKV cluster backup. Restoring the snapshot and starting `2.6` on it returns every namespace, database and user to its state before the upgrade.
+- **An export of every database.** Each [`surreal export`](/docs/reference/cli/surrealdb-cli/commands/export) run covers one namespace and one database, and none of them contains what is defined above a database, such as root users or namespace-level users and access methods. To restore this way, create a new datastore with `2.6` and define each namespace and database in it, which a server started with `--strict` needs before an import can write to them. Then define the root and namespace-level users and access methods again, and import each export into its database.
+
+From `2.7.0`, a build also checks a storage revision that later `2.x` releases can raise, and refuses to start on a datastore at a revision it cannot read, with `The data stored on disk was written by a newer version of SurrealDB (storage revision …) and cannot be read by this one`. `2.6` has no such check, which is why it starts on a datastore that `2.7.0` has used.
+
+## Clusters and rolling upgrades
+
+A cluster can be upgraded one node at a time. Until every node runs `2.7.0`, a `2.6` node can still serve the data of a namespace or database that a `2.7.0` node has removed, as described in [Rolling back to `2.6`](#rolling-back-to-26). Remove namespaces and databases only after the last node is upgraded.
+
+## Background work after the upgrade
+
+After the first `2.7.0` start, two background tasks work through data that earlier `2.x` releases left in place. Both commit their work in batches of 1,000 keys, so neither holds a large transaction open.
+
+- **`COUNT` index compaction.** Each record created or deleted on a table with a [`COUNT` index](/docs/reference/query-language/statements/define/indexes#count-index) adds an entry to the index, and a compaction task combines those entries into one. From `2.4.0` to `2.6.5`, that task never found any work, so a count served by the index read one entry for every record ever created or deleted on the table. `2.7.0` compacts each `COUNT` index, and its first runs combine every entry recorded since the index was built.
+- **Changefeed timestamps.** Earlier `2.x` releases recorded a timestamp for every database at each changefeed clean-up, every 10 seconds by default, and never deleted one. `2.7.0` records timestamps only for a database that defines a changefeed on itself or on one of its tables, and deletes the timestamps already recorded for every other database.

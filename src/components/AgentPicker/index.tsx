@@ -1,5 +1,5 @@
 import { Anchor, Badge, Box, Group, SimpleGrid, Text } from "@mantine/core";
-import { useMemo, useState } from "react";
+import { type CSSProperties, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AgentBrand } from "~/components/AgentBrand";
 import { AGENTS, type AgentSummary, type AgentWorkflow, WORKFLOW_LABELS } from "~/utils/agents";
 import classes from "./style.module.scss";
@@ -31,7 +31,7 @@ function AgentCard({ agent }: AgentCardProps) {
                 >
                     <AgentBrand
                         agent={agent.id}
-                        size={28}
+                        size={20}
                     />
                     <Box miw={0}>
                         <Text
@@ -80,6 +80,43 @@ function AgentCard({ agent }: AgentCardProps) {
 }
 
 /**
+ * Places the slider's thumb under the active filter. The filters differ in
+ * width, so the thumb is measured rather than stepped by a fixed fraction the
+ * way the two-option product switch is.
+ */
+function useThumb(filter: string) {
+    const trackRef = useRef<HTMLDivElement>(null);
+    const [style, setStyle] = useState<CSSProperties>({ opacity: 0 });
+
+    useLayoutEffect(() => {
+        const track = trackRef.current;
+        const active = track?.querySelector<HTMLElement>(`[data-filter="${filter}"]`);
+        if (!track || !active) return;
+
+        const place = () =>
+            setStyle({
+                width: active.offsetWidth,
+                transform: `translateX(${active.offsetLeft}px)`,
+            });
+
+        // Measured now, again when late styles or fonts change the chips'
+        // sizes, and whenever the track itself resizes.
+        place();
+        const observer = new ResizeObserver(place);
+        observer.observe(track);
+        for (const chip of track.querySelectorAll("button")) observer.observe(chip);
+        window.addEventListener("load", place);
+        document.fonts?.ready.then(place);
+        return () => {
+            observer.disconnect();
+            window.removeEventListener("load", place);
+        };
+    }, [filter]);
+
+    return { trackRef, style };
+}
+
+/**
  * The agent picker on the setup page: a grid of cards, filterable by where the
  * agent runs, each linking to that agent's setup page.
  *
@@ -89,6 +126,7 @@ function AgentCard({ agent }: AgentCardProps) {
  */
 export function AgentPicker() {
     const [filter, setFilter] = useState<AgentWorkflow | "all">("all");
+    const thumb = useThumb(filter);
 
     const visible = useMemo(
         () =>
@@ -98,13 +136,22 @@ export function AgentPicker() {
 
     return (
         <Box className={classes.root}>
-            <Group gap="xs">
+            <Box
+                ref={thumb.trackRef}
+                className={classes.track}
+            >
+                <Box
+                    className={classes.thumb}
+                    style={thumb.style}
+                    aria-hidden
+                />
                 {FILTERS.map(({ id, label }) => (
                     <Box
                         key={id}
                         component="button"
                         type="button"
                         className={classes.chip}
+                        data-filter={id}
                         data-active={filter === id || undefined}
                         aria-pressed={filter === id}
                         onClick={() => setFilter(id)}
@@ -112,7 +159,7 @@ export function AgentPicker() {
                         {label}
                     </Box>
                 ))}
-            </Group>
+            </Box>
 
             <SimpleGrid
                 cols={{ base: 1, sm: 2 }}

@@ -19,8 +19,10 @@ export function Since({ v, prefix, ...props }: SinceProps) {
     return (
         <Badge
             component="span"
-            variant="outline"
-            color="violet"
+            variant="light"
+            bd={0}
+            bg="rgba(from var(--docs-accent) r g b / 0.12)"
+            c="var(--docs-accent-text)"
             tt="uppercase"
             size="sm"
             style={{ fontFamily: "var(--mantine-font-family-monospace)" }}

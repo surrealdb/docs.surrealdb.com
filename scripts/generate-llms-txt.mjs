@@ -20,24 +20,37 @@
  * index is read at however much the documentation grows.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
-const CONTENT_DIR = "src/content";
-const PAGES_DIR = "src/pages";
+import { byDepthThenUrl, CONTENT_DIR, pagesFor, readCollections, SITE } from "./lib/docs-pages.mjs";
+
 const OUTPUT_FILE = "public/llms.txt";
-const SITE = "https://surrealdb.com";
 
 /**
  * Character ceiling for the whole file.
  *
- * The readiness checks treat an llms.txt over 100,000 characters as too large
- * to be a useful index, and this file is close to that floor before a single
- * description is written: 1,000-odd pages at about 90 characters of URL and
- * title each. The remainder is what `describableUrls` has to spend, and the
- * margin below 100,000 is what stops a few dozen new pages from breaching it.
+ * The readiness checks are `agent-ecosystem/afdocs`, which scores llms.txt size
+ * in three bands: pass at 50,000 characters or under, warn to 100,000, fail
+ * above it. Listing every page costs about 88,000 characters in links and
+ * titles alone, so **pass is unreachable** while the index stays complete, and
+ * warn is the permanent state. Descriptions are spent out of what is left.
+ *
+ * 99,000 is therefore chosen against the fail threshold rather than the pass
+ * one: it is the most description budget available without leaving the band the
+ * file already sits in. Every character between here and 100,000 is free, and
+ * the 1,000 left over is roughly eleven new pages of runway at about 87
+ * characters of floor each.
+ *
+ * Raising it past 100,000 is a real option rather than a broken one - nothing
+ * fails to work, the check simply scores fail - but it buys less than it looks:
+ * 110,000 describes about 31% of pages and 120,000 about 45%, while describing
+ * all of them needs roughly 160,000. Splitting per section does not help the
+ * score either, because afdocs only ever looks at `{base}/llms.txt`,
+ * `{origin}/llms.txt` and `{origin}/docs/llms.txt` - a nested index file is
+ * never discovered.
  */
-const SIZE_BUDGET = 96_000;
+const SIZE_BUDGET = 99_000;
 
 /** Collections that are not part of the documentation tree. */
 const SKIP_COLLECTIONS = new Set(["labs-items"]);
@@ -117,99 +130,6 @@ function summariseDescription(description) {
     return `${(boundary > 0 ? cut.slice(0, boundary) : cut).replace(/[,;:.]$/, "")}...`;
 }
 
-/** Read a page's frontmatter without pulling in a YAML parser. */
-function frontmatter(file) {
-    const text = readFileSync(file, "utf8");
-
-    if (!text.startsWith("---")) return {};
-
-    const end = text.indexOf("\n---", 3);
-    if (end === -1) return {};
-
-    const meta = {};
-
-    for (const line of text.slice(3, end).split("\n")) {
-        const match = line.match(/^(\w+):\s*(.*)$/);
-        if (!match) continue;
-
-        const [, key, raw] = match;
-        meta[key] = raw.trim().replace(/^["'](.*)["']$/, "$1");
-    }
-
-    return meta;
-}
-
-/**
- * Mirrors `github-slugger` for the shapes that appear in these paths.
- *
- * Underscores survive - they are word characters, so the slugger keeps them.
- * Stripping them here produced `listenlive` for `listen_live.mdx`, a URL that
- * 404s, and the depth cap used to hide the mistake by never listing the page.
- */
-function slugify(segment) {
-    return segment
-        .toLowerCase()
-        .replace(/[^a-z0-9\s\-_]/g, "")
-        .trim()
-        .replace(/\s+/g, "-");
-}
-
-function walk(dir) {
-    const found = [];
-
-    for (const entry of readdirSync(dir)) {
-        const full = join(dir, entry);
-
-        if (statSync(full).isDirectory()) {
-            found.push(...walk(full));
-        } else if (entry.endsWith(".mdx") || entry.endsWith(".md")) {
-            found.push(full);
-        }
-    }
-
-    return found;
-}
-
-/**
- * Collection ids and URL prefixes, taken from the router rather than restated.
- * A group without an explicit prefix serves the collection under its own id.
- */
-function readCollections() {
-    const collections = new Map();
-
-    for (const file of findDataFiles(PAGES_DIR)) {
-        if (!file.endsWith("+data.ts")) continue;
-
-        const source = readFileSync(file, "utf8");
-        const call = source.match(
-            /resolveDataFromCollection\(\s*context\s*,\s*"([^"]+)"(?:\s*,\s*"([^"]*)")?/,
-        );
-
-        if (!call) continue;
-
-        const [, id, prefix] = call;
-        collections.set(id, prefix ?? id);
-    }
-
-    return collections;
-}
-
-function findDataFiles(dir) {
-    const found = [];
-
-    for (const entry of readdirSync(dir)) {
-        const full = join(dir, entry);
-
-        if (statSync(full).isDirectory()) {
-            found.push(...findDataFiles(full));
-        } else if (entry === "+data.ts") {
-            found.push(full);
-        }
-    }
-
-    return found;
-}
-
 function collectionPosition(id) {
     const file = join(CONTENT_DIR, id, "__category.json");
 
@@ -223,54 +143,24 @@ function collectionPosition(id) {
 }
 
 /**
- * Shallowest first, then by URL.
+ * Orders the queue that `describableUrls` spends its budget down.
  *
- * Compared by code unit rather than `localeCompare`, because collation varies
- * with the runtime's locale and this ordering has to be reproducible on any
- * machine that runs `prebuild`.
+ * Separate from `byDepthThenUrl` on purpose: that one fixes the order pages
+ * are *listed* in, which is the reader's path through the index and should not
+ * move because a page was marked important. This one decides only which pages
+ * are offered a description before the budget runs out.
  */
-function byDepthThenUrl(a, b) {
-    if (a.depth !== b.depth) return a.depth - b.depth;
-    return a.url < b.url ? -1 : a.url > b.url ? 1 : 0;
-}
+function byPriorityThenDepth(a, b) {
+    // Defaulted here rather than trusted from the page object, because
+    // `EXTRA_PAGES` is written by hand and carries no `priority`. Subtracting
+    // an absent one gives `NaN`, and a comparator that returns `NaN` sorts
+    // arbitrarily - which showed up as unrelated pages trading descriptions.
+    const pa = a.priority ?? Number.POSITIVE_INFINITY;
+    const pb = b.priority ?? Number.POSITIVE_INFINITY;
 
-function pagesFor(id, prefix) {
-    const root = join(CONTENT_DIR, id);
+    if (pa !== pb) return pa - pb;
 
-    if (!existsSync(root)) return [];
-
-    const pages = [];
-
-    for (const file of walk(root)) {
-        const rel = relative(root, file).replace(/\.(mdx|md)$/, "");
-
-        if (rel.includes("__category")) continue;
-
-        const segments = rel.split("/").map(slugify);
-
-        if (segments.at(-1) === "index") segments.pop();
-
-        const meta = frontmatter(file);
-
-        if (meta.hidden === "true") continue;
-        if (!meta.title) continue;
-
-        const path = [prefix, ...segments].filter(Boolean).join("/");
-
-        pages.push({
-            url: `${SITE}/docs${path ? `/${path}` : ""}`,
-            title: meta.title,
-            description: meta.description ?? "",
-            // Counted on the URL rather than on the slug, because a section
-            // holds several collections and a slug's depth is measured from
-            // its own collection root. `/docs/learn/data-models` is that
-            // collection's index, so its slug depth is 0, which sorted it
-            // above `/docs/learn` - the hub that introduces it.
-            depth: path ? path.split("/").length : 0,
-        });
-    }
-
-    return pages.sort(byDepthThenUrl);
+    return byDepthThenUrl(a, b);
 }
 
 /** The sections, in the order they are written. */
@@ -394,7 +284,7 @@ function describableUrls() {
     const candidates = rendered
         .flatMap((section) => section.pages)
         .filter((page) => page.description)
-        .sort(byDepthThenUrl);
+        .sort(byPriorityThenDepth);
 
     for (const page of candidates) {
         const cost = `: ${summariseDescription(page.description)}`.length;

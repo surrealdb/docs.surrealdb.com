@@ -6,17 +6,17 @@ description: "SurrealDB sequences for monotonic numeric identifiers, and how the
 
 # Sequences
 
-Sometimes you need a monotonic number: an order line, a ticket counter, or an audit sequence that always moves forward and never hands the same value to two different writers. Sequences are SurrealDB's answer to this: shared, durable generators that work on a single node or in a cluster without needing to construct the logic in application code.
+Sometimes you need a monotonic number: an order line, a ticket counter, or an audit sequence that always moves forward and never hands the same value to two different writers. SurrealDB sequences are shared, durable generators that provide this on a single node or in a cluster, without needing to construct the logic in application code.
 
 ## When a sequence helps
 
-Reach for a sequence when:
+Use a sequence when:
 
 * You care about strictly increasing integers (or a predictable step) rather than opaque identifiers.
 * Multiple clients or nodes may allocate values at the same time, and collisions would be painful.
 * You are happy for the value to be numeric and database-owned, not derived from your domain model alone.
 
-If you only need a unique id and ordering is secondary, other patterns (record IDs, ULIDs, hashes) may be simpler. Sequences shine when order and uniqueness are both part of the contract.
+If you only need a unique id and ordering is secondary, other patterns (record IDs, ULIDs, hashes) may be simpler. Sequences are the better choice when order and uniqueness are both part of the contract.
 
 ## Sequences vs. manual incrementing numbers
 
@@ -33,11 +33,11 @@ fn::get_next(); -- 3
 fn::get_next(); -- 4
 ```
 
-This produces a number that will always increase by 1, and is rolled back during a failed transaction. As such, if `fn::get_next()` returns the value 4, you can also be certain that values 1, 2, and 3 also exist.
+This produces a number that will always increase by 1, and is rolled back during a failed transaction. As such, if `fn::get_next()` returns the value 4, you can be certain that values 1, 2, and 3 also exist.
 
 This works well on one server, but it gets awkward in distributed setups: everyone contends on the same record, and you pay for coordination on every allocation.
 
-SurrealDB sequences use a batch idea instead: each node reserves a range of values, hands them out locally, and only talks to shared storage when the range runs out. In practice that means less chatter under load and fewer surprises when you scale out.
+SurrealDB sequences use a batch idea instead: each node reserves a range of values, hands them out locally, and only talks to shared storage when the range runs out. In practice this reduces coordination traffic under load and as you scale out.
 
 You declare a sequence with a name, then ask for the next value when you need it. Here is the shape of the workflow:
 
@@ -75,6 +75,31 @@ Design with that rule in mind: sequences are for identity and ordering, not for 
 ## Optional configurations: batch size, start, and timeout
 
 You can tune how big each reserved batch is, where counting starts, and how long the database should wait when acquiring a new batch. Larger batches mean fewer coordination trips; smaller batches mean less “wasted” headroom if a node stops. A timeout that is too tight can make allocation fail under pressure.
+
+## A separate counter for each group
+
+A number that restarts for each group, such as a reference number for each article category, needs one counter for each value of the category field. A record ID can hold the category, so `counter:['news']` and `counter:['sport']` are two separate counters, and `UPSERT` creates each one the first time it is used. Putting the counter in a field's `DEFAULT` numbers every new record, including records from a bulk `INSERT`.
+
+```surql
+DEFINE FIELD reference ON article TYPE int READONLY
+    DEFAULT (UPSERT ONLY counter:[$this.category] SET val += 1 RETURN VALUE val);
+
+CREATE article SET category = 'news';
+CREATE article SET category = 'news';
+CREATE article SET category = 'sport';
+
+SELECT category, reference FROM article ORDER BY category, reference;
+```
+
+```surql title="Output"
+[
+	{ category: 'news', reference: 1 },
+	{ category: 'news', reference: 2 },
+	{ category: 'sport', reference: 1 }
+]
+```
+
+To use sequences instead, define one sequence for each category and build its name from the field, as in `DEFAULT sequence::nextval('article_' + $this.category)` with `DEFINE SEQUENCE article_news START 1`. A record whose category has no sequence fails with `The sequence 'article_weather' does not exist`, so define the sequence before the first record in a new category.
 
 ## Where to read more
 

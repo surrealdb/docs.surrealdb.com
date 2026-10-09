@@ -45,7 +45,13 @@ Below shows how you can define record access using the `DEFINE ACCESS ... TYPE R
 [[test.results]]
 value = "NONE"
 
+[[test.results]]
+value = "NONE"
+
 */
+
+-- One account per email address
+DEFINE INDEX unique_email ON user FIELDS email UNIQUE;
 
 DEFINE ACCESS account ON DATABASE TYPE RECORD
 	SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
@@ -55,11 +61,121 @@ DEFINE ACCESS account ON DATABASE TYPE RECORD
 ;
 ```
 
+Without the `UNIQUE` index, two sign-ups with the same email address would create two users, and `SIGNIN` would then match both. With it, the second sign-up fails.
+
+The client sends the password to SurrealDB as the `$pass` parameter, and `crypto::argon2::generate` hashes it on the server. Anyone who can read the connection can therefore read the password unless the connection is encrypted, so serve SurrealDB over HTTPS and WSS as described in [Encryption in transit](/docs/learn/security/best-practices/security-best-practices#encryption-in-transit). Hashing the password on the client does not replace this: the hash then works as the password, and anyone who reads it on the connection can sign in with it.
+
+### Refusing a sign-up with `THROW`
+
+`SIGNUP` and `SIGNIN` can take a block instead of a single expression, so they can check a condition before they create or return the user. A [`THROW`](/docs/reference/query-language/statements/throw) inside the block stops the attempt, and the client receives the message as part of the error.
+
+The access method below only accepts a sign-up that has an unused invite code. It marks the code as used in the same attempt, so a second sign-up with the same code fails.
+
+```surql
+DEFINE TABLE invite SCHEMAFULL;
+DEFINE FIELD code ON invite TYPE string;
+DEFINE FIELD used ON invite TYPE bool DEFAULT false;
+CREATE invite:one SET code = "WELCOME-42";
+
+DEFINE ACCESS account ON DATABASE TYPE RECORD
+	SIGNUP {
+		LET $invite = (SELECT * FROM ONLY invite WHERE code = $invite_code AND used = false LIMIT 1);
+		IF $invite IS NONE {
+			THROW "This invite code is not valid";
+		};
+		UPDATE $invite.id SET used = true;
+		CREATE user SET email = $email, pass = crypto::argon2::generate($pass);
+	}
+	SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) );
+```
+
+A sign-up with the parameters `email`, `pass` and `invite_code` succeeds and returns a token when the code is `WELCOME-42`. With any other code, or with the same code a second time, it fails with this error:
+
+```text title="Error output"
+An error occurred: This invite code is not valid
+```
+
+The same pattern works in `SIGNIN`, for example to refuse a user whose account is disabled. The [`AUTHENTICATE` clause](#with-authenticate-clause) runs after both of them and can also refuse a session.
+
+### Password reset
+
+A record access method has no built-in password reset, but the `SIGNIN` clause can accept a one-time reset token as well as a password. The reset works in two steps:
+
+1. **Your backend creates the token.** When a user asks for a reset, a backend service signed in as a [system user](/docs/learn/security/authentication/users#system-users) stores a random token with an expiry time, and sends the user a link that contains it. SurrealDB does not send email, so this step belongs to the application.
+2. **The user signs in with the token.** The client signs in with `reset_token` and the new password. `SIGNIN` checks the token, deletes it so that it works only once, and saves the new password. The client receives a token for the session, as with a normal sign-in.
+
+```surql
+DEFINE TABLE user SCHEMAFULL PERMISSIONS FOR select, update WHERE id = $auth;
+DEFINE FIELD email ON user TYPE string;
+DEFINE FIELD pass ON user TYPE string;
+DEFINE INDEX unique_email ON user FIELDS email UNIQUE;
+
+-- Record users have no access to this table
+DEFINE TABLE password_reset SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD user ON password_reset TYPE record<user>;
+DEFINE FIELD token ON password_reset TYPE string;
+DEFINE FIELD expires_at ON password_reset TYPE datetime;
+DEFINE INDEX unique_token ON password_reset FIELDS token UNIQUE;
+
+DEFINE ACCESS account ON DATABASE TYPE RECORD
+	SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+	SIGNIN {
+		IF $reset_token {
+			LET $reset = (SELECT * FROM ONLY password_reset WHERE token = $reset_token AND expires_at > time::now() LIMIT 1);
+			IF $reset IS NONE {
+				THROW "This reset link is not valid or has expired";
+			};
+			DELETE $reset.id;
+			RETURN UPDATE ONLY $reset.user SET pass = crypto::argon2::generate($pass);
+		};
+		RETURN SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass);
+	}
+	DURATION FOR TOKEN 15m, FOR SESSION 12h;
+```
+
+The backend creates the token with a statement like the one below, then puts the returned `token` in the link it sends. If no user has the email address, the statement fails because `user` must be a record, and the backend can reply to the request in the same way in both cases, so that the reply does not show which addresses have an account.
+
+```surql
+CREATE password_reset SET
+	user = (SELECT VALUE id FROM ONLY user WHERE email = $email LIMIT 1),
+	token = rand::string(40),
+	expires_at = time::now() + 30m
+RETURN token;
+```
+
+The client then signs in with the parameters `reset_token` and `pass`. A token that is wrong, already used or expired fails with this error:
+
+```text title="Error output"
+An error occurred: This reset link is not valid or has expired
+```
+
+After the reset, the old password no longer signs in, and the new password signs in with `email` and `pass` as usual.
+
+### Signing in with another provider's token
+
+A token from another identity provider can only be used with SurrealDB directly if it carries the `ns`, `db` and `ac` claims, as [`DEFINE ACCESS ... TYPE JWT`](/docs/reference/query-language/statements/define/access/jwt#using-tokens) describes. When a provider cannot add those claims, a `SIGNIN` clause can verify the provider's token instead. It sends the token to the provider's API with [`http::get`](/docs/reference/query-language/functions/database-functions/http#httpget), finds or creates the matching user, and SurrealDB returns its own token for the session.
+
+The example below does this with an OpenStreetMap access token. The server must be allowed to reach the provider, here with `--allow-net api.openstreetmap.org`:
+
+```surql
+DEFINE ACCESS osm ON DATABASE TYPE RECORD
+	SIGNIN {
+		-- Fails with an error if OpenStreetMap does not accept the token
+		LET $me = http::get(
+			"https://api.openstreetmap.org/api/0.6/user/details.json",
+			{ Authorization: "Bearer " + $osm_token }
+		);
+		RETURN UPSERT ONLY type::record("user", $me.user.id) MERGE { name: $me.user.display_name };
+	};
+```
+
+The client signs in with the parameters `ns`, `db`, `ac` set to `osm`, and `osm_token`, and receives a SurrealDB token for the user. A token that the provider refuses makes `http::get` fail, so the sign-in fails too.
+
 ### With JSON web token
 
 Successful authentication with a record access method results in SurrealDB generating a JSON Web Token (JWT or, in the context of SurrealDB, just "token") that can be used until its expiration to authenticate as the record user without the need of providing any additional credentials. These tokens can also be issued by third parties and trusted by SurrealDB in order to allow for the authentication process to take place outside of SurrealDB, while the resulting access claims can be provided to SurrealDB inside of a token that it can trust. This feature is provided by the `WITH JWT` clause, which behaves similarly to [the JWT access method](/docs/reference/query-language/statements/define/access/jwt), including the [`AUDIENCE`](/docs/reference/query-language/statements/define/access/jwt#audience-validation) clause for restricting which `aud` claim values are accepted.
 
-Since the origin of the claims in the JWT is verified, those claims can be used within SurrealQL in order to provide table and field authorization through an external authenticator using OpenID Connect, OAuth or simply acting as a trusted issuer of a JWT. This can be done by leveraging table permissions to allow or disallow access depending on the values of the claims in the verified token. For example, these claims can be compared with the records in a table to only return those matching certain criteria.
+Since the origin of the claims in the JWT is verified, those claims can be used within SurrealQL in order to provide table and field authorization through an external authenticator using OpenID Connect, OAuth or simply acting as a trusted issuer of a JWT. This can be done by using table permissions to allow or disallow access depending on the values of the claims in the verified token. For example, these claims can be compared with the records in a table to only return those matching certain criteria.
 
 Bear in mind that table and field permissions only apply to [record users](/docs/learn/security/authentication/users#record-users), which must use tokens that are verified by a `RECORD` access method. Access provided by namespace and database tokens defined in a `JWT` access method is equivalent to access from [system users](/docs/learn/security/authentication/users#system-users), which is above fine-grained permissions. When application users will be the ones directly authenticating with JWT, defining a `RECORD` access method `WITH JWT` is most likely the right choice.
 
@@ -207,11 +323,8 @@ ALGORITHM HS512 KEY "secret";
 
 ### With refresh token
 
-> [!CAUTION]
-> Currently, the `WITH REFRESH` clause is an experimental feature intended to be used for validating its suitability and security. As such, it may be subject to breaking changes and may present unidentified security issues. Do not rely on this feature in production applications.
-
 > [!NOTE]
-> Due to changes required in the RPC API and the SDKs, refresh tokens are currently only available when signing up and in through the [HTTP REST API](/docs/reference/rest-api/http-protocol).
+> Before SurrealDB 3.0.0, the `WITH REFRESH` clause was experimental and required `--allow-experimental bearer_access`, refresh tokens were only returned by the [HTTP REST API](/docs/reference/rest-api/http-protocol), and the response carried `token` and `refresh` as two top-level fields. From 3.0.0 refresh tokens are also returned by the [RPC](/docs/reference/rest-api/rpc-protocol) `signin` and `signup` methods, and the token is an object holding `access` and `refresh`.
 
 Defining a record access method `WITH REFRESH` will result in an additional [bearer key](/docs/reference/query-language/statements/define/access/bearer) for the record user being returned after successful authentication with the access method. This bearer key is intended to be used as a "refresh token", which is a concept commonly found in standards such as [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749#section-1.5).
 
@@ -246,7 +359,7 @@ DEFINE ACCESS user ON DATABASE TYPE RECORD
 ;
 ```
 
-Sign up with a new user or sign in with an existing user via the [HTTP REST API](/docs/reference/rest-api/http-protocol):
+Sign up with a new user or sign in with an existing user via the [HTTP REST API](/docs/reference/rest-api/http-protocol). The RPC `signup` and `signin` methods return the same `access` and `refresh` pair as their result:
 
 ```bash
 curl -X POST \
@@ -255,12 +368,14 @@ curl -X POST \
 	http://localhost:8000/signup
 ```
 
-```json title="Output"
+```json title="Sample output"
 {
 	"code":200,
 	"details":"Authentication succeeded",
-	"token":"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpYXQiOjE3MzQ1MTkyODIsIm5iZiI6MTczNDUxOTI4MiwiZXhwIjoxNzM0NTE5MzQyLCJpc3MiOiJTdXJyZWFsREIiLCJqdGkiOiJiYzQ3MzhkOS0zMTM3LTQ1ZjMtOGUzMy1jMmJmODI0MzZlZTciLCJOUyI6InRlc3QiLCJEQiI6InRlc3QiLCJBQyI6InVzZXIiLCJJRCI6InVzZXI6dHZ2NWVreXNscjBsb21sNHp4aTkifQ.liEvoYuxk9EgzqBE5MzyG2IaJTJxazz-aD9vqWPGc5AGL2u0H0gggjX3jpcaBAIyU356wxNaxFrvCoTqaA4Vrg",
-	"refresh":"surreal-refresh-UgYUNmB3FR8t-zdTZlFNuvdoWOtKe0Aqb1laH"
+	"token":{
+		"access":"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpYXQiOjE3OTAyMjQ0MjksIm5iZiI6MTc5MDIyNDQyOSwiZXhwIjoxNzkwMjI0NDg5LCJpc3MiOiJTdXJyZWFsREIiLCJqdGkiOiJiYjNjZTkxNS1mM2JhLTRlYmUtYmI5My0zYTFmMmI3YzdkYzciLCJOUyI6Im1haW4iLCJEQiI6Im1haW4iLCJBQyI6InVzZXIiLCJJRCI6InVzZXI6bW01YzAxY3Zqd3Y1MGlrOXBxNXMifQ.KVQa-NXE6b8NUfneEaLXsygJ2ULYlidEfeaWmgODkAshROfF2WZ1HiVusSnwO1K62Ddjz_j5EcodA-9Xh-fGCA",
+		"refresh":"surreal-refresh-zFX72BPE76gW-wQfRzW6o4IXC25T7T8JySiF9"
+	}
 }
 ```
 
@@ -269,16 +384,18 @@ Sign in with the refresh token to obtain a new token and refresh token:
 ```bash
 curl -X POST \
 	-H "Accept: application/json" \
-	-d '{"NS":"main", "DB":"main", "AC":"user", "refresh":"surreal-refresh-UgYUNmB3FR8t-zdTZlFNuvdoWOtKe0Aqb1laH"}' \
+	-d '{"NS":"main", "DB":"main", "AC":"user", "refresh":"surreal-refresh-zFX72BPE76gW-wQfRzW6o4IXC25T7T8JySiF9"}' \
 	http://localhost:8000/signin
 ```
 
-```json title="Output"
+```json title="Sample output"
 {
 	"code":200,
 	"details":"Authentication succeeded",
-	"token":"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpYXQiOjE3MzQ1MTkzNzcsIm5iZiI6MTczNDUxOTM3NywiZXhwIjoxNzM0NTE5NDM3LCJpc3MiOiJTdXJyZWFsREIiLCJqdGkiOiJjN2Q1YjgzYi0yMjJjLTQ2ODYtYjgzYi01ZWVlNDQ5Njk5YmUiLCJOUyI6InRlc3QiLCJEQiI6InRlc3QiLCJBQyI6InVzZXIiLCJJRCI6InVzZXI6dHZ2NWVreXNscjBsb21sNHp4aTkifQ.usM8aMtqAftJcwhUMdmqskr-k58ARF-KbmCYEQuDoGb5PlhVJDwYEwCb0oV8B85MJPvbKlC6HuFKW2wq6-AY9g",
-	"refresh":"surreal-refresh-MPKzHBtznxMa-pFJj2Doj2IRHApIzGmeOAcYo"
+	"token":{
+		"access":"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpYXQiOjE3OTAyMjQ0MjksIm5iZiI6MTc5MDIyNDQyOSwiZXhwIjoxNzkwMjI0NDg5LCJpc3MiOiJTdXJyZWFsREIiLCJqdGkiOiIyNzY5MzJmOC03YzQyLTRjY2EtYTFiZi03NjAyN2Y3Nzg5NDYiLCJOUyI6Im1haW4iLCJEQiI6Im1haW4iLCJBQyI6InVzZXIiLCJJRCI6InVzZXI6bW01YzAxY3Zqd3Y1MGlrOXBxNXMifQ.M9GrqbMQ5mBAtxxTj_ekFcv5MH8XZSiW9j9qI_yzfA-rF6VWUmaAdxyBf97lh3KRrvy_604Dsrt6J2GrICayzQ",
+		"refresh":"surreal-refresh-r4VS1wTbWIcL-bSGEkssOg9XKdFELgxjiF6cb"
+	}
 }
 ```
 
@@ -296,7 +413,7 @@ On the other hand, permissions queries are executed in every query and for each 
 
 Replacing the record identifier that will be used to establish the session is especially useful in scenarios where the token used to authenticate the session does not contain one. This is common when using an external authentication provider, which may only have knowledge of generic user identifiers such as an email address or UUID.
 
-In the below example, we check if the session may already be tied to an existing user by using the `$auth` reserved parameter, which contains the record identifier of the authenticated user. If we can select the `id` field from `$auth`, it means that the token already contained the `id` for a record that exists in the database. If that is not the case, we can check if the token contains a different claim that we can rely on to uniquely identifies users. In this case we check for an email address. If the `email` claim is present in the token, we try to retrieve the user from the `user` table by their email address. If none of the queries return a record, the `AUTHENTICATE` clause will fail with a generic error. You can also choose to `THROW` a custom error as shown in the next example.
+In the below example, we check if the session may already be tied to an existing user by using the `$auth` reserved parameter, which contains the record identifier of the authenticated user. If we can select the `id` field from `$auth`, it means that the token already contained the `id` for a record that exists in the database. If that is not the case, we can check if the token contains a different claim that we can rely on to uniquely identify users. In this case we check for an email address. If the `email` claim is present in the token, we try to retrieve the user from the `user` table by their email address. If none of the queries return a record, the `AUTHENTICATE` clause will fail with a generic error. You can also choose to `THROW` a custom error as shown in the next example.
 
 ```surql
 /**[test]
@@ -350,7 +467,7 @@ DEFINE ACCESS user ON DATABASE TYPE RECORD
 
 In addition to what is shown in the previous example, the `AUTHENTICATE` clause can also be used to create records and access the claims found in the token itself using the `$token` reserved parameter. These features can be combined to log authentication attempts and stop authentication from completing if some conditions are met.
 
-Below, we show a proof of concept example that leverages the fact that tokens issued by SurrealDB have the standard `jti` claim, which contains a randomly generated unique identifier for the token. This value can be used to uniquely identify each token that is issued by SurrealDB for the purposes of auditing and revocation.
+Below, we show a proof of concept example that uses the fact that tokens issued by SurrealDB have the standard `jti` claim, which contains a randomly generated unique identifier for the token. This value can be used to uniquely identify each token that is issued by SurrealDB for the purposes of auditing and revocation.
 
 In this example, we create a new record in the `token` table for each token that SurrealDB issues after a successful `SIGNIN` and `SIGNUP`. This record is identified by the value in the `jti`(JWT ID) claim. Every time that a token is used to authenticate, we check if the record in the `token` table with identifier matching the `jti`(JWT ID) claim has been revoked and, if so, we fail authentication with a custom message. Otherwise, we log the time that the token was used to successfully authenticate in the `audit` table and continue authentication without changes.
 

@@ -11,6 +11,7 @@ import {
     iconBrandStackOverflow,
     iconBrandX,
     iconBrandYouTube,
+    iconComment,
 } from "@surrealdb/ui";
 import { SurrealDBLogo } from "~/components/Logo";
 import { FooterLink } from "./link";
@@ -87,11 +88,18 @@ const COLUMNS: FooterColumn[] = [
 
 /**
  * Community row, matching the apex site: icon-and-label chips rather than bare
- * glyphs, in the same order, so the two footers read as one index.
+ * glyphs, in the same order, so the two footers read as one index. The apex
+ * footer does not have GitHub Discussions yet, so add it there as well to keep
+ * the two footers the same.
  */
 const COMMUNITY = [
     { label: "Discord", href: "https://discord.gg/surrealdb", icon: iconBrandDiscord },
     { label: "GitHub", href: "https://github.com/surrealdb", icon: iconBrandGitHub },
+    {
+        label: "GitHub Discussions",
+        href: "https://github.com/orgs/surrealdb/discussions",
+        icon: iconComment,
+    },
     { label: "X", href: "https://x.com/surrealdb", icon: iconBrandX },
     { label: "YouTube", href: "https://www.youtube.com/@surrealdb", icon: iconBrandYouTube },
     {
@@ -126,17 +134,17 @@ export function Footer() {
                     <SurrealDBLogo className={classes.logo} />
                     <Text
                         c="bright"
-                        fz={{ base: 18, sm: 20, md: 22 }}
+                        fz={{ base: 19, sm: 21, md: 23 }}
                         fw={400}
                         lh={1.2}
                         lts="-0.01em"
                         maw={760}
                     >
-                        The unified data layer for AI
+                        The context and memory layer for AI agents
                     </Text>
                     <Text
                         c="slate"
-                        fz={{ base: 13, sm: 14 }}
+                        fz={{ base: 14, sm: 15 }}
                         mt="md"
                         maw={780}
                         lh={1.5}
@@ -160,7 +168,7 @@ export function Footer() {
                         >
                             <Text
                                 component="h2"
-                                fz={11}
+                                fz={12}
                                 fw={600}
                                 tt="uppercase"
                                 className={classes.heading}
@@ -184,7 +192,7 @@ export function Footer() {
                 >
                     <Text
                         component="h2"
-                        fz={11}
+                        fz={12}
                         fw={600}
                         tt="uppercase"
                         className={classes.heading}
@@ -212,7 +220,7 @@ export function Footer() {
                 </Stack>
             </Box>
             <Box className={classes.baseline}>
-                <Text fz={12}>&copy; SurrealDB 2026</Text>
+                <Text fz={13}>&copy; SurrealDB 2026</Text>
             </Box>
         </Box>
     );

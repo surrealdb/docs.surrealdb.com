@@ -601,7 +601,11 @@ function cloudAndDeploymentRedirects(): Redirect[] {
             "exact",
         ],
         ["build/deployment/self-hosted/overview", "manage/self-hosted", "exact"],
-        // `docker` and `kubernetes` keep their slugs, so the folder rule covers them.
+        // The self-hosted Docker page was a near copy of the Running one, and was
+        // merged into it. Both rules precede the folder rule below.
+        ["build/deployment/self-hosted/docker", "running/docker", "exact"],
+        ["manage/self-hosted/docker", "running/docker", "exact"],
+        // `kubernetes` keeps its slug, so the folder rule covers it.
         ["build/deployment/self-hosted", "manage/self-hosted", "prefix"],
 
         // The deployment section index became the Deployment models page. There is
@@ -827,6 +831,20 @@ function enterpriseConsolidationRedirects(): Redirect[] {
         statusCode: 301,
     });
 
+    // Enterprise docs moved from being nested under organisations to top-level manage/enterprise
+    out.push(
+        {
+            source: "/manage/organisations/enterprise",
+            destination: "/docs/manage/enterprise",
+            statusCode: 301,
+        },
+        {
+            source: "/manage/organisations/enterprise/:path*",
+            destination: "/docs/manage/enterprise/:path*",
+            statusCode: 301,
+        },
+    );
+
     return out;
 }
 
@@ -871,6 +889,27 @@ function stutteringPathRedirects(): Redirect[] {
  * rather than at an exact page. They are 302s for that reason: the destination
  * is our current best answer to a word, not a page that moved.
  */
+/**
+ * Two more pages folded for the same reason. `blink` became a section of the
+ * demos index it sat under; `ai-agents/ai-frameworks` was a middleman that
+ * listed the frameworks and then told the reader to start from the integrations
+ * overview instead, so it now redirects to that overview directly.
+ */
+function shortPageFoldRedirects(): Redirect[] {
+    return [
+        {
+            source: "/explore/tutorials/demos/blink",
+            destination: "/explore/tutorials/demos/overview#blink-note-taking-app",
+            statusCode: 301,
+        },
+        {
+            source: "/build/ai-agents/ai-frameworks",
+            destination: "/build/integrations/ai-frameworks/overview",
+            statusCode: 301,
+        },
+    ];
+}
+
 function guessableEntryPointRedirects(): Redirect[] {
     const entries: [string, string][] = [
         ["quickstart", "/docs"],
@@ -985,6 +1024,15 @@ const baseRedirects: Redirect[] = [
         destination: "/docs/reference/query-language/functions/database-functions/record",
         statusCode: 301,
     },
+    // `surreal format` was removed from the CLI shortly after it shipped. The
+    // parser holds no comment nodes, so the command could only re-emit each
+    // statement from its syntax tree, and with `--write` that silently changed
+    // what a script meant. `surqlfmt` is the formatter that remains.
+    {
+        source: "/reference/cli/surrealdb-cli/commands/format",
+        destination: "/docs/reference/cli/formatter/overview",
+        statusCode: 301,
+    },
     // "Types after 3.0" split into a concepts page and an attribute reference.
     // The old slug dropped the dot in the filename, so it was served at
     // `rust-after-30`.
@@ -1064,6 +1112,7 @@ const baseRedirects: Redirect[] = [
     },
     ...enterpriseConsolidationRedirects(),
     ...stutteringPathRedirects(),
+    ...shortPageFoldRedirects(),
     // Last, so that every rule naming a real former path is tried first. These
     // are single-word guesses, and a guess should only be answered once nothing
     // better matches.

@@ -113,13 +113,9 @@ Persisted insights are stored as knowledge-category attributes, which carry a de
 
 ## Permissions for persist
 
-`persist=True` writes attributes, so it requires **`memory:write`** - and the write
-lands inside the caller's write region, never outside it. There is no persist-scope
-argument: the region the key holds is the region reflect can write to.
+`persist=True` writes attributes, so it requires **`memory:write`** - and the write lands inside the caller's write region, never outside it. There is no persist-scope argument: the region the key holds is the region reflect can write to.
 
-A key granted `memory:write` on `org/acme/*` can persist org-level insights drawn
-from across the whole org. A key granted only `org/acme/user/alice` persists at
-that path and below, however wide the evidence it reasoned over.
+A key granted `memory:write` on `org/acme/*` can persist org-level insights drawn from across the whole org. A key granted only `org/acme/user/alice` persists at that path and below, however wide the evidence it reasoned over.
 
 This prevents agents from writing to scopes they do not own. An agent operating for user A cannot persist insights visible to user B, even if the reflection was informed by shared org-level memory.
 

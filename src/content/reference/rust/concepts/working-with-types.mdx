@@ -10,7 +10,11 @@ The [surrealdb-types](https://crates.io/crates/surrealdb-types) crate holds the 
 
 ## The `SurrealValue` trait
 
-`SurrealValue` is the trait that converts a Rust type to and from a SurrealDB value. Deriving it is all that is needed to use a Rust type for serialisation and deserialisation. To customise how a type is converted, such as renaming fields or tagging enum variants, see [SurrealValue attributes](/docs/reference/rust/concepts/surrealvalue-attributes).
+`SurrealValue` is the trait that converts a Rust type to and from a SurrealDB value. Deriving it is all that is needed to use a Rust type for serialisation and deserialisation.
+
+The SDK does not generate Rust structs from a database schema. The struct for each table is written by hand and derives `SurrealValue`, and a field whose type does not match the stored value fails at deserialisation with an error that names the field. [`surrealkit typegen`](/docs/manage/schema-migration/typegen) describes a schema as JSON and generates TypeScript types, but not Rust. The opposite direction is available: `kind_of()` gives the SurrealQL type of a Rust type, as shown in [Getting the SurrealQL type of a Rust type](#getting-the-surrealql-type-of-a-rust-type).
+
+To customise how a type is converted, such as renaming fields, flattening a nested struct into its parent or tagging enum variants, see [SurrealValue attributes](/docs/reference/rust/concepts/surrealvalue-attributes). The derive does not read `#[serde(...)]` attributes, so a field marked `#[serde(flatten)]` needs `#[surreal(flatten)]` instead. This also works for a generic field, as in `struct RecordData<V: SurrealValue> { id: RecordId, #[surreal(flatten)] data: V }`.
 
 ```rust
 use surrealdb::engine::any::connect;
@@ -119,6 +123,539 @@ Ok(Some(MyOwnDateTime(1760330504574)))
 
 Err(InternalError("Couldn't convert Object(Object({\"id\": RecordId(RecordId { table: \"person\", key: String(\"tcblzaktx3ponin9dyci\") })})) to MyOwnDateTime"))
 ```
+
+https://github.com/orgs/surrealdb/discussions/3389
+### Getting the SurrealQL type of a Rust type
+
+`kind_of()` returns a `Kind`, and `to_sql()` on a `Kind` gives the SurrealQL type as a string, ready for a `DEFINE FIELD ... TYPE` clause. An `Option<String>` gives `none | string`, which is the form SurrealQL also stores for `option<string>`.
+
+```rust
+use surrealdb::types::{RecordId, SurrealValue, ToSql};
+
+#[derive(SurrealValue)]
+struct Person {
+    id: RecordId,
+    name: String,
+    nickname: Option<String>,
+    tags: Vec<String>,
+}
+
+fn main() {
+    println!("{}", Option::<String>::kind_of().to_sql());
+    println!("{}", Vec::<String>::kind_of().to_sql());
+    println!("{}", RecordId::kind_of().to_sql());
+    println!("{}", Person::kind_of().to_sql());
+}
+```
+
+```text title="Output"
+none | string
+array<string>
+record
+{id: record, name: string, nickname: none | string, tags: array<string>}
+```
+--END--
+
+## Record IDs as strings
+
+A record's `id` is a `RecordId`, made of a `table` and a `key`, so a struct field that holds it has to be a `RecordId` rather than a `String`. Reading it into a `String` field fails with `Failed to deserialize field 'id' ...: Expected string, got record`. There are two ways to work with the ID as a string instead.
+
+The first is to keep a `RecordId` field and convert it where a string is needed. `to_sql()`, from the `ToSql` trait, gives the ID in SurrealQL form, and `key.to_sql()` gives the key alone:
+
+```rust
+use surrealdb::types::{RecordId, SurrealValue, ToSql};
+
+#[derive(Debug, SurrealValue)]
+struct Person {
+    id: RecordId,
+    name: String,
+}
+
+let person: Option<Person> = db.select(("person", "tobie")).await?;
+if let Some(person) = person {
+    println!("{}", person.id.to_sql());     // person:tobie
+    println!("{}", person.id.key.to_sql()); // tobie
+}
+```
+
+The second is to have the query return strings, and use a `String` field. `<string> id` casts the whole ID, and `<string> record::id(id)` returns the key alone, which suits an ID that your application generates and shares with other systems:
+
+```rust
+#[derive(Debug, SurrealValue)]
+struct PersonSummary {
+    id: String,
+    name: String,
+}
+
+let mut response = db
+    .query("SELECT <string> record::id(id) AS id, name FROM person")
+    .await?;
+let people: Vec<PersonSummary> = response.take(0)?;
+// [PersonSummary { id: "tobie", name: "Tobie" }]
+```
+
+A key that needs escaping keeps its backticks in the full form, as in ``person:`a-b` ``, while `record::id` returns the key as it was written (`a-b`). Use the full form for a value that is later turned back into a record ID, since the key alone does not say which table it belongs to.
+
+`RecordId::parse_simple()` turns the full form back into a `RecordId`. It splits the string at the first colon outside backticks and removes backtick escaping. It returns an error for a string with no colon:
+
+```rust
+use surrealdb::types::RecordId;
+
+let id = RecordId::parse_simple("person:tobie")?;
+let person: Option<Person> = db.select(id).await?;
+```
+
+The key is always parsed as a string. For example, `person:1` becomes a record ID with the string key `'1'`, and that ID does not match a record created with the number key `1`. For a key that is not a string, build the ID with `RecordId::new()`, or pass the whole string to `type::record()` in the query. That function reads the key as SurrealQL, so `type::record('person:1')` returns `person:1` with a number key.
+
+### Numeric record IDs
+
+The same two approaches work for a record whose key is a number, such as `user:45`. A struct field of type `i64` cannot hold the whole ID, and reading one into it fails with `Failed to deserialize field 'id' on type 'User': Expected int, got record`. To get the number into an `i64` field, return the key alone from the query with `record::id`:
+
+```rust
+#[derive(Debug, SurrealValue)]
+struct User {
+    id: i64,
+    email: String,
+}
+
+let users: Vec<User> = db
+    .query("SELECT record::id(id) AS id, email FROM user")
+    .await?
+    .take(0)?;
+// [User { id: 45, email: "ann@example.com" }]
+```
+
+To keep a `RecordId` field instead, match on its key, which is a `RecordIdKey`:
+
+```rust
+use surrealdb::types::RecordIdKey;
+
+if let RecordIdKey::Number(n) = user.id.key {
+    println!("{n}"); // 45
+}
+```
+
+### Passing a record ID into a query
+
+A string that looks like a record ID is still a string, so it never equals a record ID. Binding `format!("category:{}", key)` and comparing it with `id` returns no records. Bind a `RecordId` instead, or convert the string in the query with [`type::record()`](/docs/reference/query-language/functions/database-functions/type#typerecord):
+
+```rust
+use surrealdb::types::RecordId;
+
+// Returns nothing: $id is the string 'category:books'
+db.query("SELECT * FROM category WHERE id = $id")
+    .bind(("id", format!("category:{}", "books")))
+    .await?;
+
+// Returns category:books
+db.query("SELECT * FROM category WHERE id = $id")
+    .bind(("id", RecordId::new("category", "books")))
+    .await?;
+
+// Also returns category:books
+db.query("SELECT * FROM type::record('category', $key)")
+    .bind(("key", "books"))
+    .await?;
+```
+
+The key must also have the same type as the key of the stored record. A record created with a UUID key, such as `category:u'019d764a-c692-7631-a182-de9d745eb127'`, is not found with the UUID as a string. Cast the key in the query with `type::record('category', <uuid> $key)`, or bind a `RecordId` whose key is a UUID.
+
+### Record IDs in a JSON response
+
+`RecordId` implements serde's `Serialize`, so a struct that holds one can be returned from a web handler, such as an Axum `Json<Person>`. The ID is serialised as an object of its two parts, the `table` and the `key`, and the key carries the name of its type:
+
+```json
+{ "id": { "table": "person", "key": { "String": "tobie" } }, "name": "Tobie" }
+```
+
+To send the key on its own, as most HTTP APIs do, convert the record into a response type with a `String` field. Matching on `RecordIdKey::String` gives the key as it was written, and `to_sql()` covers keys of other types, such as a number:
+
+```rust
+use serde::Serialize;
+use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, ToSql};
+
+#[derive(SurrealValue)]
+struct Person {
+    id: RecordId,
+    name: String,
+}
+
+#[derive(Serialize)]
+struct PersonResponse {
+    id: String,
+    name: String,
+}
+
+impl From<Person> for PersonResponse {
+    fn from(person: Person) -> Self {
+        let id = match person.id.key {
+            RecordIdKey::String(key) => key,
+            other => other.to_sql(),
+        };
+        Self { id, name: person.name }
+    }
+}
+```
+
+```json title="Output"
+{ "id": "tobie", "name": "Tobie" }
+```
+
+The table name is in `person.id.table`, and `person.id.table.to_sql()` returns it as a string. A route such as `/person/{id}` then needs only the key, and the handler rebuilds the record ID from the table it serves, for example with `db.select(("person", id))`. A key built from a path parameter is always a string, so a table whose keys are numbers needs the number parsed first; see [Numeric record IDs](#numeric-record-ids).
+
+### Fields that link to another record
+
+A field of type `record<category>` holds the ID of a category, not the category itself. The struct field that writes it is therefore a `RecordId`. A struct shaped like the category record is refused, because its value is an object:
+
+```rust
+use surrealdb::types::{RecordId, SurrealValue};
+
+#[derive(Debug, SurrealValue)]
+struct Product {
+    name: String,
+    category: RecordId,
+}
+
+let product: Option<Product> = db
+    .create("product")
+    .content(Product {
+        name: "Apple".into(),
+        category: RecordId::new("category", "fruits"),
+    })
+    .await?;
+```
+
+With a nested `Category` struct in place of the `RecordId`, the same call fails with ``Couldn't coerce value for field `category` ...: Expected `record<category>` but found `{ name: 'Fruits' }` ``.
+
+To read the category's fields along with the product, fetch the link with `.*` in the query, and use a struct that holds the category. `.*` returns the whole linked record, including its `id`, so each struct can keep its own ID as a `RecordId`:
+
+```rust
+#[derive(Debug, SurrealValue)]
+struct Category {
+    id: RecordId,
+    name: String,
+}
+
+#[derive(Debug, SurrealValue)]
+struct ProductWithCategory {
+    id: RecordId,
+    name: String,
+    category: Category,
+}
+
+let products: Vec<ProductWithCategory> = db
+    .query("SELECT id, name, category.* AS category FROM product")
+    .await?
+    .take(0)?;
+// [ProductWithCategory { id: product:apple, name: "Apple", category: Category { id: category:fruits, name: "Fruits" } }]
+```
+
+## Fields the database sets
+
+A field that the database fills in, such as one with a `DEFAULT` or one that is `READONLY`, can share a struct with the fields your code sets. Make it an `Option`. `SurrealValue` sends `None` as `NONE`, which is what `DEFAULT` replaces, so the same struct can create the record and read it back:
+
+```rust
+// DEFINE FIELD order ON item TYPE int DEFAULT 7 READONLY;
+#[derive(Debug, SurrealValue)]
+struct Item {
+    id: Option<RecordId>,
+    name: String,
+    order: Option<i64>,
+}
+
+let created: Option<Item> = db
+    .create(("item", "one"))
+    .content(Item { id: None, name: "a".into(), order: None })
+    .await?;
+// Some(Item { id: Some(item:one), name: "a", order: Some(7) })
+```
+
+Sending `None` for a `READONLY` field in a later `.content()` update keeps the stored value. Sending a different value fails with ``Found changed value for field `order` ... but field is readonly``.
+
+## Datetimes with chrono
+
+`chrono::DateTime<Utc>` implements `SurrealValue`, and converts to and from a SurrealQL `datetime`. A field of that type in a struct that derives `SurrealValue` is stored as a `datetime`, so it can be compared with other datetimes in a query. Add `chrono` as a dependency of your project to use the type.
+
+```rust
+use chrono::{DateTime, TimeZone, Utc};
+use surrealdb::engine::any::connect;
+use surrealdb::opt::auth::Root;
+use surrealdb::types::{RecordId, SurrealValue};
+
+#[derive(Debug, SurrealValue)]
+struct Event {
+    name: String,
+    at: DateTime<Utc>,
+}
+
+#[derive(Debug, SurrealValue)]
+struct EventRecord {
+    id: RecordId,
+    name: String,
+    at: DateTime<Utc>,
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("ws://localhost:8000").await?;
+
+    db.signin(Root {
+        username: "root".to_string(),
+        password: "secret".to_string(),
+    })
+    .await?;
+
+    db.use_ns("ns").use_db("db").await?;
+
+    let _: Option<EventRecord> = db
+        .create("event")
+        .content(Event {
+            name: "Launch".to_string(),
+            at: Utc.with_ymd_and_hms(2025, 10, 18, 4, 24, 17).unwrap(),
+        })
+        .await?;
+
+    // The field is a datetime, so it compares with a bound DateTime<Utc>
+    // or with a d'' literal
+    let recent: Vec<EventRecord> = db
+        .query("SELECT * FROM event WHERE at > $since")
+        .bind(("since", Utc.with_ymd_and_hms(2025, 10, 15, 0, 0, 0).unwrap()))
+        .await?
+        .take(0)?;
+    dbg!(recent);
+    Ok(())
+}
+```
+
+A datetime that reaches SurrealDB as a string is stored as a string. This happens with a field of type `String` holding a formatted date, such as the output of `to_rfc3339()`, and with records written by the 2.x SDK from a struct that derived `serde::Serialize`. A string is never greater than a datetime, so a query such as `WHERE at > d'2025-10-15'` does not find it. To keep a string field while querying it as a datetime, cast it in the query with `<datetime> at`, or define the field with `TYPE datetime` so that SurrealDB refuses a string for it when it is written, which shows the problem immediately.
+
+## Convenience methods for the `Value` type
+
+Importing the `SurrealValue` trait gives access to a lot of convenience methods.
+
+One example is the `.into_value()` method which converts a large number of Rust standard library types into a SurrealQL `Value`.
+
+```rust
+use surrealdb_types::{SurrealValue, Value};
+
+fn main() {
+    let string_val = "string".into_value();
+    assert!(string_val.is_string());
+    assert_eq!(string_val, Value::String("string".into()));
+}
+```
+
+One more example of `.into_value()` to convert a `HashMap<String, &'str>` into a `Value`:
+
+```rust
+use std::collections::HashMap;
+
+use surrealdb::engine::any::connect;
+use surrealdb_types::{SurrealValue, Value};
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    db.use_ns("db").use_db("db").await.unwrap();
+
+    let mut map = HashMap::new();
+    map.insert("name".to_string(), "Billy");
+    map.insert("id".to_string(), "person:one");
+
+    // Turn HashMap into SurrealDB Value
+    let as_person = map.into_value();
+
+    // Object(Object({"id": String("person:one"), "name": String("Billy")}))
+    println!("{as_person:?}");
+
+    // Insert it into a query to create a record
+    let res = db
+        .query("CREATE ONLY person CONTENT $person")
+        .bind(("person", as_person))
+        .await
+        .unwrap()
+        .take::<Value>(0)
+        .unwrap();
+
+    // Object(Object({"id": RecordId(RecordId { table: "person", key: String("person:one") }), "name": String("Billy")}))
+    println!("{res:?}");
+}
+```
+
+A `Value` can be manually constructed using any of the various structs and enums contained within it. This is particularly useful when constructing a complex ID made up of a table name and an array for the key.
+
+```rust
+use std::str::FromStr;
+
+use surrealdb::engine::any::connect;
+use surrealdb_types::{Array, Datetime, RecordId, RecordIdKey, Value};
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    db.use_ns("db").use_db("db").await.unwrap();
+
+    let date = "2025-10-13T05:16:11.343Z";
+
+    let complex_id = RecordId {
+        table: "weather".into(),
+        key: RecordIdKey::Array(Array::from(vec![
+            Value::String("London".to_string()),
+            Value::Datetime(Datetime::from_str(date).unwrap()),
+        ])),
+    };
+
+    let mut res = db
+        .query("CREATE ONLY weather SET id = $id")
+        .bind(("id", complex_id))
+        .await
+        .unwrap();
+
+    // Object(Object({"id": RecordId(RecordId { table: "weather", key: Array(Array([String("London"), Datetime(Datetime(2025-10-13T05:16:11.343Z))])) })}))
+    println!("{:?}", res.take::<Value>(0).unwrap());
+}
+```
+
+The `.is()` method for a `Value` returns `true` if the type(s) in question can be converted to the type indicated when the method is called.
+
+```rust
+use std::collections::HashMap;
+use surrealdb_types::SurrealValue;
+
+fn main() {
+    // true
+    println!("{}", "string".into_value().is::<String>());
+
+    let mut map = HashMap::new();
+    map.insert("name".to_string(), "Billy");
+    map.insert("id".to_string(), "person:one");
+
+    // true
+    println!("{}", map.clone().into_value().is::<HashMap<String, &str>>());
+    // Also true
+    println!("{}", map.into_value().is::<HashMap<String, String>>());
+}
+```
+
+A `Value` can be converted into a `serde_json::Value` using the `.into_json_value()` method, and vice versa using `.into_value()`.
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb_types::{SurrealValue, Value};
+
+#[tokio::main]
+async fn main() {
+    let db = connect("memory").await.unwrap();
+    db.use_ns("db").use_db("db").await.unwrap();
+
+    let value = db
+        .query("CREATE ONLY person:one SET age = 21")
+        .await
+        .unwrap()
+        .take::<Value>(0)
+        .unwrap();
+
+    // Object(Object({"age": Number(Int(21)), "id": RecordId(RecordId { table: "person", key: String("one") })}))
+    println!("{value:?}");
+    // Object {"age": Number(21), "id": String("person:one")}
+    println!("{:?}", value.clone().into_json_value());
+
+    // Round trip
+    value.into_json_value().into_value();
+}
+```
+
+## Value construction macros
+
+Alongside `kind!`, the crate exports four macros for building values by hand: `object!`, `array!`, `set!` and `vars!`. Each is available from `surrealdb::types` as well as from `surrealdb_types` directly.
+
+| Macro | Builds | Notes |
+| ----- | ------ | ----- |
+| `object!` | `Object` | Keys can be bare identifiers or quoted string literals |
+| `array!` | `Array` | Uses square brackets, like `vec!` |
+| `set!` | `Set` | Deduplicates its items; takes `Value`s, not raw Rust values |
+| `vars!` | `Variables` | Same syntax as `object!`, used for `.bind()` after `.query()` |
+
+Values passed to `object!`, `array!` and `vars!` only need to implement `SurrealValue`, so ordinary Rust types can be used directly.
+
+```rust
+use surrealdb::types::{Value, array, object, set};
+
+fn main() {
+    let obj = object! {
+        name: "Aeon",
+        age: 30,
+        "home-town": "Bregna",
+    };
+
+    let arr = array![1, "two", true];
+
+    let tags = set! {
+        Value::from_t("rust"),
+        Value::from_t("surrealdb"),
+        Value::from_t("rust"),
+    };
+
+    println!("{obj:?}");
+    println!("{arr:?}");
+    println!("{tags:?}");
+}
+```
+
+Output:
+
+```text
+Object({"age": Number(Int(30)), "home-town": String("Bregna"), "name": String("Aeon")})
+Array([Number(Int(1)), String("two"), Bool(true)])
+Set({String("rust"), String("surrealdb")})
+```
+
+Note the two differences between `array!` and `set!`. `set!` drops the duplicate `"rust"`, and it does not convert its items for you: each one must already be a `Value`. Passing `set! { 1, 2, 3 }` will not compile, while `array![1, 2, 3]` will.
+
+### The `vars!` macro
+
+`vars!` builds a `Variables` map, which is what the [`.bind()`](/docs/reference/rust/methods/query#binding-parameters) method on a query takes. It is the most direct way to pass more than one parameter into a query.
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb::types::{RecordId, SurrealValue, vars};
+
+#[derive(Debug, SurrealValue)]
+struct Person {
+    id: RecordId,
+    name: String,
+    age: i64,
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("mem://").await?;
+    db.use_ns("main").use_db("main").await?;
+
+    let sql = "
+        CREATE type::table($table) SET name = $name, age = $age;
+        SELECT * FROM type::table($table) WHERE age >= $min_age;
+    ";
+
+    let mut result = db
+        .query(sql)
+        .bind(vars! {
+            table: "person",
+            name: "Aeon",
+            age: 30,
+            min_age: 18,
+        })
+        .await?;
+
+    let created: Option<Person> = result.take(0)?;
+    dbg!(created);
+    let adults: Vec<Person> = result.take(1)?;
+    dbg!(adults);
+    Ok(())
+}
+```
+
+`Variables` is an ordinary struct as well as a macro target. `Variables::new()` followed by `.insert()` builds the same value at runtime, which is the better choice when the set of parameters is not known when the code is written.
 
 ## The `kind!` macro
 
@@ -349,233 +886,5 @@ async fn main() {
             .unwrap()
             .to_sql()
     );
-}
-```
-
-## Value construction macros
-
-Alongside `kind!`, the crate exports four macros for building values by hand: `object!`, `array!`, `set!` and `vars!`. Each is available from `surrealdb::types` as well as from `surrealdb_types` directly.
-
-| Macro | Builds | Notes |
-| ----- | ------ | ----- |
-| `object!` | `Object` | Keys can be bare identifiers or quoted string literals |
-| `array!` | `Array` | Uses square brackets, like `vec!` |
-| `set!` | `Set` | Deduplicates its items; takes `Value`s, not raw Rust values |
-| `vars!` | `Variables` | Same syntax as `object!`, used for `.bind()` after `.query()` |
-
-Values passed to `object!`, `array!` and `vars!` only need to implement `SurrealValue`, so ordinary Rust types can be used directly.
-
-```rust
-use surrealdb::types::{Value, array, object, set};
-
-fn main() {
-    let obj = object! {
-        name: "Aeon",
-        age: 30,
-        "home-town": "Bregna",
-    };
-
-    let arr = array![1, "two", true];
-
-    let tags = set! {
-        Value::from_t("rust"),
-        Value::from_t("surrealdb"),
-        Value::from_t("rust"),
-    };
-
-    println!("{obj:?}");
-    println!("{arr:?}");
-    println!("{tags:?}");
-}
-```
-
-Output:
-
-```text
-Object({"age": Number(Int(30)), "home-town": String("Bregna"), "name": String("Aeon")})
-Array([Number(Int(1)), String("two"), Bool(true)])
-Set({String("rust"), String("surrealdb")})
-```
-
-Note the two differences between `array!` and `set!`. `set!` drops the duplicate `"rust"`, and it does not convert its items for you: each one must already be a `Value`. Passing `set! { 1, 2, 3 }` will not compile, while `array![1, 2, 3]` will.
-
-### The `vars!` macro
-
-`vars!` builds a `Variables` map, which is what the [`.bind()`](/docs/reference/rust/methods/query#binding-parameters) method on a query takes. It is the most direct way to pass more than one parameter into a query.
-
-```rust
-use surrealdb::engine::any::connect;
-use surrealdb::types::{RecordId, SurrealValue, vars};
-
-#[derive(Debug, SurrealValue)]
-struct Person {
-    id: RecordId,
-    name: String,
-    age: i64,
-}
-
-#[tokio::main]
-async fn main() -> surrealdb::Result<()> {
-    let db = connect("mem://").await?;
-    db.use_ns("main").use_db("main").await?;
-
-    let sql = "
-        CREATE type::table($table) SET name = $name, age = $age;
-        SELECT * FROM type::table($table) WHERE age >= $min_age;
-    ";
-
-    let mut result = db
-        .query(sql)
-        .bind(vars! {
-            table: "person",
-            name: "Aeon",
-            age: 30,
-            min_age: 18,
-        })
-        .await?;
-
-    let created: Option<Person> = result.take(0)?;
-    dbg!(created);
-    let adults: Vec<Person> = result.take(1)?;
-    dbg!(adults);
-    Ok(())
-}
-```
-
-`Variables` is an ordinary struct as well as a macro target. `Variables::new()` followed by `.insert()` builds the same value at runtime, which is the better choice when the set of parameters is not known when the code is written.
-
-## Convenience methods for the `Value` type
-
-Importing the `SurrealValue` trait gives access to a lot of convenience methods.
-
-One example is the `.into_value()` method which converts a large number of Rust standard library types into a SurrealQL `Value`.
-
-```rust
-use surrealdb_types::{SurrealValue, Value};
-
-fn main() {
-    let string_val = "string".into_value();
-    assert!(string_val.is_string());
-    assert_eq!(string_val, Value::String("string".into()));
-}
-```
-
-One more example of `.into_value()` to convert a `HashMap<String, &'str>` into a `Value`:
-
-```rust
-use std::collections::HashMap;
-
-use surrealdb::engine::any::connect;
-use surrealdb_types::{SurrealValue, Value};
-
-#[tokio::main]
-async fn main() {
-    let db = connect("memory").await.unwrap();
-    db.use_ns("db").use_db("db").await.unwrap();
-
-    let mut map = HashMap::new();
-    map.insert("name".to_string(), "Billy");
-    map.insert("id".to_string(), "person:one");
-
-    // Turn HashMap into SurrealDB Value
-    let as_person = map.into_value();
-
-    // Object(Object({"id": String("person:one"), "name": String("Billy")}))
-    println!("{as_person:?}");
-
-    // Insert it into a query to create a record
-    let res = db
-        .query("CREATE ONLY person CONTENT $person")
-        .bind(("person", as_person))
-        .await
-        .unwrap()
-        .take::<Value>(0)
-        .unwrap();
-
-    // Object(Object({"id": RecordId(RecordId { table: "person", key: String("person:one") }), "name": String("Billy")}))
-    println!("{res:?}");
-}
-```
-
-A `Value` can be manually constructed using any of the various structs and enums contained within it. This is particularly useful when constructing a complex ID made up of a table name and an array for the key.
-
-```rust
-use std::str::FromStr;
-
-use surrealdb::engine::any::connect;
-use surrealdb_types::{Array, Datetime, RecordId, RecordIdKey, Value};
-
-#[tokio::main]
-async fn main() {
-    let db = connect("memory").await.unwrap();
-    db.use_ns("db").use_db("db").await.unwrap();
-
-    let date = "2025-10-13T05:16:11.343Z";
-
-    let complex_id = RecordId {
-        table: "weather".into(),
-        key: RecordIdKey::Array(Array::from(vec![
-            Value::String("London".to_string()),
-            Value::Datetime(Datetime::from_str(date).unwrap()),
-        ])),
-    };
-
-    let mut res = db
-        .query("CREATE ONLY weather SET id = $id")
-        .bind(("id", complex_id))
-        .await
-        .unwrap();
-
-    // Object(Object({"id": RecordId(RecordId { table: "weather", key: Array(Array([String("London"), Datetime(Datetime(2025-10-13T05:16:11.343Z))])) })}))
-    println!("{:?}", res.take::<Value>(0).unwrap());
-}
-```
-
-The `.is()` method for a `Value` returns `true` if the type(s) in question can be converted to the type indicated when the method is called.
-
-```rust
-use std::collections::HashMap;
-use surrealdb_types::SurrealValue;
-
-fn main() {
-    // true
-    println!("{}", "string".into_value().is::<String>());
-
-    let mut map = HashMap::new();
-    map.insert("name".to_string(), "Billy");
-    map.insert("id".to_string(), "person:one");
-
-    // true
-    println!("{}", map.clone().into_value().is::<HashMap<String, &str>>());
-    // Also true
-    println!("{}", map.into_value().is::<HashMap<String, String>>());
-}
-```
-
-A `Value` can be converted into a `serde_json::Value` using the `.into_json_value()` method, and vice versa using `.into_value()`.
-
-```rust
-use surrealdb::engine::any::connect;
-use surrealdb_types::{SurrealValue, Value};
-
-#[tokio::main]
-async fn main() {
-    let db = connect("memory").await.unwrap();
-    db.use_ns("db").use_db("db").await.unwrap();
-
-    let value = db
-        .query("CREATE ONLY person:one SET age = 21")
-        .await
-        .unwrap()
-        .take::<Value>(0)
-        .unwrap();
-
-    // Object(Object({"age": Number(Int(21)), "id": RecordId(RecordId { table: "person", key: String("one") })}))
-    println!("{value:?}");
-    // Object {"age": Number(21), "id": String("person:one")}
-    println!("{:?}", value.clone().into_json_value());
-
-    // Round trip
-    value.into_json_value().into_value();
 }
 ```

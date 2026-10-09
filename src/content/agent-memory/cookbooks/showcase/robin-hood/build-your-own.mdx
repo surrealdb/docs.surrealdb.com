@@ -1,0 +1,128 @@
+---
+position: 3
+title: Build your own character graph
+description: "Step-by-step: ingest a text in parts with a narrative clock, read entities and relations asOf a reading position, show supersession, and draw a spoiler-safe character graph."
+---
+
+# Build your own character graph
+
+This guide shows how to turn any text that arrives in parts - a novel, a series, a set of reports - into a graph of who is in it at each point, like the [Robin Hood character graph](/docs/agent-memory/cookbooks/showcase/robin-hood). It covers the Agent Memory side in full and leaves the drawing to whatever you use for front ends.
+
+When you finish, you will have a Context that holds your text part by part, and the three reads a graph needs at any reading position: the cast, what is known about each character, and how they are related.
+
+## Before you start
+
+You need:
+
+- A SurrealDB Agent Memory Context, its id and an API key with `memory:read` and `memory:write`. See [Hosted quickstart](/docs/agent-memory/quickstarts/hosted).
+- A text split into parts, in reading order. Public-domain books from Project Gutenberg are a good source.
+- An HTTP client. The examples below are raw HTTP requests, which any language can send.
+
+The Agent Memory features this guide uses are:
+
+| Feature | What it does here |
+| --- | --- |
+| Document upload with `observedAt` | Stamps each part with its place on a narrative clock |
+| `asOf` on entity reads | Reads the memory as it was at a reading position |
+| Supersession | Keeps a replaced value, with the time it stopped being current |
+| Relations | Links characters, each relation dated to the part it was learned in |
+| Scopes and labels | Optional: keep one book separate from another in a shared Context |
+
+## 1. Choose a narrative clock
+
+Give each part a date, so that the order of the dates is the order of the text. The date does not have to mean anything outside the book. The Robin Hood demo dates chapter 1 to 1 January 2000, chapter 2 to 2 January, and so on:
+
+| Part | `observedAt` |
+| --- | --- |
+| Chapter 1 | `2000-01-01T00:00:00Z` |
+| Chapter 2 | `2000-01-02T00:00:00Z` |
+| Chapter 22 | `2000-01-22T00:00:00Z` |
+
+A reading position is then just one of these dates, passed later as `asOf`.
+
+## 2. Upload the parts in order
+
+Upload each part as a document, with its date as `observedAt` in the metadata. Every fact extracted from the part takes that date as its known time.
+
+```http
+POST /api/v1/<context-id>/documents
+Content-Type: multipart/form-data
+
+file=<chapter-01.txt>
+metadata={"title":"Chapter 1","observedAt":"2000-01-01T00:00:00Z","labels":["chapter=1"]}
+```
+
+Upload one part at a time, and wait for each one to finish before the next. Extraction is shown the entities the Context already holds and told to reuse their names, so a part that starts before the previous one is finished can create a second entity for a name it should have matched. Poll the document until its status is `ready`, then wait a few seconds more for the extracted facts to be written.
+
+> [!IMPORTANT]
+> Upload one part first and check that `GET /api/v1/<context-id>/entities` returns entities before you upload the rest. If it returns none, extraction is not running, and every later part would report `ready` with nothing extracted.
+
+## 3. Read the cast at a reading position
+
+List the entities the memory held at a reading position by passing that part's date as `asOf`:
+
+```http
+GET /api/v1/<context-id>/entities?asOf=2000-01-06T00:00:00Z
+```
+
+That is the cast as of chapter 6. Anything first mentioned after chapter 6 is missing from the list, which is what keeps the graph free of spoilers. To size each character by how much is known about them, count the facts on each entity at the same `asOf`.
+
+## 4. Read what is known about a character, and what changed
+
+Read one entity at a reading position:
+
+```http
+GET /api/v1/<context-id>/entities/person/little_john?asOf=2000-01-06T00:00:00Z
+```
+
+To show how a character changed through the book, read their history. Every value is there, including values a later part replaced:
+
+```http
+GET /api/v1/<context-id>/entities/person/little_john/history
+```
+
+A replaced value is superseded rather than overwritten: it keeps the time it became known and gains the time it stopped being current. A graph can use that to strike out a value the reader has moved past, while still showing it for the chapters where it was true. [Reconciliation and supersession](/docs/agent-memory/reasoning/reconciliation-and-supersession) explains when a new value supersedes an old one.
+
+## 5. Read the relations at a reading position
+
+Read the characters one step out from an entity, with the relations between them, at a reading position:
+
+```http
+GET /api/v1/<context-id>/entities/person/robin_hood/neighbourhood?asOf=2000-01-06T00:00:00Z&minFacts=2
+```
+
+`minFacts` leaves out characters the memory knows almost nothing about. Relations are dated like attributes, so a relation learned in chapter 8 is missing at chapter 6. A graph can draw each relation in at the part it was learned in.
+
+## 6. Decide what to do with name variants
+
+Expect a character to appear under several names. Extraction creates one entity for each name, so `Robin` and `Robin Hood`, or `Tuck` and `Friar Tuck`, arrive as separate entities. You can:
+
+- Show them as separate entities, which is what the memory holds.
+- Link them in your graph, and label the links as your own suggestion. The Robin Hood demo links names of the same type where every capitalised word of the shorter name is in the longer one.
+- Map the variants to one name in your own pipeline before you upload, if one entity per character is all you need.
+
+[Entities with several names](/docs/agent-memory/mental-model/entities-with-several-names) describes the cases, including the ones that must stay separate.
+
+## 7. Draw the graph
+
+With the reads above, each frame of the graph is:
+
+1. The entities returned `asOf` the reading position, sized by their fact count.
+2. The relations between them, `asOf` the same position.
+3. For the character under the pointer, their facts at that position, with replaced values struck out.
+
+Move the reading position and repeat the three reads. Caching one frame per part keeps the graph responsive, since a part's frame never changes once the text is ingested.
+
+## Check the result
+
+Pick a character who is introduced partway through the text. Confirm that:
+
+- They are missing from `GET /entities` `asOf` the part before their introduction.
+- They are present `asOf` the part that introduces them.
+- Their history shows at least one value with an end time, if anything about them changes later in the text.
+
+## Next steps
+
+- [How the Robin Hood graph was built](/docs/agent-memory/cookbooks/showcase/robin-hood/how-it-was-built): the pipeline behind the demo, step by step.
+- [Spoiler-safe narrative memory](/docs/agent-memory/cookbooks/patterns/spoiler-safe-narrative-memory): answering questions, not only drawing a graph, as far as a reader has reached.
+- [Temporal validity](/docs/agent-memory/reasoning/temporal-validity): the known-time model behind `asOf`.

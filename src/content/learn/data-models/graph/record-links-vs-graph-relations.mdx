@@ -13,7 +13,7 @@ The first question when modelling connections is whether **graph edges** are the
 
 A record link is a pointer from one record to another: any field that holds a record id. Record ids are efficient direct pointers and avoid table scans.
 
-Example: one `user` with two `comment` rows linked from the user:
+Example: one `user` with two `comment` records linked from the user:
 
 ```surql
 LET $new_user = CREATE ONLY user SET name = "User McUserson";
@@ -57,7 +57,7 @@ FROM user;
 
 ### Reverse direction without edges
 
-Historically, record links were unidirectional; the other direction often needed a subquery; while graph edges made reverse walks easy:
+Historically, record links were unidirectional, so the other direction often needed a subquery, while graph edges made reverse walks easy:
 
 ```surql
 SELECT 
@@ -154,23 +154,96 @@ SELECT text, <~user.id[0] AS commenter FROM comment;
 ]
 ```
 
+## One-to-one, one-to-many and many-to-many
+
+Each kind of relationship maps to a record link field, and the field definition decides how strict it is. The schema below models a blog with posts and tags:
+
+| Relationship | Example | Field |
+| --- | --- | --- |
+| One-to-one | Each user owns at most one blog | `owner ON blog TYPE record<user>`, with a `UNIQUE` index |
+| One-to-many | A blog has many posts | `blog ON post TYPE record<blog>`, stored on the "many" side |
+| Many-to-many | A post has many tags, and a tag is on many posts | `tags ON post TYPE array<record<tag>>` |
+
+```surql
+DEFINE TABLE user SCHEMAFULL;
+DEFINE FIELD name ON user TYPE string;
+
+DEFINE TABLE blog SCHEMAFULL;
+DEFINE FIELD title ON blog TYPE string;
+DEFINE FIELD owner ON blog TYPE record<user>;
+DEFINE INDEX one_blog_per_owner ON blog FIELDS owner UNIQUE;
+DEFINE FIELD posts ON blog COMPUTED <~post;
+
+DEFINE TABLE tag SCHEMAFULL;
+DEFINE FIELD name ON tag TYPE string;
+DEFINE FIELD posts ON tag COMPUTED <~post;
+
+DEFINE TABLE post SCHEMAFULL;
+DEFINE FIELD title ON post TYPE string;
+DEFINE FIELD blog ON post TYPE record<blog> REFERENCE ON DELETE CASCADE ASSERT $value.exists();
+DEFINE FIELD tags ON post TYPE array<record<tag>> DEFAULT [] REFERENCE ASSERT $value.all(|$t| $t.exists());
+```
+
+Some details about this schema:
+
+- **One-to-one needs the index.** `owner` holds one user, so each blog has one owner, but several blogs could name the same user. The `UNIQUE` index refuses a second blog for the same user.
+- **The link is stored once.** A post stores its blog, and the blog does not store an array of posts. The `posts` field on `blog` is [computed](/docs/reference/query-language/language-primitives/record-references) from the incoming references with `<~post`, so it cannot go out of date. This needs `REFERENCE` on the field that holds the link.
+- **`record<blog>` checks the table, not the record.** The type accepts any `blog:…` id, including one for a record that does not exist. `ASSERT $value.exists()` adds the check that a foreign key makes in a relational database, and `$value.all(|$t| $t.exists())` does the same for each element of an array.
+- **An array field needs a value.** A `SCHEMAFULL` field of type `array<record<tag>>` refuses `NONE`, so a post created without tags fails unless the field has `DEFAULT []`, or uses `option<array<record<tag>>>` instead.
+- **`ON DELETE CASCADE`** deletes a blog's posts when the blog is deleted. The [other `ON DELETE` options](/docs/reference/query-language/language-primitives/record-references) refuse the delete, leave or remove the link, or run an expression.
+
+With some data in place, each check refuses a link that it should:
+
+```surql
+CREATE user:ann SET name = 'Ann';
+CREATE blog:news SET title = 'News', owner = user:ann;
+CREATE tag:rust SET name = 'rust';
+CREATE tag:db SET name = 'databases';
+CREATE post:one SET title = 'Hello', blog = blog:news, tags = [tag:rust, tag:db];
+CREATE post:two SET title = 'Second', blog = blog:news;
+
+CREATE post:three SET title = 'Lost', blog = blog:gone;
+//- 'Found blog:gone for field `blog`, with record `post:three`, but field must conform to: $value.exists()'
+
+CREATE post:four SET title = 'Typo', blog = blog:news, tags = [tag:rsut];
+//- 'Found [tag:rsut] for field `tags`, with record `post:four`, but field must conform to: $value.all(|$t: any| ($t.exists()))'
+
+CREATE blog:other SET title = 'Other', owner = user:ann;
+//- 'Database index `one_blog_per_owner` already contains user:ann, with record `blog:news`'
+```
+
+Queries follow the links in either direction:
+
+```surql
+SELECT title, posts.title AS posts FROM blog:news;
+//- [{ posts: ['Hello', 'Second'], title: 'News' }]
+
+SELECT name, posts.title AS posts FROM tag:rust;
+//- [{ name: 'rust', posts: ['Hello'] }]
+
+SELECT title, blog.owner.name AS owner, tags.name AS tags FROM post:one;
+//- [{ owner: 'Ann', tags: ['rust', 'databases'], title: 'Hello' }]
+```
+
+A many-to-many relationship can also be a graph edge, such as `RELATE post:one->tagged->tag:rust`. Use an edge when the relationship has data of its own, such as who added the tag and when, as the sections below describe.
+
 ## When to prefer record links
 
 **Record links are preferred if:**
 
 * Performance is the top priority.
 * You do not need very complex multi-hop graph queries.
-* You want the schema to declare what happens when a linked row is deleted (cascade, refuse, ignore, etc.) via [`ON DELETE`](/docs/reference/query-language/language-primitives/record-references) and related options.
+* You want the schema to declare what happens when a linked record is deleted (cascade, refuse, ignore, etc.) via [`ON DELETE`](/docs/reference/query-language/language-primitives/record-references) and related options.
 
 ## When to prefer graph relations
 
 **Graph relations are preferred if:**
 
-* You want to create links quickly **without** pre-defining every field, or you link across many record types in one go (for example `RELATE person:one->wrote->[blog:one, book:one, comment:one]` versus several `DEFINE FIELD` steps.
+* You want to create links quickly **without** pre-defining every field, or you link across many record types in one go (for example `RELATE person:one->wrote->[blog:one, book:one, comment:one]` versus several `DEFINE FIELD` steps).
 * You need expressive arrow syntax for multi-hop patterns such as `->wrote->comment<-wrote<-person->wrote->comment` starting from `person`.
 * You want SurrealDB Studio’s Designer to visualise edges clearly.
 
-Graph edges are **almost required** when the relationship itself carries metadata that belongs neither to the source nor target record alone (for example the moment a user posted a comment:
+Graph edges are **almost required** when the relationship itself carries metadata that belongs neither to the source nor target record alone (for example, the moment a user posted a comment):
 
 ```surql
 {
@@ -193,7 +266,7 @@ The same applies to durable facts about the relationship:
 
 ## Weighting and counting on graph tables
 
-Graph tables are a natural place to store **weights** on the edge row, or to **derive** interaction strength by **counting** how many edges exist between the same endpoints. If you need that kind of scoring or event metadata on the relationship itself, graph relations are usually the right abstraction.
+Graph tables are a natural place to store **weights** on the edge record, or to **derive** interaction strength by **counting** how many edges exist between the same endpoints. If you need that kind of scoring or event metadata on the relationship itself, graph relations are usually the right abstraction.
 
 Worked examples (random NPC interactions, `knows` vs `greeted`, aggregations) live in [Social network patterns](/docs/learn/data-models/graph/social-network-patterns).
 
@@ -201,7 +274,7 @@ Worked examples (random NPC interactions, `knows` vs `greeted`, aggregations) li
 
 Record links can encode rich behaviour on delete (for example, removing an id from an array while appending to a history field), via [`REFERENCE` `ON DELETE`](/docs/reference/query-language/language-primitives/record-references).
 
-Graph edges are simpler: if **either** endpoint record is deleted, the edge row is removed.
+Graph edges are simpler: if **either** endpoint record is deleted, the edge record is removed.
 
 ```surql
 -- likes record created without problems

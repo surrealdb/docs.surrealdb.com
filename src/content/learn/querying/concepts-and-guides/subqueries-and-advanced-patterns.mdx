@@ -50,6 +50,27 @@ CREATE ONLY person:billy SET
 
 Patterns such as appending a new comment id to a record are covered in [record references](/docs/reference/query-language/language-primitives/record-references). See also [`RETURN`](/docs/reference/query-language/statements/return).
 
+### Assigning one record from a subquery
+
+A `SELECT` subquery returns an array, even when one record matches, so it cannot be assigned directly to a field of type `record<…>`. Two forms return a single record ID instead: `SELECT VALUE id ...` followed by `[0]`, or `SELECT VALUE id FROM ONLY ... LIMIT 1`.
+
+```surql
+DEFINE FIELD category ON post TYPE record<category>;
+CREATE category:tech SET name = 'Tech';
+
+-- The subquery returns an array, so this fails
+CREATE post:1 SET category = (SELECT VALUE id FROM category WHERE name = 'Tech');
+//- "Couldn't coerce value for field `category` of `post:1`: Expected `record<category>` but found `[category:tech]`"
+
+CREATE post:2 SET category = (SELECT VALUE id FROM category WHERE name = 'Tech')[0];
+//- [{ category: category:tech, id: post:2 }]
+
+CREATE post:3 SET category = (SELECT VALUE id FROM ONLY category WHERE name = 'Tech' LIMIT 1);
+//- [{ category: category:tech, id: post:3 }]
+```
+
+`VALUE` matters as well: without it, the subquery returns objects such as `{ id: category:tech }` rather than record IDs. When no record matches, both forms give `NONE`, which a `record<category>` field refuses. Use `option<record<category>>` for a field that may be left empty.
+
 ## `$parent` and `$this`
 
 In nested contexts, SurrealDB predefines:
@@ -110,7 +131,7 @@ CREATE person:4 SET role = "admin", modified_at = d'2999-01-01';
 
 How it works:
 
-1. **`GROUP BY role`** collapses records into one row per role. Non-aggregated fields such as `id` become arrays of the grouped record ids.
+1. **`GROUP BY role`** collapses records into one result per role. Non-aggregated fields such as `id` become arrays of the grouped record ids.
 2. **`.map(|$o| { … })`** runs the nested query once per grouped record.
 3. **`SELECT * FROM ONLY $o.id ORDER BY modified_at DESC LIMIT 1`** fetches all of the records in that group, orders by `modified_at`, and returns the latest one.
 
@@ -123,6 +144,82 @@ To partition by more than one field, include every non-aggregated field in both 
 ```
 
 See also the [`GROUP` clause](/docs/reference/query-language/clauses/group#latest-record-per-group) reference for a shorter summary.
+
+## Counts for search filters (facets)
+
+A search page often shows, next to its results, how many of those results have each value of a field: so many products of each brand, so many with each tag. Store the search results in a parameter, and then count them with one `GROUP BY` query for each field. An object holds all of the counts, so one request returns them together:
+
+```surql
+INSERT INTO product [
+	{ name: 'Trail shoe', brand: 'Alpine', price: 90, tags: ['outdoor', 'running'] },
+	{ name: 'Road shoe', brand: 'Swift', price: 120, tags: ['running'] },
+	{ name: 'Hiking boot', brand: 'Alpine', price: 150, tags: ['outdoor'] },
+	{ name: 'Sandal', brand: 'Swift', price: 40, tags: ['summer'] }
+];
+
+LET $results = SELECT * FROM product WHERE price < 130;
+
+RETURN {
+	brand: (SELECT brand, count() FROM $results GROUP BY brand),
+	tag: (SELECT tag, count() FROM array::flatten($results.tags).map(|$t| { tag: $t }) GROUP BY tag)
+};
+```
+
+```surql title="Output"
+{
+	brand: [
+		{ brand: 'Alpine', count: 1 },
+		{ brand: 'Swift', count: 2 }
+	],
+	tag: [
+		{ count: 1, tag: 'outdoor' },
+		{ count: 2, tag: 'running' },
+		{ count: 1, tag: 'summer' }
+	]
+}
+```
+
+`GROUP BY` on a field that holds an array groups records by the whole array, so `['outdoor', 'running']` would be one group. To count each tag on its own, the query collects the tags of every result into one array with [`array::flatten()`](/docs/reference/query-language/functions/database-functions/array#arrayflatten), and turns each tag into an object that `GROUP BY` can group.
+
+The `WHERE` clause of `$results` can be any search, including a [full-text](/docs/reference/query-language/statements/define/indexes#full-text-search-fulltext-index) match, and the counts follow whatever it returns.
+
+## Grouping an array of objects by a field
+
+`GROUP BY` also works on an array, such as a field that holds objects, because `SELECT` can read `FROM` any SurrealQL value. Each group comes back as an object of its own:
+
+```surql
+LET $values = [
+	{ name: 'green', variant: variant:colour },
+	{ name: 'S', variant: variant:size },
+	{ name: 'blue', variant: variant:colour }
+];
+
+SELECT variant, name AS names FROM $values GROUP BY variant;
+```
+
+```surql title="Output"
+[
+	{ names: ['green', 'blue'], variant: variant:colour },
+	{ names: ['S'], variant: variant:size }
+]
+```
+
+To get one object with a key for each group instead, build the entries and pass them to [`object::from_entries()`](/docs/reference/query-language/functions/database-functions/object#objectfrom_entries). A record ID used as a key becomes a string:
+
+```surql
+object::from_entries(
+	($values.variant).distinct().map(|$k| [$k, $values.filter(|$v| $v.variant = $k).name])
+);
+```
+
+```surql title="Output"
+{
+	"variant:colour": ['green', 'blue'],
+	"variant:size": ['S']
+}
+```
+
+The parentheses around `$values.variant` matter, because without them, `.distinct()` runs on each variant separately rather than on the array of all of them. See [Flattening](/docs/reference/query-language/language-primitives/idioms#flattening) for this rule.
 
 ## Graph paths and inner queries
 

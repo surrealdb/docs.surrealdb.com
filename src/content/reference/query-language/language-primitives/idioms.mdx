@@ -6,9 +6,9 @@ description: "Accessing and manipulating data using idioms (paths) in SurrealQL.
 
 # Idioms
 
-Idioms in SurrealQL provide a powerful and flexible way to access and manipulate data within records using paths. They allow you to navigate through nested data structures, access fields, array elements, call methods, and perform complex queries with ease. Idioms are similar to expressions in other query languages that provide a path to data within documents or records.
+Idioms in SurrealQL use paths to access and manipulate data within records. They allow you to navigate through nested data structures, access fields and array elements, call methods, and perform complex queries. Idioms are similar to expressions in other query languages that provide a path to data within documents or records.
 
-An idiom is composed of a sequence of **parts** that define the path to a value within a record or data structure. Each part specifies how to navigate to the next piece of data. Idioms can be used in various parts of SurrealQL. The most common usecase is in data retrival queries such as `SELECT` statements, but they can also be used in the `WHERE` clause, `SET` clause, and more.
+An idiom is composed of a sequence of **parts** that define the path to a value within a record or data structure. Each part specifies how to navigate to the next piece of data. Idioms can be used in various parts of SurrealQL. The most common use case is in data retrieval queries such as `SELECT` statements, but they can also be used in the `WHERE` clause, `SET` clause, and more.
 
 An idiom is made up of one or more **parts**, each of which can be one of several types:
 
@@ -86,7 +86,7 @@ In this example, `person.name` is an idiom that accesses the `name` field of the
 
 ## Index access
 
-To access an element in an array by its index, use square brackets `[]` with the index inside. For example, let's say we have a `school` record with some student results.
+To access an element in an array by its index, use square brackets `[]` with the index inside. For example, take a `school` record with some student results.
 
 ```surql title="Query"
 /**[test]
@@ -155,6 +155,29 @@ SELECT results[0].score FROM student;
 Here, `results[0].score` accesses the score of the first student in the `results` array.
 
 Note: the opposite of `[0]` is `[$]`, which returns the last element in an array. See [Last element](#last-element) below.
+
+### Object keys from a parameter
+
+Square brackets also take a string, which reads or writes the object field with that name. The string can come from a parameter, so the key does not have to be known when the query is written. In an `UPDATE`, this sets or increments a field chosen at run time, and creates it if it does not exist yet:
+
+```surql
+CREATE stats:1 SET counts = { a: 1 };
+
+LET $key = "a";
+UPDATE stats:1 SET counts[$key] += 1;
+
+LET $key = "b";
+UPDATE stats:1 SET counts[$key] = 5;
+```
+
+```surql title="Output"
+[
+	{
+		counts: { a: 2, b: 5 },
+		id: stats:1
+	}
+]
+```
 
 ## All elements
 
@@ -441,11 +464,52 @@ SELECT results[$].score FROM student;
 
 `[$]` applies to arrays and sets. Sets are ordered, but their index operator follows sort order rather than insertion order: `[0]` returns the smallest value and `[$]` returns the greatest. You can also use [`set::last()`](/docs/reference/query-language/functions/database-functions/set#setlast) on sets. See [sets](/docs/reference/query-language/language-primitives/data-types/sets#using-the-index-operator-on-sets) for detail.
 
+## Flattening
+
+`...` after an array flattens it by one level, in the same way as [`array::flatten()`](/docs/reference/query-language/functions/database-functions/array#arrayflatten). Each nested array is replaced by its elements, and elements that are not arrays stay where they are:
+
+```surql
+[[1, 2], 3, [[4]], []]...;
+```
+
+```surql title="Output"
+[1, 2, 3, [4]]
+```
+
+Only one level is removed, so `[[4]]` becomes `[4]`. Repeat the part to remove more: `$value......` flattens twice. Unlike `.flatten()`, which returns an error for a value that is not an array, `...` returns any other value unchanged, including a [set](/docs/reference/query-language/language-primitives/data-types/sets).
+
+A common use is to collect the values of an array field across several records into one array:
+
+```surql
+CREATE post:1 SET tags = ['a', 'b'];
+CREATE post:2 SET tags = ['b', 'c'];
+
+(SELECT VALUE tags FROM post)...;
+```
+
+```surql title="Output"
+['a', 'b', 'b', 'c']
+```
+
+In a path that reads a field from each element of an array, the parts after that field apply to each element rather than to the whole result. `post:1.comments.tags...` flattens the `tags` of each comment separately, and so leaves the result nested. Put the path in parentheses to flatten the result as a whole:
+
+```surql
+CREATE post:3 SET comments = [{ tags: ['x'] }, { tags: ['y', 'z'] }];
+
+post:3.comments.tags...;
+//- [['x'], ['y', 'z']]
+
+(post:3.comments.tags)...;
+//- ['x', 'y', 'z']
+```
+
+At the end of a field in a [`DEFINE INDEX`](/docs/reference/query-language/statements/define/indexes#unique-index) statement, `...` makes the index hold an array as one value rather than one entry for each element, so that a `UNIQUE` index compares whole arrays.
+
 ## Method chaining
 
 To call a method on the current data, use a dot `.` followed by the method name and parentheses `()` with arguments. SurrealDB supports method chaining, so you can call multiple methods (functions) on the same data. Learn more about [method chaining](/docs/reference/query-language/functions/database-functions#method-syntax) in the functions section.
 
-For example, let's create a new `person` record and then call `uppercase()` on its name field.
+For example, the following creates a new `person` record and then calls `uppercase()` on its name field.
 
 ```surql
 /**[test]
@@ -500,6 +564,29 @@ SELECT *, string::uppercase(name) FROM person;
 ```
 
 To learn more about string method chaining in SurrealQL, see the [string functions](/docs/reference/query-language/functions/database-functions/string#method-chaining) section.
+
+## Optional parts
+
+> [!NOTE]
+> Until SurrealDB 3.0.0, this operator was a single `?` question mark. Since this version, it was changed to `.?` to avoid conflicts with the `??` operator when parsing.
+
+The `.?` operator is used to indicate that a part is optional (it may not exist). It also allows you to safely access nested data without having to check if the nested data exists and exit an idiom path early when the result is NONE.
+
+```surql
+SELECT person.spouse.?.name FROM person;
+```
+
+This idiom safely accesses `person.spouse.name` if `spouse` exists; otherwise, it returns `NONE`.
+
+## Using optional parts
+
+If some `person` records have a `spouse` field and others do not:
+
+```surql
+SELECT name, spouse.?.name AS spouse_name FROM person;
+```
+
+This idiom will return `NONE` for `spouse_name` if the `spouse` field is not present.
 
 ## Graph navigation
 
@@ -937,29 +1024,6 @@ person:one.{
 }
 ```
 
-## Optional parts
-
-> [!NOTE]
-> Until SurrealDB 3.0.0, this operator was a single `?` question mark. Since this version, it was changed to `.?` to avoid conflicts with the `??` operator when parsing.
-
-The `.?` operator is used to indicate that a part is optional (it may not exist) it also allows you to safely access nested data without having to check if the nested data exists and exit an idiom path early when the result is NONE.
-
-```surql
-SELECT person.spouse.?.name FROM person;
-```
-
-This idiom safely accesses `person.spouse.name` if `spouse` exists; otherwise, it returns `NONE`.
-
-## Using optional parts
-
-If some `person` records have a `spouse` field and others do not:
-
-```surql
-SELECT name, spouse.?.name AS spouse_name FROM person;
-```
-
-This idiom will return `NONE` for `spouse_name` if the `spouse` field is not present.
-
 ## Recursive paths
 
 A recursive path allows record link or graph traversal down to a specified depth, as opposed to manually putting together a query to navigate down each level.
@@ -972,6 +1036,25 @@ The following shows a recursive query that returns the names of people known by 
 -- Get all names of people second to Tobie
 person:tobie.{2}(->friends_with->person).name;
 ```
+
+Other graph databases call these queries variable-length patterns or k-hop queries. Cypher's `(a)-[:knows*1..3]->(b)`, which gives every record one to three hops away, is `.{1..3+collect}` in SurrealQL. Without `+collect`, a range returns only the records at the deepest level it reaches:
+
+```surql
+CREATE person:a, person:b, person:c, person:d;
+RELATE person:a->knows->person:b;
+RELATE person:b->knows->person:c;
+RELATE person:c->knows->person:d;
+
+-- Every record one to three hops away
+person:a.{1..3+collect}->knows->person;
+//- [person:b, person:c, person:d]
+
+-- Only the records at the deepest level reached
+person:a.{1..3}->knows->person;
+//- [person:d]
+```
+
+The same queries can also be written in [GQL](/docs/learn/querying/gql/overview), whose variable-length quantifier is `->{1,3}`.
 
 As the syntax of recursive queries tends to be complex to the untrained eye, this section will explain them in order of difficulty, beginning with what queries were necessary before recursive paths were added in SurrealDB version 2.1.
 
@@ -992,9 +1075,10 @@ CREATE
 	city:los_angeles, city:san_francisco,
 	city:houston,     city:dallas,
 	city:vancouver,   city:victoria,
-	city:toronto,     city:ottawa
-		-- Give them each names like 'earth', 'us', 'bc', etc.
-	SET name = id.id();
+	city:toronto,     city:ottawa;
+
+-- Give them each names like 'earth', 'us', 'bc', etc.
+UPDATE planet, country, state, province, city SET name = id.id();
 
 -- Record and graph links from planet to country
 UPDATE planet:earth     SET next = [country:us, country:canada];
@@ -1283,7 +1367,7 @@ planet:earth
 }
 ```
 
-The following two rules of thumb are a good way to understand how the syntax inside the structure of the query.
+The following two rules of thumb explain how the syntax inside the structure of the query works.
 
 - The individual fields inside a recursive query are simply populated at each point,
 - The field with `.@` is used as the gateway to the next depth.
@@ -1416,7 +1500,7 @@ Recursive queries follow a few rules to determine how far to traverse and what t
 Recursive syntax is not just useful in creating recursive queries, but parsing them as well. Take the following example that creates some `person` records, gives each of them two friends, and then traverses the `friends_with` graph for the first `person` records to find its friends, friends of friends, and friends of friends of friends. Since every level except the last contains another `connections` field, adding a `.{some_number}.connections` to a `RETURN` statement is all that is needed to drill down to a certain depth.
 
 ```surql
-CREATE |person:1..21| SET name = id.id() RETURN NONE;
+CREATE |person:1..21| RETURN NONE;
 FOR $person IN SELECT * FROM person {
     LET $friends = (SELECT * FROM person
       WHERE id != $person.id ORDER BY rand() LIMIT 2);
@@ -1458,8 +1542,6 @@ Possible output of the final query:
 ```
 
 ### Path and unique node collection, shortest path
-
-<Since v="v2.2.0" />
 
 SurrealDB has a number of built-in algorithms that allow recursive queries to collect all paths, all unique nodes, and to find the shortest path to a record. These can be used by adding the following keywords to the part of the recursive syntax that specifies the depth to recurse:
 
@@ -1598,6 +1680,22 @@ LET $you = SELECT VALUE id FROM ONLY person WHERE name = 'you' LIMIT 1;
 LET $star = SELECT VALUE id FROM ONLY person WHERE name = 'star' LIMIT 1;
 $you.{..+shortest=$star}->knows->person;
 ```
+
+Where several paths have the same shortest length, `+shortest` returns only one of them. To get all of them, take the length of the shortest path and use it as the depth for `+path`, which then returns every path of exactly that many steps. Then keep the paths that end at the target. The depth must be a literal number, so this takes two queries. With one more edge added to the network above, two paths of three steps reach `person:star`:
+
+```surql
+RELATE person:friend1->knows->person:acquaintance3;
+
+LET $shortest = person:you.{..+shortest=person:star}->knows->person;
+$shortest.len();
+//- 3
+
+LET $paths = person:you.{3+path}->knows->person;
+$paths.filter(|$p| $p.last() = person:star);
+//- [[person:friend2, person:acquaintance3, person:star], [person:friend1, person:acquaintance3, person:star]]
+```
+
+The paths are stored in a parameter before filtering because a method written directly after a recursive path is applied inside the recursion, not to its result.
 
 #### +collect
 
@@ -1797,7 +1895,7 @@ person:you.{..+collect}.knows;
 
 ## Combining idiom parts
 
-Idioms can combine multiple parts to navigate complex data structures seamlessly.
+Idioms can combine multiple parts to navigate complex data structures.
 
 Suppose we have the following data:
 
@@ -1881,7 +1979,7 @@ SELECT friends[WHERE age > 18].name FROM person WHERE id = person:5;
 - **Chaining**: Idioms can be chained to traverse deeply nested structures.
 - **Performance**: Be mindful of performance when using complex idioms; indexing fields can help.
 - **NONE Safety**: Use optional parts (`?`) to handle `NONE` or missing data gracefully.
-- **Methods**: Leverage built-in methods for data manipulation within idioms.
+- **Methods**: Use built-in methods for data manipulation within idioms.
 - **Type Casting**: Use type casting if necessary to ensure data is in the correct format.
 
 ## Best practices
@@ -1893,4 +1991,4 @@ SELECT friends[WHERE age > 18].name FROM person WHERE id = person:5;
 
 ## Summary
 
-Idioms in SurrealQL are a powerful tool for navigating and manipulating data within your database. By understanding and effectively using idiom parts, you can write expressive and efficient queries that handle complex data structures with ease. Whether you're accessing nested fields, filtering arrays, or traversing graph relationships, idioms provide the flexibility you need to interact with your data seamlessly.
+An idiom is a path built from parts: fields, indexes, filters, methods, graph traversals, destructuring, optional parts and recursion. These parts can be combined in a single path to access nested fields, filter arrays or traverse graph relationships.
