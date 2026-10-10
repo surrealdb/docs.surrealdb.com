@@ -337,6 +337,21 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                     },
                 ],
             },
+            {
+                heading: "Libraries",
+                items: [
+                    {
+                        label: "Surqlize for TypeScript",
+                        href: "/docs/libraries/surqlize-typescript",
+                        description: "A type-safe TypeScript ORM for SurrealDB.",
+                    },
+                    {
+                        label: "Surqlize for PHP",
+                        href: "/docs/libraries/surqlize-php",
+                        description: "An object-relational mapper for SurrealDB in PHP.",
+                    },
+                ],
+            },
         ],
     },
 ];
