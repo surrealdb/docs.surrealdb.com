@@ -1,0 +1,148 @@
+---
+position: 15
+title: Surqlize cancellation, timeouts, and retries
+description: Control how long and how hard a Surqlize client waits for a query with signal(), requestTimeout() and retry(), tie every query of a request handler to an AbortSignal with withSignal(), and set the server-side TIMEOUT clause with timeout().
+---
+
+# Surqlize cancellation, timeouts, and retries
+
+Every select, create, insert, update, upsert, delete and relate query, and every [batch](/docs/libraries/surqlize-typescript/transactions), can be configured with how long and how hard the client waits for the answer. The SDK applies these options when it sends the request, and they do not change the SurrealQL that Surqlize renders. Live queries, `db.run()` and `db.api()` do not take them.
+
+The examples below use this setup.
+
+```ts title="Setup for the examples"
+import { Surreal } from "surrealdb";
+import { orm, table, t } from "surqlize";
+
+const user = table("user", { name: t.string(), age: t.number() });
+const post = table("post", { title: t.string(), content: t.string() });
+
+const surreal = new Surreal();
+await surreal.connect("ws://localhost:8000", {
+    namespace: "app",
+    database: "app",
+    authentication: { username: "root", password: "secret" },
+});
+
+const db = orm(surreal, user, post);
+
+// Reading a table that does not exist fails, so the examples create one record in each table first.
+await db.create("user", "ada").content({ name: "Ada", age: 36 });
+await db.create("post").content({ title: "Hello", content: "First post" });
+```
+
+```ts title="Request options"
+// Stop waiting when the signal aborts. The promise rejects with its reason.
+await db.select("post").signal(AbortSignal.timeout(2_000));
+
+// Give up with a TimeoutError after 5 seconds. 0 waits without limit.
+await db.select("post").requestTimeout(5_000);
+
+// Send the query again if it fails because of a transaction conflict
+await db.update("user", "ada").set({ age: { "+=": 1 } }).retry();
+```
+
+Like the other builder methods, they return a new query and leave the original unchanged. Signals combine: calling `.signal()` twice abandons the query when either signal aborts. `.requestTimeout()` overrides the `requestTimeout` option of the connection for that query.
+
+The three ways to limit a wait differ in who enforces the limit and in how the query fails.
+
+| Method                | Enforced by | The query fails with                      |
+| --------------------- | ----------- | ----------------------------------------- |
+| `.signal(signal)`     | Client      | The reason of the signal                  |
+| `.requestTimeout(ms)` | Client      | A `TimeoutError`                          |
+| `.timeout(duration)`  | Server      | A server error, once the duration is over |
+
+> [!WARNING]
+> Aborting means "stop waiting" and nothing more. The server is not told, and it may carry on. A write that was already sent may or may not have been applied. This holds for `.signal()` and for `.requestTimeout()`, which is not the same as the `TIMEOUT` clause described below.
+
+## Retrying conflicts
+
+When two transactions write to the same data, one of them fails with a conflict. `.retry()` sends the whole query again, with exponential backoff, until it succeeds or the attempts run out. It turns retries on using the attempts and delays of the connection's `retry` option. Pass options to override them, or `false` to turn retries off for that query.
+
+```ts title="Retry a batch"
+await db
+    .batch(
+        db.update("user", "ada").set({ age: { "+=": 1 } }),
+        db.create("post").set({ title: "Happy birthday, Ada", content: "Many happy returns." }),
+    )
+    .retry({ attempts: 5 });
+```
+
+Only retry what is safe to replay: a single statement, or a batch, which is applied atomically. Do not retry inside an interactive transaction, where a conflict has already failed the transaction.
+
+The `.retry()` method recognises the structured conflict error that SurrealDB 3.1.0 and later report. For earlier servers, give it a predicate:
+
+```ts title="Recognise conflicts on an older server"
+await db.update("user", "ada").set({ age: { "+=": 1 } }).retry({
+    retryable: (error) =>
+        error instanceof Error && /conflict|can be retried/i.test(error.message),
+});
+```
+
+A `.requestTimeout()` set on a batch applies to each attempt. The SDK documents the connection-wide retry settings in [transactions](/docs/reference/javascript/concepts/transactions#retrying-on-write-conflict).
+
+## Tying requests to a signal
+
+In a request handler, `db.withSignal(signal)` returns a view of the ORM in which every query is abandoned when the signal aborts, so you do not pass the signal to each call. It shares the connection and session, so you can make one for each request.
+
+```ts title="Cancel the work of a request"
+export default {
+    async fetch(request: Request) {
+        const scoped = db.withSignal(request.signal);
+
+        const users = await scoped.select("user");
+        await scoped.batch(
+            scoped.create("post").set({ title: "Hello", content: "First post" }),
+            scoped.update("user", "ada").set({ age: 37 }),
+        );
+
+        // A live subscription made through the view is killed when the request
+        // is aborted, and its isAlive property becomes false.
+        const changes = await scoped.live("user");
+
+        return Response.json(users);
+    },
+};
+```
+
+Batches, transactions and live subscriptions made through the view are bound to the signal as well. For a transaction that has already begun, `tx.withSignal(signal)` returns a handle on the same transaction in which every query is bound to the signal. The `commit()` and `cancel()` methods are not bound to it, so an abandoned request cannot leave the outcome of a commit in doubt. See [transactions and batches](/docs/libraries/surqlize-typescript/transactions).
+
+## Server-side timeouts
+
+`.timeout()` adds the SurrealQL `TIMEOUT` clause, which the server enforces. It takes a duration string, and it is available on `select`, `create`, `insert`, `update`, `upsert`, `delete` and `relate`.
+
+```ts title="Set a TIMEOUT clause"
+await db.update("user", "ada").set({ age: 31 }).timeout("10s");
+
+const users = await db
+    .select("user")
+    .where((user) => user.age.gt(18))
+    .timeout("5s");
+```
+
+A statement that runs past its timeout fails with a server error, for example `The query was not executed because it exceeded the timeout: 1ns` after `.timeout("1ns")`. To limit how long the client waits instead, use `.requestTimeout()`.
+
+## Prepared queries
+
+`.prepare()` returns the query as an SDK `BoundQuery`, and the options above are not carried over to it, because the caller sends a prepared query. Configure the SDK query instead.
+
+```ts title="Retry a prepared query"
+const prepared = db.select("user").prepare();
+
+const [users] = await surreal.query(prepared).retry().requestTimeout(5_000).collect();
+```
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Error handling"
+        description="The errors that timeouts and conflicts produce."
+        href="/docs/libraries/surqlize-typescript/error-handling"
+    />
+    <IconBox
+        title="Connections"
+        description="Share one connection across requests."
+        href="/docs/libraries/surqlize-typescript/connections"
+    />
+</Boxes>

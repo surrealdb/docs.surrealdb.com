@@ -1,0 +1,342 @@
+---
+position: 7
+title: Edges and graph
+description: Define typed graph edges with edge(), create them with db.relate(), and follow them in Surqlize queries with out(), in(), both() and ANY, including multi-hop traversals, edge filters, conditions in where(), and the edge adjacency lookup.
+---
+
+# Edges and graph
+
+An edge is a table that links two records. Surqlize treats edges as part of the schema: `edge()` defines one, `db.relate()` creates its records, and `.out()`, `.in()` and `.both()` follow it inside a query. TypeScript accepts only the edges that connect to the table you are on, and infers the type of what a traversal returns.
+
+## Defining edges
+
+`edge(from, name, to, fields)` takes the table the edge starts at, the name of the edge table, the table it points to, and the fields stored on the edge. Register edges with `orm()` beside the tables they connect.
+
+```ts title="Define tables and edges"
+import { edge, orm, t, table } from "surqlize";
+
+const user = table("user", { name: t.string(), email: t.string() });
+const post = table("post", {
+    title: t.string(),
+    content: t.string(),
+    author: t.record("user"),
+});
+const tag = table("tag", { label: t.string() });
+
+const authored = edge("user", "authored", "post", {
+    created: t.date(),
+    role: t.union([t.literal("author"), t.literal("co-author")]).default("author"),
+});
+
+// A post or a user can be tagged
+const tagged = edge(["post", "user"], "tagged", "tag", {});
+
+const follows = edge("user", "follows", "user", { since: t.date() });
+
+const db = orm(surreal, user, post, tag, authored, tagged, follows);
+```
+
+Every edge has three fields that you do not declare:
+
+- **`id`** is the `RecordId` of the edge.
+- **`in`** is the `RecordId` of the record the edge starts at.
+- **`out`** is the `RecordId` of the record the edge points to.
+
+Pass an array for `from` or `to` when an edge can start at, or point to, records in more than one table. The `in` or `out` field then accepts a record from any of them.
+
+The examples on this page use the schema above, with `db` created as described in [connections](/docs/libraries/surqlize-typescript/connections). The example data block creates a few records, so that the examples which await a query have records to relate and return.
+
+```ts title="Example data"
+import { RecordId } from "surrealdb";
+
+await db.create("user", "alice").content({ name: "Alice", email: "alice@example.com" });
+await db.create("user", "bob").content({ name: "Bob", email: "bob@example.com" });
+await db.create("post", "hello-world").content({
+    title: "Hello, world",
+    content: "The first post.",
+    author: new RecordId("user", "alice"),
+});
+await db.create("post", "post1").content({
+    title: "Edges",
+    content: "How edges work.",
+    author: new RecordId("user", "alice"),
+});
+await db.create("post", "post2").content({
+    title: "Traversals",
+    content: "How traversals work.",
+    author: new RecordId("user", "bob"),
+});
+await db.create("tag", "graph").content({ label: "graph" });
+await db.relate("authored", new RecordId("user", "alice"), new RecordId("post", "hello-world")).content({
+    created: new Date(),
+    role: "author",
+});
+await db.relate("tagged", new RecordId("post", "hello-world"), new RecordId("tag", "graph")).content({});
+```
+
+## Creating relations
+
+`db.relate(edge, from, to)` creates an edge between two records, given as `RecordId` values. Add data to the edge with `.content()` or `.set()`.
+
+```ts title="Relate two records"
+import { RecordId } from "surrealdb";
+
+const [relation] = await db
+    .relate("authored", new RecordId("user", "alice"), new RecordId("post", "hello-world"))
+    .content({ created: new Date(), role: "author" });
+```
+
+`relate()` applies the defaults declared on the edge fields, as `create()` does. In the schema above, `role` defaults to `"author"`, so it can be left out. `.replace()` is the exception and applies no defaults, so a field that it leaves out is absent from the result.
+
+With [validation](/docs/libraries/surqlize-typescript/validation) turned on, `relate()` requires every defaulted edge field to be given.
+
+```ts title="Use a default on an edge"
+const [defaulted] = await db
+    .relate("authored", new RecordId("user", "bob"), new RecordId("post", "post2"))
+    .content({ created: new Date() });
+// defaulted.role: "author", from the default in the schema
+```
+
+Like the other write queries, `relate()` also takes `.set()`, `.merge()`, `.patch()`, `.replace()`, `.only()`, `.timeout()` and `.return()`. The [mutations](/docs/libraries/surqlize-typescript/mutations) page describes the data methods. The input of `.content()` has the fields of the edge, without `id`, `in` and `out`.
+
+`.return()` takes `"none"`, `"before"`, `"after"` or `"diff"`, or a callback that projects the edge.
+
+```ts title="Return a projection"
+const info = await db
+    .relate("follows", new RecordId("user", "alice"), new RecordId("user", "bob"))
+    .set({ since: new Date() })
+    .return((edge) => ({
+        id: edge.id,
+        from: edge.in,
+        to: edge.out,
+        since: edge.since,
+    }));
+```
+
+A relate query returns an array. `.only()` returns the single edge instead.
+
+```ts title="Return a single edge"
+const relation = await db
+    .relate("authored", new RecordId("user", "bob"), new RecordId("post", "hello-world"))
+    .only()
+    .content({ created: new Date(), role: "co-author" });
+// relation: the authored edge, not an array
+```
+
+### Several records at once
+
+Pass arrays to create the cartesian product. The call below creates four edges: alice and bob each to `post1` and `post2`.
+
+```ts title="Relate many to many"
+const edges = await db
+    .relate(
+        "authored",
+        [new RecordId("user", "alice"), new RecordId("user", "bob")],
+        [new RecordId("post", "post1"), new RecordId("post", "post2")],
+    )
+    .content({ created: new Date(), role: "author" });
+```
+
+## Reading edges
+
+An edge is a table, so you read its own fields by selecting from it. The `in` and `out` fields hold the two endpoints, and `fetch()` replaces them with the linked records. The [querying](/docs/libraries/surqlize-typescript/querying) page describes `fetch()`.
+
+```ts title="Select from an edge table"
+const roles = await db.select("authored").return((e) => ({
+    when: e.created,
+    role: e.role,
+    author: e.in,
+    post: e.out,
+}));
+
+const withRecords = await db.select("authored").fetch("in", "out");
+```
+
+## Traversing the graph
+
+Call `.out()` on a record to follow an edge away from it (`->edge`), `.in()` to follow it in reverse (`<-edge`), or `.both()` to follow it in either direction (`<->edge`). You can start from the record in a select, as in `user.out("authored")`, or from any record-link field, as in `post.author.out(...)`.
+
+A step lands on the edge records, not on the table at the other end, so you chain a second step to reach the records themselves: `.out("authored")` is `->authored`, and `.out("authored").out("post")` is `->authored->post`. At each step TypeScript offers only the edges and tables that connect to where you are.
+
+The examples in this section use the schema from [Defining edges](#defining-edges).
+
+### Selecting the records
+
+Chain `.select().return()` to turn the last step into records. The traversal compiles to a subquery.
+
+```ts title="Select the records a traversal lands on"
+const usersWithPosts = await db.select("user").return((user) => ({
+    name: user.name,
+    posts: user
+        .out("authored")
+        .out("post")
+        .select()
+        .return((post) => ({ title: post.title })),
+}));
+// posts is { title: string }[]
+```
+
+The query above renders as follows.
+
+```surql title="Output"
+(SELECT VALUE { name: $this.name, posts: (SELECT VALUE { title: $this.title } FROM $parent.id->authored->post) } FROM $_v0)
+```
+
+Used on their own, without `.select()`, traversals give an array of record links, as `->authored->post` does in SurrealQL.
+
+```ts title="Get record links from a traversal"
+const links = await db.select("user").return((user) => ({
+    postIds: user.out("authored").out("post"),
+}));
+// links: { postIds: RecordId<"post">[] }[]
+```
+
+A record-link field can start a traversal too. The query below finds, for each post, the posts by its author.
+
+```ts title="Traverse from a record-link field"
+db.select("post").return((post) => ({
+    title: post.title,
+    sameAuthor: post.author
+        .out("authored")
+        .out("post")
+        .select()
+        .return((other) => ({ title: other.title })),
+}));
+```
+
+### Following several hops
+
+Steps chain, and each hop is typed against the table it lands on.
+
+```ts title="Multi-hop traversal"
+db.select("user").return((user) => ({
+    tags: user
+        .out("authored")
+        .out("post")
+        .out("tagged")
+        .out("tag")
+        .select()
+        .return((tag) => ({ label: tag.label })),
+}));
+// ->authored->post->tagged->tag
+```
+
+### Incoming edges
+
+`.in()` follows an edge in reverse.
+
+```ts title="Find the authors of a post"
+db.select("post").return((post) => ({
+    authors: post
+        .in("authored")
+        .in("user")
+        .select()
+        .return((user) => ({ name: user.name })),
+}));
+// <-authored<-user
+```
+
+### Either direction and any edge
+
+`.both()` follows an edge in either direction. Because it leads back along the edge it came from, the result can include the record you started at.
+
+The `ANY` marker, exported from `surqlize`, matches any edge or table, like `?` in SurrealQL. A call with no arguments does the same, so `.out()` and `.out(ANY)` are equivalent.
+
+```ts title="Either direction and wildcards"
+import { ANY } from "surqlize";
+
+db.select("user").return((user) => ({
+    connected: user.both("follows").both("user"), // <->follows<->user
+    reachable: user.out(ANY).out(ANY), // ->?->?
+}));
+```
+
+### Reading edge fields in a traversal
+
+Stop a traversal at the edge and select it to read fields stored on the edge.
+
+```ts title="Read the fields of the edges"
+db.select("user").return((user) => ({
+    edges: user
+        .out("authored")
+        .select()
+        .return((e) => ({ when: e.created, role: e.role })),
+}));
+```
+
+### Filtering a step
+
+Pass a callback to `.out()`, `.in()` or `.both()` to filter on the edge during the traversal. The callback receives a segment builder `g`. Build the edge segment with `g("edge")` and add a `.where()` whose callback receives the fields of the edge. Chained `.where()` calls are combined with AND, and `.clearWhere()` removes the conditions set so far.
+
+```ts title="Filter on edge fields"
+db.select("user").return((user) => ({
+    authored: user
+        .out((g) => g("authored").where((e) => e.role.eq("author")))
+        .out("post")
+        .select()
+        .return((post) => ({ title: post.title })),
+}));
+// ->(authored WHERE role = $_v1)->post, with "author" bound as $_v1
+```
+
+A step can name several edges, as in `user.out("authored", "follows")`, which compiles to `->(authored, follows)`.
+
+### Conditions on traversals
+
+Traversals can appear in a `where()` to filter the outer query. `len()` and `isEmpty()` are the usual checks for "has any" and "has none", and `contains()` checks for a given record.
+
+```ts title="Filter by what a record is related to"
+// Users who have authored at least one post
+db.select("user").where((user) => user.out("authored").out("post").len().gt(0));
+
+// Users who have authored none
+db.select("user").where((user) => user.out("authored").out("post").isEmpty());
+
+// Users who have authored a given post
+db.select("user").where((user) =>
+    user.out("authored").out("post").contains(new RecordId("post", "hello-world")),
+);
+```
+
+## Edge adjacency metadata
+
+The `lookup` property of the ORM lists, as runtime data, which edges leave each table (`to`) and which edges enter it (`from`). The edge tables themselves are included, so `authored` appears as a table that points to `post`.
+
+```ts title="Inspect the edges of each table"
+console.log(db.lookup.to);
+console.log(db.lookup.from);
+```
+
+```text title="Output"
+{
+  user: [ "authored", "tagged", "follows" ],
+  post: [ "tagged" ],
+  tag: [],
+  authored: [ "post" ],
+  tagged: [ "tag" ],
+  follows: [ "user" ],
+}
+{
+  user: [ "follows" ],
+  post: [ "authored" ],
+  tag: [ "tagged" ],
+  authored: [ "user" ],
+  tagged: [ "post", "user" ],
+  follows: [ "user" ],
+}
+```
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Recursive traversal"
+        description="Follow a step repeatedly, collect nodes, and find shortest paths."
+        href="/docs/libraries/surqlize-typescript/recursive-traversal"
+    />
+    <IconBox
+        title="Querying"
+        description="Filter, order, and project the records a traversal finds."
+        href="/docs/libraries/surqlize-typescript/querying"
+    />
+</Boxes>

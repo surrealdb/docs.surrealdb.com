@@ -1,0 +1,159 @@
+---
+position: 4
+title: Surqlize connections
+description: Create a Surqlize ORM instance with orm() from a SurrealDB JavaScript SDK connection or session, register tables and edges, use sessions for multiple tenants, derive validated and signal-bound views, and share one connection across an application.
+---
+
+# Surqlize connections
+
+Surqlize does not open or own a connection. You connect with the [JavaScript SDK](/docs/reference/javascript/concepts/connecting-to-surrealdb), then pass the connection to `orm()` together with your schemas. The SDK handles the transport and authentication.
+
+## Creating the ORM
+
+`orm()` takes a connection followed by the tables and edges to register. The connection is a `Surreal` instance, a session, or a request scope from the SDK.
+
+```ts title="Connect and create the ORM"
+import { Surreal } from "surrealdb";
+import { orm } from "surqlize";
+import { authored, post, user } from "../database/schema";
+
+const surreal = new Surreal();
+await surreal.connect("ws://localhost:8000", {
+    namespace: "app",
+    database: "app",
+    authentication: { username: "root", password: "secret" },
+});
+
+const db = orm(surreal, user, post, authored);
+```
+
+The returned `Orm` has the query methods `select`, `create`, `insert`, `update`, `upsert`, `delete`, `relate`, `live`, `batch` and `transaction`. Each takes the name of a table or edge that you registered. The connection stays available as `db.surreal`.
+
+## Registering schemas
+
+Pass tables and edges as separate arguments, or group them in a single object. Both forms produce the same fully typed ORM.
+
+```ts title="Individual arguments or a schema object"
+const byArguments = orm(surreal, user, post, authored);
+const byObject = orm(surreal, { user, post, authored });
+```
+
+The object form suits a dedicated schema module, so that you define your tables once and reuse them across several ORM instances.
+
+```ts title="database/schema.ts"
+import { edge, t, table } from "surqlize";
+
+export const user = table("user", {
+    name: t.string(),
+    email: t.string(),
+    age: t.number(),
+    created: t.date(),
+});
+
+export const post = table("post", {
+    title: t.string(),
+    content: t.string(),
+});
+
+export const authored = edge("user", "authored", "post", {
+    created: t.date(),
+});
+```
+
+```ts title="src/db.ts"
+import { Surreal } from "surrealdb";
+import { orm } from "surqlize";
+import * as schema from "../database/schema";
+
+export const db = orm(new Surreal(), schema);
+```
+
+Every export of a module passed this way must be a table or an edge. TypeScript rejects a module that also exports a constant or a function.
+
+Queries address a table by its name, for example `db.select("user")`, however it was registered. The keys of a schema object are only a way to organise the tables.
+
+## Sessions
+
+Surqlize accepts any SDK session, so you can run several ORM instances over a single connection, each with its own namespace, database, authentication state and variables. See [multiple sessions](/docs/reference/javascript/concepts/multiple-sessions) in the SDK documentation.
+
+```ts title="One session per tenant"
+import { Surreal } from "surrealdb";
+import { orm, table, t } from "surqlize";
+
+const user = table("user", { name: t.string(), age: t.number() });
+
+const surreal = new Surreal();
+await surreal.connect("ws://localhost:8000");
+await surreal.signin({ username: "root", password: "secret" });
+
+const tenantA = await surreal.newSession();
+await tenantA.signin({ username: "root", password: "secret" });
+await tenantA.use({ namespace: "app", database: "tenant_a" });
+
+const tenantB = await surreal.newSession();
+await tenantB.signin({ username: "root", password: "secret" });
+await tenantB.use({ namespace: "app", database: "tenant_b" });
+
+const dbA = orm(tenantA, user);
+const dbB = orm(tenantB, user);
+
+await dbA.create("user").set({ name: "Alice", age: 30 });
+await dbB.create("user").set({ name: "Bob", age: 25 });
+```
+
+`forkSession()` creates a session that inherits the namespace, database, authentication and variables of an existing one. Sessions implement `Symbol.asyncDispose`, so `await using` closes a session when the scope ends.
+
+```ts title="A disposable forked session"
+{
+    await using session = await surreal.forkSession();
+    await session.use({ database: "analytics" });
+
+    const db = orm(session, user);
+    await db.create("user").content({
+        name: "Carol",
+        email: "carol@example.com",
+        age: 41,
+        created: new Date(),
+    });
+    const users = await db.select("user");
+}
+```
+
+## Views of the ORM
+
+`validated()` and `withSignal()` each return a new ORM over the same connection and session, with the same tables. The original ORM is unchanged, and the views combine.
+
+- `db.validated()` checks the data a query writes against the schema before it is sent. See [runtime validation](/docs/libraries/surqlize-typescript/validation).
+- `db.withSignal(signal)` abandons every query when the signal aborts. See [cancellation, timeouts, and retries](/docs/libraries/surqlize-typescript/request-options).
+
+```ts title="Combine views"
+const controller = new AbortController();
+const strict = db.validated();
+const scoped = strict.withSignal(controller.signal);
+```
+
+## Connections and pooling
+
+A pool is not needed for concurrency. The SDK serves concurrent requests on one connection, so queries from many `orm()` calls or request handlers can be in flight at once. In practice, this means:
+
+- **One `Surreal` connection per process**, created at start-up and shared by every ORM instance.
+- **A session per tenant or per request** when you need separate namespace, database, authentication or variables. Sessions share the connection.
+- **`db.withSignal(signal)`** to cancel the work of a request when the client goes away. See [cancellation, timeouts, and retries](/docs/libraries/surqlize-typescript/request-options).
+- **`db.batch()` or a transaction** when several statements must run together. See [transactions and batches](/docs/libraries/surqlize-typescript/transactions).
+
+Use several `Surreal` connections only to spread load across servers or to isolate failure domains, and manage them in your own code.
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Querying"
+        description="Build your first select query."
+        href="/docs/libraries/surqlize-typescript/querying"
+    />
+    <IconBox
+        title="Mutations"
+        description="Write data with create, insert, update, upsert, and delete."
+        href="/docs/libraries/surqlize-typescript/mutations"
+    />
+</Boxes>

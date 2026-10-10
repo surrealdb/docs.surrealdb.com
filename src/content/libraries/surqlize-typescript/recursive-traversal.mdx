@@ -1,0 +1,141 @@
+---
+position: 8
+title: Recursive traversal
+description: Follow a graph step repeatedly in Surqlize with recurse(), collect() and shortest(), covering fixed depths, depth ranges, unique node collection with inclusive, shortest-path search, edge filters inside a step, and depth validation errors.
+---
+
+# Recursive traversal
+
+Recursive traversal follows the same step again and again, which suits questions such as friends of friends, everyone reachable from a record, or the shortest route between two records. Surqlize exposes SurrealQL [recursive paths](/docs/reference/query-language/language-primitives/idioms#recursive-paths) as three methods: `recurse()`, `collect()` and `shortest()`.
+
+The repeated step is a callback that receives the node being expanded. It must land back on the same table, so every iteration is typed against one record type. The methods work on a record in a select, as in `person.recurse(...)`, and on any record-link field.
+
+The examples on this page use a `person` table and a `knows` edge:
+
+```ts title="Schema for the recursive examples"
+import { RecordId } from "surrealdb";
+import { edge, orm, t, table } from "surqlize";
+
+const person = table("person", { name: t.string() });
+const knows = edge("person", "knows", "person", { since: t.number() });
+
+const db = orm(surreal, person, knows);
+```
+
+The example data block creates five people. The `knows` edges form a cycle from alice through bob, carol and dave, and back to alice, with a branch from alice to erin.
+
+```ts title="Example data"
+import { RecordId } from "surrealdb";
+
+await db.create("person", "alice").content({ name: "Alice" });
+await db.create("person", "bob").content({ name: "Bob" });
+await db.create("person", "carol").content({ name: "Carol" });
+await db.create("person", "dave").content({ name: "Dave" });
+await db.create("person", "erin").content({ name: "Erin" });
+
+await db.relate("knows", new RecordId("person", "alice"), new RecordId("person", "bob")).set({ since: 2010 });
+await db.relate("knows", new RecordId("person", "bob"), new RecordId("person", "carol")).set({ since: 2012 });
+await db.relate("knows", new RecordId("person", "carol"), new RecordId("person", "dave")).set({ since: 2015 });
+await db.relate("knows", new RecordId("person", "dave"), new RecordId("person", "alice")).set({ since: 2018 });
+await db.relate("knows", new RecordId("person", "alice"), new RecordId("person", "erin")).set({ since: 2016 });
+```
+
+Each example writes the step inline, as `(n) => n.out("knows").out("person")`, so that `n` is typed. The step is two hops, because a step first lands on the edge and then on the table at the other end. See [edges and graph](/docs/libraries/surqlize-typescript/edges-and-graph#traversing-the-graph).
+
+## Fixed depth and depth ranges
+
+`recurse(depth, step)` takes a fixed count or a `{ min?, max? }` range. The bounds are inclusive integers from `1` to `256`. A fixed depth returns the nodes exactly that many hops away. A range returns the nodes at the deepest level it reaches, and an empty array when the minimum depth is never reached.
+
+```ts title="Recurse to a depth"
+const result = await db.select("person", "alice").return((p) => ({
+    friendsOfFriends: p.recurse(2, (n) => n.out("knows").out("person")),
+    between: p.recurse({ min: 2, max: 4 }, (n) => n.out("knows").out("person")),
+    atMost: p.recurse({ max: 3 }, (n) => n.out("knows").out("person")),
+}));
+// each field: RecordId<"person">[]
+```
+
+The three fields compile to `.{2}(...)`, `.{2..4}(...)` and `.{..3}(...)`.
+
+> [!WARNING]
+> On a graph that contains cycles, a range without a `max` fails with SurrealDB's `Exceeded the idiom recursion limit of 256` error. Set a `max`, or use `collect()`.
+
+## Collecting unique nodes
+
+`collect([depth,] step, { inclusive? })` returns every distinct node reached within the depth, nearest first. It finishes on graphs with cycles, so the depth is optional. Set `inclusive: true` to include the starting record.
+
+```ts title="Collect the reachable nodes"
+const result = await db.select("person", "alice").return((p) => ({
+    network: p.collect((n) => n.out("knows").out("person")),
+    nearby: p.collect({ max: 2 }, (n) => n.out("knows").out("person")),
+    nearbyAndMe: p.collect({ max: 2 }, (n) => n.out("knows").out("person"), {
+        inclusive: true,
+    }),
+    names: p
+        .collect({ max: 2 }, (n) => n.out("knows").out("person"))
+        .select()
+        .return((friend) => ({ name: friend.name })),
+}));
+```
+
+The first field compiles to `.{..+collect}(...)`. Like any other traversal, the result can be materialised with `.select().return()`, as the last field shows.
+
+## Shortest path
+
+`shortest(target, step, { inclusive? })` returns the nodes walked from the start to `target`. The start record is only included with `inclusive: true`. The target is a `RecordId` or an expression of the same record type, and a `RecordId` is bound as a query parameter. The search has no depth limit.
+
+When there is no path, SurrealDB returns `NONE`, so the result is typed `RecordId<"person">[] | undefined`. Use `.unwrap()` to select the records along a path.
+
+```ts title="Find the shortest path between two people"
+const route = await db.select("person", "alice").return((p) => ({
+    path: p.shortest(new RecordId("person", "dave"), (n) => n.out("knows").out("person")),
+    pathNames: p
+        .shortest(new RecordId("person", "dave"), (n) => n.out("knows").out("person"))
+        .unwrap()
+        .select()
+        .return((n) => ({ name: n.name })),
+}));
+// path: RecordId<"person">[] | undefined
+```
+
+When the target is the start record itself, the result is `NONE`, unless a cycle leads back to it. In that case the result is the walk around the cycle.
+
+## Steps and conditions
+
+Edge filters work inside the step. The step below follows only the `knows` edges whose `since` is 2015 or later.
+
+```ts title="Filter edges inside a step"
+const recent = await db.select("person", "alice").return((p) => ({
+    recent: p.recurse(2, (n) => n.out((g) => g("knows").where((e) => e.since.gte(2015))).out("person")),
+}));
+```
+
+The `where()` callback of a query can also use the result of a recursive method. The query below keeps the people who reach more than two others within two hops.
+
+```ts title="Filter a query by a recursive result"
+const wellConnected = await db.select("person").where((p) =>
+    p.collect({ max: 2 }, (n) => n.out("knows").out("person")).len().gt(2),
+);
+```
+
+A step must land on the table it started from. A step that ends on a different table, such as one that follows a `wrote` edge to a `post`, is a compile-time error.
+
+## Limits
+
+- The depth bounds must be integers from `1` to `256`, and `min` must not be greater than `max`. Anything else throws an `OrmError` as soon as the method is called, for example `Recursion depth must be an integer between 1 and 256, received 257`.
+- The `+path` option, which returns every walked path, is not exposed.
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Edges and graph"
+        description="Define edges and use single-step traversal."
+        href="/docs/libraries/surqlize-typescript/edges-and-graph"
+    />
+    <IconBox
+        title="Querying"
+        description="Order, limit, and project query results."
+        href="/docs/libraries/surqlize-typescript/querying"
+    />
+</Boxes>

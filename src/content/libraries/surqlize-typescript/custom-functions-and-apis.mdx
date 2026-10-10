@@ -1,0 +1,172 @@
+---
+position: 11
+title: Custom functions and APIs
+description: Call user-defined SurrealDB functions and DEFINE API endpoints from Surqlize with typed parameters and results, using fn(), db.run(), api(), and db.api().
+---
+
+# Custom functions and APIs
+
+Surqlize can call the [user-defined functions](/docs/reference/query-language/statements/define/function) and [API endpoints](/docs/reference/query-language/statements/define/api) that you define in the database. You describe the signature in TypeScript once, TypeScript checks the arguments you pass, and Surqlize parses the value that comes back against the type you declared.
+
+Surqlize only describes and calls these objects. It does not run `DEFINE FUNCTION` or `DEFINE API`, so define them in the database first.
+
+## User-defined functions
+
+`fn(name, params, returns)` describes a function. Pass the name without the `fn::` prefix, an array of parameter types, and the return type. For a function defined as `fn::util::greet`, pass `"util::greet"`.
+
+```surql title="Define the functions"
+DEFINE FUNCTION fn::greet($name: string) -> string {
+    RETURN "Hello, " + $name;
+};
+
+DEFINE FUNCTION fn::add($a: number, $b: number) -> number {
+    RETURN $a + $b;
+};
+
+DEFINE FUNCTION fn::get_pi() -> number {
+    RETURN 3.14159;
+};
+
+DEFINE FUNCTION fn::is_adult($age: number) -> bool {
+    RETURN $age >= 18;
+};
+```
+
+```ts title="Describe the function"
+import { fn, t } from "surqlize";
+
+const greet = fn("greet", [t.string()], t.string());
+```
+
+### Calling a function directly
+
+`db.run()` calls the function with an array of arguments and resolves to the typed result. For a function without parameters, leave the arguments out.
+
+```ts title="Run a function"
+import { fn, orm, t, table } from "surqlize";
+
+const user = table("user", {
+    name: t.string(),
+    email: t.string(),
+    age: t.number(),
+});
+
+const db = orm(surreal, user);
+
+const message = await db.run(greet, ["world"]);
+message;
+//- "Hello, world"
+
+const add = fn("add", [t.number(), t.number()], t.number());
+const sum = await db.run(add, [3, 7]);
+
+const getPi = fn("get_pi", [], t.number());
+const pi = await db.run(getPi);
+```
+
+The result is parsed against the return type. When the function returns something else, `db.run()` throws a `TypeParseError`.
+
+A transaction has the same method, so `tx.run()` runs the function inside the transaction:
+
+```ts title="Run a function in a transaction"
+const greeting = await db.transaction(async (tx) => tx.run(greet, ["transactions"]));
+```
+
+### Calling a function inside a query
+
+The value returned by `fn()` is also callable inside a query. Pass a field or record from the callback as the first argument, which supplies the query context, followed by the arguments. Each argument is an expression, such as a field. To pass a literal value, wrap it with `db.value()`.
+
+```ts title="Use a function in a projection and a filter"
+const isAdult = fn("is_adult", [t.number()], t.bool());
+
+await db.create("user", "ada").set({
+    name: "Ada",
+    email: "ada@example.com",
+    age: 36,
+});
+
+const greetings = await db.select("user").return((user) => ({
+    greeting: greet(user, user.name),
+}));
+
+const adults = await db.select("user").where((user) => isAdult(user, user.age));
+```
+
+## API endpoints
+
+An endpoint defined with `DEFINE API` can be called through the SDK. `api(path, methods)` describes the endpoint, with a request and response type for each HTTP method that it supports. `DEFINE API` needs SurrealDB 3.0 or later.
+
+```surql title="Define the endpoints"
+DEFINE API "/echo" FOR post THEN {
+    {
+        status: 200,
+        body: $request.body
+    };
+};
+
+DEFINE API "/status" FOR get THEN {
+    {
+        status: 200,
+        body: { ok: true }
+    };
+};
+
+DEFINE API "/version" FOR get THEN {
+    {
+        status: 200,
+        body: { version: "1.0.0" }
+    };
+};
+```
+
+```ts title="Describe and call the endpoint"
+import { api, t } from "surqlize";
+
+const echo = api("/echo", {
+    post: {
+        request: t.object({ text: t.string() }),
+        response: t.object({ text: t.string() }),
+    },
+});
+
+const client = db.api(echo);
+const response = await client.post("/echo", { text: "hello" });
+
+response.status;
+//- 200
+
+response.body?.text;
+//- "hello"
+```
+
+`db.api()` takes one or more endpoint descriptions and returns a client with `get`, `post`, `put`, `delete`, `patch`, and `trace` methods. Each method only accepts paths that you described for that HTTP method, and a body of the declared request type. The response has a `status`, a `headers` object, and a `body`, each of which is optional in the type. The `body` is parsed against the declared response type, and a body that does not match throws a `TypeParseError`. The request body is checked by TypeScript at compile time. Surqlize does not validate it when the request is sent.
+
+```ts title="Several endpoints on one client"
+import { api, t } from "surqlize";
+
+const status = api("/status", { get: { response: t.object({ ok: t.bool() }) } });
+const version = api("/version", { get: { response: t.object({ version: t.string() }) } });
+
+const client = db.api(status, version);
+
+const health = await client.get("/status");
+health.body?.ok;
+//- true
+```
+
+Both `request` and `response` are optional. Leave out `request` for methods without a body, such as `get`. See [invoking APIs](/docs/reference/javascript/concepts/invoking-apis) in the SDK documentation for the underlying calls.
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Functions"
+        description="The built-in function methods and families."
+        href="/docs/libraries/surqlize-typescript/functions"
+    />
+    <IconBox
+        title="Error handling"
+        description="What happens when a result does not match its declared type."
+        href="/docs/libraries/surqlize-typescript/error-handling"
+    />
+</Boxes>
