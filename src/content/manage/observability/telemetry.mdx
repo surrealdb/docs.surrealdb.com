@@ -9,6 +9,96 @@ description: "OTLP push export of metrics, logs, and traces. Intervals, backward
 This page covers push export using the OpenTelemetry Protocol (OTLP): your server sends signals to a collector. For pull scraping of `GET /metrics` (Prometheus), see [Observability (metrics and Prometheus)](/docs/manage/observability/observability).
 
 <Tabs>
+<TabItem label="SurrealDB 3.1 and later">
+
+From SurrealDB 3.1, OpenTelemetry is the single source of truth for metrics and, where configured, for log records emitted on the shared logger provider - including audit and slow-query events on **SurrealDB Enterprise** when you opt in with `SURREAL_AUDIT_OTEL_EXPORT` / `SURREAL_SLOW_QUERY_OTEL_EXPORT`. One meter provider and one logger provider route measurements to multiple exporters, including the Prometheus text exposition at [`GET /metrics`](/docs/manage/observability/observability). An OTLP subscriber receives the same **metric** surface that a fully authenticated Prometheus scrape sees, plus traces and any **log** signals you have enabled (subject to the `/metrics` allowlist only for the pull path, not for OTLP).
+
+For Prometheus pull - allowlists, naming, migration from older series, multi-tenant guidance, and Community versus Enterprise context - see [Observability (metrics and Prometheus)](/docs/manage/observability/observability) and [Enterprise observability](/docs/manage/observability/enterprise-observability).
+
+## What flows over OTLP
+
+| Signal | Source | Carries |
+| --- | --- | --- |
+| Metrics | Unified meter provider | Every instrument also surfaced on `/metrics`, plus the legacy `http.server.*` / `rpc.server.*` instruments kept for backward compatibility. |
+| Logs | Unified logger provider | **Enterprise:** audit (`surrealdb.audit`) and slow-query (`surrealdb.slow_query`) records when the file pipeline is enabled **and** the matching `SURREAL_*_OTEL_EXPORT` flag is `true`. Severity mapping is summarised on [Observability (metrics and Prometheus)](/docs/manage/observability/observability) and [Enterprise observability](/docs/manage/observability/enterprise-observability). |
+| Traces | `tracing` → OpenTelemetry bridge | Instrumented spans; enterprise builds may enrich spans with tenant attributes when enabled. |
+
+Configure the OTLP push pipeline with:
+
+```text
+SURREAL_TELEMETRY_PROVIDER=otlp
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317   # gRPC by default
+```
+
+When `SURREAL_TELEMETRY_PROVIDER` is unset (or any value other than `otlp`), OTLP exporters are not built; metrics still flow to Prometheus when `/metrics` is enabled. **SurrealDB Enterprise** audit and slow-query **file** sinks are independent of OTLP - they keep writing whenever configured.
+
+When `SURREAL_TELEMETRY_DISABLE_METRICS=true`, the OTLP metrics reader is skipped while logs and traces continue to push.
+
+When `SURREAL_TELEMETRY_DISABLE_TRACING=true`, the OTLP trace exporter is skipped while metrics and logs continue to push.
+
+## Push interval
+
+Metric push frequency follows the OpenTelemetry specification and is controlled by `OTEL_METRIC_EXPORT_INTERVAL` (milliseconds; default `60000`). The SDK reads this at startup and applies it to the periodic reader behind OTLP metrics. Sub-minute intervals (10-15 s) are common when you want responsive dashboards.
+
+## Process metric freshness
+
+`surrealdb.process.memory` and `surrealdb.process.cpu_percent` are observable gauges backed by a process-wide cache. A background task refreshes the cache on a fixed cadence so values stay fresh whether scrapers hit `/metrics` or OTLP pushes on its own schedule.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `SURREAL_PROCESS_METRICS_REFRESH_INTERVAL` | `5` | Refresh interval in seconds. Tighter intervals reduce staleness but can make `cpu_percent` noisier (it is computed as a delta since the last refresh). Floored at one second. |
+
+The task runs only when at least one metrics reader is configured (Prometheus and/or OTLP). OTLP-only deployments get the same freshness guarantee as Prometheus scrapers.
+
+## Histogram bucket views
+
+The meter provider applies three default views:
+
+- Instruments named `*.duration` with unit seconds use a quasi-exponential bucket family from 5 ms to 30 s.
+- Instruments named `*.duration` with unit milliseconds use a parallel millisecond-scale family for the legacy HTTP/RPC pipeline.
+- Instruments named `*.size` with unit bytes use a 1 KiB - 100 MiB byte family.
+
+Operators with custom views can override these before building the provider; refer to the OpenTelemetry SDK documentation.
+
+## Backward-compatibility instrument set
+
+Legacy OpenTelemetry HTTP/RPC instruments are still recorded under separate meter scopes (`surrealdb.http`, `surrealdb.rpc`). They coexist with the new `surrealdb.*` families so existing OTLP dashboards that pivot on semantic-convention names keep working.
+
+| Instrument | Kind | Unit | Labels |
+| --- | --- | --- | --- |
+| `http.server.active_requests` | UpDownCounter\<i64> | - | `http.request.method`, `http.route`, `network.protocol.{name,version}` |
+| `http.server.request.count` | Counter\<u64> | - | as above + `http.response.status_code` |
+| `http.server.request.duration` | Histogram\<u64> | `ms` | as `http.server.request.count` |
+| `http.server.request.size` | Histogram\<u64> | `By` | as `http.server.request.count` |
+| `http.server.response.size` | Histogram\<u64> | `By` | as `http.server.request.count` |
+| `rpc.server.active_connections` | UpDownCounter\<i64> | - | `rpc.service` |
+| `rpc.server.connection.count` | Counter\<u64> | - | `rpc.service` (incremented on connect only) |
+| `rpc.server.request.duration` | Histogram\<u64> | `ms` | `rpc.service`, `rpc.method`, `rpc.error` |
+| `rpc.server.request.size` | Histogram\<u64> | `By` | `rpc.service` (per WebSocket frame) |
+| `rpc.server.response.size` | Histogram\<u64> | `By` | `rpc.service` (per WebSocket frame) |
+
+## Deprecated environment variables
+
+The following variables are still parsed for backwards compatibility but are no longer applied. The server logs a deprecation warning at startup if either is set:
+
+- `SURREAL_TELEMETRY_NAMESPACE` - the `namespace` attribute was removed from telemetry metrics because it identifies tenants in multi-tenant deployments.
+- `SURREAL_TELEMETRY_RPC_LIVE_ID` - per-notification OTLP attribution by `rpc.live_id` was removed when WebSocket telemetry was unified into the execution observer pipeline.
+
+## Local development
+
+From the repository root, start the observability stack under `dev/docker` (collector, Grafana, Prometheus, Tempo, and Loki):
+
+```bash
+docker compose -f dev/docker/compose.yaml up -d
+SURREAL_TELEMETRY_PROVIDER=otlp OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317" surreal start
+```
+
+Open `http://localhost:3000` in a browser; default Grafana credentials are `admin` / `admin`.
+
+For OpenTelemetry log and trace verbosity, file output, sockets, and other logging flags used alongside this stack, see [Logging](/docs/manage/observability/logging) and [`surreal start`](/docs/reference/cli/surrealdb-cli/commands/start).
+
+</TabItem>
+
 <TabItem label="Before SurrealDB 3.1">
 
 SurrealDB can be monitored by enabling built-in observability.
@@ -123,96 +213,6 @@ The metrics are shown here in the form required by the [OpenTelemetry Metrics Se
 For async runtime introspection (tasks, polls, scheduling), you can use the [Tokio console](/docs/manage/observability/tokio-console) which is separate from OTLP.
 
 For server logging (levels, JSON, files, sockets, slow-query logging), see [Logging](/docs/manage/observability/logging).
-
-</TabItem>
-
-<TabItem label="SurrealDB 3.1 and later">
-
-From SurrealDB 3.1, OpenTelemetry is the single source of truth for metrics and, where configured, for log records emitted on the shared logger provider - including audit and slow-query events on **SurrealDB Enterprise** when you opt in with `SURREAL_AUDIT_OTEL_EXPORT` / `SURREAL_SLOW_QUERY_OTEL_EXPORT`. One meter provider and one logger provider route measurements to multiple exporters, including the Prometheus text exposition at [`GET /metrics`](/docs/manage/observability/observability). An OTLP subscriber receives the same **metric** surface that a fully authenticated Prometheus scrape sees, plus traces and any **log** signals you have enabled (subject to the `/metrics` allowlist only for the pull path, not for OTLP).
-
-For Prometheus pull - allowlists, naming, migration from older series, multi-tenant guidance, and Community versus Enterprise context - see [Observability (metrics and Prometheus)](/docs/manage/observability/observability) and [Enterprise observability](/docs/manage/observability/enterprise-observability).
-
-## What flows over OTLP
-
-| Signal | Source | Carries |
-| --- | --- | --- |
-| Metrics | Unified meter provider | Every instrument also surfaced on `/metrics`, plus the legacy `http.server.*` / `rpc.server.*` instruments kept for backward compatibility. |
-| Logs | Unified logger provider | **Enterprise:** audit (`surrealdb.audit`) and slow-query (`surrealdb.slow_query`) records when the file pipeline is enabled **and** the matching `SURREAL_*_OTEL_EXPORT` flag is `true`. Severity mapping is summarised on [Observability (metrics and Prometheus)](/docs/manage/observability/observability) and [Enterprise observability](/docs/manage/observability/enterprise-observability). |
-| Traces | `tracing` → OpenTelemetry bridge | Instrumented spans; enterprise builds may enrich spans with tenant attributes when enabled. |
-
-Configure the OTLP push pipeline with:
-
-```text
-SURREAL_TELEMETRY_PROVIDER=otlp
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317   # gRPC by default
-```
-
-When `SURREAL_TELEMETRY_PROVIDER` is unset (or any value other than `otlp`), OTLP exporters are not built; metrics still flow to Prometheus when `/metrics` is enabled. **SurrealDB Enterprise** audit and slow-query **file** sinks are independent of OTLP - they keep writing whenever configured.
-
-When `SURREAL_TELEMETRY_DISABLE_METRICS=true`, the OTLP metrics reader is skipped while logs and traces continue to push.
-
-When `SURREAL_TELEMETRY_DISABLE_TRACING=true`, the OTLP trace exporter is skipped while metrics and logs continue to push.
-
-## Push interval
-
-Metric push frequency follows the OpenTelemetry specification and is controlled by `OTEL_METRIC_EXPORT_INTERVAL` (milliseconds; default `60000`). The SDK reads this at startup and applies it to the periodic reader behind OTLP metrics. Sub-minute intervals (10-15 s) are common when you want responsive dashboards.
-
-## Process metric freshness
-
-`surrealdb.process.memory` and `surrealdb.process.cpu_percent` are observable gauges backed by a process-wide cache. A background task refreshes the cache on a fixed cadence so values stay fresh whether scrapers hit `/metrics` or OTLP pushes on its own schedule.
-
-| Variable | Default | Notes |
-| --- | --- | --- |
-| `SURREAL_PROCESS_METRICS_REFRESH_INTERVAL` | `5` | Refresh interval in seconds. Tighter intervals reduce staleness but can make `cpu_percent` noisier (it is computed as a delta since the last refresh). Floored at one second. |
-
-The task runs only when at least one metrics reader is configured (Prometheus and/or OTLP). OTLP-only deployments get the same freshness guarantee as Prometheus scrapers.
-
-## Histogram bucket views
-
-The meter provider applies three default views:
-
-- Instruments named `*.duration` with unit seconds use a quasi-exponential bucket family from 5 ms to 30 s.
-- Instruments named `*.duration` with unit milliseconds use a parallel millisecond-scale family for the legacy HTTP/RPC pipeline.
-- Instruments named `*.size` with unit bytes use a 1 KiB - 100 MiB byte family.
-
-Operators with custom views can override these before building the provider; refer to the OpenTelemetry SDK documentation.
-
-## Backward-compatibility instrument set
-
-Legacy OpenTelemetry HTTP/RPC instruments are still recorded under separate meter scopes (`surrealdb.http`, `surrealdb.rpc`). They coexist with the new `surrealdb.*` families so existing OTLP dashboards that pivot on semantic-convention names keep working.
-
-| Instrument | Kind | Unit | Labels |
-| --- | --- | --- | --- |
-| `http.server.active_requests` | UpDownCounter\<i64> | - | `http.request.method`, `http.route`, `network.protocol.{name,version}` |
-| `http.server.request.count` | Counter\<u64> | - | as above + `http.response.status_code` |
-| `http.server.request.duration` | Histogram\<u64> | `ms` | as `http.server.request.count` |
-| `http.server.request.size` | Histogram\<u64> | `By` | as `http.server.request.count` |
-| `http.server.response.size` | Histogram\<u64> | `By` | as `http.server.request.count` |
-| `rpc.server.active_connections` | UpDownCounter\<i64> | - | `rpc.service` |
-| `rpc.server.connection.count` | Counter\<u64> | - | `rpc.service` (incremented on connect only) |
-| `rpc.server.request.duration` | Histogram\<u64> | `ms` | `rpc.service`, `rpc.method`, `rpc.error` |
-| `rpc.server.request.size` | Histogram\<u64> | `By` | `rpc.service` (per WebSocket frame) |
-| `rpc.server.response.size` | Histogram\<u64> | `By` | `rpc.service` (per WebSocket frame) |
-
-## Deprecated environment variables
-
-The following variables are still parsed for backwards compatibility but are no longer applied. The server logs a deprecation warning at startup if either is set:
-
-- `SURREAL_TELEMETRY_NAMESPACE` - the `namespace` attribute was removed from telemetry metrics because it identifies tenants in multi-tenant deployments.
-- `SURREAL_TELEMETRY_RPC_LIVE_ID` - per-notification OTLP attribution by `rpc.live_id` was removed when WebSocket telemetry was unified into the execution observer pipeline.
-
-## Local development
-
-From the repository root, start the observability stack under `dev/docker` (collector, Grafana, Prometheus, Tempo, and Loki):
-
-```bash
-docker compose -f dev/docker/compose.yaml up -d
-SURREAL_TELEMETRY_PROVIDER=otlp OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317" surreal start
-```
-
-Open `http://localhost:3000` in a browser; default Grafana credentials are `admin` / `admin`.
-
-For OpenTelemetry log and trace verbosity, file output, sockets, and other logging flags used alongside this stack, see [Logging](/docs/manage/observability/logging) and [`surreal start`](/docs/reference/cli/surrealdb-cli/commands/start).
 
 </TabItem>
 
