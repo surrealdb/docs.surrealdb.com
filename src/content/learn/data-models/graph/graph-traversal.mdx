@@ -243,7 +243,6 @@ SELECT out, mood FROM wrote WHERE location = "Arizona";
 
 Both forms reach the same edges. The arrow suits a walk that carries on to the records at the far end, and the table form suits a question about the edges themselves.
 
-https://github.com/orgs/surrealdb/discussions/1696
 To return the edges in pages, put a full `SELECT` inside the parentheses. It takes `ORDER BY`, `LIMIT` and `START`: `LIMIT` sets the size of a page, `START` skips the pages before it, and `ORDER BY` keeps the order the same from one page to the next. The path then continues to the records at the far end. Here `user:ann` follows four users, returned two to a page in the order she followed them:
 
 ```surql
