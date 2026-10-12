@@ -1,0 +1,127 @@
+---
+position: 6
+title: Upgrading from 3.3 to 3.4
+description: What to do when a 3.3 deployment moves to 3.4, covering the one-way data migration, which HNSW, DiskANN and B-tree indexes to rebuild with REBUILD INDEX, and the behaviour changes in SurrealQL, configuration and Surrealism modules.
+---
+
+# Upgrading from `3.3` to `3.4`
+
+`3.4` is a minor release, so a `3.3` datastore opens on `3.4` without an export and import. The first `3.4` node to start applies a data migration automatically, and the rest of the upgrade consists of a few index rebuilds and behaviour changes that a deployment or an application may need to account for. This page describes each one briefly and links to the page that documents it in full. New features are listed in the [release notes](/releases), and the [upgrade overview](/docs/build/migrating/from-old-surrealdb-versions/overview) covers upgrades in general.
+
+The [`surreal upgrade`](/docs/reference/cli/surrealdb-cli/commands/upgrade) command installs the new binary as usual.
+
+## Before you upgrade
+
+Take and verify a [`surreal export`](/docs/reference/cli/surrealdb-cli/commands/export) before the first `3.4` node starts against a `3.x` datastore. The data migration that `3.4` applies is one-way. Once a `3.4` node has opened the datastore, a `3.3` build refuses to start on it with this message:
+
+```text title="Error output"
+The data stored on disk was migrated by a newer version of SurrealDB (Stored: ..., Running: 3.3.1) and cannot be read by this one
+```
+
+The way back to `3.3` is to restore the export into a new datastore created by `3.3`.
+
+## Indexes to rebuild
+
+The upgrade does not rewrite any index, so an index keeps working after it. Some indexes give wrong results or answer more slowly until they are rebuilt. Rebuild them once every node in a cluster runs `3.4`.
+
+| Index | Rebuild | What happens otherwise |
+| --- | --- | --- |
+| HNSW index defined with `DIST JACCARD` or `DIST PEARSON` | Required | The graph was built on the previous ordering of these metrics, so it does not serve nearest-first searches. See [Jaccard and Pearson ranking](#jaccard-and-pearson-ranking). |
+| HNSW or DiskANN index in which more than nine records hold an identical vector, built before `3.3.1` | Required | Records are missing from KNN results. |
+| HNSW or DiskANN index that serves KNN queries with a selective filter | Optional | Results are correct, but the query reads each record instead of scoring from the index, which is slower. |
+| B-tree index on a field with no declared type, used by `ORDER BY ... LIMIT` or an open range such as `WHERE time > $since` | Optional | Results are correct, but the query sorts or scans the table instead of reading the index. |
+
+The statement for each is the same:
+
+```surql
+REBUILD INDEX idx_embedding ON document;
+```
+
+Run `REBUILD INDEX` as its own statement, not inside a transaction, for an index with many records. See [Rebuilding a large index](/docs/reference/query-language/statements/rebuild#rebuilding-a-large-index) and [When to rebuild after an upgrade](/docs/reference/query-language/statements/rebuild#when-to-rebuild-after-an-upgrade).
+
+## Behaviour changes
+
+### Surrealism modules
+
+Modules built for `3.3` or earlier have to be rebuilt, because `3.4` refuses a `.surli` file built for the previous ABI with `Unsupported ABI version: expected 3, got 2`. Database access moves to a `Transaction` parameter, `#[surrealism(writeable)]` is replaced by `Transaction<ReadWrite>`, and the module key-value store is removed. The changes are listed in [Upgrading a module to 3.4](/docs/learn/extensions/guides/surrealism-attribute-reference#upgrading-a-module-to-34).
+
+### Grouping
+
+A `GROUP BY` projection that is not a group key or an aggregate is no longer collected once per record when it does not read the record, so a constant expression gives one value. `array::group()` returns the unique values of a group, and [`array::min()` and `array::max()`](/docs/reference/query-language/functions/database-functions/array#arraymax) are new. The rules are in the [`GROUP BY` clause](/docs/reference/query-language/clauses/group).
+
+### `UPSERT` creates exactly one record
+
+An `UPSERT ... WHERE` with no record id decides whether to create a record from what the statement matched, not from what it returns. A matching statement with `RETURN NONE` no longer creates a second record. See the [`UPSERT` statement](/docs/reference/query-language/statements/upsert).
+
+### Live notifications from client transactions
+
+A transaction that a client opens and commits itself, such as one started with an SDK's `begin()` method, now sends its live query notifications when it commits, and sends none if it is cancelled. See [`LIVE SELECT`](/docs/reference/query-language/statements/live-select).
+
+### Value nesting limit
+
+The limit of 256 levels now also applies to values that are built in memory and never stored, and to the levels of a `GeometryCollection`. A record stored by an earlier release can exceed the limit once its geometry levels are counted, and reading it then returns `The value is nested too deeply`. See [Nesting depth](/docs/reference/query-language/language-primitives/data-types/values#nesting-depth).
+
+### Destructuring with `...`
+
+A `...` entry at the end of a destructuring pattern keeps every field that the other entries did not name. See [Keeping the other fields](/docs/reference/query-language/language-primitives/idioms#keeping-the-other-fields).
+
+### Jaccard and Pearson ranking
+
+[`vector::similarity::jaccard`](/docs/reference/query-language/functions/database-functions/vector#vectorsimilarityjaccard) is the weighted Jaccard similarity, the sum of the minimums divided by the sum of the maximums, instead of a comparison of the values as sets. The two forms agree for vectors that hold only `0` and `1`:
+
+```surql
+vector::similarity::jaccard([1, 1, 0, 0], [1, 0, 1, 0]);
+```
+
+```surql title="Output"
+0.3333333333333333f
+```
+
+On `3.3.1` the same call returns `1f`. A KNN search over an index with `DIST JACCARD` or `DIST PEARSON` ranks by the distance `1 - similarity`, so the nearest vector comes first. For the query vector `[1, 1, 1]`, an indexed vector `[1, 1, 1]` has distance `0f` on `3.4`, where `3.3.1` ranked it last.
+
+### Paths over sets
+
+A path such as `s.*` now applies to each element of a set, as it does for an array, and collects the results into a set. On `3.3.1`, `s.*` over a set gives `NONE`.
+
+```surql
+DEFINE FIELD s ON t TYPE set<int>;
+CREATE t:1 SET s = <set>[1, 2, 3];
+SELECT VALUE s.* FROM t;
+```
+
+```surql title="Output"
+[{1, 2, 3}]
+```
+
+A `UNIQUE` index over `s.*` on a set field treats the whole set as the key.
+
+### A record id on an undefined table
+
+A record id that names a table that is not defined now returns the error `The table 'missing' does not exist` wherever it is read, as `SELECT * FROM missing:1` already did. On `3.3.1`, the same record id inside an array, as in `SELECT * FROM [missing:1]`, returned `[]`, and in a `FETCH` clause or a `.*` position it returned `NONE`. A record that is missing from a table that is defined still reads as `NONE`.
+
+```surql
+SELECT * FROM [missing:1];
+```
+
+```surql title="Error output"
+"The table 'missing' does not exist"
+```
+
+### `INSERT IGNORE`
+
+`INSERT IGNORE` skips only a record whose id already exists and a record that conflicts with a unique index. Any other error, such as a value that fails its field type, now fails the statement. The same change is in `3.3.4`. See [Ignoring duplicates](/docs/reference/query-language/statements/insert#ignoring-duplicates).
+
+### `LET` inside `IF ... THEN ... END`
+
+A `LET` written as a branch of the older `IF ... THEN ... END` form is refused with `LET statements can only appear at the top level of a query or inside a block expression`. The brace form, `IF @condition { ... }`, takes a block and is unchanged.
+
+### Named record id components
+
+A table that names the components of its array record id cannot be read by an earlier release, so define the names only when every node runs `3.4` or later, and while nothing writes to the table. See [Naming the components of an array id](/docs/reference/query-language/statements/define/field#naming-the-components-of-an-array-id).
+
+## Configuration
+
+- `SURREAL_MAX_CONCURRENT_TASKS` is removed, and `3.4` ignores it.
+- `--planner-strategy` and `SURREAL_PLANNER_STRATEGY` are deprecated and have no effect. The server logs a warning at start, and the option can be removed from the configuration.
+
+`3.4` also adds settings that bound the memory a node and each query can use. They are listed in the [environment variables](/docs/reference/cli/surrealdb-cli/environment-variables#limits-config) reference.
