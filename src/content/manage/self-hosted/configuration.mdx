@@ -12,6 +12,78 @@ Review the command reference whenever you upgrade, as defaults and supported fla
 
 Equivalent settings are often available as [environment variables](/docs/reference/cli/surrealdb-cli/environment-variables), which suits containers, systemd units, and secret managers. Prefer one coherent source of truth (file, env, or flags) so configuration does not diverge silently across hosts.
 
+**Running in the background.** `surreal start` runs in the foreground and has no daemon mode of its own, so let the operating system's service manager start it, restart it after a failure, and stop it cleanly. In a container, `docker run -d` runs the same server in the background.
+
+<Tabs syncKey="os">
+<TabItem label="Linux">
+
+On Linux, let systemd run the server. Save the following as `/etc/systemd/system/surrealdb.service`, then run `sudo systemctl enable --now surrealdb`:
+
+```ini title="/etc/systemd/system/surrealdb.service"
+[Unit]
+Description=SurrealDB server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=surrealdb
+Group=surrealdb
+EnvironmentFile=/etc/surrealdb/surrealdb.env
+ExecStart=/usr/local/bin/surreal start
+Restart=on-failure
+LimitNOFILE=infinity
+
+[Install]
+WantedBy=multi-user.target
+```
+
+The unit reads its settings from the environment file, which keeps the root password out of the unit file and the process list. The variable names are those on the [environment variables](/docs/reference/cli/surrealdb-cli/environment-variables) page:
+
+```ini title="/etc/surrealdb/surrealdb.env"
+SURREAL_USER=root
+SURREAL_PASS=secret
+SURREAL_BIND=127.0.0.1:8000
+SURREAL_PATH=rocksdb:///var/lib/surrealdb/data
+```
+
+Restrict the file with `chmod 600`, and make sure the `surrealdb` user owns the data directory. Use `journalctl -u surrealdb -f` to follow the server log.
+
+</TabItem>
+<TabItem label="Windows">
+
+`surreal.exe` is not written as a Windows service, so registering it directly with `sc.exe create` fails with error 1053 when the service starts. A service wrapper such as [WinSW](https://github.com/winsw/winsw) runs it as a service instead. Download `WinSW-x64.exe` from the WinSW releases, save it as `C:\SurrealDB\surrealdb-service.exe`, and save the following beside it as `surrealdb-service.xml`:
+
+```xml title="C:\SurrealDB\surrealdb-service.xml"
+<service>
+  <id>surrealdb</id>
+  <name>SurrealDB</name>
+  <description>SurrealDB server</description>
+  <executable>C:\Program Files\SurrealDB\surreal.exe</executable>
+  <arguments>start</arguments>
+  <workingdirectory>C:\SurrealDB</workingdirectory>
+  <env name="SURREAL_USER" value="root" />
+  <env name="SURREAL_PASS" value="secret" />
+  <env name="SURREAL_BIND" value="127.0.0.1:8000" />
+  <env name="SURREAL_PATH" value="rocksdb://data" />
+  <onfailure action="restart" delay="10 sec" />
+  <log mode="roll" />
+</service>
+```
+
+The `<env>` entries play the part of the Linux environment file, with the same [environment variables](/docs/reference/cli/surrealdb-cli/environment-variables). The relative data path is resolved from the working directory, so the data is stored in `C:\SurrealDB\data`. Then, in a terminal opened as administrator, install and start the service:
+
+```powershell
+cd C:\SurrealDB
+.\surrealdb-service.exe install
+.\surrealdb-service.exe start
+```
+
+The service starts with Windows from then on. WinSW stops the server by sending it Ctrl+C, which SurrealDB handles as a clean shutdown, and writes the server's output to log files in `C:\SurrealDB`. The XML file holds the root password, so limit who can read it, for example with `icacls surrealdb-service.xml /inheritance:r /grant:r Administrators:F SYSTEM:R`.
+
+</TabItem>
+</Tabs>
+
 **Storage engines** are selected by the path on [`surreal start`](/docs/reference/cli/surrealdb-cli/commands/start). For most self-hosted servers, use **RocksDB** (`rocksdb://…`) for on-disk production data. The default **`memory`** backend (SurrealMX) suits development and tests as well as solutions that make use of its Redis-like persistent storage, while the optional **SurrealKV** (`surrealkv://…`, beta) is an alternative single-node disk engine with a smaller tuning surface. Capacity planning, backups, and versioning options differ by engine - see the [Deployment models](/docs/manage/self-hosted/deployment-models) and [Run a single-node, on-disk server](/docs/running/file-backed) pages for more.
 
 **Bind address and port** determine where clients and operators reach the server. Restrict admin interfaces to trusted networks, use a load balancer or service mesh for TLS termination if that matches your platform, and document ports for HTTP, WebSocket, and any separate metrics endpoints you expose.
