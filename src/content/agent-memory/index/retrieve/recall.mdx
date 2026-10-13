@@ -38,13 +38,13 @@ Content-Type: application/json
 
 | Field | Meaning |
 | --- | --- |
-| `tier` | `direct`, `cache`, `hybrid`, or `full_context` - relational questions may resolve at tier 1 when the classifier routes to a structured relation read |
-| `hits` | Ranked results; each hit includes **`source`** (`entity`, `attribute`, `memory_chunk`, `chunk`, or `section`) and optional **`occurredAt`** (known time of the row - use to resolve relative dates in source text) |
-| `contextHits` | Same-section sibling passages pulled by **section expansion** - separate from `hits`, not counted against `k`. Empty when expansion is off or found nothing to add. Useful for UIs that show “expanded context” beside the ranked answer set |
+| `tier` | `cache`, `hybrid`, or `escalated`. The response cache (tier 2) is checked first. Tier 1 structured reads (attribute and relation lookups) only seed tier 3 and never answer on their own, so `direct` remains a valid wire value but is not returned by `/query` |
+| `hits` | Ranked results; each hit includes **`source`** (`entity`, `attribute`, `action`, `memory_chunk`, `chunk`, or `section`) and optional **`occurredAt`** (known time of the row - use to resolve relative dates in source text) |
+| `contextHits` | Extra rows for synthesis, separate from `hits` and not counted against `k`: same-section sibling passages from **section expansion**, neighbouring conversation chunks of ranked memory hits, attribute and relation rows from the tier 1 seed reads, and optional entity fact cards. A row's `source` names its family, and can also be `turn` (an earlier assistant reply). Omitted when nothing was added. Useful for UIs that show “expanded context” beside the ranked answer set |
 | `queryMs` | Server-side latency in milliseconds |
 | `trace.traceId` | Correlates with `GET .../traces/{traceId}` |
 
-Optional read modifiers: **`labels`** (descriptor filter only), **`lens`** (DNF scope filter by involvement), **`asOf`** (known-time playback - hide facts and relations from later chapters or episodes; see [spoiler-safe narrative memory](/docs/agent-memory/cookbooks/patterns/spoiler-safe-narrative-memory)), **`scope_view`** (`strict`, `crossTeam`, `merged` - the latter two resolve like **`strict`**; see [Contexts and scope](/docs/agent-memory/mental-model/contexts-and-scope#labels-lens-and-scope-views-reads)), **`include`** (`facts`, `passages`, or both - narrows the response only; retrieval considers all families), **`includeDuplicates`** (default `false` - excludes **near-duplicate** document passages and conversation `memory_chunk` records flagged via SimHash / `duplicate_of`; set `true` to include them, matching `/documents/query`). Exact byte-identical document uploads are still collapsed at ingest (`content_hash`); `includeDuplicates` does not resurrect those.
+Optional read modifiers: **`labels`** (descriptor filter only), **`lens`** (DNF scope filter by involvement), **`asOf`** (known-time playback - hide facts and relations from later chapters or episodes; see [spoiler-safe narrative memory](/docs/agent-memory/cookbooks/patterns/spoiler-safe-narrative-memory)), **`scopeView`** (`strict`, `crossTeam`, `merged` - the latter two resolve like **`strict`**; see [Contexts and scope](/docs/agent-memory/mental-model/contexts-and-scope#labels-lens-and-scope-views-reads)), **`include`** (`facts`, `passages`, or both - narrows the response only; retrieval considers all families), **`includeDuplicates`** (default `false` - excludes **near-duplicate** document passages and conversation `memory_chunk` records flagged via SimHash / `duplicate_of`; set `true` to include them, matching `/documents/query`). Exact byte-identical document uploads are still collapsed at ingest (`content_hash`); `includeDuplicates` does not resurrect those.
 
 **`k`** defaults to **10** and is capped at **50** per deployment (`SPECTRON_MAX_QUERY_K`). The internal retrieval pool is independent of `k` - see [Hybrid search](/docs/agent-memory/retrieve/hybrid-search#answer-size-vs-search-breadth).
 
@@ -79,10 +79,15 @@ agent-memory context "What role does Alice have?"
 ## Session-scoped context
 
 ```http
-GET /api/v1/{context_id}/sessions/{session_id}/context
+POST /api/v1/{context_id}/sessions/{session_id}/context
+Content-Type: application/json
+
+{
+  "query": "What role does Alice have?"
+}
 ```
 
-Returns recall formatted for the session’s scope and recent turns.
+Returns `{"context": "…"}`: recall for `query`, formatted for the session’s scope and recent turns. `query` is required and must not be empty.
 
 ## Document-only query
 
@@ -111,12 +116,12 @@ SurrealDB Agent Memory runs recall internally, then calls the configured respons
 ## Profile and state
 
 ```http
-GET  /api/v1/{context_id}/profile
-POST /api/v1/{context_id}/state
+GET /api/v1/{context_id}/profile
+GET /api/v1/{context_id}/state
 ```
 
-`profile` returns category-grouped attributes (identity, knowledge, context, instructions) for prompt assembly.
+`profile` returns grouped entries for prompt assembly: `selfFacts` (facts about the caller), `static`, `dynamic`, `preferences`, and `instructions`.
 
 ## Four-tier router
 
-See [Coherence, retrieval, and cost tiers](/docs/agent-memory/architecture/coherence-retrieval-and-tiers). Tiers progress from cheap structured lookup through response cache, hybrid vector + BM25 + graph, to full-context synthesis. Mode details: [Hybrid search](/docs/agent-memory/retrieve/hybrid-search), [Keywords and BM25](/docs/agent-memory/retrieve/keywords-and-bm25), [Graph traversal](/docs/agent-memory/retrieve/graph-traversal).
+See [Coherence, retrieval, and cost tiers](/docs/agent-memory/architecture/coherence-retrieval-and-tiers). The router checks the response cache (tier 2) first. On a miss, tier 1 structured reads seed tier 3, the hybrid vector + BM25 + graph retrieval. When tier 3 is thin or unconfident, tier 4 (`escalated`) rewrites the query with HyDE, widens the candidate pool and re-ranks. Mode details: [Hybrid search](/docs/agent-memory/retrieve/hybrid-search), [Keywords and BM25](/docs/agent-memory/retrieve/keywords-and-bm25), [Graph traversal](/docs/agent-memory/retrieve/graph-traversal).

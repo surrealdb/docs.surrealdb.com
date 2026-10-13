@@ -6,17 +6,17 @@ description: "How structured memory is extracted from conversation turns. Classi
 
 # Extraction pipeline
 
-Every conversation turn SurrealDB Agent Memory receives passes through an extraction pipeline that turns raw text into structured memory: entities, attributes, relations, instructions, and uncertainties. The pipeline balances **latency** and **accuracy** - lightweight heuristics run first; language models are invoked only when the turn needs deeper interpretation.
+Every conversation turn SurrealDB Agent Memory receives passes through an extraction pipeline that turns raw text into structured memory: entities, attributes, relations, actions, instructions, and uncertainties. Extraction is one structured-output model call per window of text, with no separate heuristic or escalation stage.
 
-## How stages escalate
+## How a turn is extracted
 
-1. **Heuristics** - Pattern matching for known entities, temporal phrases (“since January”, “until next quarter”), and instruction-like language (“always”, “never”, “from now on”). Simple corrections to known facts can finish here without calling a model.
+1. **Windowing** - The turn text is split into windows of up to 8,000 characters, with a 256-character overlap so that a fact on a window boundary is seen by both windows. A turn produces at most 10 windows. Text beyond that limit is dropped, and the server logs a warning and counts the dropped bytes.
 
-2. **Fast model** - Handles most turns: new entities, preferences, straightforward assertions, and routine corrections.
+2. **One call per window** - Each window is sent to the extraction model as one structured-output call. Turn extraction uses the deployment's default model; document extraction on the worker uses the Context's `extraction` stage (see [Models per stage](/docs/agent-memory/tuning/models-per-stage)).
 
-3. **Stronger model** - Reserved for harder cases: contradictions within one turn, ambiguous references, or output that fails structural validation.
+3. **Merge** - The results of all windows are sanitised, joined, and deduplicated when more than one window ran.
 
-You do not choose a stage. SurrealDB Agent Memory escalates automatically when the current stage cannot produce a confident result.
+You do not choose a model per turn. Every turn takes the same path, whatever its length or difficulty.
 
 ## What extraction produces
 
@@ -24,31 +24,34 @@ The pipeline returns a structured diff nested under **`extraction`** on **`POST 
 
 ```json
 {
+  "turnId": "01k7e2q4w9",
   "entities": [
-    { "name": "Alice Chen", "type": "Person", "memory_category": "identity" }
+    { "id": "01k7e2q4xa", "name": "Alice Chen", "entityType": "person", "memoryCategory": "identity", "isNew": true }
   ],
   "attributes": [
-    { "entity": "Alice Chen", "key": "role", "value": "CTO", "memory_category": "identity" }
+    { "id": "01k7e2q4xb", "entityId": "01k7e2q4xa", "key": "role", "value": "CTO", "memoryCategory": "identity" }
   ],
   "relations": [
-    { "subject": "Alice Chen", "verb": "works_at", "object": "Acme", "memory_category": "identity" }
+    { "subject": "Alice Chen", "label": "works_at", "object": "Acme", "memoryCategory": "identity" }
   ],
+  "actions": [],
   "instructions": [
-    { "label": "Bullet-point responses", "description": "Always respond using bullet points" }
+    { "id": "01k7e2q4xc", "label": "Bullet-point responses", "description": "Always respond using bullet points" }
   ],
   "uncertainties": [
     { "about": "job title", "reason": "User joked about being CEO, then appeared to correct themselves" }
-  ]
+  ],
+  "corrections": []
 }
 ```
 
-Each extracted **entity**, **attribute**, and **relation** carries a **`memory_category`** - one of `identity`, `knowledge`, or `context`. Labels the model emits outside that set (for example `emotion`, `group`) are **bucketed as `context`** during extraction rather than failing the turn. Episodic transcript material stays on **sessions** and **turns**; **instructions** and **uncertainties** are stored separately. See [Memory categories](/docs/agent-memory/mental-model/memory-categories).
+Each extracted **entity**, **attribute**, **relation**, and **action** carries a **`memoryCategory`** - one of `identity`, `knowledge`, or `context`. Labels the model emits outside that set (for example `emotion`, `group`) are **bucketed as `context`** during extraction rather than failing the turn. Episodic transcript material stays on **sessions** and **turns**; **instructions** and **uncertainties** are stored separately. See [Memory categories](/docs/agent-memory/mental-model/memory-categories).
 
 Nothing is written blindly: extractions pass through [reconciliation](/docs/agent-memory/reasoning/reconciliation-and-supersession) before they become durable memory.
 
 **Chat synthesis is separate.** `/chat` and Workbench replies are generated *after* extraction and recall. The response model may add narrative colour, continue a well-known story, or answer from general knowledge - only the structured **`extraction`** diff (and reconciled graph records) are durable memory attributed to your turns. If you paste prose from a published book, extracted **entities** and **relations** reflect what you sent; any additional storytelling in the chat reply is not automatically stored unless the extractor captures it as fact.
 
-**Resilience:** if extraction fails for a single turn (model error, parse failure), SurrealDB Agent Memory still stores the conversational chunk and returns a chunk-only diff - the session is not aborted. Token budget exhaustion (`429`) still propagates.
+**Resilience:** if the model output for a turn cannot be parsed, SurrealDB Agent Memory still stores the conversational chunk and returns a chunk-only diff - the session is not aborted. When only some windows fail, the facts from the other windows are kept. Provider and transport errors are returned as errors, and token budget exhaustion returns `429`.
 
 ## When extraction runs
 

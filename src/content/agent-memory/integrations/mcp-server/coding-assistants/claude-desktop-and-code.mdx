@@ -1,12 +1,15 @@
 ---
 position: 2
 title: Claude
-description: "Connecting SurrealDB Agent Memory to Claude Code, Cowork, and Claude Desktop."
+description: "Connecting SurrealDB Agent Memory to Claude Code, Cowork, and Claude Desktop with the agent-memory plugin, the managed MCP server and memory hooks."
 ---
 
 # Claude
 
-The official [SurrealDB plugin marketplace for Claude](https://github.com/surrealdb/ai-claude-plugin) ships an **`agent-memory`** plugin that connects Claude to your SurrealDB Agent Memory instance's `/mcp` endpoint and installs a usage skill. It supports **Claude Code**, **Cowork**, and **Claude Desktop**. There is no default URL - point it at your own instance (SurrealDB Cloud: your context host from SurrealDB Studio **API keys**; self-hosted: your server's base URL).
+The official [SurrealDB plugin marketplace for Claude](https://github.com/surrealdb/ai-claude-plugin) ships an **`agent-memory`** plugin with two parts: an MCP server connection and a set of memory hooks. It supports **Claude Code**, **Cowork**, and **Claude Desktop**; the hooks run in Claude Code and Cowork only.
+
+- **MCP server.** The plugin connects to SurrealDB's managed MCP server at `https://mcp.surrealdb.com` over OAuth. There is nothing to configure: on the first tool call, a browser opens so you can sign in with your Surreal ID.
+- **Memory hooks.** Three lifecycle hooks recall memories into context and store each exchange, without the model choosing to call a tool. The hooks call your Agent Memory instance's `/mcp` endpoint directly with a bearer token, so they need their own configuration.
 
 ## Claude Code and Cowork
 
@@ -19,11 +22,32 @@ Add the marketplace, then install the `agent-memory` plugin:
 /plugin install agent-memory@surrealdb
 ```
 
-Claude Code reads the plugin directly - the MCP server and the usage skill load automatically.
+Claude Code reads the plugin directly - the MCP server, the hooks and the usage skill load automatically. The plugin's MCP entry has no URL or token to set:
 
-### Configure
+```json
+{
+  "mcpServers": {
+    "agent-memory": {
+      "type": "http",
+      "url": "https://mcp.surrealdb.com"
+    }
+  }
+}
+```
 
-The SurrealDB Agent Memory MCP has no default URL. Set your instance endpoint and a bearer token before launching Claude Code, then restart:
+The URL is the bare root, with no `/mcp` path.
+
+### Configure the memory hooks
+
+The hooks are separate processes and cannot use the OAuth sign-in, so they take a token-authenticated endpoint from environment variables:
+
+| Hook event | Tool called | What it does |
+|---|---|---|
+| `SessionStart` | `recall` | Recalls general memories about the user and project and adds them to the context |
+| `UserPromptSubmit` | `recall` | Recalls memories relevant to the current prompt and adds them to the context |
+| `Stop` | `remember` | Stores the latest user and assistant exchange with `infer: "full"` |
+
+Set your instance's `/mcp` endpoint and a context API key before launching Claude Code, then restart:
 
 <Tabs syncKey="shell">
 
@@ -42,23 +66,17 @@ $env:AGENT_MEMORY_MCP_TOKEN = "<your-api-key>"
 </TabItem>
 </Tabs>
 
-If `AGENT_MEMORY_MCP_URL` is unset, the server will not connect. The plugin's MCP entry expands these variables:
+| Variable | Description |
+|---|---|
+| `AGENT_MEMORY_MCP_URL` | Your instance's `/mcp` endpoint. Required for the hooks |
+| `AGENT_MEMORY_MCP_TOKEN` | Bearer token for that endpoint, a context API key. Required for the hooks |
+| `AGENT_MEMORY_HOOKS` | Set to `off`, `0` or `false` to disable the hooks. The MCP server stays connected |
+| `AGENT_MEMORY_HOOK_TIMEOUT` | Network timeout per hook call, in seconds. Default `8` |
 
-```json
-{
-  "mcpServers": {
-    "agent-memory": {
-      "type": "http",
-      "url": "${AGENT_MEMORY_MCP_URL}",
-      "headers": {
-        "Authorization": "Bearer ${AGENT_MEMORY_MCP_TOKEN}"
-      }
-    }
-  }
-}
-```
+The hooks fail open. If either required variable is unset, or the instance returns an error or times out, the hook exits without output and does not block the prompt. Without these variables the MCP server still works, and memory is on-demand through the tools rather than automatic. The hooks never send `context_id`; the server uses the Context bound to the key.
 
-The bearer token is your SurrealDB Agent Memory context API key. Each key is bound to one Context, so `context_id` is optional on every tool call.
+> [!NOTE]
+> With the hooks configured, the `Stop` hook sends the latest exchange, which is conversation content, to the configured endpoint, and the `recall` hooks send the current prompt.
 
 ### Verify the installation
 
@@ -66,7 +84,7 @@ The bearer token is your SurrealDB Agent Memory context API key. Each key is bou
 claude mcp list
 ```
 
-You should see **agent-memory** connected. In a session, ask "What MCP tools do you have access to?" and Claude should list the SurrealDB Agent Memory tools: `remember`, `recall`, `context`, `reflect`, `forget`, `upload`, `inspect`.
+You should see **agent-memory** listed. The first tool call opens a browser to sign in with your Surreal ID. In a session, ask "What MCP tools do you have access to?" and Claude should list the SurrealDB and Agent Memory tools that the managed server provides.
 
 ### Usage examples
 
@@ -76,7 +94,7 @@ You should see **agent-memory** connected. In a session, ask "What MCP tools do 
 claude "Remember that we have decided to use event sourcing for the orders service and that the aggregate root is OrderAggregate."
 ```
 
-Claude Code calls `remember`. The next time you start a session in this project, `recall` surfaces this decision before Claude answers questions about the orders service.
+Claude Code stores the decision in Agent Memory. With the hooks configured, the next session in this project recalls it before Claude answers questions about the orders service.
 
 **Recall context before a coding task:**
 
@@ -86,15 +104,17 @@ claude "What do you remember about our database schema decisions?"
 
 ## Claude Desktop
 
-Claude Desktop has no plugin/marketplace format, so set it up manually. Both options use your instance's `/mcp` URL and a bearer token; there is no default.
+Claude Desktop has no plugin or marketplace format, so set it up manually. Claude Desktop does not run plugin hooks, so memory there is on-demand through the MCP tools, and the `AGENT_MEMORY_*` variables have no effect.
 
 ### Option A - Connectors UI (recommended)
 
 Open **Settings → Connectors → Add custom connector** and add:
 
-| Name | URL | Header |
+| Name | URL | Auth |
 |---|---|---|
-| `agent-memory` | your SurrealDB Agent Memory `/mcp` endpoint (for example `https://<your-agent-memory-instance>/mcp`) | `Authorization: Bearer <your-api-key>` |
+| `agent-memory` | `https://mcp.surrealdb.com` | OAuth - sign in with your Surreal ID when prompted |
+
+The managed server carries the SurrealDB tools and the Agent Memory tools, so one connector is enough for both.
 
 ### Option B - Manual config
 
@@ -110,10 +130,7 @@ Merge the following into `claude_desktop_config.json`, then restart Claude Deskt
   "mcpServers": {
     "agent-memory": {
       "type": "http",
-      "url": "https://<your-agent-memory-instance>/mcp",
-      "headers": {
-        "Authorization": "Bearer <your-api-key>"
-      }
+      "url": "https://mcp.surrealdb.com"
     }
   }
 }
@@ -123,18 +140,18 @@ You can validate the file with `cat ~/Library/Application\ Support/Claude/claude
 
 ### Skill (optional)
 
-Claude Desktop cannot load plugins, but you can add the SurrealDB Agent Memory usage skill by hand: open **Settings → Skills → Upload skill** and upload the `plugins/agent-memory/skills/agent-memory/` folder from the [plugin repo](https://github.com/surrealdb/ai-claude-plugin).
+Claude Desktop cannot load plugins, but you can add the SurrealDB Agent Memory usage skill by hand: open **Settings → Skills → Upload skill** and upload the `plugins/agent-memory/skills/agent-memory/` folder from the [plugin repo](https://github.com/surrealdb/ai-claude-plugin). Its sections about hooks do not apply on Claude Desktop.
 
 ### Verify the installation
 
 1. Restart Claude Desktop completely (quit and reopen)
-2. Start a new conversation
-3. Click the tools icon (the hammer symbol) in the composer - the seven SurrealDB Agent Memory tools should appear
+2. Start a new conversation and sign in with your Surreal ID when prompted
+3. Click the tools icon (the hammer symbol) in the composer - the SurrealDB Agent Memory tools should appear
 4. Ask "What MCP tools do you have?" and Claude should describe the SurrealDB Agent Memory tools
 
 ## Scope on tool calls
 
-Narrow reads and writes with the per-tool **`scope`** argument (slash paths, for example `["org/acme/user/alice"]` or `["org/acme/project/orders-service"]`). Register paths with `agent-memory scopes create` before first use. Use separate contexts or distinct scope paths to keep memory isolated per repository.
+Narrow writes with the per-tool **`scope`** argument and reads with **`lens`** (slash paths, for example `["org/acme/user/alice"]` or `["org/acme/project/orders-service"]`). Register paths with `agent-memory scopes create` before first use. Use separate contexts or distinct scope paths to keep memory isolated per repository.
 
 ## Removing SurrealDB Agent Memory
 

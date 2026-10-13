@@ -1,17 +1,17 @@
 ---
 position: 2
 title: Customer support agent
-description: "Ticket-linked memory with authoritative knowledge policies."
+description: "Ticket-linked memory with policy and catalogue documents, and flagged contradictions."
 ---
 
 # Customer support agent
 
-This guide walks through building a customer support agent that uses SurrealDB Agent Memory for two distinct purposes: **authoritative knowledge** holds the FAQs, policies, and product catalogue, and **experiential memory** holds per-customer memory accumulated over every interaction. The result is an agent that answers product questions correctly and remembers each customer's history without manual context injection.
+This guide walks through building a customer support agent that uses SurrealDB Agent Memory for two distinct purposes: uploaded **documents** hold the FAQs, policies, and product catalogue, and **experiential memory** holds per-customer memory accumulated over every interaction. The result is an agent that answers product questions correctly and remembers each customer's history without manual context injection.
 
 ## What you are building
 
 - A Context configured for extraction, holding customer, product, and ticket records.
-- authoritative knowledge nodes for the product catalogue and policy documents.
+- Uploaded documents for the product catalogue and policies, with the facts extracted from them.
 - Per-customer sessions scoped by `user_id`, so each customer's memory is isolated.
 - A conversation loop that retrieves relevant context before each LLM call and extracts new facts after each turn.
 
@@ -23,38 +23,40 @@ A Context is created through the management API or the dashboard. The examples b
 
 Create the Context with LLM extraction enabled, so conversation turns and uploaded documents produce typed entities rather than passages alone.
 
+The Context id goes in the path, and the body names the SurrealDB namespace and database that hold its data. Each model stage is an object with a `provider` and a `model`. The management API runs on its own listener, separate from the memory API.
+
 ```python
 import os
 import httpx
 
 mgmt = httpx.Client(
-    base_url="https://spectron.surrealdb.com/api/v1",
-    headers={"Authorization": f"Bearer {os.environ['SPECTRON_MGMT_KEY']}"},
+    base_url=f"{os.environ['AGENT_MEMORY_MGMT_ENDPOINT']}/api/v1",
+    headers={"Authorization": f"Bearer {os.environ['AGENT_MEMORY_MGMT_KEY']}"},
 )
 
-mgmt.post("/contexts", json={
-    "id": "support",
-    "display_name": "Customer Support",
+mgmt.post("/contexts/support", json={
+    "namespace": "acme",
+    "database": "support",
     "config": {
         "llm_extraction_enabled": True,
-        "models": {"extraction": "openai/gpt-4o-mini"},
+        "models": {"extraction": {"provider": "openai", "model": "gpt-5-mini"}},
     },
 })
 ```
 
 ```typescript
-const response = await fetch("https://spectron.surrealdb.com/api/v1/contexts", {
+const response = await fetch(`${process.env.AGENT_MEMORY_MGMT_ENDPOINT}/api/v1/contexts/support`, {
     method: "POST",
     headers: {
-        "Authorization": "Bearer mgmt_...",
+        "Authorization": `Bearer ${process.env.AGENT_MEMORY_MGMT_KEY}`,
         "Content-Type": "application/json",
     },
     body: JSON.stringify({
-        id: "support",
-        display_name: "Customer Support",
+        namespace: "acme",
+        database: "support",
         config: {
             llm_extraction_enabled: true,
-            models: { extraction: "openai/gpt-4o-mini" },
+            models: { extraction: { provider: "openai", model: "gpt-5-mini" } },
         },
     }),
 });
@@ -63,50 +65,50 @@ const response = await fetch("https://spectron.surrealdb.com/api/v1/contexts", {
 > [!NOTE]
 > Entity types come from a fixed vocabulary - a customer extracts as `person` or `organisation`, a catalogue item as `product`, a ticket as `event` or `other`. You cannot register `Customer` or `Ticket` as types of their own. Attribute keys and relation labels are free-form and converge on reuse as the graph fills; see [Extraction vocabulary](/docs/agent-memory/tuning/ontology-grounding). Where you need guaranteed keys - a ticket's `status`, a plan tier - write them as triples with `infer: "triples"` instead of relying on extraction.
 
-## Step 2 - Ingest the product catalogue into authoritative knowledge
+## Step 2 - Upload the product catalogue
 
-Upload your product catalogue as a document. SurrealDB Agent Memory chunks it, extracts keywords, and creates knowledge nodes that agents can query.
+Upload your product catalogue as a document. SurrealDB Agent Memory chunks it, extracts keywords, and extracts entities and attributes into the Context's graph. The title and other metadata go in a `metadata` part as one JSON object; separate form fields such as `title` are ignored.
 
 ```python
+import json
 import pathlib
 
 upload = httpx.Client(
-    base_url="https://spectron.surrealdb.com/api/v1/support",
-    headers={"Authorization": f"Bearer {os.environ['SPECTRON_API_KEY']}"},
+    base_url=f"{os.environ['AGENT_MEMORY_ENDPOINT']}/api/v1/support",
+    headers={"Authorization": f"Bearer {os.environ['AGENT_MEMORY_API_KEY']}"},
 )
 
 with open("products.json", "rb") as f:
     upload.post(
         "/documents",
+        data={"metadata": json.dumps({"title": "Product catalogue"})},
         files={"file": ("products.json", f, "application/json")},
-        data={"title": "Product catalogue", "content_type": "product_data"},
     )
 ```
 
 ```typescript
 const formData = new FormData();
+formData.append("metadata", JSON.stringify({ title: "Product catalogue" }));
 formData.append("file", new Blob([productJson], { type: "application/json" }), "products.json");
-formData.append("title", "Product catalogue");
-formData.append("content_type", "product_data");
 
-await fetch("https://spectron.surrealdb.com/api/v1/support/documents", {
+await fetch(`${process.env.AGENT_MEMORY_ENDPOINT}/api/v1/support/documents`, {
     method: "POST",
-    headers: { "Authorization": "Bearer mgmt_..." },
+    headers: { "Authorization": `Bearer ${process.env.AGENT_MEMORY_API_KEY}` },
     body: formData,
 });
 ```
 
 ## Step 3 - Ingest policy documents
 
-Policy documents are ingested the same way. SurrealDB Agent Memory parses them and extracts structured knowledge nodes for policy rules, deadlines, and conditions.
+Policy documents are uploaded the same way. SurrealDB Agent Memory parses them and extracts entities and attributes for policy rules, deadlines, and conditions.
 
 ```python
 for path in pathlib.Path("policies/").glob("*.md"):
     with open(path, "rb") as f:
         upload.post(
             "/documents",
+            data={"metadata": json.dumps({"title": path.stem.replace("-", " ").title()})},
             files={"file": (path.name, f, "text/markdown")},
-            data={"title": path.stem.replace("-", " ").title(), "content_type": "policy"},
         )
 ```
 
@@ -118,13 +120,12 @@ const files = await readdir("policies/");
 for (const filename of files.filter(f => f.endsWith(".md"))) {
     const content = await readFile(join("policies", filename));
     const formData = new FormData();
+    formData.append("metadata", JSON.stringify({ title: filename.replace(/-/g, " ").replace(".md", "") }));
     formData.append("file", new Blob([content], { type: "text/markdown" }), filename);
-    formData.append("title", filename.replace(/-/g, " ").replace(".md", ""));
-    formData.append("content_type", "policy");
 
-    await fetch("https://spectron.surrealdb.com/api/v1/support/documents", {
+    await fetch(`${process.env.AGENT_MEMORY_ENDPOINT}/api/v1/support/documents`, {
         method: "POST",
-        headers: { "Authorization": "Bearer mgmt_..." },
+        headers: { "Authorization": `Bearer ${process.env.AGENT_MEMORY_API_KEY}` },
         body: formData,
     });
 }
@@ -132,20 +133,20 @@ for (const filename of files.filter(f => f.endsWith(".md"))) {
 
 ## Step 4 - Handle a customer conversation
 
-Each customer conversation is a session scoped to that customer's `user_id`. The scope ensures that Customer entity attributes (past tickets, preferences, purchase history) are isolated per customer.
+Each customer conversation is a session scoped to that customer's `user_id`. The scope ensures that the facts about the customer (past tickets, preferences, purchase history) are isolated per customer.
 
 ### Initialise the client
 
 ```python
-from surrealdb.memory import Memory
+from surrealdb.memory import AsyncMemory
 
-memory = Memory(context="support", api_key="sk-...")
+memory = AsyncMemory(context="support", api_key="sp-...")
 ```
 
 ```typescript
 import { AgentMemory } from "@surrealdb/memory";
 
-const memory = new AgentMemory({ context: "support", apiKey: "sk-..." });
+const memory = new AgentMemory({ context: "support", apiKey: "sp-..." });
 ```
 
 ### Create a session per conversation
@@ -164,18 +165,18 @@ const session = await memory.sessions.create({
 
 ### Retrieve context before each agent call
 
-Before generating a response, retrieve relevant memory. The `context()` call performs hybrid retrieval across authoritative knowledge and experiential memory, returning a ranked summary the agent can use.
+Before generating a response, retrieve relevant memory. Session context performs hybrid retrieval across the facts from documents and from conversation, and returns them as one string, `context`, ready to place in a prompt.
 
 ```python
 async def respond(session, user_message: str) -> str:
-    # 1. Retrieve relevant context from both layers
-    ctx = await session.context(query=user_message)
+    # 1. Retrieve relevant context from documents and conversation
+    ctx = await memory.sessions.context(session.id, user_message)
 
     # 2. Build the system prompt
     system = f"""You are a customer support agent for Acme Corp.
 Use the context below to answer accurately.
 
-{ctx.formatted}"""
+{ctx.context}"""
 
     # 3. Call your LLM
     response = your_llm(system=system, user=user_message)
@@ -189,14 +190,14 @@ Use the context below to answer accurately.
 
 ```typescript
 async function respond(session: Session, userMessage: string): Promise<string> {
-    // 1. Retrieve relevant context from both layers
+    // 1. Retrieve relevant context from documents and conversation
     const ctx = await session.context({ query: userMessage });
 
     // 2. Build the system prompt
     const system = `You are a customer support agent for Acme Corp.
 Use the context below to answer accurately.
 
-${ctx.formatted}`;
+${ctx.context}`;
 
     // 3. Call your LLM
     const response = await yourLlm({ system, user: userMessage });
@@ -213,34 +214,38 @@ ${ctx.formatted}`;
 
 After a few interactions, the context retrieval for a query like "what is your return policy for AirPods?" will surface:
 
-- **authoritative knowledge**: The return policy knowledge node (authoritative: 30 days, no opened packaging).
-- **authoritative knowledge**: The AirPods Pro product node (price, SKU, warranty terms).
-- **experiential memory**: The customer entity with attributes - plan tier, previous ticket about a delivery issue, preferred contact channel.
+- **From the policy document**: the return policy facts (30 days, no opened packaging).
+- **From the catalogue**: the AirPods Pro facts (price, SKU, warranty terms).
+- **From conversation**: the customer's facts - plan tier, previous ticket about a delivery issue, preferred contact channel.
 
-The agent answers the return policy question correctly from authoritative knowledge and can personalise the response ("since you're on the Pro plan, you also have extended phone support") using experiential memory context.
+The agent answers the return policy question correctly from the policy document and can personalise the response ("since you're on the Pro plan, you also have extended phone support") using experiential memory context.
 
 ## Step 6 - Querying a customer's memory directly
 
 At any point you can inspect what SurrealDB Agent Memory knows about a specific customer:
 
+A customer extracts as a `person`, so list the `person` entities, then read one to get its attributes. The list returns entity summaries without attributes.
+
 ```python
 # GET /entities filters on type only - the key's read region bounds the rest
-entities = await memory.entities.list(type="Customer")
-for entity in entities:
-    print(entity.attributes)
+listing = await memory.entities.list(entity_type="person")
+for entity in listing.entities:
+    read = await memory.entities.get("person", entity.name)
+    print(entity.name, [(a.key, a.value) for a in read.attributes])
 ```
 
 ```typescript
-const entities = await memory.entities.list({ type: "Customer" });
-for (const entity of entities) {
-    console.log(entity.attributes);
+const listing = await memory.entities.list({ type: "person" });
+for (const entity of listing.entities) {
+    const read = await memory.entities.get("person", entity.name);
+    console.log(entity.name, read.attributes);
 }
 ```
 
 This is useful for building agent dashboards, pre-populating ticket forms, or debugging unexpected agent behaviour.
 
-## Authoritative and Experiential interaction
+## When a customer contradicts a policy
 
-When a customer says "your return policy is actually 60 days", SurrealDB Agent Memory stores their belief under the **Experiential** pillar and surfaces the conflict with the curated policy under the **Authoritative** pillar - the document record is not updated.
+When a customer says "your return policy is actually 60 days", SurrealDB Agent Memory keeps both values: the policy document's 30 days and the customer's 60 days, each with its source kind. Because the two come from different kinds of source, neither supersedes the other, and the write raises an `uncertainty` with an `about` and a `reason` naming both values. The policy document itself is not changed.
 
-This is the core guarantee: **Authoritative** content is protected from conversational drift regardless of how many users assert conflicting information. See [Eight pillars and six categories](/docs/agent-memory/architecture/eight-pillars-and-categories) and [Authority when pillars meet](/docs/agent-memory/reasoning/authority-hierarchy).
+The agent can see both values and tell the customer what the policy says. Open uncertainties are listed by `GET /api/v1/support/uncertainty`, and an operator settles one with `POST /api/v1/support/uncertainty/{id}/resolve`. See [Authority when pillars meet](/docs/agent-memory/reasoning/authority-hierarchy).

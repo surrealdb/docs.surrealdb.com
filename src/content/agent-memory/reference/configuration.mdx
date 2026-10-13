@@ -10,7 +10,7 @@ SurrealDB Agent Memory has two configuration surfaces: server-wide settings (in 
 
 ## Server-wide configuration
 
-Server configuration is provided via environment variables or a TOML configuration file passed at startup. These settings apply to all Contexts unless overridden at the Context level.
+Server configuration is provided through environment variables or the matching command-line flags at startup. There is no configuration file. These settings apply to all Contexts unless overridden at the Context level.
 
 > [!NOTE]
 > Every variable keeps the `SPECTRON_` prefix from **Spectron**, the project name SurrealDB Agent Memory was developed under. The CLI binary is now `agent-memory` and the SDKs have been renamed, but these variables are configuration the server already reads, so they are deliberately unchanged.
@@ -19,11 +19,15 @@ Server configuration is provided via environment variables or a TOML configurati
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `SPECTRON_BIND` | string | `0.0.0.0:8080` | Listen address and port |
-| `SPECTRON_SURREALDB_URL` | string | - | SurrealDB connection URL (required) |
-| `SPECTRON_SURREALDB_USER` | string | - | SurrealDB username (required) |
-| `SPECTRON_SURREALDB_PASS` | string | - | SurrealDB password (required) |
-| `SPECTRON_OBJECT_STORE` | string | `local://./data` | Object store backend (see below) |
+| `SURREALDB_CONNECTION` | string | - | SurrealDB endpoint and root credentials in one value, as `endpoint;user;pass` (required) |
+| `SPECTRON_BIND_ADDRESS` | string | `0.0.0.0:9090` | Listen address and port of the user API |
+| `SPECTRON_MANAGEMENT_BIND_ADDRESS` | string | `0.0.0.0:9090` | Listen address and port of the management REST API, which runs as its own process |
+| `SPECTRON_MANAGEMENT_GRPC_BIND_ADDRESS` | string | `0.0.0.0:9091` | Listen address and port of the management gRPC API, served next to the management REST API |
+| `SPECTRON_MANAGEMENT_API_KEY` | string | - | Management API key to seed in the control plane before the management API starts |
+| `SPECTRON_OBJECT_STORE_URL` | string | - | Object store location for uploaded document binaries (required, see below) |
+| `SPECTRON_EMBEDDINGS_API_KEY` | string | - | Gemini Developer API key for embeddings (required) |
+| `SPECTRON_MAX_UPLOAD_BYTES` | integer | `4294967296` (4 GiB) | Largest accepted document upload, for the whole deployment |
+| `SPECTRON_HTTP_MAX_CONCURRENT_REQUESTS` | integer | `1000` | In-flight request cap of the user API. Requests above it get `503` with `Retry-After`. `0` turns shedding off |
 
 ### Default model settings
 
@@ -32,9 +36,10 @@ Per-stage defaults are cost-tiered for the deployment’s chosen LLM provider (`
 | Variable | Description |
 |---|---|
 | `SPECTRON_LLM_MODEL` | Global model override when a stage has no per-Context selection |
-| `SPECTRON_MODEL_EMBEDDING` | Must be `gemini-embedding-2` (3072-dim). Embedding is **fixed per deployment** - not a free per-Context choice |
 
-The embedding model is **fixed per deployment** - it is not a per-Context override. Context config rejects any `models.embedding` value other than the deployment default. Changing the server embedding model requires a [reindex](/docs/agent-memory/reference/management-api#force-reindex) so vectors and HNSW indexes stay in the same embedding space.
+When a stage has no selection and `SPECTRON_LLM_MODEL` is not set, the server uses a built-in default for the provider: `gemini-2.5-flash` for Google, `gpt-5.1` for OpenAI and `claude-opus-4-8` for Anthropic.
+
+The embedding model is **fixed** to `gemini-embedding-2` (3072 dimensions), because the vector columns have a single fixed width. It is not a per-Context choice: Context config rejects any `models.embedding` value other than `gemini-embedding-2`.
 
 ### Reranker (optional)
 
@@ -74,14 +79,26 @@ See [Multimodal content](/docs/agent-memory/ingest/authoritative/multimodal-cont
 | `SPECTRON_LLM_PROVIDER` | Explicit default provider for unset stages: `openai` \| `anthropic` \| `google`. Unset ⇒ a present Google key makes Gemini the implicit default on `/chat` and `/facts?infer=full` |
 | `SPECTRON_EMBEDDINGS_API_KEY` | Gemini Developer API key for embeddings (`gemini-embedding-2`, 3072-dim). Embeddings are Gemini-only |
 
+### Token budget
+
+These variables decide which model calls count toward a Context's `token_limit` and what happens when it is reached.
+
+| Variable | Default | Description |
+|---|---|---|
+| `SPECTRON_TOKEN_BUDGET_MODELS` | empty | Comma-separated model ids that count toward the limit. `*` matches any characters, so `claude-opus-*` matches every Opus model. With no patterns, no model counts |
+| `SPECTRON_TOKEN_BUDGET_ENFORCEMENT` | `soft` | `soft` allows the call and records that the limit was passed. `hard` rejects new calls once the running total reaches the limit |
+| `SPECTRON_TOKEN_BUDGET_ENFORCE_SYSTEM` | `false` | When `true`, background worker calls (document ingestion, memory extraction, scheduled jobs) are also gated. When `false`, they are recorded but not gated |
+
 ### Object store configuration
 
-| Backend | `SPECTRON_OBJECT_STORE` format | Notes |
+`SPECTRON_OBJECT_STORE_URL` is required and has no default. Any other scheme is rejected at startup.
+
+| Backend | `SPECTRON_OBJECT_STORE_URL` format | Notes |
 |---|---|---|
-| Local filesystem | `local:///path/to/data` | Development and single-node deployments |
-| Amazon S3 | `s3://bucket-name/prefix` | Requires `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` or instance role |
-| Google Cloud Storage | `gcs://bucket-name/prefix` | Requires `GOOGLE_APPLICATION_CREDENTIALS` |
-| Azure Blob Storage | `azure://container/prefix` | Requires `AZURE_STORAGE_ACCOUNT` + `AZURE_STORAGE_ACCESS_KEY` |
+| Local filesystem | `file:///path/to/data` | Development and single-node deployments |
+| Amazon S3 | `s3://bucket-name/prefix` | Requires `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` or instance role. For an S3-compatible store, add `?region=` and `?endpoint=` query parameters |
+| Google Cloud Storage | `gs://bucket-name/prefix` | Requires `GOOGLE_APPLICATION_CREDENTIALS` |
+| Azure Blob Storage | `azblob://container/prefix` | Requires `AZURE_STORAGE_ACCOUNT` + `AZURE_STORAGE_ACCESS_KEY` |
 
 ### CORS (browser clients)
 
@@ -98,25 +115,23 @@ The management API is normally server-side only; CORS is optional there for oper
 
 ## Per-Context configuration
 
-Each Context stores a `config` object in the control plane. This is updated via `PATCH /api/v1/contexts/{id}` and applies immediately to new requests.
+Each Context stores a `config` object in the control plane. It is set as the `config` field when the Context is created, updated with `PATCH /api/v1/contexts/{id}` on the management API, and applies immediately to new requests.
 
 ### Full config schema
 
 ```json
 {
-  "config": {
-    "token_limit": 1000000,
-    "models": {
-      "extraction": { "provider": "google", "model": "gemini-2.5-flash" },
-      "synthesis": { "provider": "google", "model": "gemini-2.5-pro" },
-      "elaboration_consolidation": { "provider": "google", "model": "gemini-2.5-flash" },
-      "embedding": "gemini-embedding-2"
-    },
-    "providers": {
-      "google": "…",
-      "openai": "sk-…",
-      "anthropic": "sk-ant-…"
-    }
+  "token_limit": 1000000,
+  "models": {
+    "extraction": { "provider": "google", "model": "gemini-2.5-flash" },
+    "synthesis": { "provider": "anthropic", "model": "claude-opus-4-8" },
+    "elaboration_consolidation": { "provider": "google", "model": "gemini-2.5-flash" },
+    "embedding": "gemini-embedding-2"
+  },
+  "providers": {
+    "google": "…",
+    "openai": "sk-…",
+    "anthropic": "sk-ant-…"
   }
 }
 ```
@@ -125,16 +140,21 @@ Each Context stores a `config` object in the control plane. This is updated via 
 
 | Field | Type | Description |
 |---|---|---|
-| `token_limit` | integer (optional) | Soft monthly token cap for metering and billing. Does not reject requests while `enforcement_blocked` is `false`. `null` = no cap. |
+| `token_limit` | integer (optional) | Soft monthly token cap for metering and billing. Does not reject requests while `enforcement_blocked` is `false`. `null` = no cap. In a `PATCH`, `0` clears the cap. |
+| `billing_anchor_day` | integer (optional) | Day of the month (1-31) on which the monthly budget period starts. A day past the end of a month moves back to that month's last day. Unset means day 1. In a `PATCH`, `0` clears it. |
 | `ingestion_profile` | string | Document ingest dial: `TextOnly`, `TextPlusKeyword`, `StandardMultimodal`, or `MultimodalFull` (default). See [Multimodal content](/docs/agent-memory/ingest/authoritative/multimodal-content). |
 | `models.extraction` | `{provider, model}` | LLM for turn and document extraction. |
-| `models.reconciliation` | `{provider, model}` (optional) | LLM assist when structural entity merge is inconclusive. |
-| `models.synthesis` | `{provider, model}` | LLM for `/chat` and `/reflect`. |
+| `models.reconciliation` | `{provider, model}` (optional) | Stored and validated, but not yet applied. |
+| `models.synthesis` | `{provider, model}` | Stored and validated, but not yet applied: `/chat` and `/reflect` use the deployment default. |
 | `models.elaboration_consolidation` | `{provider, model}` | LLM for worker elaboration and consolidation. |
 | `models.embedding` | string | Must be `gemini-embedding-2` when set (3072-dim; deployment-fixed). |
 | `providers.google` | string | Google (Gemini) API key for this Context. |
 | `providers.openai` | string | OpenAI API key for this Context. Overrides the server-wide default. |
 | `providers.anthropic` | string | Anthropic API key for this Context. |
+| `providers.cerebras` | string | Cerebras API key for this Context. |
+| `providers.openrouter` | string | OpenRouter API key for this Context. |
+
+Each stage takes an object with a `provider` (`openai`, `anthropic`, `google`, `cerebras` or `openrouter`) and a `model`. The provider must have a key available to the Context. For OpenAI and Google, the model must be one the server knows for that provider, so an id such as `gemini-2.5-pro` is rejected with `400`. Anthropic accepts any non-empty id, OpenRouter needs a `vendor/model` id, and Cerebras needs an id with no `/`.
 
 ### Provider API key visibility
 
@@ -148,7 +168,7 @@ Provider API keys are **write-only** on the API surface. The read projection for
 }
 ```
 
-This is **not** the same as **`GET /api/v1/{context_id}/providers`**, which lists providers reachable via a global deployment key **or** a per-Context key and includes selectable model ids. The two surfaces are not derivable from each other.
+This is **not** the same as **`GET /api/v1/contexts/{context_id}/providers`** on the management API, which lists providers reachable via a global deployment key **or** a per-Context key and includes selectable model ids. The two surfaces are not derivable from each other.
 
 The raw key values never appear in read responses.
 
@@ -158,11 +178,11 @@ These fields live on the Context record itself, not inside the `config` object. 
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `enforcement_blocked` | boolean | `false` | When `true`, gated LLM-backed requests return **`429`** regardless of the soft `token_limit`. When `false`, usage may exceed `token_limit` (pay-as-you-go). |
+| `enforcement_blocked` | boolean | `false` | When `true`, gated LLM-backed requests return **`429`** regardless of the soft `token_limit`. When `false`, usage may exceed `token_limit` (pay-as-you-go). Set it with `PUT /api/v1/contexts/{id}/enforcement` on the management API. |
 
 ### Patching config
 
-Send only the fields you want to change. Unset fields are left unchanged (deep merge):
+Send only the fields you want to change, at the top level of the body. Unset fields are left unchanged (deep merge). The response is the updated config view:
 
 ```http
 PATCH /api/v1/contexts/acme-prod
@@ -170,14 +190,14 @@ Content-Type: application/json
 Authorization: Bearer mgmt-...
 
 {
-  "config": {
-    "token_limit": 2000000,
-    "models": {
-      "reflection": "anthropic/claude-opus-4-7"
-    }
+  "token_limit": 2000000,
+  "models": {
+    "elaboration_consolidation": { "provider": "anthropic", "model": "claude-sonnet-4-6" }
   }
 }
 ```
+
+Do not wrap the fields in a `config` object. Unknown fields are ignored without an error, so a wrapped body changes nothing.
 
 ## Extraction tuning
 
@@ -185,11 +205,13 @@ Additional per-Context settings control extraction behaviour:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `llm_extraction_enabled` | boolean | `false` | Whether typed-node extraction runs at all. With it off, documents and turns are still stored and searchable, but produce no entities, attributes, or relations |
+| `llm_extraction_enabled` | boolean | `false` | Has no effect. It is kept so stored values still load. Document fact extraction runs for every `ingestion_profile` above `TextOnly` |
 | `pii_redaction_enabled` | boolean | `false` | Redact detected personal data during ingest |
 | `reconciliation.confidence_floor` | float | `0.7` | Posterior-confidence floor for auto-supersession. Below it, a conflicting assertion records an `uncertainty` instead of replacing the prior value |
-| `ingestion_profile` | string | - | Which pipeline steps run during document ingest |
-| `chunking_strategy` | string | - | How document text is split before embedding |
+| `ingestion_profile` | string | `MultimodalFull` | Which pipeline steps run during document ingest |
+| `chunking_strategy` | string | `recursive` | How document text is split before embedding: `recursive`, `sentence`, `paragraph` or `token_limit` |
+| `injection_scan.enabled` | boolean | `true` | Run the ingest-time prompt-injection scanner |
+| `injection_scan.threshold` | float | `0.7` | Scanner score at or above which a write is rejected with `400`. Findings below it are recorded as `uncertainty` records |
 
 There is no setting that constrains which entity types, attribute keys, or relation labels extraction may produce. Entity types come from a fixed vocabulary; keys and labels converge through reuse. See [Extraction vocabulary](/docs/agent-memory/tuning/ontology-grounding).
 
@@ -200,6 +222,25 @@ There is no setting that constrains which entity types, attribute keys, or relat
 | `response_cache.enabled` | boolean | `true` | Master switch. With it `false`, every `/chat` and `/reflect` call skips the cache tier |
 | `response_cache.similarity_threshold` | float | `0.92` | Cosine-similarity floor a prior query must score against the new one before its answer is reused |
 | `response_cache.freshness_window_seconds` | integer | `3600` | Soft cap on how old a reusable response may be |
+
+## Trace retention
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `trace_retention.decision_trace_days` | integer (optional) | none | Days of `decision_trace` history to keep. Unset keeps it indefinitely |
+| `trace_retention.retrieval_trace_days` | integer (optional) | `90` | Days of `retrieval_trace` history to keep |
+| `trace_retention.response_trace_days` | integer (optional) | `90` | Days of `response_trace` history to keep |
+
+## Scope and label limits
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `scope_limits.max_nodes` | integer | `100000` | Maximum number of registered custom scope nodes |
+| `scope_limits.max_depth` | integer | `16` | Maximum scope path depth |
+| `label_limits.max_labels_per_fact` | integer | `32` | Maximum labels on one fact |
+| `label_dimensions` | array | `[]` | Declared label keys. Each entry has a `key`, a `value_policy` (`open` or `closed`), and an optional `max_values` and `description`. Undeclared keys are still accepted |
+
+A write that passes a scope or label limit returns `409`. In a `PATCH`, `scope_limits`, `label_limits` and `label_dimensions` each replace the stored value as a whole.
 
 ## Key policy
 
@@ -234,10 +275,10 @@ Requests above the query ceiling return **`400 Bad Request`**.
 
 ## Defaults reference
 
-When a per-Context field is not set, the server-wide default applies. The effective configuration for a Context is always visible at:
+When a per-Context field is not set, the default applies. The configuration for a Context is visible on the management API at:
 
 ```http
 GET /api/v1/contexts/{id}
 ```
 
-The response includes the `config` object with all effective values merged - Context-level overrides where set, server-wide defaults elsewhere.
+The response includes the `config` object. A field the Context has not set shows its default value. The one exception is `models`: a stage with no selection is left out of the response, and resolves to the server-wide default when it is used.

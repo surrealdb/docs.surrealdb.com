@@ -6,7 +6,7 @@ description: "Contexts, keys, and operator lifecycle."
 
 # Management API
 
-The management API provides control-plane operations: creating Contexts, managing API keys, and operator lifecycle. All management endpoints are under `/api/v1/` and require a management key.
+The management API provides control-plane operations: creating Contexts, managing principals and API keys, connectors, and operator lifecycle. It runs as its own process, separate from the user API, on `SPECTRON_MANAGEMENT_BIND_ADDRESS` (REST) and `SPECTRON_MANAGEMENT_GRPC_BIND_ADDRESS` (gRPC). All management endpoints are under `/api/v1/` and require a management key.
 
 ## Authentication
 
@@ -16,7 +16,7 @@ Management endpoints require a **management** API key as a Bearer token:
 Authorization: Bearer <management-key>
 ```
 
-Keys are printed once by bootstrap or minted via the management REST API. They are distinct from per-Context end-user keys.
+Keys are printed once by bootstrap or seeded with `SPECTRON_MANAGEMENT_API_KEY`. They are distinct from per-Context end-user keys. A data-plane key sent to the management API gets `401`.
 
 ## Contexts
 
@@ -38,12 +38,15 @@ Returns all Contexts registered on this SurrealDB Agent Memory deployment.
       "database": "prod",
       "config": {
         "token_limit": 1000000,
-        "models": { "extraction": "openai/gpt-4o-mini" },
+        "models": { "extraction": { "provider": "openai", "model": "gpt-5-mini" } },
         "providers_configured": ["openai"]
       },
-      "created_at": "2026-01-15T10:00:00Z"
+      "created_at": "2026-01-15T10:00:00Z",
+      "schema_version": 29,
+      "enforcement_blocked": false
     }
-  ]
+  ],
+  "page": { "hasMore": false }
 }
 ```
 
@@ -61,8 +64,8 @@ Content-Type: application/json
   "config": {
     "token_limit": 1000000,
     "models": {
-      "extraction": "openai/gpt-4o-mini",
-      "response": "openai/gpt-4o"
+      "extraction": { "provider": "openai", "model": "gpt-5-mini" },
+      "elaboration_consolidation": { "provider": "openai", "model": "gpt-5.1" }
     },
     "providers": {
       "openai": "sk-..."
@@ -85,12 +88,16 @@ When **`admin_external_id`** is set, SurrealDB Agent Memory seeds an initial **`
   "database": "prod",
   "config": {
     "token_limit": 1000000,
-    "models": { "extraction": "openai/gpt-4o-mini" },
+    "models": { "extraction": { "provider": "openai", "model": "gpt-5-mini" } },
     "providers_configured": ["openai"]
   },
-  "created_at": "2026-05-12T10:00:00Z"
+  "created_at": "2026-05-12T10:00:00Z",
+  "schema_version": 29,
+  "enforcement_blocked": false
 }
 ```
+
+Each model stage is an object with a `provider` and a `model`. See [Configuration](/docs/agent-memory/reference/configuration#config-fields) for the stages and the accepted models.
 
 ### Migration status
 
@@ -100,13 +107,38 @@ GET /api/v1/migrations
 
 Returns a fleet-wide view of per-Context schema catch-up after a binary upgrade: version histogram, Contexts still behind the embedded latest, and DLQ entries.
 
+### Run a Context's migration now
+
+```http
+POST /api/v1/contexts/{context_id}/migrate
+```
+
+Queues this Context's schema migration to run now, ahead of the scheduler's next retry, and returns the queued job immediately. Track it in `GET /api/v1/migrations`.
+
 ### Get a Context
 
 ```http
 GET /api/v1/contexts/{context_id}
 ```
 
-Returns the Context record. Provider API key values are replaced with a `providers_configured` summary (per-Context keys only). For the full provider and model catalogue - including providers reachable via deployment-wide keys - use **`GET /api/v1/{context_id}/providers`** on the data-plane API.
+Returns the Context record. Provider API key values are replaced with a `providers_configured` summary (per-Context keys only). For the full provider and model catalogue - including providers reachable via deployment-wide keys - use **`GET /api/v1/contexts/{context_id}/providers`**.
+
+### List providers
+
+```http
+GET /api/v1/contexts/{context_id}/providers
+```
+
+Lists the providers available to the Context and the models selectable for each.
+
+### Usage and stats
+
+```http
+GET /api/v1/contexts/{context_id}/usage
+GET /api/v1/contexts/{context_id}/stats
+```
+
+`usage` returns the Context's token consumption for the current billing period. `stats` counts the records in each of the Context's data-plane tables. It scans every table it reports, so fetch it when needed rather than on every request.
 
 ### Update Context config
 
@@ -115,18 +147,25 @@ PATCH /api/v1/contexts/{context_id}
 Content-Type: application/json
 
 {
-  "config": {
-    "token_limit": 2000000,
-    "models": {
-      "reflection": "anthropic/claude-opus-4-7"
-    }
+  "token_limit": 2000000,
+  "models": {
+    "elaboration_consolidation": { "provider": "anthropic", "model": "claude-sonnet-4-6" }
   }
 }
 ```
 
-Deep-merges the provided config into the existing config. Unset fields are left unchanged.
+Deep-merges the provided fields into the existing config and returns the updated config. Send the config fields at the top level of the body. Unset fields are left unchanged, and unknown fields are ignored without an error, so a body wrapped in `{"config": ...}` changes nothing.
 
-Top-level fields such as **`enforcement_blocked`** (pay-as-you-go vs hard block - see [Configuration](/docs/agent-memory/reference/configuration#top-level-context-fields-outside-config)) may be set on the same `PATCH` body outside `config`.
+### Set enforcement
+
+```http
+PUT /api/v1/contexts/{context_id}/enforcement
+Content-Type: application/json
+
+{ "blocked": true }
+```
+
+Sets the Context's runtime hard block (**`enforcement_blocked`**, see [Configuration](/docs/agent-memory/reference/configuration#top-level-context-fields-outside-config)). While blocked, every gated LLM and embedding call for the Context is rejected with `429`, background work included. The call is idempotent.
 
 ### Delete a Context
 
@@ -163,23 +202,38 @@ Grant verbs use namespaced forms (`memory:read`, `memory:write`, …). Flat name
 
 ## Principals and external identity
 
-Principals are the data-plane identity SurrealDB Agent Memory authorises. Create one with an optional **`external_id`** so upstream systems (SurrealDB Cloud, OIDC, on-prem IdP) can resolve “which principal is this user?” without a side mapping table:
+Principals are the data-plane identity SurrealDB Agent Memory authorises. Create one with a required **`kind`** and **`display_name`**, and an optional **`external_id`** so upstream systems (SurrealDB Cloud, OIDC, on-prem IdP) can resolve “which principal is this user?” without a side mapping table:
 
 ```http
 POST /api/v1/contexts/{context_id}/principals
 Content-Type: application/json
 
 {
+  "kind": "human",
   "display_name": "Alice",
   "external_id": "surreal-cloud:usr_01HF…",
   "grants": {
-    "memory:read": [{ "org": "acme", "user": "alice" }],
-    "memory:write": [{ "org": "acme", "user": "alice" }]
+    "memory:read": ["org/acme/user/alice/*"],
+    "memory:write": ["org/acme/user/alice/*"]
   }
 }
 ```
 
+`kind` is one of `human`, `agent`, `service` or `unknown`. It describes the identity: what a principal may do comes only from its grants. `grants` is a map from each verb to a list of scope patterns, and defaults to no grants. The response is `201 Created` with the new principal's `id`.
+
 When **`external_id`** is present, create is **create-or-get**: a repeat call with the same issuer-qualified id returns the existing principal unchanged (even if `display_name` differs). Without `external_id`, each call mints a fresh principal. A duplicate **`display_name`** when no matching `external_id` applies returns **`409 Conflict`**. The value is opaque to SurrealDB Agent Memory - qualify it with your issuer prefix.
+
+### Manage principals
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/api/v1/contexts/{context_id}/principals` | Lists every principal in the Context, ordered by principal id. |
+| `GET` | `/api/v1/contexts/{context_id}/principals/{principal_id}` | Returns one principal by id. |
+| `PATCH` | `/api/v1/contexts/{context_id}/principals/{principal_id}` | Updates a principal's `kind` and/or `display_name`. |
+| `DELETE` | `/api/v1/contexts/{context_id}/principals/{principal_id}` | Deletes a principal and revokes its bound API keys. |
+| `PUT` | `/api/v1/contexts/{context_id}/principals/{principal_id}/grants` | Replaces a principal's entire grant map. The body is `{"grants": {"<verb>": ["<pattern>", ...]}}`. |
+| `GET` | `/api/v1/contexts/{context_id}/principals/{principal_id}/grant-history` | Reads back the principal's recorded grant changes, oldest first. Grants assigned when the principal was created are not events, so they do not appear here. |
+| `GET` | `/api/v1/contexts/{context_id}/scopes` | Lists the Context's registered scope nodes (live and tombstoned), ordered by scope path. |
 
 ### Reserved built-in principals
 
@@ -204,7 +258,7 @@ Content-Type: application/json
 
 {
   "grants": {
-    "memory:read": [{ "org": "acme", "agent": "planner" }]
+    "memory:read": ["org/acme/agent/planner/*"]
   }
 }
 ```
@@ -244,12 +298,16 @@ List responses include optional **`grants`** on each key (same semantics as the 
 
 The secret is never returned after creation except on mint and rotate.
 
-**Principal types:**
+**Principal kinds:**
 
-| Principal | Capabilities |
+| Kind | Meaning |
 |---|---|
-| `agent` | Create sessions, add turns, recall context, search knowledge. Cannot persist reflections or manage keys. |
-| `supervisor` | All agent capabilities plus persisting reflections within the supervisor’s grant region. |
+| `human` | A person, typically linked to a cloud user. |
+| `agent` | An autonomous process, such as a planner or a support bot. |
+| `service` | An integration or pipeline. The reserved `system` principal has this kind. |
+| `unknown` | A kind for older or unrecognised values. |
+
+The kind does not grant capabilities. A principal's grants decide what its keys can do.
 
 ### Cloud-brokered access tokens
 
@@ -260,23 +318,24 @@ POST /api/v1/contexts/{context_id}/access-tokens
 Content-Type: application/json
 
 {
-  "external_id": "surreal-cloud:usr_01HF…",
-  "display_name": "Alice",
-  "ttl_seconds": 3600,
+  "externalId": "surreal-cloud:usr_01HF…",
+  "kind": "human",
+  "displayName": "Alice",
+  "ttlSeconds": 3600,
   "grants": {
-    "memory:read": [{ "org": "acme", "user": "alice" }],
-    "memory:write": [{ "org": "acme", "user": "alice" }]
+    "memory:read": ["org/acme/user/alice/*"],
+    "memory:write": ["org/acme/user/alice/*"]
   }
 }
 ```
 
-Composes **create-or-get principal by `external_id`**, optional grant re-assertion, and **mint a bound key**. **`ttl_seconds` is required** - brokered tokens cannot be unbounded. Re-broker before expiry; there are no refresh tokens. The plaintext secret is returned once.
+Unlike the other management bodies, this one uses camelCase field names. It composes **create-or-get principal by `externalId`**, optional grant re-assertion, and **mint a bound key**. **`kind` and `ttlSeconds` are required** - brokered tokens cannot be unbounded, and the Context's `max_token_ttl_seconds` cap still applies. The response is `201 Created` with `key`, `principalId` and `validUntil`. Re-broker before expiry; there are no refresh tokens. The plaintext secret is returned once.
 
 Member-facing **self-service** key management (after a brokered or admin-minted key is held) lives on the [REST API](/docs/agent-memory/reference/rest-api#self-service-keys-and-me) - not the management API. **`issue_access_token`** (Cloud broker path) emits a server warning when the caller sends no grants and the resulting principal is still entirely zero-grant. The warning is diagnostic only and does not change behaviour.
 
-## Knowledge upload (management-only)
+## Knowledge upload
 
-Document ingestion requires a management key or an agent key with explicit upload capability. See [Uploading documents](/docs/agent-memory/ingest/authoritative/uploading-documents) for the full upload API.
+Document upload is a data-plane operation on the user API, not a management operation. It needs a data-plane key with `memory:write` over the target scope. See [Uploading documents](/docs/agent-memory/ingest/authoritative/uploading-documents) for the full upload API.
 
 ```http
 POST /api/v1/{context_id}/documents
@@ -284,29 +343,39 @@ Content-Type: multipart/form-data
 Authorization: Bearer <key>
 
 file=@document.pdf
-title=Product Catalogue
-scope[org]=acme
+metadata={"title": "Product Catalogue"}
 ```
+
+Fields such as `title`, `source` and `observedAt` go inside the JSON `metadata` part. Separate form parts with those names are ignored.
 
 ## Lifecycle operations
 
-### Trigger decay pass
+The management API has no decay or reindex route. The lifecycle passes are on the user API: `POST /api/v1/{context_id}/lifecycle/decay` applies importance decay across all memories and needs `grant:manage` over `/`, and `POST /api/v1/{context_id}/lifecycle/expire` runs the expiry sweep for `context`-category memories. The embedding model is fixed, so there is no reindex.
 
-Runs the lifecycle decay pass immediately, expiring `context`-category memories past their TTL and pruning expired semantic cache entries:
+## Connectors and bindings
 
-```http
-POST /api/v1/contexts/{context_id}/lifecycle/decay
-```
+A connector links an external data source to this cluster, and a binding enables a connector for one Context.
 
-### Force reindex
+| Method | Path | Description |
+| --- | --- | --- |
+| `POST` | `/api/v1/connectors/{connector_id}` | Registers an org's connector on this cluster. Credentials in the body are write-only. |
+| `GET` | `/api/v1/connectors` | Lists one org's connectors, ordered by connector id. `org_ref` is required. |
+| `GET` | `/api/v1/connectors/{connector_id}` | Returns one connector, reporting whether credentials are set but never the credentials. |
+| `PATCH` | `/api/v1/connectors/{connector_id}` | Updates a connector's non-secret configuration or its ontology manifest. |
+| `PUT` | `/api/v1/connectors/{connector_id}/credentials` | Replaces a connector's credentials wholesale. |
+| `DELETE` | `/api/v1/connectors/{connector_id}` | Deletes a connector. Refused with `409` while any of its bindings is still awaiting cleanup. |
+| `POST` | `/api/v1/connectors/{connector_id}/check` | Asks the connector host to reach the source and report its change stream, retention and collections. |
+| `POST` | `/api/v1/connectors/{connector_id}/introspect` | Asks the connector host what collections the source exposes and what their records look like. |
+| `POST` | `/api/v1/connectors/{connector_id}/ontology/validate` | Checks an ontology manifest against the source's schemas without storing it. |
+| `POST` | `/api/v1/contexts/{context_id}/bindings/{binding_id}` | Enables a connector for the Context. |
+| `GET` | `/api/v1/contexts/{context_id}/bindings` | Lists the Context's bindings, ordered by binding id. |
+| `GET` | `/api/v1/contexts/{context_id}/bindings/{binding_id}` | Returns one binding, with its policy, counters, and the reason code it last stopped on. |
+| `PATCH` | `/api/v1/contexts/{context_id}/bindings/{binding_id}` | Updates a binding's policy. |
+| `POST` | `/api/v1/contexts/{context_id}/bindings/{binding_id}/actions` | Performs an operator action on a binding: `start`, `pause`, `resume`, `resync` or `reground`. |
+| `GET` | `/api/v1/contexts/{context_id}/bindings/{binding_id}/events` | One binding's history, newest first. |
+| `DELETE` | `/api/v1/contexts/{context_id}/bindings/{binding_id}` | Disables a binding and starts releasing what it holds at the source. Returns `200` with the binding, which moves to `cleanup_pending`. |
 
-Triggers re-embedding and re-indexing of all chunks in a Context (e.g. after changing the embedding model):
-
-```http
-POST /api/v1/contexts/{context_id}/lifecycle/reindex
-```
-
-This is a long-running operation. Poll the returned job ID to track progress.
+Connector routes return `501` when connectors are disabled on the deployment, and `502` when the connector host or the source fails.
 
 ## Pagination
 
@@ -320,7 +389,12 @@ GET /api/v1/contexts/{context_id}/keys?limit=50
 ```json
 {
   "keys": [
-    { "id": "cak_01HF...", "name": "primary", "grants": ["memory:write"] }
+    {
+      "id": "cak_01HF...",
+      "name": "primary",
+      "grants": { "memory:write": ["org/acme/*"] },
+      "created_at": "2026-05-12T10:00:00Z"
+    }
   ],
   "page": { "hasMore": false }
 }

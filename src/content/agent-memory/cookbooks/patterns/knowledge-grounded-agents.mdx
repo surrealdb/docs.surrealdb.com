@@ -1,34 +1,35 @@
 ---
 position: 3
 title: Knowledge-grounded agents
-description: "Combine authoritative knowledge retrieval with experiential memory."
+description: "Combine document retrieval with experiential memory, and handle contradictions between them."
 ---
 
 # Knowledge-grounded agents
 
-A knowledge-grounded agent answers from authoritative sources before consulting conversational memory. This pattern uses SurrealDB Agent Memory's authoritative knowledge to store canonical knowledge - product data, policies, technical documentation - and relies on the authority hierarchy to prevent conversational drift from corrupting those facts.
+A knowledge-grounded agent answers from curated sources before consulting conversational memory. This pattern uploads canonical knowledge - product data, policies, technical documentation - as documents, and relies on provenance to stop a conversation from silently replacing what a document says.
 
-## Why ground agents in authoritative knowledge
+## Why ground agents in documents
 
-Without a knowledge layer, agents hallucinate or rely on stale training data for domain-specific questions. The common workaround - embedding documents in a vector store and retrieving chunks - improves recall but loses structure, provenance, and the ability to enforce authority.
+Without a knowledge source, agents hallucinate or rely on stale training data for domain-specific questions. The common workaround - embedding documents in a vector store and retrieving chunks - improves recall but loses structure and provenance.
 
-Authoritative knowledge gives you:
+Uploading documents to SurrealDB Agent Memory gives you:
 
-- **Structured knowledge nodes** with typed attributes, rather than plain text chunks.
-- **Authority enforcement** - authoritative knowledge wins when a user asserts something conflicting.
-- **`resolves_to` links** - conversational references to products or policies resolve to authoritative nodes.
+- **Structured facts** - extraction turns each document into entities and attributes in the same graph as conversational memory, and keeps keyword-indexed passages for search.
+- **Provenance** - every fact records the kind of source it came from, such as `document` or `turn`.
+- **Flagged contradictions** - when a conversation contradicts a fact from a document, both values are kept and an `uncertainty` is raised, rather than one silently replacing the other.
 - **Content addressing** - uploading the same document twice is idempotent.
 
-## Step 1 - Load authoritative knowledge
+## Step 1 - Upload the knowledge
 
-Documents are ingested through the knowledge API. SurrealDB Agent Memory processes them into knowledge nodes (typed entities with attributes) and keyword-indexed chunks.
+Documents are uploaded as `multipart/form-data`, with the bytes in a `file` part. The title, source and other metadata go in a `metadata` part as one JSON object (`title`, `source`, `mimeType`, `scopes`, `labels`, `observedAt`). Separate form fields such as `title` are ignored.
 
 ```python
+import json
 import os
 import httpx
 
 client = httpx.Client(
-    base_url="https://spectron.surrealdb.com/api/v1/my-context",
+    base_url=f"{os.environ['AGENT_MEMORY_ENDPOINT']}/api/v1/my-context",
     headers={"Authorization": f"Bearer {os.environ['AGENT_MEMORY_API_KEY']}"},
 )
 
@@ -36,67 +37,69 @@ client = httpx.Client(
 with open("product-specs.json", "rb") as f:
     client.post(
         "/documents",
+        data={"metadata": json.dumps({"title": "Product specifications"})},
         files={"file": ("product-specs.json", f, "application/json")},
-        data={"title": "Product specifications"},
     )
 
 # Upload a policy document as Markdown
 with open("returns-policy.md", "rb") as f:
     client.post(
         "/documents",
+        data={"metadata": json.dumps({"title": "Returns policy"})},
         files={"file": ("returns-policy.md", f, "text/markdown")},
-        data={"title": "Returns policy"},
     )
 ```
 
 ```typescript
 const formData = new FormData();
+formData.append("metadata", JSON.stringify({ title: "Product specifications" }));
 formData.append(
     "file",
     new Blob([productSpecsJson], { type: "application/json" }),
     "product-specs.json",
 );
-formData.append("title", "Product specifications");
-formData.append("content_type", "product_data");
 
-await fetch("https://spectron.surrealdb.com/api/v1/my-context/documents", {
+await fetch(`${process.env.AGENT_MEMORY_ENDPOINT}/api/v1/my-context/documents`, {
     method: "POST",
     headers: { "Authorization": `Bearer ${process.env.AGENT_MEMORY_API_KEY}` },
     body: formData,
 });
 ```
 
-## Step 2 - Query authoritative knowledge in the agent loop
+The SDKs build the `metadata` part for you: `memory.documents.upload("returns-policy.md", title="Returns policy")` in Python.
 
-Before generating a response, search authoritative knowledge for relevant passages. Use `documents.query` for natural-language search over document chunks, or an entity read for exact lookups.
+## Step 2 - Query the documents in the agent loop
+
+Before generating a response, search the documents for relevant passages. Use `documents.query` for natural-language search over document chunks, or an entity read for exact lookups.
 
 ```python
-from surrealdb.memory import Memory
+from surrealdb.memory import AsyncMemory
 
-memory = Memory(context="my-context", api_key="sk-...")
+memory = AsyncMemory(context="my-context", api_key="sp-...")
 
 async def grounded_response(session, user_message: str) -> str:
-    # Search authoritative knowledge for relevant authoritative knowledge
+    # Search the uploaded documents for relevant passages
     knowledge = await memory.documents.query(
-        query=user_message,
+        user_message,
         mode="hybrid",
         k=4,
     )
 
-    # Retrieve experiential memory user context for personalisation
-    ctx = await session.context(query=user_message)
+    # Retrieve the session's memory context for personalisation
+    ctx = await memory.sessions.context(session.id, user_message)
 
-    # Assemble the prompt with authoritative facts taking precedence
+    # Assemble the prompt with document passages first
     system = "You are a product assistant. Answer from the knowledge provided."
 
-    # documents.query returns {results, queryMs}; each hit is {chunk, document, score}
-    if knowledge["results"]:
-        system += "\n\n## Authoritative knowledge\n"
-        for hit in knowledge["results"]:
-            system += f"\n{hit['chunk']['text']}  (source: {hit['document']['title']})"
+    # Each hit carries the matched chunk, its document and a score
+    if knowledge.results:
+        system += "\n\n## Reference documents\n"
+        for hit in knowledge.results:
+            system += f"\n{hit.chunk['text']}  (source: {hit.document['title']})"
 
-    if ctx.items:
-        system += f"\n\n## User context\n{ctx.formatted}"
+    # Session context is one string, ready to place in a prompt
+    if ctx.context:
+        system += f"\n\n## User context\n{ctx.context}"
 
     response = your_llm(system=system, user=user_message)
 
@@ -116,14 +119,14 @@ async function groundedResponse(session: Session, userMessage: string): Promise<
     let system = "You are a product assistant. Answer from the knowledge provided.";
 
     if (knowledge.results.length > 0) {
-        system += "\n\n## Authoritative knowledge\n";
+        system += "\n\n## Reference documents\n";
         for (const hit of knowledge.results) {
             system += `\n${hit.chunk.text}  (source: ${hit.document.title})`;
         }
     }
 
-    if (ctx.items.length > 0) {
-        system += `\n\n## User context\n${ctx.formatted}`;
+    if (ctx.context) {
+        system += `\n\n## User context\n${ctx.context}`;
     }
 
     const response = await yourLlm({ system, user: userMessage });
@@ -135,60 +138,69 @@ async function groundedResponse(session: Session, userMessage: string): Promise<
 }
 ```
 
-## Step 3 - The `resolves_to` mechanism
+## Step 3 - How documents and conversation meet
 
-When a user mentions a product or policy, SurrealDB Agent Memory creates an experiential memory entity and automatically creates a `resolves_to` relation pointing to the matching authoritative knowledge node. The context retrieval traverses this relation so the agent sees both layers together.
+Extraction from documents and extraction from conversation write to the same entity graph. An entity is identified by its type and name, so when a user mentions a product that a document describes, both sets of facts attach to one entity, such as `product/airpods_pro`. Entity types come from a fixed lower-case set, and `product`, `policy` and `organisation` are all part of it.
 
-```json
-// User says "I bought the AirPods Pro" - experiential memory entity created
+For example, after the catalogue upload and a conversation in which Alice says she bought AirPods Pro, one entity read shows both sources:
+
+```http
+GET /api/v1/{context_id}/entities/product/airpods_pro
+```
+
+```json title="Sample output"
 {
-  "id": "entity:[\"Product\", \"airpods_pro\"]",
-  "layer": 1,
-  "scope": ["org/acme/user/alice"]
-}
-
-// authoritative knowledge node - loaded from product catalogue
-{
-  "id": "knowledge:[\"Product\", \"airpods_pro\"]",
-  "layer": 0,
-  "name": "AirPods Pro (2nd generation)",
-  "price": 279,
-  "return_window_days": 30
-}
-
-// resolves_to - Spectron creates this automatically
-{
-  "in": "entity:[\"Product\", \"airpods_pro\"]",
-  "out": "knowledge:[\"Product\", \"airpods_pro\"]"
+  "entity": { "name": "airpods_pro", "entityType": "product", "memoryCategory": "knowledge" },
+  "attributes": [
+    {
+      "entity": "entity:product/airpods_pro",
+      "key": "price",
+      "value": "279",
+      "source": { "kind": "document", "title": "Product specifications" }
+    },
+    {
+      "entity": "entity:product/airpods_pro",
+      "key": "return_window_days",
+      "value": "30",
+      "source": { "kind": "document", "title": "Product specifications" }
+    }
+  ],
+  "relations": [
+    {
+      "subject": "entity:person/alice",
+      "object": "entity:product/airpods_pro",
+      "label": "owns",
+      "source": { "kind": "turn" }
+    }
+  ],
+  "truncated": { "attributes": false, "relations": false }
 }
 ```
 
-At retrieval time, a query about the user's AirPods returns both the experiential-memory entity (the user owns them) and the authoritative knowledge node (authoritative specs). The agent receives a complete picture in a single context call.
+The response is shortened: each entity, attribute and relation also carries its `id`, timestamps, `confidence`, `scope` and the rest of its `source` reference.
 
-## Step 4 - Handling authoritative and experiential streams conflicts
+At retrieval time, a query about the user's AirPods returns the facts from the conversation (the user owns them) and the facts from the product catalogue (the specification) together. Each fact carries its `source.kind`, so the agent can tell which is which.
 
-When a user asserts something that contradicts authoritative knowledge, SurrealDB Agent Memory records the conflict rather than silently overwriting the authoritative fact.
+## Step 4 - Handling conflicts between documents and conversation
 
-Example: the return policy is 30 days (authoritative knowledge), and a user says "I thought it was 60 days".
+When a user asserts something that contradicts a fact from a document, SurrealDB Agent Memory does not let either value silently replace the other. A contradiction between two kinds of source writes both values and raises an `uncertainty`. A new value from the same kind of source supersedes the old one as usual.
 
-The extraction pipeline:
+Example: the returns policy says 30 days, and a user says "I thought it was 60 days".
 
-1. Creates an experiential memory attribute: `return_window_days: 60` on the policy entity.
-2. Detects the conflict with the authoritative knowledge node (which says 30).
-3. Surfaces the clash in **`uncertainties`** and state/profile responses without modifying the curated record.
+The reconciliation pipeline:
 
-The agent is informed via the context retrieval:
+1. Writes `return_window_days: 60` on the policy entity, with source kind `turn`, without superseding the document's value.
+2. Keeps `return_window_days: 30`, with source kind `document`, as a current value too.
+3. Raises an `uncertainty`, returned in the write's `extraction.uncertainties` as `{about, reason}`:
 
 ```json
 {
-  "type": "conflict",
-  "l0_fact": { "key": "return_window_days", "value": 30 },
-  "l1_belief": { "key": "return_window_days", "value": 60, "source": "user assertion" },
-  "recommendation": "Inform the user of the authoritative value."
+  "about": "entity.return_window_days (document vs turn)",
+  "reason": "cross-provenance contradiction: prior document fact = \"30\"; new turn fact = \"60\""
 }
 ```
 
-The agent can then politely correct the user without any custom conflict-detection code.
+Open uncertainties are listed by `GET /api/v1/{context_id}/uncertainty`. To settle one, send the value to keep to `POST /api/v1/{context_id}/uncertainty/{id}/resolve` as `{"acceptedValue": "30"}`. Until then, the agent can see both values and their sources, and can tell the user what the policy document says.
 
 ## Exact entity retrieval
 

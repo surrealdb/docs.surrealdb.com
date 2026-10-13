@@ -6,11 +6,11 @@ description: "Vector, BM25, and graph-density retrieval modes. How each mode beh
 
 # Hybrid search
 
-SurrealDB Agent Memory exposes four retrieval modes for **document passages** (`POST .../documents/query`) and for the **unified** read path (`POST .../query`, which also ranks experiential facts). Each mode trades coverage, precision, and computational cost differently. See [Recalling memories](/docs/agent-memory/retrieve/recall) for unified recall; this page focuses on mode selection and graph-density signals.
+SurrealDB Agent Memory exposes four retrieval modes for **document passages** (`POST .../documents/query`: `hybrid`, `vector`, `bm25`, `hybrid_graph`) and four for the **unified** read path (`POST .../query`, which also ranks experiential facts: `hybrid`, `vector`, `bm25`, `graph`). Each mode trades coverage, precision, and computational cost differently. See [Recalling memories](/docs/agent-memory/retrieve/recall) for unified recall; this page focuses on mode selection and graph-density signals.
 
 ## Answer size vs search breadth
 
-**`k`** (and **`limit`** on `/query`) controls how many hits are returned after fusion - the **answer size**. Default **10**, maximum **50** (`SPECTRON_MAX_QUERY_K`, clamp-down only).
+**`k`** controls how many hits are returned after fusion - the **answer size**. Default **10**, maximum **50** (`SPECTRON_MAX_QUERY_K`, clamp-down only).
 
 The **candidate pool** that vector, BM25, and graph signals search over is sized separately (`SPECTRON_RETRIEVAL_POOL_SIZE`, default **256**). Raising `k` returns more fused results but does not widen the internal search. Tier escalation (when confidence is thin) doubles the pool rather than re-running an identical pass.
 
@@ -63,7 +63,7 @@ The graph-density reranker draws on:
 
 `hybrid_graph` produces the highest-quality results for complex queries requiring multi-hop reasoning, but adds latency proportional to graph depth. For simple factual lookups, `hybrid` is sufficient.
 
-When tuning graph-density reranking, optional **`graph_edges`** selects which structural signals contribute. Each value must be one of the recognised edge kinds - typos or unknown values return `400 Bad Request` rather than being silently ignored:
+When tuning graph-density reranking, optional **`graphEdges`** on `/documents/query` selects which structural signals contribute. Each value must be one of the recognised edge kinds - typos or unknown values are rejected with `422 Unprocessable Entity` rather than being silently ignored:
 
 | Edge kind | Signal |
 | --- | --- |
@@ -72,78 +72,104 @@ When tuning graph-density reranking, optional **`graph_edges`** selects which st
 | `document_link` | Cross-document link density |
 | `document_summary` | Document-level summary similarity |
 
-Responses may report `hybrid_graph` on individual hits when several signals combine; that value describes merged evidence in the result, not an input filter.
+The `edgeKind` in a hit's `graphEvidence` may report `hybrid_graph` when several signals combine; that value describes merged evidence in the result, not a value to send in `graphEdges`.
 
 ## Basic query
 
 ```python
-from surrealdb.memory import Memory
+import os
+from surrealdb.memory import AsyncMemory
 
-memory = Memory(context="acme-prod", api_key=os.environ["SPECTRON_API_KEY"])
+memory = AsyncMemory(
+    context="acme-prod",
+    endpoint=os.environ["AGENT_MEMORY_ENDPOINT"],
+    api_key=os.environ["AGENT_MEMORY_API_KEY"],
+)
 
-hits = await memory.documents.query(
-    query="what is the return window for unopened items?",
+response = await memory.documents.query(
+    "what is the return window for unopened items?",
     mode="hybrid",
     k=10,
 )
 
-for hit in hits:
+for hit in response.results:
     print(hit.score)
-    print(hit.chunk.text)
-    print(hit.document.title)
+    print(hit.chunk["text"])
+    print(hit.document["title"])
 ```
 
 ```javascript
 import { AgentMemory } from "@surrealdb/memory";
 
-const memory = new AgentMemory({ context: "acme-prod", apiKey: process.env.SPECTRON_API_KEY });
+const memory = new AgentMemory({
+    context: "acme-prod",
+    endpoint: process.env.AGENT_MEMORY_ENDPOINT,
+    apiKey: process.env.AGENT_MEMORY_API_KEY,
+});
 
-const hits = await memory.documents.query({
+const { results } = await memory.documents.query({
     query: "what is the return window for unopened items?",
     mode: "hybrid",
     k: 10,
 });
 
-for (const hit of hits) {
+for (const hit of results) {
     console.log(hit.score, hit.chunk.text, hit.document.title);
 }
 ```
 
 ## Full query with all options
 
-```python
-hits = await memory.documents.query(
-    query="what is the return window for unopened items?",
-    mode="hybrid_graph",
-    k=10,
-    threshold=0.5,          # minimum score to include in results
-    vector_weight=0.5,      # relative weight of vector vs BM25 in RRF
-    rrf_k=60,               # RRF smoothing constant
-    graph_alpha=0.3,        # weight of graph-density rerank vs base score
-    expand_graph=True,      # include one-hop keyword and typed-knowledge context
-    use_hyde=False,         # Hypothetical Document Embeddings query expansion
-    decompose_query=False,  # sub-question decomposition
-    use_reranker=False,     # cross-encoder reranking
-    filter={"mime_type": ["application/pdf"]},
-    scope=["org/acme"],
-)
+The request body below sets every option on `POST /api/v1/{context_id}/documents/query` to its default, except `mode`, `expandGraph`, `filter` and `lens`. The Python SDK's `documents.query` accepts only `k`, `mode`, `threshold`, `expand_graph` and `filter`; the JavaScript SDK passes the whole body through.
+
+```http
+POST /api/v1/{context_id}/documents/query
+Authorization: Bearer <key>
+Content-Type: application/json
+
+{
+  "query": "what is the return window for unopened items?",
+  "mode": "hybrid_graph",
+  "k": 10,
+  "threshold": 0.5,
+  "vectorWeight": 0.5,
+  "rrfK": 60,
+  "graphAlpha": 0.3,
+  "graphDepth": 1,
+  "expandGraph": true,
+  "useHyde": false,
+  "decomposeQuery": false,
+  "useReranker": false,
+  "filter": { "mimeType": ["application/pdf"] },
+  "lens": [["org/acme"]]
+}
 ```
+
+- `threshold` is the minimum similarity for the vector leg. `bm25` mode ignores it, and the hybrid modes admit BM25 hits without it.
+- `vectorWeight` is the relative weight of vector against BM25 in RRF, and `rrfK` is the RRF smoothing constant.
+- `graphAlpha` is the weight of the graph-density rerank against the base score.
+- `expandGraph` includes one-hop keyword and typed-knowledge context.
+- `useHyde`, `decomposeQuery` and `useReranker` are described under [Advanced options](#advanced-options).
+- `filter` accepts only `mimeType` and `documentIds`. Narrow by scope with `lens`, a DNF scope selector.
 
 ## Query result structure
 
-Each hit in the result contains:
+The response has a `results` array and `queryMs`. Each hit in `results` contains:
 
 ```json
 {
   "chunk": {
     "id": "chunk:01hy2…",
+    "document": "01hx9…",
     "text": "Unopened items may be returned within 30 days of the original purchase date.",
     "section": "Eligibility",
-    "position": 7
+    "position": 7,
+    "charStart": 1840,
+    "charEnd": 1917
   },
   "score": 0.87,
   "document": {
-    "id": "doc:01hx9…",
+    "id": "01hx9…",
     "title": "Returns Policy",
     "source": "returns.pdf"
   }
@@ -157,61 +183,58 @@ Each hit in the result contains:
 
 ## Advanced options
 
-These flags are honoured on **`POST /documents/query`** and the MCP recall path when a request-path LLM provider is configured. On failure or when no LLM is attached, SurrealDB Agent Memory falls back to single-query retrieval without error.
+These flags are honoured on **`POST /documents/query`** when a request-path LLM provider is configured. The MCP `recall` tool has no HyDE, decomposition or reranker arguments. On failure or when no LLM is attached, SurrealDB Agent Memory falls back to single-query retrieval without error.
 
 ### HyDE (Hypothetical Document Embeddings)
 
-When `use_hyde=True`, SurrealDB Agent Memory generates a hypothetical answer to the query using the configured response model, then embeds that hypothetical answer rather than the raw query string. This improves recall for queries phrased as questions rather than document-like statements, at the cost of one LLM call per query.
+When `useHyde` is `true`, SurrealDB Agent Memory generates a hypothetical answer to the query using the configured response model, then embeds that hypothetical answer rather than the raw query string. This improves recall for queries phrased as questions rather than document-like statements, at the cost of one LLM call per query.
 
-```python
-hits = await memory.documents.query(
-    query="what is the return window for unopened items?",
-    mode="hybrid",
-    use_hyde=True,
-)
+```javascript
+const { results } = await memory.documents.query({
+    query: "what is the return window for unopened items?",
+    mode: "hybrid",
+    useHyde: true,
+});
 ```
 
 ### Sub-question decomposition
 
-When `decompose_query=True`, SurrealDB Agent Memory splits complex queries into a set of simpler sub-questions, executes each independently, and merges the results. This is useful when a single query implicitly asks multiple things:
+When `decomposeQuery` is `true`, SurrealDB Agent Memory splits complex queries into a set of simpler sub-questions, executes each independently, and merges the results. This is useful when a single query implicitly asks multiple things:
 
-```python
-hits = await memory.documents.query(
-    query="what are the return and warranty policies for AirPods Pro 2?",
-    mode="hybrid",
-    decompose_query=True,
-)
+```javascript
+const { results } = await memory.documents.query({
+    query: "what are the return and warranty policies for AirPods Pro 2?",
+    mode: "hybrid",
+    decomposeQuery: true,
+});
 ```
 
 Decomposition adds latency proportional to the number of sub-questions and consumes additional LLM tokens. Use it for explicit multi-topic queries rather than as a default.
 
 ### Cross-encoder reranking
 
-When `use_reranker=True`, the top-k results from the initial retrieval pass are reranked using a cross-encoder model that jointly encodes the query and each candidate chunk. Cross-encoder reranking is more accurate than bi-encoder (embedding) similarity but significantly slower.
+When `useReranker` is `true`, the top-k results from the initial retrieval pass are reranked using a cross-encoder model that jointly encodes the query and each candidate chunk. Cross-encoder reranking is more accurate than bi-encoder (embedding) similarity but significantly slower.
 
-**Requires server configuration:** set `SPECTRON_RERANKER_URL` and `SPECTRON_RERANKER_MODEL` at startup (see [Configuration](/docs/agent-memory/reference/configuration#reranker-optional)). Without a reranker provider, `use_reranker=true` falls through to bi-encoder ordering.
+**Requires server configuration:** set `SPECTRON_RERANKER_URL` and `SPECTRON_RERANKER_MODEL` at startup (see [Configuration](/docs/agent-memory/reference/configuration#reranker-optional)). Without a reranker provider, `useReranker: true` falls through to bi-encoder ordering.
 
-```python
-hits = await memory.documents.query(
-    query="return policy for international purchases",
-    mode="hybrid",
-    use_reranker=True,
-    k=20,   # retrieve more candidates for the reranker to rescore
-)
+```javascript
+const { results } = await memory.documents.query({
+    query: "return policy for international purchases",
+    mode: "hybrid",
+    useReranker: true,
+    k: 20, // retrieve more candidates for the reranker to rescore
+});
 ```
 
 ### Metadata filtering
 
-Apply hard filters before retrieval to restrict results to a subset of the document corpus:
+Apply hard filters before retrieval to restrict results to a subset of the document corpus. `filter` accepts `mimeType` and `documentIds`; any other key is ignored. To restrict by scope, pass `lens` beside `filter` instead:
 
 ```python
-hits = await memory.documents.query(
-    query="Q3 revenue",
+response = await memory.documents.query(
+    "Q3 revenue",
     mode="hybrid",
-    filter={
-        "mime_type": ["application/pdf"],
-        "scope": ["org/acme"],
-    },
+    filter={"mimeType": ["application/pdf"]},
 )
 ```
 
@@ -225,4 +248,4 @@ Filters are applied before scoring, so they do not affect the ranking of results
 | Product codes, model numbers, exact phrases | `bm25` |
 | Paraphrase, synonym-heavy queries | `vector` |
 | Complex multi-hop reasoning, graph context | `hybrid_graph` |
-| High-recall requirements (academic, legal) | `hybrid` + `use_reranker=True` |
+| High-recall requirements (academic, legal) | `hybrid` + `useReranker: true` |

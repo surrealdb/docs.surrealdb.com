@@ -42,7 +42,7 @@ from surrealdb.memory import AsyncMemory
 client = AsyncMemory(
     context="dev",
     endpoint="http://localhost:9090",
-    api_key="sk-...",
+    api_key="sp-...",
 )
 
 await client.remember("I prefer vegetarian food.", scopes=["user/alice"])
@@ -79,13 +79,13 @@ console.log(results.hits);
 
 ## Key differences
 
-**Structured extraction**: Mem0 stores memories as flat text strings. SurrealDB Agent Memory extracts structured entities, attributes, and relations. When you write "Alice prefers vegetarian food", it creates an entity `Person/alice` with attribute `food_preference = "vegetarian"`. Future writes that contradict this (e.g. "Alice now eats fish") update the attribute with a supersession chain, so you can see the history.
+**Structured extraction**: Mem0 stores memories as flat text strings. SurrealDB Agent Memory extracts structured entities, attributes, and relations. When you write "Alice prefers vegetarian food", it creates an entity `person/alice` with attribute `food_preference = "vegetarian"`. Future writes that contradict this (e.g. "Alice now eats fish") update the attribute with a supersession chain, so you can see the history.
 
 **Conflict resolution**: Mem0 stores new memories alongside old ones. SurrealDB Agent Memory detects when a new memory contradicts a stored attribute and automatically supersedes the old value. The old value is not deleted - it is marked as superseded with a timestamp.
 
-**Scoped multi-tenancy**: Mem0 uses separate `user_id` and `agent_id` parameters. SurrealDB Agent Memory uses **slash-path scope** (for example `["org/acme"]`). A query at `org/acme` can retrieve org-wide memory across users.
+**Scoped multi-tenancy**: Mem0 uses separate `user_id` and `agent_id` parameters. SurrealDB Agent Memory uses **slash-path scope** (for example `["org/acme/user/alice"]`). A reader sees records at the scopes its grants cover and below them, never records tagged at an ancestor scope, so a key granted `org/acme/*` can read every user's memory under `org/acme`.
 
-**Authoritative versus experiential**: Mem0 treats all memory uniformly. SurrealDB Agent Memory models **eight pillars** of agent memory; among them, **Authoritative** curated content (ingested documents, knowledge nodes) is distinct from **Experiential** conversational memory (turns and the **six memory categories**). Reconciliation gives **Authoritative** precedence when they conflict. See [Eight pillars and six categories](/docs/agent-memory/architecture/eight-pillars-and-categories).
+**Documents versus conversation**: Mem0 treats all memory uniformly. SurrealDB Agent Memory records the kind of source behind every fact, such as an uploaded `document` or a conversation `turn`, and sorts facts into three memory categories: identity, knowledge and context. When a conversation contradicts a fact from a document, neither value replaces the other: both are kept and an `uncertainty` is raised for someone to resolve. See [Authority when pillars meet](/docs/agent-memory/reasoning/authority-hierarchy).
 
 ## Incremental migration strategy
 
@@ -102,13 +102,11 @@ class MemoryAdapter:
     async def add(self, content: str, user_id: str):
         # Write to both
         self.mem0.add(content, user_id=user_id)
-        async with self.agent_memory.sessions.create(scopes=[f"user/{user_id}"]) as s:
-            await s.remember(content)
+        await self.agent_memory.remember(content, scopes=[f"user/{user_id}"])
     
     async def search(self, query: str, user_id: str, use_agent_memory: bool = False):
         if use_agent_memory:
-            async with self.agent_memory.sessions.create(scopes=[f"user/{user_id}"]) as s:
-                return await s.recall(query, k=5)
+            return await self.agent_memory.recall(query, k=5, lens=[f"user/{user_id}"])
         return self.mem0.search(query, user_id=user_id)
 ```
 
@@ -123,9 +121,9 @@ Export existing Mem0 memories and replay them into SurrealDB Agent Memory:
 ```python
 existing_memories = m.get_all(user_id="alice")
 
-async with client.sessions.create(scopes=["user/alice"]) as session:
-    for item in existing_memories:
-        await client.remember(item["memory"], session_id=session.id)
+session = await client.sessions.create(scopes=["user/alice"])
+for item in existing_memories:
+    await client.remember(item["memory"], session_id=session.id)
 ```
 
 SurrealDB Agent Memory's reconciliation pipeline deduplicates on write, so replaying memories that contain the same facts will produce correct structured state rather than duplicates.
@@ -136,13 +134,12 @@ Once recall quality is satisfactory, remove the dual-write and switch reads to S
 
 ## Session management difference
 
-Mem0's `add()` takes a `user_id` directly - there is no concept of a session. SurrealDB Agent Memory requires a session as context for each turn. The nearest equivalent to Mem0's `add()` is:
+Mem0's `add()` takes a `user_id` directly - there is no concept of a session. Every SurrealDB Agent Memory turn belongs to a session, but you do not have to create one: a write without a `session_id` creates a session for itself and returns its id. The nearest equivalent to Mem0's `add()` is:
 
 ```python
-# One-shot add without a long-lived session
-async with client.sessions.create(scopes=[f"user/{user_id}"]) as session:
-    await client.remember(content, session_id=session.id, role="user")
-# Session closes automatically; memory is extracted and persisted
+# One-shot add; the write creates its own session
+result = await client.remember(content, scopes=[f"user/{user_id}"], role="user")
+print(result.session_id)
 ```
 
-If your application does not have natural session boundaries (e.g. it stores individual facts rather than conversations), create a short-lived session for each batch of writes and close it immediately.
+Sessions have no close step. If your application has natural conversation boundaries, create a session per conversation and pass its id to each write, so the turns are grouped together.

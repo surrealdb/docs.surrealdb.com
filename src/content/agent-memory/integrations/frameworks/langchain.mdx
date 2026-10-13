@@ -15,8 +15,8 @@ The integration is TypeScript. Python applications call SurrealDB Agent Memory t
 | Package | What it provides |
 | --- | --- |
 | `@surrealdb/langchain-core` | Shared SurrealDB client, config, schema and filter helpers, and the SurrealDB Agent Memory HTTP client |
-| `@surrealdb/langchain` | `VectorStore`, hybrid `Retriever`, `SpectronRetriever`, agent tools, and a persisting chat model wrapper |
-| `@surrealdb/langgraph` | LangGraph `BaseCheckpointSaver`, `BaseStore`, and `SpectronStore`, backed by SurrealDB Agent Memory |
+| `@surrealdb/langchain` | `SurrealDBVectorStore`, `HybridRetriever`, `AgentMemoryRetriever`, agent tools, and a persisting chat model wrapper |
+| `@surrealdb/langgraph` | LangGraph `BaseCheckpointSaver` and `BaseStore` implementations, and `AgentMemoryStore`, backed by SurrealDB Agent Memory |
 
 ## Requirements
 
@@ -36,19 +36,19 @@ Construct a client directly, or resolve one from the environment:
 ```typescript
 import { AgentMemory } from "@surrealdb/langchain-core";
 
-const spectron = new AgentMemory({
+const memory = new AgentMemory({
     context: "acme-prod",
     apiKey: process.env.AGENT_MEMORY_API_KEY!,
     endpoint: process.env.AGENT_MEMORY_ENDPOINT!,
 });
 ```
 
-`resolveSpectron` reads `AGENT_MEMORY_ENDPOINT`, `AGENT_MEMORY_API_KEY`, and `AGENT_MEMORY_CONTEXT`, throwing a clear error if any is missing:
+`resolveAgentMemory` reads `AGENT_MEMORY_ENDPOINT`, `AGENT_MEMORY_API_KEY`, and `AGENT_MEMORY_CONTEXT`, throwing a clear error if any is missing:
 
 ```typescript
-import { resolveSpectron } from "@surrealdb/langchain-core";
+import { resolveAgentMemory } from "@surrealdb/langchain-core";
 
-const spectron = resolveSpectron({}); // all three from the environment
+const memory = resolveAgentMemory({}); // all three from the environment
 ```
 
 | Field | Required | Notes |
@@ -59,13 +59,13 @@ const spectron = resolveSpectron({}); // all three from the environment
 
 ## Retrieval
 
-`SpectronRetriever` turns knowledge-base hits into LangChain `Document`s, with the chunk text as `pageContent` and document, chunk, score, and graph metadata in `metadata`:
+`AgentMemoryRetriever` turns knowledge-base hits into LangChain `Document`s, with the chunk text as `pageContent` and document, chunk, score, and graph metadata in `metadata`:
 
 ```typescript
-import { SpectronRetriever } from "@surrealdb/langchain/retrievers";
+import { AgentMemoryRetriever } from "@surrealdb/langchain/retrievers";
 
-const retriever = new SpectronRetriever({
-    client: spectron,
+const retriever = new AgentMemoryRetriever({
+    client: memory,
     mode: "hybrid_graph", // "vector" | "bm25" | "hybrid" | "hybrid_graph"
     k: 8,
 });
@@ -75,31 +75,33 @@ const docs = await retriever.invoke("what is the return policy?");
 
 ## Agent tools
 
-Two `StructuredTool`s wire SurrealDB Agent Memory into an agent. Both accept either an instantiated `client` or a plain config object resolved from `SPECTRON_*` environment variables:
+Two tool factories wire SurrealDB Agent Memory into an agent. Both take a `client`, which is either an instantiated client or a plain config object that falls back to the `AGENT_MEMORY_*` environment variables:
 
 ```typescript
-import { SpectronQueryTool, SpectronReflectTool } from "@surrealdb/langchain/tools";
+import { createAgentMemoryQueryTool, createAgentMemoryReflectTool } from "@surrealdb/langchain/tools";
 
 const tools = [
-    new SpectronQueryTool({ client: spectron }),
-    new SpectronReflectTool({ client: spectron }),
+    createAgentMemoryQueryTool({ client: memory }),
+    createAgentMemoryReflectTool({ client: memory }),
 ];
 ```
 
-`SpectronQueryTool` takes `{ query, k?, mode?, filter? }` and returns a compact JSON array of hits. `SpectronReflectTool` takes `{ query, persist? }` and returns the reflection.
+The query tool takes `{ query, k?, mode?, filter? }`. It gives the model a readable digest of the top hits and returns the retrieved `Document`s as the tool artifact. The reflect tool takes `{ query, persist? }` and returns the reflection.
 
 ## LangGraph store
 
-`SpectronStore` is a read-oriented `BaseStore` adapter. Reads delegate to SurrealDB Agent Memory; writes are not supported, because Agent Memory persists memory through sessions and reflections rather than raw key/value puts:
+`AgentMemoryStore` is a read-oriented `BaseStore` adapter. Reads delegate to SurrealDB Agent Memory; writes are not supported, because Agent Memory persists memory through sessions and reflections rather than raw key/value puts:
 
 ```typescript
-import { SpectronStore } from "@surrealdb/langgraph/spectron_store";
+import { AgentMemoryStore } from "@surrealdb/langgraph/memory_store";
 
-const store = new SpectronStore({ spectron });
+const store = new AgentMemoryStore({ client: memory });
 
 await store.get(["Person"], "tobie"); // → entities.get
-await store.search(["Person"], { query: "who is tobie?", limit: 5 }); // → recall
+await store.search([], { query: "who is tobie?", limit: 5 }); // → recall
 ```
+
+Recall has no namespace dimension, so `search` with a non-empty namespace prefix throws by default. Set `namespaceMode: "lens"` to apply the prefix as a scope lens, or `namespaceMode: "ignore"` to search without it.
 
 | Method | Backed by | Supported |
 | --- | --- | --- |
@@ -109,13 +111,13 @@ await store.search(["Person"], { query: "who is tobie?", limit: 5 }); // → rec
 
 ## Vector store without agent memory
 
-`@surrealdb/langchain` also exposes a `VectorStore` backed by SurrealDB's native HNSW index, for RAG against a SurrealDB instance you run yourself rather than the hosted agent memory service:
+`@surrealdb/langchain` also exposes `SurrealDBVectorStore`, backed by SurrealDB's native HNSW index, for RAG against a SurrealDB instance you run yourself rather than the hosted agent memory service:
 
 ```typescript
 import { OpenAIEmbeddings } from "@langchain/openai";
-import { VectorStore } from "@surrealdb/langchain";
+import { SurrealDBVectorStore } from "@surrealdb/langchain";
 
-const store = await VectorStore.initialize(new OpenAIEmbeddings(), {
+const store = await SurrealDBVectorStore.initialize(new OpenAIEmbeddings(), {
     surreal: { url: "ws://localhost:8000", username: "root", password: "secret", namespace: "app", database: "rag" },
     tableName: "documents",
     dimensions: 1536,

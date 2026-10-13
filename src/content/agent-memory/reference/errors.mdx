@@ -6,29 +6,23 @@ description: "Error codes and troubleshooting."
 
 # Errors
 
-SurrealDB Agent Memory uses standard HTTP status codes and follows [RFC 7807 Problem Details](https://www.rfc-editor.org/rfc/rfc7807) for all error responses.
+SurrealDB Agent Memory uses standard HTTP status codes, and every REST error response carries the same small JSON body.
 
 ## Error response format
 
-All errors return a JSON body with the following fields:
+All errors return a JSON body with a single field:
 
 ```json
 {
-  "type": "https://spectron.dev/errors/context-not-found",
-  "title": "Context not found",
-  "status": 404,
-  "detail": "No context with id 'acme-staging' exists on this server.",
-  "instance": "/api/v1/contexts/acme-staging"
+  "message": "context acme-staging does not exist"
 }
 ```
 
 | Field | Description |
 |---|---|
-| `type` | A URI identifying the error type. Stable across versions. |
-| `title` | A short, human-readable summary of the problem type. |
-| `status` | The HTTP status code. |
-| `detail` | A human-readable explanation specific to this occurrence. |
-| `instance` | The request path that produced the error. |
+| `message` | A human-readable explanation of this error. |
+
+The status is sent only as the HTTP status code of the response. The body has no `status`, `type`, `title` or `instance` field.
 
 ## HTTP status codes
 
@@ -38,30 +32,23 @@ The request body or query parameters are invalid. Common causes:
 
 - Malformed JSON body
 - Missing required fields
-- Invalid field values (e.g. unknown `mode` for knowledge query)
-- Scope floor violation (requesting a scope narrower than the key's floor)
+- Invalid field values, such as a malformed scope path or pattern, label, entity reference, pagination cursor or model configuration
+- A write to a scope that is not registered
+- An empty file upload
 
 ```json
 {
-  "type": "https://spectron.dev/errors/validation-error",
-  "title": "Validation error",
-  "status": 400,
-  "detail": "Field 'mode' must be one of: vector, bm25, hybrid, hybrid_graph. Got: 'fuzzy'.",
-  "instance": "/api/v1/acme-prod/query"
+  "message": "the uploaded file is empty"
 }
 ```
 
 ### 401 Unauthorized
 
-No `Authorization: Bearer` token was provided, or the key is malformed.
+No `Authorization: Bearer` token was provided, or the key is malformed, unknown or expired. An agent key sent to the management API also gets `401`, because the management API accepts only management keys.
 
 ```json
 {
-  "type": "https://spectron.dev/errors/unauthorized",
-  "title": "Unauthorized",
-  "status": 401,
-  "detail": "API key missing. Include 'Authorization: Bearer <key>' in your request.",
-  "instance": "/api/v1/acme-prod/sessions"
+  "message": "missing or invalid Authorization bearer token"
 }
 ```
 
@@ -69,17 +56,14 @@ No `Authorization: Bearer` token was provided, or the key is malformed.
 
 The API key is valid but does not have permission to perform this operation. Common causes:
 
-- Agent key attempting a management operation
 - The requested scope falls outside the key's granted region for the verb
-- Agent key attempting to persist a reflection (requires supervisor principal)
+- A write targets a scope outside the key's write region
+- A request acts on behalf of a principal that does not allow delegation
+- The operation targets a reserved principal or scope, such as updating the `system` principal or tombstoning the root scope `/`
 
 ```json
 {
-  "type": "https://spectron.dev/errors/forbidden",
-  "title": "Forbidden",
-  "status": 403,
-  "detail": "This operation requires a management key. The provided key has principal 'agent'.",
-  "instance": "/api/v1/contexts"
+  "message": "the root scope `/` cannot be tombstoned"
 }
 ```
 
@@ -89,11 +73,7 @@ The requested resource does not exist.
 
 ```json
 {
-  "type": "https://spectron.dev/errors/not-found",
-  "title": "Not found",
-  "status": 404,
-  "detail": "No document with id 'document:0197d8f2...' exists in context 'acme-prod'.",
-  "instance": "/api/v1/acme-prod/documents/0197d8f2"
+  "message": "document with id 0197d8f2 does not exist"
 }
 ```
 
@@ -105,42 +85,36 @@ A resource with the same identifier already exists, or an idempotency conflict o
 - Duplicate **principal `display_name`** on create (when no matching `external_id` create-or-get applies)
 - Same `Idempotency-Key` with a **different** request body on `/facts` or `/facts/batch`
 - Duplicate idempotency request while the first is still **in flight**
+- A configured limit is exceeded (`ScopeLimitExceeded`), such as the scope depth or the number of labels on a fact
+- A connector or binding already exists, a connector is still in use, or a binding action is not valid from its current status
 
 ```json
 {
-  "type": "https://spectron.dev/errors/conflict",
-  "title": "Conflict",
-  "status": 409,
-  "detail": "A context with id 'acme-prod' already exists.",
-  "instance": "/api/v1/contexts/acme-prod"
+  "message": "context already exists"
 }
 ```
 
 ### 413 Payload Too Large
 
-The uploaded file exceeds the per-Context size limit.
+The uploaded file exceeds the upload limit. The limit applies to the whole deployment, not to each Context, and is set with `SPECTRON_MAX_UPLOAD_BYTES` (4 GiB by default).
+
+### 415 Unsupported Media Type
+
+The uploaded file has a media type that the server cannot ingest.
 
 ```json
 {
-  "type": "https://spectron.dev/errors/payload-too-large",
-  "title": "Payload too large",
-  "status": 413,
-  "detail": "Uploaded file size (52.4 MB) exceeds the per-context limit (50 MB).",
-  "instance": "/api/v1/acme-prod/documents"
+  "message": "unsupported media type: application/x-msdownload"
 }
 ```
 
 ### 422 Unprocessable Entity
 
-The request is syntactically valid but semantically invalid.
+The request is syntactically valid but semantically invalid. Examples are an invalid Context id, namespace or database name (including the reserved `spectron` namespace), a malformed structured fact entry, or an uncertainty flag that names no subject.
 
 ```json
 {
-  "type": "https://spectron.dev/errors/unprocessable",
-  "title": "Unprocessable entity",
-  "status": 422,
-  "detail": "Cannot bind context to namespace 'spectron' - this namespace is reserved for internal use.",
-  "instance": "/api/v1/contexts/test"
+  "message": "invalid namespace: spectron"
 }
 ```
 
@@ -154,34 +128,33 @@ Applies to LLM-backed paths including **`/chat`**, **`/facts?infer=full`**, **`/
 
 ```json
 {
-  "type": "https://spectron.dev/errors/rate-limited",
-  "title": "Too many requests",
-  "status": 429,
-  "detail": "Token enforcement is blocked for context 'acme-prod'.",
-  "instance": "/api/v1/acme-prod/sessions/sess_abc/turns",
-  "retry_after": null
+  "message": "token limit exceeded for context"
 }
 ```
 
 ### 500 Internal Server Error
 
-An unexpected error occurred server-side. The `detail` field contains a request ID for support escalation.
+An unexpected error occurred server-side. The message does not include internal details, which are written to the server log instead.
 
 ```json
 {
-  "type": "https://spectron.dev/errors/internal",
-  "title": "Internal server error",
-  "status": 500,
-  "detail": "An unexpected error occurred. Request ID: req_01HF3X...",
-  "instance": "/api/v1/acme-prod/context"
+  "message": "unknown error"
 }
 ```
+
+### 501 Not Implemented
+
+The request needs connectors, but connectors are disabled on this deployment or no connector host is configured.
+
+### 502 Bad Gateway
+
+A call to the connector host, or to the customer data source beyond it, failed. The message carries a reason code, never a source credential.
 
 ### 503 Service Unavailable
 
 The server is temporarily unable to handle requests. This covers a SurrealDB connection issue or startup, and also **load shedding**: a serving pod above its in-flight request cap sheds new work rather than queueing it. Every end-user operation can answer `503`; `GET /health` is exempt so a shedding pod still reports its own state.
 
-A shed response carries a **`Retry-After`** header in delta-seconds alongside the usual error body:
+A shed response carries a **`Retry-After`** header in delta-seconds alongside the usual error body. Every other `503` from the server carries the header as well.
 
 ```http
 HTTP/1.1 503 Service Unavailable
@@ -229,8 +202,10 @@ See the SDK error sections for [Python](/docs/agent-memory/integrations/sdks/pyt
 | `NotFoundError` | 404 | Resource does not exist |
 | `ValidationError` | 400, 422 | Invalid request payload |
 | `RateLimitError` | 429 | Token or rate limit exceeded |
-| `ServerError` | 500, 503 | Server-side failure |
+| `ServerError` | 5xx | Server-side failure |
 | `ConnectionError` | - | Network failure or timeout |
+| `StreamError` | - | A streamed response failed part of the way through |
+| `CancelledError` | - | The caller aborted the request through its `signal` |
 
 ```javascript
 import { NotFoundError, RateLimitError } from "@surrealdb/memory";
@@ -239,7 +214,7 @@ try {
     const doc = await client.documents.get("document:nonexistent");
 } catch (e) {
     if (e instanceof NotFoundError) {
-        console.error("Document not found:", e.detail);
+        console.error("Document not found:", e.message);
     } else if (e instanceof RateLimitError) {
         console.error("Rate limit exceeded");
     }
@@ -255,8 +230,8 @@ Documents that fail during async processing do not return HTTP errors - they set
   "id": "document:0197d8f2...",
   "status": "failed",
   "error": "PDF extraction failed: file is encrypted and no password was provided.",
-  "processing_started_at": "2026-05-12T14:22:11Z",
-  "processing_completed_at": "2026-05-12T14:22:14Z"
+  "processingStartedAt": "2026-05-12T14:22:11Z",
+  "processingCompletedAt": "2026-05-12T14:22:14Z"
 }
 ```
 
