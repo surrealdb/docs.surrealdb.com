@@ -18,9 +18,9 @@ SurrealDB Agent Memory's minimum viable integration is two operations around you
 No sessions are required for the first pass. You keep your existing data model and LLM client; SurrealDB Agent Memory sits beside them as the memory layer.
 
 ```python
-from surrealdb.memory import Memory
+from surrealdb.memory import AsyncMemory
 
-memory = Memory(context="my-app", api_key="sk-...")
+memory = AsyncMemory(context="my-app", api_key="sp-...")
 
 CONTEXT_ID = "my-app"
 DEFAULT_SCOPE = ["org/my-org"]  # Start with a single scope
@@ -33,12 +33,13 @@ async def call_llm_with_memory(user_message: str,
         session = await memory.sessions.create(scopes=DEFAULT_SCOPE)
         session_id = session.id
 
-    ctx = await memory.sessions.context(session_id, query=user_message)
+    # Session context is one string, ready for a prompt
+    ctx = await memory.sessions.context(session_id, user_message)
 
     # 2. Inject into your existing system prompt
     system = your_existing_system_prompt()
-    if ctx.formatted:
-        system = f"{system}\n\n## Relevant context\n{ctx.formatted}"
+    if ctx.context:
+        system = f"{system}\n\n## Relevant context\n{ctx.context}"
 
     # 3. Your existing LLM call - unchanged
     response = your_existing_llm_call(system=system, user=user_message)
@@ -53,7 +54,7 @@ async def call_llm_with_memory(user_message: str,
 ```typescript
 import { AgentMemory } from "@surrealdb/memory";
 
-const memory = new AgentMemory({ context: "my-app", apiKey: "sk-..." });
+const memory = new AgentMemory({ context: "my-app", apiKey: "sp-..." });
 
 const DEFAULT_SCOPE = ["org/my-org"];
 
@@ -64,11 +65,13 @@ async function callLlmWithMemory(
     const id = sessionId
         ?? (await memory.sessions.create({ scopes: DEFAULT_SCOPE })).id;
 
-    const ctx = await memory.sessions.context(id, { query: userMessage });
+    // The JavaScript SDK reads session context through a Session object.
+    // With only the id to hand, read the Context's memory through the same scope.
+    const ctx = await memory.context(userMessage, { lens: DEFAULT_SCOPE });
 
     let system = yourExistingSystemPrompt();
-    if (ctx.formatted) {
-        system = `${system}\n\n## Relevant context\n${ctx.formatted}`;
+    if (ctx.context) {
+        system = `${system}\n\n## Relevant context\n${ctx.context}`;
     }
 
     const response = await yourExistingLlmCall({ system, user: userMessage });
@@ -80,7 +83,7 @@ async function callLlmWithMemory(
 }
 ```
 
-The key principle: **do not change what your LLM receives if there is no relevant memory**. The `if ctx.formatted` guard ensures that when SurrealDB Agent Memory has nothing useful to add, the call is identical to the original.
+The key principle: **do not change what your LLM receives if there is no relevant memory**. The `if ctx.context` guard ensures that when SurrealDB Agent Memory has nothing useful to add, the call is identical to the original.
 
 ## Intercepting existing LLM calls
 
@@ -95,9 +98,9 @@ async def llm(system: str, user: str) -> str:
 async def llm(system: str, user: str,
     session_id: str | None = None) -> str:
     if session_id:
-        ctx = await memory.sessions.context(session_id, query=user)
-        if ctx.formatted:
-            system = f"{system}\n\n{ctx.formatted}"
+        ctx = await memory.sessions.context(session_id, user)
+        if ctx.context:
+            system = f"{system}\n\n{ctx.context}"
 
     response = await openai_client.chat(system=system, user=user)
 
@@ -120,8 +123,8 @@ async function llm(system: string, user: string,
     let enrichedSystem = system;
 
     if (sessionId) {
-        const ctx = await memory.sessions.context(sessionId, { query: user });
-        if (ctx.formatted) enrichedSystem = `${system}\n\n${ctx.formatted}`;
+        const ctx = await memory.context(user, { lens: DEFAULT_SCOPE });
+        if (ctx.context) enrichedSystem = `${system}\n\n${ctx.context}`;
     }
 
     const response = await openaiClient.chat({ system: enrichedSystem, user });
@@ -146,11 +149,11 @@ Do not attempt multi-user scoping on day one. Start with a single organisational
 DEFAULT_SCOPE = ["org/my-app"]
 
 # Phase 2 (later): add user dimension
-def scope_for_user(user_id: str) -> dict:
+def scope_for_user(user_id: str) -> list[str]:
     return [f"org/my-app/user/{user_id}"]
 ```
 
-The profile and context endpoints are scope-matched: a scope of `["org/my-app/user/alice"]` matches memory stored at that path and also memory stored under the broader `["org/my-app"]` path (hierarchical visibility). Starting broad and narrowing later does not require rewriting stored records.
+The profile and context endpoints are scope-matched, and a read never reaches an ancestor scope. A reader limited to `["org/my-app/user/alice"]` sees memory stored at that path and below it, but not memory stored at the broader `["org/my-app"]` path. A reader whose grants cover `org/my-app/*` sees both.
 
 ## Expanding to multi-user
 
@@ -164,7 +167,7 @@ session = await memory.sessions.create(scopes=["org/my-app"])
 session = await memory.sessions.create(scopes=[f"org/my-app/user/{user_id}"])
 ```
 
-Existing memory under the org-only scope remains readable, since the org path is an ancestor of the user path. New memory is stored under the user scope and is only visible to that user's context retrievals.
+New memory is stored under the user scope. Existing memory under the org-only scope stays where it is, and is readable only by keys whose grants cover `org/my-app` itself, such as a key granted `org/my-app/*`. A key limited to one user's path does not see it, because the org path is an ancestor of the user path. If per-user keys need that earlier memory, replay it under each user's scope.
 
 ## Profile injection at session start
 
@@ -210,6 +213,6 @@ async function startSession(userId: string): Promise<{ sessionId: string; system
 | 2 - Context injection | Retrieve context and inject before each call | Responses become memory-aware |
 | 3 - Profile injection | Inject profile at session start | New sessions start with full user context |
 | 4 - Per-user scoping | Add `user` scope dimension | Memory is isolated per user |
-| 5 - authoritative knowledge | Ingest authoritative documents | Agents answer from authoritative knowledge |
+| 5 - Documents | Upload reference documents | Agents answer from your documents |
 
 Each phase is independently deployable and backwards-compatible with the previous one.

@@ -20,6 +20,7 @@ These MIME types are accepted on **`POST /api/v1/{context_id}/documents`** under
 | --- | --- |
 | Plain text | `text/plain` |
 | Markdown | `text/markdown` |
+| CSV | `text/csv` |
 | JSON | `application/json` |
 | HTML | `text/html` |
 | PDF | `application/pdf` |
@@ -50,21 +51,25 @@ file=<binary>
 metadata={"title":"Returns Policy","scopes":[["org/acme/team/eng"]],"labels":["team=eng"]}
 ```
 
-The `metadata` part is JSON. **`scopes`** is a DNF selector (OR of conjunctive slash-path clauses). **`labels`** are descriptive `key=value` tags (same validation as fact ingest - keys must not start with `_`; count caps return **`409`**). Optional **`observedAt`** (RFC 3339) sets the known time of facts derived from this document - essential for **page-by-page or episode-by-episode ingest** where later plot points must stay hidden until the reader reaches them ([spoiler-safe narrative memory](/docs/agent-memory/cookbooks/patterns/spoiler-safe-narrative-memory)). Omit **`scopes`** to tag the document with the caller's full `memory:write` region.
+The `metadata` part is JSON, and both it and every field in it are optional. **`title`** and **`source`** default to the filename. **`mimeType`** overrides the `Content-Type` of the `file` part; without either, the type is inferred from the bytes. **`scopes`** is a DNF selector (OR of conjunctive slash-path clauses). **`labels`** are descriptive `key=value` tags (same validation as fact ingest - keys must not start with `_`; count caps return **`409`**). Optional **`observedAt`** (RFC 3339) sets the known time of facts derived from this document - essential for **page-by-page or episode-by-episode ingest** where later plot points must stay hidden until the reader reaches them ([spoiler-safe narrative memory](/docs/agent-memory/cookbooks/patterns/spoiler-safe-narrative-memory)). **`observedAtHeader`** names a field in a leading `---` front-matter block whose value (RFC 3339 or `YYYY-MM-DD`) is read as `observedAt` when you do not send `observedAt` yourself. A missing or unparseable field is not an error: facts are then dated to ingest time. Omit **`scopes`** to tag the document with the caller's full `memory:write` region.
 
 > [!NOTE]
-> **`observedAt` is caller-supplied metadata** - SurrealDB Agent Memory does not scan document headers or body text to infer a narrative timeline automatically. For serial fiction or journals, split uploads per chapter or episode and set **`observedAt`** (or ingest turns with **`observed_at`**) explicitly. Bulk single-file upload stamps derived facts at ingest time unless you provide the field.
+> **`observedAt` is caller-supplied metadata** - SurrealDB Agent Memory does not scan document body text to infer a narrative timeline, and reads front matter only when you name a field with **`observedAtHeader`**. For serial fiction or journals, split uploads per chapter or episode and set **`observedAt`** (or ingest turns with **`observed_at`**) explicitly. Bulk single-file upload stamps derived facts at ingest time unless you provide the field.
 
 Response:
 
 ```json
 {
-  "id": "doc:01hx9…",
+  "id": "01hx9…",
   "status": "queued",
-  "content_hash": "blake3:4f3c…",
+  "contentHash": "4f3c…",
   "deduplicated": false
 }
 ```
+
+The `id` is the bare document id, without a `document:` prefix, and `contentHash` is the BLAKE3 hash as plain hex. When the upload sets `observedAt` or detects one through `observedAtHeader`, the response also carries the effective `observedAt`.
+
+The upload size limit is set for the deployment, 4 GiB by default.
 
 ### CLI
 
@@ -90,15 +95,13 @@ Poll **`GET /api/v1/{context_id}/documents/{id}`** until **`status`** is **`read
 | `queued` | Waiting to enter the pipeline |
 | `extracting` | Reading content from the uploaded bytes |
 | `chunking` | Splitting content into overlapping segments |
-| `embedding` | Generating dense vectors for chunks |
-| `rendering` | Building document summaries and section metadata |
-| `transcribing` | Transcribing audio or video (multimodal profiles) |
-| `captioning` | Generating captions for images (multimodal profiles) |
-| `keywording` | RAKE keyword extraction |
+| `embedding` | Generating dense vectors for chunks and sections |
+| `keywording` | RAKE keyword extraction (every profile except `TextOnly`) |
+| `extracting_nodes` | Extracting entities, attributes, relations and actions with a language model (every profile except `TextOnly`, when an LLM is attached) |
 | `ready` | Fully indexed and available for retrieval |
 | `failed` | Pipeline error; inspect `error` on the document record |
 
-Oversized chunk persists (SurrealDB transaction write-set or WebSocket message caps) are classified as permanent size errors and dead-letter without spending minutes on re-parse retries. Operators tuning large corpora should keep the client WS cap (`SPECTRON_DB_WS_MAX_MESSAGE_BYTES`) aligned with the SurrealDB server's `SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE` - see [Configuration](/docs/agent-memory/reference/configuration#request-and-list-limits).
+Oversized chunk persists (SurrealDB transaction write-set or WebSocket message caps) are classified as permanent size errors and dead-letter without spending minutes on re-parse retries.
 
 ## Content addressing and deduplication
 
@@ -122,12 +125,12 @@ These edges feed **`hybrid_graph`** reranking (document-link density) and citati
 
 Documents and their chunks inherit the caller's **resolved write scope** from the API key when you omit explicit scope on upload - required for scoped keys to recall their own uploads.
 
-You can **narrow** tagging with **`scopes`** on **`POST /documents`**, **`agent-memory documents upload --scope …`**, or MCP **`upload`** - the path must lie within the caller's `memory:write` region (out-of-region scope returns **`403`**). A document's scope is **fixed at upload** - reprocess rejects a non-empty `scopes` field with **`400`**.
+You can **narrow** tagging with **`scopes`** on **`POST /documents`**, **`agent-memory documents upload --scope …`**, or MCP **`upload`** - the path must lie within the caller's `memory:write` region (out-of-region scope returns **`403`**). A document's scope is **fixed at upload** - reprocess keeps the existing scope and labels and ignores any `scopes` or `labels` in its metadata.
 
 Optional **`labels`** (`key=value` strings) are stamped on the document, chunks, and sections. They follow the same validation rules as fact ingest and are **not** copied onto reconciled graph records.
 
 > [!NOTE]
-> **MCP `upload`** accepts optional **`scope`** and **`labels`** arguments with the same semantics as REST - scoped keys produce scope-tagged documents and chunks visible under `memory:read` within that region.
+> **MCP `upload`** accepts optional **`scopes`** and **`labels`** arguments with the same semantics as REST - scoped keys produce scope-tagged documents and chunks visible under `memory:read` within that region.
 
 ## Document management
 

@@ -16,10 +16,14 @@ Populating a new Context, or migrating from another system, means ingesting many
 
 ```python
 import asyncio
-from surrealdb.memory import Memory
+import os
+from surrealdb.memory import AsyncMemory
 
-memory = Memory(context="acme-prod",
-    api_key=os.environ["AGENT_MEMORY_API_KEY"])
+memory = AsyncMemory(
+    context="acme-prod",
+    endpoint=os.environ["AGENT_MEMORY_ENDPOINT"],
+    api_key=os.environ["AGENT_MEMORY_API_KEY"],
+)
 
 files = [
     ("returns-policy.pdf", "Returns Policy"),
@@ -42,18 +46,28 @@ print(f"Queued {len(doc_ids)} documents")
 ```
 
 ```javascript
+import { readFile } from "node:fs/promises";
 import { AgentMemory } from "@surrealdb/memory";
 
-const memory = new AgentMemory({ context: "acme-prod",
-    apiKey: process.env.AGENT_MEMORY_API_KEY });
+const memory = new AgentMemory({
+    context: "acme-prod",
+    endpoint: process.env.AGENT_MEMORY_ENDPOINT,
+    apiKey: process.env.AGENT_MEMORY_API_KEY,
+});
 
 const files = [
     { path: "returns-policy.pdf", title: "Returns Policy" },
     { path: "shipping-guide.pdf", title: "Shipping Guide" },
 ];
 
-const uploads = files.map(({ path, title }) =>
-        memory.documents.upload(path, { title, scopes: ["org/acme"] })
+const uploads = files.map(async ({ path, title }) =>
+    memory.documents.upload({
+        file: await readFile(path),
+        filename: path,
+        contentType: "application/pdf",
+        title,
+        scopes: ["org/acme"],
+    })
 );
 
 const docs = await Promise.all(uploads);
@@ -103,11 +117,11 @@ docs = await asyncio.gather(*[upload_with_limit(path, title) for path,
     title in files])
 ```
 
-The recommended concurrency ceiling for standard deployments is 10-20 concurrent uploads. Self-hosted deployments can be tuned according to your infrastructure capacity.
+The recommended concurrency ceiling for standard deployments is 10-20 concurrent uploads.
 
 ## Bulk structured facts
 
-For structured catalogue or policy data you already trust, use **`POST /api/v1/{context_id}/facts`** with `infer: "triples"` (or batch multiple utterances via **`/facts/batch`**). The reconciler persists entities, attributes, and relations in the unified graph with `source.kind = "document"` or operator-provided provenance.
+For structured catalogue or policy data you already trust, use **`POST /api/v1/{context_id}/facts`** with `infer: "triples"`. Triples go to `/facts` only: **`/facts/batch`** takes a `messages` array of conversation turns and has no `triples` field. The reconciler persists the entries in the unified graph with `source.kind = "upsert"`.
 
 ### Triples or documents
 
@@ -123,6 +137,8 @@ A triple reads as a short sentence. The subject is the `entity` the fact is abou
 | Alice is 34 | Alice | `age` | `value`: 34 | Attribute |
 | Alice lives in Paris | Alice | `lives_in` | `target`: Paris | Relation |
 | The guard stands at the front door from 10 am to 4 pm | Guard | `stands_at` | `target`: front door | Relation, with `valid_from` 10 am and `valid_until` 4 pm |
+
+The same `triples` array also takes two other kinds of entry. An entry with a `verb` (and no `key`) records an **action**, a dated event that the entity performed, with an optional free-text `object`. An entry with none of `value`, `target` or `verb` creates or updates the entity on its own. A malformed or ambiguous entry, such as one with both a `value` and a `target`, rejects the request with `422`.
 
 The third row shows why a time is kept out of the triple: the guard can stand at the front door during the day and sleep in a bed at night, and each of those is a separate triple with its own validity range.
 
@@ -209,6 +225,7 @@ Response:
                       "value": "29.99", "memoryCategory": "knowledge" } ],
     "relations": [ { "subject": "product/sku_001", "label": "belongs_to",
                      "object": "category/widgets", "memoryCategory": "knowledge" } ],
+    "actions": [],
     "instructions": [],
     "uncertainties": [],
     "corrections": []
@@ -253,12 +270,12 @@ for i in range(0, len(nodes), BATCH_SIZE):
         for r in batch_relations
     ]
     result = await memory.remember(infer="triples", triples=triples)
-    extraction = result["extraction"]
+    extraction = result.extraction
     print(
         f"Batch {i // BATCH_SIZE + 1}: "
-        f"entities={len(extraction['entities'])} "
-        f"attributes={len(extraction['attributes'])} "
-        f"relations={len(extraction['relations'])}"
+        f"entities={len(extraction.entities)} "
+        f"attributes={len(extraction.attributes)} "
+        f"relations={len(extraction.relations)}"
     )
 ```
 
@@ -274,7 +291,7 @@ for (let i = 0; i < nodes.length; i += BATCH_SIZE) {
         key: "title",
         value: n.title,
     }));
-    const result = await memory.remember(null, { infer: "triples", triples });
+    const result = await memory.remember(undefined, { infer: "triples", triples });
     console.log(
         `Batch ${i / BATCH_SIZE + 1}: `
         + `entities=${result.extraction.entities.length} `
@@ -317,22 +334,18 @@ docs = await asyncio.gather(*[upload_with_scope(item) for item in items])
 
 For imports of tens of thousands of documents, track overall progress by listing documents with a status filter:
 
-```python
-async def import_progress():
-    ready = await memory.documents.list(status="ready")
-    queued = await memory.documents.list(status="queued")
-    failed = await memory.documents.list(status="failed")
-
-    print(f"Ready: {len(ready)}  Queued: {len(queued)}  Failed: {len(failed)}")
+```http
+GET /api/v1/{context_id}/documents?status=failed&limit=100&count=true
+Authorization: Bearer <key>
 ```
 
-`GET /documents` filters on `status` and `mimeType` and pages with `page` / `pageSize`. It has no scope filter - the caller's read region already bounds what comes back.
+`GET /documents` filters on `status` and `mimeType`. It pages with `limit` and `cursor`: pass the previous page's `page.nextCursor` as `cursor` to get the next page, and add `count=true` to get `page.totalSize` for the whole filtered set. It has no scope filter - the caller's read region already bounds what comes back.
 
 Failed documents should be inspected individually to determine whether the failure is transient (pipeline overload) or permanent (corrupt file, unsupported format):
 
 ```python
 failed_docs = await memory.documents.list(status="failed")
-for doc in failed_docs:
+for doc in failed_docs.documents:
     full = await memory.documents.get(doc.id)
     print(f"{doc.id}  {full.title}  {full.error}")
 ```

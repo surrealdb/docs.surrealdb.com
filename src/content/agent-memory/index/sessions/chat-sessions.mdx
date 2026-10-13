@@ -15,9 +15,9 @@ SurrealDB Agent Memory supports two ways to integrate memory into a conversation
 | Pattern | Use when |
 |---|---|
 | **SurrealDB Agent Memory drives the loop** (`chat()`) | You want minimal integration surface. SurrealDB Agent Memory handles context retrieval, model invocation, and memory persistence. |
-| **Caller drives the loop** (`remember()` + `sessions.context()`) | You need control over the model call - custom prompts, streaming, tool use, multi-step chains, or your own model infrastructure. |
+| **Caller drives the loop** (`remember()` + `sessions.context()`) | You need control over the model call - custom prompts, tool use, multi-step chains, or your own model infrastructure. |
 
-The two patterns are not mutually exclusive. A single session can use `chat` for simple turns and `turn` + `context` for turns that require tool use or custom prompting.
+The two patterns are not mutually exclusive. A single session can use `chat` for simple turns and `remember` + `context` for turns that require tool use or custom prompting.
 
 ## What SurrealDB Agent Memory does in `chat`
 
@@ -25,8 +25,8 @@ When you call `chat()`, SurrealDB Agent Memory executes the following steps:
 
 1. **Loads the session transcript window** - the last **10** user/assistant turns of the same session, capped at **8k characters** of the newest content. Rendered as a sanitised `# Conversation so far` block inside the system prompt (one line per turn, inside the existing untrusted-data framing). The user message for this request is not yet stored; it appears under `# Question` after a successful reply.
 2. **Retrieves context** - runs the tiered retrieval strategy. Turns already in the transcript window are not retrieved again (the prompt already includes them). Older turns from the same session remain eligible. Prior assistant replies rank below user statements and document sources when both match; citations from those hits include **`role: "assistant"`**.
-3. **Calls the response model** - invokes the configured `response` model with retrieved context, the transcript window (when non-empty), and the current question.
-4. **Persists both turns** - on a successful reply, stores the user message (`infer: full`) and the assistant reply (`infer: none`, so the reply is not re-extracted).
+3. **Calls the model** - invokes the deployment's default model, or the per-call `model` when one is given, with retrieved context, the transcript window (when non-empty), and the current question.
+4. **Persists both turns** - on a successful reply, stores the user message with full extraction, and stores the assistant reply as a turn only. The reply is not extracted and is not stored as a retrievable passage, so a later answer cannot cite the model's own output as evidence.
 5. **Returns** the reply text, the memory diff from the user turn's extraction, and a **`citations`** list when the model cites retrieved sources with `[S1]`-style markers.
 
 When the transcript window is non-empty, **tier-2 response reuse is bypassed** - the cache is keyed by query embedding and caller scope, not session, so transcript-dependent replies must neither be served from nor seeded into the cache. First-turn and sessionless calls remain cache-eligible.
@@ -41,24 +41,29 @@ Content-Type: application/json
 
 {
   "message": "What do you know about me?",
-  "sessionId": "sess_01jt4kx…"
+  "sessionId": "01jt4kx…"
 }
 ```
 
-There is no per-session chat route: `/chat` is a Context-level endpoint and the session is pinned with `sessionId` in the body. Omit it and the handler auto-creates a session. The message field is **`message`**, not `content`.
+There is no per-session chat route: `/chat` is a Context-level endpoint and the session is pinned with `sessionId` in the body. Omit it and the handler auto-creates a session. The message field is **`message`**, not `content`. Other optional fields are `scopes`, `labels`, `model` (a model id that overrides the deployment default for this call), `stream`, `bypassCache`, and `suppressMarkers`.
 
 Response:
 
 ```json
 {
-  "reply": "Based on what you've shared, you're Alice, CTO at Acme,
-    based in Berlin…",
-  "memory_updates": {
+  "reply": "Based on what you've shared, you're Alice, CTO at Acme, based in Berlin…",
+  "memoryUpdates": {
+    "turnId": "01jt4m2…",
     "entities": [],
     "attributes": [],
     "relations": [],
+    "actions": [],
+    "instructions": [],
+    "uncertainties": [],
     "corrections": []
   },
+  "traceId": "01jt4m3…",
+  "sessionId": "01jt4kx…",
   "citations": [
     {
       "marker": "[S1]",
@@ -81,24 +86,26 @@ The plain-text response from the configured response model. This is ready to dis
 
 One entry per cited marker. Each resolves to a source record (`id`, `kind`, `snippet`, `score`, optional `occurredAt`, optional **`role`**). Document passages also include **`documentTitle`** and **`positionPercent`** (approximate percentage through the document). When a citation points at a stored assistant reply, **`role`** is `"assistant"` so callers can tell chat is citing its own earlier output. Markers never invent sources - only records from retrieval (including section-expansion context) are cited.
 
-### `memory_updates`
+### `memoryUpdates`
 
-The extraction diff from the user turn (the assistant reply is stored with `infer: none`). The shape matches the extraction result from `remember()`. Use this to update UI state or trigger any downstream logic that depends on changes to the memory graph.
+The extraction diff from the user turn (the assistant reply is not extracted). The shape matches the `extraction` object returned by `remember()`; see [Adding turns](/docs/agent-memory/sessions/adding-turns#extraction-result). Use this to update UI state or trigger any downstream logic that depends on changes to the memory graph.
 
 ## Python SDK
 
 ```python
-from surrealdb.memory import Memory
+import os
 
-memory = Memory(context="acme-prod",
+from surrealdb.memory import AsyncMemory
+
+memory = AsyncMemory(context="acme-prod",
+    endpoint=os.environ["AGENT_MEMORY_ENDPOINT"],
     api_key=os.environ["AGENT_MEMORY_API_KEY"])
 session = await memory.sessions.create(scopes=["org/acme/user/alice"])
 
 reply = await memory.chat("What do you know about me?", session_id=session.id)
 
-print(reply["reply"])          # The model's response string
-print(reply["citations"])      # One entry per [S1] marker
-print(reply["memoryUpdates"])  # Entities, attributes, relations, corrections
+print(reply.reply)            # The model's response string
+print(reply.memory_updates)   # Entities, attributes, relations, corrections
 ```
 
 ## JavaScript SDK
@@ -107,14 +114,15 @@ print(reply["memoryUpdates"])  # Entities, attributes, relations, corrections
 import { AgentMemory } from "@surrealdb/memory";
 
 const memory = new AgentMemory({ context: "acme-prod",
+    endpoint: process.env.AGENT_MEMORY_ENDPOINT,
     apiKey: process.env.AGENT_MEMORY_API_KEY });
 const session = await memory.sessions.create({ scopes: ["org/acme/user/alice"] });
 
 const reply = await memory.chat("What do you know about me?", { sessionId: session.id });
 
 console.log(reply.reply);          // The model's response string
-console.log(reply.memoryUpdates);  // Entities, attributes, relations,
-    corrections
+console.log(reply.citations);      // One entry per [S1] marker
+console.log(reply.memoryUpdates);  // Entities, attributes, relations, corrections
 ```
 
 ## Full loop example
@@ -123,9 +131,10 @@ The following pattern shows a minimal chat loop using `chat()`:
 
 ```python
 import os
-from surrealdb.memory import Memory
+from surrealdb.memory import AsyncMemory
 
-memory = Memory(context="acme-prod",
+memory = AsyncMemory(context="acme-prod",
+    endpoint=os.environ["AGENT_MEMORY_ENDPOINT"],
     api_key=os.environ["AGENT_MEMORY_API_KEY"])
 session = await memory.sessions.create(scopes=["org/acme/user/alice"])
 
@@ -137,11 +146,9 @@ while True:
     result = await memory.chat(user_input, session_id=session.id)
     print(f"Agent: {result.reply}")
 
-    if result.memory_updates.corrections:
+    if result.memory_updates and result.memory_updates.corrections:
         for c in result.memory_updates.corrections:
-            print(f"  [memory corrected] {c.previous.value!r} → {c.current.value!r}")
-
-await session.close()
+            print(f"  [memory corrected] {c['oldValue']!r} → {c['newValue']!r}")
 ```
 
 ```javascript
@@ -149,6 +156,7 @@ import * as readline from "node:readline";
 import { AgentMemory } from "@surrealdb/memory";
 
 const memory = new AgentMemory({ context: "acme-prod",
+    endpoint: process.env.AGENT_MEMORY_ENDPOINT,
     apiKey: process.env.AGENT_MEMORY_API_KEY });
 const session = await memory.sessions.create({ scopes: ["org/acme/user/alice"] });
 
@@ -157,7 +165,6 @@ const rl = readline.createInterface({ input: process.stdin,
 
 const ask = () => rl.question("You: ", async (input) => {
     if (input.trim().toLowerCase() === "exit") {
-        await session.close();
         rl.close();
         return;
     }
@@ -166,7 +173,7 @@ const ask = () => rl.question("You: ", async (input) => {
     console.log(`Agent: ${result.reply}`);
 
     for (const c of result.memoryUpdates.corrections) {
-        console.log(`  [memory corrected] ${c.previous.value} → ${c.current.value}`);
+        console.log(`  [memory corrected] ${c.oldValue} → ${c.newValue}`);
     }
 
     ask();
@@ -177,16 +184,17 @@ ask();
 
 ## Configuring the response model
 
-The model used for response generation is configured at the context level in `config.models.response`. This is separate from the extraction model (`config.models.extraction`) used to parse turns into structured facts.
+`/chat` uses the deployment's default model unless the request names one in `model`, which applies to that call only:
 
-```yaml
-# spectron.config.yaml
-models:
-  extraction: openai/gpt-4o-mini
-  response: openai/gpt-4o
+```json
+{
+  "message": "What do you know about me?",
+  "sessionId": "01jt4kx…",
+  "model": "gpt-5.1"
+}
 ```
 
-You may use any provider supported by your SurrealDB Agent Memory deployment. The extraction and response models can differ - a faster, cheaper model is often suitable for extraction while a more capable model handles final response generation.
+A Context's configuration also has a `models.synthesis` stage, set as a `{provider, model}` object. That setting is stored but not yet applied: `/chat` and `/reflect` do not read it today. A call with a per-call `model` is not served from or stored in the tier-2 response cache.
 
 See [Configuration](/docs/agent-memory/reference/configuration#default-provider-api-keys) for the supported providers and how to configure API keys.
 
@@ -194,10 +202,11 @@ See [Configuration](/docs/agent-memory/reference/configuration#default-provider-
 
 Use `remember()` plus your own model call when you need:
 
-- **Streaming responses** - a non-streaming `chat()` waits for the full completion before returning. If you require token-level streaming to your UI, drive the LLM loop yourself.
 - **Tool use** - if your agent needs to call external tools mid-conversation, you need control over the turn-taking loop to interleave tool calls and results.
 - **Custom prompting** - if you maintain your own system prompt structure, persona configuration, or prompt template that cannot be expressed through SurrealDB Agent Memory's context injection format.
 - **Multiple models per turn** - if your architecture uses a router, ensemble, or chain of models.
 - **Explicit context control** - if you want to inspect or modify the retrieved context string before it reaches the model.
+
+Streaming does not require this pattern: send `"stream": true` to `/chat` and the reply arrives as server-sent events.
 
 The `session.context()` method retrieves the formatted context string that SurrealDB Agent Memory would have injected, so you can replicate the retrieval step in the manual pattern. See [Retrieving context](/docs/agent-memory/retrieve/recall) for details.

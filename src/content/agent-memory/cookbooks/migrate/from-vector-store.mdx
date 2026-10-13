@@ -6,7 +6,7 @@ description: "From chunk-only search to structured memory."
 
 # Migrating from a vector store
 
-Vector stores are a common first step for adding memory to AI agents. They work well for simple document retrieval but fall short when you need structured extraction, provenance tracking, temporal validity, or authority-based conflict resolution. This guide covers what you gain by migrating to SurrealDB Agent Memory and how to execute the migration.
+Vector stores are a common first step for adding memory to AI agents. They work well for simple document retrieval but fall short when you need structured extraction, provenance tracking, temporal validity, or conflict detection. This guide covers what you gain by migrating to SurrealDB Agent Memory and how to execute the migration.
 
 ## What you gain
 
@@ -14,11 +14,11 @@ Vector stores are a common first step for adding memory to AI agents. They work 
 |---|---|---|
 | Document retrieval | Semantic similarity search | Hybrid (semantic + BM25 + graph traversal) |
 | Structured extraction | None - raw chunks | Entities, attributes, and relations |
-| Provenance | None - chunk origin only | Every fact traces back to the turn that produced it |
+| Provenance | None - chunk origin only | Every fact traces back to the turn or document that produced it |
 | Correction tracking | None | Supersession chains with full history |
 | Temporal validity | None | `valid_from` / `valid_until` on every attribute |
-| Authoritative precedence | None | **Authoritative** pillar wins over **Experiential** assertions when they conflict |
-| Scope-based isolation | Manual metadata filtering | Dimensional scope with floor matching |
+| Conflict handling | None | A contradiction between a document and a conversation keeps both values and raises an `uncertainty` |
+| Scope-based isolation | Manual metadata filtering | Hierarchical scope paths, enforced by grants on every read |
 | State inspection | None | Query memory state directly |
 
 Some typical reasons to migrate are: contradictions accumulating with no way to tell which fact is current, no way to correct or expire a fact, no queryable view of what the agent knows, or metadata filtering that no longer scales.
@@ -55,44 +55,47 @@ const exportedDocs = documents.map(doc => ({
 }));
 ```
 
-### 2. Upload documents to authoritative knowledge
+### 2. Upload documents
 
-Ingest your exported documents into SurrealDB Agent Memory's authoritative knowledge layer. Each document is processed through the ingestion pipeline: chunked, keyword-extracted, and linked to knowledge nodes.
+Upload your exported documents to SurrealDB Agent Memory. Each document is processed through the ingestion pipeline: chunked, keyword-extracted, and passed to extraction, which writes entities and attributes to the Context's graph. The title, source and other metadata go in a `metadata` part as one JSON object; separate form fields are ignored.
 
 ```python
+import json
 import os
 import httpx
 
 client = httpx.Client(
-    base_url="https://spectron.surrealdb.com/api/v1/my-context",
+    base_url=f"{os.environ['AGENT_MEMORY_ENDPOINT']}/api/v1/my-context",
     headers={"Authorization": f"Bearer {os.environ['AGENT_MEMORY_API_KEY']}"},
 )
 
 for doc in documents:
     client.post(
         "/documents",
+        data={"metadata": json.dumps({
+            "title": doc.get("source") or "Imported document",
+            "source": doc.get("source", ""),
+        })},
         files={"file": (
             "document.txt",
             doc["text"].encode(),
             "text/plain",
         )},
-        data={
-            "title": doc.get("source", "Imported document"),
-            "source_url": doc.get("source", ""),
-        },
     )
 ```
 
 ```typescript
 for (const doc of exportedDocs) {
     const formData = new FormData();
+    formData.append("metadata", JSON.stringify({
+        title: doc.source || "Imported document",
+        source: doc.source || "",
+    }));
     formData.append("file", new Blob([doc.text], { type: "text/plain" }), "document.txt");
-    formData.append("title", doc.source || "Imported document");
-    formData.append("source_url", doc.source || "");
 
-    await fetch("https://spectron.surrealdb.com/api/v1/my-context/documents", {
+    await fetch(`${process.env.AGENT_MEMORY_ENDPOINT}/api/v1/my-context/documents`, {
         method: "POST",
-        headers: { "Authorization": "Bearer mgmt_..." },
+        headers: { "Authorization": `Bearer ${process.env.AGENT_MEMORY_API_KEY}` },
         body: formData,
     });
 }
@@ -104,17 +107,17 @@ SurrealDB Agent Memory's ingestion pipeline handles chunking internally. You do 
 
 Vector stores often have minimal, inconsistent, or missing metadata. SurrealDB Agent Memory's pipeline extracts structure from content, so missing metadata matters less. If you have source information available, add it to the documents before ingestion.
 
-If your vector store metadata includes document type, date, or author information, include it in the document upload:
+If your vector store metadata includes a title, source, date, or other descriptive values, include them in the `metadata` part. A date goes in `observedAt`, which dates the facts extracted from the document, and other values can go in `labels` as `key=value` strings:
 
 ```python
 client.post(
     "/documents",
-    files={"file": ("policy.md", content, "text/markdown")},
-    data={
+    data={"metadata": json.dumps({
         "title": "Return policy",
-        "content_type": "policy",
-        "authored_at": "2024-01-15T00:00:00Z",
-    },
+        "observedAt": "2024-01-15T00:00:00Z",
+        "labels": ["doc_type=policy"],
+    })},
+    files={"file": ("policy.md", content, "text/markdown")},
 )
 ```
 
@@ -156,10 +159,10 @@ You do not need to cut over immediately. Run SurrealDB Agent Memory and your vec
 
 ```python
 async def retrieve_context(user_id: str, query: str) -> str:
-    # Try Memory first
-    ctx = await session.context(query=query)
-    if ctx.items:
-        return ctx.formatted
+    # Try Agent Memory first; the context is one string ready for a prompt
+    ctx = await memory.query_context(query, lens=[f"org/my-org/user/{user_id}"])
+    if ctx.context:
+        return ctx.context
 
     # Fall back to vector store during transition
     chunks = vector_store.search(query=query, user_id=user_id, top_k=6)
@@ -170,7 +173,7 @@ async def retrieve_context(user_id: str, query: str) -> str:
 
 | Week | Activity |
 |---|---|
-| 1 | Export documents; begin authoritative knowledge ingestion |
+| 1 | Export documents; begin document upload |
 | 2 | Begin recording new conversations as SurrealDB Agent Memory turns |
 | 3-4 | Coexistence: SurrealDB Agent Memory primary, vector store fallback |
 | 5 | Validate response quality; remove fallback |
