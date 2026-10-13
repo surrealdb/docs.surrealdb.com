@@ -745,6 +745,16 @@ function agentMemoryRedirects(): Redirect[] {
             "/agent-memory/welcome/what-is-agent-memory",
             "/docs/agent-memory/welcome/what-is-surrealdb-agent-memory",
         ],
+        // Removed in October 2026: these described the management API and the
+        // internal schema, which customers on SurrealDB Cloud do not use. Listed
+        // before the `/spectron` prefix rules so the old paths need one hop.
+        [
+            "/agent-memory/reference/management-api",
+            "/docs/agent-memory/quickstarts/surrealdb-cloud",
+        ],
+        ["/spectron/reference/management-api", "/docs/agent-memory/quickstarts/surrealdb-cloud"],
+        ["/agent-memory/reference/data-model-and-schema", "/docs/agent-memory/reference"],
+        ["/spectron/reference/data-model-and-schema", "/docs/agent-memory/reference"],
         // Flattened section - the hub page's content lives at a new slug.
         ["/spectron/agent-memory", "/docs/agent-memory/memory-and-knowledge"],
         ["/spectron/agent-memory/:path*", "/docs/agent-memory/:path*"],
