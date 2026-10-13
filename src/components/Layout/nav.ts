@@ -195,12 +195,6 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                 heading: "Operations",
                 items: [
                     {
-                        label: "surrealctl",
-                        href: "/docs/manage/surrealctl",
-                        description: "Manage instances and organisations from the command line.",
-                        badge: "new",
-                    },
-                    {
                         label: "Observability",
                         href: "/docs/manage/observability",
                         description: "Monitor metrics, logs, and slow queries.",
@@ -235,6 +229,13 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         label: "SurrealDB Studio",
                         href: "/docs/explore/studio",
                         description: "Explore data in the official SurrealDB dashboard.",
+                    },
+                    {
+                        label: "SurrealDB CLI",
+                        href: "/docs/explore/cli",
+                        description:
+                            "Install and run the database, Cloud and modules from one command.",
+                        badge: "new",
                     },
                 ],
             },
@@ -276,7 +277,8 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                     {
                         label: "CLI Tools",
                         href: "/docs/reference/cli",
-                        description: "Command reference for surrealctl, surreal, and surqlfmt.",
+                        description:
+                            "Command reference for the surreal launcher, its components, and surqlfmt.",
                     },
                 ],
             },

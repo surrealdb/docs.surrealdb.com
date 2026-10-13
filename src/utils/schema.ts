@@ -41,7 +41,7 @@ export const pageSchema = strictObject({
      * | `3` | Section landing pages that depth does not already reach | ~50 |
      *
      * "First hour" is per surface, not one funnel. A reader starting on
-     * SurrealDB itself wants install, `surreal start` and `SELECT`; one
+     * SurrealDB itself wants install, `surreal db start` and `SELECT`; one
      * starting from Python wants the Python SDK; one evaluating GraphQL wants
      * the GraphQL overview. Each surface earns one entry point, not a path
      * through the whole product.
