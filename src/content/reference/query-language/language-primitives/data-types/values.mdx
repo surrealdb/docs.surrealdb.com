@@ -54,8 +54,11 @@ As a result, all of the following return `true`.
 ```surql
 /**[test]
 
+[env.capabilities]
+allow-experimental = ["files"]
+
 [[test.results]]
-value = "[true, true, true, true, true, true, true, true, true, true, true, true]"
+value = "[true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]"
 
 */
 
@@ -77,7 +80,7 @@ value = "[true, true, true, true, true, true, true, true, true, true, true, true
     f"file://myfile.txt" > person:one,
     <regex>"a|b" > f"file://myfile.txt",
     0..10 > <regex>"a|b",
-    || > 0.. 10
+    (|| 1) > 0..10
 ];
 ```
 
