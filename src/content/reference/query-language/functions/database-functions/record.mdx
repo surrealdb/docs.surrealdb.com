@@ -77,7 +77,7 @@ A longer example of `record::exists` using method syntax:
 /**[test]
 
 [[test.results]]
-value = "false"
+value = "NONE"
 
 */
 
@@ -108,7 +108,9 @@ value = "'tobie'"
 */
 
 record::id(person:tobie);
+```
 
+```surql title="Output"
 'tobie'
 ```
 

@@ -113,7 +113,7 @@ value = "[{ op: 'change', path: '', value: '@@ -1,5 +1,6 @@
 [
 	{
 		op: 'change',
-		path: '/',
+		path: '',
 		value: '@@ -1,5 +1,6 @@
  tobi
 -e
