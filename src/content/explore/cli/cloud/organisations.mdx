@@ -1,0 +1,207 @@
+---
+position: 2
+title: Organisations with surreal cloud
+description: "Select an organisation, manage members and invitations, check roles, and read usage, spend and plans from the command line with surreal cloud."
+---
+
+# Organisations
+
+An organisation owns instances, members, and billing. This page covers how `surreal cloud` decides which organisation you mean, how to manage the people in it, and how to read what it has used and what it has cost. It is for anyone who administers a team's SurrealDB Cloud account.
+
+## Choosing an organisation
+
+Almost every command needs an organisation. `surreal cloud` works down a fixed order and stops at the first answer.
+
+1. `--org` on the command line
+2. `SURREAL_CLOUD_ORG` in the environment
+3. `org` in this profile's section of `config.toml`
+4. The organisation remembered by `surreal cloud org use`
+5. Your account's default organisation
+6. The only candidate, when you belong to exactly one
+7. An interactive picker, at a terminal
+8. An error naming the flag
+
+```bash
+surreal cloud org list
+surreal cloud org use acme          # remember it for this profile
+surreal cloud --org acme instance list
+surreal cloud org use --clear       # forget it again
+```
+
+`surreal cloud context show` reports which organisation resolved and which layer decided it. Add `--debug` to any command to see the winning layer for every value.
+
+In CI, set `SURREAL_CLOUD_ORG` to the organisation **id** rather than its name. An id is used as it stands; a name costs a lookup on every command.
+
+> [!NOTE]
+> `SURREAL_CLOUD_ORG` outranks the value `org use` remembered. If a remembered organisation seems to be ignored, check whether the variable is exported. `org use` warns you about it at the time.
+
+## Manage organisations
+
+```bash
+surreal cloud org list
+surreal cloud org list --all                 # include archived organisations
+surreal cloud org get acme
+surreal cloud org create acme-labs --use
+surreal cloud org update acme --name "Acme Ltd"
+surreal cloud org archive acme
+```
+
+An organisation name is 1 to 30 characters. `--use` on `create` remembers the new organisation immediately, so the commands after it need no `--org`. `org archive` asks for confirmation unless you pass `--force`.
+
+`org get` shows the plan, the state, your role, the member count, the instance allowances, and the billing configuration.
+
+## Members
+
+Members are addressed by username or user id.
+
+```bash
+surreal cloud team list
+surreal cloud team get ada
+surreal cloud team update ada --role admin
+surreal cloud team remove ada
+```
+
+`team remove` ends someone's membership of the organisation. Their account is untouched, which is why the verb is `remove` and not `delete`.
+
+`team list` deliberately does not fold in pending invitations. Someone who has been invited is not yet a member; `invite list` is where they appear.
+
+## Invitations
+
+Roles are defined per organisation, so read the list before you send an invitation.
+
+```bash
+surreal cloud org roles
+surreal cloud team invite ada@example.com --role member
+surreal cloud invite list
+surreal cloud invite delete ada@example.com
+```
+
+<OptionsTable
+    title="team invite"
+    options={[
+        {
+            "name": "<EMAIL>",
+            "required": true,
+            "description": "The email address to invite."
+        },
+        {
+            "name": "--role",
+            "value": "<ROLE>",
+            "required": true,
+            "description": "The role to grant. Run `surreal cloud org roles` for the ones this organisation defines."
+        }
+    ]}
+/>
+
+`surreal cloud team invite` and `surreal cloud invite create` are the same command under two names - use whichever reads better where you are. If the API rejects the role, the error points you back at `org roles`.
+
+`invite delete` withdraws an invitation, by the email address it was sent to or by its code. The confirmation names the address.
+
+## Roles and permissions
+
+```bash
+surreal cloud org roles        # the roles this organisation can assign
+surreal cloud org permissions  # what you are permitted to do here
+```
+
+`org permissions` answers "what may I do in this organisation" for the credential in hand. It is the question `auth scopes` cannot answer for a login session, where the authorisation model is your role rather than a scope list.
+
+For what Owner, Admin, and Member each permit, see [Members and roles](/docs/manage/organisations/members-and-roles).
+
+## Personal access tokens
+
+Tokens belong to your account rather than to an organisation, but they are how a pipeline reads an organisation's data.
+
+```bash
+surreal cloud token scopes
+surreal cloud token create "ci-read-only" --scope read:cloud | tail -1
+surreal cloud token list
+surreal cloud token delete ci-read-only
+```
+
+All four verbs need a login session, so a token cannot mint its own replacement. See [Authentication](/docs/explore/cli/cloud/authentication#personal-access-tokens) for scopes, expiry, and how to capture the secret.
+
+## Usage and spend
+
+```bash
+surreal cloud org usage                  # consumption across every instance
+surreal cloud instance usage production  # one instance
+surreal cloud org spend                  # the current billing period
+surreal cloud org spend --period 03-2026 # a specific month
+surreal cloud org plans                  # the plans available to this organisation
+```
+
+`--period` is written month first, as `MM-YYYY`. If you write it the other way round, `surreal cloud` says so and shows the correction rather than sending the request.
+
+In text output, `org spend` prints a total on stderr. The total is computed before `--limit` is applied, so it is always the whole bill even when the table is trimmed.
+
+> [!IMPORTANT]
+> Under `--json`, money stays in integer minor units - cents, or millicents where the API uses them. Do not treat `amount` as a decimal. Divide before you display.
+
+```bash title="Total spend for a month, in whole currency units"
+surreal cloud org spend --period 03-2026 --json | jq '[.[].amount] | add / 100'
+```
+
+```bash title="Line items as TSV"
+surreal cloud org spend --json \
+  | jq -r '.[] | [.effective_at, .resource, .description, .amount] | @tsv'
+```
+
+For invoices, payment methods, and how the platform bills, see [Billing](/docs/manage/organisations/billing).
+
+## Open the dashboard
+
+```bash
+surreal cloud open org acme
+surreal cloud open billing acme
+surreal cloud open instance production
+surreal cloud open terms
+```
+
+The URL is always printed; a browser is only opened when somebody is present to look at it, so this is safe in a script that logs its output. `surreal cloud` links to the terms and never accepts them on your behalf.
+
+## Worked examples
+
+### Onboard a new engineer
+
+```bash title="onboard.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+email="$1"
+
+surreal cloud team invite "$email" --role member
+surreal cloud invite list --columns email,role,status
+```
+
+### Report which instances cost the most
+
+```bash title="top-spend.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+surreal cloud org spend --json \
+  | jq -r 'group_by(.instance_id)
+           | map({instance: .[0].instance_id, cents: ([.[].amount] | add)})
+           | sort_by(-.cents)
+           | .[] | [.instance, .cents] | @tsv'
+```
+
+### Audit who is in every organisation you belong to
+
+```bash title="audit-members.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+surreal cloud org list --json | jq -r '.[].id' | while read -r org; do
+    echo "== ${org}"
+    surreal cloud --org "$org" team list --json | jq -r '.[] | [.username, .role] | @tsv'
+done
+```
+
+## Next steps
+
+- [Scripting](/docs/explore/cli/cloud/scripting) - exit codes, `--json`, and unattended runs.
+- [Instances](/docs/explore/cli/cloud/instances) - the instance lifecycle from the command line.
+- [Organisations](/docs/manage/organisations) - the same concepts in SurrealDB Studio.
+- [Reference](/docs/reference/cli/cloud/commands/org) - every `org` flag, with [`team`](/docs/reference/cli/cloud/commands/team) and [`invite`](/docs/reference/cli/cloud/commands/invite) alongside.

@@ -1,5 +1,5 @@
-// Builds a `surreal start` command from the options selected on the page, with notes on what
-// the chosen combination means. Flags and parameters follow `surreal start --help` for 3.3.
+// Builds a `surreal db start` command from the options selected on the page, with notes on what
+// the chosen combination means. Flags and parameters follow `surreal db start --help` for 3.3.
 
 const $ = (id) => document.getElementById(id);
 const form = $("form");
@@ -155,7 +155,7 @@ function build() {
 	advancedFlags(flags, notes);
 
 	// The path goes first, so that a flag with optional values cannot take it as one of them.
-	const parts = ["surreal start", quote(path), ...flags];
+	const parts = ["surreal db start", quote(path), ...flags];
 	const command = parts.length > 3 ? parts.join(" \\\n  ") : parts.join(" ");
 	$("cmd").textContent = command;
 
@@ -190,7 +190,7 @@ function updateVisibility() {
 	$("import-path").hidden = !$("import").checked;
 }
 
-// Every other option of `surreal start`, grouped as `--help` groups them. A text option is
+// Every other option of `surreal db start`, grouped as `--help` groups them. A text option is
 // left out of the command while it is empty, and its placeholder shows the default.
 const LEVELS = ["", "none", "full", "error", "warn", "info", "debug", "trace"];
 const ADVANCED = [

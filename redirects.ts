@@ -159,22 +159,22 @@ function legacySurrealdbTreeRedirects(): Redirect[] {
         { source: "/docs/cli", destination: "/docs/reference/cli", statusCode: 301 },
         {
             source: "/cli/overview",
-            destination: "/docs/reference/cli/surrealdb-cli/overview",
+            destination: "/docs/reference/cli/db",
             statusCode: 301,
         },
         {
             source: "/docs/cli/overview",
-            destination: "/docs/reference/cli/surrealdb-cli/overview",
+            destination: "/docs/reference/cli/db",
             statusCode: 301,
         },
         {
             source: "/cli/:path*",
-            destination: "/docs/reference/cli/surrealdb-cli/commands/:path*",
+            destination: "/docs/reference/cli/db/commands/:path*",
             statusCode: 301,
         },
         {
             source: "/docs/cli/:path*",
-            destination: "/docs/reference/cli/surrealdb-cli/commands/:path*",
+            destination: "/docs/reference/cli/db/commands/:path*",
             statusCode: 301,
         },
     );
@@ -244,14 +244,50 @@ function databaseFunctionsOverviewRedirects(): Redirect[] {
         { source: from, destination: to, statusCode: 301 },
     ];
 }
-/** surrealctl installation moved into the guide; the reference is command-only. */
-function surrealctlInstallRedirects(): Redirect[] {
-    const from = "/reference/cli/surrealctl/install";
-    const to = "/manage/surrealctl/install";
-    return [
-        { source: `/docs${from}`, destination: `/docs${to}`, statusCode: 301 },
-        { source: from, destination: `/docs${to}`, statusCode: 301 },
+/**
+ * The `surreal` launcher replaced the separate `surrealctl` and `surreal` tools,
+ * and the two CLI sections became one.
+ *
+ * - The `surrealctl` guide moved from `manage/surrealctl` to the Cloud guides
+ *   under `explore/cli/cloud`, and its install page to `explore/cli/install`.
+ * - The reference folders were renamed after the components they document:
+ *   `surrealctl` is `cloud`, and `surrealdb-cli` is `db`. Both landing pages
+ *   moved from `overview` to the folder index.
+ * - `surrealctl spectron` was the memory command group and has no page for now,
+ *   so it lands on the commands index.
+ *
+ * Page renames are listed before the folder rule that would otherwise swallow
+ * them.
+ */
+function surrealCliRedirects(): Redirect[] {
+    const moves: [string, string, "exact" | "prefix"][] = [
+        ["manage/surrealctl/install", "explore/cli/install", "exact"],
+        ["reference/cli/surrealctl/install", "explore/cli/install", "exact"],
+        ["manage/surrealctl", "explore/cli/cloud", "prefix"],
+        ["reference/cli/surrealctl/overview", "reference/cli/cloud", "exact"],
+        ["reference/cli/surrealctl/commands/spectron", "reference/cli/cloud/commands", "exact"],
+        ["reference/cli/surrealctl", "reference/cli/cloud", "prefix"],
+        ["reference/cli/surrealdb-cli/overview", "reference/cli/db", "exact"],
+        ["reference/cli/surrealdb-cli", "reference/cli/db", "prefix"],
     ];
+
+    const out: Redirect[] = [];
+
+    for (const [from, to, kind] of moves) {
+        // Source without `/docs` (the www rewrite strips it); destination with
+        // `/docs` (it is browser-facing).
+        out.push({ source: `/${from}`, destination: `/docs/${to}`, statusCode: 301 });
+
+        if (kind === "prefix") {
+            out.push({
+                source: `/${from}/:path*`,
+                destination: `/docs/${to}/:path*`,
+                statusCode: 301,
+            });
+        }
+    }
+
+    return out;
 }
 /** PHP SDK split into versioned folders: legacy v1 paths → /languages/php/v1/*. */
 function phpVersionedRedirects(): Redirect[] {
@@ -1019,7 +1055,7 @@ const baseRedirects: Redirect[] = [
     ...deploymentObservabilityToManageRedirects(),
     ...runningFromSelfHostedRedirects(),
     ...databaseFunctionsOverviewRedirects(),
-    ...surrealctlInstallRedirects(),
+    ...surrealCliRedirects(),
     ...phpVersionedRedirects(),
     ...sdkReferenceRedirects(),
     ...sdkGettingStartedRedirects(),
