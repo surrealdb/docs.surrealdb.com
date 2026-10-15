@@ -1,0 +1,441 @@
+---
+position: 6
+title: Links and entities
+description: "Relations between files in Agent Filesystem: five relation types, links from Markdown, backlinks, neighbours, and entities that an integration records."
+---
+
+# Links and entities
+
+Agent Filesystem can record how files relate to each other and which named things a file mentions. A **relation** is a record that connects one file to another. An **entity** is a named thing, such as a person, a ticket or a system, that a file mentions. This page describes both, how they are created and read, and which parts run on their own in this release.
+
+Relations are created in two ways. A caller creates one with `relate`, and the Python library derives `links_to` relations from the Markdown links and wikilinks in the text of a file when it writes the file. Entities are stored by the schema and extracted by a Rust function. The gateway that `surrealfs-rs serve gateway` starts calls that function after each write that goes through it, and no other client does, so entities exist only for files that the gateway wrote or that an integration recorded.
+
+> [!NOTE]
+> Agent Filesystem is in beta. The API, schema and command-line interface may change in breaking ways between releases. This page describes version 0.2.0 of [SurrealFS](https://github.com/surrealdb/surrealfs), the open source project behind Agent Filesystem, built from the `next` branch of its repository, and each limitation that applies is listed where it matters.
+
+The relation examples use the Python library, which is the only implementation that derives links and the one with the widest range of calls. They need a running SurrealDB server and the `surrealfs` package, which the [Python quickstart](/docs/agent-filesystem/quickstarts/python) describes. The examples share the connection and the files below, and they use top-level `await`, so run them in `python -m asyncio` or wrap them in an `async` function. The outputs assume that the namespace `agents` and the database `links` hold no other files. The `surql` blocks run in Surrealist or in `surreal sql`, which takes piped input one line at a time, so a multi-line statement has to be joined into one line there. The entity examples use the Rust library and the `surrealfs-rs` command, which must connect to the same namespace and database, with `SURREALDB_NS=agents` and `SURREALDB_DB=links`. See [Settings for `surrealfs-rs`](/docs/agent-filesystem/interfaces/command-line#settings-for-surrealfs-rs).
+
+```python title="Connect and write the example files"
+from surrealdb import AsyncSurreal
+from surrealfs import SurrealFs, apply_schema
+
+db = AsyncSurreal("ws://localhost:8000/rpc")
+await db.signin({"username": "root", "password": "secret"})
+await db.use("agents", "links")
+await apply_schema(db)
+
+alice = SurrealFs(db, user="alice")
+bob = SurrealFs(db, user="bob")
+
+await alice.write_text("/docs/tokens.md", "# Tokens\n\nAccess tokens last fifteen minutes.\n")
+await alice.write_text("/docs/rotation.md", "# Key rotation\n\nKeys rotate weekly.\n")
+await alice.write_text("/rfcs/0017.md", "# RFC 17\n\nThe original session design.\n")
+await alice.write_text("/rfcs/0042.md", "---\nstatus: accepted\nsupersedes: /rfcs/0017.md\n---\n\n# RFC 42\n\nThis design replaces [RFC 17](0017.md).\n")
+```
+
+## Relation types
+
+A relation is a record in one of five tables. Each table is a SurrealDB relation from one `file` record to another, so a record has an `in` field for the source and an `out` field for the target.
+
+| Table | Typical use |
+| --- | --- |
+| `links_to` | The source contains a link to the target. The Python library creates these records from Markdown links and wikilinks. |
+| `references` | The source refers to the target, for example a note that cites a document. |
+| `supersedes` | The source replaces the target, for example a new specification that replaces an old one. |
+| `derives_from` | The source was produced from the target, for example a summary of a document. |
+| `implements` | The source implements what the target specifies, for example code that follows a design. |
+
+The second column describes how the names are meant to be used. The schema stores every relation in the same way and does not act on the name, so `supersedes` hides nothing and `implements` checks nothing.
+
+A relation record has these properties:
+
+- **It holds only `in` and `out`.** There is no timestamp, label, weight, author or provenance.
+- **There is no uniqueness.** Creating the same relation twice stores two records, and both appear in every listing.
+- **Any two files can be related.** A file can relate to itself, and a folder can be the source. The root folder `/` is not a record and cannot be an end of a relation.
+- **A relation follows the file records.** After `mv` the same relation appears under the new path. When either file is deleted with `rm`, its relations are deleted.
+
+## Links derived from file content
+
+When the Python library writes a file, it scans the text for links and creates a `links_to` relation from the file to each target. This happens in `write_text` and `edit`, for any text file and not only for Markdown, so link-shaped text in a `.py` or `.txt` file creates relations too. It does not happen in `append_text`, `write_bytes`, `cp`, a `write_text` to a collaborative file, a workspace merge, or any write from the TypeScript SDK or the Rust library.
+
+The scan uses these rules:
+
+- **Two link forms count.** A Markdown link `[label](target)`, which includes an image link such as `![label](target)`, and a wikilink `[[target]]` or `[[target|label]]`.
+- **External links are skipped.** A Markdown link whose target starts with `http://`, `https://`, `mailto:` or `#` is ignored.
+- **Markdown links lose any fragment or query.** The target `/rfcs/0042.md#design` becomes `/rfcs/0042.md`. A wikilink keeps its fragment, so `[[0042.md#design]]` names a path that does not exist and creates no relation.
+- **A title makes the target unusable.** The link `[label](target.md "title")` creates no relation, because the title is part of the target text.
+- **Targets resolve against the folder of the file.** A relative target is joined to the folder that holds the source, and an absolute target is used as it is.
+- **Wikilinks get no extension.** The wikilink `[[rotation]]` in `/docs/overview.md` resolves to `/docs/rotation`, and not to `/docs/rotation.md`, so write `[[rotation.md]]`.
+- **The target must exist.** A link to a file that does not exist when the source is written creates no relation, and nothing records the missing target.
+
+```python
+await alice.write_text("/docs/auth.md", "# Authentication\n\nTokens are described in [the token spec](tokens.md) and rotated as in [[rotation.md]].\nThe design is in [RFC 42](/rfcs/0042.md#design). See [SurrealDB](https://surrealdb.com).\n")
+
+for relation in sorted(await alice.get_neighbors("/docs/auth.md"), key=lambda r: r.target_path):
+    print(relation.relation, relation.target_path)
+```
+
+```text title="Output"
+links_to /docs/rotation.md
+links_to /docs/tokens.md
+links_to /rfcs/0042.md
+```
+
+The external link to `surrealdb.com` produced no relation. A wikilink without an extension finds no target:
+
+```python
+await alice.write_text("/docs/overview.md", "# Overview\n\nSee [[rotation]] and [[tokens.md]].\n")
+
+for relation in await alice.get_neighbors("/docs/overview.md"):
+    print(relation.relation, relation.target_path)
+```
+
+```text title="Output"
+links_to /docs/tokens.md
+```
+
+### Frontmatter does not create relations
+
+The Python library parses the frontmatter of a Markdown file into the `meta` field, but a key such as `supersedes` or `implements` creates no relation. RFC 42 names RFC 17 in its frontmatter:
+
+```python
+print((await alice.stat("/rfcs/0042.md")).meta)
+```
+
+```text title="Output"
+{'status': 'accepted', 'supersedes': '/rfcs/0017.md'}
+```
+
+```surql
+SELECT count() FROM supersedes GROUP ALL;
+```
+
+```surql title="Output"
+[{ count: 0 }]
+```
+
+The `meta` field records the key, and the `supersedes` table is empty. A relation comes only from a link in the text or from a call to `relate`. The scan reads the whole text of a file, so link syntax inside a frontmatter value creates a `links_to` relation, but a frontmatter key never selects a relation table.
+
+## Create a relation
+
+`relate` creates one relation record by hand. It accepts only the five table names and raises `ValueError` for any other name:
+
+<Synopsis label="Signature">
+relate(from_path, relation, to_path) -> bool
+</Synopsis>
+
+The frontmatter of RFC 42 says that it supersedes RFC 17, and the next call records that:
+
+```python
+print(await alice.relate("/rfcs/0042.md", "supersedes", "/rfcs/0017.md"))
+```
+
+```text title="Output"
+True
+```
+
+```python
+try:
+    await alice.relate("/rfcs/0042.md", "likes", "/rfcs/0017.md")
+except ValueError as error:
+    print(error)
+```
+
+```text title="Error output"
+Invalid relation 'likes'. Expected one of ['derives_from', 'implements', 'links_to', 'references', 'supersedes']
+```
+
+Both paths must exist, and a missing path raises `NotFound`. The `relate` tool takes `from_path`, `relation` and `to_path`, and replies with a line such as `Linked /docs/overview.md -[references]-> /rfcs/0017.md`. The database function behind the method is `fn::sfs_relate($from_path, $relation, $to_path)`, which throws `sfs:invalid_relation` for an unknown name.
+
+## Backlinks and neighbours
+
+A **backlink** of a file is a relation that points at it, and a **neighbour** is a file that it points at. Both calls return `GraphRelation` objects, one for each relation record:
+
+<Synopsis label="Signature">
+backlinks(path) -> list[GraphRelation]
+get_neighbors(path, *, relation=None) -> list[GraphRelation]
+</Synopsis>
+
+A `GraphRelation` has `source_path`, `target_path`, `relation`, `source_name` and `target_name`. For `backlinks`, `target_path` is the path that you asked about, and for `get_neighbors`, `source_path` is. The `relation` argument of `get_neighbors` restricts the result to one table, and an unknown name returns an empty list and not an error. A missing path raises `NotFound`. The calls cover one hop, and the records come back in the order of the tables: `references`, `supersedes`, `derives_from`, `implements` and `links_to`.
+
+```python
+for relation in await alice.backlinks("/rfcs/0017.md"):
+    print(relation)
+```
+
+```text title="Output"
+GraphRelation(source_path='/rfcs/0042.md', target_path='/rfcs/0017.md', relation='supersedes', source_name='0042.md', target_name='0017.md')
+GraphRelation(source_path='/rfcs/0042.md', target_path='/rfcs/0017.md', relation='links_to', source_name='0042.md', target_name='0017.md')
+```
+
+RFC 17 has two backlinks from RFC 42: the `supersedes` relation from `relate`, and the `links_to` relation that the Markdown link in the body of RFC 42 created. The `backlinks` tool prints the same information as text, and replies `No incoming links to PATH` when there is none. The tool registry has no neighbours tool.
+
+```python
+from surrealfs.integrations.json_tools import call_tool
+from surrealfs.tools import ToolContext
+
+context = ToolContext(fs=alice)
+print(await call_tool(context, "backlinks", {"path": "/rfcs/0017.md"}))
+```
+
+```text title="Output"
+Backlinks to /rfcs/0017.md:
+  <-[supersedes]- /rfcs/0042.md
+  <-[links_to]- /rfcs/0042.md
+```
+
+The database functions are `fn::sfs_backlinks($path)` and `fn::sfs_neighbors($path, $relation)`. They return `source_path`, `source_name` and `relation`, or `target_path`, `target_name` and `relation`.
+
+A longer path is a SurrealQL traversal, because the relations are graph edges. The next query follows `links_to` twice from `auth.md`, from the file to RFC 42 and from RFC 42 to RFC 17:
+
+```surql
+SELECT array::distinct(->links_to->file->links_to->file.path) AS two_hops
+FROM file
+WHERE filename = 'auth.md';
+```
+
+```surql title="Output"
+[{ two_hops: ['/rfcs/0017.md'] }]
+```
+
+> [!WARNING]
+> Under a system credential, which every client in this release uses unless record access is configured, `relate`, `backlinks` and `get_neighbors` do not apply per-user permissions. A user can learn the path of another user's private file from the backlinks of a public file, and can create relations from files that the user cannot read. With [record access](/docs/agent-filesystem/security/record-access), the same calls filter the results and refuse the writes.
+
+```python
+await alice.write_text("/home/alice/acquisition-plan.md", "Notes on the token spec: [[/docs/tokens.md]]\n")
+print(sorted(relation.source_path for relation in await bob.backlinks("/docs/tokens.md")))
+```
+
+```text title="Output"
+['/docs/auth.md', '/docs/overview.md', '/home/alice/acquisition-plan.md']
+```
+
+The file `/home/alice/acquisition-plan.md` is in the private home of `alice`, which `bob` cannot read, and yet its path is in the result. The Python library creates a folder directly under `/home` with mode `0o700`, which makes `/home/alice` private. See [Home directories](/docs/agent-filesystem/security/permissions#home-directories).
+
+## What a relation changes
+
+Nothing in the product reads a relation to change a result. Search, reads, history and workspace merges ignore the relations, and `supersedes` records that one file replaces another and no more. A search for a word that is in both RFCs ranks them by their text, and RFC 17, which RFC 42 supersedes, comes first:
+
+```python
+for hit in await alice.search_text("design"):
+    print(f"{hit.score:.4f}  {hit.path}")
+```
+
+```text title="Output"
+1.0699  /rfcs/0017.md
+0.5636  /rfcs/0042.md
+0.5456  /docs/auth.md
+```
+
+A caller that wants to hide superseded files has to filter them with a query on the `supersedes` table.
+
+## Keep links accurate
+
+Each write adds the relations again, and no write removes any. Three behaviours follow from that:
+
+- **Rewriting duplicates relations.** Every write of a file adds a new record for every link that is still in the text.
+- **A removed link keeps its relation.** Deleting a link from the text does not delete the record.
+- **A link to a file created later gets no relation** until the source is written again.
+
+The file `auth.md` has three relations from its first write. The query below counts them, and then counts again after an identical rewrite:
+
+```surql
+SELECT array::len(->links_to->file) AS links FROM file WHERE filename = 'auth.md';
+```
+
+```surql title="Output"
+[{ links: 3 }]
+```
+
+```python
+await alice.write_text("/docs/auth.md", "# Authentication\n\nTokens are described in [the token spec](tokens.md) and rotated as in [[rotation.md]].\nThe design is in [RFC 42](/rfcs/0042.md#design). See [SurrealDB](https://surrealdb.com).\n")
+```
+
+```surql
+SELECT array::len(->links_to->file) AS links FROM file WHERE filename = 'auth.md';
+```
+
+```surql title="Output"
+[{ links: 6 }]
+```
+
+The rewrite added three more relations. The `array::distinct` function collapses the duplicates in a query, and `array::sort` fixes the order, which otherwise follows the generated ids of the relation records and not the paths:
+
+```surql
+SELECT array::sort(array::distinct(->links_to->file.path)) AS links FROM file WHERE filename = 'auth.md';
+```
+
+```surql title="Output"
+[{ links: ['/docs/rotation.md', '/docs/tokens.md', '/rfcs/0042.md'] }]
+```
+
+To rebuild the relations of a file, delete its `links_to` records and write the file again. The next statements rebuild the relations of `auth.md` after the links to the key rotation note and to RFC 42 are removed from the text, so the file holds one relation for each link that it still contains:
+
+```surql
+DELETE links_to WHERE in.path = '/docs/auth.md';
+```
+
+```python
+await alice.write_text("/docs/auth.md", "# Authentication\n\nTokens are described in [the token spec](tokens.md).\n")
+```
+
+```surql
+SELECT ->links_to->file.path AS links FROM file WHERE filename = 'auth.md';
+```
+
+```surql title="Output"
+[{ links: ['/docs/tokens.md'] }]
+```
+
+The relations follow the file records and not the text of the links. After a move, the relation from `auth.md` points to the new path, while the link text in `auth.md` still names the old one. The `find_broken_links` method compares the text with the filesystem. It reads the files under a path prefix whose names end in `.md` and lists the links whose target does not exist, including wikilinks without an extension. It raises `NotATextFile` and stops if one of those files holds bytes:
+
+<Synopsis label="Signature">
+find_broken_links(path_prefix="/") -> list[dict]
+</Synopsis>
+
+```python
+await alice.mv("/docs/tokens.md", "/docs/access-tokens.md")
+print(await alice.find_broken_links("/docs"))
+```
+
+```text title="Output"
+[{'source': '/docs/auth.md', 'target': '/docs/tokens.md', 'raw_link': 'tokens.md'}, {'source': '/docs/overview.md', 'target': '/docs/rotation', 'raw_link': 'rotation'}, {'source': '/docs/overview.md', 'target': '/docs/tokens.md', 'raw_link': 'tokens.md'}]
+```
+
+The relation from `auth.md` now points to `/docs/access-tokens.md`, and the link text `tokens.md` is reported as broken. When a file is deleted with `rm`, its relations are deleted, and a link to it is reported as broken in the same way.
+
+## Entities and mentions
+
+An entity record has a `name` and a `kind`, and a `mentions` relation connects a file to each entity that it mentions. The pair of name and kind is unique, and the record id is the array `[name, kind]`, so the entity `aws` of kind `system` has the id `entity:['aws', 'system']`. A second file that mentions the same entity adds a `mentions` record and no new entity.
+
+> [!WARNING]
+> Entity extraction does not run when the Python library, the TypeScript SDK or `surrealfs-rs` writes a file. The extractor is a Rust function, `extract_entities_and_tags`, and the gateway calls it after each write that goes through the gateway and stores the result with the Rust method `record_entities`. An integration that writes through another client has to do the same, and `record_entities` has no command-line equivalent. The `surrealfs-rs entities` command only reads, so it returns `[]` for a file that nobody recorded entities for. The Python library and the TypeScript SDK have no entity calls.
+
+### How the extractor works
+
+The extractor uses no model. It runs three regular expressions and a fixed list of names over the text, in this order:
+
+1. **Tags.** The pattern `#([a-zA-Z][a-zA-Z0-9_\-]{1,50})` matches a `#` followed by a letter and then 1 to 50 letters, digits, underscores or hyphens. The name is lower-cased and de-duplicated, and the kind is `tag`.
+2. **Tickets.** The pattern `\b([A-Z]{2,10}-[0-9]{1,6})\b` matches 2 to 10 capital letters, a hyphen and 1 to 6 digits. The match is case-sensitive, the name keeps its letters, and the kind is `ticket`.
+3. **Mentions.** The pattern `@([a-zA-Z0-9_\.\-]{2,50})` matches an `@` followed by 2 to 50 letters, digits, underscores, dots or hyphens. The name is the text after the `@`, with its case, and the kind is `person`.
+4. **Known names.** Each term of the next table is searched in the lower-cased text as a whole word. A match adds an entity with the term as its name, unless an entity with that name exists already, ignoring case.
+
+| Kind | Terms |
+| --- | --- |
+| `system` | `okta`, `aws`, `gcp`, `azure`, `surrealdb`, `redis`, `postgres`, `kafka`, `kubernetes`, `docker`, `github`, `datadog` |
+| `company` | `stripe`, `openai`, `anthropic` |
+
+The function returns the tags and the entities, and a second function, `extract_entities`, returns only the entities. The entities come in the order of the four steps and not in the order of the text. It can produce the kinds `tag`, `ticket`, `person`, `system` and `company`. A comment in the schema also lists `project`, which the extractor never produces.
+
+The next example uses a file `/notes/incident.md`, which the Python library writes first:
+
+```python
+await alice.write_text("/notes/incident.md", "# Incident review #postmortem\n\nOwner: @maria\nTicket: SEC-1042 (follow-up PAY-7)\nThe outage began on AWS after a Postgres failover, and Stripe webhooks were delayed.\n")
+```
+
+The Rust program below extracts the entities from that file and records them. It is a small Cargo project that depends on the `surrealfs-core` crate from the repository, with this `Cargo.toml`:
+
+```toml title="Cargo.toml"
+[package]
+name = "record-entities"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+surrealfs-core = { git = "https://github.com/surrealdb/surrealfs", branch = "next" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+```rust title="src/main.rs"
+use surrealfs_core::{extract_entities_and_tags, ConnectOptions, SurrealFs};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let fs = SurrealFs::connect(ConnectOptions {
+        url: "ws://127.0.0.1:8000".into(),
+        user: Some("root".into()),
+        pass: Some("secret".into()),
+        ns: "agents".into(),
+        db: "links".into(),
+        caller: None,
+    })
+    .await?;
+
+    let text = fs.read_text("/notes/incident.md").await?;
+    let (_tags, entities) = extract_entities_and_tags(&text);
+    fs.record_entities("/notes/incident.md", &entities).await?;
+    Ok(())
+}
+```
+
+The `cargo run` command builds and runs the program. The `record_entities` method returns `Ok(())` and records nothing when the path does not exist, so check the result with `surrealfs-rs entities`, as described in [Read entities](#read-entities).
+
+The extractor finds these entities in the text of the file:
+
+| Order | Kind | Name |
+| --- | --- | --- |
+| 1 | `tag` | `postmortem` |
+| 2 | `ticket` | `SEC-1042` |
+| 3 | `ticket` | `PAY-7` |
+| 4 | `person` | `maria` |
+| 5 | `system` | `aws` |
+| 6 | `system` | `postgres` |
+| 7 | `company` | `stripe` |
+
+The `record_entities` method upserts each entity, and it relates the file to the entity with a new `mentions` record on every call. Calling it twice for the same file therefore adds a second `mentions` record for each entity, and `surrealfs-rs entities` then lists each entity twice. The gateway calls it on every write, so a rewrite through the gateway adds a `mentions` record for each entity again. In a test, a file with 7 entities went from 7 to 14 `mentions` records after an identical rewrite, and the `entity` records stayed at 7.
+
+### Known quirks of the patterns
+
+Patterns find text that has the right shape, and some shapes occur for other reasons. Each result below was produced by the extractor:
+
+| Text | Result | Reason |
+| --- | --- | --- |
+| `Colour #FF00AA` | Tag `ff00aa` | A colour code has the shape of a tag. |
+| `Mail bob@example.com.` | Person `example.com.` | An email address has the shape of a mention, and the trailing full stop is part of the name. |
+| `Ping @alice.` | Person `alice.` | The character class of a mention includes the full stop. |
+| `Encodings UTF-8 and SHA-256` | Tickets `UTF-8` and `SHA-256` | Capital letters, a hyphen and digits have the shape of a ticket. |
+| `Run the Dockerfiles` | No entity | A known name has to be a whole word, so `Dockerfiles` does not match `docker`. |
+| `github.com/surrealdb` | Systems `surrealdb` and `github` | Both names appear as whole words. |
+
+### Read entities
+
+The `surrealfs-rs entities PATH` command and the function `fn::sfs_entities($path, $caller)` list the entities that a file mentions. For a folder, they list the entities that any readable file under the path mentions. The folder match is a string prefix, so `/notes` also matches `/notes2`. Each result has `id`, `name`, `kind` and `source_path`, and the results are ordered by name:
+
+```surql
+SELECT name, kind FROM fn::sfs_entities('/notes/incident.md', 'root') ORDER BY name;
+```
+
+```surql title="Output"
+[
+    { kind: 'ticket', name: 'PAY-7' },
+    { kind: 'ticket', name: 'SEC-1042' },
+    { kind: 'system', name: 'aws' },
+    { kind: 'person', name: 'maria' },
+    { kind: 'system', name: 'postgres' },
+    { kind: 'tag', name: 'postmortem' },
+    { kind: 'company', name: 'stripe' }
+]
+```
+
+Under a system credential, a missing `$caller` means `root` for this function, and the function throws `sfs:not_found` for a missing path and `sfs:denied_or_missing` when the caller cannot read it. Under record access the signed-in user is used, and an unreadable path gives `sfs:not_found`.
+
+> [!WARNING]
+> Under record access, a signed-in user can read the names of entities that only a private file mentions. The `entity` table is readable when at least one `mentions` record points at it, and the count includes records that the user cannot see. A user who selects from `entity` can therefore see the name of an entity that only another user's private file mentions, although `mentions` and `fn::sfs_entities` show nothing to that user.
+
+## Limitations in this release
+
+- **Links are derived by the Python library only.** The TypeScript SDK and the Rust library derive none, and `relate` and `backlinks` exist in Python and the tool registry. The TypeScript `relate` method fails because it passes four arguments to a function that takes three, and its `backlinks` method returns empty `source` and `target` values. The Rust library and the `surrealfs-rs` command have no relation calls.
+- **`get_neighbors` has no tool.** The tool registry has `relate` and `backlinks` only.
+- **Relations are not unique and are never removed by a rewrite.** Use `array::distinct` and the rebuild described above.
+- **Relations have no data.** There is no label, time or author, so the order of creation is not recorded.
+- **Entity extraction runs only in the gateway.** No other client records entities, and the gateway adds the `mentions` records of a file again on every write.
+- **The extractor is pattern based.** It recognises five kinds, a list of 15 names and the quirks above.
+- **Deleting a file leaves its entity records.** The `mentions` records are deleted, and the `entity` records stay.
+
+## See also
+
+- [File search](/docs/agent-filesystem/concepts/search) describes how files are found by their content, which relations do not affect.
+- [Content analysis](/docs/agent-filesystem/concepts/understanding-pipeline) covers the other analysis features, including the ones that have limited use in this release.
+- [Data model](/docs/agent-filesystem/concepts/data-model) describes the `file` table and the `meta` field that holds frontmatter.
+- [Permissions](/docs/agent-filesystem/security/permissions) and [Record access](/docs/agent-filesystem/security/record-access) describe who can see which relations.
+- [Python SDK](/docs/agent-filesystem/interfaces/python-sdk) lists `relate`, `backlinks`, `get_neighbors` and `find_broken_links`.

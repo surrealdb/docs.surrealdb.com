@@ -638,8 +638,11 @@ has to be updated everywhere the id is named (see below).
 
 The collections are `index` (the root catch-all, serving `/docs/<slug>`), one per
 section under `build/*`, `explore/*`, `learn/*`, `manage/*`, `reference/*` and
-`agent-memory/*` (plus `agent-memory/index` for `/docs/agent-memory`), and
-`labs-items`.
+`agent-memory/*` (plus `agent-memory/index` for `/docs/agent-memory`), `labs-items`,
+and `agent-filesystem/index`, which serves `/docs/agent-filesystem`. Agent
+Filesystem has no `ProductId` and no switcher button: `getProductFromPath` gives
+its pages the Agent Memory product (header, switcher, accent and search scope),
+and `getProductLabelOverride` keeps "Agent Filesystem" as the title suffix.
 
 Every doc collection's `+Content.ts` is the same boilerplate:
 

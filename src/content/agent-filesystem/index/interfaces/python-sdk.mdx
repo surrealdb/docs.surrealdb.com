@@ -1,0 +1,786 @@
+---
+position: 0
+title: Agent Filesystem Python SDK
+description: "SurrealFs, the Python class for Agent Filesystem: read, write, search, version, lease and branch files, with parameters, return values and errors for every method."
+---
+
+# Agent Filesystem Python SDK
+
+`SurrealFs` is the Python class for Agent Filesystem. It reads and writes files and folders in a SurrealDB database through an `AsyncSurreal` connection that your code owns, and every operation is one `await`: `write_text`, `read_text`, `edit`, `search_text`, `history`, `acquire_lock` and so on. This page lists every public method with its parameters, return value and errors.
+
+The same class sits underneath the [tool schemas](/docs/agent-filesystem/interfaces/tool-schemas), the [MCP server](/docs/agent-filesystem/interfaces/mcp-server) and the [Hermes plugins](/docs/agent-filesystem/interfaces/hermes), so whatever a model does through a tool, your code can do through a method. For a guided first run, start with the [Python quickstart](/docs/agent-filesystem/quickstarts/python).
+
+> [!NOTE]
+> The package is in beta. The API, the schema and the command-line interface may change in breaking ways between releases. SurrealFS is the name of the open source project, so the package, the class and the command-line tools on this page carry that name.
+
+## Install
+
+Install the package from the project's GitHub repository, and add the extras you need in square brackets. The package is not on PyPI, so `pip install surrealfs` does not find it, and `git` must be installed:
+
+```bash
+pip install "surrealfs[crdt] @ git+https://github.com/surrealdb/surrealfs.git@next"
+```
+
+The package requires Python 3.11 or later and a SurrealDB 3.x server, and pins the `surrealdb` Python SDK to `3.0.0b8`. The sample output on this page comes from Python 3.12 and SurrealDB 3.2.3. Replace `@next` with a release tag once the project publishes one.
+
+| Extra | Adds | Needed for |
+| --- | --- | --- |
+| `crdt` | `pycrdt` | [Collaborative editing](#collaborative-editing) with `enable_crdt` |
+| `pydantic-ai` | `pydantic-ai-slim` | The [pydantic-ai toolset](/docs/agent-filesystem/interfaces/tool-schemas#pydantic-ai-toolset) |
+| `mcp` | `mcp`, `python-dotenv` | The [MCP server](/docs/agent-filesystem/interfaces/mcp-server) |
+| `agent-memory` | `httpx` | The optional Agent Memory mirror of the MCP server |
+| `claude` | The same packages as `mcp` and `agent-memory` together | An alias that installed [Claude plugins](/docs/agent-filesystem/interfaces/claude-plugin) ask for |
+| `demo` | `pydantic-ai-slim`, `anthropic`, `openai`, `logfire`, `uvicorn` | The repository's demos, and not the library |
+
+The package has no extra for embeddings and none for the file browser. The library calls no embedding model, see [Search](#search), and the [file browser](/docs/agent-filesystem/interfaces/file-browser) is a page that a Rust server serves.
+
+## Connect and write a first file
+
+`SurrealFs` never connects, signs in or closes anything. You open the connection with the `surrealdb` package, select a namespace and database, and pass the handle in. `apply_schema` defines the `file` table, its functions and its events, and is safe to run again, because every statement either overwrites its own definition or is created only if it does not exist.
+
+This is a complete script. It assumes a SurrealDB server on `localhost:8000` with the root user `root` and the password `secret`:
+
+```python title="first_file.py"
+import asyncio
+
+from surrealdb import AsyncSurreal
+from surrealfs import SurrealFs, apply_schema
+
+
+async def main():
+    async with AsyncSurreal("ws://localhost:8000/rpc") as db:
+        await db.signin({"username": "root", "password": "secret"})
+        await db.use("agents", "workspace")
+        await apply_schema(db)
+
+        fs = SurrealFs(db, user="alice")
+        entry = await fs.write_text(
+            "/projects/atlas/plan.md",
+            "# Atlas plan\n\n- Draft the API\n- Review the schema\n",
+        )
+        print(entry.path, entry.generation)
+        print(await fs.read_text("/projects/atlas/plan.md"))
+
+
+asyncio.run(main())
+```
+
+```text title="Output"
+/projects/atlas/plan.md 1
+# Atlas plan
+
+- Draft the API
+- Review the schema
+```
+
+The parent folders `/projects` and `/projects/atlas` did not exist, so `write_text` created them. The examples in the rest of this page continue inside that `main()` function, after the `fs` line, so each one can use `db` and `fs`. They build on one another, so run them in order: later blocks use the files that earlier blocks wrote, the name `bob` from [Identity and permissions](#identity-and-permissions) and the name `path` from [Read files](#read-files). A block that runs alone can raise a `NameError` or print different output.
+
+> [!WARNING]
+> `apply_schema` redefines the Agent Filesystem tables, functions and events with `OVERWRITE`. Run it against a database that holds Agent Filesystem data only, and against a server whose version you have tested.
+
+> [!NOTE]
+> `SurrealFs.from_server(url, *, user, token=None, table="file")` builds the class over the `/api/rpc` endpoint of a [gateway](/docs/agent-filesystem/interfaces/remote-clients), and not over a SurrealDB connection. It needs the `httpx` package. In this release the gateway and this client disagree on the name of a field in the answer, so every query comes back empty. `exists` returns `False`, the searches return `[]`, `stat`, `read_text` and `ls` of a folder raise `NotFound`, and `write_text` raises `PermissionDenied`. Connect with `AsyncSurreal`, as above, until that changes.
+
+## Identity and permissions
+
+The constructor takes the identity that every call acts as:
+
+<Synopsis label="Signature">
+SurrealFs(db, *, user, table="file")
+</Synopsis>
+
+<OptionsTable
+	title="Constructor parameters"
+	options={[
+		{ "name": "db", "type": "AsyncSurreal", "required": true, "description": "A connected handle that has signed in and selected a namespace and a database. The object never connects to the server and never closes the handle." },
+		{ "name": "user", "type": "str", "required": true, "description": "The identity of the caller. It must match `[A-Za-z0-9_-]+`, and raises `InvalidPath` otherwise. There is no default. The constant `ROOT` is the string `root`, so a user that is literally named `root` bypasses every check." },
+		{ "name": "table", "type": "str", "default": "file", "description": "The table that holds the files. It must match `[A-Za-z_][A-Za-z0-9_]*`." }
+	]}
+/>
+
+The identity is an argument because the credentials in the examples above are system credentials. A system user bypasses table permissions, so the database cannot tell the `SurrealFs` object who is asking, and the class applies the permission rules itself. [Record access](/docs/agent-filesystem/security/record-access) adds a second layer, in which SurrealDB enforces the permission rules itself for a signed-in record user. The database rules differ from the class in one respect, the group digit, see [Known issues](#known-issues).
+
+Each file has an owner and an octal mode such as `0o666`. `SurrealFs` checks the owner digit when `user` owns the file and the other digit otherwise. The class ignores the group digit, which only the database enforces, and only under record access. New files get mode `0o666` and new folders `0o777`, and a folder directly under `/home` gets `0o700` and belongs to the user it is named after, so `/home/alice` is private to `alice`. Only that user can create it. `ROOT` bypasses every check, and the code that indexes embeddings has to run as `ROOT`. A request that reaches the [gateway](/docs/agent-filesystem/interfaces/gateway-server) without naming a user also acts as `ROOT`. For the full rules, see [Permissions](/docs/agent-filesystem/security/permissions).
+
+```python title="Two identities on one database"
+from surrealfs import PermissionDenied
+
+bob = SurrealFs(db, user="bob")
+
+await fs.write_text("/home/alice/journal.md", "Private notes\n")
+try:
+    await bob.read_text("/home/alice/journal.md")
+except PermissionDenied as error:
+    print(error)
+```
+
+```text title="Output"
+Permission denied: /home/alice/journal.md
+```
+
+> [!WARNING]
+> Several methods do not check the caller's permission on the file they touch: `history`, `diff` with two generations, `undelete`, `relate`, `backlinks`, `get_neighbors`, `acquire_lock`, `watch`, and `write_workspace_text` followed by `merge_workspace`. Two more, `fork_workspace` and `diff_workspace`, return the path of every file in the database, including files inside private homes that `ls` refuses to list. Each is marked where it is described, and the [permissions page](/docs/agent-filesystem/security/permissions) lists the effect. Use record access when callers must not see each other's private files.
+
+## Paths
+
+Paths are always absolute, and there is no working directory. A leading slash is optional on input. The class drops `.` segments, collapses repeated slashes, and resolves `..` without leaving the root, so `projects//atlas/../atlas/./plan.md` and `/projects/atlas/plan.md` name the same file. The helper functions are in `surrealfs.paths`: `normalize`, `split`, `join`, `parent_of`, `basename`, `home_of`, `glob_to_regex` and `literal_prefix`.
+
+## Data types
+
+Every method that returns file metadata returns a frozen `FileEntry` dataclass:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | `RecordID` | The record id in the `file` table. |
+| `path`, `filename` | `str` | The absolute path, and its last segment. |
+| `content_type` | `str` | The media type. Folders use `inode/directory`. |
+| `is_folder` | `bool` | True for a folder. |
+| `owner` | `str` | The owning user. |
+| `group` | `str` or `None` | Always `None` in the Python class. |
+| `mode` | `int` | The octal permission bits, for example `0o666`. |
+| `permissions` | `str` | A property that renders `mode` as `-rw-rw-rw-` or `drwxr-xr-x`. |
+| `gate` | `str` or `None` | The schema's ancestry check: the users who can pass every closed folder above the file, as a user name or a comma-separated list that can include `group:<name>`. It is `'!closed'` when no single user can, and `None` when no folder above is closed. |
+| `size` | `int` | Characters for a text file, and bytes for a binary file. |
+| `hash` | `str` | A digest for detecting changes. For text it is the MD5 of the content. For a binary file it is the MD5 of the content's Base64 text without the `=` padding, so it differs from `hashlib.md5(data)`. A database event fills it just after a write, so the entry that `write_text` returns for a new file can carry an empty `hash`. Call `stat` for the value. `stat` and `ls` return an empty `hash` to a caller without the read bit. |
+| `generation` | `int` | Starts at 1 and rises by one each time the content changes. |
+| `content`, `data` | `str` or `None`, and `bytes` or `None` | Filled only by the methods that fetch content. |
+| `meta` | `dict` or `None` | The parsed frontmatter of a text file. |
+| `crdt` | `bool` | True when collaborative editing is enabled for the file. |
+| `created_at`, `updated_at` | `datetime` or `None` | Timestamps from the database. |
+
+The other result types are also frozen dataclasses:
+
+| Type | Fields |
+| --- | --- |
+| `SearchHit` | `entry` (a `FileEntry`), `score`, `snippet`, and a `path` property. |
+| `SectionHit` | `path`, `heading`, `line_start`, `line_end`, `content`, `score`, and a `lines` property such as `"1-3"`. |
+| `GrepMatch` | `path`, `line_number`, `line`. |
+| `FileVersionEntry` | `id`, `file`, `generation`, `path`, `content_type`, `hash`, `author`, `owner`, `mode`, `op`, `size`, `created_at`, and a `permissions` property. It has no content field. |
+| `GraphRelation` | `source_path`, `target_path`, `relation`, `source_name`, `target_name`. |
+| `WatchEvent` | `action` (`CREATE`, `UPDATE` or `DELETE`), `path`, `entry`. |
+| `WorkspaceEntry` | `id`, `name`, `owner`, `is_public`, `created_at`. |
+
+## Errors
+
+Every error class inherits from `SurrealFsError` and from the nearest built-in exception, so both `except PermissionDenied` and `except PermissionError` work.
+
+| Class | Also a | Raised when |
+| --- | --- | --- |
+| `NotFound` | `FileNotFoundError` | A path, a version or a piece of text does not exist. |
+| `AlreadyExists` | `FileExistsError` | A path that must be new already exists. |
+| `ConflictError` | `OSError` | A generation does not match, another user holds a lease, or a workspace merge finds a changed file. |
+| `IsADirectory` | `IsADirectoryError` | A file operation targets a folder. |
+| `NotADirectory` | `NotADirectoryError` | A folder operation targets a file. |
+| `DirectoryNotEmpty` | `OSError` | `rm` targets a folder that has children and `recursive` is false. |
+| `PermissionDenied` | `PermissionError` | The identity lacks the needed mode bit, or a folder above the target is closed to it. |
+| `NotATextFile` | `ValueError` | A text method reads a binary file. |
+| `InvalidPath` | `ValueError` | A user, table or path is malformed. |
+| `QueryError` | `RuntimeError` | Any other failed statement. The `retryable` attribute is true for transaction conflicts. |
+
+The database functions report failures as codes such as `sfs:not_found`, `sfs:locked` and `sfs:conflict`, and the SDK maps them: `sfs:not_found` to `NotFound`, `sfs:exists` to `AlreadyExists`, `sfs:not_empty` to `DirectoryNotEmpty`, `sfs:denied` and `sfs:denied_or_missing` to `PermissionDenied`, and `sfs:conflict`, `sfs:denied_or_conflict` and `sfs:locked` to `ConflictError`. Any other code becomes a `QueryError`. The class retries a retryable `QueryError` before it reaches your code: the call runs at most five times in all, with delays of 0.02, 0.04, 0.08 and 0.16 seconds between the attempts. `LegalHoldError` exists in the module and the SDK never raises it, see [Known issues](#known-issues).
+
+## Read files
+
+<Synopsis label="Signature">
+read_text(path) -> str
+read_bytes(path) -> bytes
+head(path, n=10) -> str
+tail(path, n=10) -> str
+read_range(path, start=1, end=-1, *, numbers=False) -> str
+exists(path) -> bool
+stat(path) -> FileEntry
+</Synopsis>
+
+| Method | Behaviour and errors |
+| --- | --- |
+| `read_text` | Returns the whole text. Raises `NotFound`, `IsADirectory`, `NotATextFile` for binary content, and `PermissionDenied`. |
+| `read_bytes` | Returns the raw bytes. A text file is returned UTF-8 encoded. |
+| `head`, `tail` | Return the first or last `n` lines joined with `\n`. Raise `ValueError` when `n` is zero or negative. |
+| `read_range` | Returns a 1-indexed, inclusive line range. `end=-1`, or an `end` past the last line, reads to the end, and a `start` past the end returns an empty string. `numbers=True` prefixes each line with its line number and a vertical bar. Raises `ValueError` when `start` is below 1, or `end` is below `start` and is not `-1`. |
+| `exists` | Returns `False` for a missing path and for a path behind a folder that the caller cannot enter. The root `/` always exists. |
+| `stat` | Returns metadata without content. Raises `NotFound` and `PermissionDenied`. |
+
+```python title="Read parts of a file"
+path = "/projects/atlas/plan.md"
+
+print(await fs.head(path, 2))
+print(await fs.tail(path, 1))
+print(await fs.read_range(path, 3, 4, numbers=True))
+
+entry = await fs.stat(path)
+print(entry.size, entry.generation, entry.permissions)
+print(await fs.exists(path), await fs.exists("/projects/atlas/missing.md"))
+```
+
+```text title="Output"
+# Atlas plan
+
+- Review the schema
+3 | - Draft the API
+4 | - Review the schema
+50 1 -rw-rw-rw-
+True False
+```
+
+## List and find files
+
+<Synopsis label="Signature">
+ls(path="/", *, recursive=False) -> list[FileEntry]
+glob(pattern, *, meta=None) -> list[FileEntry]
+tree(path="/", *, max_depth=3) -> str
+</Synopsis>
+
+| Method | Behaviour and errors |
+| --- | --- |
+| `ls` | Returns the children of a folder sorted by path. The caller needs read and execute permission on the folder. Every child is listed whatever its own mode, and a recursive listing descends only into folders the caller may enter. `ls("/")` includes the seeded `/home` folder. Raises `NotFound`, `NotADirectory` and `PermissionDenied`. |
+| `glob` | Matches paths with `*` (within one segment), `**` (across segments, including zero folders), `?`, `[abc]` and `[!abc]`. The literal folder prefix narrows the query in the database. The optional `meta` dictionary keeps only files whose frontmatter matches each key, and a list value matches by membership. |
+| `tree` | Returns an ASCII tree as a string, with `/` after folder names. Raises `ValueError` when `max_depth` is below 1. |
+
+```python title="List, glob and draw a tree"
+await fs.write_text("/projects/atlas/notes.md", "# Notes\n\nThe launch review is on Friday.\n")
+await fs.write_text("/projects/hermes/plan.md", "# Hermes plan\n\n- Pick a database\n")
+
+for item in await fs.ls("/projects", recursive=True):
+    print(item.path, "folder" if item.is_folder else f"{item.size} characters")
+
+print([item.path for item in await fs.glob("/projects/**/plan.md")])
+print(await fs.tree("/projects"))
+```
+
+```text title="Output"
+/projects/atlas folder
+/projects/atlas/notes.md 41 characters
+/projects/atlas/plan.md 50 characters
+/projects/hermes folder
+/projects/hermes/plan.md 33 characters
+['/projects/atlas/plan.md', '/projects/hermes/plan.md']
+/projects
+├── atlas/
+│   ├── notes.md
+│   └── plan.md
+└── hermes/
+    └── plan.md
+```
+
+> [!WARNING]
+> In version 0.2.0, `tree` raises `NotFound` for its default path `/`, because the root folder has no record of its own. Pass a folder below the root, such as `tree("/projects")`. The `tree` tool has the same default, see [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas#known-issues).
+
+## Write files
+
+<Synopsis label="Signature">
+write_text(path, content, *, content_type=None, create_parents=True, if_generation=None) -> FileEntry
+write_bytes(path, data, *, content_type="application/octet-stream", create_parents=True, if_generation=None) -> FileEntry
+touch(path, *, create_parents=True) -> FileEntry
+append_text(path, suffix, *, if_generation=None) -> FileEntry
+edit(path, old, new, *, replace_all=False, if_generation=None) -> str
+mkdir(path, *, parents=False, exist_ok=False, mode=None) -> FileEntry
+mv(src, dst) -> FileEntry
+cp(src, dst, *, recursive=False) -> FileEntry
+rm(path, *, recursive=False) -> int
+chmod(path, mode, *, recursive=False) -> int
+</Synopsis>
+
+<OptionsTable
+	title="write_text parameters"
+	options={[
+		{ "name": "path", "type": "str", "required": true, "description": "The absolute path. A folder at this path raises `IsADirectory`." },
+		{ "name": "content", "type": "str", "required": true, "description": "The full new text. The call creates the file or replaces its content." },
+		{ "name": "content_type", "type": "str | None", "default": "None", "description": "The media type. When omitted, the class infers it from the extension, then from the content: `.py` gives `text/x-python`, `.json` gives `application/json`, `.surql` gives `text/x-surrealql`, and an unrecognised text file gives `text/markdown`." },
+		{ "name": "create_parents", "type": "bool", "default": true, "description": "Create missing parent folders. With `False`, a missing parent raises `NotFound`." },
+		{ "name": "if_generation", "type": "int | None", "default": "None", "description": "Write only when the file's current generation equals this number. A mismatch, or a missing file, raises `ConflictError`." }
+	]}
+/>
+
+| Method | Behaviour and errors |
+| --- | --- |
+| `write_text` | Creates or replaces a text file. It parses a leading frontmatter block into `meta` and records a `links_to` edge for each link to a file that exists, see [Links and metadata](#links-and-metadata). A write that changes the content increases `generation` by one, and a write of identical content leaves it unchanged. |
+| `write_bytes` | The same rules for binary data. It stores the bytes and clears any text content. |
+| `touch` | Returns an existing path untouched. A new path becomes an empty `text/plain` file. |
+| `append_text` | Appends to the end in one atomic update, so several writers that append never overwrite each other. It does not refresh `meta` or the `links_to` edges, and raises `NotATextFile` for binary content. |
+| `edit` | Replaces the first occurrence of `old` with `new`, or every occurrence with `replace_all=True`. It returns a unified diff, or `(no textual change in <path>)`. It raises `ValueError` when `old` is empty and `NotFound` when `old` is absent. |
+| `mkdir` | Creates a folder. `parents=True` creates missing folders along the way, and `exist_ok=True` returns an existing folder. `mode` must be between `0` and `0o777` and applies only to the final folder. Raises `NotFound` with the message "Pass parents=True to create it.", `AlreadyExists` and `InvalidPath` for `/`. |
+| `mv` | Moves or renames a file or folder in one update, and the descendants follow. Raises `AlreadyExists` when `dst` exists, `NotFound` when the destination folder is missing, and `InvalidPath` for a move into the source's own subtree. It raises `PermissionDenied` when `dst` is a `/home/<user>` folder. |
+| `cp` | Copies a file with its content, type and mode, and the caller becomes the owner. A folder needs `recursive=True` and is copied all or nothing. Raises `AlreadyExists` when `dst` exists. |
+| `rm` | Deletes a file, or a folder with `recursive=True`, and returns the number of records removed. A non-empty folder raises `DirectoryNotEmpty` without `recursive`. A recursive removal is all or nothing and deletes the deepest records first. |
+| `chmod` | Sets the mode of a file or folder and returns the number of records changed. Only the owner or `ROOT` can change a mode. Raises `PermissionDenied` and `ValueError` for a mode outside `0` to `0o777`. With `recursive=True` it skips records the caller does not own. |
+
+The `if_generation` argument turns a write into a compare-and-swap, which is how several agents can edit one file without overwriting each other:
+
+```python title="Optimistic concurrency"
+from surrealfs import ConflictError, NotFound
+
+todo = "/projects/atlas/todo.md"
+entry = await fs.write_text(todo, "- Draft the API\n- Review the schema\n")
+
+await fs.write_text(
+    todo,
+    "- Draft the API\n- Review the schema\n- Publish\n",
+    if_generation=entry.generation,
+)
+
+try:
+    await fs.write_text(todo, "A stale write\n", if_generation=entry.generation)
+except ConflictError as error:
+    print(error)
+
+await fs.append_text(todo, "- Announce\n")
+print(await fs.edit(todo, "Draft the API", "Draft the HTTP API"))
+
+try:
+    await fs.edit(todo, "missing words", "anything")
+except NotFound as error:
+    print(error)
+```
+
+```text title="Output"
+Generation mismatch on /projects/atlas/todo.md: expected 1, got 2
+--- a/projects/atlas/todo.md
++++ b/projects/atlas/todo.md
+@@ -1,4 +1,4 @@
+-- Draft the API
++- Draft the HTTP API
+ - Review the schema
+ - Publish
+ - Announce
+Text not found in /projects/atlas/todo.md: 'missing words'
+```
+
+The next example uses the other write methods:
+
+```python title="Folders, copies, moves, removal and modes"
+await fs.mkdir("/projects/atlas/drafts")
+await fs.cp(path, "/projects/atlas/drafts/plan.md")
+moved = await fs.mv("/projects/atlas/drafts/plan.md", "/projects/atlas/drafts/plan-v2.md")
+print(moved.path)
+
+print(await fs.rm("/projects/atlas/drafts", recursive=True))
+print(await fs.chmod(path, 0o600))
+
+print((await fs.stat(path)).permissions)
+try:
+    await bob.read_text(path)
+except PermissionDenied as error:
+    print(error)
+
+await fs.chmod(path, 0o666)
+await fs.write_bytes("/projects/atlas/logo.png", b"\x89PNG\r\n\x1a\n", content_type="image/png")
+print(await fs.read_bytes("/projects/atlas/logo.png"))
+```
+
+```text title="Output"
+/projects/atlas/drafts/plan-v2.md
+2
+1
+-rw-------
+Permission denied: cannot read /projects/atlas/plan.md
+b'\x89PNG\r\n\x1a\n'
+```
+
+> [!NOTE]
+> Keep folder trees shallow. The database computes an ancestry field for each record, and the time to touch a record grows steeply with its depth, which is the number of segments in its path. On an Apple M2 Max with SurrealDB 3.2.3 and the in-memory engine, creating a folder at depth 8 took 0.2 to 0.3 seconds, and each further level multiplied the time by about three. Keep paths to eight levels or fewer. Timings vary with the machine and its load, and [Folder depth](/docs/agent-filesystem/concepts/data-model#folder-depth) has the figures for each level.
+
+## Search
+
+<Synopsis label="Signature">
+search_text(query, *, limit=20, match="any") -> list[SearchHit]
+search(query, *, vector=None, limit=20, match="any") -> list[SearchHit]
+search_semantic(vector, *, k=10) -> list[SearchHit]
+search_sections(vector, *, limit=20) -> list[SectionHit]
+grep(pattern, *, path_prefix=None, glob=None, limit=100, is_regex=False, case_sensitive=True) -> list[GrepMatch]
+reindex_embeddings(embed, *, version, batch=32) -> int
+</Synopsis>
+
+| Method | Behaviour and errors |
+| --- | --- |
+| `search_text` | BM25 full-text search over the content of every text file the caller can read. `match="any"` returns files that share any query word, and `match="all"` requires every word. A blank query returns `[]`. `score` is the BM25 score, and a word that appears in more than about half of the files scores `0.0`. |
+| `search` | Full-text search, fused with a vector search when you pass `vector`. The fusion is reciprocal rank fusion, and `score` is the fused rank score. With no `vector` it ranks by the full-text arm alone, and the scores are small numbers near 0.016. |
+| `search_semantic` | Nearest-neighbour search over file embeddings. `score` is the cosine distance, so a lower number is closer. The method returns nothing until embeddings exist. The database examines a fixed pool of 80 candidates before it filters by read permission and applies `k`, so a caller can receive fewer than `k` results when more files match. Raises `ValueError` when `k` is below 1. |
+| `search_sections` | Nearest-neighbour search over sections, the heading-level chunks of a file. Results are filtered by permission, from the same fixed pool of 80 candidates. `SectionHit.score` is always `0.0` in version 0.2.0, because the database function returns a field named `distance` that the dataclass does not read. |
+| `grep` | Matches lines against `pattern`. An empty pattern or a `limit` of 0 or less returns `[]`. A `glob` without a leading slash is matched as `/**/<glob>`. Results are in database order, not sorted. With `is_regex=True`, the pattern is compiled by Python's `re` module and by the database, so it must be valid in both: an invalid pattern raises `re.error`, and a pattern that only Python accepts, such as a lookahead, raises `QueryError`. |
+| `reindex_embeddings` | Embeds every text file whose stored embedding is stale, splits it into sections and embeds those, and returns the number of files embedded. Only `ROOT` can call it. |
+
+Every vector must have 1,536 dimensions, because the vector index is defined with that dimension. The library never calls an embedding model, and the package provides no embedder and no indexing command, so you supply the function. It is an async function that takes a string and returns a list of floats, and `reindex_embeddings` calls it with the text of every file that it embeds, including files inside private homes. Whatever the function sends to an embedding service, it sends all of that text. The `version` argument is a name that you choose for the embedder, such as `openai:text-embedding-3-small`. A pass embeds again every file whose stored `indexer_version` differs from it. See [Search](/docs/agent-filesystem/concepts/search) and [Sections and chunking](/docs/agent-filesystem/concepts/sections-and-chunking) for how the arms work and which data each one reads.
+
+```python title="Full-text search and grep"
+for hit in await fs.search_text("schema"):
+    print(hit.path, round(hit.score, 3))
+
+matches = await fs.grep("review", path_prefix="/projects", case_sensitive=False)
+for match in sorted(matches, key=lambda m: m.path):
+    print(match.path, match.line_number, match.line)
+
+print([(m.path, m.line_number) for m in await fs.grep(r"^- Review", is_regex=True)])
+print(sorted((m.path, m.line_number) for m in await fs.grep(r"(?m)^- Review", is_regex=True)))
+```
+
+```text title="Output"
+/projects/atlas/plan.md 0.754
+/projects/atlas/todo.md 0.673
+/projects/atlas/notes.md 3 The launch review is on Friday.
+/projects/atlas/plan.md 4 - Review the schema
+/projects/atlas/todo.md 2 - Review the schema
+[]
+[('/projects/atlas/plan.md', 4), ('/projects/atlas/todo.md', 2)]
+```
+
+The database applies a regular expression to the whole content of each file to choose the files to scan, so `^` and `$` match only at the start and the end of the file, and the first pattern above finds nothing. The `(?m)` flag anchors them to each line, as the last line of the example does.
+
+Hybrid search needs an embedder and an indexing pass. The next block is illustrative: its embedder hashes each word into one of 1,536 slots, to show the calls without an embedding service, and a real model matches by meaning where this one matches only identical words:
+
+```python title="Hybrid search with a stand-in embedder (illustrative)"
+import hashlib
+
+from surrealfs import ROOT
+
+DIMENSIONS = 1536
+
+
+async def embed(text: str) -> list[float]:
+    vector = [0.0] * DIMENSIONS
+    for word in text.lower().split():
+        slot = int.from_bytes(hashlib.sha256(word.encode()).digest()[:4], "big")
+        vector[slot % DIMENSIONS] += 1.0
+    norm = sum(x * x for x in vector) ** 0.5 or 1.0
+    return [x / norm for x in vector]
+
+
+# Only ROOT can index. Run this on a schedule, for example every few minutes.
+indexer = SurrealFs(db, user=ROOT)
+print(await indexer.reindex_embeddings(embed, version="stand-in-v1"))
+
+question = "launch review on Friday"
+for hit in await fs.search(question, vector=await embed(question)):
+    print(hit.path, hit.score)
+```
+
+Nothing in the package runs that pass for you, so a scheduler of your own has to call `reindex_embeddings`. The method never applies the schema, and against a database that has none it raises `QueryError` with the message `The table 'file' does not exist`. The [gateway](/docs/agent-filesystem/interfaces/gateway-server) requests embeddings when `OPENAI_API_KEY` is set, but it stores none of them, see [Search](/docs/agent-filesystem/concepts/search#limitations-in-this-release).
+
+## Versions
+
+<Synopsis label="Signature">
+history(path, *, limit=20) -> list[FileVersionEntry]
+diff(path, from_generation, to_generation=None) -> str
+restore(path, generation) -> FileEntry
+undelete(path) -> FileEntry
+</Synopsis>
+
+A database event stores the previous state of a file whenever its content, name, parent or mode changes, and when it is deleted. The current state is not in the history, so a file that has been written once has an empty history. See [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) for the model.
+
+| Method | Behaviour and errors |
+| --- | --- |
+| `history` | Returns the superseded versions newest first, looked up by path. `op` is `write`, `chmod`, `rename` or `delete`. Versions recorded before a rename stay under the old path. |
+| `diff` | Returns a unified diff from `from_generation` to `to_generation`, or to the current file when it is `None`. Raises `NotFound` when a generation has no stored version, which is always true of the current generation. |
+| `restore` | Writes an old version back as a new generation. It does not rewind the counter. |
+| `undelete` | Recreates the most recent stored version of a deleted path as generation 1, with the default mode and the caller as owner. The original mode and owner are not restored. Raises `AlreadyExists` when the path exists and `NotFound` when there is no stored version. |
+
+```python title="History, diff, restore and undelete"
+log = "/projects/atlas/changelog.md"
+await fs.write_text(log, "- Draft the API\n")
+await fs.append_text(log, "- Review the schema\n")
+await fs.edit(log, "Draft", "Write")
+
+for version in await fs.history(log):
+    print(version.generation, version.op, version.author)
+
+print(await fs.diff(log, 1))
+
+restored = await fs.restore(log, 1)
+print(restored.generation, repr(await fs.read_text(log)))
+
+await fs.rm(log)
+recovered = await fs.undelete(log)
+print(recovered.generation, recovered.owner)
+```
+
+```text title="Output"
+2 write alice
+1 write alice
+--- /projects/atlas/changelog.md (gen 1)
++++ /projects/atlas/changelog.md (current)
+@@ -1 +1,2 @@
+-- Draft the API
++- Write the API
++- Review the schema
+
+4 '- Draft the API\n'
+1 alice
+```
+
+> [!WARNING]
+> `history`, `undelete` and `diff` with two generations do not check read permission on the file, so another user can list the metadata and read superseded text of a private file, and can recover a deleted private file, read it and become its owner. When you connect with a system credential, `history` records the owner of the file at that time as the author, and not the user who wrote, so it is not an audit trail. `undelete` on a deleted folder recreates it as an empty file.
+
+## Links and metadata
+
+<Synopsis label="Signature">
+relate(from_path, relation, to_path) -> bool
+backlinks(path) -> list[GraphRelation]
+get_neighbors(path, *, relation=None) -> list[GraphRelation]
+find_broken_links(path_prefix="/") -> list[dict[str, str]]
+</Synopsis>
+
+When `write_text` or `edit` stores text, the class reads two things from it. A leading `---` block of YAML, or a `+++` block of TOML, becomes `meta`, and `glob(..., meta=...)` filters on it. The YAML reader is a small subset: scalars, inline lists such as `[api, launch]`, and `- item` lists, with no nested maps. Each Markdown link `[label](target)` and wiki link `[[target]]` or `[[target|label]]` becomes a `links_to` edge to the file it resolves to, relative to the folder of the file that holds the link, but only when that file exists at the moment the linking file is written. A link to a missing file produces no edge, and creating the target later adds nothing until the linking file is written again. A wiki link resolves as written, so `[[plan]]` links a file named `plan` and does not find `plan.md`. Web, anchor and `mailto:` links are ignored.
+
+`relate` adds an edge of your own. The relation must be one of `references`, `supersedes`, `derives_from`, `implements` or `links_to`, and both files must exist. Each call creates another edge, so calling it twice duplicates it, and a file that is written three times with the same link has three `links_to` edges. See [Links and entities](/docs/agent-filesystem/concepts/links-and-entities).
+
+```python title="Frontmatter, links and backlinks"
+await fs.write_text(
+    "/projects/atlas/notes.md",
+    "---\nstatus: draft\ntags: [api, launch]\n---\n"
+    "# Notes\n\nThe launch review is on Friday. See [the plan](plan.md).\n",
+)
+await fs.write_text(
+    "/projects/atlas/risks.md",
+    "# Risks\n\nThe schema review may slip. See [the plan](plan.md) and [the budget](budget.md).\n",
+)
+
+print((await fs.stat("/projects/atlas/notes.md")).meta)
+print([e.path for e in await fs.glob("/projects/**/*.md", meta={"tags": "launch"})])
+
+for edge in sorted(await fs.backlinks("/projects/atlas/plan.md"), key=lambda e: e.source_path):
+    print(edge.source_path, edge.relation, edge.target_path)
+
+print(await fs.find_broken_links("/projects"))
+print(await fs.relate("/projects/atlas/risks.md", "references", "/projects/atlas/notes.md"))
+```
+
+```text title="Output"
+{'status': 'draft', 'tags': ['api', 'launch']}
+['/projects/atlas/notes.md']
+/projects/atlas/notes.md links_to /projects/atlas/plan.md
+/projects/atlas/risks.md links_to /projects/atlas/plan.md
+[{'source': '/projects/atlas/risks.md', 'target': '/projects/atlas/budget.md', 'raw_link': 'budget.md'}]
+True
+```
+
+> [!WARNING]
+> `relate`, `backlinks` and `get_neighbors` do not check read permission. Another user can create an edge to a private file, which also shows whether the file exists, and can list the edges that point at it.
+
+## Leases
+
+<Synopsis label="Signature">
+acquire_lock(path, *, ttl_seconds=60, reason="advisory lease") -> dict
+release_lock(path) -> bool
+lease(path, ttl=60, reason="advisory lease") -> async context manager
+</Synopsis>
+
+A lease is an advisory lock on a path with an expiry. `acquire_lock` returns a dictionary with the keys `expires_at`, `file`, `holder`, `id`, `path` and `reason`. The same holder can call it again to renew the lease, and another holder gets `ConflictError` until the lease is released or expires. A missing path raises `NotFound`. `release_lock` returns `True` whether or not you hold a lease, including when no lease exists and when you release the same lease twice, and raises `ConflictError` when someone else holds an unexpired lease. The `lease` context manager acquires on entry and releases on exit, and it suppresses errors from the release.
+
+Leases are advisory. They do not block writes, so a user who ignores the lease can still write to the file. Acquiring is exclusive, though: when four callers on separate connections acquire the same path at the same moment, exactly one of them succeeds. See [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases).
+
+```python title="Take a lease around an edit"
+from surrealfs import ConflictError
+
+async with fs.lease(path, ttl=30, reason="batch edit") as lock:
+    print(lock["holder"], lock["reason"])
+    try:
+        await bob.acquire_lock(path)
+    except ConflictError as error:
+        print(error)
+
+other = await bob.acquire_lock(path)
+print(other["holder"])
+await bob.release_lock(path)
+```
+
+```text title="Output"
+alice batch edit
+An error occurred: sfs:locked
+bob
+```
+
+> [!WARNING]
+> `acquire_lock` does not check read permission. A user can take a lease on a file that belongs to someone else, and the owner then gets `ConflictError` until it expires. The error message does not say who holds the lease.
+
+## Workspaces
+
+<Synopsis label="Signature">
+fork_workspace(dst_branch, src_branch="main") -> dict
+write_workspace_text(branch, path, content) -> FileEntry
+diff_workspace(branch) -> list[dict]
+merge_workspace(branch, target="main") -> dict
+discard_workspace(branch) -> dict
+list_workspaces() -> list[WorkspaceEntry]
+sandbox(branch, base_branch="main") -> async context manager of WorkspaceSandbox
+</Synopsis>
+
+A workspace is a named branch of the tree. Forking creates one `file_branch` record for each file in the database that points at the original, so no content is copied. Edits to a workspace are written under `/.workspaces/<branch>/`, and a merge copies the changed content back to the original file. See [Workspaces](/docs/agent-filesystem/concepts/workspaces) for the model.
+
+| Method | Behaviour and errors |
+| --- | --- |
+| `fork_workspace` | Returns `{"workspace", "base_branch", "count"}`, where `count` is the number of files. Raises `AlreadyExists` when the branch exists. A `src_branch` other than `main` forks from another workspace. |
+| `write_workspace_text` | Writes the file under `/.workspaces/<branch>/` and records it in the branch. |
+| `diff_workspace` | Returns one dictionary for every file in the database, with `path`, `modified`, `conflict`, `base_gen`, `branch_gen`, `current_base_gen`, `base_file` and `current_file`, where the last two are the record ids of the base file and of the workspace copy. Filter on `modified` to see the changes. |
+| `merge_workspace` | Returns `{"into", "merged", "status"}` and deletes the workspace. Raises `ConflictError` when a file in the base has changed since the fork. |
+| `discard_workspace` | Deletes the workspace and returns `{"discarded", "status"}`. Raises `NotFound`. |
+| `list_workspaces` | Returns the caller's workspaces and the public ones. |
+| `sandbox` | Forks on entry and yields a `WorkspaceSandbox`. On exit it discards the workspace, unless the block merged or discarded it. A raised exception also discards it. |
+
+`WorkspaceSandbox` has five methods: `write_text(path, content)`, `read_text(path)` (the workspace copy when it exists, otherwise the base file), `diff()`, `merge(strategy="3way")` and `discard()`. The `strategy` argument is accepted and ignored.
+
+```python title="Edit in a workspace and merge"
+await fs.fork_workspace("experiment")
+await fs.write_workspace_text("experiment", path, "# Atlas plan\n\n- Draft the HTTP API\n")
+
+changed = [row["path"] for row in await fs.diff_workspace("experiment") if row["modified"]]
+print(changed)
+print(repr(await fs.read_text(path)))
+print(await fs.merge_workspace("experiment"))
+print(repr(await fs.read_text(path)))
+
+async with fs.sandbox("review") as sandbox:
+    await sandbox.write_text(path, "Discarded on exit\n")
+    print(repr(await sandbox.read_text(path)))
+
+print(await fs.list_workspaces())
+print(repr(await fs.read_text(path)))
+```
+
+```text title="Output"
+['/projects/atlas/plan.md']
+'# Atlas plan\n\n- Draft the API\n- Review the schema\n'
+{'into': 'main', 'merged': 'experiment', 'status': 'ok'}
+'# Atlas plan\n\n- Draft the HTTP API\n'
+'Discarded on exit\n'
+[]
+'# Atlas plan\n\n- Draft the HTTP API\n'
+```
+
+> [!WARNING]
+> Workspaces carry five limits in version 0.2.0. A merge copies content only for files that existed when you forked, so a file created inside a workspace does not reach `main`, and the merge still reports `"status": "ok"`. Conflict detection is per file: if the base file changed at all since the fork, the merge raises `ConflictError`, and nothing merges text-level. The files under `/.workspaces/` are ordinary files, so they appear in `ls`, `glob` and search results. `write_workspace_text` followed by `merge_workspace` does not check write permission, so a user can overwrite another user's private file this way. And `fork_workspace` and `diff_workspace` return the path of every file in the database, so a user can learn the names of files in other users' private homes.
+
+## Mailboxes
+
+<Synopsis label="Signature">
+send_message(agent_id, task_name, payload) -> FileEntry
+receive_messages(agent_id, limit=10) -> list[FileEntry]
+claim_message(agent_id, task_name, consumer_id) -> FileEntry
+complete_message(agent_id, task_name, consumer_id) -> None
+</Synopsis>
+
+A mailbox is a folder of files. `send_message` writes the string `payload` to `/agents/<agent_id>/inbox/<task_name>`. `receive_messages` lists the inbox ordered by creation time. `claim_message` moves one file into `/agents/<agent_id>/inbox/.claimed/<consumer_id>/`, and `complete_message` deletes it. A claim is a move, so a second claim of a task that was already claimed raises `NotFound`, as the example below shows.
+
+Claims that happen at the same moment are not mutually exclusive. When several consumers claim one task at once, each of them can receive a successful result with its own `.claimed/<consumer_id>/` path, while the file ends up in only one of those folders. When the consumer folders do not exist yet, the losing claims raise `QueryError` instead, because creating the shared `.claimed` folder collides. To let exactly one consumer proceed, take a [lease](#leases) on the task file with `acquire_lock` before the claim, and treat a claim as won only when `exists` confirms the path that it returned. See [Mailboxes](/docs/agent-filesystem/concepts/mailboxes).
+
+```python title="Send, claim and complete a task"
+import json
+
+await fs.send_message("indexer", "task-001.json", json.dumps({"action": "reindex"}))
+await fs.send_message("indexer", "task-002.json", json.dumps({"action": "audit"}))
+
+print([m.path for m in await bob.receive_messages("indexer")])
+
+claimed = await bob.claim_message("indexer", "task-001.json", "worker-1")
+print(claimed.path)
+try:
+    await fs.claim_message("indexer", "task-001.json", "worker-2")
+except NotFound as error:
+    print(error)
+
+await bob.complete_message("indexer", "task-001.json", "worker-1")
+print([m.path for m in await bob.receive_messages("indexer")])
+```
+
+```text title="Output"
+['/agents/indexer/inbox/task-001.json', '/agents/indexer/inbox/task-002.json']
+/agents/indexer/inbox/.claimed/worker-1/task-001.json
+No such file or directory: /agents/indexer/inbox/task-001.json
+['/agents/indexer/inbox/task-002.json']
+```
+
+## Watch for changes
+
+<Synopsis label="Signature">
+watch(path_pattern="/*") -> async iterator of WatchEvent
+</Synopsis>
+
+`watch` opens a SurrealDB live query on the `file` table and yields a `WatchEvent` for each change to a path that matches the glob. A single write usually produces more than one event, because a database event updates the record again to fill its hash, and the order of `CREATE` and `UPDATE` is not guaranteed.
+
+```python title="Print the first changes under /projects"
+import asyncio
+
+async def listen():
+    events = []
+    async for event in fs.watch("/projects/*"):
+        events.append((event.action, event.path))
+        if len(events) == 3:
+            return events
+
+task = asyncio.create_task(listen())
+await asyncio.sleep(0.5)
+await fs.write_text("/projects/status.md", "Ready\n")
+await fs.append_text("/projects/status.md", "Done\n")
+print(await asyncio.wait_for(task, 10))
+```
+
+```text title="Sample output"
+[('UPDATE', '/projects/status.md'), ('CREATE', '/projects/status.md'), ('UPDATE', '/projects/status.md')]
+```
+
+> [!WARNING]
+> `watch` is not filtered by permission. A user who watches a pattern receives events, including the full `content`, for files they could not read.
+
+## Collaborative editing
+
+<Synopsis label="Signature">
+enable_crdt(path) -> None
+compact_crdt(path) -> None
+</Synopsis>
+
+`enable_crdt` switches a text file to Yjs-based collaborative editing, which needs the `crdt` extra. After that, `edit`, `append_text` and `write_text` on the file are recorded as updates in a log and bump the generation, and `stat(path).crdt` is true. `compact_crdt` folds the log into one snapshot. See [Collaborative editing](/docs/agent-filesystem/concepts/collaborative-editing) for the model.
+
+```python title="Enable collaborative editing"
+await fs.write_text("/projects/shared.md", "alpha beta gamma\n")
+await fs.enable_crdt("/projects/shared.md")
+await fs.edit("/projects/shared.md", "beta", "BETA")
+await fs.append_text("/projects/shared.md", "delta\n")
+
+entry = await fs.stat("/projects/shared.md")
+print(entry.crdt, entry.generation)
+print(await fs.read_text("/projects/shared.md"))
+await fs.compact_crdt("/projects/shared.md")
+```
+
+```text title="Output"
+True 3
+alpha BETA gamma
+delta
+```
+
+> [!WARNING]
+> Sequential edits to a collaborative file work, but simultaneous edits from separate writers do not merge reliably in version 0.2.0. When several writers edit one file at the same moment, most of their calls raise a `QueryError` that names an index conflict on the update log. A call that raised can still have changed the file: in some runs every call raised although the change of one writer had been stored. When the writers share one `AsyncSurreal` connection, the text in `content` can also differ from the text that the update log produces. Read the file, or call `stat` and compare `generation`, before you retry a failed call. Retry `append_text` only after you have confirmed that the text is not already in the file. Take a [lease](#leases) around each edit when several writers share one file.
+
+## Performance and size
+
+On an Apple M2 Max with an in-memory SurrealDB 3.2.3 server on the same machine, a write took about 3 to 4 milliseconds, a read about 1 millisecond, and listing or searching a folder of 100 files about 7 to 10 milliseconds. These figures come from one local server without a network, so they show an order of magnitude and not a guarantee. The class sets no limit on file size, and quotas are not enforced in this release, see [Usage and statistics](/docs/agent-filesystem/operations/quotas-and-usage). The `read_text` method returns the whole file, so a model that reads a large file through the `cat` tool receives all of it, while `head`, `tail` and `read_range` return a part.
+
+## Helper functions and modules
+
+| Name | Purpose |
+| --- | --- |
+| `apply_schema(db, *, record_auth=False)` | Defines the schema. It raises on the first failed statement. With `record_auth=True` it also defines the `user` table and the record access that enforces permissions in the database. |
+| `schema_sql(*, record_auth=False)` | Returns the schema as SurrealQL text. |
+| `parse_frontmatter(text)` | Returns `(meta, body)`, where `meta` is a dictionary or `None`. |
+| `extract_markdown_links(text)` | Returns the link targets that `write_text` records. |
+| `resolve_link(source_path, target)` | Resolves a target relative to the folder of the source file. |
+| `format_mode(mode, *, is_folder=False)` | Renders `0o640` as `-rw-r-----`. |
+| `default_mode(path, *, is_folder)` | Returns the mode a new file or folder gets. |
+| `ROOT` | The identity that bypasses permission checks. |
+
+The package also installs two modules that you can run: `python -m surrealfs.schema` applies the schema to a server (add `--record-auth`, or `--print` to see the SurrealQL without connecting), and `python -m surrealfs.users add NAME` creates a record user and a `/home/NAME` folder (it prompts for a password unless you pass `--password` or `--generate`, or set `SURREALFS_NEW_PASSWORD`). The `surrealfs` command wraps the same functions, see the [command-line reference](/docs/agent-filesystem/interfaces/command-line).
+
+## Known issues
+
+The behaviours below apply to version 0.2.0 of the Python class. They are collected here, with the pages that cover each one, so you can plan around them:
+
+- **Legal hold.** The database function `fn::sfs_rm` refuses to delete a file under legal hold, and so does the table permission when you sign in as a record user. The Python class does neither: `rm` deletes a held file, because it does not call that function and system credentials bypass table permissions. `edit` and `write_text` also clear the hold, even when the content is unchanged, because both replace `meta` with the frontmatter of the new text, while `mv`, `append_text` and `chmod` keep it. The class has no method to set a hold, which SurrealQL sets with `fn::sfs_set_legal_hold`. See [Encryption, legal hold and audit](/docs/agent-filesystem/security/encryption-and-legal-hold).
+- **Group permissions.** The Python class ignores the group digit of a mode and never returns `FileEntry.group`, which is always `None`. Under record access the database does enforce the group digit, so a record user who belongs to a file's group can read a file that the Python class refuses to show, and the two layers disagree. Groups are created and assigned with SurrealQL functions such as `fn::sfs_create_group`, `fn::sfs_add_group_member` and `fn::sfs_chgrp`, see [Groups and sharing](/docs/agent-filesystem/security/groups-and-sharing).
+- **Privacy of metadata.** The methods named in the warning under [Identity and permissions](#identity-and-permissions) bypass the read check, and `fork_workspace` and `diff_workspace` return every path.
+- **Search quality.** A word that appears in more than half of the files scores `0.0`, and files under `/.workspaces/` appear in results.
+
+## See also
+
+- [Python quickstart](/docs/agent-filesystem/quickstarts/python)
+- [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas) for the same operations as model tools
+- [Data model](/docs/agent-filesystem/concepts/data-model) for the `file` table behind these methods
+- [Permissions](/docs/agent-filesystem/security/permissions) and [Record access](/docs/agent-filesystem/security/record-access)
+- The SurrealDB [Python SDK](/docs/reference/python) for connection options

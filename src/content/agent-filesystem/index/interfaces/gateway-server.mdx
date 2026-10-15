@@ -1,0 +1,575 @@
+---
+position: 12
+title: Gateway server
+description: "The surrealfs-server HTTP gateway for Agent Filesystem: REST API, SurrealQL RPC, MCP, WebDAV, S3, start options, authentication and limits."
+---
+
+# Gateway server
+
+The gateway server is one HTTP program that gives network access to an Agent Filesystem database. A single port serves a REST API, a SurrealQL endpoint, an MCP endpoint, WebDAV, an S3-style API, a chat endpoint for an assistant and the web interface, and the gateway indexes the files that clients write through it. The program is `surrealfs-server`, and the command `surrealfs-rs serve gateway` runs the same code. Use the gateway when clients reach the files over HTTP: an MCP client that connects to a URL, a tool that mounts WebDAV, an S3 client, or a person who uses the web interface.
+
+The gateway holds the credentials for SurrealDB and connects to the database over HTTP. Clients send requests to the gateway, and the gateway runs the matching SurrealQL against the database. The gateway is the only program in this release that serves the web interface, that indexes files as they are written, and that offers MCP over the network.
+
+> [!NOTE]
+> Agent Filesystem is in beta. This page describes version 0.2.0 of the `surrealfs-server` crate on the `next` branch of the SurrealFS repository, and the examples ran against a SurrealDB 3.2 server. The embeddings client was tested against a local stand-in for the OpenAI embeddings API and not against OpenAI. The chat endpoint was not run with an Anthropic API key. A statement that comes from reading the source, and not from a run, says so.
+
+> [!WARNING]
+> Do not expose the gateway to a network that you do not trust. It speaks plain HTTP with no TLS. Every credential that it accepts gives full access to the database, because `POST /api/rpc` runs any SurrealQL statement that a client sends. Without `SURREALFS_SERVER_TOKEN` it accepts every request, including a request that a web page in your own browser sends to it. The static directory is served before the gateway checks any credential, and the handler that serves it can return files outside that directory. Keep the gateway on the default loopback address, set `SURREALFS_SERVER_TOKEN`, start it without a static directory, or put a reverse proxy that handles TLS and authentication in front of it. See [Security](#security).
+
+## What the gateway serves
+
+The gateway looks at the method and the path of each request, and it sends the request to one of the surfaces in the table.
+
+| Path | Serves | Notes |
+| --- | --- | --- |
+| `GET /api/health` | A status document | Served without credentials. It does not contact the database |
+| `/api/...` | The REST API, the SurrealQL endpoint at `/api/rpc` and the chat endpoint at `/api/chat` | See [HTTP interfaces](#http-interfaces) |
+| `GET /raw?path=<PATH>` | The bytes of one file | Sent with `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox` |
+| `/mcp` | The MCP endpoint | See [MCP clients](#mcp-clients) |
+| `/dav/...` | [WebDAV](#webdav-and-s3-through-the-gateway) | `/dav/notes/a.md` is the file `/notes/a.md` |
+| `/s3/...` | [S3](#webdav-and-s3-through-the-gateway) | `/s3/notes/a.md` is the bucket `notes` and the key `a.md`. A request that has an `x-amz-date` or `x-amz-content-sha256` header, or an `Authorization` header that starts with `AWS4-HMAC-SHA256`, also goes to S3, for any path other than `/api/`, `/raw`, `/mcp` and `/dav` |
+| Any other `GET` | A file from the [static directory](#web-interface), when the gateway has one | An unknown path returns `index.html` |
+| Any other request | The service document | `200` for every method and path that nothing else matches, when no token is set. With `SURREALFS_SERVER_TOKEN` set, the request needs credentials first and gets `401` without them |
+| `OPTIONS` on any path | An empty `204` response | Answered before any credential check, and without any CORS headers |
+
+The service document is the answer to `GET /` when the gateway has no static directory:
+
+```bash
+curl -s http://127.0.0.1:8787/
+```
+
+```json title="Output"
+{"service":"surrealfs-server","surfaces":{"api":"/api/*","chat":"/api/chat","mcp":"/mcp","rpc":"/api/rpc","s3":"/s3/*","webdav":"/dav/*"},"version":"0.2.0"}
+```
+
+The server reads one request from each TCP connection, answers it and closes the connection, so every response carries `Connection: close`. It speaks HTTP/1.1 only, and it does not decode `Transfer-Encoding: chunked` request bodies, so a request body must have a `Content-Length` header. The API routes match the method exactly, so `HEAD /api/health` returns `404`. The gateway parses a request body as JSON whatever the `Content-Type` header says.
+
+## Quickstart
+
+This quickstart builds the gateway, starts it against a local SurrealDB server, and reaches one file through the REST API, MCP, WebDAV and S3. When you finish, you will have a gateway on `127.0.0.1:8787` and a Markdown file that you have reached through all four interfaces.
+
+You need three programs: a SurrealDB 3.x server (`surreal`), a Rust toolchain with `cargo` (the build was tested with Rust 1.99), and `git`. The MCP step formats its replies with `jq`, which is optional. The web interface needs [Bun](https://bun.sh) as well, and an [optional step](#add-the-web-interface) covers it.
+
+1. Start a SurrealDB server in a separate terminal. The `memory` engine keeps data until the server stops. See [`surreal start`](/docs/reference/cli/surrealdb-cli/commands/start) for persistent engines.
+
+    ```bash
+    surreal start --user root --pass secret --bind 127.0.0.1:8000 memory
+    ```
+
+2. Clone the repository and build the gateway:
+
+    ```bash
+    git clone --branch next https://github.com/surrealdb/surrealfs.git
+    cd surrealfs
+    cargo build --release -p surrealfs-server
+    ```
+
+    The program is `target/release/surrealfs-server`.
+
+3. Start the gateway. It connects to `http://127.0.0.1:8000` as the user `root`, so it needs the password from step 1. It applies the schema to the namespace `surrealfs` and the database `main`, and it listens on `127.0.0.1:8787`:
+
+    ```bash
+    SURREALDB_PASS=secret target/release/surrealfs-server
+    ```
+
+    ```text title="Sample output"
+    SurrealFS Server listening on http://127.0.0.1:8787 -> http://127.0.0.1:8000 (surrealfs/main) [embeddings=false, chat=false]
+    ```
+
+4. Check the gateway from a second terminal. The `status` field is `ok` whenever the process runs, because the check does not contact the database:
+
+    ```bash
+    curl -s http://127.0.0.1:8787/api/health
+    ```
+
+    ```json title="Output"
+    {"chat_enabled":false,"embeddings_enabled":false,"status":"ok","version":"0.2.0"}
+    ```
+
+5. Write a file with the REST API and read it back:
+
+    ```bash
+    curl -s -X PUT http://127.0.0.1:8787/api/file \
+      -d '{"path": "/notes/launch.md", "content": "# Launch plan\n\nThe gateway ships on Thursday.\nOwner: @alice, ticket TICKET-42.\n"}'
+    curl -s 'http://127.0.0.1:8787/api/file?path=/notes/launch.md'
+    ```
+
+    ```json title="Sample output"
+    {"content_type":"text/plain","filename":"launch.md","generation":1,"is_folder":false,"path":"/notes/launch.md","size":79,"updated_at":"2026-10-15T02:10:45.348316Z"}
+    {"content":"# Launch plan\n\nThe gateway ships on Thursday.\nOwner: @alice, ticket TICKET-42.\n","content_type":"text/plain","filename":"launch.md","generation":1,"is_folder":false,"path":"/notes/launch.md","size":79,"updated_at":"2026-10-15T02:10:45.379536Z"}
+    ```
+
+    The `PUT` created the folder `/notes` as well. The gateway also indexed the file after the write, as [Indexing after a write](#indexing-after-a-write) describes.
+
+6. Search for a word in the file:
+
+    ```bash
+    curl -s 'http://127.0.0.1:8787/api/search?q=gateway'
+    ```
+
+    ```json title="Sample output"
+    {"hybrid":false,"results":[{"content_type":"text/plain","filename":"launch.md","generation":1,"is_folder":false,"path":"/notes/launch.md","score":0.281,"size":79,"snippet":"# Launch plan  The gateway ships on Thursday. Owner: @alice, ticket TICKET-42. ","updated_at":"2026-10-15T02:10:45.379536Z"}]}
+    ```
+
+7. List the tools of the MCP endpoint, and call the `cat` tool on the same file:
+
+    ```bash
+    curl -s -X POST http://127.0.0.1:8787/mcp -H 'Content-Type: application/json' \
+      -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}' | jq -r '.result.tools[].name' | paste -sd' ' -
+    curl -s -X POST http://127.0.0.1:8787/mcp -H 'Content-Type: application/json' \
+      -d '{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "cat", "arguments": {"path": "/notes/launch.md"}}}' \
+      | jq -r '.result.content[0].text'
+    ```
+
+    ```text title="Output"
+    ls cat stat write_file append_file edit_file mkdir rm mv cp glob grep search_text search_semantic search_hybrid
+    {
+      "content": "# Launch plan\n\nThe gateway ships on Thursday.\nOwner: @alice, ticket TICKET-42.",
+      "path": "/notes/launch.md"
+    }
+    ```
+
+8. Read the file over WebDAV, write a second file over WebDAV and read it over S3. The S3 bucket `notes` is the folder `/notes`:
+
+    ```bash
+    curl -s http://127.0.0.1:8787/dav/notes/launch.md
+    printf '# Minutes\n\nDecided to ship.\n' > minutes.md
+    curl -s -o /dev/null -w '%{http_code}\n' -T minutes.md http://127.0.0.1:8787/dav/notes/minutes.md
+    curl -s http://127.0.0.1:8787/s3/notes/minutes.md
+    ```
+
+    ```text title="Output"
+    # Launch plan
+
+    The gateway ships on Thursday.
+    Owner: @alice, ticket TICKET-42.
+    201
+    # Minutes
+
+    Decided to ship.
+    ```
+
+The gateway accepts every request in this quickstart because no token is set. The [authentication section](#identity-and-authentication) shows how to require one.
+
+### Add the web interface
+
+The gateway serves the web interface from a directory of built files. The source is in `surrealfs/browser/ui` in the repository, and the build needs Bun. Run the build from the root of the repository, stop the gateway and start it again from the same directory:
+
+```bash
+cd surrealfs/browser/ui && bun install && bun run build && cd ../../..
+SURREALDB_PASS=secret target/release/surrealfs-server
+```
+
+The build writes `surrealfs/browser/static`. The gateway uses that directory by default when it exists relative to the working directory, so no option is needed, and `GET /` now returns the interface instead of the service document. A static directory has a security cost, which [Security](#security) describes. Open `http://127.0.0.1:8787/` in a browser. See [Web interface](#web-interface) for what the page shows and for its limits.
+
+## Start the gateway
+
+### The surrealfs-server program
+
+<Synopsis>
+surrealfs-server [OPTIONS]
+</Synopsis>
+
+The program reads its settings from flags and environment variables. A flag overrides the matching environment variable, and when a flag appears twice the last one wins. The program ignores any argument that it does not know, and it ignores a flag that has no value after it. `surrealfs-server --help` is such an argument: it prints nothing and starts the gateway, and so does a mistyped flag such as `--prot 8787`. Check the startup line to see the settings that took effect.
+
+<OptionsTable
+    title="Options"
+    options={[
+        { "name": "--bind", "value": "<ADDR>", "env": "SURREALFS_BIND", "default": "127.0.0.1:8787", "description": "The address and port to listen on. Use `0.0.0.0:8787` to listen on every interface." },
+        { "name": "--port", "short": "-p", "value": "<PORT>", "env": "SURREALFS_PORT", "default": "8787", "description": "A port on `127.0.0.1`. The flags `--port` and `--bind` both set the address, and the one that comes later on the command line wins. The flag overrides `SURREALFS_BIND`. The environment variable applies only when `SURREALFS_BIND` is not set." },
+        { "name": "--url", "value": "<URL>", "env": "SURREALDB_URL", "default": "http://127.0.0.1:8000", "description": "The SurrealDB server. The gateway talks HTTP to it. A `ws://` or `wss://` URL is accepted and rewritten to `http://` or `https://`, and a trailing `/rpc` is removed." },
+        { "name": "--ns", "value": "<NAME>", "env": "SURREALDB_NS", "default": "surrealfs", "description": "The namespace that holds the files. The flag `--namespace` is the same option." },
+        { "name": "--db", "value": "<NAME>", "env": "SURREALDB_DB", "default": "main", "description": "The database that holds the files. The flag `--database` is the same option." },
+        { "name": "--user", "short": "-u", "value": "<NAME>", "env": "SURREALDB_USER", "default": "root", "description": "The SurrealDB user that the gateway signs in as, with HTTP Basic authentication. A root user worked, and a database user was refused. See Connect to SurrealDB." },
+        { "name": "--pass", "value": "<PASSWORD>", "env": "SURREALDB_PASS", "default": "root", "description": "The password of that user. The flag `--password` is the same option. A flag value is visible in the process list, so prefer the variable." },
+        { "name": "--static-dir", "value": "<DIR>", "env": "SURREALFS_STATIC_DIR", "default": "surrealfs/browser/static, when that directory exists", "description": "The directory that holds the built web interface. The default is relative to the working directory." },
+        { "name": "--nfs-port", "value": "<PORT>", "description": "Opens a listener on `127.0.0.1` that accepts a connection and closes it again. It does not serve NFS, and the program prints a line that says `NFSv3 listening`. Do not use it." }
+    ]}
+/>
+
+Seven more settings have no flag and are read from the environment only:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SURREALDB_TOKEN` | None | A SurrealDB JWT. When it is set and not empty, the gateway sends it as a bearer token and ignores the user and the password |
+| `SURREALFS_SERVER_TOKEN` | None | The token that clients must send as a bearer token. Without it the gateway accepts every request. See [Identity and authentication](#identity-and-authentication) |
+| `OPENAI_API_KEY` | None | Switches on the embeddings client. See [Indexing after a write](#indexing-after-a-write) |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | The base URL of the embeddings API. The gateway posts to `<BASE_URL>/embeddings` |
+| `SURREALFS_EMBED_MODEL` | `text-embedding-3-small` | The embeddings model |
+| `ANTHROPIC_API_KEY` | None | Switches on the [chat endpoint](/docs/agent-filesystem/interfaces/rest-api#chat-and-sessions) |
+| `SURREALFS_CHAT_MODEL` | `claude-sonnet-4-5` | The chat model |
+
+At start the program does three things in this order:
+
+1. It builds the connection settings. The gateway always connects with the caller name `root` and scopes each request afterwards, as [Identity and authentication](#identity-and-authentication) describes.
+2. It applies the schema, which is compiled into the binary, to the namespace and the database. The schema is the file `file.surql` and also the file `record_auth.surql`, so the gateway defines the `user` table and the four record access methods `account`, `indexer`, `projector` and `compactor` as well. The statements that define tables, fields, functions, events and access methods use `OVERWRITE`, so each start puts them back to the version in the binary, and it replaces an access method of the same name that the database already holds. A failure is only a warning on standard error, for example `Warning: apply_schema returned: Database error: HTTP RPC request failed: ...`, and the gateway keeps running.
+3. It prints the startup line, and then it binds the address. A port that is already in use therefore shows the `listening` line, followed by `Error: Address already in use` and the exit status 1.
+
+The startup line reports whether the embeddings client and the chat endpoint are on: `[embeddings=true, chat=false]`. The line shows the SurrealDB URL as given, with the namespace and the database in parentheses.
+
+### Connect to SurrealDB
+
+The gateway signs in with HTTP Basic authentication or with a token, and it sends every query as an HTTP request to `<URL>/rpc`. It does not open a WebSocket, and the `/rpc` path of the SurrealDB server must be reachable from the gateway.
+
+- **User and password.** `SURREALDB_USER` and `SURREALDB_PASS` name the user for HTTP Basic authentication. In a test against SurrealDB 3.2.3, a root user worked, and a database user with the `OWNER` role was refused with `401`. Use a root user, or use a token.
+- **Token.** `SURREALDB_TOKEN` takes a JWT. In the same test, the token of that database user worked. The user needs the rights to define tables, functions and events, because the gateway applies the schema. The role `OWNER` worked, and other roles were not tested. The gateway does not renew the token. When the token expires, every request fails with a `500` response, and the gateway needs a restart with a new token. See [Troubleshooting](#troubleshooting).
+- **Namespace and database of a token.** The token decides the namespace and the database. A gateway that started with the token and without `SURREALDB_NS` and `SURREALDB_DB`, and a gateway that started with those variables set to another database, both wrote their files into the database that the user belongs to. The startup line shows the values of the variables, so it can differ from the database that holds the files.
+- **Defaults.** The default database is `main`. The Rust command `surrealfs-rs` defaults to the database `surrealfs`, and the Python tools default to `demo`, so a gateway and a tool that both run with no settings use different databases. Set the namespace and the database on every program that should share files. See [Configuration reference](/docs/agent-filesystem/operations/configuration).
+
+### The serve gateway command
+
+`surrealfs-rs serve gateway` starts the same handler inside the command-line program.
+
+<Synopsis>
+surrealfs-rs serve gateway [-a <ADDR>] [--static-dir <DIR>]
+</Synopsis>
+
+The command takes the connection from the global options and variables of `surrealfs-rs`, which the [command-line reference](/docs/agent-filesystem/interfaces/command-line) describes. It differs from `surrealfs-server` in these ways:
+
+| Behaviour | `surrealfs-server` | `surrealfs-rs serve gateway` |
+| --- | --- | --- |
+| Schema | Applied at every start | Not applied. Run `surrealfs-rs init` first. On a database without the schema, `PUT /api/file` returns `404` with `Function 'fn::sfs_write' not found` |
+| Connection to SurrealDB | HTTP, with a user and password or with `SURREALDB_TOKEN` | The `--url` of the program, a WebSocket for `ws://`, and a root user |
+| Default namespace and database | `surrealfs` and `main` | `surrealfs` and `surrealfs` |
+| Options | The tables above | `-a` or `--addr` (default `127.0.0.1:8787`) and `--static-dir`. The variables for embeddings, chat and the server token are the same, and `SURREALFS_STATIC_DIR` is not read |
+| Caller of a request that names none | `root` | The `--caller` of the program, or its database user. This comes from the source |
+| Output at start | The startup line | Nothing. The program prints no line while it runs |
+
+### Other ways to start the gateway
+
+The `Justfile` in the repository has a recipe `just server`. It builds the web interface, which needs Bun, and it runs `cargo run -p surrealfs-server -- --bind 127.0.0.1:7933`. The port 7933 comes from that recipe, and the program itself defaults to 8787. [Deployment](/docs/agent-filesystem/operations/deployment) covers a gateway on a host, a Cloudflare Worker build of the gateway, and the container files in the repository, which do not contain the gateway in this release.
+
+## Identity and authentication
+
+Every request acts as a user, which the gateway calls the caller. The gateway decides the caller in three steps. A request to `/api/health`, any `OPTIONS` request, and any `GET` that the static directory answers skip these steps.
+
+1. When the `Authorization` header holds `Bearer` followed by the value of `SURREALFS_SERVER_TOKEN`, the request is accepted. The caller is the value of the `X-SurrealFS-User` header, or `root` when the header is missing or empty.
+2. Otherwise, when the header holds a credential that [`surrealfs-rs credential create`](/docs/agent-filesystem/security/credentials) stored, the request is accepted and the caller is the `user_id` of the credential. The `X-SurrealFS-User` header is ignored. Three forms are checked: `Basic` with a `webdav` or `s3` credential, `Bearer` with the identifier of a `bearer` credential, and an `AWS4-HMAC-SHA256` header that names the access key of an `s3` credential.
+3. When the header is missing or holds nothing valid, the answer depends on the token. With `SURREALFS_SERVER_TOKEN` set, the gateway returns `401` with `{"error":"Authentication required"}` for a request without a header, and `{"error":"Invalid authentication credentials"}` for a header that matched nothing. With no token set, the gateway accepts the request, and the caller is the `X-SurrealFS-User` header or `root`.
+
+The next tables show the status codes for a gateway that has a token and for one that has none. Each row is one `Authorization` header, sent to a REST endpoint, to the MCP endpoint, to a WebDAV `PROPFIND` and to an S3 `ListBuckets` request. The tests used one stored `webdav` credential, one stored `s3` credential and one stored `bearer` credential.
+
+With `SURREALFS_SERVER_TOKEN` set:
+
+| `Authorization` header | `/api` and `/mcp` | `/dav` | `/s3` |
+| --- | --- | --- | --- |
+| None | 401 | 401 | 401 |
+| `Bearer` with the server token | 200 | 401 | 403 |
+| `Bearer` with a stored `bearer` token | 200 | 401 | 200 |
+| `Bearer` with any other value | 401 | 401 | 401 |
+| `Basic` with a stored `webdav` or `s3` credential | 200 | 207 | 200 |
+| `Basic` with a wrong secret | 401 | 401 | 401 |
+| `AWS4-HMAC-SHA256, Credential=<access key>/...`, with a comma after the algorithm name and a known access key | 200 | 401 | 200 |
+| `AWS4-HMAC-SHA256 Credential=<access key>/...`, as the AWS CLI and the AWS SDKs send it | 401 | 401 | 401 |
+
+With no token set:
+
+| `Authorization` header | `/api` and `/mcp` | `/dav` | `/s3` |
+| --- | --- | --- | --- |
+| None | 200 | 207 | 200 |
+| `Bearer` with a stored `bearer` token | 200 | 401 | 200 |
+| `Bearer` with any other value | 200 | 401 | 403 |
+| `Basic` with a stored `webdav` or `s3` credential | 200 | 207 | 200 |
+| `Basic` with a wrong secret | 200 | 401 | 403 |
+| `AWS4-HMAC-SHA256, Credential=<access key>/...` with a known access key | 200 | 401 | 200 |
+| `AWS4-HMAC-SHA256 Credential=<access key>/...` with the space form | 200 | 401 | 403 |
+
+Five details follow from the tables:
+
+- **The server token does not work for WebDAV and S3.** The WebDAV and S3 handlers check the `Authorization` header a second time. WebDAV accepts `Basic` only, and S3 accepts `Basic`, a stored `bearer` token and the comma form of the AWS header. Create a `webdav` or `s3` credential for such clients, and give them the credential and not the server token.
+- **The AWS CLI and the AWS SDKs cannot sign in.** The gateway never verifies a signature, and it rejects the header form that the AWS tools send. With no token set, the AWS CLI works for most requests when it does not sign them: pass `--no-sign-request` and an endpoint such as `--endpoint-url http://127.0.0.1:8787/s3`, and set `AWS_REQUEST_CHECKSUM_CALCULATION` to `when_required`, as [WebDAV and S3 through the gateway](#webdav-and-s3-through-the-gateway) explains. With a token set, no AWS tool can reach `/s3`, but `curl -u <ACCESS_KEY>:<SECRET>` can.
+- **An S3 access key works as a password.** The gateway never verifies a request signature, so a client that knows the access key of an `s3` credential acts as the user of that credential. Treat access keys as secrets.
+- **A wrong credential is not an error without a token.** With no token set, `/api` and `/mcp` accept a request whose credential is wrong, and the request acts as `root` or as the user in `X-SurrealFS-User`. Only WebDAV and S3 reject it.
+- **A credential names the caller by its `user_id`.** The [credentials page](/docs/agent-filesystem/security/credentials) says that the WebDAV and S3 servers discard the `user_id`. The gateway uses it as the caller name. Store the same plain user name that files record as `owner`, such as `alice`. A value such as `user:alice` reaches the database as a record identifier, and a write through WebDAV then fails with a `500` response. The message says that the field `owner` expected a string and found the value `user:alice`. To repair a credential that already holds such a value, set its `user_id` with SurrealQL: `UPDATE credential:['webdav', 'alice-dav'] SET user_id = 'alice';`.
+
+The following commands create a credential and write a file through a gateway that has a token. The credential is created with `surrealfs-rs`, and [The Rust program](/docs/agent-filesystem/interfaces/command-line#the-rust-program) explains how to install it. Stop the gateway from the quickstart first, because the last command below starts a second gateway on the same port.
+
+```bash
+export SURREALDB_URL=ws://127.0.0.1:8000/rpc SURREALDB_PASS=secret
+export SURREALDB_NS=surrealfs SURREALDB_DB=main
+surrealfs-rs credential create webdav alice-dav hunter123 alice
+
+SURREALFS_SERVER_TOKEN=gateway-secret SURREALDB_PASS=secret target/release/surrealfs-server
+```
+
+The command in the last line starts the gateway and keeps running, and it prints the startup line with the URL as the variable gave it:
+
+```text title="Sample output"
+SurrealFS Server listening on http://127.0.0.1:8787 -> ws://127.0.0.1:8000/rpc (surrealfs/main) [embeddings=false, chat=false]
+```
+
+From another terminal, send the same file to WebDAV without and with the credential. The first request prints the status `401`, and the second prints `201`:
+
+```bash
+printf '# Agenda\n\nReview the gateway docs.\n' > agenda.md
+curl -s -o /dev/null -w '%{http_code}\n' -T agenda.md http://127.0.0.1:8787/dav/notes/agenda.md
+curl -s -o /dev/null -w '%{http_code}\n' -u alice-dav:hunter123 -T agenda.md http://127.0.0.1:8787/dav/notes/agenda.md
+```
+
+```text title="Output"
+401
+201
+```
+
+The file that the second request created has the owner `alice`. A request that holds the server token can pick any caller with the `X-SurrealFS-User` header. The second command below shows the owner of the file that the first one wrote:
+
+```bash
+curl -s -X PUT http://127.0.0.1:8787/api/file \
+  -H "Authorization: Bearer gateway-secret" -H 'X-SurrealFS-User: carol' \
+  -d '{"path": "/notes/carol.md", "content": "Written as carol."}'
+curl -s -X POST http://127.0.0.1:8787/api/rpc -H "Authorization: Bearer gateway-secret" \
+  -d '{"sql": "SELECT path, owner FROM file WHERE path = \"/notes/carol.md\";"}'
+```
+
+```json title="Sample output"
+{"content_type":"text/plain","filename":"carol.md","generation":1,"is_folder":false,"path":"/notes/carol.md","size":17,"updated_at":"2026-10-15T02:11:03.170368Z"}
+{"result":[{"result":[{"owner":"carol","path":"/notes/carol.md"}],"status":"OK"}]}
+```
+
+The sections after this one use the gateway from the quickstart again, which has no token. Stop the gateway that has the token, and start the quickstart gateway again with `SURREALDB_PASS=secret target/release/surrealfs-server` before you continue.
+
+### What the caller name controls
+
+The caller name reaches the in-database functions as the argument `$caller`, and it becomes the owner of each file that the request creates. The gateway does not enforce the [permissions](/docs/agent-filesystem/security/permissions) for changes. In a test, a caller named `alice` overwrote and removed a file that belonged to `bob` with the mode `0600` in a folder with the mode `0700`, and both requests returned `200`. Reads of content do check the mode: `GET /raw` returned `403` for that file, and `GET /api/file` returned `200` with the metadata and without the `content` field, with no sign that the content was withheld. Listings, `GET /api/stat` and `GET /api/tree` do not check the mode, and `GET /api/tree` listed the private file. [What the caller controls](/docs/agent-filesystem/interfaces/rest-api#what-the-caller-controls) lists each route.
+
+The `X-SurrealFS-User` header is therefore a label, not a proof of identity, and it does not separate users from each other. A client that sends SurrealQL to `/api/rpc` can also set the variable `caller` itself.
+
+## HTTP interfaces
+
+The [Gateway REST API](/docs/agent-filesystem/interfaces/rest-api) page is the reference for the routes under `/api`, for `/raw` and for `/mcp`. The table lists the interfaces and the sections that describe them.
+
+| Interface | Routes | Reference |
+| --- | --- | --- |
+| Files and folders | `GET /api/tree`, `GET /api/stat`, `GET`, `PUT`, `POST` and `DELETE` on `/api/file`, `POST /api/move`, `POST /api/copy` and `GET /raw` | [Routes](/docs/agent-filesystem/interfaces/rest-api#routes) |
+| Search, versions and graph | `GET /api/search`, `GET /api/history`, `POST /api/restore`, `GET /api/graph` and `GET /api/activity` | [Routes](/docs/agent-filesystem/interfaces/rest-api#routes) |
+| SurrealQL | `POST /api/rpc` | [SQL RPC](/docs/agent-filesystem/interfaces/rest-api#sql-rpc) |
+| MCP | `/mcp` | [MCP over HTTP](/docs/agent-filesystem/interfaces/rest-api#mcp-over-http) and [MCP clients](#mcp-clients) |
+| Indexing | `POST /api/index` | [Indexing](/docs/agent-filesystem/interfaces/rest-api#indexing) |
+| Chat | `POST /api/chat` and `GET /api/session` | [Chat and sessions](/docs/agent-filesystem/interfaces/rest-api#chat-and-sessions) |
+
+Four properties of these interfaces matter when you choose where to run the gateway and who may call it. The first is the SurrealQL endpoint:
+
+> [!WARNING]
+> `POST /api/rpc` runs the SQL that a client sends with the database credential of the gateway, which is a root user in the default setup. A client that can call it can read, change and delete everything that the credential reaches, including the `credential` table, and it can define or remove tables. A request can also send the variable `caller` in `vars`, and the gateway does not override it, so the caller name of the request does not limit what the SQL does. Give the endpoint only to clients that you would trust with the database credential.
+
+The second property concerns remote clients. A client is remote when it sends its queries to `/api/rpc` and holds no SurrealDB credentials. `surrealfs-rs` works in this mode when `SURREALFS_SERVER_URL` names the gateway and `SURREALFS_TOKEN` holds the token. The Python and TypeScript clients, `SurrealFs.from_server` and `SurrealFs.connectServer`, read a key named `results` from the response, and the gateway sends the key `result`, so a read of a file that exists acts as if the file did not exist in this release. The Python client raises `NotFound` for such a file, `exists` returns `False`, and a write raises `PermissionDenied`. The TypeScript client returns an empty list, `false` or an empty string. [Remote clients and the gateway](/docs/agent-filesystem/interfaces/remote-clients) lists the settings, the address forms and the tests.
+
+The third property concerns chat. `POST /api/chat` needs `ANTHROPIC_API_KEY`. Without the key, the gateway answers `200` with one line of NDJSON:
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/api/chat -d '{"message": "hello"}'
+```
+
+```json title="Output"
+{"error":"Set ANTHROPIC_API_KEY on the SurrealFS server to enable chat."}
+```
+
+With a key, a model reads and changes files as the caller of the request, and the gateway sends the conversation and the text of every file that a tool reads to Anthropic. The gateway builds the whole response before it sends it, so the answer does not stream. The endpoint was not run with a key, and [Chat and sessions](/docs/agent-filesystem/interfaces/rest-api#chat-and-sessions) describes it from the source.
+
+The fourth property concerns indexing. The gateway analyses a file after it writes the file, as [Indexing after a write](#indexing-after-a-write) describes, and it requests an embedding of the text when `OPENAI_API_KEY` is set.
+
+## MCP clients
+
+The gateway serves the [Model Context Protocol](https://modelcontextprotocol.io) at `/mcp`, so a client that supports MCP over HTTP can connect to `http://127.0.0.1:8787/mcp` and use the file tools. [MCP over HTTP](/docs/agent-filesystem/interfaces/rest-api#mcp-over-http) lists the methods and the 15 tools. Four properties of the endpoint decide which clients work:
+
+- **No sessions and no streams.** The endpoint sends no `Mcp-Session-Id` header and no server-sent events. Each `POST` returns one JSON object, and `GET /mcp` returns a JSON description and not an event stream.
+- **One protocol version.** `initialize` answers `2024-11-05` whatever version the client asks for, and it offers the `tools` capability only.
+- **Authentication.** A client sends `Authorization: Bearer <TOKEN>` with the server token, and it may name the user in `X-SurrealFS-User`. See [Identity and authentication](#identity-and-authentication).
+- **A different tool set.** The 15 tools are not the 31 tools of the [stdio MCP server](/docs/agent-filesystem/interfaces/mcp-server). The gateway has no tools for versions, links, leases or workspaces. The tool `search_text` returns an error in this release, and `search_hybrid` is the working search tool.
+
+The Python MCP client in version 2.3.0 of the `mcp` package, which `pip install mcp==2.3.0` installs, connected to the endpoint, listed the tools, and wrote a file. Other clients and hosts were not tested, and a client that requires a session or a stream may not work.
+
+```python
+import asyncio
+
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
+
+
+async def main() -> None:
+    async with streamable_http_client("http://127.0.0.1:8787/mcp") as streams:
+        read, write = streams[0], streams[1]
+        async with ClientSession(read, write) as session:
+            init = await session.initialize()
+            print(init.server_info.name, init.protocol_version)
+            tools = await session.list_tools()
+            print(len(tools.tools), "tools")
+            result = await session.call_tool(
+                "write_file",
+                {"path": "/notes/client.md", "content": "# From an MCP client\n"},
+            )
+            print("write_file error:", result.is_error)
+
+
+asyncio.run(main())
+```
+
+```text title="Output"
+surrealfs-server 2024-11-05
+15 tools
+write_file error: False
+```
+
+## WebDAV and S3 through the gateway
+
+The gateway runs the same WebDAV and S3 handlers as `surrealfs-rs serve webdav` and `surrealfs-rs serve s3`. The [WebDAV and S3 servers](/docs/agent-filesystem/interfaces/network-servers) page lists the supported methods and operations, the response codes and the protocol limits, and all of it applies here except for the multipart upload. This section lists what is different.
+
+| Behaviour | Standalone servers | Gateway |
+| --- | --- | --- |
+| URL | WebDAV at the root, or under `--prefix`. S3 at the root | WebDAV under `/dav`, S3 under `/s3`. The prefixes are fixed |
+| Caller | The identity of the server process, for every request | The caller of the request. A WebDAV or S3 login writes as the `user_id` of its credential |
+| Request without credentials | Served | Served only when no token is set |
+| Indexing after a write | None | After a WebDAV `PUT`. The gateway does not index an S3 `PUT` |
+| S3 multipart upload | Works. The one S3 server process keeps the uploaded parts in memory | Does not work. The gateway creates the S3 handler again for each request, so the parts are lost, and `UploadPart` returns `404 NoSuchUpload` |
+| Ports | Two processes and two ports | One port |
+| Request size | A WebSocket message limit of the database connection | The HTTP body limit of the SurrealDB server. See [Limits and known issues](#limits-and-known-issues) |
+
+The gateway indexes a WebDAV `PUT` and does not index an S3 `PUT`. According to the source, it looks up the file at the key without the bucket name after an S3 write. In a test, a `PUT` to `/s3/notes/s3.md` created the file `/notes/s3.md`, and the file had no fingerprint and no entities afterwards. A file that is written over S3 is still found by a full-text search, and a `POST /api/index` request with its `path` stores the fingerprint and the other index data.
+
+The AWS CLI works for unsigned requests when no token is set, with one setting. The tests used aws-cli 2.38.1. By default, that version sends the body of an upload in the `aws-chunked` format, with a checksum trailer, and the gateway stores that framing as part of the object. A 24-byte file was stored as 74 bytes, and the stored object began with the chunk length `18` and a line break, followed by the file and the trailer. Set `AWS_REQUEST_CHECKSUM_CALCULATION` to `when_required`, or run `aws configure set default.request_checksum_calculation when_required`, and the CLI sends the plain body. With the setting, a `cmp` of the stored object against the local file found no difference.
+
+```bash
+export AWS_REQUEST_CHECKSUM_CALCULATION=when_required
+aws s3 ls --no-sign-request --endpoint-url http://127.0.0.1:8787/s3
+aws s3 cp report.md s3://reports/report.md --no-sign-request --endpoint-url http://127.0.0.1:8787/s3
+aws s3 ls s3://reports/ --no-sign-request --endpoint-url http://127.0.0.1:8787/s3
+curl -s http://127.0.0.1:8787/s3/reports/report.md
+```
+
+```text title="Sample output"
+2026-10-14 23:00:59 home
+2026-10-14 23:01:03 notes
+upload: ./report.md to s3://reports/report.md
+2026-10-14 23:01:05         24 report.md
+# Report
+
+Revenue grew.
+```
+
+The listing shows each top-level folder as a bucket, including `home`, and it shows times in the local time zone. The first `aws s3 ls` ran before the upload, so it does not list `reports`. The multipart upload that the table above describes also affects the CLI. A 20.6 MiB text file that the CLI sent as a multipart upload failed with `An error occurred (NoSuchUpload) when calling the UploadPart operation`, both with the default setting and with `when_required`. Use a client that sends one `PUT` request for the whole object, such as `curl`, or use the standalone `surrealfs-rs serve s3` server for large files.
+
+## Indexing after a write
+
+The gateway analyses a file after it has written the file. The steps are the same as those in [What the gateway does after a write](/docs/agent-filesystem/concepts/understanding-pipeline#what-the-gateway-does-after-a-write), and this section lists when they run and what they store.
+
+The gateway indexes the path after these operations succeed:
+
+| Operation | Indexed |
+| --- | --- |
+| `PUT /api/file`, and `POST /api/file` for a file | Yes |
+| `POST /api/restore` | Yes |
+| WebDAV `PUT` | Yes |
+| MCP tools `write_file`, `append_file` and `edit_file`, and the same tools when the chat endpoint calls them | Yes |
+| `POST /api/rpc` with SQL that contains `fn::sfs_write`, `fn::sfs_edit` or `fn::sfs_append`, and a variable named `path` in `vars` | Yes, for the path in that variable. SQL without the variable, or with another name, is not indexed |
+| `POST /api/index` with a `path` | Yes, for that path, and the response is `{"indexed": "<path>"}` even when the file does not exist |
+| S3 `PUT` | No. See the previous section |
+| Move, copy, delete and `mkdir` through any surface, and WebDAV `COPY` and `MOVE` | No |
+
+Writes under `/_sessions/` are not indexed. The steps skip a file with no text or with text that the caller cannot read, and the gateway ignores the errors of every step, so a step that fails leaves no trace in the response. Each step runs with the caller of the request.
+
+The steps, and what each one leaves in the database:
+
+| Step | Result |
+| --- | --- |
+| SimHash fingerprint | Stored as `meta.simhash` on the file, for near-duplicate checks |
+| Code symbols | Stored in the `symbol` table for source files, with `kind`, `language`, `qualified` name and the line range |
+| Entities | Tags such as `#launch`, mentions such as `@alice` and ticket keys such as `TICKET-42` are stored in `entity`, and a `mentions` relation joins the file to each. A rewrite adds the relations again, so a file that is written twice lists each entity twice |
+| Markdown sections | Split at headings. The statement that stores them is rejected by the schema, so no section is stored |
+| Embeddings | Requested when `OPENAI_API_KEY` is set. The statements that store them are rejected by the schema, so no vector is stored |
+
+In a test with a local stand-in for the embeddings API, one write of a Markdown file with three headings caused two requests: one for the whole file, and one for the three sections together. The text of each request starts with the path of the file. According to the source, the gateway cuts each text at 24,000 characters. The database stored neither the file vector nor the section vectors, and the gateway ignored the errors.
+
+The file text still went to the provider on every write, and so did the text of every search, because `GET /api/search` and the `search_semantic` and `search_hybrid` tools embed the query. The `hybrid` field of a search response is `true` when the gateway obtained a query vector, which is not a sign that any stored vector took part. See [File search](/docs/agent-filesystem/concepts/search#limitations-in-this-release), [Sections and chunking](/docs/agent-filesystem/concepts/sections-and-chunking) and [Links and entities](/docs/agent-filesystem/concepts/links-and-entities) for the schema side of these limits.
+
+A request to `POST /api/index` without a `path` claims up to 25 jobs of the kinds `embed`, `symbols`, `entities` and `sections`, and it runs the steps above for the file of each job. It claims jobs that are pending, and jobs whose 60-second lease has ended. A write queues jobs of the kinds `detect`, `chunk` and `symbols`, so only the `symbols` jobs are claimed. The response field `completed_jobs` counts the claimed jobs whose steps returned no error.
+
+The endpoint does not mark a job completed. In a test, every claimed job stayed `processing` with the worker name `server-worker`, and a request after the lease had ended claimed the same jobs again and raised their `attempts` from 1 to 2. Each run adds the entity relations of the file again. Nothing calls the endpoint on a schedule.
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/api/index -d '{"path": "/notes/launch.md"}'
+curl -s -X POST http://127.0.0.1:8787/api/index -d '{}'
+```
+
+```json title="Sample output"
+{"indexed":"/notes/launch.md"}
+{"completed_jobs":3}
+```
+
+## Web interface
+
+The gateway serves the web interface from a directory of built files. The directory is the `--static-dir` option, the `SURREALFS_STATIC_DIR` variable of `surrealfs-server`, or `surrealfs/browser/static` relative to the working directory when that directory exists. The [Quickstart](#add-the-web-interface) shows the build.
+
+A `GET` for a path that is not `/api`, `/raw`, `/mcp`, `/dav` or S3 returns the file at that path, or `index.html` when there is no such file, so the page can handle its own routes. The gateway sets the content type from the file extension for HTML, JavaScript, CSS, SVG, PNG, JPEG, WebP, WOFF, WOFF2, TTF and JSON, and it uses `application/octet-stream` for any other extension. The page talks to the gateway through `/api/*` and `/raw` only. [File browser](/docs/agent-filesystem/interfaces/file-browser) describes what the page shows, and the assistant panel needs `ANTHROPIC_API_KEY`.
+
+> [!NOTE]
+> The web interface cannot be used with `SURREALFS_SERVER_TOKEN`. The page sends no `Authorization` header, so every call fails with `401`. In a test, the page loaded, showed `No files yet` in the explorer and displayed the message `Authentication required`. Run the interface on the loopback address without a token, or put a reverse proxy in front of the gateway that adds the header to each request.
+
+The gateway serves the static directory before it checks any credential, which is also a security risk that [Security](#security) describes.
+
+## Security
+
+This section lists what the gateway does and does not protect in this release. Each statement was tested, except those that say that they come from the source, which were read in the code and not run.
+
+- **No TLS.** The gateway speaks plain HTTP. Passwords, tokens and file contents cross the network in clear text. Terminate TLS in a reverse proxy.
+- **Every accepted credential is database access.** The server token, a stored `webdav`, `s3` or `bearer` credential, and the access key of an `s3` credential all reach `/api/rpc`, which runs arbitrary SurrealQL with the database credential of the gateway. Per-user rules in the file functions do not limit that SQL, and the request can set `$caller` itself.
+- **The default gateway has no authentication.** With no `SURREALFS_SERVER_TOKEN`, every request is accepted, and the caller is `root` unless the request names another user. A wrong credential is not rejected on `/api` and `/mcp`.
+- **Web pages can send requests.** The gateway does not check the `Origin` or the `Host` header, and it answers `OPTIONS` with `204` and no `Access-Control-*` headers. A browser then stops a page from reading an answer from another origin, but it does not stop every request from being sent. In a browser test, a page served from one local port made a gateway without a token on another port run the SurrealQL that the page sent, although the page could not read the answer. In the same test the browser blocked a request that carried an `Authorization` header, and a request without one meets the token check, which returns `401`. A token therefore stops this, which is a reason to set `SURREALFS_SERVER_TOKEN` even on a loopback address, although the web interface does not work with a token. The test used two local origins. Pages from other sites, and browsers or settings that restrict requests to local addresses, were not tested.
+- **The static directory can expose other files.** The handler that serves the static directory can return files outside that directory, so any file that the gateway process can read is at risk. The handler runs before the credential check, so `SURREALFS_SERVER_TOKEN` does not protect it. A gateway that starts in the root of the repository after a build of the interface uses the directory `surrealfs/browser/static` with no flag. Start the gateway from a directory that has no `surrealfs/browser/static` folder and without `--static-dir`, or run it as a user that can read nothing sensitive.
+- **The caller name is not proof of identity.** `X-SurrealFS-User` is accepted from any client that is accepted at all. Writes and removals are not checked against the file modes, and a request to `/api/rpc` can set the caller variable itself. The gateway does not separate users.
+- **No limits on requests.** The gateway reads a whole request body into memory, using the `Content-Length` header, with no maximum size and no read timeout. It applies no rate limit and keeps no log of requests. This comes from the source. A reverse proxy can enforce these limits.
+- **Data that goes to other services.** With `OPENAI_API_KEY` set, the text of every written file, up to 24,000 characters per request, and every search query go to the embeddings endpoint, and the gateway stores nothing from the answer. With `ANTHROPIC_API_KEY` set, the chat conversation and the files that its tools read go to Anthropic.
+- **Raw files.** `GET /raw` sends `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`, so a stored HTML file does not run scripts from the gateway origin.
+
+A reverse proxy in front of the gateway can supply TLS, authentication of clients and request limits, and it can remove `/api/rpc` and the static directory from what clients reach. If the proxy holds the server token, it can state the user in `X-SurrealFS-User` for each request. Because writes are not checked against file permissions, this separates callers by name and does not keep one caller's files from another. These measures reduce the exposure and were not tested with a particular proxy.
+
+## Limits and known issues
+
+| Area | Behaviour in this release |
+| --- | --- |
+| File size | The gateway sends a file to SurrealDB in one HTTP request, and the SurrealDB server refuses a request body above its limit with `413`. The gateway reports that as `500` and `HTTP RPC invalid JSON`. With the default limit of SurrealDB 3.2.3, a text file of 3,000,000 bytes was stored and one of 5,000,000 bytes was refused. A binary file of 800,000 bytes through WebDAV was stored and one of 1,500,000 bytes was refused, because the bytes travel as a JSON array. The variable `SURREAL_HTTP_MAX_RPC_BODY_SIZE` of the SurrealDB server raises the limit, and a 5,000,000-byte text file was stored after it was set to 67,108,864 |
+| Health check | `GET /api/health` reports `ok` while the database is unreachable or the password is wrong. `GET /health` returns `404`, and with no token set every other path that nothing matches returns `200` with the service document, so neither tests the gateway |
+| Request format | One request for each connection, no chunked request bodies and no `Expect: 100-continue`. `HEAD /api/health` returns `404` |
+| Web interface | Not usable with `SURREALFS_SERVER_TOKEN` |
+| Activity | `recent_versions[].path` of `/api/activity` is always `null` |
+| Deleting | A recursive delete reports `{"removed":1}` and leaves records that are more than one level deep |
+| S3 | A `PUT` is not indexed. A multipart upload fails with `NoSuchUpload`. The AWS CLI and the AWS SDKs cannot sign in, and the AWS CLI stores the chunk framing in each object unless `AWS_REQUEST_CHECKSUM_CALCULATION` is `when_required`. See the [S3 limits](/docs/agent-filesystem/interfaces/network-servers#supported-operations) |
+| Embeddings and sections | Requested and discarded. `search_semantic` returns `[]` when `OPENAI_API_KEY` is set and an error when it is not |
+| MCP search | The tool `search_text` returns an error. `search_hybrid` and `GET /api/search` work |
+| Remote clients | The Python `from_server` client raises `NotFound` for files that exist and `PermissionDenied` for writes. The TypeScript `connectServer` client returns empty values. `surrealfs-rs` works |
+| NFS | `--nfs-port` opens a port that closes every connection. NFS and SFTP servers do not exist in this release |
+| Access control | File modes are not checked for writes and removals, and `/api/rpc` is unrestricted |
+| Token expiry | A JWT in `SURREALDB_TOKEN` is not renewed |
+| Schema | `surrealfs-server` replaces the schema definitions at every start |
+
+## Troubleshooting
+
+| Symptom | Cause | Resolution |
+| --- | --- | --- |
+| A request returns `500` with `HTTP RPC invalid JSON: error decoding response body` | The SurrealDB server returned a plain-text error that the gateway cannot read as JSON. Four causes give this message: a wrong password, a database user passed as `SURREALDB_USER` and `SURREALDB_PASS`, an expired `SURREALDB_TOKEN`, and a request body above the SurrealDB limit | Check the password. Use a root user for `SURREALDB_USER`, or a token for a database user. Restart with a new token. For a large file, raise `SURREAL_HTTP_MAX_RPC_BODY_SIZE` on the SurrealDB server. Send the same request to the SurrealDB `/rpc` endpoint with `curl -i` to see its status |
+| A request returns `500` with `HTTP RPC request failed: error sending request` | The gateway cannot reach the SurrealDB server | Check `SURREALDB_URL` and that the server runs. The gateway starts without one and prints `Warning: apply_schema returned` |
+| `PUT /api/file` returns `404` with `Function 'fn::sfs_write' not found` | The schema is not applied. This happens with `surrealfs-rs serve gateway` on a new database | Run `surrealfs-rs init`, or start `surrealfs-server`, which applies the schema |
+| The startup line appears, and the program exits with `Address already in use` | The program prints the line before it binds the address | Choose another address with `--bind` or `--port` |
+| A flag has no effect | The program ignores a flag that it does not know and a flag without a value | Read the startup line, and check the flag name |
+| A tool or the interface shows an empty filesystem | The gateway and the tool use different databases. The gateway defaults to `main` | Set `SURREALDB_DB` on the gateway or the tool |
+| A request returns `401` with `Authentication required` | `SURREALFS_SERVER_TOKEN` is set and the request has no `Authorization` header | Send `Authorization: Bearer <TOKEN>`, or a stored credential for WebDAV and S3 |
+| The web interface shows `No files yet` and `Authentication required` | The interface cannot send the token | Start the gateway without `SURREALFS_SERVER_TOKEN`, on the loopback address |
+| WebDAV returns `401` with the server token | The WebDAV handler accepts only `Basic` credentials | Create a `webdav` credential and use it |
+| A WebDAV `PUT` returns `500` with `Expected string but found user:alice` | A credential stores a `user_id` with a table prefix | Store a plain name such as `alice`. `credential create` does not change an existing credential, so set the field with SurrealQL: `UPDATE credential:['webdav', 'alice-dav'] SET user_id = 'alice';` |
+| A file that was written over S3 is missing from entity and symbol queries | The gateway indexes an S3 `PUT` at the wrong path | Send `POST /api/index` with the path of the file |
+| `search_semantic` returns `[]`, or an error that names `OPENAI_API_KEY` | With the key set, the gateway stores no vectors, so no file matches. Without the key, the tool reports that the key is not configured | Use `search_hybrid`, or `GET /api/search`, which work without a key |
+| An S3 object is larger than the file that the AWS CLI uploaded | The AWS CLI stored the `aws-chunked` framing and the checksum trailer in the object | Set `AWS_REQUEST_CHECKSUM_CALCULATION` to `when_required`, and upload the file again |
+| An S3 upload fails with `NoSuchUpload` | The gateway does not support multipart uploads, and the AWS CLI uses one for a large file | Use `curl` or the standalone `surrealfs-rs serve s3` server |
+| `search_text` returns an error with `search needs an identity` | The search function behind the tool reports that it needs an identity, and the gateway does not supply one | Use `search_hybrid`, or `GET /api/search` |
+| An MCP client cannot connect | The endpoint has no session, no event stream and one protocol version | Test with the `tools/list` request from the quickstart, and use a client that accepts plain JSON responses |
+
+## See also
+
+- [Gateway REST API](/docs/agent-filesystem/interfaces/rest-api) for the routes, the SQL RPC endpoint and the MCP tools.
+- [Remote clients and the gateway](/docs/agent-filesystem/interfaces/remote-clients) for clients that use the gateway instead of connecting to SurrealDB.
+- [Deployment](/docs/agent-filesystem/operations/deployment) for running the gateway on a host or as a Cloudflare Worker.
+- [File browser](/docs/agent-filesystem/interfaces/file-browser) for the web interface.
+- [WebDAV and S3 servers](/docs/agent-filesystem/interfaces/network-servers) for the protocol details of the two servers that the gateway also runs.
+- [Protocol credentials](/docs/agent-filesystem/security/credentials) for the credential kinds and how the commands store them.
+- [Permissions](/docs/agent-filesystem/security/permissions) for owners, modes and the clients that enforce them.
+- [Content analysis](/docs/agent-filesystem/concepts/understanding-pipeline) for the analyses that the gateway runs after a write.
+- [Configuration reference](/docs/agent-filesystem/operations/configuration) for the settings of the other programs.

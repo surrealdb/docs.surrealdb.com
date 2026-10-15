@@ -1,0 +1,286 @@
+---
+position: 1
+title: Backup and restore
+description: "Back up an Agent Filesystem database with surreal export and surreal import, or copy folders with the surrealfs-rs export, import, backup and restore-backup commands."
+---
+
+# Backup and restore
+
+An Agent Filesystem lives in one SurrealDB database, so the way to back up everything is to export that database with `surreal export`. The `surrealfs-rs` command adds two ways to copy a folder out of the filesystem as files: an archive and a backup directory. Both keep less than a database export, and this page lists what each one keeps and loses.
+
+> [!NOTE]
+> Agent Filesystem is in beta, and the schema may change between releases. Take a database export before you apply the schema of a newer release.
+
+## Choose a method
+
+| Method | Commands | Keeps | Use it to |
+| --- | --- | --- | --- |
+| Database export | `surreal export` and `surreal import` | Everything in the database, including version history, owners, modes, groups, legal holds, record users and stored embeddings | Back up and restore a whole filesystem, or move it to another server |
+| Archive | `surrealfs-rs export` and `surrealfs-rs import` | The paths and bytes of the files in one folder | Copy the files of a folder to a place that does not use Agent Filesystem |
+| Backup directory | `surrealfs-rs backup` and `surrealfs-rs restore-backup` | The paths, bytes and modes of the files in one folder, and a manifest that also records owners and `meta` fields | Keep a content-addressed copy of one folder on disk |
+| Earlier version of a file | `history` and `restore` | The previous states of one file | Undo a change. See [Versions and history](/docs/agent-filesystem/concepts/versions-and-history). |
+
+The examples need a running SurrealDB server and the `surreal`, `surrealfs` and `surrealfs-rs` commands. [Command-line reference](/docs/agent-filesystem/interfaces/command-line#install) shows how to install the last two, and [Run a local server](/docs/agent-filesystem/operations/configuration#run-a-local-server) shows how to start a server that accepts the user `root` with the password `secret`.
+
+The examples use the database `files` in the namespace `agents`. The `surrealfs` and `surrealfs-rs` commands read different variable names, and the `surreal` command reads a third set, so the setup below exports all of them. It also names `alice` as the identity of the `surrealfs` command, which otherwise uses the operating-system user name and refuses `root`. The [configuration reference](/docs/agent-filesystem/operations/configuration#which-tool-reads-which-setting) explains why. The `init` and `write` commands at the end create the sample files that the examples back up. `surrealfs-rs write` replaces the content of a file, and each replacement adds a version to the history:
+
+```bash
+export SURREALDB_URL=ws://localhost:8000/rpc
+export SURREALDB_USER=root SURREALDB_PASS=secret
+export SURREALDB_NAMESPACE=agents SURREALDB_DATABASE=files
+export SURREALDB_NS=agents SURREALDB_DB=files
+export SURREAL_USER=root SURREAL_PASS=secret
+export SURREALFS_AGENT_USER=alice
+
+surrealfs-rs init
+surrealfs-rs write /notes/plan.md "# Launch plan"
+surrealfs-rs write /notes/plan.md "# Launch plan, revised"
+surrealfs-rs write /notes/ideas.md "# Ideas"
+```
+
+```text title="Output"
+SurrealFS schema successfully initialized.
+Wrote 13 bytes to /notes/plan.md
+Wrote 22 bytes to /notes/plan.md
+Wrote 7 bytes to /notes/ideas.md
+```
+
+The number after `Wrote` counts the characters of the text, so it equals the number of bytes only for ASCII text.
+
+## Back up a database
+
+`surreal export` writes the database as a SurrealQL script. The script holds the schema (tables, functions, events, indexes, analyzers and, when record access is applied, access methods) and every record, so it covers files and their bytes, version history, groups, webhook registrations, record users and the stored embeddings. An export of a database with no files is about 80 KB, because the schema is part of it. The `surreal` command reads the credentials from `SURREAL_USER` and `SURREAL_PASS`, which the setup exported, so the password does not appear in the process list:
+
+```bash
+surreal export --endpoint http://localhost:8000 --ns agents --db files agent-filesystem.surql
+```
+
+The script starts with `OPTION IMPORT;`, which stops events from running while the script is imported. The import therefore does not add version records or pipeline jobs of its own. The [`surreal export`](/docs/reference/cli/surrealdb-cli/commands/export) reference lists the options that select which tables and definitions to include.
+
+> [!WARNING]
+> The export holds every file in clear text, including the files in private home folders. It also holds the secrets of webhook registrations and credentials, and the password hashes of record users. The file is not encrypted, and it gets the default permissions of your shell, which let other users read it. Treat it like the database itself, and create it with a restrictive `umask`:
+
+```bash
+(umask 077; surreal export --endpoint http://localhost:8000 --ns agents --db files agent-filesystem.surql)
+```
+
+The examples export a database that no agent is writing to, and this page does not cover an export that runs during writes, so stop the agents that write before you export.
+
+To keep a series of backups, put the date in the file name:
+
+```bash
+surreal export --endpoint http://localhost:8000 --ns agents --db files "agent-filesystem-$(date +%F).surql"
+```
+
+## Restore a database
+
+`surreal import` runs the script against a database. Import into a database that has no records, such as a new database name on the same server or a database on a new server:
+
+```bash
+surreal import --endpoint http://localhost:8000 --ns agents --db files_restored agent-filesystem.surql
+```
+
+```text title="Sample output"
+2026-10-14T22:55:18.422874Z  INFO surrealdb_server::cli::import: Import executed with no errors
+```
+
+> [!WARNING]
+> Importing into a database that already holds the same records fails with `Database record ... already exists`, and SurrealDB reports that the import might be only partly complete. The script defines the schema itself, so do not apply the schema to the target first: the `/home` folder that the schema creates makes the import fail with ``Database record `file:home` already exists``. Import into an empty database, and remove the old database first if you want to replace it.
+
+To replace a database, remove it with `REMOVE DATABASE`, which deletes the database and everything in it, and then import under the same name:
+
+```bash
+echo "REMOVE DATABASE files_restored;" | surreal sql --endpoint ws://localhost:8000 --ns agents --hide-welcome
+surreal import --endpoint http://localhost:8000 --ns agents --db files_restored agent-filesystem.surql
+```
+
+Check the restore by comparing the record count with the original, and by reading the data through an Agent Filesystem tool. The restored database keeps the version history, so `history` still lists the first version of `plan.md`:
+
+```bash
+echo "SELECT count() FROM file GROUP ALL;" | surreal sql --endpoint ws://localhost:8000 --ns agents --db files --hide-welcome
+echo "SELECT count() FROM file GROUP ALL;" | surreal sql --endpoint ws://localhost:8000 --ns agents --db files_restored --hide-welcome
+SURREALDB_DB=files_restored surrealfs-rs history /notes/plan.md
+SURREALDB_DATABASE=files_restored surrealfs grep -i launch
+```
+
+```text title="Output"
+[[{ count: 4 }]]
+
+[[{ count: 4 }]]
+
+gen 1   | op write  | author root       | size     13 | /notes/plan.md
+/notes/plan.md:1:# Launch plan, revised
+```
+
+The count is 4 because the `file` table also holds the folders `/home` and `/notes`. A restored database has the same owner, mode, group, `meta` fields, generation and hash on every file as the original, and the same version records, groups and webhook registrations.
+
+Record users and their access methods are part of the export when record access is applied. A restored database accepts the same record sign-ins, so agents that use [record access](/docs/agent-filesystem/security/record-access) keep their credentials. Lease records are restored as stored, with their original expiry times, so a lease that was active at the export stays active until it expires.
+
+## Copy a folder as an archive
+
+`surrealfs-rs export` reads every file under a path and writes a tar, gzip-compressed tar or zip archive. `surrealfs-rs import` writes the files of an archive under another path:
+
+```bash
+surrealfs-rs export /notes notes.tar.gz
+tar -tzf notes.tar.gz
+surrealfs-rs import notes.tar.gz /restored
+surrealfs-rs ls /restored
+```
+
+```text title="Sample output"
+Exported /notes (141 bytes) to notes.tar.gz
+ideas.md
+plan.md
+Imported 2 files, 0 dirs (29 bytes) into /restored
+FILE        7 bytes  /restored/ideas.md
+FILE       22 bytes  /restored/plan.md
+```
+
+The `-f` option chooses the format, and `import` needs the same `-f` value that `export` used because it does not detect the format:
+
+| Value | Format |
+| --- | --- |
+| `targz` | Gzip-compressed tar. This is the default. |
+| `tar` | Uncompressed tar |
+| `zip` | Zip |
+
+```bash
+surrealfs-rs export /notes notes.zip -f zip
+surrealfs-rs import notes.zip /restored-zip -f zip
+```
+
+An archive keeps the relative paths and the bytes of the files. The tar entries carry each file's mode, but `import` applies no mode from either format. Every imported text file gets the mode `0o644`, every imported binary file gets `0o666`, every imported folder gets `0o755`, and the user who runs the import owns them. The owner, the group, the `meta` fields (such as a legal hold or an encryption nonce) and the version history are not in an archive.
+
+Four details affect how you use an archive:
+
+- Both commands run as the caller, so `export` needs permission to read every file under the path. It stops at the first file that the caller cannot read and writes no archive.
+- A format name other than `tar` or `zip` is treated as `targz` without an error.
+- The command builds and reads the whole archive in memory.
+- A file stored with `surrealfs-rs upload` is written as an empty folder. See [Limits and caveats](/docs/agent-filesystem/operations/limits-and-caveats#storage-and-data-movement).
+
+> [!WARNING]
+> `import` does not reject archive entries whose names contain `..`. An entry such as `../outside.txt` is created above the target path. Because `surrealfs-rs` does not check write permissions for the caller, an entry can also land in another user's home folder, for example `../../home/alice/planted.txt` in an archive that is imported to `/imports/job2`. Import only archives that you created or that come from a source you trust.
+
+## Copy a folder to a backup directory
+
+`surrealfs-rs backup` copies the files under a path to a directory on disk, and `surrealfs-rs restore-backup` writes them back under a path:
+
+```bash
+surrealfs-rs backup /notes notes-backup
+ls notes-backup notes-backup/blobs
+surrealfs-rs restore-backup notes-backup /notes-restored
+surrealfs-rs ls /notes-restored
+```
+
+```text title="Sample output"
+Backup complete:
+  Root:  /notes
+  Files: 2
+  Bytes: 29
+  Dest:  notes-backup
+notes-backup:
+blobs
+manifest.json
+
+notes-backup/blobs:
+a0f4e0d8d0f43551abb733933d04c063aa10db83ae33966bcdf9161fcd5cf90b.blob
+a9aec35c9ed66d73af44c152bac56a51daa348693262c04a9edcfa8ed52a1a23.blob
+Restore complete:
+  Files: 2
+  Dirs:  0
+  Bytes: 29
+FILE        7 bytes  /notes-restored/ideas.md
+FILE       22 bytes  /notes-restored/plan.md
+```
+
+The directory holds one blob per distinct file content, named by the BLAKE3 hash of the content, and a `manifest.json` that lists the files:
+
+```json title="Sample manifest.json (abridged)"
+{
+  "version": 1,
+  "created_at": "2026-10-14T22:54:58.918550Z",
+  "root_path": "/notes",
+  "files": [
+    {
+      "path": "/notes/plan.md",
+      "is_folder": false,
+      "mode": 420,
+      "owner": "root",
+      "group": null,
+      "size": 22,
+      "hash": "a9aec35c9ed66d73af44c152bac56a51daa348693262c04a9edcfa8ed52a1a23",
+      "created_at": "2026-10-14T22:54:49.854231Z",
+      "updated_at": "2026-10-14T22:54:49.899602Z",
+      "meta": null
+    }
+  ],
+  "total_bytes": 29
+}
+```
+
+How the two commands treat the data:
+
+- A second `backup` into the same directory writes the blobs that are not there yet and replaces `manifest.json`. It reads every file again each time, and there is no incremental mode.
+- `restore-backup` writes each file with its bytes and applies its mode. The target path replaces the manifest's `root_path`, so restoring a backup of `/notes` with the target `/` creates `/plan.md` and `/ideas.md`.
+- Restoring over existing paths replaces their content.
+- The restoring user owns every restored file. The owner is in the manifest but is not applied.
+- The group is not recorded. The `group` field of the manifest is always `null`, even for a file that has a group, because the listing that the backup reads has no group, so a restored file has no group.
+- The `Files` figure that `backup` prints counts every entry in the manifest, folders included.
+- `--as-of` takes an RFC 3339 time and skips the files that were created after it. It does not select an older version of a file, because a backup holds one version of each file.
+- The restore does not check a blob against its hash, so a blob that changed on disk is restored as it is.
+- A caller that cannot read every file under the path gets `Permission denied` at the first unreadable file, and the command leaves a `blobs` directory without a `manifest.json`. A backup therefore needs a caller that can read everything, in practice `root`.
+
+The blobs are stored without encryption, with the default file permissions of your shell. Run the command with a restrictive `umask` when the files are private:
+
+```bash
+(umask 077; surrealfs-rs backup /notes notes-backup)
+```
+
+> [!WARNING]
+> A restore does not bring back the `meta` fields. A legal hold is lost, and a file that you encrypted with `surrealfs-rs encrypt` is restored as ciphertext without the fields that `decrypt` reads, so `decrypt` prints the ciphertext and exits with status 0. The nonce is in `manifest.json`, but the restore does not write it back to the file. Use a database export for folders that hold legal holds or encrypted files.
+
+The following commands set a legal hold on `/notes/ideas.md`, back up `/notes` and restore it to `/held-restored`. Only the original has the hold:
+
+```bash
+surrealfs-rs legal-hold /notes/ideas.md --active true
+surrealfs-rs backup /notes held-backup
+surrealfs-rs restore-backup held-backup /held-restored
+surrealfs-rs legal-hold /notes/ideas.md
+surrealfs-rs legal-hold /held-restored/ideas.md
+```
+
+```text title="Output"
+Set legal hold on /notes/ideas.md to true
+Backup complete:
+  Root:  /notes
+  Files: 2
+  Bytes: 29
+  Dest:  held-backup
+Restore complete:
+  Files: 2
+  Dirs:  0
+  Bytes: 29
+Legal hold on /notes/ideas.md: true
+Legal hold on /held-restored/ideas.md: false
+```
+
+## What each method keeps
+
+| Property | Database export | Archive | Backup directory |
+| --- | --- | --- | --- |
+| File bytes | Kept | Kept | Kept |
+| Version history | Kept | Not included | Not included |
+| Owner | Kept | Not included | In the manifest, not applied |
+| Mode | Kept | In the tar entry, not applied | Applied |
+| Group | Kept | Not included | Not recorded |
+| `meta` fields | Kept | Not included | In the manifest, not applied |
+| Record users and access methods | Kept | Not included | Not included |
+| Groups, webhook registrations and links | Kept | Not included | Not included |
+| Stored embeddings | Kept | Not included | Not included |
+| Files stored with `surrealfs-rs upload` | Kept, with the chunk tables | An empty folder | An empty folder in the manifest |
+
+## Related pages
+
+- [Configuration reference](/docs/agent-filesystem/operations/configuration) lists the connection settings that these commands read.
+- [Encryption and legal hold](/docs/agent-filesystem/security/encryption-and-legal-hold) describes the `meta` fields that a backup directory does not restore.
+- [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) covers restoring one file to an earlier version.

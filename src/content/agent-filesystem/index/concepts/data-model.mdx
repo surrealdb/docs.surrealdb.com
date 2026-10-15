@@ -1,0 +1,441 @@
+---
+position: 0
+title: Data model
+description: "How Agent Filesystem stores files and folders as records in one SurrealDB table: fields, computed paths, folders, owners, modes and metadata."
+---
+
+Agent Filesystem stores every file and folder as one record in a single SurrealDB table named `file`. A record's place in the tree is a link to its parent folder, and its path is computed from that chain of links. This page describes the record, its fields, and the rules for names, folders, ownership and modes.
+
+> [!NOTE]
+> Agent Filesystem is in beta, so the schema and the client behaviour described here can change between releases. The examples use the Python `SurrealFs` client unless a section names another client. The Rust and TypeScript clients call database functions that differ from the Python client in places, and [Other clients](#other-clients) lists the differences that affect the data model, including two that change what happens to an existing path.
+
+## A file is one record
+
+The script below writes two text files and one binary file as the user `alice`. It assumes a local SurrealDB 3 server whose root password is `secret`, and an installed `surrealfs` package as described in the [Python quickstart](/docs/agent-filesystem/quickstarts/python).
+
+```python title="write_files.py"
+import asyncio
+
+from surrealdb import AsyncSurreal
+from surrealfs import SurrealFs, apply_schema
+
+PLAN = """---
+status: draft
+tags: [launch, q4]
+---
+# Launch plan
+- confirm the date
+"""
+
+
+async def main():
+    db = AsyncSurreal("ws://localhost:8000/rpc")
+    await db.signin({"username": "root", "password": "secret"})
+    await db.use("agents", "files")
+    await apply_schema(db)
+
+    fs = SurrealFs(db, user="alice")
+    await fs.write_text("/projects/launch/plan.md", PLAN)
+    await fs.write_text("/projects/launch/notes/day-1.md", "Kick-off done.\n")
+    await fs.write_bytes(
+        "/projects/launch/logo.png", b"\x89PNG\r\n\x1a\n", content_type="image/png"
+    )
+
+    await db.close()
+
+
+asyncio.run(main())
+```
+
+The Python snippets that follow on this page run inside that script, before the `await db.close()` line. The SurrealQL statements here and on the other concept pages run in the `surreal sql` shell, connected to the same namespace and database:
+
+```bash
+surreal sql --endpoint ws://localhost:8000 --username root --password secret --namespace agents --database files --pretty
+```
+
+Statements end with a semicolon, and a line that ends with a backslash continues the statement on the next line. The shell prints a `-- Query` header with the execution time above each result, which the output blocks on these pages leave out. It also saves the input history to a file named `history.txt` in the current directory, so start it from a directory where that file does no harm.
+
+Each file now exists as one record in the `file` table, and so does each folder that the writes created. This query lists them:
+
+```surql
+SELECT path, is_folder, owner, mode, content_type FROM file ORDER BY path;
+```
+
+```surql title="Output"
+[
+    { content_type: 'inode/directory', is_folder: true, mode: 511, owner: 'root', path: '/home' },
+    { content_type: 'inode/directory', is_folder: true, mode: 511, owner: 'alice', path: '/projects' },
+    { content_type: 'inode/directory', is_folder: true, mode: 511, owner: 'alice', path: '/projects/launch' },
+    { content_type: 'image/png', is_folder: false, mode: 438, owner: 'alice', path: '/projects/launch/logo.png' },
+    { content_type: 'inode/directory', is_folder: true, mode: 511, owner: 'alice', path: '/projects/launch/notes' },
+    { content_type: 'text/markdown', is_folder: false, mode: 438, owner: 'alice', path: '/projects/launch/notes/day-1.md' },
+    { content_type: 'text/markdown', is_folder: false, mode: 438, owner: 'alice', path: '/projects/launch/plan.md' }
+]
+```
+
+The `/home` folder exists because applying the schema creates it. The other folders came from the writes, which create missing parent folders by default. The `mode` field holds the permission bits as an integer, so 511 is `0o777` and 438 is `0o666`.
+
+A single record shows the fields that hold a value:
+
+```surql
+SELECT * FROM file WHERE path = '/projects/launch/plan.md';
+```
+
+```surql title="Sample output"
+[
+    {
+        content: '---
+status: draft
+tags: [launch, q4]
+---
+# Launch plan
+- confirm the date
+',
+        content_type: 'text/markdown',
+        crdt: false,
+        created_at: d'2026-10-14T22:46:03.474966Z',
+        encoding: 'utf-8',
+        filename: 'plan.md',
+        gate: NONE,
+        generation: 1,
+        hash: '01513678dfcfaac03041a013d6970a13',
+        id: file:5fvuada85ji9sb2p2gai,
+        is_folder: false,
+        is_generated: false,
+        meta: {
+            status: 'draft',
+            tags: ['launch', 'q4']
+        },
+        mode: 438,
+        owner: 'alice',
+        parent: file:b7wrvoiscx5228gsxg3v,
+        parent_key: 'file:b7wrvoiscx5228gsxg3v',
+        path: '/projects/launch/plan.md',
+        updated_at: d'2026-10-14T22:46:03.475454Z'
+    }
+]
+```
+
+Three properties of this record shape the rest of the model:
+
+- **The record links to its folder.** The `parent` field is a record link, and the record holds only its own `filename`.
+- **Some fields are computed.** `path`, `is_folder` and `gate` are calculated when the record is read and are never stored.
+- **The database maintains some fields.** `hash`, `generation`, `parent_key` and `updated_at` are set by field rules and events, so a client does not supply them.
+
+## Fields
+
+The tables below list the fields of the `file` table. The schema is `SCHEMAFULL`, so a record holds only the fields that are defined.
+
+### Identity and position
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | `record<file>` | A random 20-character ID, such as `file:5fvuada85ji9sb2p2gai`. The seeded `/home` folder has the ID `file:home`. |
+| `filename` | `string` | One path segment. Required and case-sensitive. |
+| `parent` | `option<record<file>>` | A link to the containing folder. `NONE` for an entry directly under `/`. |
+| `parent_key` | `string` | A stored copy of `parent` as a string, with `'root'` standing for `NONE`. The database sets it on every write, and the index that keeps names unique uses it. |
+| `path` | `string` (computed) | The `path` of the parent, then `/`, then `filename`. |
+| `is_folder` | `bool` (computed) | `true` when `content`, `file` and `symlink` are all `NONE`. A file that was uploaded in chunks has none of them either, so it also reports `true`. |
+
+### Ownership and access
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `owner` | `string` | The user who owns the record. The default is `'root'`. The Python client sets it to the creating user, except for home folders. No client changes an owner after creation. |
+| `group` | `option<string>` | An optional group name for the group permission bits. The database permission functions consult it. The Python `SurrealFs` client does not, and its entries report `group` as `None`. |
+| `mode` | `int` | Unix permission bits as an integer: 438 is `0o666`, 511 is `0o777` and 448 is `0o700`. |
+| `gate` | `option<string>` (computed) | `NONE` when every ancestor folder lets other users traverse it. Otherwise it lists the users, and any `group:<name>` entries, who can traverse the closed ancestors. A file in `/home/alice` has the gate `'alice'`. The value `'!closed'` means that the closed ancestors have different owners, so that no user can traverse all of them, and `root` is the only user exempt from the check. [Record access](/docs/agent-filesystem/security/record-access) uses the gate to hide files below a private folder. |
+
+### Content
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `content` | `option<string>` | Text content. |
+| `file` | `option<bytes>` | Binary content. A record holds `content` or `file`, not both. |
+| `content_type` | `string` | A MIME type. Required, because the schema defines no default. Folders use `inode/directory`. |
+| `hash` | `string` | The MD5 digest of the text, or of the base64 text of binary content as described in [Content storage](/docs/agent-filesystem/concepts/content-storage#content-hash). It is `''` for a folder and for a chunked file. The database sets it after each write. |
+| `size` | `option<int>` | Set only for files that were uploaded in chunks. For other files, the clients calculate the size when they read. The Python client also ignores the stored value, so it reports 0 for a chunked file. |
+| `symlink` | `option<file>` | Declared in the schema but not usable. See [Symlinks](#symlinks). |
+
+[Content storage](/docs/agent-filesystem/concepts/content-storage) explains how text and bytes differ, how the content type is chosen, and what the hash covers.
+
+### Tracking and metadata
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `generation` | `int` | Starts at 1 and rises by 1 when a write changes the content hash. Clients cannot write it. Under record access it stays at 1 in this release. [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) describes how it is used. |
+| `created_at` | `datetime` | Set when the record is created and read-only afterwards. |
+| `updated_at` | `datetime` | Set on every write, including a write that stores the same content again. |
+| `meta` | `option<object>` | Metadata that the Python client parses from frontmatter. See [Metadata from frontmatter](#metadata-from-frontmatter). |
+| `crdt` | `bool` | `true` when collaborative editing is enabled for the file. See [Collaborative editing](/docs/agent-filesystem/concepts/collaborative-editing). |
+
+### Fields for other features
+
+Some fields exist for features that other pages describe, or that no client uses yet:
+
+- **Search fields.** `embedding`, `embedded_at`, `embedded_hash` and `indexer_version` belong to semantic search. `reindex_embeddings` writes them, and ordinary file writes leave them alone. See [File search](/docs/agent-filesystem/concepts/search).
+- **Unused fields.** No client in this release writes `language`, `encoding`, `is_generated`, `digest` or `deleted_at`. The five derived fields `text_de`, `text_fr`, `text_es`, `text_cjk` and `text_code` copy `content` only when `language` has a matching value, so they stay empty. The default for `encoding` is `'utf-8'`.
+
+## Paths and folders
+
+### Path rules
+
+Every path is absolute, and no working directory exists. The Python client normalises each path before it uses it:
+
+| Input | Normalised path |
+| --- | --- |
+| `projects/launch/` | `/projects/launch` |
+| `notes//a/./b/../c.md` | `/notes/a/c.md` |
+| `../x` | `/x` |
+| `..` | `/` |
+
+A `..` segment never leaves the root, and an empty path means the root.
+
+### The root
+
+The root `/` is not a record. The top-level entries have `parent` set to `NONE`, and `exists("/")` returns `True`. In the Python client, calling `stat("/")` raises `NotFound`, and writing to `/` raises `InvalidPath`. The Rust and TypeScript clients get a synthetic folder record for `/` instead, as [Other clients](#other-clients) describes.
+
+### Folders
+
+A folder is a record with no content and the content type `inode/directory`. The `mkdir` method creates one, and a write creates any missing parent folders unless you pass `create_parents=False`. A file that was uploaded in chunks also has no content in its record, so it reads as a folder in this release. [Content storage](/docs/agent-filesystem/concepts/content-storage#status-in-this-release) describes the consequences.
+
+```python
+await fs.mkdir("/projects/archive/2026", parents=True)
+```
+
+The method reports a conflict with an error whose message says what is wrong:
+
+| Situation | Error |
+| --- | --- |
+| The folder already exists and `exist_ok` is `False` | `AlreadyExists: File exists: /projects` |
+| A file stands where a folder is needed | `AlreadyExists: Not a directory: /projects/launch/plan.md` |
+| A parent is missing and `parents` is `False` | `NotFound: No such file or directory: /nope. Pass parents=True to create it.` |
+| A write targets a path that is a folder | `IsADirectory: Is a directory: /projects` |
+
+The mode applies to the final folder only, as with `mkdir -m`. Folders that `parents=True` creates on the way take the default mode.
+
+### Names and uniqueness
+
+A name is one path segment. Any character except `/` is accepted, and names are case-sensitive, so `A.MD` and `a.md` can exist in the same folder.
+
+A unique index named `child_unique` covers `parent_key` and `filename`, so two entries in one folder cannot share a name. The `parent_key` field exists because an index over `parent` skips records where `parent` is `NONE`, and that would leave top-level names unprotected. This statement shows the index refusing a duplicate:
+
+```surql
+CREATE file CONTENT { filename: 'projects', content_type: 'inode/directory' };
+```
+
+```surql title="Sample error output"
+"Database index `child_unique` already contains ['root', 'projects'], with record `file:i84ahlb6iv4s5d3cyzi2`"
+```
+
+The Python `mkdir`, `cp` and `mv` methods check for an existing path first and raise `AlreadyExists`. When two writers create the same new path at the same moment, through `mkdir`, `cp`, `write_text` or a write that creates parent folders, the loser receives the raw database error above, raised as a `QueryError`. The Rust and TypeScript clients handle an existing path differently, as [Other clients](#other-clients) describes.
+
+### Moving and renaming
+
+A move or a rename is one update to `filename` or `parent`. The path of every descendant follows, because paths are computed from the chain of parents. The record keeps its `id`, `owner`, `mode`, content and `generation`.
+
+Continuing from the first script, this call renames the `launch` folder:
+
+```python
+await fs.mv("/projects/launch", "/projects/launch-2026")
+```
+
+```surql
+SELECT id, path FROM file WHERE filename = 'plan.md';
+```
+
+```surql title="Sample output"
+[
+    { id: file:5fvuada85ji9sb2p2gai, path: '/projects/launch-2026/plan.md' }
+]
+```
+
+The `id` matches the one in the earlier record, and only the path changed. The move writes a `rename` version for the record that moved, which is the folder, and none for the files below it, as [Versions and history](/docs/agent-filesystem/concepts/versions-and-history#history-follows-paths) describes. The Python `mv` method raises `AlreadyExists` when the destination exists, and it requires that the destination folder already exists. The Rust and TypeScript `mv` replaces an existing destination instead, as [Other clients](#other-clients) describes.
+
+### Looking up a path
+
+Computed fields cannot be indexed, so a query that filters on `path` reads the whole table. The `EXPLAIN` statement shows this:
+
+```surql
+EXPLAIN SELECT * FROM file WHERE path = '/projects/launch-2026/plan.md';
+```
+
+```surql title="Output"
+"SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: file, direction: Forward, predicate: path = '/projects/launch-2026/plan.md', pre_decode_filter: no (computed fields)]
+"
+```
+
+The clients avoid this by walking the path one segment at a time through the `child_unique` index. A condition on `parent_key` and `filename` uses that index:
+
+```surql
+EXPLAIN SELECT * FROM file WHERE parent_key = 'root' AND filename = 'projects';
+```
+
+```surql title="Output"
+"SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [index: child_unique, access: ['root', 'projects'], direction: Forward]
+"
+```
+
+In SurrealQL, the `fn::sfs_resolve` function resolves a whole path and returns the record ID, or `NONE` when the path does not exist:
+
+```surql
+fn::sfs_resolve('/projects/launch-2026/plan.md');
+```
+
+```surql title="Sample output"
+file:5fvuada85ji9sb2p2gai
+```
+
+### Folder depth
+
+> [!WARNING]
+> The cost of creating, writing and reading a record grows quickly with its folder depth in this release. The `gate` field is computed recursively, and each extra level of nesting multiplies the work by about three. Keep paths to eight levels or fewer.
+
+The level of a record is the number of segments in its path, so `/a/b/c` is at level 3, and a file at level 10 lives in a folder at level 9. The table below shows the time that the Python client took to create, read and list one folder at increasing levels, with every ancestor folder already in place. The measurements come from SurrealDB 3.2.3 with the in-memory engine, one client and a local connection on an otherwise idle machine. Repeated runs differed by more than a factor of two at the lower levels, so the table shows how the cost grows and is not a benchmark.
+
+| Folder level below `/` | Create with `mkdir` | Read with `stat` | List with `ls` |
+| --- | --- | --- | --- |
+| 5 | 0.02 s | 0.004 s | 0.004 s |
+| 7 | 0.08 s | 0.02 s | 0.02 s |
+| 8 | 0.2 s | 0.05 s | 0.05 s |
+| 9 | 0.6 s | 0.13 s | 0.14 s |
+| 10 | 1.8 s | 0.4 s | 0.4 s |
+| 11 | 5.6 s | 1.1 s | 1.3 s |
+
+Writing a file into a folder at level 9 took 2.7 s in the same test, rewriting it took 5.2 s, removing it took 3.2 s, and reading its text took 0.4 s. The `gate` field causes the cost. With the field removed from a test database, creating a whole chain of 11 nested folders took 0.06 s.
+
+## Home folders
+
+Applying the schema creates `/home` as a record owned by `root` with mode `0o777`. A folder directly under `/home` is a user's home. The Python client creates it with mode `0o700` and gives it to the user whose name it carries, whoever runs the `mkdir`:
+
+```python
+home = await SurrealFs(db, user="root").mkdir("/home/carol")
+print(oct(home.mode), home.owner)
+```
+
+```text title="Output"
+0o700 carol
+```
+
+The Python client refuses to create, remove or move another user's home, unless it acts as `root`, as the example above shows. No user can move a folder onto a path directly under `/home`, root included. A home is created with `mkdir`, and its contents are moved into it afterwards. [Permissions](/docs/agent-filesystem/security/permissions) describes what the mode means for other users.
+
+The Rust and TypeScript clients apply none of these rules. Their database function creates a folder under `/home` as an ordinary folder owned by the caller with mode `0o755`, so other users can read it and write into it. A private home therefore needs the Python client.
+
+## Owners and modes
+
+`owner`, `group` and `mode` follow the Unix model. The mode is a number from 0 to `0o777`, and the `FileEntry` objects that the Python client returns also carry a `permissions` string such as `-rw-r--r--`.
+
+| Item | Default in the Python client | Default in the database functions |
+| --- | --- | --- |
+| New file | `0o666` | `0o644` |
+| New folder | `0o777` | `0o755` |
+| Home folder | `0o700` | `0o755`, as for any folder |
+
+The default file mode in the Python client lets every user write to the file, so a file outside `/home/<user>` that must stay private needs a `chmod`. The `0o644` default of the database functions applies to text files. The Rust `write_bytes` method, which the `import` command uses for data that is not valid UTF-8, and the commit of a chunked upload create a file with the schema defaults instead: the mode is `0o666`, and `write_bytes` leaves the owner as `root`, while a chunked upload names the caller.
+
+The `chmod` method changes the mode. Only the owner or `root` can call it, and it validates the range:
+
+```python
+await fs.chmod("/projects/launch-2026/plan.md", 0o640)
+```
+
+The `chmod` method does not change the generation, and it writes a `chmod` entry to the file's history. Permission checks, groups and the other rules that decide who may read or write a record are on the [Permissions](/docs/agent-filesystem/security/permissions) page.
+
+## Symlinks
+
+The schema declares a `symlink` field, but no client in this release creates, resolves or follows a symlink. The field has the type `option<file>`, and in SurrealDB 3 the `file` type is a file pointer, not a link to another record. A default SurrealDB server rejects a record link in this field, as this statement shows, and it rejects a file pointer unless the experimental `files` capability is enabled:
+
+```surql
+UPDATE file SET symlink = file:abc WHERE path = '/projects/launch-2026/plan.md';
+```
+
+```surql title="Sample error output"
+"Couldn't coerce value for field `symlink` of `file:5fvuada85ji9sb2p2gai`: Expected `none | file` but found `file:abc`"
+```
+
+The `is_folder` rule includes `symlink` in its test, and no client sets a value there. To refer to one file from another, use [links](/docs/agent-filesystem/concepts/links-and-entities) instead.
+
+## Metadata from frontmatter
+
+When the Python client writes or edits a text file, it reads a frontmatter block at the start of the content and stores the result in `meta`. A block that starts and ends with `---` is parsed as YAML, and a block that starts and ends with `+++` is parsed as TOML.
+
+The YAML parser handles a subset of the language:
+
+- Keys match `[A-Za-z0-9_-]+`.
+- A scalar becomes a boolean, `null`, an integer or a float where it looks like one, and every other value stays a string. The words are matched in any case: `true`, `yes` and `on` become `true`, `false`, `no` and `off` become `false`, and `null`, `none` and `~` become `null`. The value `country: NO` is therefore stored as `false`, while `country: "NO"` stays a string.
+- A bare number loses its leading zeros, so `007` becomes 7, and `"007"` stays a string. Values such as `2026-10-15` and `1.2.3` remain strings.
+- Surrounding single or double quotes are removed.
+- A key whose value is `null`, `none`, `~` or empty is not stored, so the key is absent from `meta`.
+- Inline lists such as `[launch, q4]` and bullet lists under a key become arrays.
+- Block scalars, nested mappings and keys that contain spaces are not supported. A `#` starts a comment even inside a quoted string, so the value `"quoted # hash"` is stored as `"quoted`, with its opening quote.
+
+The `glob` method filters on `meta` with exact matches. A list value matches when the filter equals the whole list or one of its elements:
+
+```python
+drafts = await fs.glob("/projects/**/*.md", meta={"status": "draft"})
+launch = await fs.glob("/projects/**/*.md", meta={"tags": "launch"})
+```
+
+A `write_text` call replaces `meta` with the parsed frontmatter, or with `NONE` when the text has none, and `edit` parses the edited text again. For a file with collaborative editing enabled, `write_text` updates `meta` only when the new text has frontmatter. The `append_text` and `write_bytes` methods leave `meta` as it was, and `cp` leaves it empty in the copy, so the field can lag behind the content after them. The Rust and TypeScript clients never set `meta` when they write.
+
+> [!WARNING]
+> Some features store their own keys in `meta`, such as `legal_hold` and `encrypted`, described under [Encryption, legal hold and audit](/docs/agent-filesystem/security/encryption-and-legal-hold). A Python `write_text` call without frontmatter replaces `meta` with `NONE`, which removes those keys: it clears a legal hold and the marker that shows a file is encrypted. The Python `rm` method does not check `legal_hold`, so a user who can write to the folder can delete a held file. The `fn::sfs_rm` function that the Rust CLI and the TypeScript SDK call refuses to delete a held file, and so do the table permissions under record access.
+
+## Query the table with SurrealQL
+
+The `file` table is an ordinary SurrealDB table, so any SurrealQL client can read it. These queries use the records from the first script:
+
+```surql
+SELECT path, meta FROM file WHERE meta.status = 'draft';
+```
+
+```surql title="Output"
+[
+    { meta: { status: 'draft', tags: ['launch', 'q4'] }, path: '/projects/launch-2026/plan.md' }
+]
+```
+
+```surql
+SELECT content_type, count() AS files FROM file WHERE is_folder = false GROUP BY content_type;
+```
+
+```surql title="Output"
+[
+    { content_type: 'image/png', files: 1 },
+    { content_type: 'text/markdown', files: 2 }
+]
+```
+
+> [!WARNING]
+> A connection that signs in as a root, namespace or database user bypasses the table and field permissions for every statement it runs. The Python client applies the Unix permission rules itself, and a raw `UPDATE` or `DELETE` from such a connection skips them. To make the database enforce the rules for each user, enable [record access](/docs/agent-filesystem/security/record-access). In this release that choice has a cost: under record access the `generation` field stays at 1, so `if_generation` and the selection of versions by generation stop working. See [Generations under record access](/docs/agent-filesystem/concepts/versions-and-history#generations-under-record-access).
+
+Your own statements should treat `hash`, `generation`, `parent_key` and `updated_at` as read-only fields. The database sets them, and the clients do not write them.
+
+## Other clients
+
+The Python `SurrealFs` class is the most complete client and the one these pages describe. The Rust crates and the TypeScript SDK call functions named `fn::sfs_*` that the schema defines, and those functions differ from the Python client in these ways:
+
+| Behaviour | Python `SurrealFs` | Rust and TypeScript |
+| --- | --- | --- |
+| `mv` onto an existing path | Raises `AlreadyExists` | Deletes the destination and then renames. A `delete` version keeps the old content, and a destination folder leaves its children without a parent |
+| `mkdir` on an existing path | Raises `AlreadyExists` unless `exist_ok` is true | Succeeds and returns the existing folder |
+| Mode of a new text file | `0o666` | `0o644` |
+| Mode of a new folder | `0o777` | `0o755` |
+| Folder directly under `/home` | `0o700`, owned by the user whose name it carries | `0o755`, owned by the caller, so other users can read it |
+| Content type of a new text file | Chosen from the name and content | `text/plain` |
+| `meta` from frontmatter | Set on write and edit | Not set |
+| `stat` of `/` | Raises `NotFound` | Returns a synthetic folder record owned by `root` with mode `0o755` |
+| Path normalisation | Does not trim whitespace | Trims whitespace, and TypeScript also converts `\` to `/` |
+| Missing parent folders on `mkdir` | `NotFound` unless `parents=True` | Always created |
+| Permission checks on writes | Applied by the client | Not applied by the functions, which check only reads |
+
+A database that is set up from the TypeScript package gets an older copy of the schema than the Python package ships, and that copy lacks several tables, including the ones that [content storage](/docs/agent-filesystem/concepts/content-storage) uses. Apply the schema from the Python package or the Rust CLI when you need those tables.
+
+## Related pages
+
+- [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) describes generations, history, restore and undelete.
+- [Content storage](/docs/agent-filesystem/concepts/content-storage) covers text and bytes, hashes, content types and chunked uploads.
+- [Permissions](/docs/agent-filesystem/security/permissions) covers owners, groups and modes in detail.
+- [Schema reference](/docs/agent-filesystem/reference/schema) lists every table, field and index.

@@ -1,0 +1,417 @@
+---
+position: 4
+title: Sections and chunking
+description: "How Agent Filesystem splits text files into sections by Markdown heading, Python definition or line window, and searches the sections by embedding."
+---
+
+# Sections and chunking
+
+A **section** is a range of lines of a text file, with a heading, stored as a record in the `file_section` table. Splitting a file into sections lets a search return the part of a file that answers a question and not the whole file. This page describes the rules that split a file, how sections are stored and kept current, how to search them, and where the current implementation stops.
+
+> [!NOTE]
+> Agent Filesystem is in beta. The API, schema and command-line interface may change in breaking ways between releases. This page describes version 0.2.0 of [SurrealFS](https://github.com/surrealdb/surrealfs), the open source project behind Agent Filesystem, built from the `next` branch of its repository, and each limitation that applies is listed where it matters.
+
+The `reindex_embeddings` method of the Python library is the one code path that stores sections: it splits each file and embeds each section. The `surrealfs-rs chunk` command applies similar rules and prints the result, but it stores nothing. Writing a file does not create sections. The gateway tries to store sections after a write, but the database rejects its statement, as the [limitations](#limitations-in-this-release) describe.
+
+The first examples call the chunker directly and need no database. The later examples need a running SurrealDB server and the `surrealfs` package, which the [Python quickstart](/docs/agent-filesystem/quickstarts/python) installs, and they use the connection below. They use top-level `await`, so run them in `python -m asyncio` or wrap them in an `async` function. They also use the stand-in `embed` function from [File search](/docs/agent-filesystem/concepts/search#provide-an-embedding-function). It maps a few groups of related words, such as `rollback`, `undo` and `revert`, to one direction for each group, and it carries no real understanding of language. The outputs assume that the namespace `agents` and the database `sections` hold no other files, because `reindex_embeddings` counts every file and section search ranks the sections of every file.
+
+The `surql` blocks run in Surrealist or in `surreal sql`, which takes piped input one line at a time, so a multi-line statement has to be joined into one line there.
+
+```python title="Connect"
+from surrealdb import AsyncSurreal
+from surrealfs import ROOT, SurrealFs, apply_schema
+
+db = AsyncSurreal("ws://localhost:8000/rpc")
+await db.signin({"username": "root", "password": "secret"})
+await db.use("agents", "sections")
+await apply_schema(db)
+
+alice = SurrealFs(db, user="alice")
+bob = SurrealFs(db, user="bob")
+root = SurrealFs(db, user=ROOT)
+```
+
+## How a file is split
+
+The `chunk_text(text, filename="", content_type="")` function in `surrealfs.chunking` chooses a strategy, and the first rule that applies wins:
+
+| Rule | Strategy | One section per |
+| --- | --- | --- |
+| The filename ends in `.md`, `.markdown` or `.mdown`, or the content type is `text/markdown` | Markdown | Heading, at any level from 1 to 6 |
+| The filename ends in `.py`, or the content type is `text/x-python` or `text/python` | Python source | Top-level function or class |
+| The file has 30 lines or fewer | Single section | File, headed with the filename |
+| The file has 31 to 50 lines | Single section | File, headed `Lines 1-N` |
+| The file has more than 50 lines | Line windows | Window of 50 lines that overlaps the next by 10 lines |
+
+Every strategy returns `FileSection` objects with these fields:
+
+| Field | Description |
+| --- | --- |
+| `section_idx` | The position of the section in the file, counted from 0. |
+| `heading` | The title of the section. The values are described below for each strategy. |
+| `line_start`, `line_end` | The first and last line of the section, counted from 1. Both lines are included. |
+| `content` | The exact text of the section. |
+| `source_hash` | The MD5 hash of `content`, as 32 hexadecimal characters. |
+
+The examples print the sections with this helper:
+
+```python
+from surrealfs.chunking import chunk_text
+
+def show(sections):
+    for section in sections:
+        print(f"{section.section_idx}  {section.line_start:>2}-{section.line_end:<2} {section.heading!r}")
+```
+
+### Markdown sections
+
+Each heading starts a section that runs to the line before the next heading of **any** level, so sections are flat records and are never nested. The hierarchy is in the `heading` field, which joins the headings of the ancestors with ` > `. Text before the first heading becomes a section with the heading `Overview`, and a file with no headings is one section with an empty heading.
+
+```python
+guide = """Release notes for the sync service.
+
+# Authentication guide
+
+Tokens expire after fifteen minutes.
+
+## JWT tokens
+
+Sign tokens with a rotating key.
+
+## Sessions
+
+Sessions last twelve hours.
+
+# Storage
+
+Files are stored in SurrealDB.
+"""
+
+show(chunk_text(guide, "guide.md"))
+```
+
+```text title="Output"
+0   1-2  'Overview'
+1   3-6  'Authentication guide'
+2   7-10 'Authentication guide > JWT tokens'
+3  11-14 'Authentication guide > Sessions'
+4  15-17 'Storage'
+```
+
+A heading is a line of one to six `#` characters, a space and the title. Trailing `#` characters are removed, so `## Sub ##` has the title `Sub`. A line with seven `#` characters, a line without a space after the `#` characters, and an indented line are not headings.
+
+Two rules of this strategy affect what ends up in a section:
+
+- **Fenced code is not recognised.** A line that starts with `#` inside a code fence, such as a shell comment, starts a new section.
+- **Frontmatter is part of the first section.** The `---` block at the top of a file is not treated separately. It is text before the first heading, so it ends up in the `Overview` section.
+
+```python
+show(chunk_text("# Setup\n\n```bash\n# install the package\npip install surrealfs\n```\n", "setup.md"))
+```
+
+```text title="Output"
+0   1-3  'Setup'
+1   4-6  'install the package'
+```
+
+A file whose extension is not in the table of [content types](/docs/agent-filesystem/concepts/content-storage#content-types), or that has no extension, is stored with the content type `text/markdown` unless its content is JSON, HTML or XML, which the library detects first. Such a file is split by Markdown heading. A `# ` comment in a script such as `setup.rb` therefore starts a new section, and a source file whose language has no such comments, such as `main.go`, `Main.java` or `main.c`, has no headings and becomes one section with an empty heading, however long it is. Keep a recognised extension, such as `.py`, `.sh` or `.txt`, on a file that is not Markdown.
+
+### Python source sections
+
+The Python strategy parses the file with the `ast` module and creates one section for each top-level `def`, `async def` and `class`. The heading is `def name` or `class Name`, and a class section includes all of its methods. Methods do not have sections of their own.
+
+```python
+source = '''"""Connection helpers."""
+import os
+
+LIMIT = 10
+
+
+@retry
+def connect(url):
+    return url
+
+
+class Pool:
+    def get(self):
+        return 1
+
+    def put(self, x):
+        return x
+
+
+DEFAULT = Pool()
+'''
+
+show(chunk_text(source, "pool.py"))
+```
+
+```text title="Output"
+0   1-7  'Imports & Module Docs'
+1   8-9  'def connect'
+2  12-17 'class Pool'
+```
+
+Text before the first definition becomes the section `Imports & Module Docs`, and a file with no definition becomes one section named `Module`. Lines between and after definitions belong to no section, so lines 10 to 11 and 18 to 20 above are in none. A decorator sits on the line before the `def` line, so it belongs to the previous section, as `@retry` does in `Imports & Module Docs`. A file that does not parse falls back to line windows.
+
+### Line windows
+
+A file in any other format is one section when it has 50 lines or fewer. The heading is the filename when the file has 30 lines or fewer, and `Lines 1-N` when it has 31 to 50 lines. A longer file is split into windows of 50 lines, and each window starts 40 lines after the previous one.
+
+```python
+log = "".join(f"line {number}\n" for number in range(1, 76))
+show(chunk_text(log, "log.txt"))
+```
+
+```text title="Output"
+0   1-50 'Lines 1-50'
+1  41-75 'Lines 41-75'
+```
+
+## Create sections
+
+`reindex_embeddings` creates sections for every text file that needs a pass, as described in [File search](/docs/agent-filesystem/concepts/search#store-embeddings). For each file, it embeds the whole content, splits the file with `chunk_text`, deletes the stored sections whose `section_idx` is at or above the new section count, and upserts one `file_section` record for each section. Only a caller that acts as `ROOT` may run it.
+
+```python
+runbook = """# Release runbook
+
+Notes for the release manager.
+
+## Deploying
+
+Run the smoke tests, then ship the release to production.
+
+## Rolling back
+
+Revert to the previous tag if the error rate rises. Undo schema changes last.
+
+## Billing impact
+
+Invoice jobs pause during a deploy. Payment retries resume afterwards.
+"""
+
+await alice.write_text("/runbooks/release.md", runbook)
+await alice.write_text("/home/alice/private.md", "# Private\n\nUndo the billing change quietly.\n")
+await alice.write_text("/scripts/setup.rb", "# install gems\nputs 'hi'\n\n# run tests\nputs 'bye'\n")
+
+print(await root.reindex_embeddings(embed, version="stand-in-1"))
+```
+
+```text title="Output"
+3
+```
+
+The method returns the number of files that it processed. The stored records are ordinary SurrealDB records that you can query:
+
+```surql
+SELECT section_idx, heading, line_start, line_end
+FROM file_section
+WHERE file_id.path = '/runbooks/release.md'
+ORDER BY section_idx;
+```
+
+```surql title="Output"
+[
+    { heading: 'Release runbook', line_end: 4, line_start: 1, section_idx: 0 },
+    { heading: 'Release runbook > Deploying', line_end: 8, line_start: 5, section_idx: 1 },
+    { heading: 'Release runbook > Rolling back', line_end: 12, line_start: 9, section_idx: 2 },
+    { heading: 'Release runbook > Billing impact', line_end: 15, line_start: 13, section_idx: 3 }
+]
+```
+
+The file `/scripts/setup.rb` is stored with the content type `text/markdown`, as described in [Markdown sections](#markdown-sections), so its comment lines start sections:
+
+```surql
+SELECT section_idx, heading, line_start, line_end
+FROM file_section
+WHERE file_id.path = '/scripts/setup.rb'
+ORDER BY section_idx;
+```
+
+```surql title="Output"
+[
+    { heading: 'install gems', line_end: 3, line_start: 1, section_idx: 0 },
+    { heading: 'run tests', line_end: 5, line_start: 4, section_idx: 1 }
+]
+```
+
+Each `file_section` record has these fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `file_id` | `record<file>` | The file that the section belongs to. |
+| `section_idx` | `int` | The position of the section. The pair `file_id` and `section_idx` is unique. |
+| `heading`, `line_start`, `line_end`, `content` | | The values that the chunker produced. |
+| `embedding` | `option<array<float, 1536>>` | The embedding of `content`, with an HNSW index named `idx_section_hnsw`. |
+| `source_hash` | `string` | The hash of `content`. |
+
+Some details of how sections are kept:
+
+- **Embedding cost.** A file of four sections costs five `embed` calls: one for the file and one for each section. A file that is a single section with the same text as the file reuses the file's embedding.
+- **Whole files are re-embedded.** When a file changes, every section of the file is embedded again. The stored `source_hash` is not used to skip sections that did not change.
+- **A shorter file loses sections.** When a rewrite produces fewer sections, the sections with a higher `section_idx` are deleted on the next pass.
+- **Sections are not current until the next pass.** A rewritten file keeps its old sections until `reindex_embeddings` runs again.
+- **Permissions.** A user can read a section when the user can read the parent file through the owner or other permission bits, as search does. A user who can read a file only through its group does not see the sections of the file. Only root and the [`indexer` access](/docs/agent-filesystem/security/record-access#what-the-database-does-not-isolate) can write sections.
+
+## Search sections
+
+`search_sections` takes a query vector and returns the nearest sections of the files that the caller may read. It is a vector search only, and there is no full-text arm for sections.
+
+<Synopsis label="Signature">
+search_sections(vector, *, limit=20) -> list[SectionHit]
+</Synopsis>
+
+```python
+vector = await embed("undo a bad change")
+for hit in await alice.search_sections(vector, limit=2):
+    print(f"{hit.path}  {hit.heading}  lines {hit.lines}  score {hit.score}")
+```
+
+```text title="Output"
+/runbooks/release.md  Release runbook > Rolling back  lines 9-12  score 0.0
+/home/alice/private.md  Private  lines 1-3  score 0.0
+```
+
+A `SectionHit` has `path`, `heading`, `line_start`, `line_end`, `content` and `score`, and a `lines` property that gives `"9-12"`. The `content` is the text of the section only, so a hit costs less of an agent's context than the whole file would. The permission filter applies to the parent file, so `bob` does not receive sections of Alice's private file. The Python library creates a folder directly under `/home` with mode `0o700`, which makes `/home/alice` private. See [Permissions](/docs/agent-filesystem/security/permissions#home-directories):
+
+```python
+print(sorted({hit.path for hit in await alice.search_sections(vector, limit=10)}))
+print(sorted({hit.path for hit in await bob.search_sections(vector, limit=10)}))
+```
+
+```text title="Output"
+['/home/alice/private.md', '/runbooks/release.md', '/scripts/setup.rb']
+['/runbooks/release.md', '/scripts/setup.rb']
+```
+
+> [!WARNING]
+> `SectionHit.score` is always `0.0` in version 0.2.0. The database function returns the cosine distance in a field named `distance`, and the Python class reads a field named `score`. The hits are still ordered nearest first. Use the order, and call the SQL function when you need the distance.
+
+The SurrealQL function is `fn::sfs_search_sections($qvec, $k, $me)`. It takes a vector of 1,536 floats, a limit that defaults to 20 and an identity, and the identity rules are the same as for [file search](/docs/agent-filesystem/concepts/search#permission-filtering). It returns `path`, `heading`, `line_start`, `line_end`, `content` and `distance`, nearest first, from a pool of 80 candidates. Run it from Python with the vector as a variable. The `query` method returns one list of records for each statement in the query, so `rows[0]` holds the records of the `SELECT`:
+
+```python
+rows = await db.query(
+    "SELECT path, heading, line_start, line_end, distance FROM fn::sfs_search_sections($vector, 2, 'alice')",
+    {"vector": vector},
+)
+for row in rows[0]:
+    print(row)
+```
+
+```text title="Output"
+{'distance': 0.009276241340524738, 'heading': 'Release runbook > Rolling back', 'line_end': 12, 'line_start': 9, 'path': '/runbooks/release.md'}
+{'distance': 0.29552136090270387, 'heading': 'Private', 'line_end': 3, 'line_start': 1, 'path': '/home/alice/private.md'}
+```
+
+### The search_sections tool
+
+The tool registry has a `search_sections` tool for agents. It takes these arguments:
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `query` | string | The text to look for. The tool embeds it, so it matches by meaning and not by keyword. |
+| `path` | string, optional | An exact path or a folder prefix. The tool applies it after the limit, so a scoped call can return fewer than `limit` hits. |
+| `limit` | integer | The maximum number of hits, from 1 to 50. The default is 10. |
+
+The tool needs an `embed` function in its `ToolContext`. Without one it replies `Section search requires embedding to be configured.` Each hit is printed as a heading line with the path, the heading and the score, followed by the text of the section:
+
+```python
+from surrealfs.integrations.json_tools import call_tool
+from surrealfs.tools import ToolContext
+
+context = ToolContext(fs=alice, embed=embed)
+print(await call_tool(context, "search_sections", {"query": "undo a bad change", "limit": 1}))
+```
+
+```text title="Output"
+### /runbooks/release.md #Release runbook > Rolling back (score: 0.000):
+## Rolling back
+
+Revert to the previous tag if the error rate rises. Undo schema changes last.
+```
+
+The score in the output is the `0.0` of the warning above.
+
+## Split a file from the command line
+
+The `surrealfs-rs chunk PATH` command reads a file from Agent Filesystem, splits it and prints the sections as JSON. It stores nothing, so it is a way to preview how a file would be split. It needs the `surrealfs-rs` program, which the [command-line quickstart](/docs/agent-filesystem/quickstarts/command-line) installs. The commands read their connection settings from the variables below, which differ from the `SURREALDB_NAMESPACE` and `SURREALDB_DATABASE` names that the Python library reads. See [Settings for `surrealfs-rs`](/docs/agent-filesystem/interfaces/command-line#settings-for-surrealfs-rs).
+
+```bash
+export SURREALDB_URL=ws://127.0.0.1:8000/rpc
+export SURREALDB_USER=root SURREALDB_PASS=secret
+export SURREALDB_NS=agents SURREALDB_DB=sections
+```
+
+The Python examples above defined the schema in this database. In a database that they did not use, run `surrealfs-rs init` first. The next commands write a file and split it:
+
+```bash
+surrealfs-rs write /docs/guide.md $'# Guide\n\nIntro text.\n\n## Auth\n\nTokens expire.\n'
+```
+
+```bash
+surrealfs-rs chunk /docs/guide.md
+```
+
+```json title="Output"
+[
+  {
+    "section_idx": 0,
+    "heading": "Guide",
+    "line_start": 1,
+    "line_end": 4,
+    "content": "# Guide\n\nIntro text.\n",
+    "source_hash": "d3f15ab9817a2572b05f3943f7019930e3bfd7c9fa3cf79e33803dc4a7661409"
+  },
+  {
+    "section_idx": 1,
+    "heading": "Guide > Auth",
+    "line_start": 5,
+    "line_end": 7,
+    "content": "## Auth\n\nTokens expire.",
+    "source_hash": "058922612a2ee3eb55424f1953abebd7efe9549dcb9ace4ffc2b3edd1d4cddb1"
+  }
+]
+```
+
+The Rust splitter differs from the Python one in these ways:
+
+| Difference | Python library | Rust (`surrealfs-rs chunk`) |
+| --- | --- | --- |
+| Markdown detection | `.md`, `.markdown`, `.mdown` and the content type `text/markdown` | `.md` and `.markdown` only, and the content type is not consulted |
+| Python source | One section per top-level definition | No special handling, so a `.py` file follows the line rules |
+| `source_hash` | MD5, 32 characters | SHA-256, 64 characters |
+| Line endings | Kept in `content` | Sections made by joining lines (Markdown with headings, and the windows of a file of more than 50 lines) have no newline after their last line. A single-section result keeps the text unchanged |
+| Heading of a file of 30 lines or fewer that is not Markdown | The filename that the caller passes, which is the name of the file when `reindex_embeddings` splits it | The whole path that was passed, such as `/docs/notes.txt` |
+
+## Limitations in this release
+
+- **Sections come from one path.** Only the Python `reindex_embeddings` method stores `file_section` records, and it needs root and an embedding function. The Rust command prints sections without storing them, and the TypeScript SDK has no chunker.
+- **The gateway stores no sections.** After a write, the gateway that `surrealfs-rs serve gateway` starts splits the text at Markdown headings with a splitter of its own, which differs from the one on this page, and calls the Rust method `index_file_sections`. That method sets the fields `level` and `updated_at`, which the `file_section` table does not define, and leaves out the required field `source_hash`. The database rejects the statement and the gateway ignores the error, so no section is stored.
+- **The `chunk` job does nothing.** Every write adds a `chunk` job to the job queue, and no code in the release processes it. See [Content analysis](/docs/agent-filesystem/concepts/understanding-pipeline).
+- **Python code sections cover top-level definitions only.** Methods, nested functions, statements between definitions and decorators are not sections of their own.
+- **Section search matches by embedding only.** The `search_sections` tool describes keyword matching in its text, and the implementation embeds the query.
+- **The TypeScript `searchSections` method passes its path prefix as the identity.** It does not scope the results by path, and it searches as the identity that the prefix names, which is the empty string by default. It also reads field names that the function does not return, so the distances and the line numbers come back as 0.
+- **The Rust `search_sections` method is a brute-force scan.** It applies no permission filter and the `surrealfs-rs` command does not expose it.
+- **Sections are unrelated to storage chunks.** The byte-level chunks that store large files are a different mechanism. See [Content storage](/docs/agent-filesystem/concepts/content-storage).
+
+> [!WARNING]
+> Deleting a file does not delete its section records. After `rm`, the orphaned sections stay in the table. A root caller then receives them with no `path`, and a non-root caller of `search_sections` fails whenever an orphan is among the 80 nearest candidates. Running `reindex_embeddings` does not remove orphans.
+
+The error of that failure reads as follows:
+
+```text title="Error output"
+Incorrect arguments for function fn::sfs_can_read(). Failed to coerce argument `$owner`: Expected `string` but found `NONE`
+```
+
+This SurrealQL statement removes every section whose file no longer exists:
+
+```surql
+DELETE file_section WHERE !record::exists(file_id);
+```
+
+## See also
+
+- [File search](/docs/agent-filesystem/concepts/search) covers full-text, vector and hybrid search, and how embeddings are stored.
+- [Content analysis](/docs/agent-filesystem/concepts/understanding-pipeline) covers the job queue and the other analysis features.
+- [Data model](/docs/agent-filesystem/concepts/data-model) describes the `file` table that sections belong to.
+- [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas) lists the arguments of every tool, including `search_sections`.

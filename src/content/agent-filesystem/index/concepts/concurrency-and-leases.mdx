@@ -1,0 +1,384 @@
+---
+position: 7
+title: Concurrency and leases
+description: "How Agent Filesystem handles several agents writing the same file: the generation counter, conditional writes with if_generation, conflict errors, retries and advisory leases."
+---
+
+# Concurrency and leases
+
+When several agents write to the same file, the last write replaces the earlier ones unless a write states which version of the file it started from. Agent Filesystem gives every file a **generation** number for that purpose, so a write can be refused when the file has changed since the agent read it. It also provides **advisory leases**, which let cooperating agents announce that they are working on a file.
+
+The database enforces the generation counter when the connection signs in with a system credential. Under [record authentication](#record-authentication) the counter does not advance. A lease is a record that agents agree to respect, and the database does not use it to block writes.
+
+The examples on this page use the Python library, which is the most complete implementation in this release. Start SurrealDB and install the library as described in the [Python quickstart](/docs/agent-filesystem/quickstarts/python), which starts the server with `surreal start --user root --pass secret memory`. The examples use an empty database named `concurrency`, and the outputs assume that it holds no other files. They share the connection below, and later snippets reuse `alice` and `bob`. They use top-level `await`, so run them in `python -m asyncio` or wrap them in an `async` function.
+
+```python
+from surrealdb import AsyncSurreal
+from surrealfs import ConflictError, SurrealFs, apply_schema
+
+db = AsyncSurreal("ws://localhost:8000/rpc")
+await db.signin({"username": "root", "password": "secret"})
+await db.use("agents", "concurrency")
+await apply_schema(db)
+
+alice = SurrealFs(db, user="alice")
+bob = SurrealFs(db, user="bob")
+```
+
+> [!NOTE]
+> Agent Filesystem is in beta. The API, schema and command-line interface may change in breaking ways between releases. This page describes the behaviour of the `next` branch of the SurrealFS repository, and each limitation that applies is listed where it matters.
+
+## The generation counter
+
+Every file record has an integer field named `generation`. It starts at 1 when the file is created, and the schema adds 1 each time a write changes the stored content, meaning the text or the bytes. A client cannot set the field, because the schema recomputes it on every write.
+
+| Operation | Effect on `generation` |
+| --- | --- |
+| Create a file | Starts at 1 |
+| `write_text` or `write_bytes` with different content | Adds 1 |
+| `append_text` or `edit` that changes the content | Adds 1 |
+| `write_text` with content identical to the stored content | Unchanged (`updated_at` still changes) |
+| `chmod` or `mv` | Unchanged |
+| `restore` of an earlier generation | Adds 1, so the restored content gets a new generation |
+| A [collaborative editing](/docs/agent-filesystem/concepts/collaborative-editing) update that changes the text | Adds 1 |
+| A [workspace](/docs/agent-filesystem/concepts/workspaces) merge that changes the file | Adds 1. In a file that uses collaborative editing, the next collaborative write discards the merged text. |
+
+The `stat` call returns the current generation. The `write_text`, `write_bytes`, `append_text` and `mv` methods of the Python library return the updated file entry, which carries the new generation. The Python `edit` method returns a unified diff and `chmod` returns a count, so call `stat` to read the generation after either of them.
+
+```python
+entry = await alice.write_text("/plans/launch.md", "# Launch plan\n", create_parents=True)
+print(entry.generation)
+
+entry = await alice.append_text("/plans/launch.md", "- Draft the announcement\n")
+print(entry.generation)
+
+await alice.chmod("/plans/launch.md", 0o644)
+await alice.mv("/plans/launch.md", "/plans/launch-plan.md")
+print((await alice.stat("/plans/launch-plan.md")).generation)
+```
+
+```text title="Output"
+1
+2
+2
+```
+
+The previous states of a file are kept as versions, and the generation of a version is the generation the file had before the change. The history of a file therefore lists the states that it has left, and never its current content. A `chmod` or `mv` leaves the generation unchanged, so its version carries the generation that is still live. Each version records the path of the file at the time of the change, and a rename records the new path, so the history of a path that a file was moved to starts at the move. In the example above, the history of `/plans/launch-plan.md` holds one version, a rename at generation 2, and the earlier versions are under `/plans/launch.md`. See [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) for how to list, compare and restore them.
+
+## Conditional writes
+
+A write can carry the generation the agent last read. The database applies the write only if the file is still at that generation, and otherwise refuses it with a conflict error. In the Python library the parameter is `if_generation`.
+
+In the example below, both agents read generation 1 of the same file. Bob writes first, so Alice's write is refused.
+
+```python
+await alice.write_text("/plans/budget.md", "Budget: 10\n")
+seen = (await alice.stat("/plans/budget.md")).generation
+
+await bob.write_text("/plans/budget.md", "Budget: 12\n", if_generation=seen)
+
+try:
+    await alice.write_text("/plans/budget.md", "Budget: 11\n", if_generation=seen)
+except ConflictError as error:
+    print(error)
+
+print(repr(await alice.read_text("/plans/budget.md")))
+```
+
+```text title="Output"
+Generation mismatch on /plans/budget.md: expected 1, got 2
+'Budget: 12\n'
+```
+
+The conflict does not change the file. Alice has to read the file again, decide whether her change still applies, and write again with the new generation.
+
+A conditional write behaves as follows in these cases:
+
+- **Identical content:** A write of the content the file already holds succeeds when `if_generation` matches, and the generation stays the same.
+- **Missing file:** A write that carries `if_generation` to a path where no file exists raises `ConflictError` with the message `Generation mismatch on /path: file does not exist`. Create the file without `if_generation` first.
+- **Two writers at once:** The Python library checks the generation before it writes, and the database checks it again inside the update statement. When two writers hold the same generation at the same moment, one write succeeds and the other raises `ConflictError`. The loser sees `Conflict: generation mismatch on <path>`, without the two generations, when the check in the update statement catches it, and the message with the two generations when the check before the write catches it. Match on the exception class and not on the text.
+
+### Which calls accept a generation
+
+| Implementation | Calls | Parameter |
+| --- | --- | --- |
+| Python library | `write_text`, `write_bytes`, `append_text`, `edit` | `if_generation` |
+| TypeScript SDK | `writeText`, `appendText`, `editText` | `{ ifGeneration }` in the options argument |
+| Rust library | `write_text`, `write_bytes`, `edit_text` | `if_generation: Option<u64>` |
+| Tool registry (MCP server, Hermes, pydantic-ai, JSON tools) | `write_file`, `append_file`, `edit` | `if_generation` |
+| [WebDAV server](/docs/agent-filesystem/interfaces/network-servers) | `PUT` | An `If-Match: "gen-N"` header. A stale generation returns `412 Precondition Failed`. |
+
+The `write_bytes` tool and the `surrealfs-rs` command-line interface do not accept a generation. The Rust `append_text` method does not accept one either. The TypeScript SDK has no bytes method. Three limits apply to some of these calls:
+
+- **Collaborative files:** Only the Python library checks `if_generation` on a file that uses [collaborative editing](/docs/agent-filesystem/concepts/collaborative-editing). The TypeScript SDK and the Rust library ignore the expected generation for such a file.
+- **Rust `write_bytes` with data that is not valid UTF-8:** The method does not check the generation. When the generation is stale the update is skipped, and the call still returns the unchanged file entry as a success. When the path does not exist, the method creates the file although a generation was given. Data that is valid UTF-8 goes through `write_text` and raises `SurrealFsError::Conflict`. The WebDAV server writes through `write_bytes`, so a `PUT` with a binary body ignores a stale `If-Match` in the same way and returns `201 Created`, while a `PUT` with a text body returns `412`.
+- **Record authentication:** The generation does not advance, so the check does not detect a stale write. See [Record authentication](#record-authentication).
+
+An agent that works through the tools cannot read the current generation directly, because no tool returns it from a read. The `append_file` tool reports it in its reply, as in `(now 42 bytes, gen 3)`, and a client that calls the library or the SDK can use `stat`.
+
+### Conflict errors by implementation
+
+| Situation | Python | TypeScript |
+| --- | --- | --- |
+| Stale expected generation | `ConflictError`: `Generation mismatch on /doc.md: expected 1, got 2`, or `Conflict: generation mismatch on /doc.md` when two writers race | `ConflictError`: `An error occurred: sfs:conflict` |
+| Expected generation, file missing | `ConflictError`: `Generation mismatch on /doc.md: file does not exist` | `ConflictError`: `An error occurred: sfs:conflict` |
+
+The Python `ConflictError` is a subclass of `SurrealFsError` and of the built-in `OSError`. The TypeScript `ConflictError` carries an empty `path` property, so the path of the conflicting file has to come from the call site. The Rust library maps `sfs:conflict` and transaction conflicts to `SurrealFsError::Conflict`. A lease conflict is not mapped in Rust: it is reported as `SurrealFsError::Database` with the text `sfs:locked`, while Python and TypeScript raise `ConflictError` for it.
+
+A tool call that fails returns text that starts with `Error: ` to the model, for example `Error: Generation mismatch on /plans/budget.md: expected 1, got 2`.
+
+## Retry after a conflict
+
+A conflict means that another writer changed the file first, so the usual response is to read the file again and repeat the change. The helper below appends a line to a shared file and retries up to ten times. It reads the generation before it reads the content. If the file changes between the two reads, the generation is out of date and the write is refused, so no update is lost.
+
+```python
+import asyncio
+
+
+async def add_line(fs, path, line, attempts=10):
+    for _ in range(attempts):
+        current = await fs.stat(path)
+        text = await fs.read_text(path)
+        try:
+            return await fs.write_text(path, text + line + "\n", if_generation=current.generation)
+        except ConflictError:
+            continue
+    raise RuntimeError(f"Gave up updating {path} after {attempts} attempts")
+
+
+await alice.write_text("/plans/todo.md", "")
+await asyncio.gather(*(add_line(alice, "/plans/todo.md", f"item {n}") for n in range(4)))
+
+print(sorted((await alice.read_text("/plans/todo.md")).splitlines()))
+print((await alice.stat("/plans/todo.md")).generation)
+```
+
+```text title="Output"
+['item 0', 'item 1', 'item 2', 'item 3']
+5
+```
+
+All four changes are present, and the generation moved from 1 to 5 because each of the four writes added 1.
+
+Each failed attempt means that another writer's write succeeded, so a helper needs at most as many attempts as there are concurrent writers. A helper with fewer attempts can give up. In local runs, 16 concurrent writers with the default of ten attempts raised `RuntimeError` for some writers in 4 of 5 runs, and `attempts=16` completed in 8 of 8 runs. Set `attempts` to at least the number of writers that can overlap.
+
+## Writes without a generation
+
+Without `if_generation`, a write does not check what the file held when the agent read it. The calls differ in how much that matters:
+
+| Call | Behaviour without `if_generation` |
+| --- | --- |
+| `write_text`, `write_bytes` | The last writer wins. The earlier content stays available in the file's history. |
+| `append_text` | The Python library appends to the stored content in a single statement. Each append is applied atomically, and none is lost without an error. Under heavy contention a call can raise `QueryError` with `retryable` set to `True` after the library's five attempts, and the caller has to repeat it. In local runs, 20 concurrent calls on one file all succeeded, and 100 concurrent calls left between 38 and 40 failures. The file held one line for each call that succeeded. |
+| `edit` | The Python library reads the whole content, replaces the text in the client, and writes the whole content back. Two concurrent edits to different lines can overwrite each other, so one of them is lost. |
+
+Use `if_generation` for any `edit` or `write_text` on a file that more than one agent can change.
+
+## Automatic retries
+
+The database reports a transaction conflict when two statements change the same record at the same time. The Python library makes up to five attempts at such a statement, and waits 20, 40, 80 and 160 ms between the attempts. After the fifth failure it raises `QueryError` with `retryable` set to `True`.
+
+The TypeScript SDK and the Rust library do not retry. A concurrent call there can fail with `ConflictError` even when the call carried no generation, and the caller has to repeat it. In a local test of 20 concurrent `appendText` calls on one file, 17 of the calls raised `ConflictError`.
+
+## Record authentication
+
+> [!WARNING]
+> Under [record authentication](/docs/agent-filesystem/security/record-access), where each agent signs in as a record user, the `generation` field stays at 1. The field's update permission is `false`, so the database does not store the new value for a record user. A write that carries `if_generation=1` keeps succeeding after other writers have changed the file, so the check does not detect a stale write, and a write that carries any other value is refused because the stored value is 1. The merge of a [workspace](/docs/agent-filesystem/concepts/workspaces), which compares generations, does not detect a concurrent change either.
+
+A connection that signs in with a system credential increments the counter as described above. The surfaces that read the `SURREALDB_*` environment variables, which are the `surrealfs` command, the MCP server and Hermes, sign in with a system credential unless `SURREALDB_AUTH_LEVEL` is `record`, and a caller of the library chooses the credential when it signs in to SurrealDB. The `surrealfs init` command, which the [MCP and Claude quickstart](/docs/agent-filesystem/quickstarts/mcp-and-claude) uses, writes `SURREALDB_AUTH_LEVEL=record` to the configuration file, so the MCP server that reads that file runs under record authentication, where the counter stays at 1.
+
+## Advisory leases
+
+A lease is a claim on one file for a limited time. While an agent holds a lease, no other holder can take a lease on the same file, so agents that check for leases before they write do not work on the same file at once. The lease belongs to the file record, so a lease on a folder does not cover the files inside it.
+
+> [!WARNING]
+> A lease is advisory. The database does not consult it when a file is written, moved or removed, so an agent that ignores leases can still change a leased file. A lease only has an effect when every agent acquires one before it writes.
+
+Leases are stored in the `file_lock` table, one record per file:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `file` | `record<file>` | The leased file. A unique index allows one lease per file. |
+| `path` | `string` | The path at the time the lease was taken or renewed |
+| `holder` | `string` | Who holds the lease |
+| `reason` | `string` | Free text, `advisory lease` by default |
+| `expires_at` | `datetime` | When the lease ends, computed from the server clock |
+
+### Acquire a lease
+
+The `acquire_lock` method takes a path, a time to live in seconds (default 60) and a reason. The time to live and the reason are keyword-only arguments, so `acquire_lock(path, 30)` raises `TypeError`. The method returns the lease record as a dictionary, and it raises `NotFound` when the path does not exist. A `ttl_seconds` of zero is accepted and produces a lease that has already expired. Files and folders can both be leased, but a lease on a folder protects only the folder record, and another holder can still lease a file inside it.
+
+```python
+await alice.write_text("/reports/q3.md", "# Q3\n", create_parents=True)
+
+lease = await alice.acquire_lock("/reports/q3.md", ttl_seconds=120, reason="drafting the summary")
+print(lease["holder"], lease["path"], lease["reason"])
+```
+
+```text title="Output"
+alice /reports/q3.md drafting the summary
+```
+
+While the lease is active, any other holder who tries to acquire it receives `ConflictError`. The database throws `sfs:locked`, which the Python library reports as `An error occurred: sfs:locked`. The message does not name the holder, so read the `file_lock` table to find out who has the lease. There is no queue, no wait and no automatic retry, so a caller that needs the file has to try again later.
+
+```python
+try:
+    await bob.acquire_lock("/reports/q3.md")
+except ConflictError as error:
+    print(error)
+```
+
+```text title="Error output"
+An error occurred: sfs:locked
+```
+
+The lease is an ordinary record that any query can read:
+
+```surql
+SELECT path, holder, reason, expires_at FROM file_lock;
+```
+
+```surql title="Sample output"
+[
+	{
+		expires_at: d'2026-10-14T22:43:10.672331Z',
+		holder: 'alice',
+		path: '/reports/q3.md',
+		reason: 'drafting the summary'
+	}
+]
+```
+
+### Renew and release a lease
+
+The holder renews a lease by calling `acquire_lock` again. The call updates the same lease record with a new `expires_at` and a new reason. There is no heartbeat and no separate renewal call, so an agent that works for longer than the time to live has to renew the lease itself.
+
+The `release_lock` method deletes the lease and returns `True`. It also returns `True` when no lease exists, and it raises `NotFound` when the path does not exist. A caller that is not the holder gets `ConflictError` while the lease is active, and can release it after `expires_at` has passed.
+
+```python
+await alice.acquire_lock("/reports/q3.md", ttl_seconds=120, reason="reviewing the figures")
+print(await alice.release_lock("/reports/q3.md"))
+print(await alice.release_lock("/reports/q3.md"))
+```
+
+```text title="Output"
+True
+True
+```
+
+### Expiry
+
+A lease ends when `expires_at` passes on the server clock. The database does not delete expired leases in the background. It evaluates expiry when someone next acquires or releases the lease. The record of an expired lease on a file that still exists stays in the table until another holder replaces it or someone deletes it, so a query for the active leases has to filter on `expires_at`, as in `SELECT path, holder FROM file_lock WHERE expires_at > time::now()`. The following statement removes the records of expired leases:
+
+```surql
+DELETE file_lock WHERE expires_at < time::now();
+```
+
+### Lease as a context manager
+
+The `lease` method acquires a lease when the block starts and releases it when the block ends, including when the block raises an exception. It raises `ConflictError` on entry if another holder has the lease, and it does not retry. It does not renew the lease either, so a block that outlasts `ttl` runs with an expired lease. The time to live is named `ttl` in this method and `ttl_seconds` in `acquire_lock`.
+
+```python
+try:
+    async with alice.lease("/reports/q3.md", ttl=120, reason="editing") as held:
+        print(held["holder"])
+        raise RuntimeError("the agent stopped")
+except RuntimeError:
+    pass
+
+taken = await bob.acquire_lock("/reports/q3.md", ttl_seconds=120)
+print(taken["holder"])
+await bob.release_lock("/reports/q3.md")
+```
+
+```text title="Output"
+alice
+bob
+```
+
+### Leases from the command line
+
+The `surrealfs` command acquires, lists and releases leases. It connects with the `SURREALDB_*` environment variables and, except under record authentication, applies the schema to the database it reaches, so set the URL, the namespace and the database before the first command. The holder is the value of `SURREALFS_AGENT_USER`, with each run of characters other than letters, digits, underscores and hyphens replaced by a hyphen, or the name of the operating system account when the variable is not set. Under record authentication the holder is the signed-in user. The command refuses to act as `root`, and it does so by printing a Python traceback that ends with `RuntimeError: no agent may act as 'root'`.
+
+```bash
+export SURREALDB_URL=ws://localhost:8000/rpc
+export SURREALDB_NAMESPACE=agents
+export SURREALDB_DATABASE=concurrency
+export SURREALDB_USER=root
+export SURREALDB_PASS=secret
+export SURREALDB_AUTH_LEVEL=root
+export SURREALFS_AGENT_USER=carol
+
+surrealfs lock acquire /reports/q3.md --ttl 120 --reason "checking figures"
+surrealfs lock list
+surrealfs lock release /reports/q3.md
+```
+
+The `acquire` command prints the lease as a Python dictionary, and the `release` command prints `Released lease on /reports/q3.md`. The `lock list` command prints the active leases, or `No active leases.` when there are none:
+
+```text title="Sample output"
+PATH                           HOLDER          EXPIRES AT                REASON
+--------------------------------------------------------------------------------
+/reports/q3.md                 carol           2026-10-14 22:43:24.505050+00:00 checking figures
+```
+
+### Leases and writes
+
+The example below shows that a lease does not stop another agent from writing. Alice holds the lease, and Bob's write succeeds regardless.
+
+```python
+await alice.acquire_lock("/reports/q3.md", ttl_seconds=120, reason="editing")
+await bob.write_text("/reports/q3.md", "# Q3, edited by Bob\n")
+print(await alice.read_text("/reports/q3.md"))
+```
+
+```text title="Output"
+# Q3, edited by Bob
+```
+
+To protect a file from a stale write, combine the two mechanisms. The lease tells cooperating agents that someone is working on the file, and `if_generation` makes the database refuse any write that started from an out-of-date copy.
+
+```python
+await alice.acquire_lock("/reports/q3.md", ttl_seconds=120, reason="editing")
+try:
+    current = await alice.stat("/reports/q3.md")
+    text = await alice.read_text("/reports/q3.md")
+    await alice.write_text("/reports/q3.md", text + "Summary written.\n", if_generation=current.generation)
+finally:
+    await alice.release_lock("/reports/q3.md")
+```
+
+### Holder identity
+
+The holder is a string. When the connection uses a system credential, the holder is whatever the client passes: the Python library passes the `user` given to `SurrealFs`, and the database does not verify it. With [record authentication](/docs/agent-filesystem/security/record-access) the database uses the authenticated user. Under a system credential, `acquire_lock` and `release_lock` also skip the permission checks that the Python library applies to reads and writes, so a user can take a lease on a file that the user cannot read.
+
+A lease excludes only callers whose holder strings differ. A caller that acquires a lease it already holds renews it and succeeds, so several tasks that share one `SurrealFs` object, and therefore one `user`, all acquire the same lease. Give every contender its own `SurrealFs` object with a distinct `user`. The same rule applies to the `surrealfs` command, whose holder is the operating system account or `SURREALFS_AGENT_USER`, and to the `surrealfs-rs` command, whose holder is `--caller`. In local tests of the lease recipe in [Collaborative editing](/docs/agent-filesystem/concepts/collaborative-editing#concurrent-calls), ten tasks with distinct users lost no line in 10 of 10 runs, and ten tasks that shared one user lost lines in 7 of 10 runs.
+
+### Leases on each interface
+
+| Interface | Calls |
+| --- | --- |
+| Python library | `acquire_lock`, `release_lock`, `lease` (there is no method that lists leases) |
+| TypeScript SDK | `acquireLock(path, { ttlSeconds, reason })`, `releaseLock(path)`, `listLocks()` |
+| Rust library | `acquire_lock(path, ttl_seconds, reason, holder)`, `release_lock(path, holder)`, `list_locks()` |
+| `surrealfs` command | `surrealfs lock acquire PATH [--ttl N] [--reason TEXT]`, `surrealfs lock release PATH`, `surrealfs lock list` |
+| `surrealfs-rs` command | `surrealfs-rs lock acquire PATH [-t N] [-r TEXT]`, `surrealfs-rs lock release PATH`, `surrealfs-rs lock list` |
+| Tool registry | `acquire_lease` (`path`, `ttl_seconds` from 1 to 3600, `reason`) and `release_lease` (`path`) |
+| [WebDAV server](/docs/agent-filesystem/interfaces/network-servers) | `LOCK` and `UNLOCK`. The holder is `webdav-client`, `Timeout: Second-N` sets the time to live, and the lease token is not stored or checked. |
+
+The Rust command takes its holder from the global `--caller` option, which defaults to `root`.
+
+## Limitations in this release
+
+- **The `acquire_lease` tool fails after it takes the lease.** In the Python tool registry, which the MCP server, Hermes and pydantic-ai share, the handler raises `AttributeError` while it formats its reply, after the lease record has been stored. The `call_tool` function of the JSON tools does not catch that exception, so a loop that calls it directly has to handle it, and the MCP server returns a JSON-RPC error to the client. The lease stays until its time to live ends, and `release_lease` works. The TypeScript tools in `@surrealdb/fs/ai` are not affected. See [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas).
+- **An agent that has only tools cannot coordinate dependably.** No tool returns the generation after a read, so `if_generation` has nothing to take except the value that `append_file` prints, and the `acquire_lease` tool fails as described above. Such an agent can use `append_file`, which changes the file in a single statement, in place of reading a file and writing it back, and it can call `release_lease` after a failed `acquire_lease`. It has no dependable way to hold a lease.
+- **A lease record keeps the path it was taken with.** After `mv` the record still shows the old path, although it continues to protect the same file. After `rm` the record stays in the table, because a lease belongs to the file record and a new file at the same path gets a lease record of its own. The `release_lock` method raises `NotFound` once the path no longer resolves, so the way to remove such a record is the `DELETE` statement under [Expiry](#expiry). Until the time to live ends, a query for the active leases lists it.
+- **Concurrent first writes into a new folder can fail.** When several callers write their first file into a folder that does not exist yet, one of them creates the folder and the others can raise `AlreadyExists` or `QueryError` from a unique index on the folder name. The Python library does not retry these errors. Writes into a folder that already exists do not have the problem.
+
+## See also
+
+- [Data model](/docs/agent-filesystem/concepts/data-model) describes the `file` table and its fields.
+- [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) covers how earlier generations are kept and restored.
+- [Collaborative editing](/docs/agent-filesystem/concepts/collaborative-editing) covers files that several agents can edit through a CRDT.
+- [Workspaces](/docs/agent-filesystem/concepts/workspaces) covers isolated copies of the filesystem that are merged back.
+- [Mailboxes](/docs/agent-filesystem/concepts/mailboxes) covers messages between agents.

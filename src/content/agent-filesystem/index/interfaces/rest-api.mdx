@@ -1,0 +1,959 @@
+---
+position: 13
+title: Gateway REST API
+description: "HTTP reference for the Agent Filesystem gateway: file, search and version routes, SurrealQL RPC, MCP over HTTP, identity headers, status codes and limits."
+---
+
+The gateway is the HTTP server of Agent Filesystem. On one port it serves a JSON REST API for files, search and versions, a route that runs SurrealQL, an MCP endpoint, WebDAV and S3 handlers, and an optional browser application. Use this page to call Agent Filesystem from a language that has no SDK, to build a web interface for a file tree, or to run the MCP tools over HTTP. It lists every route with its parameters, responses and errors, and it explains how the gateway identifies a caller. [Gateway server](/docs/agent-filesystem/interfaces/gateway-server) covers running the gateway.
+
+The gateway is a separate process from SurrealDB. It holds one set of SurrealDB credentials, and it turns each request into SurrealQL that calls the `fn::sfs_*` functions described in [Agent Filesystem functions](/docs/agent-filesystem/reference/surrealql-functions). The Rust crate `surrealfs-server` implements it.
+
+> [!NOTE]
+> Agent Filesystem is in beta. This page describes commit `76d2444` of the `next` branch of the [SurrealFS repository](https://github.com/surrealdb/surrealfs), version 0.2.0, run against SurrealDB 3.2.3. The `/api/chat` route was not run against a model provider, so its description comes from the source code. The [limitations](#limitations-in-this-release) at the end of the page list the behaviours that differ from what a route's name suggests.
+
+> [!WARNING]
+> A gateway that starts without `SURREALFS_SERVER_TOKEN` accepts every request without credentials, and it acts as the user `root` unless the request names another user. Its `POST /api/rpc` route runs any SurrealQL statement with the SurrealDB credentials of the gateway. The gateway speaks plain HTTP, and it checks neither the `Origin` header nor the `Host` header. Keep it on a loopback address, or put it behind a reverse proxy that terminates TLS and authenticates requests. See [Security](#security).
+
+## Start a gateway
+
+[Gateway server](/docs/agent-filesystem/interfaces/gateway-server) explains how to run the gateway, its settings and its limits. These steps are the shortest way to a gateway that the examples on this page can use. The [command-line quickstart](/docs/agent-filesystem/quickstarts/command-line#requirements) lists what you need to build Rust programs from the repository.
+
+First, start a SurrealDB server that keeps its data in memory. The server listens on `127.0.0.1:8000` and loses its data when it stops:
+
+```bash
+surreal start --user root --pass secret memory
+```
+
+Second, install the gateway program from the `next` branch of the repository:
+
+```bash
+cargo install --locked --git https://github.com/surrealdb/surrealfs --branch next surrealfs-server
+```
+
+Third, start the gateway with the password of the SurrealDB user:
+
+```bash
+SURREALDB_PASS=secret surrealfs-server
+```
+
+```text title="Sample output"
+SurrealFS Server listening on http://127.0.0.1:8787 -> http://127.0.0.1:8000 (surrealfs/main) [embeddings=false, chat=false]
+```
+
+The program applies the schema when it starts. The line shows the address that the gateway listens on, the SurrealDB URL, the namespace and database, and whether embeddings and chat are enabled. The command `surrealfs-rs serve gateway` runs the same handler with a different launch: it takes `--addr` where `surrealfs-server` takes `--bind`, it does not apply the schema, and its default database is `surrealfs` where the default of `surrealfs-server` is `main`. [The serve gateway command](/docs/agent-filesystem/interfaces/gateway-server#the-serve-gateway-command) lists every difference.
+
+Fourth, in a second terminal, set the base URL and call the health route:
+
+```bash
+export GATEWAY=http://127.0.0.1:8787
+curl -s "$GATEWAY/api/health"
+```
+
+```json title="Output"
+{"chat_enabled":false,"embeddings_enabled":false,"status":"ok","version":"0.2.0"}
+```
+
+Every example on this page uses `$GATEWAY` as the base URL. The sample outputs come from a gateway that listened on another port, and their `updated_at` values differ from the ones that you get.
+
+## First requests
+
+The commands in this section write a file, read it back, change it twice and search for it. They show the shape of the JSON that the routes return, and each route is described in the sections that follow.
+
+Write a file. A `PUT` creates the file and any missing parent folders:
+
+```bash
+curl -s -X PUT -H 'Content-Type: application/json' \
+  -d '{"path": "/notes/roadmap.md", "content": "# Roadmap\n\nShip the gateway docs.\n"}' \
+  "$GATEWAY/api/file"
+```
+
+```json title="Sample output"
+{"content_type":"text/plain","filename":"roadmap.md","generation":1,"is_folder":false,"path":"/notes/roadmap.md","size":34,"updated_at":"2026-10-15T01:44:13.195179Z"}
+```
+
+The response is an entry, the JSON object that the routes return for a file or a folder, and [The entry object](#the-entry-object) lists its fields. The `generation` field numbers the versions of the file: a new file starts at 1, and each write that changes the content adds 1. [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) describes how versions work.
+
+Read it back. The response is the same entry with a `content` field:
+
+```bash
+curl -s "$GATEWAY/api/file?path=/notes/roadmap.md"
+```
+
+```json title="Sample output"
+{"content":"# Roadmap\n\nShip the gateway docs.\n","content_type":"text/plain","filename":"roadmap.md","generation":1,"is_folder":false,"path":"/notes/roadmap.md","size":34,"updated_at":"2026-10-15T01:44:13.228118Z"}
+```
+
+Write the file again with an extra line, then list its earlier versions. After these two writes the file is at generation 2, and the history holds generation 1 only:
+
+```bash
+curl -s -X PUT -d '{"path": "/notes/roadmap.md", "content": "# Roadmap\n\nShip the gateway docs.\nReview the search page.\n"}' \
+  "$GATEWAY/api/file"
+curl -s "$GATEWAY/api/history?path=/notes/roadmap.md"
+```
+
+```json title="Sample output"
+{"content_type":"text/plain","filename":"roadmap.md","generation":2,"is_folder":false,"path":"/notes/roadmap.md","size":58,"updated_at":"2026-10-15T01:44:13.409311Z"}
+[{"path":"/notes/roadmap.md","generation":1,"author":"root","op":"write","size":34,"reason":null,"created_at":"2026-10-15T01:44:13.410066Z"}]
+```
+
+Restore generation 1. The content of generation 1 differs from the current content, so the restore writes it as a new generation: the file moves to generation 3 and no version is lost:
+
+```bash
+curl -s -X POST -d '{"path": "/notes/roadmap.md", "generation": 1}' "$GATEWAY/api/restore"
+```
+
+```json title="Sample output"
+{"content_type":"text/plain","filename":"roadmap.md","generation":3,"is_folder":false,"path":"/notes/roadmap.md","size":34,"updated_at":"2026-10-15T01:44:13.592645Z"}
+```
+
+Search for a word in the content. Each result is an entry with a `snippet` and a `score`:
+
+```bash
+curl -s "$GATEWAY/api/search?q=gateway"
+```
+
+```json title="Sample output"
+{"hybrid":false,"results":[{"content_type":"text/plain","filename":"roadmap.md","generation":3,"is_folder":false,"path":"/notes/roadmap.md","score":0.281,"size":34,"snippet":"# Roadmap  Ship the gateway docs. ","updated_at":"2026-10-15T01:44:13.623836Z"}]}
+```
+
+Any HTTP client works the same way. These two programs write a file, read it and search for it:
+
+<Tabs syncKey="language-sdk">
+  <TabItem label="Python">
+
+```python
+import httpx
+
+gateway = "http://127.0.0.1:8787"
+
+with httpx.Client(base_url=gateway, timeout=30) as client:
+    client.put(
+        "/api/file",
+        json={"path": "/notes/standup.md", "content": "# Standup\n\nReview the gateway page.\n"},
+    ).raise_for_status()
+
+    entry = client.get("/api/file", params={"path": "/notes/standup.md"}).json()
+    print(entry["generation"], repr(entry["content"]))
+
+    hits = client.get("/api/search", params={"q": "standup"}).json()
+    for hit in hits["results"]:
+        print(hit["path"], hit["score"])
+```
+
+```text title="Sample output"
+1 '# Standup\n\nReview the gateway page.\n'
+/notes/standup.md 1.6291
+```
+
+  </TabItem>
+  <TabItem label="JavaScript">
+
+```javascript
+const gateway = "http://127.0.0.1:8787";
+
+async function call(path, init) {
+    const response = await fetch(`${gateway}${path}`, init);
+    if (!response.ok) {
+        throw new Error(`${response.status}: ${await response.text()}`);
+    }
+    return response.json();
+}
+
+await call("/api/file", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+        path: "/notes/standup.md",
+        content: "# Standup\n\nReview the gateway page.\n",
+    }),
+});
+
+const entry = await call(`/api/file?path=${encodeURIComponent("/notes/standup.md")}`);
+console.log(entry.generation, JSON.stringify(entry.content));
+
+const hits = await call(`/api/search?q=${encodeURIComponent("standup")}`);
+for (const hit of hits.results) {
+    console.log(hit.path, hit.score);
+}
+```
+
+```text title="Sample output"
+1 "# Standup\n\nReview the gateway page.\n"
+/notes/standup.md 1.6291
+```
+
+  </TabItem>
+</Tabs>
+
+The Python program needs the `httpx` package. The JavaScript program uses `fetch` and top-level `await`, and it ran in Node.js 26. The two outputs come from running each program once against the same gateway. The second program wrote the same text as the first, so the generation stayed at 1. The `score` depends on the other files in the database, so the value that you get can differ from 1.6291.
+
+## Authentication and identity
+
+The gateway runs each request as a caller, which is a user name such as `alice` or `root`. It passes the caller to the SurrealQL functions as the variable `$caller`. The caller becomes the owner of a file that the request creates, and it decides which files a read of content can return.
+
+Two things set the caller. `SURREALFS_SERVER_TOKEN` is an optional shared secret that you set when you start the gateway, and `X-SurrealFS-User` is a request header that names a user. The table shows what the gateway does with the `Authorization` header of a request:
+
+| `Authorization` header | Gateway with a server token | Gateway without a server token |
+| --- | --- | --- |
+| None | `401` with `Authentication required` | The caller is the value of `X-SurrealFS-User`, or `root` when the header is absent. |
+| `Bearer` with the server token | The caller is the value of `X-SurrealFS-User`, or `root` when the header is absent. | Not applicable. The gateway has no token to compare with, so the header follows the last two rows. |
+| A value that matches a credential in the credential store | The caller is the user that owns the credential. The gateway ignores `X-SurrealFS-User`. | The same. |
+| Any other value | `401` with `Invalid authentication credentials` | The gateway ignores the header, so the caller is the value of `X-SurrealFS-User`, or `root` when the header is absent. |
+
+The credential store is the one that [Protocol credentials](/docs/agent-filesystem/security/credentials) describes. The gateway matches three forms of header against it:
+
+- A `Bearer` header matches a credential of kind `bearer` whose identifier is the token. The secret of that credential plays no part in the match.
+- A `Basic` header matches the identifier and secret of a credential of kind `webdav`, and then of kind `s3`.
+- An `Authorization` header that starts with `AWS4-HMAC-SHA256`, followed by a comma and `Credential=ACCESS_KEY/...`, matches the `s3` credential with that access key. The gateway does not verify the signature that follows, and it does not match the form that AWS tools send, with a space after the algorithm name.
+
+[Gateway server](/docs/agent-filesystem/interfaces/gateway-server#identity-and-authentication) lists the status that each header gets from `/api`, `/dav` and `/s3`.
+
+The following examples use a second gateway that holds a server token. Start it beside the first one, on another port, in a new terminal:
+
+```bash
+SURREALDB_PASS=secret SURREALFS_SERVER_TOKEN=hunter123 surrealfs-server --bind 127.0.0.1:8788
+```
+
+In the terminal that you use for requests, set the address of the second gateway. A request without the token gets `401`:
+
+```bash
+export TOKEN_GATEWAY=http://127.0.0.1:8788
+curl -s -w "\nHTTP %{http_code}\n" "$TOKEN_GATEWAY/api/tree"
+```
+
+```json title="Output"
+{"error":"Authentication required"}
+HTTP 401
+```
+
+A client that holds the server token names the user to act as in a header:
+
+```bash
+curl -s -X POST -H 'Authorization: Bearer hunter123' -H 'X-SurrealFS-User: alice' \
+  -d '{"sql": "$caller;"}' "$TOKEN_GATEWAY/api/rpc"
+```
+
+```json title="Output"
+{"result":[{"result":"alice","status":"OK"}]}
+```
+
+Some details apply to every route:
+
+- `GET /api/health` needs no credentials. The gateway also serves static files without credentials. See [Other surfaces](#other-surfaces).
+- `OPTIONS` requests get an empty `204` response before the gateway looks at credentials. The response has no `Access-Control-Allow-*` headers.
+- The server token is one secret for every client, and its holder can act as any user by sending `X-SurrealFS-User`. To give each client its own identity, create a `bearer` credential for each user. A request with such a credential keeps that identity whatever `X-SurrealFS-User` says.
+- Without a server token, the gateway authenticates nobody. `X-SurrealFS-User` is then a claim that any client can make, and a request with a wrong `Authorization` header is accepted as `root`.
+- The routes `/dav` and `/s3` do not accept the server token. WebDAV answers `401`, and S3 answers `403`. `/dav` accepts a `Basic` credential from the store only, and `/s3` also accepts a stored `bearer` token and the comma form of the AWS header.
+
+The command `surrealfs-rs` comes from the `surrealfs-cli` crate of the same repository. It installs two executables, `surrealfs-rs` and `git-remote-surrealfs`:
+
+```bash
+cargo install --locked --git https://github.com/surrealdb/surrealfs --branch next surrealfs-cli
+```
+
+The command `surrealfs-rs credential create` takes the kind, the identifier, a secret and the user. The identifier of a `bearer` credential is the token that the client sends, and the secret is a required argument that this kind does not use. The command connects to SurrealDB and not to the gateway, so it needs the connection settings of the database:
+
+```bash
+export SURREALDB_URL=ws://127.0.0.1:8000/rpc SURREALDB_USER=root SURREALDB_PASS=secret
+export SURREALDB_NS=surrealfs SURREALDB_DB=main
+surrealfs-rs credential create bearer tok-alice-4f9a secret alice
+curl -s -X POST -H 'Authorization: Bearer tok-alice-4f9a' -H 'X-SurrealFS-User: bob' \
+  -d '{"sql": "$caller;"}' "$TOKEN_GATEWAY/api/rpc"
+```
+
+```text title="Output"
+Created credential tok-alice-4f9a (bearer) for alice
+{"result":[{"result":"alice","status":"OK"}]}
+```
+
+### What the caller controls
+
+The gateway connects to SurrealDB with a root user by default, and SurrealDB does not apply the permissions of the schema's tables to a root user. The only permission checks that remain are the ones inside the functions that read content, and the table shows which routes reach them:
+
+| Route | Checks the caller | Result for a caller that cannot read the file |
+| --- | --- | --- |
+| `GET /api/file` | Yes, for `content` | `200` with the entry and no `content` field. |
+| `GET /raw` | Yes | `403` with `Permission denied`. |
+| `GET /api/search`, and the MCP tools `search_hybrid` and `search_semantic` | Yes | The results leave the file out. |
+| The MCP tool `cat` | Yes | A tool result with `isError` set to `true`. |
+| The MCP tool `grep`, and `POST /api/rpc` | No | The matching lines and the content come back. |
+| `GET /api/tree`, `GET /api/stat`, `GET /api/history`, `GET /api/graph`, `GET /api/activity`, and the MCP tools `ls`, `stat` and `glob` | No | The metadata comes back. |
+| Every route that writes, moves, copies, restores or deletes | No | The change is accepted. |
+
+> [!WARNING]
+> In this release the gateway does not enforce permissions on changes. A caller named `bob` can overwrite and delete a file that `alice` owns, even when the file has the mode `0600`, which no other user can read. Use the gateway only for callers that you trust with every file in the database. [Permissions](/docs/agent-filesystem/security/permissions) describes the rules that apply to the other clients.
+
+The history of a file records an `author` for each version. The author is the owner of the file at the time of the change and not the caller, so a change that `bob` made to a file owned by `alice` appears under `alice`. A file that a request creates takes the caller as its owner, with the mode `0644` for a file and `0755` for a folder.
+
+## Request and response conventions
+
+These rules apply to every route under `/api`, to `/raw` and to `/mcp`.
+
+- **JSON bodies.** A request body is JSON. The gateway parses it whatever the `Content-Type` header says. The first `curl` example sends `application/json`, and most of the later ones leave the header out to keep the commands short. A body that is not valid JSON, or that lacks a required field, returns `400` with the parser message in `error`.
+- **Responses.** Responses are JSON with `Content-Type: application/json; charset=utf-8`, and the order of the keys in an object is not defined. Every response carries `connection: close`, and the gateway does not compress responses. The exceptions are `/raw`, which returns file bytes, and `/api/chat`, which returns newline-delimited JSON.
+- **Timestamps.** A time such as `updated_at` is a string in RFC 3339 format, in UTC, with microseconds and a trailing `Z`.
+- **Paths.** A path is absolute and starts with `/`. The gateway normalises the file paths that it receives in a body or a query string: it adds a missing leading `/`, removes `.` segments, resolves `..` segments, and removes repeated and trailing slashes. The body `{"path": "/a/../b/./c.txt"}` therefore writes `/b/c.txt`. The path of the HTTP request itself is not normalised, as [Other surfaces](#other-surfaces) explains for the static directory.
+- **Query strings.** The gateway decodes `%XX` sequences and reads `+` as a space, in the path of the request as well as in the query string. A path that contains a plus sign needs `%2B`. With `curl`, the options `-G --data-urlencode` encode a value for you.
+- **Exact routes.** A route matches its method and its path exactly. A trailing slash, a different method or a `HEAD` request returns `404` with `Unknown API route: METHOD PATH`. The gateway never answers `405` on `/api`.
+- **Request size.** The gateway reads a request body by its `Content-Length` header. It does not decode chunked request bodies, and a chunked body fails with `400`. It answers `400` to a request with headers larger than 64 KiB. A write of more than about 4 MiB to a `surrealfs-server` gateway fails with `500`, as the next section describes.
+- **No paging.** `GET /api/tree` returns every entry. The routes that return a list of matches have fixed limits: 20 results for search, 30 versions for history and 20 versions for activity. The REST routes ignore a `limit` parameter.
+
+A request with a plus sign in the query string shows how the gateway reads it. The error message repeats the path that the gateway decoded:
+
+```bash
+curl -s "$GATEWAY/api/stat?path=/notes/a+b.md"
+```
+
+```json title="Error output"
+{"error":"Not found: /notes/a b.md"}
+```
+
+The next commands write a file whose name holds plus signs, and read its entry with `-G --data-urlencode`, which writes each plus sign as `%2B`:
+
+```bash
+curl -s -X PUT -d '{"path": "/notes/c++ notes.md", "content": "c plus plus"}' "$GATEWAY/api/file"
+curl -s -G "$GATEWAY/api/stat" --data-urlencode "path=/notes/c++ notes.md"
+```
+
+```json title="Sample output"
+{"content_type":"text/plain","filename":"c++ notes.md","generation":1,"is_folder":false,"path":"/notes/c++ notes.md","size":11,"updated_at":"2026-10-15T01:44:14.478493Z"}
+{"content_type":"text/plain","filename":"c++ notes.md","generation":1,"is_folder":false,"path":"/notes/c++ notes.md","size":11,"updated_at":"2026-10-15T01:44:14.507539Z"}
+```
+
+### Large bodies
+
+A `surrealfs-server` gateway sends every write to SurrealDB as one HTTP request, and SurrealDB rejects a request body of more than 4 MiB by default. The variable `SURREAL_HTTP_MAX_RPC_BODY_SIZE` of the SurrealDB server changes the limit. See [Message size limits](/docs/reference/rest-api/rpc-protocol#message-size-limits). The request also holds the SurrealQL of the call, so the largest content is a little under 4 MiB. With the default limit, a `PUT` of 4,193,280 ASCII characters returns `200`, and a `PUT` of 4,195,328 ASCII characters returns `500`:
+
+```json title="Sample error output"
+{"error":"Database error: HTTP RPC invalid JSON: error decoding response body for url (http://127.0.0.1:8000/rpc)"}
+```
+
+A gateway that `surrealfs-rs serve gateway` starts uses a WebSocket to SurrealDB when its `--url` is a `ws://` URL, which is the default. A `PUT` of 5,242,880 ASCII characters returns `200` through such a gateway.
+
+When `curl` sends a body of more than 1 MiB, it adds `Expect: 100-continue` and waits about one second for an answer that the gateway never sends. Add `-H 'Expect:'` to remove the delay.
+
+### Errors
+
+An error response has a JSON body with one field, `error`. The status comes from the kind of failure:
+
+| Status | Meaning |
+| --- | --- |
+| `400` | A required parameter or body field is missing, a body is not valid JSON, the target is a folder where a file is needed, or a folder that has contents is removed without `recursive`. |
+| `401` | The gateway has a server token and the request has no valid credentials. |
+| `403` | The caller may not read the content of a file. |
+| `404` | The file or version does not exist, the route does not exist, or the schema is missing a function. |
+| `409` | `POST /api/file` finds that the path exists already, or two requests that overlap in time write the same path and the database reports a write conflict. The message of a write conflict contains `Transaction conflict: Write conflict, retry the transaction`, and the request can be sent again. |
+| `500` | Any other failure, including a database error, a copy onto a path that exists, a delete of a file under legal hold, and a request body above the size limit. |
+
+The message text repeats its prefix, because the gateway wraps a database error in a second message with the same label. The examples on this page show the messages as the gateway returns them.
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" "$GATEWAY/api/stat?path=/nope"
+curl -s -w "\nHTTP %{http_code}\n" "$GATEWAY/api/stat"
+curl -s -w "\nHTTP %{http_code}\n" -X DELETE "$GATEWAY/api/file?path=/notes"
+```
+
+```json title="Error output"
+{"error":"Not found: /nope"}
+HTTP 404
+{"error":"path required"}
+HTTP 400
+{"error":"Directory not empty: Directory not empty: An error occurred: sfs:not_empty"}
+HTTP 400
+```
+
+## Routes
+
+| Method and path | What it does |
+| --- | --- |
+| `GET /api/health` | Reports that the gateway runs. No credentials needed. |
+| `GET /api/tree` | Lists every file and folder. |
+| `GET /api/stat` | Returns the entry of one path. |
+| `GET /api/file` | Returns the entry of one path, with the text content of a file. |
+| `PUT /api/file` | Writes the text content of a file, and creates it when it does not exist. |
+| `POST /api/file` | Creates a file or a folder, and fails when the path exists. |
+| `DELETE /api/file` | Removes a file or a folder. |
+| `POST /api/move` | Moves or renames a file or a folder. |
+| `POST /api/copy` | Copies a file. |
+| `GET /raw` | Returns the bytes of a file. |
+| `GET /api/search` | Searches the content of files. |
+| `GET /api/history` | Lists the earlier versions of a file. |
+| `POST /api/restore` | Writes an earlier version as a new version. |
+| `GET /api/graph` | Returns the files as nodes and the relations between them as edges. |
+| `GET /api/activity` | Returns the active leases and the latest versions. |
+| `POST /api/index` | Runs the analysis of one file, or runs pending jobs. |
+| `POST /api/chat` | Runs one turn of a chat with a model that can use the file tools. |
+| `GET /api/session` | Lists stored chat transcripts, or reads one. |
+| `POST /api/rpc` | Runs SurrealQL. |
+| `GET /mcp`, `POST /mcp` | Speaks MCP over HTTP with 15 tools. |
+| `/dav`, `/s3` | WebDAV and S3-style handlers. |
+
+### The entry object
+
+The routes that return a file or a folder return an entry, a JSON object with these fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `path` | string | The absolute path. |
+| `filename` | string | The last segment of the path. It is empty for `/`. |
+| `is_folder` | boolean | `true` for a folder. |
+| `content_type` | string | `inode/directory` for a folder. For a file, the type that the file stores. A request of this API gives a new file `text/plain`, whatever its extension, and a `PUT` leaves the stored type of an existing file as it is. WebDAV stores a body that is valid UTF-8 as `text/plain`, and any other body as `application/octet-stream`. The Python library chooses a type from the extension and the content instead. |
+| `size` | integer | The number of characters in a text file, the number of bytes in a binary file, and 0 for a folder. |
+| `generation` | integer | The number of the current version of the file. A new file starts at 1, and each write or restore that changes the content adds 1. |
+| `updated_at` | string or null | The time of the last change. It is `null` for `/`. |
+| `content` | string | The text of the file. Only `GET /api/file` returns it, and only for a text file that the caller may read. |
+
+The entry leaves out the fields `owner`, `mode`, `group`, `created_at`, `hash` and `meta`. Read all of them with a `SELECT` through [`POST /api/rpc`](#sql-rpc). The MCP tool `stat` returns every one of them except `hash`. See the [data model](/docs/agent-filesystem/concepts/data-model) for the fields.
+
+A write whose content equals the current content changes `updated_at` and leaves the generation as it was, and it adds no version.
+
+### Files and folders
+
+#### List the tree
+
+`GET /api/tree` takes no parameters and returns an array with every entry in the filesystem except `/`, sorted by `path`. The sample lists the files that the earlier examples created, and the folder `/home`, which applying the schema creates. See the [data model](/docs/agent-filesystem/concepts/data-model) for `/home`. The route ignores a `path` parameter and always starts at `/`. The gateway lists the tree one folder at a time, so a tree with many folders takes many queries.
+
+```bash
+curl -s "$GATEWAY/api/tree"
+```
+
+```json title="Sample output"
+[{"content_type":"inode/directory","filename":"home","generation":1,"is_folder":true,"path":"/home","size":0,"updated_at":"2026-10-15T02:01:26.029548Z"},{"content_type":"inode/directory","filename":"notes","generation":1,"is_folder":true,"path":"/notes","size":0,"updated_at":"2026-10-15T02:01:28.026285Z"},{"content_type":"text/plain","filename":"c++ notes.md","generation":1,"is_folder":false,"path":"/notes/c++ notes.md","size":11,"updated_at":"2026-10-15T02:01:28.464172Z"},{"content_type":"text/plain","filename":"roadmap.md","generation":3,"is_folder":false,"path":"/notes/roadmap.md","size":34,"updated_at":"2026-10-15T02:01:28.301933Z"}]
+```
+
+#### Read an entry
+
+`GET /api/stat?path=PATH` returns the entry of a file or a folder, and it does not read content. A missing path returns `404`, and a request without `path` returns `400`. The path `/` returns an entry for the root with `updated_at` set to `null`.
+
+```bash
+curl -s "$GATEWAY/api/stat?path=/notes"
+```
+
+```json title="Sample output"
+{"content_type":"inode/directory","filename":"notes","generation":1,"is_folder":true,"path":"/notes","size":0,"updated_at":"2026-10-15T02:01:28.026285Z"}
+```
+
+`GET /api/file?path=PATH` returns the same entry, and for a text file it adds `content`. A folder, a binary file, and a file that the caller may not read come back without `content` and with status `200`. Read the bytes of a binary file with [`GET /raw`](#read-raw-bytes).
+
+#### Write a file
+
+`PUT /api/file` writes the content of a file, and it creates the file and its missing parent folders when the path does not exist. The status is `200` in both cases.
+
+| Body field | Type | Meaning |
+| --- | --- | --- |
+| `path` | string | The path to write. Required. |
+| `content` | string | The new text content. The default is the empty string. |
+
+> [!WARNING]
+> A `PUT` that leaves out `content` replaces the content of an existing file with an empty string, and the write adds a generation. The body `{"path": "/notes/roadmap.md"}` changes a file of 34 characters to a file of size 0.
+
+A `PUT` to the path of a folder returns `400` with `Is a directory`. The gateway runs the [analysis that it performs after a write](/docs/agent-filesystem/concepts/understanding-pipeline#what-the-gateway-does-after-a-write) for the file when the write succeeds.
+
+The route has no precondition, and a write that overlaps another write to the same path can fail with `409`, as [Errors](#errors) describes. To write only when the file is still at the generation that you read, call `fn::sfs_write` through [`POST /api/rpc`](#sql-rpc) with that generation as the third argument.
+
+`POST /api/file` creates a file or a folder and fails when the path exists.
+
+| Body field | Type | Meaning |
+| --- | --- | --- |
+| `path` | string | The path to create. Required. |
+| `folder` | boolean | `true` creates a folder and its missing parents. The default is `false`, and a folder ignores `content`. |
+| `content` | string | The text of the new file. The default is the empty string. |
+
+```bash
+curl -s -X POST -d '{"path": "/projects/alpha", "folder": true}' "$GATEWAY/api/file"
+curl -s -X POST -d '{"path": "/projects/alpha/todo.md", "content": "- write docs\n"}' "$GATEWAY/api/file"
+curl -s -X POST -d '{"path": "/projects/alpha/todo.md"}' "$GATEWAY/api/file"
+```
+
+```json title="Sample output"
+{"content_type":"inode/directory","filename":"alpha","generation":1,"is_folder":true,"path":"/projects/alpha","size":0,"updated_at":"2026-10-15T01:44:13.894199Z"}
+{"content_type":"text/plain","filename":"todo.md","generation":1,"is_folder":false,"path":"/projects/alpha/todo.md","size":13,"updated_at":"2026-10-15T01:44:13.962390Z"}
+{"error":"File exists: /projects/alpha/todo.md"}
+```
+
+The third request returns `409`.
+
+#### Copy, move and delete
+
+`POST /api/copy` and `POST /api/move` take `src` and `dst`. Both return the entry at `dst`, and both create the missing parent folders of `dst`.
+
+| Body field | Type | Meaning |
+| --- | --- | --- |
+| `src` | string | The path to copy or move. Required. |
+| `dst` | string | The destination path. Required. |
+| `recursive` | boolean | Only `copy` reads it. A folder needs `true`. |
+
+```bash
+curl -s -X POST -d '{"src": "/projects/alpha/todo.md", "dst": "/projects/alpha/todo-copy.md"}' "$GATEWAY/api/copy"
+curl -s -X POST -d '{"src": "/projects/alpha/todo-copy.md", "dst": "/projects/alpha/done.md"}' "$GATEWAY/api/move"
+```
+
+```json title="Sample output"
+{"content_type":"text/plain","filename":"todo-copy.md","generation":1,"is_folder":false,"path":"/projects/alpha/todo-copy.md","size":13,"updated_at":"2026-10-15T01:44:14.135198Z"}
+{"content_type":"text/plain","filename":"done.md","generation":1,"is_folder":false,"path":"/projects/alpha/done.md","size":13,"updated_at":"2026-10-15T01:44:14.184612Z"}
+```
+
+Four behaviours of these routes need care:
+
+- A copy of a folder with `recursive` set to `true` creates an empty folder at `dst` and copies none of the contents. A copy of a folder without `recursive` returns `400`.
+- A move onto a path that exists replaces the destination without an error. The replaced file appears in the history of the path as a version with the operation `delete`.
+- A move of a folder keeps its contents, because the contents of a folder take their paths from it.
+- A copy onto a path that exists fails with `500` and a message about a unique index named `child_unique`. The destination keeps its content.
+
+`DELETE /api/file?path=PATH` removes a file or a folder. With `recursive=1` or `recursive=true`, it also removes the contents of a folder.
+
+| Parameter | Meaning |
+| --- | --- |
+| `path` | The path to remove. Required. |
+| `recursive` | `1` or `true` removes a folder that has contents. Any other value counts as `false`. |
+
+```bash
+curl -s -X DELETE "$GATEWAY/api/file?path=/projects/alpha/done.md"
+```
+
+```json title="Output"
+{"removed":1}
+```
+
+The value of `removed` is always 1, whatever the route removed. A folder with contents and no `recursive` returns `400`. A path that is under a legal hold returns `500` with `Legal hold active`. A legal hold blocks `DELETE /api/file` only, because `PUT /api/file` and `POST /api/move` ignore it.
+
+> [!WARNING]
+> A recursive delete removes the folder and its direct children only. A record below a subfolder stays in the database, loses its place in the tree, and takes a wrong path. After `DELETE /api/file?path=/e1&recursive=1` on a folder that holds `/e1/sub/deep.md`, the file no longer appears in `GET /api/tree`, and a search returns it as `/deep.md`. To remove a nested tree, delete the deepest folder first and then each parent, every time with `recursive`.
+
+#### Read raw bytes
+
+`GET /raw?path=PATH` returns the bytes of a file as the response body, which suits a binary file or a link in a web page.
+
+```bash
+curl -s -i "$GATEWAY/raw?path=/notes/roadmap.md"
+```
+
+```text title="Sample output"
+HTTP/1.1 200 OK
+content-length: 34
+connection: close
+content-type: text/plain
+X-Content-Type-Options: nosniff
+Content-Security-Policy: sandbox
+
+# Roadmap
+
+Ship the gateway docs.
+```
+
+The `Content-Type` is the content type that the file stores. A file that stores `application/octet-stream`, or no type, gets a type from its extension for `.md`, `.markdown`, `.json`, `.html`, `.htm`, `.css`, `.js`, `.mjs`, `.ts`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg` and `.pdf`, and `text/plain; charset=utf-8` for any other extension. The extensions `.js`, `.mjs` and `.ts` all give `text/javascript; charset=utf-8`. A successful response carries the headers `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`, so a browser treats an HTML file that an agent wrote as sandboxed content that cannot use the origin of the gateway. The error responses are JSON, and they carry neither header.
+
+A folder returns `400`, a missing file returns `404` with `Not found`, a request without `path` returns `400`, and a caller that cannot read the file gets `403`.
+
+### Search
+
+`GET /api/search?q=QUERY` searches the content of files and returns at most 20 results, best match first.
+
+| Parameter | Meaning |
+| --- | --- |
+| `q` | The query. The gateway trims it, and an empty query returns an empty list. |
+
+```bash
+curl -s "$GATEWAY/api/search?q=gateway"
+```
+
+```json title="Sample output"
+{"hybrid":false,"results":[{"content_type":"text/plain","filename":"roadmap.md","generation":3,"is_folder":false,"path":"/notes/roadmap.md","score":0.281,"size":34,"snippet":"# Roadmap  Ship the gateway docs. ","updated_at":"2026-10-15T01:44:13.623836Z"}]}
+```
+
+Each result is an entry plus a `score`, rounded to four decimal places, and a `snippet` of about 200 characters around the first match, with line breaks replaced by spaces. A result never has `content`.
+
+The field `hybrid` reports how the gateway searched. It is `false` for a full-text search that uses BM25 ranking. It is `true` when an embedding provider turned the query into a vector, and the gateway then combined full-text and vector ranking. The route does not return an error when the provider fails, and it falls back to full-text ranking with `hybrid` set to `false`. See [File search](/docs/agent-filesystem/concepts/search) for the ranking and its limits.
+
+The search honours the permissions of the caller: a file that the caller may not read does not appear.
+
+#### Embeddings
+
+Set `OPENAI_API_KEY` on the gateway to turn on embeddings. The gateway then requests an embedding from `OPENAI_BASE_URL` for each query. After each write it sends the path and text of the file to the provider in one request, and a second request carries the Markdown sections of the file when it has any. The gateway cuts each text at 24,000 characters. `GET /api/health` reports `embeddings_enabled` as `true`.
+
+> [!NOTE]
+> The gateway does not store the embeddings that it requests, because the statements that it sends to the database are rejected and it ignores the error. A vector search through the gateway can match only the embeddings that another client stored. See the [limitations of file search](/docs/agent-filesystem/concepts/search#limitations-in-this-release). With a stand-in provider that returned fixed vectors, the gateway reported `"embeddings_enabled":true` and `"hybrid":true`, and a file that it had just written had no stored vector.
+
+### Versions
+
+`GET /api/history?path=PATH` lists up to 30 versions of a file, newest first. Each version is the state of the file before a change. Four kinds of change add a version: a write that changes the content, a move or rename, a change of mode and a delete. Each version has these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `path` | The path of the file after the change, which is the destination path for a `rename`. For a `delete` it is the path before the removal. |
+| `generation` | The generation that the version holds. |
+| `author` | The owner of the file at the time. See [What the caller controls](#what-the-caller-controls). |
+| `op` | The change that replaced the version: `write`, `rename`, `chmod` or `delete`. |
+| `size` | The size of the version. |
+| `reason` | Always `null`. |
+| `created_at` | The time of the change that replaced the version. |
+
+A write adds a version that holds the generation that the write replaced. After writes alone, the list therefore does not include the current generation. A rename and a change of mode keep the generation of the file, so their versions repeat the current generation.
+
+A path with no versions, and a path that does not exist, both return `[]`. After 40 writes that each change the content, the file is at generation 40 and the list holds generations 39 down to 10, because it stops at 30 versions.
+
+The gateway looks versions up by the path that each version stores, so the history does not follow a move. After `POST /api/move` from `/a.md` to `/b.md`, the versions that were taken before the move stay under `/a.md`. `GET /api/history` and `POST /api/restore` for `/b.md` cannot reach them.
+
+```bash
+curl -s "$GATEWAY/api/history?path=/notes/roadmap.md"
+```
+
+```json title="Sample output"
+[{"path":"/notes/roadmap.md","generation":2,"author":"root","op":"write","size":58,"reason":null,"created_at":"2026-10-15T01:44:13.593371Z"},{"path":"/notes/roadmap.md","generation":1,"author":"root","op":"write","size":34,"reason":null,"created_at":"2026-10-15T01:44:13.410066Z"}]
+```
+
+`POST /api/restore` writes the content of an earlier version as a new generation. It does not rewind the file, so the history keeps every state. The generation moves only when the restored content differs from the current content, so restoring a version whose content equals the current content leaves the generation as it was.
+
+| Body field | Type | Meaning |
+| --- | --- | --- |
+| `path` | string | The file to restore. Required. |
+| `generation` | integer | The generation to copy. Required. |
+
+A generation that has no version returns `404`. The route returns the entry of the restored file, and it runs the [analysis that follows a write](/docs/agent-filesystem/concepts/understanding-pipeline#what-the-gateway-does-after-a-write). See [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) for how versions work.
+
+### Graph and activity
+
+`GET /api/graph` returns every entry as a node and every relation as an edge. A node has `id`, which is the path, `label`, which is the file name, `is_folder`, `size` and `content_type`. An edge has `source`, `target` and `kind`.
+
+The `kind` is `contains` for a folder and an entry directly in it. For a relation between files it is the name of a relation table: `references`, `supersedes`, `derives_from`, `implements` or `links_to`. The graph has no node for `/` and no `contains` edge from it, so the entries at the top level have no parent edge. The sample has the node `/home`, which the schema creates.
+
+```bash
+curl -s "$GATEWAY/api/graph"
+```
+
+```json title="Sample output"
+{"edges":[{"kind":"contains","source":"/notes","target":"/notes/c++ notes.md"},{"kind":"contains","source":"/notes","target":"/notes/roadmap.md"},{"kind":"contains","source":"/projects","target":"/projects/alpha"},{"kind":"contains","source":"/projects/alpha","target":"/projects/alpha/todo.md"}],"nodes":[{"content_type":"inode/directory","id":"/home","is_folder":true,"label":"home","size":0},{"content_type":"inode/directory","id":"/notes","is_folder":true,"label":"notes","size":0},{"content_type":"text/plain","id":"/notes/c++ notes.md","is_folder":false,"label":"c++ notes.md","size":11},{"content_type":"text/plain","id":"/notes/roadmap.md","is_folder":false,"label":"roadmap.md","size":34},{"content_type":"inode/directory","id":"/projects","is_folder":true,"label":"projects","size":0},{"content_type":"inode/directory","id":"/projects/alpha","is_folder":true,"label":"alpha","size":0},{"content_type":"text/plain","id":"/projects/alpha/todo.md","is_folder":false,"label":"todo.md","size":13}]}
+```
+
+`GET /api/activity` returns the active leases and the latest versions of any file:
+
+```bash
+curl -s "$GATEWAY/api/activity"
+```
+
+```json title="Sample output"
+{"locks":[],"recent_versions":[{"author":"root","created_at":"2026-10-15T01:44:14.243369Z","generation":1,"op":"delete","path":null,"reason":null,"size":13},{"author":"root","created_at":"2026-10-15T01:44:14.185625Z","generation":1,"op":"rename","path":null,"reason":null,"size":13},{"author":"root","created_at":"2026-10-15T01:44:13.593371Z","generation":2,"op":"write","path":null,"reason":null,"size":58},{"author":"root","created_at":"2026-10-15T01:44:13.410066Z","generation":1,"op":"write","path":null,"reason":null,"size":34}]}
+```
+
+`locks` lists each lease that has not expired, as an object with `path`, `holder`, `reason`, `acquired_at` and `expires_at`. `acquired_at` is always `null`. `recent_versions` holds the latest 20 versions, newest first, in the format of the history fields above. In this release the field `path` of each version is always `null`, so an entry does not say which file it belongs to.
+
+See [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases) for how a lease works. A write through this API does not check for a lease.
+
+### Indexing
+
+`POST /api/index` runs the [analysis that follows a write](/docs/agent-filesystem/concepts/understanding-pipeline#what-the-gateway-does-after-a-write) on request.
+
+With a `path` in the body, it runs the analysis for that file and answers `{"indexed": PATH}`. It does not check that the file exists, so a path that does not exist also returns `200`. A body that is not valid JSON counts as an empty body.
+
+Without a `path`, it claims up to 25 pending jobs as the worker `server-worker`, runs the analysis for the file of each job, and answers with the number of jobs whose analysis returned without an error.
+
+```bash
+curl -s -X POST -d '{"path": "/notes/roadmap.md"}' "$GATEWAY/api/index"
+curl -s -X POST "$GATEWAY/api/index"
+```
+
+```json title="Sample output"
+{"indexed":"/notes/roadmap.md"}
+{"completed_jobs":4}
+```
+
+The number of `completed_jobs` depends on the jobs that are waiting, so the value that you get differs. In this release the route differs from what its description suggests in three ways:
+
+- The route asks for jobs of the kinds `embed`, `symbols`, `entities` and `sections`, and the schema queues jobs of the kinds `detect`, `chunk` and `symbols` only. The route can therefore claim `symbols` jobs only, and the `detect` and `chunk` jobs stay `pending`.
+- The route does not record a job as completed in the table `sfs_job`. A claimed job stays `processing` with `locked_by` set to `server-worker`.
+- A call that comes more than 60 seconds after a claim claims the same jobs again, and counts them again. A call within that time claims only the jobs that are new. The count is thus the number of jobs that the route ran, and not the number that it marked as completed.
+
+Nothing calls this route unless a client does, so jobs that nobody claims stay `pending`.
+
+### Chat and sessions
+
+`POST /api/chat` runs one turn of a conversation with a model that reads and changes files through the tools of the [MCP endpoint](#mcp-over-http). It needs `ANTHROPIC_API_KEY` on the gateway. This description comes from the source code, because the route was not run with a key.
+
+| Body field | Type | Meaning |
+| --- | --- | --- |
+| `message` | string | The user message. Required, and not empty after trimming. |
+| `path` | string | The path of the file that the user has open. The gateway adds a line `[Currently viewing PATH]` before the message. |
+| `session` | string | The path of a stored transcript to continue. Without it, the gateway starts a new transcript. |
+
+For each request the gateway calls the Anthropic Messages API with `max_tokens` set to 4096 and the 15 tools of `/mcp`. It runs the tool calls that the model requests as the caller of the request, and it calls the model again with the results, up to 10 calls in all. It stores the conversation in a file after the turn finishes, at the `session` path or at `/_sessions/YYYY-MM-DD/HHMMSS-SLUG.json`, where `SLUG` is made from the message. The file holds `{"messages": [...]}` with the messages in the Anthropic format. The gateway does not analyse files under `/_sessions`.
+
+The response has the type `application/x-ndjson` and the header `Cache-Control: no-cache`. The gateway collects the whole response and sends it when the turn ends, so the route does not stream. Each line is a JSON object of one kind:
+
+| Line | Meaning |
+| --- | --- |
+| `{"delta": TEXT}` | A text block from the model. |
+| `{"tool": SUMMARY, "mutates": BOOLEAN}` | A tool call. `SUMMARY` is the tool name and its first path, such as `cat /notes/todo.md`. `mutates` is `true` for `write_file`, `append_file`, `edit_file`, `mkdir`, `rm`, `mv` and `cp`. |
+| `{"done": true, "session": PATH}` | The end of the turn and the path of the stored transcript. |
+| `{"error": MESSAGE}` | A failure. A failed call to the provider returns this line and stores no transcript. |
+
+A gateway without `ANTHROPIC_API_KEY` answers every request to this route with status `200` and one error line, before it reads the body:
+
+```bash
+curl -s -i -X POST -d '{"message": "Summarise /notes"}' "$GATEWAY/api/chat"
+```
+
+```text title="Sample output"
+HTTP/1.1 200 OK
+content-type: application/x-ndjson
+content-length: 74
+Cache-Control: no-cache
+connection: close
+
+{"error":"Set ANTHROPIC_API_KEY on the SurrealFS server to enable chat."}
+```
+
+With a key, a body that is not valid JSON returns the same kind of `200` response with an error line, and an empty `message` returns `400` with `{"error":"message required"}`.
+
+The request to the model provider contains the messages, the file contents that the tools return, and the path of the file that the user has open.
+
+`GET /api/session` reads the transcripts. Without a parameter it returns an array of the entries for the `.json` files under `/_sessions`, without a `generation` field. With `path` it returns the conversation as an array of messages for display:
+
+| Field | Meaning |
+| --- | --- |
+| `who` | `you` for a user message, `agent` for a reply from the model. |
+| `text` | The text. For a user message the gateway removes the `[Currently viewing PATH]` line. |
+| `tools` | The summaries of the tool calls that came before the reply. Present only when there were calls. |
+
+A missing transcript returns `404`, and a file that is not a transcript returns `[]`. A transcript that was written by hand in the stored format shows how the conversion works:
+
+```json title="A stored transcript"
+{"messages": [
+  {"role": "user", "content": "[Currently viewing /notes/todo.md]\nSummarise this file"},
+  {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "cat", "input": {"path": "/notes/todo.md"}}]},
+  {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "{\"content\":\"- write docs\"}"}]},
+  {"role": "assistant", "content": [{"type": "text", "text": "The file holds one task: write docs."}]}
+]}
+```
+
+```json title="Output of GET /api/session for that file"
+[{"text":"Summarise this file","who":"you"},{"text":"The file holds one task: write docs.","tools":["cat /notes/todo.md"],"who":"agent"}]
+```
+
+## SQL RPC
+
+`POST /api/rpc` runs SurrealQL on the database of the gateway and returns the result of each statement. It is how the Rust command-line tool talks to a remote gateway, and it reaches every function that the schema defines, including the ones that no other route exposes.
+
+| Body field | Type | Meaning |
+| --- | --- | --- |
+| `sql` | string | The SurrealQL to run. Required. |
+| `vars` | object | The variables to bind. The default is an empty object. |
+| `caller` | string | The user to act as. See the rules below. |
+
+The response has status `200` once the body parses, even when a statement fails. It holds one object for each statement, in order. The `status` is `OK` or `ERR`. For `OK`, `result` holds the value as JSON, with record identifiers and datetimes as strings. For `ERR`, `result` holds the error message. A failing statement does not stop the ones after it.
+
+```bash
+curl -s -X POST -d '{"sql": "1 + 1;"}' "$GATEWAY/api/rpc"
+curl -s -X POST -d '{"sql": "fn::sfs_read($path, $caller);", "vars": {"path": "/notes/roadmap.md"}}' "$GATEWAY/api/rpc"
+curl -s -X POST -d '{"sql": "RETURN 1; THROW \"boom\"; RETURN 3;"}' "$GATEWAY/api/rpc"
+curl -s -X POST -d '{"sql": "SELEC nonsense"}' "$GATEWAY/api/rpc"
+```
+
+```json title="Output"
+{"result":[{"result":2,"status":"OK"}]}
+{"result":[{"result":"# Roadmap\n\nShip the gateway docs.\n","status":"OK"}]}
+{"result":[{"result":1,"status":"OK"},{"result":"Database error: Database error: An error occurred: boom","status":"ERR"},{"result":3,"status":"OK"}]}
+{"result":[{"result":"Database error: Parse error: Unexpected token `an identifier`, expected Eof\n --> [1:7]\n  |\n1 | SELEC nonsense\n  |       ^^^^^^^^\n","status":"ERR"}]}
+```
+
+A body that is not valid JSON, or that has no `sql` field, returns `400`.
+
+### The caller in a query
+
+The gateway sets the variable `$caller` for a query that contains the text `$caller` and that does not bind a variable named `caller` in `vars`. Its value is the caller of the request.
+
+A `caller` field in the body replaces the caller of the request, but only when the caller of the request is `root`. A request with no `X-SurrealFS-User` header acts as `root` on a gateway without a token, and so does a request that holds the server token. A request that names `root` in `X-SurrealFS-User` also acts as `root`. A request that names another user in that header, or that holds a stored credential of another user, keeps that user, and the `caller` field has no effect.
+
+```bash
+curl -s -X POST -d '{"sql": "$caller;", "caller": "agent-7"}' "$GATEWAY/api/rpc"
+```
+
+```json title="Output"
+{"result":[{"result":"agent-7","status":"OK"}]}
+```
+
+A variable in `vars` is not checked against the identity of the request. A query that sets `vars.caller` gets that value for `$caller` whatever the request is, so the variable is an input to the query and not a proof of identity.
+
+After a query that contains the text `fn::sfs_write`, `fn::sfs_edit` or `fn::sfs_append`, the gateway runs the analysis that follows a write for the file that `vars.path` names.
+
+### Write only at a known generation
+
+A write that names a generation fails when the file has changed since. The third argument of `fn::sfs_write` is the generation to expect:
+
+```bash
+curl -s -X POST -d '{"sql": "fn::sfs_write($path, $content, $gen, true, $caller);", "vars": {"path": "/notes/roadmap.md", "content": "changed", "gen": 1}}' "$GATEWAY/api/rpc"
+```
+
+```json title="Output when the file is at generation 3"
+{"result":[{"result":"Conflict: Conflict: An error occurred: sfs:conflict","status":"ERR"}]}
+```
+
+The same call with `"gen": 3` succeeds and returns the new entry. See [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases) and [Agent Filesystem functions](/docs/agent-filesystem/reference/surrealql-functions) for the functions that accept a generation.
+
+### Clients of the RPC route
+
+A client that sends its statements to `/api/rpc` needs no SurrealDB credentials. The Rust command-line tool `surrealfs-rs` does this in two cases, and the token that it sends as the bearer token depends on the case:
+
+| How the command reaches the gateway | Token that the command sends |
+| --- | --- |
+| `--url` starts with `sfs://`, `sfs+http://` or `sfs+https://` | The value of `--pass`. The variable `SURREALFS_TOKEN` has no effect. |
+| The variable `SURREALFS_SERVER_URL` is set | The value of `SURREALFS_TOKEN` when that variable is set, and otherwise the value of `--pass`. |
+
+The command names the user in the `caller` field of the body, and it also sends an `X-SurrealFS-Caller` header, which the gateway does not read.
+
+> [!WARNING]
+> The Python method `SurrealFs.from_server` and the TypeScript method `SurrealFs.connectServer` do not work against this gateway in this release. Both read a key named `results` in the response, where the gateway answers with `result`, so they see no statements. In Python, `ls` returns an empty list for a filesystem that holds files, and `read_text` raises `NotFound` for a file that exists. In TypeScript, `ls` returns an empty list, `readText` returns an empty string, and `stat` throws `NotFoundError`.
+
+[Remote clients and the gateway](/docs/agent-filesystem/interfaces/remote-clients) describes each client.
+
+## MCP over HTTP
+
+`/mcp` speaks the Model Context Protocol over HTTP with 15 tools. It lets an MCP client that supports a streamable HTTP endpoint use the filesystem without the stdio program. Every request runs as the caller that the [identity rules](#authentication-and-identity) give.
+
+The endpoint supports a small part of the protocol:
+
+| Request | Response |
+| --- | --- |
+| `GET /mcp` | A JSON description of the endpoint: `name`, `version`, `protocol` and `tools`, the number of tools. |
+| `POST /mcp` with `initialize` | The server information and the capability `tools`. The `protocolVersion` is always `2024-11-05`, whatever the client sent. |
+| `POST /mcp` with `notifications/initialized` | An empty `202` response. |
+| `POST /mcp` with `ping` | An empty result. |
+| `POST /mcp` with `tools/list` | The 15 tool definitions. |
+| `POST /mcp` with `tools/call` | The result of a tool call. |
+| `POST /mcp` with any other method | A JSON-RPC error `-32601` in a `200` response. |
+| A body that is not valid JSON | A JSON-RPC error `-32700` in a `400` response. |
+| Any other HTTP method | `405` with `{"error":"Method not allowed"}`. |
+
+The endpoint answers each request with one JSON object. It has no event stream and no session header, and it does not accept a JSON array of requests. A path that starts with `/mcp/` reaches the same handler.
+
+```bash
+curl -s "$GATEWAY/mcp"
+curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "curl", "version": "1.0"}}}' \
+  "$GATEWAY/mcp"
+```
+
+```json title="Output"
+{"name":"surrealfs-mcp","protocol":"mcp-streamable-http","tools":15,"version":"0.2.0"}
+{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"tools":{"listChanged":false}},"protocolVersion":"2024-11-05","serverInfo":{"name":"surrealfs-server","version":"0.2.0"}}}
+```
+
+A tool call returns one text item that holds the result as indented JSON. A failing tool does not return a JSON-RPC error. It returns `isError` set to `true` and a message that starts with `Error:`.
+
+```bash
+curl -s -X POST -d '{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "cat", "arguments": {"path": "/notes/roadmap.md"}}}' "$GATEWAY/mcp"
+curl -s -X POST -d '{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "cat", "arguments": {"path": "/missing.md"}}}' "$GATEWAY/mcp"
+curl -s -X POST -d '{"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "history", "arguments": {"path": "/notes/roadmap.md"}}}' "$GATEWAY/mcp"
+```
+
+```json title="Output"
+{"id":2,"jsonrpc":"2.0","result":{"content":[{"text":"{\n  \"content\": \"# Roadmap\\n\\nShip the gateway docs.\",\n  \"path\": \"/notes/roadmap.md\"\n}","type":"text"}],"isError":false}}
+{"id":3,"jsonrpc":"2.0","result":{"content":[{"text":"Error: Not found: Not found: An error occurred: sfs:not_found","type":"text"}],"isError":true}}
+{"id":4,"jsonrpc":"2.0","result":{"content":[{"text":"Error: Other error: Unknown tool: history","type":"text"}],"isError":true}}
+```
+
+### The tools
+
+| Tool | Arguments | Result |
+| --- | --- | --- |
+| `ls` | `path`, default `/` | An array of entries, one for each child. |
+| `cat` | `path`; `offset`, the first line, counted from 1; `limit`, the number of lines | `{"path", "content"}`. The lines are joined with `\n`, so a `\r\n` line break comes back as `\n`, and the final line break is not included. A folder gives an empty `content` and no error. The name `read_file` also works. |
+| `stat` | `path` | The entry of the file or folder, with `owner`, `mode`, `group`, `branch`, `created_at` and `meta` in addition to the REST fields. It has no `hash`. |
+| `write_file` | `path`, `content` | The entry of the file. It creates missing parent folders. |
+| `append_file` | `path`, `content` | The entry of the file. The name `chunk` also works for `content`. |
+| `edit_file` | `path`, `old_string`, `new_string` | The entry of the file. The tool replaces every occurrence of `old_string`, and it has no switch to replace only the first one. An `old_string` that does not occur returns a `Not found` error. An empty `old_string` is accepted, and it inserts `new_string` before, between and after every character of the file. The names `old` and `new` also work. |
+| `mkdir` | `path` | The entry of the folder. The tool always creates the missing parent folders. It lists a `parents` argument with the default `true` and ignores it, so `parents` set to `false` does not stop the creation of parents. |
+| `rm` | `path`; `recursive`, default `false` | `{"removed": PATH}`. |
+| `mv` | `src`, `dst` | The entry at `dst`. |
+| `cp` | `src`, `dst`; `recursive`, default `false` | The entry at `dst`. |
+| `glob` | `pattern`, such as `/docs/**/*.md` | An array of the entries, files and folders, whose path matches. |
+| `grep` | `pattern`; `path`, a path prefix; `regex`, default `false` | An array of `{"path", "line_number", "line_text"}`. The search reads the first 1,000 files that hold text and applies `path` afterwards. |
+| `search_text` | `query`; `limit`, default 10 | An error in this release: `search needs an identity: pass $me, or connect as a record user`. |
+| `search_semantic` | `query`; `limit`, default 10 | A vector search. It returns an error when the gateway has no `OPENAI_API_KEY`, and it can match only embeddings that another client stored. |
+| `search_hybrid` | `query`; `limit`, default 10 | An array of `{"entry", "score", "snippet"}`, with the file entry in `entry`. It runs the same search as `GET /api/search`. |
+
+The entries that these tools return have more fields than the entries of the REST routes: `owner`, `mode`, `group`, `branch`, `created_at` and `meta`. They do not hold `hash`, which only [`POST /api/rpc`](#sql-rpc) returns. The tools run the same code as the routes of the same name, so `write_file` runs the analysis that follows a write, and `rm` of a folder follows the rules of `DELETE /api/file`.
+
+The stdio server of the [MCP server](/docs/agent-filesystem/interfaces/mcp-server) page offers 31 tools. The two servers are different programs with different tool names and arguments:
+
+| Tool | Stdio server | This endpoint |
+| --- | --- | --- |
+| `cat` | Returns the text. | Returns JSON with `path` and `content`. |
+| `edit` and `edit_file` | The stdio tool `edit` takes `old`, `new` and `replace_all`, which is `false` by default, so only the first occurrence changes. | The tool `edit_file` takes `old_string` and `new_string`, and the names `old` and `new` also work. It always replaces every occurrence. |
+| `mkdir` | Creates parent folders only when `parents` is `true`, which is not the default. | Always creates parent folders. |
+| `write_file` | Takes an optional `if_generation` argument. | Takes no `if_generation` argument. |
+
+This endpoint has no tools for history, restore, links, leases, workspaces or permissions. [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas) lists the 31 tools of the stdio server. The chat route of the gateway gives its model the 15 tools above.
+
+## Other surfaces
+
+The gateway answers four more kinds of request besides the routes above. [Gateway server](/docs/agent-filesystem/interfaces/gateway-server) describes them in full.
+
+| Path | What it serves |
+| --- | --- |
+| `/dav` | The WebDAV handler of [WebDAV and S3 servers](/docs/agent-filesystem/interfaces/network-servers). The gateway removes the prefix, so `/dav/notes/a.md` is the file `/notes/a.md`. After a successful `PUT`, the gateway runs the analysis that follows a write. |
+| `/s3` | The S3-style handler. The gateway removes the prefix, and the first path segment is a bucket. It also sends a request to this handler when the request has an `x-amz-content-sha256` or `x-amz-date` header, or an `Authorization` header that starts with `AWS4-HMAC-SHA256`, unless the request goes to `/api/`, `/raw`, `/mcp` or `/dav`, which take precedence. A `PUT` is not analysed, because the gateway runs the analysis for the object key without its bucket. |
+| Any other `GET` | A file from the static directory when the gateway has one, and `index.html` for a path with no file. |
+| Any other request | A description of the surfaces, as the example below shows. This applies to every method. A gateway with a server token first answers `401` to a request that has no valid credentials. |
+
+With a server token, a request to `/dav` or `/s3` needs a credential from the store, and a `Bearer` header that holds the server token returns `401` from `/dav` and `403` from `/s3`. The route `/dav` accepts a `Basic` credential only. The route `/s3` also accepts a stored `bearer` token and the comma form of the AWS header. [Gateway server](/docs/agent-filesystem/interfaces/gateway-server#identity-and-authentication) lists the status of each case.
+
+```bash
+curl -s "$GATEWAY/"
+```
+
+```json title="Output"
+{"service":"surrealfs-server","surfaces":{"api":"/api/*","chat":"/api/chat","mcp":"/mcp","rpc":"/api/rpc","s3":"/s3/*","webdav":"/dav/*"},"version":"0.2.0"}
+```
+
+The static directory is the folder that `--static-dir` or `SURREALFS_STATIC_DIR` names, or `surrealfs/browser/static` in the working directory when it exists. The browser application in `surrealfs/browser/ui` builds into it with `bun run build`, and [File browser](/docs/agent-filesystem/interfaces/file-browser) describes the application. The gateway serves static files before it checks credentials, so a server token does not protect them. It also does not keep a request inside the directory.
+
+The handler joins the decoded path of the request to the directory without removing `..` segments. The requests `GET /../outside.txt`, `GET /%2e%2e/outside.txt` and `GET /..%2foutside.txt` therefore all return the file `outside.txt` from the parent of the directory. The requests need no credentials, and the answer does not depend on what the directory holds. Any file that the gateway process can read is reachable this way.
+
+> [!WARNING]
+> A static directory exposes every file that the gateway process can read to any client that can reach the gateway. A folder that holds only the built application does not prevent this. Set a static directory only on a gateway that listens on a loopback address, and run the gateway as a user that can read nothing sensitive. Do not set `--static-dir` or `SURREALFS_STATIC_DIR` on a gateway that other computers can reach, and start such a gateway from a directory that has no `surrealfs/browser/static` folder.
+
+## Security
+
+[Gateway server](/docs/agent-filesystem/interfaces/gateway-server#security) lists every security property of the gateway. Four of them decide how a client may use the routes on this page:
+
+- **No transport security.** The gateway speaks plain HTTP, so a token, a password or a file that crosses a network is readable on it. Put a reverse proxy in front of the gateway to terminate TLS, and keep the gateway on `127.0.0.1`.
+- **Full database access through RPC.** `POST /api/rpc` runs any statement with the SurrealDB credentials of the gateway, including `INFO FOR DB`, `DEFINE TABLE`, `CREATE` and `REMOVE TABLE`. Every credential that the gateway accepts reaches it, so treat each one as a database credential.
+- **Pages in a browser.** The gateway checks neither the `Origin` nor the `Host` header, and it reads a body as JSON whatever its `Content-Type`. A web page that you open in a browser can send a cross-origin `POST` with the content type `text/plain`, which the browser sends without a preflight request, to a gateway without a token on `127.0.0.1`, and the gateway runs it. The page cannot read the response, and the effect is still real. A server token stops this, because a request with an `Authorization` header needs a preflight request, which the gateway answers without `Access-Control-Allow-*` headers.
+- **Data that leaves the gateway.** With `ANTHROPIC_API_KEY` set, a model reads and changes files as the caller, and the messages and the file contents that it reads go to Anthropic. With `OPENAI_API_KEY` set, the text of each file that the gateway writes, and each search query, go to the embedding provider.
+
+Pass `SURREALDB_PASS`, `SURREALFS_SERVER_TOKEN` and the API keys as environment variables, because the process list shows flags.
+
+## Limitations in this release
+
+- **Activity fields.** In `GET /api/activity`, `path` is always `null` for a version, and `acquired_at` is always `null` for a lease.
+- **Copying a folder.** `POST /api/copy` with `recursive` copies a folder as an empty folder.
+- **Copying onto an existing path.** `POST /api/copy` returns `500` and leaves the destination as it was.
+- **Moving onto an existing path.** `POST /api/move` replaces the destination without an error.
+- **Recursive delete.** `DELETE /api/file` with `recursive` leaves the records below a subfolder in the database, where search can still return them under a wrong path.
+- **Writing without content.** A `PUT` that leaves out `content` empties the file.
+- **No precondition on REST.** The file routes take no generation, so two clients that write the same path overwrite each other. A write that overlaps another one in time can also fail with `409` and a message about a write conflict, and it can be sent again. Use `fn::sfs_write` through RPC for a checked write.
+- **History does not follow a move.** The versions that were taken before a move stay under the old path. See [Versions](#versions).
+- **Legal holds.** A legal hold blocks `DELETE /api/file` only. A `PUT` and `POST /api/move` ignore it.
+- **No lease checks.** A write through the gateway ignores the leases that other agents hold.
+- **No permission checks on changes.** See [What the caller controls](#what-the-caller-controls).
+- **Static directory.** The handler returns files outside the directory and runs before the credential check. See [Other surfaces](#other-surfaces).
+- **Indexing route.** `POST /api/index` without a `path` claims `symbols` jobs only, and it does not mark them as completed. See [Indexing](#indexing).
+- **Embeddings and sections are not stored.** See [Embeddings](#embeddings) and [Content analysis](/docs/agent-filesystem/concepts/understanding-pipeline).
+- **S3 uploads are not analysed.** A `PUT` through `/s3` stores the file and does not run the analysis that follows a write.
+- **Chat does not stream.** The gateway returns the whole conversation turn at once.
+- **The MCP tool `search_text` fails.** Use `search_hybrid`, or `GET /api/search`.
+- **The MCP tools `mkdir` and `edit_file`.** The tool `mkdir` ignores its `parents` argument and always creates parent folders. The tool `edit_file` replaces every occurrence of `old_string`, and an empty `old_string` inserts `new_string` between every two characters of the file.
+- **Remote Python and TypeScript clients.** `SurrealFs.from_server` and `SurrealFs.connectServer` read the wrong key. See [Clients of the RPC route](#clients-of-the-rpc-route).
+- **No paging.** `GET /api/tree` returns the whole tree in one response.
+
+## Related pages
+
+- [Gateway server](/docs/agent-filesystem/interfaces/gateway-server) explains how to run the gateway, its settings, its security properties and its known issues.
+- [Remote clients and the gateway](/docs/agent-filesystem/interfaces/remote-clients) covers the clients that send their statements to `/api/rpc`.
+- [WebDAV and S3 servers](/docs/agent-filesystem/interfaces/network-servers) describes the handlers behind `/dav` and `/s3`.
+- [MCP server](/docs/agent-filesystem/interfaces/mcp-server) and [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas) describe the stdio server with 31 tools.
+- [Protocol credentials](/docs/agent-filesystem/security/credentials) explains the credential store that the gateway consults.
+- [Permissions](/docs/agent-filesystem/security/permissions) and [Record access](/docs/agent-filesystem/security/record-access) describe the permission rules of the other clients.
+- [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) and [File search](/docs/agent-filesystem/concepts/search) explain what the routes for history and search return.
+- [Command-line reference](/docs/agent-filesystem/interfaces/command-line) and [Configuration reference](/docs/agent-filesystem/operations/configuration) cover `surrealfs-rs` and the settings of the other programs.
+- [Limits and caveats](/docs/agent-filesystem/operations/limits-and-caveats) lists which features are ready in the beta.

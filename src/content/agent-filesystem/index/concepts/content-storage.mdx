@@ -1,0 +1,408 @@
+---
+position: 2
+title: Content storage
+description: "How Agent Filesystem stores file content: text and bytes, content types, size and hashes, plus the experimental chunked, content-addressed storage."
+---
+
+Agent Filesystem stores the content of a file inside the file's own record. Text goes in the `content` field and binary data goes in the `file` field. This page describes how text and bytes differ, how the content type, size and hash are set, and the experimental chunked storage, which exists in the Rust crates only.
+
+> [!NOTE]
+> Agent Filesystem is in beta, and chunked storage is experimental in this release. [Limits and caveats](/docs/agent-filesystem/operations/limits-and-caveats) rates it Not available, because a file that was uploaded in chunks can be read back by byte range only, and most other operations do not yet treat it as an ordinary file. [Status in this release](#status-in-this-release) lists what works. Use the inline storage in the first part of this page for ordinary files.
+
+## Text and bytes
+
+A file holds text or bytes, and the field that holds the content decides which.
+
+| Property | Text | Bytes |
+| --- | --- | --- |
+| Field | `content`, a `string` | `file`, a `bytes` value |
+| Write with the Python client | `write_text(path, content)` | `write_bytes(path, data)` |
+| Read with the Python client | `read_text(path)` | `read_bytes(path)` |
+| Default content type | Chosen from the name and content | `application/octet-stream` |
+| Size | Characters | Bytes |
+| Full-text search | Indexed | Not indexed |
+
+The following rules apply:
+
+- Each write sets one field and clears the other, so a record never holds both. A record with neither is a folder.
+- The `write_bytes` method always stores bytes, even when the data is valid UTF-8.
+- The `read_text` method raises `NotATextFile` for a binary file, with the message `Not a text file (application/octet-stream): /path. Use read_bytes() instead.`
+- The `read_bytes` method returns the UTF-8 encoding of a text file.
+- A write can change a file from text to bytes or back. The change is an ordinary write, and the replaced state is kept as a [version](/docs/agent-filesystem/concepts/versions-and-history).
+- An empty text file has the content `''`, and an empty binary file has the bytes `b''`. The `touch` method creates the empty text file. Neither is a folder, because a folder is a record whose content and file are both `NONE`.
+
+The Rust client differs here. Its `write_bytes` stores data that is valid UTF-8 as text, and only other data as bytes.
+
+## Content types
+
+Every record has a `content_type`. When the Python client writes text without a `content_type` argument, it chooses one in this order:
+
+1. The file extension, matched without regard to case, against the table below. A name with no dot counts as an extension in its entirety, so a file called `json` is `application/json` and a file called `sh` is `text/x-shellscript`.
+2. The first 256 characters of the content, after leading whitespace, decide which check applies. Text that starts with `<html` or `<!doctype html`, in any case, is `text/html`. Text that starts with `{` or `[` is `application/json` when the whole content parses as JSON. Text that starts with `<?xml`, in lower case only, is `application/xml`.
+3. Otherwise `text/markdown`.
+
+| Extension | Content type |
+| --- | --- |
+| `md`, `markdown` | `text/markdown` |
+| `txt` | `text/plain` |
+| `html`, `htm` | `text/html` |
+| `json` | `application/json` |
+| `csv` | `text/csv` |
+| `tsv` | `text/tab-separated-values` |
+| `yaml`, `yml` | `application/yaml` |
+| `toml` | `application/toml` |
+| `xml` | `application/xml` |
+| `py` | `text/x-python` |
+| `rs` | `text/x-rust` |
+| `js`, `jsx` | `text/javascript` |
+| `ts`, `tsx` | `text/typescript` |
+| `surql` | `text/x-surrealql` |
+| `sql` | `text/x-sql` |
+| `sh`, `bash`, `zsh` | `text/x-shellscript` |
+| `css` | `text/css` |
+| `diff`, `patch` | `text/x-diff` |
+
+The client chooses the type again on every write, so a type that you set does not persist. A write with `content_type="text/x-custom"` sets that type, and the next write without the argument returns the type to the value from the table. A `write_bytes` call without `content_type` likewise resets the type to `application/octet-stream`.
+
+The Python snippets on this page run inside a script with a connected `fs` client, like the one on the [Data model](/docs/agent-filesystem/concepts/data-model#a-file-is-one-record) page.
+
+```python
+await fs.write_text("/notes/a.md", "text", content_type="text/x-custom")
+print((await fs.stat("/notes/a.md")).content_type)
+
+await fs.write_text("/notes/a.md", "more text")
+print((await fs.stat("/notes/a.md")).content_type)
+```
+
+```text title="Output"
+text/x-custom
+text/markdown
+```
+
+The `cp` method copies the type of the source, and `restore` chooses it again from the name and content for a text version. The database function that the Rust and TypeScript clients call for writes sets `text/plain` for a new file and leaves the type alone on later writes.
+
+## Size
+
+The `size` of a file is not stored for ordinary records. The clients calculate it when they read a record: the number of characters for text, the number of bytes for binary content, and 0 for a folder. A text file that contains multibyte characters therefore has a size that is smaller than its length in UTF-8 bytes. The text `héllo wörld` reports a size of 11, and its UTF-8 encoding is 13 bytes long.
+
+A file that was uploaded in chunks has a stored `size` field that holds its length in bytes. The Rust CLI reports that value, but the Python client does not read the stored field, so it reports a size of 0 for such a file.
+
+## Content hash
+
+The `hash` field is an MD5 digest in 32 lowercase hexadecimal characters. A database event sets it after each write that changes the content.
+
+| Content | What is hashed |
+| --- | --- |
+| Text | The MD5 of the text. The text `one` has the hash `f97c5d29941bfb1b2fdab0874906ab82`. |
+| Bytes | The MD5 of the base64 text of the bytes, written without `=` padding. |
+| Folder | The hash is `''`. |
+| Chunked file | The hash is `''`. |
+
+The hash of binary content is not the MD5 of the bytes. SurrealDB writes base64 without padding, and the event hashes that text. The bytes `00 01 02 ff fe` encode as `AAEC//4`, and the stored hash is the MD5 of that string:
+
+```python
+import base64
+import hashlib
+
+data = b"\x00\x01\x02\xff\xfe"
+await fs.write_bytes("/data/sample.bin", data)
+
+entry = await fs.stat("/data/sample.bin")
+expected = hashlib.md5(base64.b64encode(data).rstrip(b"=")).hexdigest()
+print(entry.hash == expected, entry.hash)
+```
+
+```text title="Output"
+True 53d6ae7bc342abb67bbff92a7fac00a9
+```
+
+Three more details matter:
+
+- The entry that a write returns can carry an empty or an out-of-date hash. In testing, the entry from `write_text` had the hash `''`, while `stat` returned the MD5. Call `stat` to read the current value.
+- The hash is a change marker. The `generation` field rises when the hash of the new content differs from the stored one. MD5 does not protect against deliberate collisions, so do not use it as a security check.
+- A rewrite of identical content leaves the hash and the generation unchanged.
+
+## Size limits for inline content
+
+The code enforces no size limit on `content` or `file`. The limit that applies in practice is the largest message that one request can carry. The server accepts WebSocket messages of up to 128 MiB by default, and the Rust SDK refuses to send a message above 64 MiB. [Message size limits](/docs/reference/rest-api/rpc-protocol#message-size-limits) describes both. The two clients use different shares of that ceiling:
+
+- **Python.** The client sends text and bytes as they are. In a test against SurrealDB 3.2.3 with the in-memory engine, writes of 100 MiB succeeded for both text and bytes, and a text write of 130 MiB closed the WebSocket connection before the server answered.
+- **Rust.** The client binds binary data as a `Vec<u8>` with a `<bytes>` cast, and in testing the request was about 28 times the size of the data. A random binary file of 2,390,000 bytes imported, and a random file of 2,410,000 bytes failed with `Message too long: 67405840`, which is above the 64 MiB limit of 67,108,864 bytes. Binary data of about 2.4 million bytes or more therefore fails from the Rust client in this release, whatever the server accepts. Data that is valid UTF-8 is written as text instead, and in testing a 5.6 MB text file of random base64 characters imported without this error.
+
+Every [version](/docs/agent-filesystem/concepts/versions-and-history#storage-and-retention) of a file stores another full copy of its content, and the limits of the SurrealDB server and its storage engine apply as well.
+
+## Chunked storage
+
+Chunked storage splits a file into content-defined pieces and stores each piece once as a **blob** whose ID comes from a hash of its bytes. A second file that contains the same bytes reuses the blobs. The Rust client provides the upload, and the database provides the tables and functions.
+
+> [!NOTE]
+> The chunks in this section are pieces of stored bytes. Search splits text into sections for retrieval, which is a separate mechanism that [Sections and chunking](/docs/agent-filesystem/concepts/sections-and-chunking) describes.
+
+### Status in this release
+
+> [!WARNING]
+> Chunked storage can upload a file and read a byte range back. In this release, ordinary read operations do not work on a file that was uploaded this way. It appears as a folder with no content, and `cat` prints nothing. Use it to experiment, and use inline storage for files that an agent needs to read.
+
+| Capability | Status |
+| --- | --- |
+| Upload a file with `surrealfs-rs upload` or the library method `upload_file` | Works for compressible data. Fails with `Message too long` when one stored chunk is larger than about 2.4 million bytes, which random data can reach. |
+| Reuse identical chunks | Works. Identical chunks are stored once. |
+| Compress chunks with zstd | Works. A chunk is stored compressed only when that is smaller. |
+| Read a byte range | Works through `fn::sfs_read_bytes_range` and the Rust method `read_range`. |
+| Read the whole file | Does not work. `cat` and `read_bytes` return no data, and the Python `read_bytes` raises `IsADirectory`. |
+| Overwrite or copy a chunked file | Does not work. The error is `Is a directory`, and the file must be removed first. |
+| List the file as a file | Does not work. Listings and `stat` show it as a folder. |
+| Include the file in an archive export | Does not work. The export contains an empty folder for it. |
+| Back the file up with `surrealfs-rs backup` | Does not work. The backup counts the file with no bytes. |
+| Reclaim space after a delete | Does not work. See [Usage, deletion and garbage collection](#usage-deletion-and-garbage-collection). |
+| Report usage with `du` | Partly works. It counts uploads only, and a delete or move does not update it. |
+| Enforce a quota | Not implemented. The `quota` table exists, and no code reads it. |
+
+The Python client and the TypeScript SDK have no upload method. The Python client reads the stored records but cannot read their bytes.
+
+### How chunked storage works
+
+A chunked file uses these tables:
+
+| Table | Purpose |
+| --- | --- |
+| `file` | The file record. Its `content`, `file` and `symlink` fields are `NONE`, and its `size` field holds the length in bytes. |
+| `file_chunk` | The manifest. One record per chunk, with `file`, `offset`, `length` and a link to the `blob`. |
+| `blob` | One record per distinct chunk. The record ID is built from the chunk ID, which looks like `b3:8b67c9b0...`. |
+| `upload` | An upload session. |
+| `usage` | A usage total for each scope and path. |
+| `quota` | Declared limits, which nothing enforces. |
+
+The Rust client prepares a file in three steps:
+
+1. It cuts the data into chunks with the FastCDC algorithm. The default minimum, average and maximum sizes are 256 KiB, 1 MiB and 4 MiB. The content of the data decides where each cut falls, not a fixed offset.
+2. It names each chunk `b3:` followed by the 64 hexadecimal characters of the BLAKE3 hash of the chunk.
+3. It compresses each chunk with zstd at level 3, and keeps the compressed form only when that is smaller than the original.
+
+A blob record holds the stored bytes in its `bytes` field, so the data lives inside the database. The `codec` field is `none` or `zstd`, `size` is the uncompressed length, `stored` is the stored length, and `tier` is `inline`.
+
+The upload uses three database functions:
+
+| Function | What it does |
+| --- | --- |
+| `fn::sfs_upload_begin($path, $size, $chunk_ids, $caller)` | Opens a session with an expiry time one day ahead and returns `upload_id`, `missing_chunks` and `received_chunks`. |
+| `fn::sfs_upload_chunk($upload_id, $chunk_id, $uncompressed_size, $stored_bytes, $codec, $data, $caller)` | Stores one blob, unless a blob with that ID already exists. |
+| `fn::sfs_upload_commit($upload_id, $if_generation, $offsets, $lengths, $caller)` | Writes the manifest, sets the file `size`, and creates or updates the file record. |
+
+The commit fails with `sfs:incomplete_upload: missing chunks` when a chunk of the session was not stored, with `sfs:is_a_directory` when the path is a folder, and with `sfs:conflict` when `$if_generation` does not match. Each chunk travels in its own request, so the size of a stored chunk decides the size of the request.
+
+A session that is not committed leaves its blobs in place with a reference count of 0, and its `upload` record stays in the database. Nothing checks the expiry time or removes the record.
+
+> [!WARNING]
+> An upload fails with `Database error: Message too long` when one stored chunk is larger than about 2.4 million bytes. The Rust client sends each chunk in its own request, and in testing a request was about 28 times the size of its chunk, so a chunk of that size reaches the 64 MiB limit that the Rust SDK sets on a message. A chunk is compressed before it is sent, so compressible data stays far below the limit. Chunk sizes follow the content and range from 256 KiB to 4 MiB, so a random or already compressed file of a few MiB or more can contain a chunk above the limit. In testing, some random 8 MiB files uploaded and others failed. A failed upload leaves the blobs that it stored with a reference count of 0, together with an `upload` record. The `gc` command reclaims the blobs, and nothing removes the `upload` record.
+
+### Upload a file with the Rust CLI
+
+The `surrealfs-rs` binary is built from the `surrealfs-cli` crate, and [Command-line reference](/docs/agent-filesystem/interfaces/command-line) describes how to install and configure it. This walkthrough uses a server that runs locally with the root password `secret`. The CLI reads its connection settings from the environment:
+
+```bash
+export SURREALDB_URL=ws://localhost:8000/rpc
+export SURREALDB_NS=agents
+export SURREALDB_DB=files
+export SURREALDB_USER=root
+export SURREALDB_PASS=secret
+```
+
+The script below creates three local files. The second file repeats the content of the first and adds 1 MiB, and the third is text that compresses well:
+
+```python title="make_data.py"
+import json
+import random
+
+first = random.Random(21).randbytes(2 * 1024 * 1024)
+second = random.Random(22).randbytes(2 * 1024 * 1024)
+extra = random.Random(23).randbytes(1024 * 1024)
+
+with open("dataset-v1.bin", "wb") as out:
+    out.write(first + second)
+
+with open("dataset-v2.bin", "wb") as out:
+    out.write(first + second + extra)
+
+with open("events.jsonl", "w") as out:
+    for seq in range(70_000):
+        record = {"seq": seq, "type": "page_view", "path": "/docs/agent-filesystem", "status": 200}
+        out.write(json.dumps(record) + "\n")
+```
+
+The commands below initialise the schema, upload the three files and list the result:
+
+```bash
+surrealfs-rs init
+surrealfs-rs upload dataset-v1.bin /datasets/dataset-v1.bin
+surrealfs-rs upload dataset-v2.bin /datasets/dataset-v2.bin
+surrealfs-rs upload events.jsonl /datasets/events.jsonl
+surrealfs-rs ls /datasets
+surrealfs-rs du /datasets
+```
+
+```text title="Output"
+SurrealFS schema successfully initialized.
+Uploaded 'dataset-v1.bin' -> '/datasets/dataset-v1.bin' (4194304 bytes, gen 1)
+Uploaded 'dataset-v2.bin' -> '/datasets/dataset-v2.bin' (5242880 bytes, gen 1)
+Uploaded 'events.jsonl' -> '/datasets/events.jsonl' (5938890 bytes, gen 1)
+DIR   4194304 bytes  /datasets/dataset-v1.bin
+DIR   5242880 bytes  /datasets/dataset-v2.bin
+DIR   5938890 bytes  /datasets/events.jsonl
+/datasets	files: 3	logical: 15376074 B	stored: 15376074 B
+```
+
+The CLI reads the whole local file into memory before it chunks the file, and random data is the slowest case. In testing with a debug build, the first upload took about 10 seconds and 670 MB of memory. The second upload took 4 seconds, because most of its chunks were already stored, and the compressible `events.jsonl` took 0.4 seconds and 36 MB. A random file of 8 MiB needed between 0.6 GB and 1.3 GB of memory.
+
+The `DIR` label comes from the file record, whose `content`, `file` and `symlink` fields are all `NONE`. SurrealQL shows the record and its manifest, in the namespace and database that the CLI used:
+
+```surql
+SELECT path, is_folder, size, hash, content_type, generation FROM file
+WHERE path = '/datasets/dataset-v1.bin';
+```
+
+```surql title="Output"
+[
+    {
+        content_type: 'application/octet-stream',
+        generation: 1,
+        hash: '',
+        is_folder: true,
+        path: '/datasets/dataset-v1.bin',
+        size: 4194304
+    }
+]
+```
+
+```surql
+SELECT offset, length, blob.codec AS codec, blob.refs AS refs FROM file_chunk
+WHERE file.path = '/datasets/dataset-v2.bin'
+ORDER BY offset;
+```
+
+```surql title="Output"
+[
+    { codec: 'none', length: 707960, offset: 0, refs: 2 },
+    { codec: 'none', length: 774285, offset: 707960, refs: 2 },
+    { codec: 'none', length: 934712, offset: 1482245, refs: 2 },
+    { codec: 'none', length: 1281435, offset: 2416957, refs: 2 },
+    { codec: 'none', length: 952485, offset: 3698392, refs: 1 },
+    { codec: 'none', length: 592003, offset: 4650877, refs: 1 }
+]
+```
+
+### Deduplication
+
+Two identical chunks are stored once. In the walkthrough, `dataset-v2.bin` begins with the same 4 MiB as `dataset-v1.bin`. Four of its six chunks have a reference count of 2, because both manifests point at them. The fifth chunk starts at offset 3,698,392 in both files, but in `dataset-v1.bin` it ends at the end of the file after 495,912 bytes, while in `dataset-v2.bin` it continues into the added data for 952,485 bytes. Content-defined chunking places each cut according to the content, so the two chunks differ and are stored separately. The totals show the effect:
+
+```surql
+SELECT codec, count() AS blobs, math::sum(size) AS logical_bytes, math::sum(stored) AS stored_bytes
+FROM blob GROUP BY codec;
+```
+
+```surql title="Output"
+[
+    { blobs: 7, codec: 'none', logical_bytes: 5738792, stored_bytes: 5738792 },
+    { blobs: 3, codec: 'zstd', logical_bytes: 5938890, stored_bytes: 60769 }
+]
+```
+
+The three files add up to 15,376,074 bytes, and the ten blobs hold 11,677,682 bytes of content. Compression reduces the stored size to 5,799,561 bytes, because the repetitive `events.jsonl` compresses to about 1% of its length.
+
+Three rules govern reuse:
+
+- **Scope.** The begin function treats a chunk as present when the scope owns a blob with that ID. The scope is the signed-in record user or the caller name that the client passes, and `root` when neither exists.
+- **Shared IDs.** The store function checks for an existing blob in every scope. When the ID exists, it discards the bytes that the new upload supplies and keeps the existing blob.
+- **No verification.** Nothing checks that a chunk ID is the BLAKE3 hash of its bytes. A chunk ID is therefore not proof of content, and a client has to compute the IDs honestly. Together with the shared IDs, this means that a user can store other bytes under the ID of a chunk that another user uploads later, and that upload then keeps the stored bytes and discards its own.
+
+The `missing_chunks` list that the begin function returns can also contain IDs that the scope holds but the upload does not use. The list can therefore contain extra IDs, and the client uploads only the chunks that it has.
+
+### Range reads
+
+The `fn::sfs_read_bytes_range($path, $offset, $length, $caller)` function returns the chunks that overlap a byte range. The Rust method `read_range(path, offset, length)` calls it, decompresses the chunks, and copies the overlap into a buffer of the requested length. The CLI has no command that reads a range.
+
+```surql
+fn::sfs_read_bytes_range('/datasets/dataset-v2.bin', 700000, 100000, 'root')
+    .chunks
+    .map(|$chunk| { offset: $chunk.offset, length: $chunk.length });
+```
+
+```surql title="Output"
+[
+    { length: 707960, offset: 0 },
+    { length: 774285, offset: 707960 }
+]
+```
+
+The function returns whole chunks, and each one can be up to 4 MiB. A 100,000-byte range that crosses a chunk boundary, as above, sends two chunks of 707,960 and 774,285 bytes. In the Rust client the buffer is filled with zeros first, so a range that runs past the end of the file comes back padded with zero bytes.
+
+Each chunk in the result also carries its stored `bytes` and its `codec`. A small file shows them. This upload creates a 21-byte file, which is one chunk that is not compressed:
+
+```bash
+printf 'hello, chunked world\n' > hello.txt
+surrealfs-rs upload hello.txt /samples/hello.txt
+```
+
+```surql
+fn::sfs_read_bytes_range('/samples/hello.txt', 7, 7, 'root').chunks;
+```
+
+```surql title="Output"
+[
+    {
+        bytes: b"68656C6C6F2C206368756E6B656420776F726C640A",
+        codec: 'none',
+        length: 21,
+        offset: 0
+    }
+]
+```
+
+To read a range with SurrealQL, decompress the `bytes` of each chunk whose `codec` is `zstd`, join the chunks in order, and cut the range from the joined data, starting at `$offset` minus the `offset` of the first chunk. Here the 7 bytes at offset 7 are `6368756E6B6564`, which spell `chunked`. The Rust `read_range` method performs these steps. Because no command reads a whole chunked file back in this release, the manifest and the `size` field, as in the walkthrough, are the way to check an upload.
+
+Under a system credential, the function applies no permission check and does not use `$caller` to filter the result: in testing, a call with the caller name `bob` returned the chunk bytes of a file that only `alice` could read. Under record access, the table permissions hide a file that the user cannot read, so the function raises `sfs:not_found` for it. The `blob` table is open to every record user, however, so a query on `blob` returns the stored bytes of every chunk, including the chunks of files that the user cannot read.
+
+The function treats files that are not chunked differently:
+
+- For text, it returns `string::slice(content, $offset, $length)`, so the offset and length count characters.
+- For binary content, it ignores the range and returns the whole `file` value.
+
+The Python `read_range` method is unrelated. It reads a range of lines from a text file.
+
+### Usage, deletion and garbage collection
+
+The `fn::sfs_du($path, $caller)` function totals the `usage` records of the caller's scope whose path equals `$path` or starts with it. The Rust CLI exposes it as `surrealfs-rs du`. These limits apply:
+
+- Only chunked uploads write `usage` records. Ordinary writes are not counted.
+- The `stored_bytes` value equals `logical_bytes`, so compression and deduplication do not appear.
+- The match is a string prefix, so `du /dat` also counts `/data2/file.bin`.
+- A delete or a move does not update `usage`.
+
+Deleting a chunked file removes the file record. It does not remove the manifest records or lower any reference count, so the blobs stay in the database:
+
+```bash
+surrealfs-rs rm /datasets/dataset-v2.bin
+surrealfs-rs du /datasets
+surrealfs-rs gc --max-age-secs 0
+```
+
+```text title="Output"
+Removed /datasets/dataset-v2.bin
+/datasets	files: 3	logical: 15376074 B	stored: 15376074 B
+Garbage collected 0 unreferenced blobs
+```
+
+The `fn::sfs_gc_blobs($max_age_secs)` function deletes blobs whose reference count is 0 and whose age exceeds `$max_age_secs`. The `gc` command defaults to 86,400 seconds. A reference count rises when an upload commits and never falls, so the function reclaims only blobs that an upload stored and never committed. It does not reclaim the blobs of a file that was deleted.
+
+The delete also writes a `delete` version with no content and a size of 0, so history cannot bring the bytes back. Uploading over an existing text file converts it into a chunked file and leaves its generation and content type unchanged.
+
+## Other clients
+
+Chunked storage exists only in the Rust crates and the database schema. The Python client, the MCP server and the TypeScript SDK have no upload method. A database that was set up from the TypeScript package lacks the `blob`, `upload`, `usage` and `quota` tables, so apply the schema from the Python package or the Rust CLI when you need them.
+
+## Related pages
+
+- [Data model](/docs/agent-filesystem/concepts/data-model) describes the `file` table and its fields.
+- [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) describes versions, restore and undelete.
+- [Sections and chunking](/docs/agent-filesystem/concepts/sections-and-chunking) describes the text sections that search uses.
+- [Backup and restore](/docs/agent-filesystem/operations/backup-and-restore) describes archive export and backups.

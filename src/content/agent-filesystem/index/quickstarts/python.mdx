@@ -1,0 +1,392 @@
+---
+position: 0
+title: Python quickstart
+description: "Install the surrealfs Python package, start SurrealDB, apply the schema, and write, read, search and version files with the SurrealFs class."
+---
+
+This quickstart installs the `surrealfs` Python package, starts a local SurrealDB server, and uses the `SurrealFs` class to write, read, search and version files. When you finish, you will have a database that holds a small `/notes` folder and a script that you can extend.
+
+> [!NOTE]
+> Agent Filesystem is in beta. The API, schema and command-line interface may change in breaking ways between releases. The `surrealfs` package is not published on PyPI yet, so the install command below names the `next` branch of the [SurrealFS repository](https://github.com/surrealdb/surrealfs) on GitHub.
+
+## Requirements
+
+- **Python 3.11 or later.** The sample output on this page comes from Python 3.12.
+- **Git.** `pip` clones the repository to install the package.
+- **A SurrealDB 3.x server.** The sample output comes from SurrealDB 3.2.3, and earlier 3.x releases are untested. See [installing SurrealDB](/docs/running/installation) if the `surreal` command is not available.
+- **A macOS or Linux shell.** The commands use the syntax of a POSIX shell.
+
+## 1. Start SurrealDB
+
+Start a server that keeps its data in memory:
+
+```bash
+surreal start --user root --pass secret memory
+```
+
+The server runs in the foreground, so leave it running and open a second terminal for the remaining steps. It listens on `127.0.0.1:8000` and loses its data when the process stops. To keep the data between runs, start the server with a [file-backed](/docs/running/file-backed) storage engine instead.
+
+## 2. Install the package
+
+In the second terminal, create a virtual environment and install the package from GitHub:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install "surrealfs @ git+https://github.com/surrealdb/surrealfs.git@next"
+```
+
+The install also brings in the `surrealdb` Python SDK. The package pins that SDK to exactly `3.0.0b8`, a beta release, so an environment that needs another version of the SDK reports a conflict. Confirm the install with the command below:
+
+```bash
+python -c "import surrealfs; print(surrealfs.__version__)"
+```
+
+```text title="Output"
+0.2.0
+```
+
+Some features need an optional extra. Add the extra to the package name, as in `"surrealfs[crdt] @ git+https://github.com/surrealdb/surrealfs.git@next"`.
+
+| Extra | Installs | Needed for |
+| --- | --- | --- |
+| `crdt` | `pycrdt` | [Collaborative editing](/docs/agent-filesystem/concepts/collaborative-editing) of a file. Two writers that edit the same file at the same moment collide, and one of them fails. |
+| `mcp` | `mcp`, `python-dotenv` | The [MCP server](/docs/agent-filesystem/interfaces/mcp-server) |
+| `agent-memory` | `httpx` | The optional Agent Memory bridge of the MCP server |
+| `claude` | The `mcp` and `agent-memory` extras | The [Claude plugin](/docs/agent-filesystem/interfaces/claude-plugin) |
+| `pydantic-ai` | `pydantic-ai-slim` | The pydantic-ai toolset |
+
+## 3. Run the quickstart script
+
+Save the following script as `quickstart.py`. The script signs in as the `root` system user, defines the schema in the `quickstart` database of the `agents` namespace, and then acts as the Agent Filesystem user `alice`. At the end it uses a second user, `bob`, to show a permission check.
+
+```python title="quickstart.py"
+import asyncio
+
+from surrealdb import AsyncSurreal
+
+from surrealfs import ConflictError, PermissionDenied, SurrealFs, apply_schema
+
+
+async def main() -> None:
+    # Connect, select a namespace and database, and define the schema.
+    db = AsyncSurreal("ws://localhost:8000/rpc")
+    await db.signin({"username": "root", "password": "secret"})
+    await db.use("agents", "quickstart")
+    await apply_schema(db)
+
+    # Every SurrealFs object acts as one named user.
+    alice = SurrealFs(db, user="alice")
+
+    # Write files. Missing folders are created automatically.
+    await alice.write_text("/notes/standup.md", "# Standup\n- ship the refactor\n")
+    await alice.write_text(
+        "/notes/retro.md",
+        "# Retro\nThe deploy pipeline was slow. We agreed to cache dependencies.\n",
+    )
+    await alice.write_text(
+        "/notes/api.md",
+        "# API design\nPagination uses cursors. Errors return a problem document.\n",
+    )
+    await alice.write_text(
+        "/notes/oncall.md",
+        "# On-call handover\nThe nightly backup job failed twice. Check the retry policy.\n",
+    )
+
+    # Frontmatter becomes metadata, and markdown links become graph edges.
+    await alice.write_text(
+        "/notes/launch-plan.md",
+        "---\nstatus: draft\ntags: [q4, launch]\n---\n"
+        "# Launch plan\nThe launch date is 15 October. Marketing owns the announcement.\n"
+        "The [standup](standup.md) covers the refactor.\n",
+    )
+    plan = await alice.stat("/notes/launch-plan.md")
+    print("Owner and mode:", plan.owner, oct(plan.mode))
+    print("Metadata:", plan.meta)
+    drafts = await alice.glob("/notes/*.md", meta={"status": "draft"})
+    print("Drafts:", [entry.path for entry in drafts])
+    links = await alice.backlinks("/notes/standup.md")
+    print("Links to the standup:", [(link.source_path, link.relation) for link in links])
+
+    # Read, edit and append.
+    print("Read:", repr(await alice.read_text("/notes/standup.md")))
+    print(await alice.edit("/notes/standup.md", "ship", "shipped"))
+    await alice.append_text("/notes/standup.md", "- review the launch plan\n")
+
+    # List and search.
+    print("Files:", [(entry.path, entry.size) for entry in await alice.ls("/notes")])
+    matches = await alice.grep("launch", path_prefix="/notes")
+    print("Lines:", sorted((match.path, match.line_number) for match in matches))
+    for query in ["refactor", "backup retry"]:
+        hits = await alice.search_text(query)
+        print(f"Search {query!r}:", [(hit.path, round(hit.score, 2)) for hit in hits])
+    print("Snippet:", repr(hits[0].snippet))
+
+    # Versions. History lists earlier generations, newest first.
+    versions = await alice.history("/notes/standup.md")
+    print("History:", [(version.generation, version.op) for version in versions])
+    print(await alice.diff("/notes/standup.md", 1))
+    restored = await alice.restore("/notes/standup.md", 1)
+    print("Restored as generation", restored.generation)
+    print("Read:", repr(await alice.read_text("/notes/standup.md")))
+
+    # A write that names an out-of-date generation is refused.
+    try:
+        await alice.write_text("/notes/standup.md", "stale\n", if_generation=1)
+    except ConflictError as error:
+        print("ConflictError:", error)
+
+    # A second user cannot read the first user's private home folder.
+    await alice.write_text("/home/alice/private.md", "Only alice reads this.\n")
+    bob = SurrealFs(db, user="bob")
+    try:
+        await bob.read_text("/home/alice/private.md")
+    except PermissionDenied as error:
+        print("PermissionDenied:", error)
+
+    print(await alice.tree("/notes"))
+    await db.close()
+
+
+asyncio.run(main())
+```
+
+The script expects an empty `quickstart` database. To run it again, stop and restart the server, or change the database name in `db.use()`.
+
+Run the script:
+
+```bash
+python quickstart.py
+```
+
+```text title="Output"
+Owner and mode: alice 0o666
+Metadata: {'status': 'draft', 'tags': ['q4', 'launch']}
+Drafts: ['/notes/launch-plan.md']
+Links to the standup: [('/notes/launch-plan.md', 'links_to')]
+Read: '# Standup\n- ship the refactor\n'
+--- a/notes/standup.md
++++ b/notes/standup.md
+@@ -1,2 +1,2 @@
+ # Standup
+-- ship the refactor
++- shipped the refactor
+Files: [('/notes/api.md', 72), ('/notes/launch-plan.md', 166), ('/notes/oncall.md', 80), ('/notes/retro.md', 71), ('/notes/standup.md', 58)]
+Lines: [('/notes/launch-plan.md', 3), ('/notes/launch-plan.md', 6), ('/notes/standup.md', 3)]
+Search 'refactor': [('/notes/standup.md', 0.87), ('/notes/launch-plan.md', 0.42)]
+Search 'backup retry': [('/notes/oncall.md', 2.72)]
+Snippet: '# On-call handover\nThe nightly backup job failed twice. Check the retry policy.'
+History: [(2, 'write'), (1, 'write')]
+--- /notes/standup.md (gen 1)
++++ /notes/standup.md (current)
+@@ -1,2 +1,3 @@
+ # Standup
+-- ship the refactor
++- shipped the refactor
++- review the launch plan
+
+Restored as generation 4
+Read: '# Standup\n- ship the refactor\n'
+ConflictError: Generation mismatch on /notes/standup.md: expected 1, got 4
+PermissionDenied: Permission denied: /home/alice/private.md
+/notes
+├── api.md
+├── launch-plan.md
+├── oncall.md
+├── retro.md
+└── standup.md
+```
+
+## What the script did
+
+The sections below explain each part of the script and list the details that the script does not show.
+
+### Connection and schema
+
+The `SurrealFs` class never connects, signs in or selects a namespace. You create the `AsyncSurreal` connection, pass it in, and close it yourself. One connection can serve any number of `SurrealFs` objects.
+
+`apply_schema(db)` defines the `file` table and the indexes, functions and events around it, and creates the `/home` folder. Every statement either overwrites its definition or is created only if missing, so running the function again is safe. The connection needs permission to define tables, which a system user such as `root` has. A [record access](#enforce-permissions-in-the-database) user does not.
+
+### Identity, owner and mode
+
+The `user` argument is required and has no default. It must contain only letters, digits, `_` and `-`, or be the constant `ROOT`, which skips every permission check. Each file records its owner and a unix-style mode.
+
+| Item | Default |
+| --- | --- |
+| File mode | `0o666`, readable and writable by everyone |
+| Folder mode | `0o777` |
+| Folder directly under `/home` | `0o700`, owned by the user it is named after. Only that user or `ROOT` can create it, and any other user receives `PermissionDenied`. |
+| Owner of a new file | The `user` of the `SurrealFs` object that wrote it |
+
+The identity is whatever you pass. With a system credential, nothing stops one connection from acting as two users, which is how the script uses `alice` and `bob` on one `db`.
+
+### Writing and reading files
+
+| Method | Behaviour |
+| --- | --- |
+| `write_text(path, content)` | Creates or replaces a file, and creates missing parent folders unless you pass `create_parents=False`. Returns the `FileEntry`. |
+| `read_text(path)` | Returns the whole content. Raises `NotATextFile` for a binary file and `IsADirectory` for a folder. |
+| `head(path, n)`, `tail(path, n)`, `read_range(path, start, end)` | Return the first lines, the last lines, or an inclusive range of lines counted from 1. |
+| `edit(path, old, new)` | Replaces the first occurrence of `old`, or every occurrence with `replace_all=True`, and returns a unified diff. Raises `NotFound` when `old` is absent. |
+| `append_text(path, suffix)` | Adds text to the end of a file in one statement. |
+| `write_bytes(path, data)`, `read_bytes(path)` | Store and return binary content. |
+| `mkdir`, `cp`, `mv`, `rm`, `chmod` | Organise files. `rm` of a folder that has contents needs `recursive=True`, and `mv` refuses to overwrite an existing path. |
+
+Paths are absolute. A missing leading slash is added, `.` segments are dropped, and `..` never leaves the root.
+
+Text that starts with a `---` YAML block or a `+++` TOML block has that block stored as the file's `meta`. The YAML reader handles scalar values and lists, and drops nested maps. It starts a comment at any `#`, even inside a value, so `title: Issue #5` stores `Issue`, and an unquoted `yes`, `no`, `on` or `off` becomes a boolean. The TOML reader keeps nested tables.
+
+Each markdown link to another existing file becomes a `links_to` edge, which `backlinks` and `get_neighbors` read. A wiki link needs the full file name, so `[[standup.md]]` creates an edge and `[[standup]]` does not. A link to a file that does not exist creates no edge.
+
+The `size` field counts characters for text files and bytes for binary files. The entry that `write_text` returns can carry an empty `hash`, because the database computes the hash after the write completes, so call `stat` to read it.
+
+> [!WARNING]
+> `tree()` with no argument and `tree("/")` both raise `NotFound` in this release because the root folder has no record of its own. Pass a folder below the root, as the script does with `tree("/notes")`. The `max_depth` argument defaults to 3.
+
+### Searching
+
+`grep(pattern)` searches line by line, either for a literal string or, with `is_regex=True`, for a regular expression, and it returns each matching line whole. It filters by `path_prefix` and `glob`, and the `path_prefix` is a string prefix, so `/notes` also matches `/notes2/a.md`. It returns the path and line number of each match, in no guaranteed order, and at most `limit` matches, which is 100 by default. The match is case-sensitive unless you pass `case_sensitive=False`.
+
+`search_text(query)` runs a [BM25](/docs/agent-filesystem/concepts/search) full-text search over the text of every file that the user can read.
+
+- Matching ignores case and applies English word stemming, so `caching` and `cached` both match `cache`.
+- The default `match="any"` returns files that contain any query term, and `match="all"` requires every term. The search returns at most `limit` hits, which is 20 by default.
+- Each `SearchHit` carries the `entry`, a `score` and a `snippet`. When a query word occurs literally in the file, the snippet is a window of up to 160 characters that starts 53 characters before that word, or at the start of the file when the word is nearer than that. Each cut end carries `...`, so the string can be a few characters longer than 160. A file that matches only through stemming, such as a query for `caching` against a file that contains `cache`, shows the start of the file instead.
+- A term that occurs in more than half of the files scores `0.0`. The files are still returned, so the order among them carries no information. The script searches only a few files, and for rare terms, for this reason.
+
+#### Semantic and hybrid search
+
+`SurrealFs` never calls an embedding model. Semantic search works on vectors that you create with an `embed` function of your own, which takes a string and returns a list of floats. The vector index has 1,536 dimensions, so the function must return vectors of that length. Indexing runs as `ROOT`, because it reads every file, including private ones. The `version` argument names the embedder, and a file whose vector came from a different version is embedded again:
+
+```python
+# Illustrative: embed() is an async function that you provide, and it returns 1,536 floats.
+from surrealfs import ROOT
+
+async def embed(text: str) -> list[float]:
+    ...  # call the embedding model of your choice
+
+
+await SurrealFs(db, user=ROOT).reindex_embeddings(embed, version="my-embedder-1")
+hits = await alice.search("when is the launch", vector=await embed("when is the launch"))
+```
+
+With a vector, `search` fuses the full-text and vector results by reciprocal rank, and `score` is the fused rank score. See [search](/docs/agent-filesystem/concepts/search) for the index definitions, the indexing pass and the section-level search.
+
+### Versions
+
+Every file has a **generation** number that starts at 1 and increases when the content changes. The database keeps a snapshot of the file's earlier state each time the content changes, the mode changes, the file is renamed or moved, and the file is removed.
+
+- `history(path)` lists those snapshots, newest first, up to `limit` entries, which is 20 by default. Each snapshot records the generation that it replaced and an `op` field with the value `write`, `chmod`, `rename` or `delete`. A mode change or a rename does not increase the generation, so the current generation can appear in the list. A file that was written once and never changed has an empty history. History is looked up by path, so it does not follow a file when you move it.
+- `diff(path, from_generation)` returns a unified diff from that generation to the current content.
+- `restore(path, generation)` writes the old content back as a new generation. In the script, restoring generation 1 of a file at generation 3 produces generation 4, so the history stays intact.
+- `rm` removes the file, but the snapshots remain, and `undelete(path)` recreates the file as generation 1, owned by the caller and with the default mode. The numbering then starts again, so a generation number can occur twice in the history, and `restore` or `diff` with that number can use either snapshot.
+
+When the connection uses a system credential, the `author` of a snapshot is the file's owner rather than the user who wrote it. With record access it is the signed-in user. See [versions and history](/docs/agent-filesystem/concepts/versions-and-history).
+
+### Optimistic concurrency
+
+The `write_text`, `write_bytes`, `append_text` and `edit` methods take `if_generation`. The write raises `ConflictError` when the file is no longer at that generation. The `write_text` and `write_bytes` methods also raise it when the file does not exist, whereas `append_text` and `edit` raise `NotFound` for a missing file. Use the generation from a `stat` or from the entry that an earlier write returned. See [concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases) for advisory leases and retries.
+
+### Permissions
+
+`bob` reads `/home/alice/private.md` and receives `PermissionDenied`, because the folder `/home/alice` has mode `0o700` and `bob` is not its owner. The library checks the permission bits of the file and of the folders above it before it reads, writes or lists.
+
+> [!WARNING]
+> Under a system credential such as `root`, the database cannot tell which user is asking, so only the library enforces permissions, and several methods do not apply the check. In this release `undelete`, `history`, `diff` between two generations, `backlinks`, `get_neighbors`, `relate`, `acquire_lock` and `release_lock` work on another user's private file. A user can recreate a removed private file with `undelete` and then own and read it, list its snapshots with `history`, read its content with `diff`, and take a lease on it with `acquire_lock`. Treat the library check as a convenience, and use [record access](#enforce-permissions-in-the-database) when the database has to enforce the rules. See [permissions](/docs/agent-filesystem/security/permissions) for the full model.
+
+### Errors
+
+Each exception class inherits from `SurrealFsError` and from the nearest Python built-in, so `except FileNotFoundError` catches `NotFound`. The script catches `ConflictError` for a stale generation, `PermissionDenied` for a mode bit that the user lacks and, in the record-access section, `NotFound`. The [Python SDK](/docs/agent-filesystem/interfaces/python-sdk#errors) lists every exception class and when each is raised.
+
+A `QueryError` is any other database error, and its `retryable` attribute is true for a transaction conflict. The library tries a statement up to five times, which is four retries, before it raises one, so a `QueryError` with `retryable` set means that the conflict persisted through those attempts.
+
+## Enforce permissions in the database
+
+With record access, each user signs in with their own credentials, and SurrealDB applies the table permissions itself. A record user can neither read nor change another user's private files, even with raw SurrealQL.
+
+This section continues from step 3: it uses the `quickstart` database and the file `/home/alice/private.md` that the script wrote there. First define the record access and create two users. The commands read the connection settings from environment variables, which stay set in the shell until you unset them in the clean-up step:
+
+```bash
+export SURREALDB_URL=ws://localhost:8000/rpc
+export SURREALDB_USER=root
+export SURREALDB_PASS=secret
+export SURREALDB_NAMESPACE=agents
+export SURREALDB_DATABASE=quickstart
+python -m surrealfs.schema --record-auth
+python -m surrealfs.users add alice --password hunter123
+python -m surrealfs.users add bob --password hunter456
+```
+
+Omit `--password` to be prompted for it, or pass `--generate` to create a password that the command prints once.
+
+Then sign in with the `account` access method, first as `alice` and then as `bob`. Save the following as `record_access.py`:
+
+```python title="record_access.py"
+import asyncio
+
+from surrealdb import AsyncSurreal
+
+from surrealfs import NotFound, SurrealFs
+
+
+async def sign_in(user: str, password: str) -> AsyncSurreal:
+    db = AsyncSurreal("ws://localhost:8000/rpc")
+    await db.signin(
+        {
+            "namespace": "agents",
+            "database": "quickstart",
+            "access": "account",
+            "variables": {"user": user, "pass": password},
+        }
+    )
+    await db.use("agents", "quickstart")
+    return db
+
+
+async def main() -> None:
+    alice_db = await sign_in("alice", "hunter123")
+    alice = SurrealFs(alice_db, user="alice")
+    print("alice reads:", repr(await alice.read_text("/home/alice/private.md")))
+    await alice_db.close()
+
+    bob_db = await sign_in("bob", "hunter456")
+    bob = SurrealFs(bob_db, user="bob")
+    try:
+        await bob.read_text("/home/alice/private.md")
+    except NotFound as error:
+        print("NotFound:", error)
+
+    result = await bob_db.query("SELECT path FROM file WHERE path = '/home/alice/private.md'")
+    print("Raw query:", result)
+    await bob_db.close()
+
+
+asyncio.run(main())
+```
+
+```bash
+python record_access.py
+```
+
+```text title="Output"
+alice reads: 'Only alice reads this.\n'
+NotFound: No such file or directory: /home/alice/private.md
+Raw query: [[]]
+```
+
+The file exists, because `alice` reads it. The library reports `NotFound` to `bob` rather than `PermissionDenied`, because the database returns no record for a file that the user may not read. The raw query returns an empty result for the same reason. The `user` argument is still required, so pass the name of the signed-in user. See [record access](/docs/agent-filesystem/security/record-access) for the permission rules and the users that the schema defines.
+
+## Clean up
+
+Stop the server with `Ctrl+C`. The server keeps its data in memory, so the `quickstart` database is gone after it stops. Remove the variables that the record-access section exported, so that other SurrealDB tools started from the same shell do not pick them up:
+
+```bash
+unset SURREALDB_URL SURREALDB_USER SURREALDB_PASS SURREALDB_NAMESPACE SURREALDB_DATABASE
+```
+
+## Next steps
+
+- [Python SDK](/docs/agent-filesystem/interfaces/python-sdk) lists every method, argument and return type.
+- [Data model](/docs/agent-filesystem/concepts/data-model) describes the `file` table that these calls read and write.
+- [Command-line quickstart](/docs/agent-filesystem/quickstarts/command-line) manages files from a shell.
+- [MCP and Claude quickstart](/docs/agent-filesystem/quickstarts/mcp-and-claude) hands the filesystem to an agent.

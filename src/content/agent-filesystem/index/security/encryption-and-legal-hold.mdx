@@ -1,0 +1,211 @@
+---
+position: 4
+title: Encryption, legal hold and audit
+description: "Client-side AES-256-GCM encryption in the Rust tool, legal holds that block deletion, and what the version history records."
+---
+
+# Encryption, legal hold and audit
+
+This page covers three controls that protect stored content and record what happened to it: encrypting a file before it is stored, holding a file against deletion, and the version history that serves as an audit trail. For each one it states what works in this release and where the control stops.
+
+> [!NOTE]
+> Agent Filesystem is in beta. The API, schema and command-line interface may change in breaking ways between releases. This page describes version 0.2.0 of [SurrealFS](https://github.com/surrealdb/surrealfs), the open source project behind Agent Filesystem, and each limitation that applies is listed where it matters.
+
+> [!IMPORTANT]
+> Encryption is available only through the Rust command-line tool, `surrealfs-rs`, and its library. A legal hold is set and checked through the Rust tool and the database functions. The Python library and the TypeScript SDK have no method for encryption, and none for setting or checking a hold. A hold can be set or read only indirectly, through the `meta` field of the file. The Rust tool does not check the caller for most operations, as the [permissions page](/docs/agent-filesystem/security/permissions#how-permissions-are-enforced) describes. A database whose schema was applied by the TypeScript SDK has no legal-hold functions, so apply the schema with the Python package or with `surrealfs-rs init`.
+
+The examples use `surrealfs-rs`, which the [command-line quickstart](/docs/agent-filesystem/quickstarts/command-line) shows how to build. The tool reads its connection from environment variables, and its default database is `surrealfs`:
+
+```bash
+export SURREALDB_URL=ws://localhost:8000/rpc SURREALDB_NS=agents SURREALDB_DB=files
+export SURREALDB_USER=root SURREALDB_PASS=secret
+surrealfs-rs init
+```
+
+## Encryption
+
+The `encrypt` command encrypts a file on the client with AES-256-GCM before it is written, so the database stores only ciphertext and never receives the key. This is encryption of file content by the caller. It does not encrypt the database's own storage, which depends on how the SurrealDB server is deployed.
+
+<Synopsis>
+surrealfs-rs encrypt [-k <KEY_ID>] <PATH> <INPUT_FILE> <KEY_HEX>
+surrealfs-rs decrypt [-o <OUTPUT_FILE>] <PATH> <KEY_HEX>
+</Synopsis>
+
+| Argument | Meaning |
+| --- | --- |
+| `PATH` | The path of the encrypted file in Agent Filesystem |
+| `INPUT_FILE` | A local file that holds the plaintext (`encrypt` only) |
+| `KEY_HEX` | The key as 64 hexadecimal digits, which is 32 bytes. A key of any other length is rejected |
+| `-k`, `--key-id` | An optional label that is stored with the file. Nothing looks up a key by this label |
+| `-o`, `--output-file` | A local file for the plaintext (`decrypt` only). Without it, the plaintext goes to standard output |
+
+The example generates a key, encrypts a file and reads it back:
+
+```bash
+KEY=$(openssl rand -hex 32)
+printf 'Acquisition target: Northwind Ltd.\n' > mission.txt
+surrealfs-rs --caller alice encrypt /deals/northwind.txt mission.txt "$KEY" -k deals-2026
+surrealfs-rs --caller alice decrypt /deals/northwind.txt "$KEY"
+surrealfs-rs --caller alice ls /deals
+```
+
+```text title="Output"
+Wrote encrypted file /deals/northwind.txt (35 bytes)
+Acquisition target: Northwind Ltd.
+
+FILE       51 bytes  /deals/northwind.txt
+```
+
+The first line reports the 35 bytes of plaintext. The listing shows 51 bytes, because the stored value is the ciphertext followed by a 16-byte authentication tag. A decryption with a different key fails with `Permission denied: Decryption failed or invalid key: aead::Error`.
+
+### What is stored
+
+| Where | Content |
+| --- | --- |
+| The file's bytes | The ciphertext followed by the 16-byte tag. The nonce is 12 random bytes and is stored in `meta` |
+| `meta` | `{"encrypted": true, "encryption_algo": "aes-256-gcm", "nonce": "<24 hexadecimal digits>", "key_id": "<label>"}` |
+| `content_type` | `application/octet-stream` |
+| `owner` and `mode` | `root` and `0o666`, whichever caller ran the command. Run `chmod` afterwards to set a mode, as in `chmod /deals/northwind.txt 0600`. The tool reads a number without a leading `0` or `0o` as decimal, so `600` does not mean `0o600` |
+
+The following stay in clear text:
+
+- The path and name of the file.
+- The size that `ls` reports, which is the plaintext size plus 16 bytes.
+- The owner, the mode, the group and the timestamps.
+- The `meta` value, including the key label.
+- The earlier ciphertexts in the version history.
+
+The ciphertext is stored as bytes, so it is not indexed for full-text search and is not split into sections or embedded. A `grep` for a word from the plaintext finds nothing.
+
+A text read of an encrypted file, such as `cat`, fails with a database error, because the stored value is bytes and not text. A file is encrypted when its `meta` holds `"encrypted": true`. The database holds no key and the tool has no key derivation, so a file whose key is lost cannot be recovered.
+
+The tool does not read a key from a file or from the environment, so the key appears in the shell history and in the process list. The tool has no key rotation or key management, and the key label is only a label.
+
+### Operations that break decryption
+
+> [!WARNING]
+> Decryption needs the `meta` value that `encrypt` stored, because the nonce is kept there. Operations that copy the bytes without `meta`, or that pair old bytes with new `meta`, leave a file that `decrypt` cannot read, and in some cases `decrypt` reports success.
+
+| Operation | Result |
+| --- | --- |
+| `restore` of an earlier generation | The earlier ciphertext is restored, and `meta` still holds the nonce of the current version. `decrypt` fails with `aead::Error`, even with the key that encrypted the earlier version |
+| `cp` | The copy holds the ciphertext and no `meta`. `decrypt` exits successfully and prints the stored bytes as text, with every byte that is not valid UTF-8 replaced by the replacement character, because the file does not look encrypted |
+| `backup` and `restore-backup` | The manifest in the backup directory records `meta`, including the nonce, but `restore-backup` does not apply it. The restored file holds the ciphertext and no `meta`, so `decrypt` behaves as it does after `cp` |
+| `export` and `import` | The archive carries no `meta`. The imported file holds the ciphertext and no `meta`, so `decrypt` behaves as it does after `cp` |
+| `mv` | Keeps `meta`. `decrypt` works at the new path |
+
+A successful exit from `decrypt` is therefore not proof that the output is plaintext. The option `-o` writes the stored bytes to the output file unchanged. The manifest of a backup directory still lists the nonce, so the data to rebuild `meta` exists, but no command applies it. An archive cannot recover an encrypted file in this release. [Backup and restore](/docs/agent-filesystem/operations/backup-and-restore) compares what each option saves, and describes the database export, which keeps `meta`.
+
+## Legal hold
+
+A legal hold marks a file or a folder so that it cannot be deleted. The hold is the value `legal_hold: true` in the file's `meta` field. A path counts as held when the path itself or any folder above it is held.
+
+<Synopsis>
+surrealfs-rs legal-hold [-a <true|false>] <PATH>
+</Synopsis>
+
+Without `--active`, the command reports the current state. With `--active true` or `--active false`, it sets or clears the hold. On a path that does not exist, the command without `--active` prints `Legal hold on <path>: false` and exits with status 0, and with `--active true` it prints `Error: Not found`.
+
+```bash
+surrealfs-rs --caller alice write /legal/contract.md "Master services agreement, draft 1."
+surrealfs-rs legal-hold /legal/contract.md --active true
+surrealfs-rs legal-hold /legal/contract.md
+surrealfs-rs --caller alice rm /legal/contract.md
+surrealfs-rs legal-hold /legal/contract.md --active false
+surrealfs-rs --caller alice rm /legal/contract.md
+```
+
+```text title="Output"
+Wrote 35 bytes to /legal/contract.md
+Set legal hold on /legal/contract.md to true
+Legal hold on /legal/contract.md: true
+Error: Legal hold active: An error occurred: sfs:legal_hold
+Set legal hold on /legal/contract.md to false
+Removed /legal/contract.md
+```
+
+### What a hold blocks
+
+A hold blocks deletion in two places:
+
+- **The delete function:** The database function `fn::sfs_rm` raises `sfs:legal_hold` when the path is held, when a folder above it is held, or when one of its direct children is held. The `rm` command of the Rust tool (including `rm -r`) and the `rm` method of the TypeScript SDK call this function. The Rust library reports the error as `SurrealFsError::LegalHold`.
+- **The table rule:** Under [record access](/docs/agent-filesystem/security/record-access), the `file` table refuses to delete a record whose own `meta` carries `legal_hold: true`. This rule does not look at folders above the record.
+
+> [!WARNING]
+> A recursive delete does not look below the first level. The function `fn::sfs_rm` checks the target, the folders above it and its direct children, and then deletes only those entries. A held file two or more levels below the target does not stop the delete, and it stays in the database as an orphaned record that no path reaches.
+
+### What a hold does not do
+
+> [!WARNING]
+> A legal hold in this release is a guard against deletion through two paths. It does not freeze content, it is not tied to a user, and any client can clear it.
+
+- **Changes to content:** A held file can still be overwritten, restored to an earlier generation, moved, and given a new mode.
+- **Who can set or clear it:** The `legal-hold` command and its database function take no check on the caller. A `--caller bob legal-hold` command can set or clear a hold on Alice's file. Under record access, any user with the write bit on a file can change its `meta`, and so clear a hold.
+- **The Python library:** `rm` in Python deletes a held file. `write_text` replaces the `meta` field with the values from the file's front matter, which removes a hold, and a file whose front matter contains `legal_hold: true` becomes held. The library has no method to set or check a hold. The value is readable as `stat(path).meta`, and the `LegalHoldError` class is defined but never raised.
+- **Backups and archives:** The manifest of a `backup` records the hold in `meta`, but `restore-backup` does not apply it, and `export` does not carry it. A restored file has no hold.
+- **Records:** A hold has no reason, no creator, no expiry and no log entry. Setting or clearing it creates no version record.
+
+## History and audit
+
+Every change to the content, mode, name or parent folder of a file, and every deletion, saves the previous state as a version record in the `file_version` table. The version holds the content, the `owner`, `mode` and `gate` that the file had, the `generation`, the `op`, which is `write`, `chmod`, `rename` or `delete`, an `author`, and the time. [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) describes how to list, compare and restore versions. This section covers what the records say about people, and where they stop.
+
+### Who is the author
+
+The `author` field names a user, but which user depends on how the client connects:
+
+| Connection | `author` is |
+| --- | --- |
+| A system credential, through any client | The owner of the file, whoever wrote the change |
+| [Record access](/docs/agent-filesystem/security/record-access) | The user whose write replaced the version |
+
+The script below shows the first case. Alice creates a file, and Bob and Eve edit it. Every saved state carries the author `alice`, because Alice owns the file:
+
+```python
+import asyncio
+
+from surrealdb import AsyncSurreal
+from surrealfs import SurrealFs, apply_schema
+
+
+async def main():
+    db = AsyncSurreal("ws://localhost:8000/rpc")
+    await db.signin({"username": "root", "password": "secret"})
+    await db.use("agents", "files")
+    await apply_schema(db)
+
+    alice = SurrealFs(db, user="alice")
+    bob = SurrealFs(db, user="bob")
+    eve = SurrealFs(db, user="eve")
+
+    await alice.write_text("/shared/doc.md", "draft by alice")
+    await bob.write_text("/shared/doc.md", "edit by bob")
+    await eve.write_text("/shared/doc.md", "edit by eve")
+
+    print([(h.generation, h.op, h.author) for h in await alice.history("/shared/doc.md")])
+    await db.close()
+
+
+asyncio.run(main())
+```
+
+```text title="Output"
+[(2, 'write', 'alice'), (1, 'write', 'alice')]
+```
+
+The list shows only previous states, so the current content, which Eve wrote, has no version record yet. Under a system credential, therefore, `author` does not identify who wrote a version. Users that need an attributable history sign in with record access.
+
+### What the history does not cover
+
+- **Reads and sign-ins:** Agent Filesystem keeps no log of reads, sign-ins, or use of a credential or share link.
+- **Group and metadata changes:** Changing the `group`, or the `meta` field that holds a legal hold and the encryption metadata, creates no version record.
+- **Retention:** No function prunes, expires or compacts the history. Each version holds a full copy of the content, so the history grows with every write.
+- **Permissions on old versions:** A version keeps the owner, mode and gate from the time it was saved. A `chmod` saves a version that holds the content as it was before the change, under the old mode. Under record access, the database applies the saved values, so a later `chmod` does not hide earlier versions, and the content that a user has just made private stays readable through `history`.
+- **History without a read check:** With a system credential, the Python `history` call, and `diff` with two generations, return the versions and earlier content of files that the caller cannot read. A `diff` of one generation against the current file is refused, because it reads the current content.
+- **Tampering:** Under record access nobody can create, update or delete a version record through the table, because the table rules refuse it. A system credential is not subject to table rules and can change the records.
+
+## Related pages
+
+- [Permissions](/docs/agent-filesystem/security/permissions) describes owners, modes and where the rules apply.
+- [Record access](/docs/agent-filesystem/security/record-access) describes the database-enforced mode that attributes each change to a user.
+- [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) describes the version records in detail.
+- [Backup and restore](/docs/agent-filesystem/operations/backup-and-restore) describes what a backup saves and restores.

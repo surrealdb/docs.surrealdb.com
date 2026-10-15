@@ -25,7 +25,8 @@ export const MAX_QUERY_LENGTH = 500;
 // Product scoping
 //
 // The search index is shared across products, but the UX is
-// product-scoped: every Agent Memory page lives under /docs/agent-memory,
+// product-scoped: every Agent Memory page lives under /docs/agent-memory
+// (the Agent Filesystem docs at /docs/agent-filesystem share that product),
 // everything else is SurrealDB. Filtering happens HERE - before
 // boosting, grouping, the relevance threshold, and the result cap
 // - so the much larger SurrealDB corpus can't crowd the smaller
@@ -35,12 +36,16 @@ export const MAX_QUERY_LENGTH = 500;
 // even when relevant Agent Memory pages existed.)
 // ──────────────────────────────────────────────────────────
 
-const AGENT_MEMORY_PATH_PREFIX = "/docs/agent-memory";
+// Agent Filesystem has no product of its own, so its pages are searched with
+// Agent Memory's, matching `getProductFromPath` in src/utils/product.ts.
+const AGENT_MEMORY_PATH_PREFIXES = ["/docs/agent-memory", "/docs/agent-filesystem"] as const;
 
 export type SearchProduct = "surrealdb" | "agent-memory";
 
 function isAgentMemoryPath(path: string): boolean {
-    return path === AGENT_MEMORY_PATH_PREFIX || path.startsWith(`${AGENT_MEMORY_PATH_PREFIX}/`);
+    return AGENT_MEMORY_PATH_PREFIXES.some(
+        (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+    );
 }
 
 function matchesProduct(hit: RawSearchHit, product: SearchProduct): boolean {

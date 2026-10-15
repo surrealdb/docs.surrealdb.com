@@ -1,0 +1,429 @@
+---
+position: 2
+title: MCP and Claude quickstart
+description: "Run the Agent Filesystem MCP server, connect it to Claude Code or Claude Desktop, and install the Claude plugin that adds the brain skills."
+---
+
+This quickstart runs the Agent Filesystem MCP server and connects it to Claude Code. It then describes the Claude plugin, which packages the same server with two skills and is an alternative to adding the server yourself. The server, `surrealfs-mcp`, gives an MCP client tools to read, write, search and version files in a SurrealDB database, which other agents and people can use at the same time. When you finish, Claude can create and read files in your database.
+
+> [!NOTE]
+> Agent Filesystem is in beta. The API, schema and command-line interface may change in breaking ways between releases. The `surrealfs` package is not published on PyPI yet, so the commands on this page install it with `uvx` from the `next` branch of the [SurrealFS repository](https://github.com/surrealdb/surrealfs), and the tool list below describes that branch.
+
+## Requirements
+
+- **uv.** The `uvx` command from [uv](https://docs.astral.sh/uv/) downloads the package, creates an isolated environment and runs the server.
+- **A SurrealDB 3.x server.** The steps were tested against SurrealDB 3.2.3, and earlier 3.x releases were not tested. See [installing SurrealDB](/docs/running/installation) if the `surreal` command is not available.
+- **An MCP client.** This quickstart uses Claude Code. Any client that can start a stdio MCP server can use the same command, in the configuration format of that client.
+- **A macOS or Linux shell.** The commands on this page were run in one, and the launcher script of the Claude plugin is a POSIX shell script.
+
+## 1. Start SurrealDB
+
+Start a server that keeps its data in memory:
+
+```bash
+surreal start --user root --pass secret memory
+```
+
+The server runs in the foreground, so leave it running and open a second terminal for the remaining steps. It listens on `127.0.0.1:8000` and loses its data when the process stops.
+
+## 2. Create the database user and the configuration file
+
+The server reads its connection settings from the file `~/.config/surrealfs/env`, so the configuration of an MCP client does not need to carry them and every client starts the server with the same settings. A variable that is already set in the environment that starts the server overrides the same variable in the file, as the note at the end of this step describes. The `surrealfs init` command creates the file and prepares the database in one step:
+
+```bash
+uvx --from "surrealfs @ git+https://github.com/surrealdb/surrealfs.git@next" surrealfs init \
+  --url ws://localhost:8000/rpc --username root --password secret \
+  --namespace agents --database mcp \
+  --account agent-claude --account-pass hunter123
+```
+
+```text title="Sample output"
+Initializing SurrealFS...
+Target: ws://localhost:8000/rpc (NS: agents, DB: mcp)
+Applying schema with record auth enabled...
+Creating record user 'agent-claude'...
+Created user 'agent-claude'.
+Wrote record-auth configuration to /home/you/.config/surrealfs/env
+SurrealFS initialized successfully.
+```
+
+The command does three things:
+
+1. It defines the schema in the `agents` namespace and the `mcp` database, with record access enabled.
+2. It creates the record user `agent-claude` and its private home folder, `/home/agent-claude`.
+3. It writes the connection settings, including the password of `agent-claude` in plain text, to `~/.config/surrealfs/env` with mode `0600`. An existing file at that path is overwritten.
+
+The server signs in as `agent-claude`, so SurrealDB itself applies the file permissions to everything that the agent does. The first time `uvx` runs a package, it prints its own download messages before the output above.
+
+> [!NOTE]
+> `surrealfs init` always writes to `~/.config/surrealfs/env`, but the server reads `SURREALFS_ENV_FILE` first and `$XDG_CONFIG_HOME/surrealfs/env` next. When either variable is set, copy the file that `init` wrote to the path that the server reads, or unset the variable.
+
+> [!WARNING]
+> Always pass `--account-pass`. Without it, `init` uses a fixed password that is published in the source code.
+
+> [!WARNING]
+> Run `init` once for each database. When the record user already exists, `init` prints `User provisioning: Database record ... already exists`, the existing user keeps its old password, and `init` still reports success and writes the new `--account-pass` to the configuration file. The server then cannot sign in. Reuse the original password, or choose a new `--account` name. Copy `~/.config/surrealfs/env` first when it holds settings that you want to keep.
+
+To use a database that already has the schema, write the file yourself. [Where the settings come from](#where-the-settings-come-from) lists the settings that this page uses. This example uses a system user, so the agent needs a name of its own in `SURREALFS_AGENT_USER`:
+
+```text title="~/.config/surrealfs/env"
+SURREALDB_URL=ws://localhost:8000/rpc
+SURREALDB_USER=root
+SURREALDB_PASS=secret
+SURREALDB_NAMESPACE=agents
+SURREALDB_DATABASE=mcp
+SURREALFS_AGENT_USER=agent-claude
+```
+
+The file holds a password, so restrict it with `chmod 600 ~/.config/surrealfs/env`. The server prints a warning when other users can read it.
+
+> [!IMPORTANT]
+> A variable that is already set in the environment overrides the same variable in the file. If you exported `SURREALDB_*` variables for another quickstart in this shell, remove them before step 3 and before you start Claude Code, or open a new terminal: `unset SURREALDB_URL SURREALDB_USER SURREALDB_PASS SURREALDB_NAMESPACE SURREALDB_DATABASE SURREALDB_AUTH_LEVEL`. With `SURREALDB_USER=root` in the environment and the record-access file that `init` wrote, the check fails with the traceback `RuntimeError: no agent may act as 'root'`.
+
+## 3. Check the configuration
+
+The `--selftest` option connects with the saved settings, prints what it found and exits:
+
+```bash
+uvx --from "surrealfs[mcp] @ git+https://github.com/surrealdb/surrealfs.git@next" surrealfs-mcp --selftest
+```
+
+```text title="Sample output"
+config    /home/you/.config/surrealfs/env
+server    ws://localhost:8000/rpc
+database  agents / mcp
+acting as agent-claude
+tools     31
+ls /      home
+
+WARN      connected, but this database is empty apart from /home.
+          Check SURREALDB_NAMESPACE and SURREALDB_DATABASE -- a
+          wrong pair connects successfully to the wrong filesystem.
+```
+
+The check writes this text to standard output. On a new database it ends with a warning and exit status 1. The connection works, and the warning appears because the database holds nothing but `/home`. That condition is reported as a failure on purpose: with a system credential, a wrong namespace or database name connects without any error, and the agent would then work in an empty filesystem that is not the one you meant. The first file removes the warning.
+
+> [!NOTE]
+> With a system credential, the check is not read-only. It applies the schema, as every start of the server does, so a misspelled database name gets the schema defined in it and produces this warning instead of an error.
+
+| Line | Meaning |
+| --- | --- |
+| `config` | The configuration file that the server read |
+| `server` and `database` | The server URL, the namespace and the database |
+| `acting as` | The identity that the agent uses for ownership and permissions |
+| `tools` | The number of tools that this build of the server offers |
+| `ls /` | The top-level entries that the agent sees |
+| `memory` | Whether the optional [Agent Memory](#optional-agent-memory) bridge is configured. The line appears only when the check gets past the empty-database warning. |
+
+## 4. Connect Claude Code
+
+Add the server to Claude Code, then check that it connects:
+
+```bash
+claude mcp add surrealfs -- uvx --from "surrealfs[mcp] @ git+https://github.com/surrealdb/surrealfs.git@next" surrealfs-mcp
+```
+
+```bash
+claude mcp list
+```
+
+```text title="Sample output"
+Checking MCP server health…
+
+surrealfs: uvx --from surrealfs[mcp] @ git+https://github.com/surrealdb/surrealfs.git@next surrealfs-mcp - ✔ Connected
+```
+
+The server is available in the current project only. To register it for every project instead, put the `--scope user` option before the server name, because everything after `--` belongs to the server command. Run `claude mcp remove surrealfs` first when you added the server with the command above:
+
+```bash
+claude mcp add --scope user surrealfs -- uvx --from "surrealfs[mcp] @ git+https://github.com/surrealdb/surrealfs.git@next" surrealfs-mcp
+```
+
+The `claude mcp list` command checks the health of each configured server and reports `Connected` when the server starts and answers.
+
+The `uvx` command contacts GitHub each time the server starts, to find out whether the branch has moved, and builds the package again when it has. Each start therefore needs network access, and the server can change between two sessions. To register a fixed copy instead, install the package once with `uv tool install`, and give Claude Code the path of the installed command. Remove an earlier registration of the same name first:
+
+```bash
+uv tool install "surrealfs[mcp] @ git+https://github.com/surrealdb/surrealfs.git@next"
+claude mcp add surrealfs -- "$(which surrealfs-mcp)"
+```
+
+The install adds `surrealfs` and `surrealfs-mcp` to the bin directory of `uv`. When `which` prints nothing, that directory is not on your `PATH`: run `uv tool update-shell` and open a new terminal.
+
+### Claude Desktop and other clients
+
+Every MCP client that starts stdio servers takes the same command and arguments, but each client has its own configuration format. The following JSON is the format of Claude Desktop, whose configuration file is `claude_desktop_config.json`, at `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS and `%APPDATA%\Claude\claude_desktop_config.json` on Windows. This configuration was not tested in Claude Desktop for this page.
+
+```json title="claude_desktop_config.json"
+{
+  "mcpServers": {
+    "surrealfs": {
+      "command": "/absolute/path/to/uvx",
+      "args": [
+        "--from",
+        "surrealfs[mcp] @ git+https://github.com/surrealdb/surrealfs.git@next",
+        "surrealfs-mcp"
+      ]
+    }
+  }
+}
+```
+
+Give the absolute path of `uvx`, which `which uvx` prints. Some clients start servers with a minimal `PATH` that does not include the directory of `uvx`, and the server then never starts. To use the installed command instead, set `command` to the absolute path of `surrealfs-mcp` and leave out `args`. For other clients, such as Cursor, Codex CLI and Zed, the command and the arguments are the same, and the [MCP server](/docs/agent-filesystem/interfaces/mcp-server#connect-a-client) page lists where each client keeps its configuration.
+
+## 5. Try the tools
+
+Ask Claude to use the filesystem, for example: "Write a standup note to `/notes/standup.md` using the `surrealfs` server, then list the `/notes` folder."
+
+The script below makes the same kind of calls without a model, so you can see exactly what the server returns. It starts `surrealfs-mcp` as a child process and calls tools through the MCP client library. Save it as `mcp_session.py`:
+
+```python title="mcp_session.py"
+import asyncio
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+CALLS = [
+    ("write_file", {"path": "/notes/standup.md", "content": "# Standup\n- ship the refactor\n"}),
+    (
+        "write_file",
+        {
+            "path": "/notes/launch-plan.md",
+            "content": "# Launch plan\nThe launch date is 15 October. Marketing owns the announcement.\n",
+        },
+    ),
+    ("ls", {"path": "/notes"}),
+    ("edit", {"path": "/notes/standup.md", "old": "ship", "new": "shipped"}),
+    ("search", {"query": "marketing announcement"}),
+    ("history", {"path": "/notes/standup.md"}),
+    ("cat", {"path": "/notes/standup.md"}),
+    ("cat", {"path": "/notes/missing.md"}),
+    ("tree", {"path": "/notes"}),
+]
+
+
+async def main() -> None:
+    server = StdioServerParameters(command="surrealfs-mcp")
+    async with stdio_client(server) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            for name, arguments in CALLS:
+                result = await session.call_tool(name, arguments)
+                print(">", name, arguments)
+                for item in result.content:
+                    print(item.text)
+                print()
+
+
+asyncio.run(main())
+```
+
+Run it with `uv run`, which installs the package and the MCP client library into a temporary environment. The command sends the server's diagnostics on standard error to `/dev/null`. The MCP client library passes the server only a few environment variables, such as `HOME` and `PATH`, so the server reads the configuration file under `HOME` and ignores the `SURREALDB_*` variables that your shell exports:
+
+```bash
+uv run --python 3.12 --with "surrealfs[mcp] @ git+https://github.com/surrealdb/surrealfs.git@next" python mcp_session.py 2>/dev/null
+```
+
+```text title="Sample output"
+> write_file {'path': '/notes/standup.md', 'content': '# Standup\n- ship the refactor\n'}
+Wrote 30 bytes to /notes/standup.md
+
+> write_file {'path': '/notes/launch-plan.md', 'content': '# Launch plan\nThe launch date is 15 October. Marketing owns the announcement.\n'}
+Wrote 78 bytes to /notes/launch-plan.md
+
+> ls {'path': '/notes'}
+      78  /notes/launch-plan.md
+      30  /notes/standup.md
+
+> edit {'path': '/notes/standup.md', 'old': 'ship', 'new': 'shipped'}
+Edited /notes/standup.md
+
+--- a/notes/standup.md
++++ b/notes/standup.md
+@@ -1,2 +1,2 @@
+ # Standup
+-- ship the refactor
++- shipped the refactor
+
+> search {'query': 'marketing announcement'}
+/notes/launch-plan.md
+    # Launch plan
+The launch date is 15 October. Marketing owns the announcement.
+
+> history {'path': '/notes/standup.md'}
+Revisions for /notes/standup.md:
+  gen 1   | write  | agent-claude | 30     bytes | 2026-10-14 23:01:26
+
+> cat {'path': '/notes/standup.md'}
+# Standup
+- shipped the refactor
+
+
+> cat {'path': '/notes/missing.md'}
+Error: No such file or directory: /notes/missing.md
+
+> tree {'path': '/notes'}
+/notes
+├── launch-plan.md
+└── standup.md
+```
+
+Three details of the results matter to an agent:
+
+- A tool that fails returns an ordinary result whose text starts with `Error:`, as `cat` does for the missing file. The result is not marked as an error at the protocol level, so a client sees a successful call.
+- `edit` returns a unified diff of the change, and `history` lists snapshots of the earlier states of a file. After the edit the file is at generation 2, and the list holds generation 1.
+- `ls` prints the size and the path of each entry. The size counts characters for text files.
+
+Run the check from step 3 again. With files in the database it now ends with `OK`, and the `memory` line appears:
+
+```bash
+uvx --from "surrealfs[mcp] @ git+https://github.com/surrealdb/surrealfs.git@next" surrealfs-mcp --selftest
+```
+
+```text title="Sample output"
+config    /home/you/.config/surrealfs/env
+server    ws://localhost:8000/rpc
+database  agents / mcp
+acting as agent-claude
+tools     31
+ls /      home, notes
+memory    not configured (AGENT_MEMORY_CONTEXT_ID / AGENT_MEMORY_API_KEY)
+
+OK        filesystem reachable; agent memory off, so no
+          brain_recall tool. Everything else works.
+```
+
+The `brain_recall` tool belongs to the optional [Agent Memory](#optional-agent-memory) bridge, which is off here.
+
+## The tools
+
+The server offers 31 tools. They come from the same registry as the pydantic-ai toolset, the Hermes plugin and the raw JSON tool definitions. The names have no prefix, because an MCP client adds the name of the server. Each tool takes JSON arguments, and [tool schemas](/docs/agent-filesystem/interfaces/tool-schemas) lists them all.
+
+| Group | Tools |
+| --- | --- |
+| Read | `ls`, `glob`, `cat`, `head`, `tail`, `read_range`, `read_bytes` |
+| Write | `write_file`, `append_file`, `edit`, `touch`, `write_bytes`, `mkdir`, `cp`, `mv`, `rm`, `chmod` |
+| Search and browse | `search`, `grep`, `search_sections`, `tree` |
+| Versions | `history`, `diff`, `restore`, `undelete` |
+| Links | `relate`, `backlinks` |
+| Coordination | `acquire_lease`, `release_lease`, `fork_workspace`, `merge_workspace` |
+
+The `write_file`, `append_file` and `edit` tools accept `if_generation`, which makes a write fail when the file has changed since the agent read it. In this release the server has no embedding function, so `search` is a full-text search whatever `SURREALFS_SEMANTIC` is set to, and `search_sections` answers `Section search requires embedding to be configured.` The `undelete` tool recreates a file that `rm` removed, because the version snapshots remain.
+
+The server also offers one resource template, `surrealfs://{path}`, which reads a text file and returns it as `text/plain`. The server lists no resources, and a missing file returns a result whose text starts with `Error reading resource`.
+
+> [!WARNING]
+> Three tools fail in this release, and the [known issues](/docs/agent-filesystem/interfaces/tool-schemas#known-issues) list more. `tree` without a `path` returns `Error: Not found: /`, so pass a folder such as `/notes`. `fork_workspace` always returns an argument error, so no workspace can be created through MCP. `acquire_lease` takes the lease and then fails with a protocol error instead of returning a result, and `release_lease` still releases the lease.
+
+## Where the settings come from
+
+The server reads one configuration file and then the process environment. The file is the path in `SURREALFS_ENV_FILE` when that variable is set, `$XDG_CONFIG_HOME/surrealfs/env` when `XDG_CONFIG_HOME` is set, and `~/.config/surrealfs/env` otherwise. The file supplies defaults. A variable that is already set in the environment of the process that starts the server wins over the same variable in the file, so a variable in the `env` block of an MCP client overrides the file.
+
+The settings that this page uses are the following:
+
+- `SURREALDB_URL` is the WebSocket URL of the server, such as `ws://localhost:8000/rpc`. It has no default, and the server refuses to start without it.
+- `SURREALDB_USER` and `SURREALDB_PASS` are the credentials. With record access, the user name is also the identity of the agent.
+- `SURREALDB_NAMESPACE` and `SURREALDB_DATABASE` name the namespace and the database that hold the files.
+- `SURREALDB_AUTH_LEVEL` chooses how to sign in: `root`, `namespace`, `database` or `record`. The value `record` signs in through the `account` access method that the schema defines.
+- `SURREALFS_AGENT_USER` names the agent when the credentials are a system user. Characters other than letters, digits, `_` and `-` become `-`, and `root` is refused. The setting is ignored with record access.
+
+The [MCP server](/docs/agent-filesystem/interfaces/mcp-server#configure-the-server) page lists every setting and its default.
+
+The server tries to apply the schema each time it connects. With record access that attempt fails, because a record user cannot define tables, so the server prints `could not apply the schema: IAM error: Not enough permissions to perform this action` on standard error and continues. The message is expected when the schema is already in place, as it is after `surrealfs init`.
+
+With system credentials, the agent identity is a name that the server asserts, and SurrealDB cannot tell which agent is asking. See [permissions](/docs/agent-filesystem/security/permissions) and [record access](/docs/agent-filesystem/security/record-access) for what each credential type enforces.
+
+## The Claude plugin
+
+The Claude plugin is an alternative to step 4. It installs the same MCP server together with two skills, so use one of the two routes. The plugin starts its own copy of the server, and Claude would otherwise see two servers over the same database. If you added the server in step 4, remove it first:
+
+```bash
+claude mcp remove surrealfs
+```
+
+> [!IMPORTANT]
+> The plugin builds the server from the default branch of the SurrealFS repository unless you name another source. That branch is older than the `next` branch that this page describes: its server has 15 tools instead of 31 and defines an older schema. Started with a system credential, such as the `root` user in the hand-written file of step 2, a server built from the older branch applies its schema to the database and replaces the permission functions that the `next` build defined there. With the record-access file that `init` writes, that attempt fails and changes nothing. Export `SURREALFS_SOURCE` in the shell from which you start Claude Code, before you start it with the plugin installed. The variable must be exported, because the launcher reads it before the server exists to read a configuration file.
+
+```bash
+export SURREALFS_SOURCE="git+https://github.com/surrealdb/surrealfs.git@next"
+```
+
+Install the plugin in Claude Code with these commands:
+
+```bash
+claude plugin marketplace add surrealdb/surrealfs
+claude plugin install surrealfs@surrealfs
+```
+
+```text title="Sample output"
+✔ Successfully added marketplace: surrealfs (declared in user settings)
+Installing plugin "surrealfs@surrealfs"...✔ Successfully installed plugin: surrealfs@surrealfs (scope: user)
+```
+
+The `marketplace add` command prints progress lines before the first line shown here. Then run the launcher of the installed plugin with `--selftest` to see which build it starts. The selftest runs in your shell, so it shows the build that a Claude Code started from this shell gets. The `tools` line must show 31, and if it shows another number, stop: the plugin builds an older branch than the one described on this page.
+
+```bash
+"$(ls -d ~/.claude/plugins/cache/surrealfs/surrealfs/*/scripts/surrealfs-mcp | tail -1)" --selftest
+```
+
+Claude Code keeps an installed plugin under `~/.claude/plugins/cache/`, or under `$CLAUDE_CONFIG_DIR/plugins/cache/` when `CLAUDE_CONFIG_DIR` is set. Replace `~/.claude` in the command above with that directory in the second case. The layout is an implementation detail of Claude Code, and the command below does not depend on it. It builds the same package source as the launcher does and runs the same check:
+
+```bash
+uvx --from "surrealfs[mcp,agent-memory] @ $SURREALFS_SOURCE" surrealfs-mcp --selftest
+```
+
+The plugin reads the same `~/.config/surrealfs/env` file as the server, so complete step 2 first. To remove the plugin, run `claude plugin uninstall surrealfs@surrealfs` and `claude plugin marketplace remove surrealfs`.
+
+> [!NOTE]
+> The launcher is a POSIX shell script, and the project's source notes that Windows would need a separate `.cmd` launcher, so use the JSON configuration of step 4 on Windows. Claude Desktop starts servers with a bare environment, so an export in a shell does not reach it, and the plugin route cannot choose the build there. On Claude Desktop, use the JSON configuration of step 4, which names the `next` branch in its arguments. The Claude Desktop steps for the plugin come from the project's README, and they were not tested for this page: open **Customize** in the sidebar, choose **Plugins** and **Add from a repository**, enter `https://github.com/surrealdb/surrealfs`, and install the `surrealfs` plugin. The menu names can change between releases of Claude Desktop.
+
+The plugin contains the following:
+
+| Part | Purpose |
+| --- | --- |
+| MCP server `surrealfs` | A launcher script that starts `surrealfs-mcp` through `uvx`. The plugin passes no settings to the server. |
+| Skill `brain` | Instructions for keeping a shared project record under `/brain/<project>/`, with folders for `sources` (evidence), `risks` (current state), `decisions`, `digests` and `notes`. The examples in the skill come from a security and compliance workflow. |
+| Skill `brain-memory` | Instructions for asking Agent Memory first with the `brain_recall` tool. It applies only when that tool exists. |
+
+The launcher resolves the package source with `uvx` each time the plugin starts, and `uvx` builds the package again when the branch has moved. Without `SURREALFS_SOURCE`, the source is the default branch. A local checkout works as well: set `SURREALFS_SOURCE` to its path.
+
+## Optional: Agent Memory
+
+The server can mirror the text files that it writes into [Agent Memory](/docs/agent-memory) and offer a `brain_recall` tool that queries it. Both are off unless the configuration holds `AGENT_MEMORY_CONTEXT_ID` and `AGENT_MEMORY_API_KEY`. To get a context ID and an API key, follow [Create your first context](/docs/agent-memory/quickstarts/surrealdb-cloud#create-your-first-context). Each context has its own host, so also set `AGENT_MEMORY_URL` to the host that the context shows. The default is a built-in host, which is not the host of your context. Add the three settings to the configuration file:
+
+```text title="Add to ~/.config/surrealfs/env"
+AGENT_MEMORY_URL=https://<your-context-host>
+AGENT_MEMORY_CONTEXT_ID=<your-context-id>
+AGENT_MEMORY_API_KEY=<your-api-key>
+SURREALFS_MIRROR_ROOT=/brain
+```
+
+The `SURREALFS_MIRROR_ROOT` setting limits the upload to writes below one path. Install the `agent-memory` extra when you set them: with the variables set and the extra missing, the server still offers `brain_recall`, every mirror fails with a message that names the extra, and `--selftest` reports a failure. The plugin installs the extra. With `uvx`, name it in the package, as in `surrealfs[mcp,agent-memory]`. When Agent Memory is configured, the `tools` line of the selftest shows 32, because `brain_recall` counts as a tool. The [MCP server](/docs/agent-filesystem/interfaces/mcp-server#optional-agent-memory) page lists every Agent Memory setting, including `AGENT_MEMORY_SCOPE`, the scope that the documents are filed under.
+
+After `write_file`, `edit` or `touch` succeeds, the server uploads the new text of the file as a document that is titled with the file's path. A file whose text is empty or only whitespace is not uploaded. The `append_file`, `cp`, `rm` and `mv` tools are not mirrored, so a file that changed only through `append_file` or `cp` is not updated in Agent Memory. A file whose text changed becomes a second document and does not replace the first, so Agent Memory keeps the earlier version. A failed upload does not undo the write, and the server appends the failure to the tool result.
+
+> [!NOTE]
+> This section describes the code of the server. It was not run against the hosted Agent Memory service for this page.
+
+> [!WARNING]
+> With the default `SURREALFS_MIRROR_ROOT` of `/`, every text file that the server writes is uploaded, including files in `/home/<user>`. Set the variable to a shared folder such as `/brain` to keep other files out of Agent Memory. See [Agent Filesystem and Agent Memory](/docs/agent-filesystem/welcome/agent-filesystem-and-agent-memory) for how the two products relate.
+
+## Troubleshooting
+
+When a client shows no tools, run `surrealfs-mcp --selftest` first. Several different misconfigurations look the same in a client, and the check separates the causes. If the check passes and the client still lists nothing, the client never started the server, so look at the client's own log or at `claude mcp list`. The [MCP server](/docs/agent-filesystem/interfaces/mcp-server#troubleshooting) page lists further messages.
+
+| Message | Cause | Resolution |
+| --- | --- | --- |
+| `FAIL nothing to connect to`, or `no configuration found at <path>` on standard error | No `SURREALDB_URL` in the file or the environment. The `config` line of the selftest ends with `(absent)` when the file at that path does not exist. | Create the configuration file, as in step 2, at the path that the `config` line shows |
+| `WARN connected, but this database is empty apart from /home` | The database is new, or the namespace or database name is wrong. With a system credential, the check has also defined the schema in the database that it reached. | Check `SURREALDB_NAMESPACE` and `SURREALDB_DATABASE`, or write a first file |
+| `FAIL could not reach the filesystem: The database 'x' does not exist`, or the same message for a namespace | The namespace or database name is wrong, and the user is a record user, who cannot create it. With a system credential, a wrong name does not fail, and the check prints the empty-database warning instead. | Correct `SURREALDB_NAMESPACE` or `SURREALDB_DATABASE` |
+| `FAIL could not reach the filesystem: No record was returned` from the selftest, or `surrealfs-mcp: No record was returned` from the server | The record user did not sign in: the password is wrong, the user does not exist in this namespace and database, or `init` was run again with a different `--account-pass` | Write the password that the user holds to `SURREALDB_PASS`, or create a user with a new `--account` name |
+| `RuntimeError: no agent may act as 'root'`, which `--selftest` prints as a traceback | `SURREALFS_AGENT_USER` is `root`, or the operating-system user is `root` and no other name is set, or the environment sets `SURREALDB_USER=root`, which overrides the record user in the file | Set `SURREALFS_AGENT_USER` to a real name, or unset the exported `SURREALDB_*` variables |
+| `<path> is readable by other users; chmod 600 it.` | The configuration file has loose permissions | Run `chmod 600` on the file |
+
+## Next steps
+
+- [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas) lists the arguments and results of every tool.
+- [MCP server](/docs/agent-filesystem/interfaces/mcp-server) and [Claude plugin](/docs/agent-filesystem/interfaces/claude-plugin) describe both integrations in reference form.
+- [Permissions](/docs/agent-filesystem/security/permissions) explains what several agents sharing one filesystem can and cannot do to each other's files.
+- [Python quickstart](/docs/agent-filesystem/quickstarts/python) uses the same filesystem from code.

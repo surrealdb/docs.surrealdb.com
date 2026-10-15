@@ -1,0 +1,2309 @@
+---
+position: 0
+title: Agent Filesystem functions
+description: "Reference for the 76 fn::sfs_* SurrealQL functions of Agent Filesystem: signatures, parameters, return values, errors, permission behaviour and examples."
+---
+
+Agent Filesystem defines 76 SurrealQL functions, all named `fn::sfs_*`, in the schema file `file.surql`. This page describes each function: its signature, parameters, return value, errors, how it treats the identity of the caller, and an example that you can run.
+
+Any client that can send SurrealQL to the database can call these functions, including the `surreal sql` shell. The [Python SDK](/docs/agent-filesystem/interfaces/python-sdk), the [TypeScript SDK](/docs/agent-filesystem/interfaces/typescript-sdk) and the [command line](/docs/agent-filesystem/interfaces/command-line) call some of them, and the [schema reference](/docs/agent-filesystem/reference/schema) describes the tables they read and write.
+
+> [!NOTE]
+> Agent Filesystem is in beta. This page describes the functions in version 0.2.0 of the SurrealFS repository, tested on SurrealDB 3.2.3. Where a function does less than its name suggests, or behaves differently from the Python client of the same name, the entry says so.
+
+## Before you call a function
+
+### Install the functions
+
+The schema creates the functions. The steps below start a server that keeps its data in memory, install the Python package that applies the schema, apply it, and open a SurrealQL shell on the database. The [Python quickstart](/docs/agent-filesystem/quickstarts/python) explains the first two steps in more detail. Start the server first:
+
+```bash
+surreal start --user root --pass secret memory
+```
+
+In a second terminal, create a virtual environment, install the package from the `next` branch of the repository, apply the schema to the SurrealDB 3.x server, and open the shell:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install "surrealfs @ git+https://github.com/surrealdb/surrealfs.git@next"
+python -m surrealfs.schema --url ws://localhost:8000/rpc --username root --password secret --namespace surrealfs --database demo
+surreal sql --endpoint http://localhost:8000 --user root --pass secret --ns surrealfs --db demo
+```
+
+An option that the schema command does not receive falls back to an environment variable and then to a default: `ws://localhost:8000/rpc`, the user `root` with the password `root`, the namespace `surrealfs` and the database `demo`. The shell needs the namespace and the database, because a shell that has not selected them cannot see the functions.
+
+Every function is defined with `DEFINE FUNCTION OVERWRITE`, so applying the schema again replaces the functions with the versions in the installed package. All 76 functions have `PERMISSIONS FULL`, which lets any signed-in user call them. What a call may do depends on the credential, as described in [Identity and permissions](#identity-and-permissions).
+
+> [!NOTE]
+> The TypeScript package embeds an older copy of the schema in `packages/sdk-ts/src/schema_sql.ts`. That copy defines 44 of the 76 functions and 15 of the 32 tables, so a database initialised from it lacks the functions for chunked uploads, groups, shares, jobs, symbols, digests, context packing, entities, tables, credential lookup, legal hold and the `*_grp` permission predicates. The reference for the tables is the [schema reference](/docs/agent-filesystem/reference/schema).
+
+### Conventions in this page
+
+- Arguments are positional. A trailing parameter typed `option<...>` or `any` can be left out, so `fn::sfs_history('/notes/a.md')` and `fn::sfs_history('/notes/a.md', 5)` are both valid.
+- A path is an absolute string. The functions split it on `/`, ignore empty segments, and do not resolve `.` or `..`.
+- The root folder is not a record. `fn::sfs_resolve('/')` returns `NONE`, and only `fn::sfs_stat` and `fn::sfs_ls` accept `/`.
+- A `mode` is an integer in decimal. The table below lists the values used on this page.
+- A section that needs data starts with the statements that create it. The examples in a section run in order, and later examples use the data that earlier ones create. Start each section on a database that has only the schema applied, for example by applying the schema to a new database such as `--database search`, because some outputs depend on the records that earlier sections create. The outputs are in SurrealQL notation, as `surreal sql` prints them. An identity argument such as `'alice'` stands for the user that the call acts for.
+
+| Decimal | Octal | Permissions |
+| --- | --- | --- |
+| 511 | 777 | Everyone can read, write and enter |
+| 493 | 755 | Everyone can read and enter, the owner can write |
+| 448 | 700 | The owner only |
+| 438 | 666 | Everyone can read and write |
+| 432 | 660 | The owner and the group can read and write |
+| 420 | 644 | Everyone can read, the owner can write |
+| 416 | 640 | The owner can read and write, the group can read |
+| 384 | 600 | The owner can read and write |
+
+### Identity and permissions
+
+Most functions take an argument that names the user they act for. It is called `$caller`, `$me`, `$holder` or `$owner`, depending on the function. The database does not verify that argument. The checks that a function makes with it depend on how the client connected:
+
+- **System credential.** A root, namespace or database user bypasses the table and field `PERMISSIONS` clauses, and `fn::sfs_me()` returns `NONE`. A function checks permissions only if it takes an identity argument and tests it.
+- **Record user.** A user created with `python -m surrealfs.users add` signs in through the `account` access method. `fn::sfs_me()` returns the user name, and the statements inside a function run under that user's table permissions. A path that the user cannot read does not resolve, so it gives `sfs:not_found`. See [Record access](/docs/agent-filesystem/security/record-access) and [Calling the functions as a record user](#calling-the-functions-as-a-record-user).
+
+> [!WARNING]
+> Under a system credential, most write functions do not check permissions. `fn::sfs_write`, `fn::sfs_append`, `fn::sfs_edit`, `fn::sfs_mkdir`, `fn::sfs_rm`, `fn::sfs_mv`, `fn::sfs_cp`, `fn::sfs_chmod`, `fn::sfs_restore` and `fn::sfs_set_legal_hold` act for any identity that a client passes, and some take no identity at all. The read and search functions in the next table do check. The Python `SurrealFs` class applies the permission rules in its own code before it calls the database, and the Rust command-line client and the TypeScript SDK call these functions directly.
+
+To try the example, create a private home for alice first:
+
+```surql
+fn::sfs_mkdir('/home/alice', false, 'alice');
+fn::sfs_chmod('/home/alice', 448);
+fn::sfs_write('/home/alice/plan.md', 'Q4 plan', NONE, NONE, 'alice');
+```
+
+```surql
+-- The read function checks the identity
+fn::sfs_read('/home/alice/plan.md', 'bob');
+//- 'An error occurred: sfs:denied'
+
+-- The write function does not. The caller argument is only used as the owner of new records
+fn::sfs_write('/home/alice/plan.md', 'Overwritten by bob', NONE, NONE, 'bob').{ path, owner, generation };
+//- { generation: 2, owner: 'alice', path: '/home/alice/plan.md' }
+
+fn::sfs_read('/home/alice/plan.md', 'alice');
+//- 'Overwritten by bob'
+```
+
+Each function uses one of these rules to decide whom it acts for.
+
+| Rule | What the function does | Functions |
+| --- | --- | --- |
+| Search identity | Uses `fn::sfs_me()` and falls back to `$me`. It throws when neither exists, and it ignores `$me` for a record user. | `fn::sfs_searcher`, the search functions and `fn::sfs_grep` |
+| Caller or root | Uses `fn::sfs_me()`, then the argument, then `'root'`. Without an argument, a system credential acts as `root`. | `fn::sfs_write`, `fn::sfs_mkdir`, `fn::sfs_mv`, `fn::sfs_cp`, `fn::sfs_ensure_parents`, `fn::sfs_acquire_lock`, `fn::sfs_release_lock`, `fn::sfs_upload_begin`, `fn::sfs_upload_commit`, `fn::sfs_du`, `fn::sfs_symbols`, `fn::sfs_definition`, `fn::sfs_digest`, `fn::sfs_pack`, `fn::sfs_entities`, `fn::sfs_query_table` |
+| Argument, then session | Uses the argument, then `fn::sfs_me()`. With neither, the call is denied. | `fn::sfs_read`, `fn::sfs_diff` |
+| Argument only | Compares the argument with the owner or creator. | `fn::sfs_chgrp`, `fn::sfs_create_share`, `fn::sfs_revoke_share`, `fn::sfs_list_shares`, and the workspace functions, which take an `$owner` |
+| No identity | Takes no identity, or accepts one and ignores it. | The remaining functions |
+
+In a session that is signed in as a record user, `fn::sfs_me()` supplies the identity, and the arguments are ignored where the rule says so. [Calling the functions as a record user](#calling-the-functions-as-a-record-user) shows how to open such a session and what the database refuses in it.
+
+### Errors
+
+A function reports an error with `THROW`. The message that a client receives starts with `An error occurred: `, as in `An error occurred: sfs:conflict`.
+
+| Error | Meaning | Raised by |
+| --- | --- | --- |
+| `sfs:not_found` | The path, version, upload, share or related record does not resolve. For a record user it also covers a record that the user may not read. | Most functions |
+| `sfs:denied` | The identity may not read the file, or may not change it. | `fn::sfs_read`, `fn::sfs_diff`, `fn::sfs_chmod` when a record user may not update the record at all, `fn::sfs_chgrp`, `fn::sfs_revoke_share` |
+| `sfs:denied_or_missing` | The identity may not read the path. The message does not say whether the path exists. | `fn::sfs_symbols`, `fn::sfs_digest`, `fn::sfs_entities`, `fn::sfs_query_table` |
+| `sfs:denied_or_conflict` | The lease statement changed nothing. | `fn::sfs_acquire_lock` |
+| `sfs:conflict` | `$if_generation` is set and does not match the file's generation. | `fn::sfs_write`, `fn::sfs_append`, `fn::sfs_edit`, `fn::sfs_upload_commit` |
+| `sfs:not_found: workspace not found`, `sfs:not_found: source workspace not found`, `sfs:not_found: upload expired or not found` | A workspace, the source of a fork or an upload does not exist, or an upload has expired. | The workspace functions, `fn::sfs_upload_chunk` and `fn::sfs_upload_commit` |
+| `sfs:conflict: concurrent change on /docs/b.md` | A file that the workspace was forked from has changed since. The message ends with the path. | `fn::sfs_merge_workspace` |
+| `sfs:locked` | Another holder has an unexpired lease. | `fn::sfs_acquire_lock`, `fn::sfs_release_lock` |
+| `sfs:legal_hold` | The file, or one that the call would delete, is under legal hold. | `fn::sfs_rm` |
+| `sfs:not_empty` | The folder has children and `$recursive` is not `true`. | `fn::sfs_rm` |
+| `sfs:is_a_directory` | The path is a folder. | `fn::sfs_write`, `fn::sfs_cp`, `fn::sfs_upload_commit` |
+| `sfs:not_a_directory` | The path is a file. | `fn::sfs_digest` |
+| `sfs:exists: workspace already exists` | The workspace name is taken for that owner. | `fn::sfs_fork_workspace` |
+| `sfs:invalid_relation` | The relation name is not one of the five relation tables. | `fn::sfs_relate` |
+| `sfs:incomplete_upload: missing chunks` | Some chunks of the upload have not arrived. | `fn::sfs_upload_commit` |
+| `search needs an identity: pass $me, or connect as a record user` | A system credential called a search function without `$me`. | `fn::sfs_searcher` and the functions that use it |
+
+The error `sfs:denied: rename needs w+x on both folders` comes from the `evt_file_move` event, not from a function. It applies to a record user who renames a file without write and execute permission on both folders.
+
+SurrealDB itself raises a few errors that the functions do not translate:
+
+- ``Database index `child_unique` already contains ...`` when a call creates a name that exists in the folder, as `fn::sfs_cp` does when the destination exists, or when two calls create the same name at the same time.
+- `Reached excessive computation depth due to functions, subqueries, or computed values` when `fn::sfs_mv` moves a folder into its own subtree. Deeply nested folders also slow every call down, as described in [folder nesting depth](/docs/agent-filesystem/reference/schema#folder-nesting-depth).
+- `Incorrect vector dimension (3). Expected a vector of 1536 dimension.` when a vector does not have 1536 numbers.
+- `Incorrect arguments for function ...` with a `Failed to coerce argument` message when an argument has the wrong type.
+- `There was a problem with the key-value store: Transaction conflict: Write conflict, retry the transaction. This transaction can be retried` when two statements change the same record at the same moment. The caller can retry the call.
+- `` Couldn't coerce value for field `filename` of `file:...`: Expected `string` but found `NONE` `` when `fn::sfs_write` receives a path that has no segments, such as `/`.
+- `Incorrect arguments for function fn::sfs_write(). The function expects 2 to 5 arguments.` when a call has too few or too many arguments. Each function names itself and the range that it accepts.
+
+## Function index
+
+| Group | Functions |
+| --- | --- |
+| [Files and folders](#files-and-folders) | [`fn::sfs_write`](#fnsfs_write), [`fn::sfs_read`](#fnsfs_read), [`fn::sfs_append`](#fnsfs_append), [`fn::sfs_edit`](#fnsfs_edit), [`fn::sfs_stat`](#fnsfs_stat), [`fn::sfs_ls`](#fnsfs_ls), [`fn::sfs_mkdir`](#fnsfs_mkdir), [`fn::sfs_mv`](#fnsfs_mv), [`fn::sfs_cp`](#fnsfs_cp), [`fn::sfs_chmod`](#fnsfs_chmod), [`fn::sfs_rm`](#fnsfs_rm) |
+| [Versions and legal hold](#versions-and-legal-hold) | [`fn::sfs_history`](#fnsfs_history), [`fn::sfs_version_content`](#fnsfs_version_content), [`fn::sfs_diff`](#fnsfs_diff), [`fn::sfs_restore`](#fnsfs_restore), [`fn::sfs_is_legal_hold`](#fnsfs_is_legal_hold), [`fn::sfs_set_legal_hold`](#fnsfs_set_legal_hold) |
+| [Search](#search) | [`fn::sfs_search_text`](#fnsfs_search_text), [`fn::sfs_search_semantic`](#fnsfs_search_semantic), [`fn::sfs_search_sections`](#fnsfs_search_sections), [`fn::sfs_hybrid_search`](#fnsfs_hybrid_search), [`fn::sfs_grep`](#fnsfs_grep) |
+| [Links](#links) | [`fn::sfs_relate`](#fnsfs_relate), [`fn::sfs_backlinks`](#fnsfs_backlinks), [`fn::sfs_neighbors`](#fnsfs_neighbors) |
+| [Leases](#leases) | [`fn::sfs_acquire_lock`](#fnsfs_acquire_lock), [`fn::sfs_release_lock`](#fnsfs_release_lock) |
+| [Workspaces](#workspaces) | [`fn::sfs_fork_workspace`](#fnsfs_fork_workspace), [`fn::sfs_diff_workspace`](#fnsfs_diff_workspace), [`fn::sfs_merge_workspace`](#fnsfs_merge_workspace), [`fn::sfs_discard_workspace`](#fnsfs_discard_workspace) |
+| [Chunked uploads](#chunked-uploads) | [`fn::sfs_upload_begin`](#fnsfs_upload_begin), [`fn::sfs_upload_chunk`](#fnsfs_upload_chunk), [`fn::sfs_upload_commit`](#fnsfs_upload_commit), [`fn::sfs_read_bytes_range`](#fnsfs_read_bytes_range), [`fn::sfs_du`](#fnsfs_du), [`fn::sfs_gc_blobs`](#fnsfs_gc_blobs) |
+| [Code and structure](#code-and-structure) | [`fn::sfs_symbols`](#fnsfs_symbols), [`fn::sfs_definition`](#fnsfs_definition), [`fn::sfs_digest`](#fnsfs_digest), [`fn::sfs_pack`](#fnsfs_pack), [`fn::sfs_entities`](#fnsfs_entities), [`fn::sfs_query_table`](#fnsfs_query_table) |
+| [Job queue](#job-queue) | [`fn::sfs_job_claim`](#fnsfs_job_claim), [`fn::sfs_job_complete`](#fnsfs_job_complete) |
+| [Shares](#shares) | [`fn::sfs_create_share`](#fnsfs_create_share), [`fn::sfs_revoke_share`](#fnsfs_revoke_share), [`fn::sfs_resolve_share`](#fnsfs_resolve_share), [`fn::sfs_list_shares`](#fnsfs_list_shares) |
+| [Groups](#groups) | [`fn::sfs_create_group`](#fnsfs_create_group), [`fn::sfs_add_group_member`](#fnsfs_add_group_member), [`fn::sfs_remove_group_member`](#fnsfs_remove_group_member), [`fn::sfs_list_group_members`](#fnsfs_list_group_members), [`fn::sfs_get_user_groups`](#fnsfs_get_user_groups), [`fn::sfs_chgrp`](#fnsfs_chgrp) |
+| [Credentials](#credentials) | [`fn::sfs_resolve_credential`](#fnsfs_resolve_credential) |
+| [Permission predicates](#permission-predicates) | `fn::sfs_me`, `fn::sfs_searcher`, `fn::sfs_is_member`, `fn::sfs_gate`, `fn::sfs_reachable`, `fn::sfs_bits`, `fn::sfs_bits_grp`, `fn::sfs_can_read`, `fn::sfs_can_read_grp`, `fn::sfs_w`, `fn::sfs_w_grp`, `fn::sfs_can_write`, `fn::sfs_can_write_grp`, `fn::sfs_can_enter`, `fn::sfs_has_children`, `fn::sfs_home_ok` |
+| [Path helpers](#path-helpers) | `fn::sfs_resolve`, `fn::sfs_resolve_seg`, `fn::sfs_ensure_parents`, `fn::sfs_ensure_parents_seg` |
+
+## Files and folders
+
+These functions create, read and change files and folders. A file is one record in the `file` table, and a folder is a record that has no text, no bytes and no symlink. See [The file table](/docs/agent-filesystem/reference/schema#the-file-table).
+
+The Python client does not call the functions in this section. It runs its own statements and applies the permission rules in Python, so its defaults and some of its behaviour differ from the functions below. Each entry names the difference.
+
+### `fn::sfs_write`
+
+Creates a text file, or replaces the text of an existing file, and returns the file's metadata.
+
+<Synopsis label="Signature">
+fn::sfs_write($path: string, $content: string, $if_generation: any, $create_parents: any, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The absolute path of the file. Missing parent folders are created. |
+| `$content` | The new text. |
+| `$if_generation` | `NONE`, or the generation that the file must have for the write to happen. For a path that does not exist, any value other than `NONE` is a conflict. |
+| `$create_parents` | Accepted and ignored. The function always creates missing parent folders. |
+| `$caller` | The identity that owns the file and the folders that the call creates. |
+
+**Returns:** the record that [`fn::sfs_stat`](#fnsfs_stat) returns for the path.
+
+**Errors:** `sfs:is_a_directory` when the path is a folder. `sfs:conflict` when `$if_generation` is set and does not match.
+
+**Identity:** a new file and the parent folders that the call creates belong to `fn::sfs_me() ?? $caller ?? 'root'`. The function does not check that the identity may write the path. For a record user who may read an existing file but not write it, the call returns the unchanged record and writes nothing.
+
+**Behaviour:** a new file has mode 420, the content type `text/plain` and generation 1. New parent folders have mode 493. Replacing the text of an existing file keeps its owner, mode and content type, sets `content` and clears `file`. The function does not read frontmatter and does not create `links_to` records. It writes text only: no function stores new bytes in the `file` field, so a client that needs a binary file, such as the Python `write_bytes`, writes the record with a statement of its own. The function does not check that a parent in the path is a folder. A path below an existing file succeeds, the file keeps its text and gains the new record as a child, and `fn::sfs_rm` of that file then raises `sfs:not_empty`.
+
+**Python client:** `write_text` creates files with mode 438, chooses the content type from the file name, stores frontmatter in `meta`, creates `links_to` records from Markdown links, checks permissions first and refuses a path below a file with `NotADirectory`.
+
+```surql
+-- Create a file. Missing parent folders are created as well
+fn::sfs_write('/notes/todo.md', 'Ship the docs', NONE, NONE, 'alice').{ path, owner, mode, generation };
+//- { generation: 1, mode: 420, owner: 'alice', path: '/notes/todo.md' }
+
+-- Replace the content only if the file is still at generation 1
+fn::sfs_write('/notes/todo.md', 'Ship the docs today', 1, NONE, 'alice').generation;
+//- 2
+
+fn::sfs_write('/notes/todo.md', 'A stale write', 1, NONE, 'alice');
+//- 'An error occurred: sfs:conflict'
+
+fn::sfs_write('/notes', 'Not a file', NONE, NONE, 'alice');
+//- 'An error occurred: sfs:is_a_directory'
+```
+
+### `fn::sfs_read`
+
+Returns the content of a file: the text of a text file, the bytes of a binary file, and an empty string for a folder.
+
+<Synopsis label="Signature">
+fn::sfs_read($path: string, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The absolute path of the file. |
+| `$caller` | The identity that reads. When it is omitted, `fn::sfs_me()` is used, and when there is neither the call is denied. |
+
+**Returns:** a `string`, a `bytes` value, or `''` when the record holds neither, which is the case for a folder and for a file that a chunked upload committed.
+
+**Errors:** `sfs:not_found` and `sfs:denied`.
+
+**Identity:** the identity is `$caller ?? fn::sfs_me()`, and `'root'` skips the check. The check is group-aware: when the file has a group and the identity belongs to it, the group digit of the mode applies. A call with no identity is denied, even for a file that everyone can read.
+
+**Python client:** `read_text` and `read_bytes` check permissions in Python and raise `NotATextFile` or `IsADirectory` where this function returns bytes or an empty string.
+
+```surql
+-- Set up a private home so that the permission check is visible
+fn::sfs_mkdir('/home/alice', false, 'alice').path;
+//- '/home/alice'
+
+fn::sfs_chmod('/home/alice', 448);
+//- true
+
+fn::sfs_write('/home/alice/plan.md', 'Q4 plan', NONE, NONE, 'alice').path;
+//- '/home/alice/plan.md'
+
+fn::sfs_read('/home/alice/plan.md', 'alice');
+//- 'Q4 plan'
+
+fn::sfs_read('/home/alice/plan.md', 'bob');
+//- 'An error occurred: sfs:denied'
+
+-- A call without an identity is denied, even for a world-readable file
+fn::sfs_read('/notes/todo.md');
+//- 'An error occurred: sfs:denied'
+
+fn::sfs_read('/notes/todo.md', 'bob');
+//- 'Ship the docs today'
+```
+
+### `fn::sfs_append`
+
+Adds text to the end of a file in a single update and returns the file's record, including its content.
+
+<Synopsis label="Signature">
+fn::sfs_append($path: any, $suffix: string, $if_generation: any, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The path of the file as a string, or a `record<file>` id. |
+| `$suffix` | The text to add. |
+| `$if_generation` | `NONE`, or the generation that the file must have. |
+| `$caller` | Accepted and ignored. |
+
+**Returns:** a record with the fields `id`, `filename`, `path`, `content`, `content_type`, `is_folder`, `owner`, `mode`, `gate`, `hash`, `generation`, `created_at`, `updated_at`, `meta`, `crdt` and `size`.
+
+**Errors:** `sfs:not_found` and `sfs:conflict`.
+
+**Behaviour:** the new text is computed inside the update, as the existing text followed by `$suffix`, so two appends from different connections are both kept. A transaction conflict under heavy contention is reported as an error that the caller can retry. The function does not check that the target is a text file. Appending to a folder gives the folder a text value, and its `is_folder` field then becomes `false`. A binary file that receives an append gains a `content` value, and [`fn::sfs_read`](#fnsfs_read) then returns that text instead of the bytes.
+
+**Python client:** `append_text` checks permissions, raises `NotATextFile` for a binary file and retries a transaction conflict, with up to five attempts in total.
+
+```surql
+fn::sfs_append('/notes/todo.md', '\nReview the API page', NONE, 'alice').{ generation, size };
+//- { generation: 3, size: 39 }
+
+fn::sfs_append('/notes/todo.md', '\nToo late', 1, 'alice');
+//- 'An error occurred: sfs:conflict'
+```
+
+### `fn::sfs_edit`
+
+Replaces text inside a text file and returns the file's metadata.
+
+<Synopsis label="Signature">
+fn::sfs_edit($path: string, $old: string, $new: string, $if_generation: any, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The absolute path of the file. |
+| `$old` | The text to find. |
+| `$new` | The replacement text. |
+| `$if_generation` | `NONE`, or the generation that the file must have. |
+| `$caller` | Accepted and ignored. |
+
+**Returns:** the record that [`fn::sfs_stat`](#fnsfs_stat) returns.
+
+**Errors:** `sfs:not_found` when the path does not resolve or `$old` does not occur in the text. `sfs:conflict` when `$if_generation` does not match.
+
+**Behaviour:** the function replaces every occurrence of `$old`. An empty `$old` is not rejected, and it inserts `$new` between every character and at both ends of the text.
+
+**Python client:** `edit` replaces the first occurrence unless `replace_all` is set, returns a unified diff, checks permissions and rejects an empty `old` with `ValueError`. It reads the file and writes it back from the client, so two edits at the same moment can lose one of them unless `if_generation` is passed.
+
+```surql
+fn::sfs_edit('/notes/todo.md', 'today', 'tomorrow', NONE, 'alice').generation;
+//- 4
+
+fn::sfs_edit('/notes/todo.md', 'green', 'blue', NONE, 'alice');
+//- 'An error occurred: sfs:not_found'
+
+-- Every occurrence is replaced
+fn::sfs_write('/notes/colours.txt', 'red red red', NONE, NONE, 'alice').path;
+//- '/notes/colours.txt'
+
+fn::sfs_edit('/notes/colours.txt', 'red', 'blue', NONE, 'alice').generation;
+//- 2
+
+fn::sfs_read('/notes/colours.txt', 'alice');
+//- 'blue blue blue'
+```
+
+### `fn::sfs_stat`
+
+Returns the metadata of a file or folder, without its content.
+
+<Synopsis label="Signature">
+fn::sfs_stat($path: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | An absolute path. `/` is accepted. |
+
+**Returns:** a record with the fields `id`, `filename`, `path`, `content_type`, `is_folder`, `owner`, `group`, `mode`, `gate`, `hash`, `generation`, `created_at`, `updated_at`, `meta`, `crdt` and `size`. The `size` is the stored size when there is one, otherwise the number of characters of the text, otherwise the number of bytes, otherwise 0. For `/` the function returns a fixed record with the owner `root`, the mode 493 and the id `file:root`.
+
+**Errors:** `sfs:not_found`.
+
+**Identity:** none. For a record user the path resolves only if the user may read it.
+
+**Python client:** `stat` raises `NotFound` for `/` and hides the `hash` of a file that the caller cannot read.
+
+```surql
+fn::sfs_stat('/notes/todo.md').{ path, owner, mode, generation, size, hash };
+//- { generation: 4, hash: '301b0dd02080f37d5b0bd46d166ba9fd', mode: 420, owner: 'alice', path: '/notes/todo.md', size: 42 }
+
+fn::sfs_stat('/');
+//- { content_type: 'inode/directory', filename: '', generation: 1, group: NONE, id: file:root, is_folder: true, mode: 493, owner: 'root', path: '/', size: 0 }
+
+fn::sfs_stat('/nope');
+//- 'An error occurred: sfs:not_found'
+```
+
+### `fn::sfs_ls`
+
+Lists the direct children of a folder, ordered by file name.
+
+<Synopsis label="Signature">
+fn::sfs_ls($path: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The absolute path of a folder. `/` lists the top level. |
+
+**Returns:** an array of the records that [`fn::sfs_stat`](#fnsfs_stat) returns, without the `group` field. The array is empty for an empty folder and for a file that has no children.
+
+**Errors:** `sfs:not_found`.
+
+**Identity:** none. Under a system credential the function lists every child, including the children of another user's private folder. For a record user it lists only the records that the user may read.
+
+**Python client:** `ls` checks that the caller may read and enter the folder, orders the result by path and can list recursively.
+
+```surql
+fn::sfs_ls('/notes').map(|$f| $f.path);
+//- ['/notes/colours.txt', '/notes/todo.md']
+
+fn::sfs_ls('/').map(|$f| $f.path);
+//- ['/home', '/notes']
+```
+
+### `fn::sfs_mkdir`
+
+Creates a folder and its missing parent folders, and returns the folder's metadata.
+
+<Synopsis label="Signature">
+fn::sfs_mkdir($path: string, $parents: any, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The absolute path of the folder. |
+| `$parents` | Accepted and ignored. The function always creates missing parent folders. |
+| `$caller` | The identity that owns the folders that the call creates. |
+
+**Returns:** the record that [`fn::sfs_stat`](#fnsfs_stat) returns. When the path already exists, whether it is a folder or a file, the function returns the existing record and changes nothing.
+
+**Identity:** new folders belong to `fn::sfs_me() ?? $caller ?? 'root'` and have mode 493. The function does not apply the rules for `/home`, and it does not check that a parent in the path is a folder, so a path below an existing file succeeds, as for [`fn::sfs_write`](#fnsfs_write).
+
+**Python client:** `mkdir` creates folders with mode 511, and with mode 448 directly under `/home`. It raises an error for an existing folder unless `exist_ok` is set, creates missing parents only when `parents` is set, and raises `AlreadyExists` for a path that passes through a file.
+
+```surql
+fn::sfs_mkdir('/projects/api', true, 'alice').{ path, is_folder, mode, owner };
+//- { is_folder: true, mode: 493, owner: 'alice', path: '/projects/api' }
+
+-- An existing path is returned as it is, even when it is a file
+fn::sfs_mkdir('/notes/todo.md', false, 'alice').{ path, is_folder };
+//- { is_folder: false, path: '/notes/todo.md' }
+```
+
+### `fn::sfs_mv`
+
+Moves or renames a file or folder by changing its name and its parent.
+
+<Synopsis label="Signature">
+fn::sfs_mv($src: string, $dst: string, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$src` | The path of the file or folder to move. |
+| `$dst` | The new path, including the new name. |
+| `$caller` | The identity that owns the parent folders that the call creates. |
+
+**Returns:** the record that [`fn::sfs_stat`](#fnsfs_stat) returns for `$dst`.
+
+**Errors:** `sfs:not_found` when `$src` does not resolve.
+
+**Behaviour:** missing parent folders of `$dst` are created. A record that already exists at `$dst` is deleted first, whatever its type, and the delete is recorded in the history. The moved record keeps its id, owner, mode, text and generation. The paths of a folder's descendants change with it, because `path` is computed. Two calls fail and change nothing. A move of a path onto itself raises `sfs:not_found`. A move of a folder into its own subtree raises an error that contains `Reached excessive computation depth`, because the function does not check whether the destination lies inside the folder that moves.
+
+> [!WARNING]
+> The function replaces `$dst` and does not move a file into a folder. If `$dst` names an existing folder, the function deletes that one folder record, and its children stay in the `file` table with a `parent` that no longer exists, so they disappear from listings and path lookups, as described for [`fn::sfs_rm`](#fnsfs_rm). Give the full destination path, including the new name. The function also deletes an existing destination that is under legal hold, together with its hold.
+
+**Python client:** `mv` refuses an existing destination, requires the destination's parent folder to exist, refuses to move a folder to a path of the form `/home/name` and checks write and execute permission on both folders.
+
+```surql
+fn::sfs_mv('/notes/todo.md', '/projects/api/todo.md', 'alice').{ path, generation };
+//- { generation: 4, path: '/projects/api/todo.md' }
+
+-- An existing destination is deleted first
+fn::sfs_mv('/notes/colours.txt', '/projects/api/todo.md', 'alice').path;
+//- '/projects/api/todo.md'
+
+fn::sfs_read('/projects/api/todo.md', 'alice');
+//- 'blue blue blue'
+```
+
+### `fn::sfs_cp`
+
+Copies a file.
+
+<Synopsis label="Signature">
+fn::sfs_cp($src: string, $dst: string, $recursive: any, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$src` | The path of the file to copy. |
+| `$dst` | The path of the copy. |
+| `$recursive` | `true` to accept a folder as the source. Any other value rejects a folder. |
+| `$caller` | The identity that owns the copy. |
+
+**Returns:** the record that [`fn::sfs_stat`](#fnsfs_stat) returns for `$dst`.
+
+**Errors:** `sfs:not_found`. `sfs:is_a_directory` when `$src` is a folder and `$recursive` is not `true`. The index error ``Database index `child_unique` already contains ...`` when `$dst` exists.
+
+**Behaviour:** the copy is a new record with generation 1 and the owner `fn::sfs_me() ?? $caller ?? 'root'`. It takes the mode, content type, text and bytes of the source. It does not take `meta`. For a folder with `$recursive` set to `true`, the function creates only the empty destination folder and does not copy the children.
+
+**Python client:** `cp` with `recursive=True` copies the whole tree after it checks that every file can be read, and it does not copy `meta` either.
+
+```surql
+fn::sfs_cp('/projects/api/todo.md', '/notes/todo-copy.md', false, 'bob').{ path, owner, mode, generation };
+//- { generation: 1, mode: 420, owner: 'bob', path: '/notes/todo-copy.md' }
+
+fn::sfs_cp('/projects', '/projects-copy', false, 'alice');
+//- 'An error occurred: sfs:is_a_directory'
+
+-- With recursive set to true, only the folder itself is created
+fn::sfs_cp('/projects', '/projects-copy', true, 'alice').{ path, is_folder };
+//- { is_folder: true, path: '/projects-copy' }
+
+fn::sfs_ls('/projects-copy');
+//- []
+```
+
+### `fn::sfs_chmod`
+
+Sets the mode of a file or folder.
+
+<Synopsis label="Signature">
+fn::sfs_chmod($path: string, $mode: int)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The absolute path. |
+| `$mode` | The new mode as a decimal integer. Octal 644 is 420. |
+
+**Returns:** `true`.
+
+**Errors:** `sfs:not_found`. `sfs:denied` when a record user may not update the record at all.
+
+**Identity:** the function takes no identity, and it does not check the range of `$mode`. Under a system credential any caller can change any mode, and a value such as 99999 is stored. A record user who may update the record but does not own it gets `true`, and the mode does not change, because the field rule reverts it. A mode change adds a `chmod` record to the history and leaves the generation unchanged.
+
+**Python client:** `chmod` is limited to the owner or `root`, accepts the range 0 to 511 and can apply the mode recursively.
+
+```surql
+fn::sfs_chmod('/notes/todo-copy.md', 384);
+//- true
+
+fn::sfs_stat('/notes/todo-copy.md').{ mode, owner };
+//- { mode: 384, owner: 'bob' }
+
+fn::sfs_chmod('/missing.md', 420);
+//- 'An error occurred: sfs:not_found'
+```
+
+### `fn::sfs_rm`
+
+Deletes a file, or a folder together with its direct children.
+
+<Synopsis label="Signature">
+fn::sfs_rm($path: string, $recursive: any, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The absolute path. |
+| `$recursive` | `true` to delete a folder that has children. Any other value rejects it. |
+| `$caller` | Accepted and ignored. |
+
+**Returns:** `true`.
+
+**Errors:** `sfs:not_found`. `sfs:not_empty` when the folder has children and `$recursive` is not `true`. `sfs:legal_hold` when the path, an ancestor of it, or a child that the call would delete is under [legal hold](#fnsfs_set_legal_hold).
+
+**Behaviour:** the delete is permanent. Each deleted record adds a `delete` record to the history. For a record user, a delete that the table rule refuses returns `true` and deletes nothing. With `$recursive` set to `true`, the function deletes the folder's direct children and then the folder. It does not delete anything deeper. Records below the direct children keep a `parent` that no longer exists, so they disappear from listings and path lookups, and they remain in the `file` table with a shortened `path`.
+
+**Python client:** `rm` checks permissions for the whole subtree first, deletes the records deepest first and does not look at legal hold. Under record authentication, a record that the database refuses to delete can leave a partial delete, and `rm` then raises `PermissionDenied` with the number of records that it removed.
+
+```surql
+fn::sfs_rm('/projects', false, 'alice');
+//- 'An error occurred: sfs:not_empty'
+
+fn::sfs_rm('/projects/api/todo.md', false, 'alice');
+//- true
+
+fn::sfs_rm('/projects', true, 'alice');
+//- true
+
+fn::sfs_stat('/projects');
+//- 'An error occurred: sfs:not_found'
+```
+
+## Versions and legal hold
+
+The `file_version` table keeps a snapshot of a file's previous state whenever its text, bytes, mode, name or parent changes, and when the file is deleted. After a write, the snapshot is the state before the change, so the current text is not in the history. A `chmod` or a rename changes no text, so its snapshot holds the live text with the earlier mode, owner and gate, and the current generation then appears in the history too. The history is keyed by path. Renaming a folder leaves the earlier snapshots of its children under the old path, and creating a new file at a path that held a deleted file joins the two histories. See [Versions and history](/docs/agent-filesystem/concepts/versions-and-history).
+
+The examples in this section use one file that has been written three times:
+
+```surql
+fn::sfs_write('/specs/api.md', 'v1: draft', NONE, NONE, 'alice');
+fn::sfs_write('/specs/api.md', 'v2: reviewed', NONE, NONE, 'alice');
+fn::sfs_write('/specs/api.md', 'v3: approved', NONE, NONE, 'alice');
+```
+
+### `fn::sfs_history`
+
+Lists the snapshots of a path, newest first.
+
+<Synopsis label="Signature">
+fn::sfs_history($path: string, $limit: option<int>)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The absolute path to look up. |
+| `$limit` | The maximum number of records. The default is 20. |
+
+**Returns:** an array of `file_version` records with the fields `id`, `file`, `generation`, `path`, `content_type`, `hash`, `author`, `owner`, `mode`, `op`, `size` and `created_at`. A record has no content. The `op` field is `write`, `chmod`, `rename` or `delete`. The array is empty for a path with no history.
+
+**Identity:** none, and the function does not check that the caller may read the file. The `author` is the owner of the file under a system credential, and the user who made the change under record authentication.
+
+**Python client:** `history` calls this function.
+
+```surql
+-- Three writes leave generations 1 and 2 in the history, and generation 3 is the live file
+fn::sfs_history('/specs/api.md').map(|$v| { generation: $v.generation, op: $v.op, author: $v.author, size: $v.size });
+//- [{ author: 'alice', generation: 2, op: 'write', size: 12 }, { author: 'alice', generation: 1, op: 'write', size: 9 }]
+
+fn::sfs_history('/specs/api.md', 1).map(|$v| $v.generation);
+//- [2]
+```
+
+### `fn::sfs_version_content`
+
+Returns the content of one snapshot.
+
+<Synopsis label="Signature">
+fn::sfs_version_content($path: string, $generation: int)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The absolute path to look up. |
+| `$generation` | The generation of the snapshot. |
+
+**Returns:** an object with the fields `content` and `file_bytes`.
+
+**Errors:** `sfs:not_found`.
+
+**Behaviour:** the function takes the first matching snapshot without an order. A `chmod` snapshot and a later `write` snapshot can have the same generation, and the function does not say which one it returns. It does not check that the caller may read the file. Under a system credential it returns the content of any snapshot. A record user reads a snapshot when the mode stored in it allows that, and a `chmod` snapshot holds the live text with the earlier mode, so a user who could read a file before it was made private can still read its current text through this function.
+
+**Python client:** `diff` and `restore` call this function.
+
+```surql
+fn::sfs_version_content('/specs/api.md', 1);
+//- { content: 'v1: draft', file_bytes: NONE }
+
+fn::sfs_version_content('/specs/api.md', 3);
+//- 'An error occurred: sfs:not_found'
+```
+
+### `fn::sfs_diff`
+
+Returns the content of one version of a file. Despite the name, it does not compute a line difference.
+
+<Synopsis label="Signature">
+fn::sfs_diff($path: string, $gen_a: option<int>, $gen_b: option<int>, $caller: option<string>)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The absolute path of the file. |
+| `$gen_a` | A generation. When it is `NONE`, the function returns `''`. The function does not use the content of this version. |
+| `$gen_b` | The generation to return. When it is `NONE`, the function returns the current content. |
+| `$caller` | The identity that reads. |
+
+**Returns:** the text of the version named by `$gen_b`, or the current text, or `''`.
+
+**Errors:** the errors of [`fn::sfs_read`](#fnsfs_read), because the function reads the current file first.
+
+**Python client:** `diff` returns a unified diff that it computes in Python from two versions.
+
+```surql
+-- The function returns the content of the later version, not a line diff
+fn::sfs_diff('/specs/api.md', 1, 2, 'alice');
+//- 'v2: reviewed'
+
+-- With no second generation, the current content is returned
+fn::sfs_diff('/specs/api.md', 1, NONE, 'alice');
+//- 'v3: approved'
+
+fn::sfs_diff('/specs/api.md', NONE, NONE, 'alice');
+//- ''
+```
+
+### `fn::sfs_restore`
+
+Writes the content of an earlier snapshot back to the file.
+
+<Synopsis label="Signature">
+fn::sfs_restore($path: string, $version: int, $caller: option<string>)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The absolute path of the file. |
+| `$version` | The generation of the snapshot to restore. |
+| `$caller` | Accepted and ignored. |
+
+**Returns:** the record that [`fn::sfs_stat`](#fnsfs_stat) returns.
+
+**Errors:** `sfs:not_found` when the file or the snapshot does not exist. The function cannot bring back a deleted file, because its path no longer resolves. To recover one, read its last snapshot with [`fn::sfs_version_content`](#fnsfs_version_content) and write the content with [`fn::sfs_write`](#fnsfs_write), which creates a new file with generation 1. The Python client has `undelete`, which writes the newest snapshot of the path back in the same way.
+
+**Behaviour:** the function sets `content` and `file` from the snapshot. The generation increases by one when the restored text differs from the current text, and the change is recorded in the history. The owner, mode and content type are not restored. The function does not check permissions or legal hold.
+
+**Python client:** `restore` writes the old content through `write_text` or `write_bytes`, so the content type is chosen again and `meta` is read again.
+
+```surql
+fn::sfs_restore('/specs/api.md', 1).{ generation, size };
+//- { generation: 4, size: 9 }
+
+fn::sfs_read('/specs/api.md', 'alice');
+//- 'v1: draft'
+
+fn::sfs_restore('/specs/api.md', 9);
+//- 'An error occurred: sfs:not_found'
+
+-- A deleted file cannot be restored. Write the content of its last snapshot back instead
+fn::sfs_write('/specs/gone.md', 'v1: gone', NONE, NONE, 'alice');
+fn::sfs_rm('/specs/gone.md', false, 'alice');
+fn::sfs_restore('/specs/gone.md', 1);
+//- 'An error occurred: sfs:not_found'
+
+fn::sfs_write('/specs/gone.md', fn::sfs_version_content('/specs/gone.md', 1).content, NONE, NONE, 'alice').generation;
+//- 1
+```
+
+### `fn::sfs_is_legal_hold`
+
+Tells whether a file or one of its ancestors is under legal hold.
+
+<Synopsis label="Signature">
+fn::sfs_is_legal_hold($path: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The absolute path. |
+
+**Returns:** `true` when the record or an ancestor has `meta.legal_hold` set to `true`, and `false` otherwise, including for a path that does not exist.
+
+**Identity:** none. See [Encryption and legal hold](/docs/agent-filesystem/security/encryption-and-legal-hold).
+
+### `fn::sfs_set_legal_hold`
+
+Sets or clears the legal hold flag of a file or folder.
+
+<Synopsis label="Signature">
+fn::sfs_set_legal_hold($path: string, $enabled: bool)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The absolute path. |
+| `$enabled` | `true` to set the hold and `false` to clear it. |
+
+**Returns:** the record that [`fn::sfs_stat`](#fnsfs_stat) returns. Its `meta` field holds `legal_hold`.
+
+**Errors:** `sfs:not_found`.
+
+**Behaviour:** the function writes `meta.legal_hold`. [`fn::sfs_rm`](#fnsfs_rm) checks the flag on the path, on its ancestors and on each child that it deletes. For a record user, the table's delete rule also checks the flag of the record itself, and not the flags of its ancestors, so a direct `DELETE` of a file below a held folder succeeds. No other function checks the flag: a write, an edit, a restore, a mode change or a move changes a held file, and a [`fn::sfs_mv`](#fnsfs_mv) onto a held path deletes the held record, and its hold with it. The function has no identity argument, so under a system credential any caller can set or clear a hold, and under record authentication so can any user who has the write bit on the record, whoever owns it. The Python client does not look at the flag when it deletes a file, and its `write_text` replaces `meta`, which removes a hold that the new frontmatter does not set.
+
+```surql
+fn::sfs_is_legal_hold('/specs/api.md');
+//- false
+
+fn::sfs_set_legal_hold('/specs', true).meta;
+//- { legal_hold: true }
+
+-- A hold on a folder covers the files inside it
+fn::sfs_is_legal_hold('/specs/api.md');
+//- true
+
+fn::sfs_rm('/specs/api.md', false, 'alice');
+//- 'An error occurred: sfs:legal_hold'
+
+fn::sfs_set_legal_hold('/specs', false).meta;
+//- { legal_hold: false }
+
+fn::sfs_rm('/specs/api.md', false, 'alice');
+//- true
+
+fn::sfs_history('/specs/api.md', 2).map(|$v| { generation: $v.generation, op: $v.op });
+//- [{ generation: 4, op: 'delete' }, { generation: 3, op: 'write' }]
+```
+
+## Search
+
+The search functions run inside the database, and each of them filters its results by permission. Full-text matching needs no setup, because the `content` field is indexed when a file is written. Vector search needs embeddings. The functions in this section never call an embedding model, and neither does the `SurrealFs` class: the Python method `reindex_embeddings` takes an embedding function that you supply. The vector index has 1536 dimensions. See [Search](/docs/agent-filesystem/concepts/search) and [Sections and chunking](/docs/agent-filesystem/concepts/sections-and-chunking).
+
+Every search function takes `$me`, the identity to search as. [`fn::sfs_searcher`](#permission-predicates) resolves it. For a record user the session decides, and `$me` is ignored. For a system credential `$me` is required, and the function throws when it is missing, so that a forgotten argument does not look like an empty result. The search functions use the permission rule without groups, so membership of a file's group does not make a file visible to them.
+
+The examples in this section use the files below. The file `secrets.md` has the mode 384, so only its owner can read it:
+
+```surql
+fn::sfs_write('/runbooks/deploy.md', 'Deploy steps: build the image, push it, then roll out with a retry policy of three attempts.', NONE, NONE, 'alice');
+fn::sfs_write('/runbooks/rollback.md', 'Rollback steps: redeploy the previous image tag and verify the health checks.', NONE, NONE, 'alice');
+fn::sfs_write('/runbooks/oncall.md', 'On-call rota and escalation contacts for the platform team.', NONE, NONE, 'alice');
+fn::sfs_write('/runbooks/style.md', 'Writing style guide for incident reports and postmortems.', NONE, NONE, 'alice');
+fn::sfs_write('/runbooks/billing.md', 'Billing export schedule and invoice reconciliation notes.', NONE, NONE, 'alice');
+fn::sfs_write('/runbooks/network.md', 'Network diagrams and firewall change process.', NONE, NONE, 'alice');
+fn::sfs_write('/runbooks/secrets.md', 'Secrets rotation: rotate the deploy key every quarter. Retry policy for the vault client.', NONE, NONE, 'alice');
+fn::sfs_chmod('/runbooks/secrets.md', 384);
+```
+
+### `fn::sfs_search_text`
+
+Finds files by the words in their text and orders them by relevance.
+
+<Synopsis label="Signature">
+fn::sfs_search_text($q: string, $k: option<int>, $match: option<string>, $me: option<string>)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$q` | The query. It is analysed with the analyser `fts_simple`, which splits text into words, splits camel case, keeps punctuation as terms and stems English words. |
+| `$k` | The maximum number of results. The default is 20. |
+| `$match` | `'any'`, the default, matches a file that shares any analysed term with the query. `'all'` requires every distinct term. Any other value behaves like `'any'`. |
+| `$me` | The identity to search as. |
+
+**Returns:** an array of records with the fields `id`, `filename`, `path`, `content_type`, `is_folder`, `owner`, `mode`, `gate`, `hash`, `generation`, `created_at`, `updated_at`, `content`, `size` and `score`. The whole text of each file is returned, with no snippet. The array is ordered by `score` descending and then by `path`. Folders and binary files never match.
+
+**Behaviour:** matching ignores case. The analyser splits letters from digits and keeps punctuation as terms, so `w3` becomes `w` and `3`, and `SEC-1042` becomes `sec`, `-` and `1042`. With `'any'`, a file that shares only the hyphen or only `1042` with the query matches too, and `'all'` requires every term. `search::analyze('fts_simple', $q)` shows the terms of a query. The score is a BM25 score with `k1` 1.2 and `b` 0.75. SurrealDB clamps the inverse document frequency at zero, so a term that occurs in more than about half of the files scores 0 for every file, and the order then follows the path. A small collection therefore often shows scores of 0. The analyser is English. Text in other languages is split into words and stemmed with the English rules, a run of Chinese, Japanese or Korean characters is one term, and the per-language analysers in the schema are not used by this function.
+
+**Python client:** `search_text(query, limit=20, match="any")` calls this function and builds a snippet from the text on the client.
+
+```surql
+-- Match any term, best first, for a caller who can read every file
+fn::sfs_search_text('retry policy', 5, 'any', 'alice').map(|$h| { path: $h.path, score: math::fixed($h.score, 2) });
+//- [{ path: '/runbooks/secrets.md', score: 1.69f }, { path: '/runbooks/deploy.md', score: 1.5f }]
+
+-- Another user does not see the file with mode 0600
+fn::sfs_search_text('retry policy', 5, 'any', 'bob').map(|$h| $h.path);
+//- ['/runbooks/deploy.md']
+
+-- Require every analysed term
+fn::sfs_search_text('deploy rollback', 5, 'all', 'alice').map(|$h| $h.path);
+//- []
+
+fn::sfs_search_text('deploy rollback', 5, 'any', 'alice').map(|$h| $h.path);
+//- ['/runbooks/rollback.md', '/runbooks/secrets.md', '/runbooks/deploy.md']
+
+-- A query that holds an identifier splits into several terms
+search::analyze('fts_simple', 'SEC-1042');
+//- ['sec', '-', '1042']
+
+fn::sfs_search_text('retry policy');
+//- 'An error occurred: search needs an identity: pass $me, or connect as a record user'
+```
+
+### `fn::sfs_search_semantic`
+
+Finds files whose stored embedding is nearest to a query vector.
+
+<Synopsis label="Signature">
+fn::sfs_search_semantic($qvec: array<float>, $k: option<int>, $me: option<string>)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$qvec` | The query vector. It must have exactly 1536 numbers. |
+| `$k` | The maximum number of results. The default is 20. |
+| `$me` | The identity to search as. |
+
+**Returns:** an array of records with the fields of [`fn::sfs_search_text`](#fnsfs_search_text), except `score`, and a `distance` field. The `distance` is the cosine distance, so a smaller value is nearer. The array is ordered by `distance` ascending.
+
+**Behaviour:** only files that have an `embedding` take part. A file is not embedded when it is written, and rewriting it leaves the old vector in place until the next indexing pass. The function asks the vector index for the 80 nearest files and filters them by permission afterwards, so it can return fewer than `$k` files, and a `$k` above 20 is limited by how many of the 80 the caller may read.
+
+**Python client:** `search_semantic(vector, k=10)` calls this function. `reindex_embeddings`, which can run only as `root`, writes the vectors.
+
+```surql
+-- Store demonstration vectors. A real deployment stores embeddings of 1536 dimensions from an embedding model
+UPDATE fn::sfs_resolve('/runbooks/deploy.md') SET embedding = array::concat([1.0, 0.1, 0.0], array::repeat(0.0, 1533)) RETURN NONE;
+
+UPDATE fn::sfs_resolve('/runbooks/rollback.md') SET embedding = array::concat([0.9, 0.3, 0.0], array::repeat(0.0, 1533)) RETURN NONE;
+
+UPDATE fn::sfs_resolve('/runbooks/billing.md') SET embedding = array::concat([0.0, 0.1, 1.0], array::repeat(0.0, 1533)) RETURN NONE;
+
+UPDATE fn::sfs_resolve('/runbooks/secrets.md') SET embedding = array::concat([0.8, 0.5, 0.1], array::repeat(0.0, 1533)) RETURN NONE;
+
+LET $query = array::concat([1.0, 0.2, 0.0], array::repeat(0.0, 1533));
+fn::sfs_search_semantic($query, 3, 'alice').map(|$h| { path: $h.path, distance: math::fixed($h.distance, 4) });
+//- [{ distance: 0.0048f, path: '/runbooks/deploy.md' }, { distance: 0.0077f, path: '/runbooks/rollback.md' }, { distance: 0.0697f, path: '/runbooks/secrets.md' }]
+
+LET $query = array::concat([1.0, 0.2, 0.0], array::repeat(0.0, 1533));
+fn::sfs_search_semantic($query, 3, 'bob').map(|$h| $h.path);
+//- ['/runbooks/deploy.md', '/runbooks/rollback.md', '/runbooks/billing.md']
+
+fn::sfs_search_semantic([1.0, 0.2, 0.0], 3, 'alice');
+//- 'Incorrect vector dimension (3). Expected a vector of 1536 dimension.'
+```
+
+### `fn::sfs_search_sections`
+
+Finds sections of files whose stored embedding is nearest to a query vector.
+
+<Synopsis label="Signature">
+fn::sfs_search_sections($qvec: array<float>, $k: option<int>, $me: option<string>)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$qvec` | The query vector. It must have exactly 1536 numbers. |
+| `$k` | The maximum number of results. The default is 20. |
+| `$me` | The identity to search as. |
+
+**Returns:** an array of records with the fields `path`, `heading`, `line_start`, `line_end`, `content` and `distance`, ordered by `distance` ascending. A record holds the text of the section, not the whole file.
+
+**Behaviour:** the function searches the `file_section` table and filters by the permissions of the parent file. Deleting a file does not delete its sections. A section whose file is gone has no path. It is returned to `root` with `path` set to `NONE`, and it makes the call fail for another identity when it falls among the 80 nearest sections.
+
+**Python client:** `search_sections(vector, limit=20)` calls this function. Its `score` field is always 0.0, because the function returns `distance` and not `score`.
+
+```surql
+-- Section records are normally written by the reindex step. This one is written by hand
+LET $file = fn::sfs_resolve('/runbooks/deploy.md');
+CREATE file_section CONTENT { file_id: $file, section_idx: 0, heading: 'Deploy steps', line_start: 1, line_end: 1, content: 'Deploy steps: build the image, push it, then roll out with a retry policy of three attempts.', embedding: array::concat([1.0, 0.1, 0.0], array::repeat(0.0, 1533)), source_hash: crypto::md5('deploy') } RETURN NONE;
+
+LET $query = array::concat([1.0, 0.2, 0.0], array::repeat(0.0, 1533));
+fn::sfs_search_sections($query, 5, 'alice').map(|$s| { path: $s.path, heading: $s.heading, lines: [$s.line_start, $s.line_end], distance: math::fixed($s.distance, 4) });
+```
+
+```surql title="Output"
+[{ distance: 0.0048f, heading: 'Deploy steps', lines: [1, 1], path: '/runbooks/deploy.md' }]
+```
+
+### `fn::sfs_hybrid_search`
+
+Combines full-text and vector results with reciprocal rank fusion.
+
+<Synopsis label="Signature">
+fn::sfs_hybrid_search($q: string, $qvec: option<array<float>>, $k: option<int>, $match: option<string>, $me: option<string>)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$q` | The query text, as for [`fn::sfs_search_text`](#fnsfs_search_text). |
+| `$qvec` | The query vector, or `NONE` to run the text search alone. |
+| `$k` | The maximum number of results, and the number that each search contributes. The default is 20. |
+| `$match` | `'any'` or `'all'`, applied to the text search only. |
+| `$me` | The identity to search as. |
+
+**Returns:** an array of at most `$k` records, ordered by `rrf_score` descending. A record has the fields of the search that found it, plus `rrf_score`. A file that the text search found has `score`. A file that the vector search found has `distance`. A file found by only one of them lacks the other field.
+
+**Behaviour:** the fusion adds `1 / (60 + rank)` for each list in which a file appears, with the rank starting at 1. The scores of the two searches are not comparable, which is why the fusion uses ranks. Without `$qvec`, the result is the text search alone, and it still carries `rrf_score`.
+
+**Python client:** `search(query, vector=None, limit=20, match="any")` calls this function.
+
+```surql
+LET $query = array::concat([0.9, 0.3, 0.0], array::repeat(0.0, 1533));
+fn::sfs_hybrid_search('rollback image', $query, 3, 'any', 'alice').map(|$h| { path: $h.path, rrf_score: math::fixed($h.rrf_score, 4), score: $h.score != NONE, distance: $h.distance != NONE });
+//- [{ distance: true, path: '/runbooks/rollback.md', rrf_score: 0.0328f, score: true }, { distance: true, path: '/runbooks/deploy.md', rrf_score: 0.0323f, score: true }, { distance: true, path: '/runbooks/secrets.md', rrf_score: 0.0159f, score: false }]
+
+-- Without a query vector, only the text arm runs, and the result still has an rrf_score
+fn::sfs_hybrid_search('rollback image', NONE, 3, 'any', 'alice').map(|$h| { path: $h.path, rrf_score: math::fixed($h.rrf_score, 4) });
+//- [{ path: '/runbooks/rollback.md', rrf_score: 0.0164f }, { path: '/runbooks/deploy.md', rrf_score: 0.0161f }]
+```
+
+### `fn::sfs_grep`
+
+Finds files whose text matches a regular expression.
+
+<Synopsis label="Signature">
+fn::sfs_grep($pattern: string, $path_prefix: option<string>, $me: option<string>)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$pattern` | A regular expression in the syntax of the Rust `regex` crate. A pattern that does not compile raises an argument error. |
+| `$path_prefix` | `NONE`, or a string that the path must start with. The test is a plain prefix, so `/runbooks` also matches `/runbooks2`. |
+| `$me` | The identity to search as. |
+
+**Returns:** an array of records with the fields `id`, `filename`, `path` and `content`, in no particular order and without a limit. A record holds the whole text of the file, not the matching lines.
+
+**Behaviour:** the function applies the read check to every candidate, with no exception for `root`. A file that someone else owns and that has a restrictive mode, such as 384, is therefore invisible to `root`, although `root` finds it with [`fn::sfs_search_text`](#fnsfs_search_text).
+
+**Python client:** `grep` calls this function, then matches the pattern line by line on the client and applies its own `limit`.
+
+```surql
+fn::sfs_grep('retry.*attempts', '/runbooks', 'alice').map(|$h| $h.path);
+//- ['/runbooks/deploy.md']
+
+-- A pattern is a regular expression. (?i) makes it case-insensitive
+fn::sfs_grep('(?i)ROLLBACK', NONE, 'alice').map(|$h| $h.path);
+//- ['/runbooks/rollback.md']
+
+fn::sfs_grep('(?i)retry', NONE, 'bob').map(|$h| $h.path);
+//- ['/runbooks/deploy.md']
+```
+
+## Links
+
+Five relation tables record typed links between files: `references`, `supersedes`, `derives_from`, `implements` and `links_to`. A link has only an id, a source and a target. The names carry no behaviour: nothing in search, reads, history or merging looks at the links. See [Links and entities](/docs/agent-filesystem/concepts/links-and-entities).
+
+The examples in this section use three files:
+
+```surql
+fn::sfs_write('/runbooks/deploy.md', 'Deploy steps', NONE, NONE, 'alice');
+fn::sfs_write('/runbooks/rollback.md', 'Rollback steps', NONE, NONE, 'alice');
+fn::sfs_write('/runbooks/secrets.md', 'Secrets rotation', NONE, NONE, 'alice');
+```
+
+### `fn::sfs_relate`
+
+Creates a link between two files.
+
+<Synopsis label="Signature">
+fn::sfs_relate($from_path: string, $relation: string, $to_path: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$from_path` | The path of the source file or folder. |
+| `$relation` | One of `references`, `supersedes`, `derives_from`, `implements` and `links_to`. |
+| `$to_path` | The path of the target. |
+
+**Returns:** `true`.
+
+**Errors:** `sfs:not_found` when either path does not resolve. `sfs:invalid_relation` for any other relation name.
+
+**Behaviour:** each call creates a new link, and nothing prevents duplicates. The function takes no identity.
+
+**Python client:** `relate` validates the relation name in Python and then calls this function. `write_text` and `edit` also create `links_to` links from the Markdown links and wikilinks in the text, and they add new links each time the file is written.
+
+```surql
+fn::sfs_relate('/runbooks/rollback.md', 'references', '/runbooks/deploy.md');
+//- true
+
+fn::sfs_relate('/runbooks/secrets.md', 'derives_from', '/runbooks/deploy.md');
+//- true
+
+fn::sfs_relate('/runbooks/rollback.md', 'blocks', '/runbooks/deploy.md');
+//- 'An error occurred: sfs:invalid_relation'
+
+fn::sfs_relate('/runbooks/rollback.md', 'references', '/runbooks/missing.md');
+//- 'An error occurred: sfs:not_found'
+```
+
+### `fn::sfs_backlinks`
+
+Lists the links that point to a file.
+
+<Synopsis label="Signature">
+fn::sfs_backlinks($path: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The path of the target file. |
+
+**Returns:** an array of objects with the fields `source_path`, `source_name` and `relation`. The links are grouped by relation in the order `references`, `supersedes`, `derives_from`, `implements` and `links_to`.
+
+**Errors:** `sfs:not_found`.
+
+**Python client:** `backlinks` calls this function.
+
+```surql
+fn::sfs_backlinks('/runbooks/deploy.md');
+```
+
+```surql title="Output"
+[{ relation: 'references', source_name: 'rollback.md', source_path: '/runbooks/rollback.md' }, { relation: 'derives_from', source_name: 'secrets.md', source_path: '/runbooks/secrets.md' }]
+```
+
+### `fn::sfs_neighbors`
+
+Lists the links that leave a file.
+
+<Synopsis label="Signature">
+fn::sfs_neighbors($path: string, $relation: option<string>)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The path of the source file. |
+| `$relation` | `NONE` for every relation, or the name of one relation. A name that is not a relation gives an empty array. |
+
+**Returns:** an array of objects with the fields `target_path`, `target_name` and `relation`. The function follows one link only.
+
+**Errors:** `sfs:not_found`.
+
+**Python client:** `get_neighbors` calls this function.
+
+```surql
+fn::sfs_neighbors('/runbooks/rollback.md');
+//- [{ relation: 'references', target_name: 'deploy.md', target_path: '/runbooks/deploy.md' }]
+
+fn::sfs_neighbors('/runbooks/rollback.md', 'derives_from');
+//- []
+
+-- An unknown relation name gives an empty array
+fn::sfs_neighbors('/runbooks/rollback.md', 'blocks');
+//- []
+```
+
+## Leases
+
+A lease is an advisory claim on a file, kept in the `file_lock` table, that tells other agents that someone is working on it. Nothing enforces it: writes, moves and deletes ignore leases. See [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases).
+
+The examples in this section use one file:
+
+```surql
+fn::sfs_write('/runbooks/deploy.md', 'Deploy steps', NONE, NONE, 'alice');
+```
+
+### `fn::sfs_acquire_lock`
+
+Claims a lease on a file, or renews the claim that the holder already has.
+
+<Synopsis label="Signature">
+fn::sfs_acquire_lock($path: string, $holder: option<string>, $ttl_seconds: option<int>, $reason: option<string>)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The path of the file or folder. |
+| `$holder` | The identity that claims the lease. |
+| `$ttl_seconds` | The lifetime of the lease in seconds, counted on the server clock. The default is 60. |
+| `$reason` | A note for other agents. The default is `advisory lease`. |
+
+**Returns:** the `file_lock` record, with the fields `id`, `file`, `path`, `holder`, `reason` and `expires_at`.
+
+**Errors:** `sfs:not_found` when the path does not resolve. `sfs:locked` when another holder has a lease that has not expired. `sfs:denied_or_conflict` when the write returns nothing.
+
+**Behaviour:** a file has at most one lease. The holder can call the function again to renew it, which replaces the reason and the expiry. An expired lease is replaced by the next caller, and the expired record stays in the table until then. The `path` in the record is the string that the caller passed, and it is not updated when the file moves. The holder is `fn::sfs_me() ?? $holder ?? 'root'`. The function does not check that the holder may read the file, so under a system credential `sfs:not_found` tells a caller whether a private path exists.
+
+**Python client:** `acquire_lock` and the `lease()` context manager call this function. `lease()` releases the lease on exit and does not renew it.
+
+```surql
+fn::sfs_acquire_lock('/runbooks/deploy.md', 'agent-1', 120, 'rewriting the retry section').{ path, holder, reason };
+//- { holder: 'agent-1', path: '/runbooks/deploy.md', reason: 'rewriting the retry section' }
+
+fn::sfs_acquire_lock('/runbooks/deploy.md', 'agent-2', 120, 'also editing');
+//- 'An error occurred: sfs:locked'
+
+-- The holder can renew the lease. The reason is replaced, and the lease lasts 60 seconds from now
+fn::sfs_acquire_lock('/runbooks/deploy.md', 'agent-1').{ holder, reason };
+//- { holder: 'agent-1', reason: 'advisory lease' }
+
+fn::sfs_release_lock('/runbooks/deploy.md', 'agent-2');
+//- 'An error occurred: sfs:locked'
+
+fn::sfs_release_lock('/runbooks/deploy.md', 'agent-1');
+//- true
+
+fn::sfs_release_lock('/runbooks/deploy.md', 'agent-1');
+//- true
+
+-- A lease does not block writes
+fn::sfs_acquire_lock('/runbooks/deploy.md', 'agent-1', 120).holder;
+//- 'agent-1'
+
+fn::sfs_write('/runbooks/deploy.md', 'Deploy steps, revised', NONE, NONE, 'agent-2').generation;
+//- 2
+
+fn::sfs_acquire_lock('/nope', 'agent-1');
+//- 'An error occurred: sfs:not_found'
+```
+
+### `fn::sfs_release_lock`
+
+Releases a lease.
+
+<Synopsis label="Signature">
+fn::sfs_release_lock($path: string, $holder: option<string>)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The path of the file or folder. |
+| `$holder` | The identity that releases the lease. |
+
+**Returns:** `true`, including when there is no lease.
+
+**Errors:** `sfs:not_found` when the path does not resolve. `sfs:locked` when another holder's lease has not expired.
+
+**Python client:** `release_lock` calls this function.
+
+The lease example above includes a release by the holder and a refused release by another holder.
+
+## Workspaces
+
+A workspace is a named branch of the file tree that belongs to one owner. A fork records one `file_branch` record for each file and copies no content, and a merge applies the changed text back to the original files. See [Workspaces](/docs/agent-filesystem/concepts/workspaces).
+
+> [!WARNING]
+> Workspaces handle edits to existing text files. A file that is created inside a workspace is not merged, and the merge reports `ok`. Deletions, renames, bytes, `meta` and links are not merged either. The merge fails if any forked file has changed on the main tree since the fork, even a file that the workspace did not touch.
+
+The examples in this section use two files:
+
+```surql
+fn::sfs_write('/docs/a.md', 'alpha', NONE, NONE, 'alice');
+fn::sfs_write('/docs/b.md', 'beta', NONE, NONE, 'alice');
+```
+
+### `fn::sfs_fork_workspace`
+
+Creates a workspace from the main tree or from another workspace.
+
+<Synopsis label="Signature">
+fn::sfs_fork_workspace($src: string, $dst: string, $owner: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$src` | `'main'`, or the name of an existing workspace of the same owner. |
+| `$dst` | The name of the new workspace. |
+| `$owner` | The identity that owns the workspace. |
+
+**Returns:** an object with the fields `workspace`, `base_branch` and `count`. The `count` is the number of `file_branch` records.
+
+**Errors:** `sfs:exists: workspace already exists`. `sfs:not_found: source workspace not found`.
+
+**Behaviour:** for `'main'` the function records every file that is not a folder, whoever owns it, including the copies in `/.workspaces`. A fork of another workspace copies that workspace's records. The function checks no permissions for a system credential.
+
+**Python client:** `fork_workspace` and the `sandbox()` context manager call this function.
+
+```surql
+fn::sfs_fork_workspace('main', 'draft', 'alice');
+//- { base_branch: 'main', count: 2, workspace: 'draft' }
+
+fn::sfs_fork_workspace('main', 'draft', 'alice');
+//- 'An error occurred: sfs:exists: workspace already exists'
+
+fn::sfs_fork_workspace('nope', 'other', 'alice');
+//- 'An error occurred: sfs:not_found: source workspace not found'
+```
+
+### `fn::sfs_diff_workspace`
+
+Compares a workspace with the files that it was forked from.
+
+<Synopsis label="Signature">
+fn::sfs_diff_workspace($branch: string, $owner: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$branch` | The name of the workspace. |
+| `$owner` | The owner of the workspace. |
+
+**Returns:** an array with one object per forked file, with the fields `path`, `base_file`, `base_gen`, `current_base_gen`, `current_file`, `branch_gen`, `modified` and `conflict`. The `modified` field is `true` when the workspace copy has different text from the base file. The `conflict` field is `true` when the base file's generation is not the one that was recorded at the fork, or when the base file no longer exists, whether or not the workspace touched it.
+
+**Errors:** `sfs:not_found: workspace not found`.
+
+**Behaviour:** the `write_workspace_text` method of the Python client and the `writeWorkspaceText` method of the TypeScript SDK edit a file in a workspace by writing a copy under `/.workspaces/draft` and pointing the `current_file` field of the `file_branch` record at the copy. The example does the same two steps by hand.
+
+```surql
+fn::sfs_diff_workspace('draft', 'alice').map(|$d| { path: $d.path, modified: $d.modified, conflict: $d.conflict });
+//- [{ conflict: false, modified: false, path: '/docs/a.md' }, { conflict: false, modified: false, path: '/docs/b.md' }]
+
+-- Edit a file in the workspace: write a copy, then point the branch record at it
+LET $branch = (SELECT * FROM ONLY file_branch WHERE path = '/docs/a.md');
+LET $copy = fn::sfs_write('/.workspaces/draft/docs/a.md', 'alpha, revised', NONE, NONE, 'alice');
+UPDATE $branch.id SET current_file = $copy.id RETURN NONE;
+
+fn::sfs_diff_workspace('draft', 'alice').map(|$d| { path: $d.path, modified: $d.modified, conflict: $d.conflict });
+//- [{ conflict: false, modified: true, path: '/docs/a.md' }, { conflict: false, modified: false, path: '/docs/b.md' }]
+```
+
+### `fn::sfs_merge_workspace`
+
+Applies a workspace's changes to the main tree and removes the workspace.
+
+<Synopsis label="Signature">
+fn::sfs_merge_workspace($branch: string, $target: string, $owner: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$branch` | The name of the workspace. |
+| `$target` | Returned in the result and otherwise unused. The function always merges into the main tree. |
+| `$owner` | The owner of the workspace. |
+
+**Returns:** an object with the fields `merged`, `into` and `status`. The status is `ok`.
+
+**Errors:** `sfs:not_found: workspace not found`. `sfs:conflict: concurrent change on` followed by the path, for the first file that conflicts. A conflict changes nothing and keeps the workspace.
+
+**Behaviour:** for each file with `modified` set to `true`, the function sets the base file's text to the workspace copy's text, which increases the generation of the base file by one. It then deletes the `file_branch` records and the workspace. It does not delete the `/.workspaces/name` files. The Python and TypeScript clients delete that folder afterwards. The function checks no permissions for a system credential.
+
+**Python client:** `merge_workspace(branch, target)` calls this function. The `merge(strategy=...)` method of the object that `sandbox()` returns accepts a `strategy` argument and ignores it, because the only conflict rule is the generation comparison.
+
+```surql
+fn::sfs_merge_workspace('draft', 'main', 'alice');
+//- { into: 'main', merged: 'draft', status: 'ok' }
+
+fn::sfs_read('/docs/a.md', 'alice');
+//- 'alpha, revised'
+
+fn::sfs_stat('/docs/a.md').generation;
+//- 2
+
+-- A change on main after the fork blocks the merge of every workspace forked before it
+fn::sfs_fork_workspace('main', 'review', 'alice').count;
+//- 3
+
+fn::sfs_write('/docs/b.md', 'beta, edited on main', NONE, NONE, 'alice').generation;
+//- 2
+
+fn::sfs_merge_workspace('review', 'main', 'alice');
+//- 'An error occurred: sfs:conflict: concurrent change on /docs/b.md'
+```
+
+### `fn::sfs_discard_workspace`
+
+Removes a workspace without applying its changes.
+
+<Synopsis label="Signature">
+fn::sfs_discard_workspace($branch: string, $owner: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$branch` | The name of the workspace. |
+| `$owner` | The owner of the workspace. |
+
+**Returns:** an object with the fields `discarded` and `status`.
+
+**Errors:** `sfs:not_found: workspace not found`.
+
+**Python client:** `discard_workspace` calls this function, then deletes `/.workspaces/name`.
+
+```surql
+fn::sfs_discard_workspace('review', 'alice');
+//- { discarded: 'review', status: 'ok' }
+
+fn::sfs_discard_workspace('review', 'alice');
+//- 'An error occurred: sfs:not_found: workspace not found'
+```
+
+## Chunked uploads
+
+These functions implement a protocol for storing a large file as content-addressed chunks. A client splits the file, asks which chunks the database lacks, sends those, and commits the list. Only the Rust client (`surrealfs-rs upload`) uses the protocol. See [Content storage](/docs/agent-filesystem/concepts/content-storage).
+
+> [!WARNING]
+> The chunked upload is incomplete in this release. A committed file has no text and no bytes in its `file` record, so it reports `is_folder: true`, [`fn::sfs_read`](#fnsfs_read) returns an empty string for it, and [`fn::sfs_write`](#fnsfs_write) refuses to replace it. [`fn::sfs_read_bytes_range`](#fnsfs_read_bytes_range) is the only function that returns its content. The reference count of a `blob` record never decreases, so [`fn::sfs_gc_blobs`](#fnsfs_gc_blobs) removes only the chunks of uploads that never completed. The `usage` and `quota` tables do not stay accurate, and no code enforces a quota.
+
+### `fn::sfs_upload_begin`
+
+Starts an upload and reports which chunks the database already holds for the caller.
+
+<Synopsis label="Signature">
+fn::sfs_upload_begin($path: string, $size: int, $chunk_ids: array<string>, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The absolute path of the file to create or replace. |
+| `$size` | The size of the whole file in bytes. |
+| `$chunk_ids` | The ids of the chunks, in file order. The Rust client uses `b3:` followed by the BLAKE3 hash of the chunk. |
+| `$caller` | The identity of the uploader. It is also the scope for deduplication. |
+
+**Returns:** an object with the fields `upload_id`, `missing_chunks` and `received_chunks`. The `upload_id` is the id of an `upload` record, as a string.
+
+**Behaviour:** the function creates an `upload` record that expires after one day. Nothing checks the expiry or deletes the record. A chunk counts as received when a `blob` record with that id exists in the scope of the caller. The `missing_chunks` field is the symmetric difference of the requested ids and the scope's blob ids, so it can also list blobs that the scope holds and the upload does not use. A client should send only the chunks that it holds.
+
+```surql
+-- Declare the file: its size and the content-addressed ids of its chunks
+LET $upload = fn::sfs_upload_begin('/data/report.bin', 11, ['b3:aaa', 'b3:bbb'], 'alice');
+$upload.{ missing_chunks, received_chunks };
+//- { missing_chunks: ['b3:aaa', 'b3:bbb'], received_chunks: [] }
+
+-- Send each missing chunk. The id is the client's own label for the chunk: the server does not hash the bytes
+fn::sfs_upload_chunk($upload.upload_id, 'b3:aaa', 5, 5, 'none', <bytes>'hello', 'alice');
+//- true
+
+-- Committing before every chunk has arrived fails
+fn::sfs_upload_commit($upload.upload_id, NONE, [0, 5], [5, 6], 'alice');
+//- 'An error occurred: sfs:incomplete_upload: missing chunks'
+
+fn::sfs_upload_chunk($upload.upload_id, 'b3:bbb', 6, 6, 'none', <bytes>' world', 'alice');
+//- true
+
+fn::sfs_upload_commit($upload.upload_id, NONE, [0, 5], [5, 6], 'alice').{ path, size, is_folder, content_type, owner, generation };
+//- { content_type: 'application/octet-stream', generation: 1, is_folder: true, owner: 'alice', path: '/data/report.bin', size: 11 }
+
+fn::sfs_upload_commit('upload:missing', NONE, [], [], 'alice');
+//- 'An error occurred: sfs:not_found: upload expired or not found'
+```
+
+### `fn::sfs_upload_chunk`
+
+Stores one chunk of an upload.
+
+<Synopsis label="Signature">
+fn::sfs_upload_chunk($upload_id: string, $chunk_id: string, $uncompressed_size: int, $stored_bytes: int, $codec: string, $data: bytes, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$upload_id` | The `upload_id` that `fn::sfs_upload_begin` returned. |
+| `$chunk_id` | The id of the chunk. |
+| `$uncompressed_size` | The size of the chunk before compression. |
+| `$stored_bytes` | The size of `$data`. |
+| `$codec` | A label for the encoding of `$data`. The Rust client uses `none` or `zstd`. The function does not validate it. |
+| `$data` | The bytes of the chunk. |
+| `$caller` | Accepted and ignored. The scope comes from the upload. |
+
+**Returns:** `true`.
+
+**Errors:** `sfs:not_found: upload expired or not found`.
+
+**Behaviour:** the function creates a `blob` record with the chunk id, unless a blob with that id exists in any scope, in which case it discards `$data`. It never checks that the id is the hash of the bytes, so the first client that stores an id decides what every later upload of that id receives. It then adds the id to the upload's received chunks.
+
+The example under [`fn::sfs_upload_begin`](#fnsfs_upload_begin) runs this call as part of the whole protocol.
+
+### `fn::sfs_upload_commit`
+
+Turns a finished upload into a file.
+
+<Synopsis label="Signature">
+fn::sfs_upload_commit($upload_id: string, $if_generation: any, $offsets: array<int>, $lengths: array<int>, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$upload_id` | The `upload_id` that `fn::sfs_upload_begin` returned. |
+| `$if_generation` | `NONE`, or the generation that an existing file must have. |
+| `$offsets` | The byte offset of each chunk, in the order of `$chunk_ids`. A missing entry is read as 0. |
+| `$lengths` | The length of each chunk. A missing entry is read as 0. |
+| `$caller` | The identity of the owner of a new file. |
+
+**Returns:** the record that [`fn::sfs_stat`](#fnsfs_stat) returns, with the stored `size`.
+
+**Errors:** `sfs:not_found: upload expired or not found`. `sfs:incomplete_upload: missing chunks`. `sfs:is_a_directory` when the path is a folder, which includes a file that an earlier chunked upload committed, so a second upload to the same path fails. `sfs:conflict` when `$if_generation` does not match.
+
+**Behaviour:** for an existing file the function deletes its `file_chunk` records and clears `content` and `file`. For a new path it creates a file with the content type `application/octet-stream`. It creates one `file_chunk` record for each chunk, adds one to the `refs` field of each blob, creates or updates the `usage` record for the scope and the path with `logical_bytes` and `stored_bytes` both set to the size, and deletes the upload. The generation does not change when a text file becomes a chunked file.
+
+The example under [`fn::sfs_upload_begin`](#fnsfs_upload_begin) runs this call as part of the whole protocol.
+
+### `fn::sfs_read_bytes_range`
+
+Returns the chunks that cover a byte range of a chunked file, or a slice of a text file.
+
+<Synopsis label="Signature">
+fn::sfs_read_bytes_range($path: string, $offset: int, $length: int, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The absolute path of the file. |
+| `$offset` | The start of the range. |
+| `$length` | The length of the range for a chunked file. For a text file it is passed to `string::slice` as the end of the range. |
+| `$caller` | Accepted and ignored. |
+
+**Returns:** for a chunked file, an object with `chunked` set to `true` and a `chunks` array. Each element has the fields `offset`, `length`, `bytes` and `codec`, and it is a whole chunk, not a cut one, so the client decompresses the chunks and trims the result. For a text file, an object with `chunked` set to `false` and a `data` string. For a binary file stored in the `file` field, the function ignores the range and returns all of the bytes as `data`. For any other record `data` is `''`.
+
+**Errors:** `sfs:not_found`.
+
+**Behaviour:** the function does not check permissions. The text slice counts characters, not bytes. The third argument of `string::slice` is the end of the range, so offset 1 and length 3 return two characters, as the example shows.
+
+```surql
+fn::sfs_read_bytes_range('/data/report.bin', 3, 4, 'alice').chunks.map(|$c| { offset: $c.offset, length: $c.length, codec: $c.codec });
+//- [{ codec: 'none', length: 5, offset: 0 }, { codec: 'none', length: 6, offset: 5 }]
+
+fn::sfs_read('/data/report.bin', 'alice');
+//- ''
+```
+
+```surql
+fn::sfs_write('/data/notes.txt', 'blue blue blue', NONE, NONE, 'alice').path;
+//- '/data/notes.txt'
+
+fn::sfs_read_bytes_range('/data/notes.txt', 1, 3, 'alice');
+//- { chunked: false, data: 'lu' }
+```
+
+### `fn::sfs_du`
+
+Reports the size of the chunked files that the caller uploaded.
+
+<Synopsis label="Signature">
+fn::sfs_du($path: string, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | A path prefix. |
+| `$caller` | The identity whose uploads are counted. |
+
+**Returns:** an object with the fields `path`, `files`, `logical_bytes` and `stored_bytes`.
+
+**Behaviour:** the function sums the `usage` records of the caller's scope whose path equals `$path` or starts with it. The match is a string prefix, so `/dat` also matches `/data`, and an empty string matches everything. Only uploads that were committed are counted. Deleting or moving a file does not change its `usage` record, and the stored size equals the logical size, because compression and deduplication are not reflected.
+
+```surql
+fn::sfs_du('/data', 'alice');
+//- { files: 1, logical_bytes: 11, path: '/data', stored_bytes: 11 }
+
+fn::sfs_du('/data', 'bob');
+//- { files: 0, logical_bytes: 0, path: '/data', stored_bytes: 0 }
+```
+
+### `fn::sfs_gc_blobs`
+
+Deletes blobs that no file refers to.
+
+<Synopsis label="Signature">
+fn::sfs_gc_blobs($max_age_secs: int)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$max_age_secs` | The minimum age of a blob in seconds. |
+
+**Returns:** the number of deleted blobs.
+
+**Behaviour:** the function deletes `blob` records with `refs` of 0 or less that are older than `$max_age_secs`. Because `refs` is never decreased, these are the chunks of uploads that did not complete. It does not delete expired `upload` records.
+
+```surql
+fn::sfs_gc_blobs(0);
+```
+
+```surql title="Output"
+0
+```
+
+## Code and structure
+
+These functions read tables that describe the content of files: symbols in source code, folder digests, named entities and the contents of CSV and TSV files. No write path of the Python client or the Rust command-line client fills them automatically. The Rust command-line client fills `symbol` with `symbols --index` and `file_row` with `table-load`, a library call records entities, and nothing writes `folder_digest`. The functions return empty results, or template values, when their tables are empty. See [Understanding pipeline](/docs/agent-filesystem/concepts/understanding-pipeline).
+
+The examples in this section use these files:
+
+```surql
+fn::sfs_write('/src/billing.py', "def charge(order):\n    return order.total\n\n\nclass Invoice:\n    pass\n", NONE, NONE, 'alice');
+fn::sfs_write('/src/orders.csv', "id,total\n1,19.5\n2,42\n", NONE, NONE, 'alice');
+fn::sfs_write('/notes/kickoff.md', "Met with @maria about SEC-1042 and Okta.", NONE, NONE, 'alice');
+```
+
+### `fn::sfs_symbols`
+
+Lists the symbols of a file, or of every file below a folder.
+
+<Synopsis label="Signature">
+fn::sfs_symbols($path: string, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The path of a file or folder. |
+| `$caller` | The identity that reads. |
+
+**Returns:** an array of objects with the fields `id`, `file_id`, `name`, `qualified`, `kind`, `language`, `signature`, `doc`, `line_start` and `line_end`, ordered by line. For a folder the objects also have a `path` field and are ordered by path and then by line.
+
+**Errors:** `sfs:not_found`. `sfs:denied_or_missing` when the caller may not read the path.
+
+**Behaviour:** for a folder the function selects the symbols of every file whose path starts with `$path` as a string, so `/src` also matches `/src2`. A symbol is a snapshot. A rewrite of the file does not refresh it. Deleting a file does not delete its symbols, and a symbol without a file makes the folder form of this function fail for every folder.
+
+```surql
+-- The symbol table is normally filled by "surrealfs-rs symbols --index". This example writes two records by hand
+LET $file = fn::sfs_resolve('/src/billing.py');
+CREATE symbol CONTENT { file_id: $file, name: 'charge', qualified: 'billing.charge', kind: 'function', language: 'python', signature: 'def charge(order):', doc: NONE, line_start: 1, line_end: 3 } RETURN NONE;
+CREATE symbol CONTENT { file_id: $file, name: 'Invoice', qualified: 'billing.Invoice', kind: 'class', language: 'python', signature: 'class Invoice:', doc: NONE, line_start: 5, line_end: 6 } RETURN NONE;
+fn::sfs_symbols('/src/billing.py', 'alice').map(|$s| { name: $s.name, kind: $s.kind, lines: [$s.line_start, $s.line_end] });
+//- [{ kind: 'function', lines: [1, 3], name: 'charge' }, { kind: 'class', lines: [5, 6], name: 'Invoice' }]
+
+-- For a folder, the symbols of every file below it are returned, with their paths
+fn::sfs_symbols('/src', 'alice').map(|$s| { path: $s.path, name: $s.name });
+//- [{ name: 'charge', path: '/src/billing.py' }, { name: 'Invoice', path: '/src/billing.py' }]
+```
+
+### `fn::sfs_definition`
+
+Finds symbols by name.
+
+<Synopsis label="Signature">
+fn::sfs_definition($name: string, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$name` | A name or a qualified name. The match is exact. |
+| `$caller` | The identity that reads. |
+
+**Returns:** an array of at most 20 objects with the fields of [`fn::sfs_symbols`](#fnsfs_symbols) and a `path`, ordered by line number across files and not by relevance. Symbols in files that the caller cannot read are left out.
+
+**Behaviour:** a symbol whose file has been deleted makes a lookup of its name fail with an argument error from `fn::sfs_can_read` for every identity except `root`. `root` receives the symbol with a `path` of `NONE`.
+
+```surql
+fn::sfs_definition('billing.charge', 'alice').map(|$s| { path: $s.path, kind: $s.kind, signature: $s.signature });
+//- [{ kind: 'function', path: '/src/billing.py', signature: 'def charge(order):' }]
+
+fn::sfs_definition('refund', 'alice');
+//- []
+```
+
+### `fn::sfs_digest`
+
+Lists the readable files and subfolders of a folder, and returns a stored summary when a `folder_digest` record exists.
+
+<Synopsis label="Signature">
+fn::sfs_digest($path: string, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The path of a folder. `/` is not accepted. |
+| `$caller` | The identity that reads. |
+
+**Returns:** an object with the fields `path`, `folder_id`, `summary`, `notable_files`, `subfolders`, `total_readable`, `private_unsummarised` and `updated_at`. The `notable_files` array holds every readable file that is a direct child, in storage order, which is not fixed, with the fields `filename`, `size`, `hash`, `updated_at` and `summary`. The `subfolders` array holds the names of the readable folders. The `private_unsummarised` field is the number of children that the caller cannot read.
+
+**Errors:** `sfs:not_found`. `sfs:not_a_directory`. `sfs:denied_or_missing`.
+
+**Behaviour:** the `summary` is the `summary` of a matching `folder_digest` record when there is one, and otherwise the text `Folder /src containing 2 items.`, where the number counts the readable children. The `summary` of a file is the `meta.summary` value from its frontmatter. The `size` is the stored size, which is 0 for ordinary text files.
+
+```surql
+fn::sfs_digest('/src', 'alice').{ path, summary, subfolders, total_readable, private_unsummarised, files: notable_files.map(|$f| $f.filename).sort() };
+//- { files: ['billing.py', 'orders.csv'], path: '/src', private_unsummarised: 0, subfolders: [], summary: 'Folder /src containing 2 items.', total_readable: 2 }
+
+fn::sfs_digest('/src/billing.py', 'alice');
+//- 'An error occurred: sfs:not_a_directory'
+
+fn::sfs_digest('/', 'alice');
+//- 'An error occurred: sfs:not_found'
+```
+
+### `fn::sfs_pack`
+
+Finds candidate files for a question.
+
+<Synopsis label="Signature">
+fn::sfs_pack($question: string, $budget: int, $scope: option<string>, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$question` | The question, used as a full-text query. |
+| `$budget` | A token budget. The function returns it unchanged. |
+| `$scope` | `NONE`, or a string that the path of a candidate must start with. |
+| `$caller` | The identity that reads. |
+
+**Returns:** an object with the fields `question`, `budget` and `candidates`. The `candidates` array holds at most 30 results of [`fn::sfs_search_text`](#fnsfs_search_text) with `'any'` matching, filtered by `$scope`. The function does not pack text to the budget. The packing step is in the Rust client, and it does not work in this release: `surrealfs-rs pack` reads a `snippet` field that the function does not return, so the command lists the right paths with empty content. Read the `content` of each candidate from the function directly instead.
+
+```surql
+fn::sfs_pack('Okta ticket', 2000, '/notes', 'alice').{ budget, candidates: candidates.map(|$c| $c.path) };
+```
+
+```surql title="Output"
+{ budget: 2000, candidates: ['/notes/kickoff.md'] }
+```
+
+### `fn::sfs_entities`
+
+Lists the named entities that a file or folder mentions.
+
+<Synopsis label="Signature">
+fn::sfs_entities($path: string, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The path of a file or folder. |
+| `$caller` | The identity that reads. |
+
+**Returns:** an array of objects with the fields `name`, `kind`, `id` and `source_path`, ordered by name. For a folder the array covers every readable file whose path starts with `$path` as a string.
+
+**Errors:** `sfs:not_found`. `sfs:denied_or_missing`.
+
+**Behaviour:** neither the Python client nor a `surrealfs-rs` command records entities while files are written, so the array is empty unless an integrator has recorded entities. Under record authentication the `entity` table is readable for any entity that some file mentions, so a direct `SELECT` on the table can show the name of an entity that only a private file mentions.
+
+```surql
+-- Entities are normally recorded by an integrator. This example records one by hand
+LET $file = fn::sfs_resolve('/notes/kickoff.md');
+LET $entity = (CREATE entity CONTENT { name: 'SEC-1042', kind: 'ticket' }).id;
+RELATE $file->mentions->$entity RETURN NONE;
+fn::sfs_entities('/notes/kickoff.md', 'alice').map(|$e| { name: $e.name, kind: $e.kind, source_path: $e.source_path });
+```
+
+```surql title="Output"
+[{ kind: 'ticket', name: 'SEC-1042', source_path: '/notes/kickoff.md' }]
+```
+
+### `fn::sfs_query_table`
+
+Returns the contents of a CSV or TSV file that was loaded into the database, with one record for each row of the file.
+
+<Synopsis label="Signature">
+fn::sfs_query_table($path: string, $limit: option<int>, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The path of the file. |
+| `$limit` | The maximum number of records. The default is 100. |
+| `$caller` | The identity that reads. |
+
+**Returns:** an array of objects with the fields `row_idx`, `sheet` and `data`, ordered by `row_idx`. The `data` field is an object with one value for each header of the loaded file.
+
+**Errors:** `sfs:not_found`. `sfs:denied_or_missing`.
+
+**Behaviour:** the records are a snapshot from the moment the file was loaded, and they do not follow later changes to the file. The `surrealfs-rs table-load` command loads at most 1,000 rows by default, and its `--max-rows` option changes the limit, so a larger file is loaded in part.
+
+```surql
+-- The file_row records are normally written by "surrealfs-rs table-load". This example writes two by hand
+LET $file = fn::sfs_resolve('/src/orders.csv');
+CREATE file_row CONTENT { file_id: $file, row_idx: 0, data: { id: 1, total: 19.5 } } RETURN NONE;
+CREATE file_row CONTENT { file_id: $file, row_idx: 1, data: { id: 2, total: 42 } } RETURN NONE;
+fn::sfs_query_table('/src/orders.csv', 10, 'alice');
+```
+
+```surql title="Output"
+[{ data: { id: 1, total: 19.5f }, row_idx: 0, sheet: NONE }, { data: { id: 2, total: 42 }, row_idx: 1, sheet: NONE }]
+```
+
+## Job queue
+
+A database event adds three jobs to the `sfs_job` table whenever the text or bytes of a file change: `detect`, `chunk` and `symbols`. Neither the Python client nor the Rust command-line client processes them. The functions below let a worker claim and complete jobs, and `surrealfs-rs jobs` calls them by hand. See [Understanding pipeline](/docs/agent-filesystem/concepts/understanding-pipeline).
+
+The example at the end of this section uses one file:
+
+```surql
+fn::sfs_write('/shared/roadmap.md', 'Q4 roadmap', NONE, NONE, 'alice');
+```
+
+### `fn::sfs_job_claim`
+
+Leases pending jobs to a worker.
+
+<Synopsis label="Signature">
+fn::sfs_job_claim($worker_id: string, $kinds: array<string>, $limit: int)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$worker_id` | The name of the worker. |
+| `$kinds` | The kinds of job to claim. An empty array claims every kind. |
+| `$limit` | The maximum number of jobs. |
+
+**Returns:** an array of objects with the fields `id`, `file_id`, `path`, `kind`, `source_hash`, `attempts`, `status` and `created_at`, oldest first. The function returns `status` as the literal `processing`, and `attempts` as the count before this claim, because it reads the jobs before it updates them.
+
+**Behaviour:** the function selects jobs that are `pending`, or `processing` with an expired lease. It sets them to `processing`, records the worker, sets the lease to 60 seconds from now and adds one to `attempts`. The lease length is fixed. A failed job is not claimed again until the file is written again, which resets its jobs to `pending`. There is no limit on attempts.
+
+### `fn::sfs_job_complete`
+
+Marks a job as completed or failed.
+
+<Synopsis label="Signature">
+fn::sfs_job_complete($job_id: string, $error: option<string>)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$job_id` | The id of the job as a string. Convert a record id with `type::string`. |
+| `$error` | `NONE` to complete the job. A message to fail it. |
+
+**Returns:** `true`.
+
+**Behaviour:** the function sets `status` to `completed`, or to `failed` with the message in `error`, and clears the lease.
+
+```surql
+-- Writing a file queued three jobs for it
+SELECT kind, status, attempts FROM sfs_job ORDER BY kind;
+//- [{ attempts: 0, kind: 'chunk', status: 'pending' }, { attempts: 0, kind: 'detect', status: 'pending' }, { attempts: 0, kind: 'symbols', status: 'pending' }]
+
+LET $chunk = fn::sfs_job_claim('worker-1', ['chunk'], 1);
+$chunk.map(|$j| { path: $j.path, kind: $j.kind, status: $j.status, attempts: $j.attempts });
+//- [{ attempts: 0, kind: 'chunk', path: '/shared/roadmap.md', status: 'processing' }]
+
+SELECT kind, status, attempts, locked_by FROM sfs_job WHERE status = 'processing';
+//- [{ attempts: 1, kind: 'chunk', locked_by: 'worker-1', status: 'processing' }]
+
+fn::sfs_job_complete(type::string($chunk[0].id), NONE);
+//- true
+
+LET $detect = fn::sfs_job_claim('worker-1', ['detect'], 1);
+fn::sfs_job_complete(type::string($detect[0].id), 'parser crashed');
+//- true
+
+SELECT kind, status, error FROM sfs_job ORDER BY kind;
+//- [{ error: NONE, kind: 'chunk', status: 'completed' }, { error: 'parser crashed', kind: 'detect', status: 'failed' }, { error: NONE, kind: 'symbols', status: 'pending' }]
+
+-- An empty kinds array claims jobs of every kind. A failed job is not claimed again
+fn::sfs_job_claim('worker-2', [], 10).map(|$j| $j.kind);
+//- ['symbols']
+```
+
+## Shares
+
+A share is a token record for a path. In this release nothing turns a share token into file access: the functions below create, revoke, resolve and list the records, and no server uses them. See [Groups and sharing](/docs/agent-filesystem/security/groups-and-sharing).
+
+> [!WARNING]
+> Under record authentication the `share` table is readable by every record user, so any user can read the token that another user created.
+
+The example at the end of this section uses one file:
+
+```surql
+fn::sfs_write('/shared/roadmap.md', 'Q4 roadmap', NONE, NONE, 'alice');
+```
+
+### `fn::sfs_create_share`
+
+Creates a share record for a path.
+
+<Synopsis label="Signature">
+fn::sfs_create_share($path: string, $mode: string, $duration_secs: option<int>, $caller: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The path to share. |
+| `$mode` | The mode of the share. The schema comment names `ro` and `append`. The function stores any string and does not validate it. |
+| `$duration_secs` | The lifetime in seconds. `NONE`, or a value of 0 or less, gives a share that does not expire. |
+| `$caller` | The identity that creates the share. It is stored as `created_by`. |
+
+**Returns:** the `share` record, with the fields `id`, `path`, `mode`, `token`, `created_by`, `expires_at`, `revoked` and `created_at`. The `token` is 32 random alphanumeric characters.
+
+**Errors:** `sfs:not_found`.
+
+### `fn::sfs_revoke_share`
+
+Marks a share as revoked.
+
+<Synopsis label="Signature">
+fn::sfs_revoke_share($token_or_id: string, $caller: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$token_or_id` | The token, or the key part of the id of the share record, which `record::id($share.id)` returns. The full `share:...` string does not match. |
+| `$caller` | The identity that revokes. It must be the creator or `root`. |
+
+**Returns:** `true`.
+
+**Errors:** `sfs:not_found`. `sfs:denied`.
+
+### `fn::sfs_resolve_share`
+
+Looks up a share by token.
+
+<Synopsis label="Signature">
+fn::sfs_resolve_share($tok: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$tok` | The token. |
+
+**Returns:** the `share` record, or `NONE` when the token is unknown, revoked or expired.
+
+### `fn::sfs_list_shares`
+
+Lists the shares of a user.
+
+<Synopsis label="Signature">
+fn::sfs_list_shares($caller: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$caller` | The user whose shares are listed. `root` lists the shares of every user. |
+
+**Returns:** an array of `share` records that are not revoked, newest first. A share that has expired but is not revoked is still listed.
+
+```surql
+LET $share = fn::sfs_create_share('/shared/roadmap.md', 'ro', 3600, 'alice');
+$share.{ path, mode, created_by, revoked, has_expiry: expires_at != NONE };
+//- { created_by: 'alice', has_expiry: true, mode: 'ro', path: '/shared/roadmap.md', revoked: false }
+
+fn::sfs_create_share('/missing.md', 'ro', 60, 'alice');
+//- 'An error occurred: sfs:not_found'
+
+fn::sfs_resolve_share($share.token).{ path, mode };
+//- { mode: 'ro', path: '/shared/roadmap.md' }
+
+fn::sfs_revoke_share($share.token, 'bob');
+//- 'An error occurred: sfs:denied'
+
+fn::sfs_list_shares('alice').map(|$s| { path: $s.path, revoked: $s.revoked });
+//- [{ path: '/shared/roadmap.md', revoked: false }]
+
+fn::sfs_revoke_share($share.token, 'alice');
+//- true
+
+fn::sfs_resolve_share($share.token);
+//- NONE
+
+fn::sfs_list_shares('alice');
+//- []
+
+-- A share can also be revoked by the key part of its record id. The full id string does not match
+LET $other = fn::sfs_create_share('/shared/roadmap.md', 'append', NONE, 'alice');
+fn::sfs_revoke_share(type::string($other.id), 'alice');
+//- 'An error occurred: sfs:not_found'
+
+fn::sfs_revoke_share(record::id($other.id), 'alice');
+//- true
+```
+
+## Groups
+
+A group is a name. The `user_group` table holds the groups, the `group_member` table pairs a group name with a user name, and a file has an optional `group` field. When a user belongs to a file's group, the group digit of the file's mode applies to that user. The functions do not check that a user or a group exists before it is used. See [Groups and sharing](/docs/agent-filesystem/security/groups-and-sharing).
+
+The group digit is honoured by [`fn::sfs_read`](#fnsfs_read) and by the `select` permission of the `file` table. Under record authentication it also lets a member of a file's group create, rename and delete entries in a folder that gives its group write and entry permission, because the folder test is group-aware. It does not let that member change the content of a file, because the field rules ignore groups. The group digit is not honoured by the search functions, by `fn::sfs_digest` and the other functions that use the permission rule without groups, or by the Python `SurrealFs` class.
+
+### `fn::sfs_create_group`
+
+Creates a group, or returns the existing group.
+
+<Synopsis label="Signature">
+fn::sfs_create_group($name: string, $description: option<string>)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$name` | The name of the group. |
+| `$description` | A description. It is ignored when the group exists. |
+
+**Returns:** the `user_group` record.
+
+### `fn::sfs_add_group_member`
+
+Adds a user to a group.
+
+<Synopsis label="Signature">
+fn::sfs_add_group_member($group: string, $user: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$group` | The name of the group. The function creates the group when it does not exist. |
+| `$user` | The name of the user. |
+
+**Returns:** `true`, also when the user is already a member.
+
+**Behaviour:** the user name is not checked against any table. A record user cannot change the group tables. For a record user the function returns `true` and adds nothing.
+
+### `fn::sfs_remove_group_member`
+
+Removes a user from a group.
+
+<Synopsis label="Signature">
+fn::sfs_remove_group_member($group: string, $user: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$group` | The name of the group. |
+| `$user` | The name of the user. |
+
+**Returns:** `true`, also when the user was not a member.
+
+### `fn::sfs_list_group_members`
+
+Lists the members of a group.
+
+<Synopsis label="Signature">
+fn::sfs_list_group_members($group: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$group` | The name of the group. |
+
+**Returns:** an array of objects with the fields `user_id` and `added_at`, oldest first.
+
+### `fn::sfs_get_user_groups`
+
+Lists the groups of a user.
+
+<Synopsis label="Signature">
+fn::sfs_get_user_groups($user: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$user` | The name of the user. |
+
+**Returns:** an array of group names, in alphabetical order.
+
+```surql
+fn::sfs_create_group('platform', 'Platform team').{ name, description };
+//- { description: 'Platform team', name: 'platform' }
+
+-- Creating an existing group returns it unchanged
+fn::sfs_create_group('platform', 'Ignored').{ name, description };
+//- { description: 'Platform team', name: 'platform' }
+
+fn::sfs_add_group_member('platform', 'alice');
+//- true
+
+fn::sfs_add_group_member('platform', 'bob');
+//- true
+
+-- A group is created when a member is added to a name that does not exist
+fn::sfs_add_group_member('contractors', 'carol');
+//- true
+
+fn::sfs_list_group_members('platform').map(|$m| $m.user_id);
+//- ['alice', 'bob']
+
+fn::sfs_get_user_groups('alice');
+//- ['platform']
+
+fn::sfs_is_member('platform', 'bob');
+//- true
+
+fn::sfs_is_member('platform', 'carol');
+//- false
+
+fn::sfs_remove_group_member('platform', 'bob');
+//- true
+
+fn::sfs_list_group_members('platform').map(|$m| $m.user_id);
+//- ['alice']
+```
+
+### `fn::sfs_chgrp`
+
+Sets or clears the group of a file or folder.
+
+<Synopsis label="Signature">
+fn::sfs_chgrp($path: string, $group: option<string>, $caller: any)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$path` | The absolute path. |
+| `$group` | The name of the group, or `NONE` to clear it. The name is not checked against `user_group`. |
+| `$caller` | The identity that changes the group. It must be the owner or `root`. |
+
+**Returns:** the record that [`fn::sfs_stat`](#fnsfs_stat) returns.
+
+**Errors:** `sfs:not_found`. `sfs:denied`, including when `$caller` is `NONE`.
+
+**Behaviour:** the function sets only the `group` field. The permissions that members get come from the middle digit of the mode.
+
+```surql
+fn::sfs_write('/shared/roadmap.md', 'Q4 roadmap', NONE, NONE, 'alice').path;
+//- '/shared/roadmap.md'
+
+fn::sfs_chmod('/shared/roadmap.md', 416);
+//- true
+
+fn::sfs_chgrp('/shared/roadmap.md', 'platform', 'alice').{ path, group, owner, mode };
+//- { group: 'platform', mode: 416, owner: 'alice', path: '/shared/roadmap.md' }
+
+fn::sfs_chgrp('/shared/roadmap.md', 'platform', 'bob');
+//- 'An error occurred: sfs:denied'
+
+fn::sfs_add_group_member('platform', 'bob');
+//- true
+
+fn::sfs_read('/shared/roadmap.md', 'bob');
+//- 'Q4 roadmap'
+
+fn::sfs_read('/shared/roadmap.md', 'carol');
+//- 'An error occurred: sfs:denied'
+
+fn::sfs_chgrp('/shared/roadmap.md', NONE, 'alice').group;
+//- NONE
+```
+
+## Credentials
+
+### `fn::sfs_resolve_credential`
+
+Looks up an enabled credential for a protocol server.
+
+<Synopsis label="Signature">
+fn::sfs_resolve_credential($kind: string, $identifier: string)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$kind` | `webdav`, `s3`, `ssh`, `slack`, `teams` or `bearer`. |
+| `$identifier` | The identifier of the credential. |
+
+**Returns:** the `credential` record, with the fields `id`, `kind`, `identifier`, `secret_hash`, `user_id`, `enabled` and `meta`, or `NONE` when there is no enabled credential. The `secret_hash` field is returned exactly as it is stored. The Rust command line stores the value that it is given, so the field holds a hash only if the operator supplied one. See [Credentials](/docs/agent-filesystem/security/credentials).
+
+```surql
+-- The secret_hash value is stored as given. The protocol servers compare it as plaintext or as an unsalted SHA-256 digest
+CREATE credential CONTENT { kind: 'webdav', identifier: 'alice-dav', secret_hash: 'example-secret', user_id: 'alice' } RETURN NONE;
+fn::sfs_resolve_credential('webdav', 'alice-dav').{ kind, identifier, user_id, enabled };
+//- { enabled: true, identifier: 'alice-dav', kind: 'webdav', user_id: 'alice' }
+
+fn::sfs_resolve_credential('webdav', 'nobody');
+//- NONE
+
+UPDATE credential SET enabled = false WHERE identifier = 'alice-dav' RETURN NONE;
+fn::sfs_resolve_credential('webdav', 'alice-dav');
+//- NONE
+```
+
+## Permission predicates
+
+These functions hold the permission rules, and the `file` table's `PERMISSIONS` clauses, the search functions and the functions that check permissions all call them. The functions without `_grp` in the name ignore groups. A mode is read as three octal digits, for the owner, the group and everyone else. The digit 4 grants read, 2 grants write and 1 grants entry to a folder.
+
+The digit arithmetic of `fn::sfs_bits`, `fn::sfs_can_read` and `fn::sfs_can_write` gives `root` no special treatment: `fn::sfs_can_read(NONE, 'alice', 384, 'root')` is `false`. Two predicates do accept `'root'`: `fn::sfs_is_member` treats it as a member of every group, so the `*_grp` predicates give `root` the group digit when a group is passed, and `fn::sfs_reachable` lets it through every gate. The functions that take an identity test for `'root'` themselves.
+
+| Function | Returns |
+| --- | --- |
+| `fn::sfs_me()` | `NONE` for a system credential. For a record user, the user name, which is the record id of the `user` record. |
+| `fn::sfs_searcher($me: option<string>)` | `fn::sfs_me() ?? $me`. It throws `search needs an identity: pass $me, or connect as a record user` when both are `NONE`. |
+| `fn::sfs_is_member($group: string, $me: option<string>)` | `true` when `$me` is `'root'` or has a `group_member` record for the group. `false` when `$me` is `NONE`. |
+| `fn::sfs_gate($parent: option<record<file>>)` | Who can traverse down to the children of a folder. `NONE` when the folder and every ancestor let everyone enter. Otherwise a comma-separated list of the owner of each closed folder and `group:name` for a closed folder whose group can enter, narrowed by the closed ancestors. `'!closed'` when no single user can pass them all. |
+| `fn::sfs_reachable($gate: option<string>, $me: option<string>)` | `false` when `$me` is `NONE`. `true` for `'root'` and for a `NONE` gate. `false` for the gate `'!closed'`. Otherwise `true` when the gate lists `$me` or a group that `$me` belongs to. |
+| `fn::sfs_bits($owner: string, $mode: any, $me: option<string>)` | The octal digit of `$mode` that applies to `$me`: the owner digit when `$owner` is `$me`, and the other digit otherwise. A `NONE` mode counts as 493. |
+| `fn::sfs_bits_grp($owner: string, $mode: any, $me: option<string>, $group: option<string>)` | As `fn::sfs_bits`, with the group digit for a member of `$group`. |
+| `fn::sfs_can_read($gate: option<string>, $owner: string, $mode: any, $me: option<string>)` | `true` when the gate is reachable and the digit is 4 or more. |
+| `fn::sfs_can_read_grp($gate: option<string>, $owner: string, $mode: any, $me: option<string>, $group: option<string>)` | As `fn::sfs_can_read`, with groups. |
+| `fn::sfs_w($owner: string, $mode: any, $me: option<string>)` | `true` when the applicable digit has the write bit. It does not look at the gate. |
+| `fn::sfs_w_grp($owner: string, $mode: any, $me: option<string>, $group: option<string>)` | As `fn::sfs_w`, with groups. |
+| `fn::sfs_can_write($gate: option<string>, $owner: string, $mode: any, $me: option<string>)` | `true` when the gate is reachable and the digit has the write bit. |
+| `fn::sfs_can_write_grp($gate: option<string>, $owner: string, $mode: any, $me: option<string>, $group: option<string>)` | As `fn::sfs_can_write`, with groups. |
+| `fn::sfs_can_enter($parent: option<record<file>>, $me: option<string>)` | Whether `$me` may add or remove an entry in a folder: the folder is reachable and its digit has both write and entry. `false` when `$me` is `NONE`, and `true` when `$parent` is `NONE`. |
+| `fn::sfs_has_children($row: record<file>)` | `true` when any `file` record has the given record as its parent. |
+| `fn::sfs_home_ok($parent: option<record<file>>, $filename: string, $me: option<string>)` | The rule for `/home`: no top-level record may be named `home`, and a record directly under `/home` must be named after `$me`. It is `true` everywhere else. |
+
+Only the other-execute bit of a folder decides whether the folder is closed, so a folder with the mode 384 does not block its own owner.
+
+The examples use a group, a closed folder and a file:
+
+```surql
+fn::sfs_add_group_member('platform', 'bob');
+fn::sfs_write('/shared/roadmap.md', 'Q4 roadmap', NONE, NONE, 'alice');
+fn::sfs_mkdir('/vault', false, 'alice');
+fn::sfs_chmod('/vault', 448);
+```
+
+```surql
+-- Owner digit, then group digit, then other digit. A mode of 416 is octal 640
+fn::sfs_bits('alice', 416, 'alice');
+//- 6
+
+fn::sfs_bits('alice', 416, 'bob');
+//- 0
+
+fn::sfs_bits_grp('alice', 416, 'bob', 'platform');
+//- 4
+
+fn::sfs_can_read(NONE, 'alice', 416, 'bob');
+//- false
+
+fn::sfs_can_read_grp(NONE, 'alice', 416, 'bob', 'platform');
+//- true
+
+-- A folder that is closed to others hides the files inside it, whatever their own mode
+fn::sfs_can_read(fn::sfs_gate(fn::sfs_resolve('/vault')), 'alice', 438, 'bob');
+//- false
+
+fn::sfs_w('alice', 420, 'bob');
+//- false
+
+fn::sfs_w_grp('alice', 432, 'bob', 'platform');
+//- true
+
+fn::sfs_can_write(NONE, 'alice', 438, 'bob');
+//- true
+
+fn::sfs_can_write_grp(NONE, 'alice', 432, 'bob', 'platform');
+//- true
+
+fn::sfs_can_enter(fn::sfs_resolve('/vault'), 'bob');
+//- false
+
+fn::sfs_gate(fn::sfs_resolve('/vault'));
+//- 'alice'
+
+fn::sfs_gate(fn::sfs_resolve('/shared'));
+//- NONE
+
+fn::sfs_reachable('alice,group:platform', 'bob');
+//- true
+
+fn::sfs_reachable('!closed', 'alice');
+//- false
+
+fn::sfs_is_member('platform', 'bob');
+//- true
+```
+
+```surql
+fn::sfs_me();
+//- NONE
+
+fn::sfs_searcher('alice');
+//- 'alice'
+
+fn::sfs_searcher(NONE);
+//- 'An error occurred: search needs an identity: pass $me, or connect as a record user'
+```
+
+## Path helpers
+
+| Function | Returns |
+| --- | --- |
+| `fn::sfs_resolve($path: string)` | The record id of the file or folder, or `NONE`. The function splits the path on `/` and looks up each segment through the `child_unique` index. `/` gives `NONE`. |
+| `fn::sfs_resolve_seg($parent_key: string, $segments: array<string>)` | The record id found by following `$segments` from `$parent_key`, which is `'root'` or a record id as a string. It is the recursive worker of `fn::sfs_resolve`. |
+| `fn::sfs_ensure_parents($path: string, $caller: any)` | Creates the folders above the last segment of the path, with mode 493, and returns the id of the deepest one. It does not check that an existing segment is a folder. It returns `NONE` when the path has one segment or fewer. |
+| `fn::sfs_ensure_parents_seg($parent_id: any, $parent_key: string, $segments: array<string>, $caller: any)` | The recursive worker of `fn::sfs_ensure_parents`. |
+
+The example uses one file:
+
+```surql
+fn::sfs_write('/shared/roadmap.md', 'Q4 roadmap', NONE, NONE, 'alice');
+```
+
+```surql
+fn::sfs_resolve('/shared/roadmap.md') != NONE;
+//- true
+
+fn::sfs_resolve('/shared/missing.md');
+//- NONE
+
+fn::sfs_resolve('/');
+//- NONE
+
+fn::sfs_resolve_seg('root', ['shared', 'roadmap.md']) = fn::sfs_resolve('/shared/roadmap.md');
+//- true
+
+fn::sfs_ensure_parents('/a/b/c/file.txt', 'alice') = fn::sfs_resolve('/a/b/c');
+//- true
+
+fn::sfs_ensure_parents_seg(NONE, 'root', ['x', 'y'], 'alice') = fn::sfs_resolve('/x/y');
+//- true
+
+fn::sfs_has_children(fn::sfs_resolve('/a/b'));
+//- true
+
+fn::sfs_home_ok(file:home, 'bob', 'alice');
+//- false
+
+fn::sfs_home_ok(file:home, 'alice', 'alice');
+//- true
+```
+
+## Calling the functions as a record user
+
+A record user is a user of the optional `account` access method. In a session that is signed in as a record user, `fn::sfs_me()` supplies the identity, and the arguments are ignored where the rule in [Identity and permissions](#identity-and-permissions) says so. The database also applies the table and field `PERMISSIONS` clauses to every statement that a function runs. This section opens such a session and shows what the database refuses.
+
+The sessions below run as the users `alice` and `bob` on a new database that has the schema with record authentication, and on which none of the other examples have run. The `surrealfs.users` command reads its connection settings from the environment variables `SURREALDB_URL`, `SURREALDB_USER`, `SURREALDB_PASS`, `SURREALDB_NAMESPACE` and `SURREALDB_DATABASE`, and has no connection options. Its password falls back to `root`, so `SURREALDB_PASS` has to hold the password of the server. Run the commands in the virtual environment that holds the package. Each `add` command creates the user and a private home folder, `/home/alice` or `/home/bob`, with the mode 448.
+
+```bash
+export SURREALDB_URL=ws://localhost:8000/rpc SURREALDB_USER=root SURREALDB_PASS=secret SURREALDB_NAMESPACE=surrealfs SURREALDB_DATABASE=accounts
+python -m surrealfs.schema --record-auth
+python -m surrealfs.users add alice --password hunter123
+python -m surrealfs.users add bob --password hunter123
+```
+
+Sign in through the `account` access method to get a token. The response is JSON, and its `token` field holds the token. The token lasts 15 minutes, so request a new one after that. It carries the namespace and the database, so `surreal sql` needs only the endpoint and the token:
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8000/signin -H 'Accept: application/json' -H 'Content-Type: application/json' -d '{"ns": "surrealfs", "db": "accounts", "ac": "account", "user": "alice", "pass": "hunter123"}' | jq -r .token)
+surreal sql --endpoint http://localhost:8000 --token "$TOKEN"
+```
+
+A refused update is not an error. When a table rule refuses a statement, SurrealDB skips the record, and when a field rule refuses a value, SurrealDB reverts the field. The function that issued the statement then returns its usual result, so a client has to read the record back to confirm a change. The first session runs as `alice` and creates the data. The second session runs as `bob`. It opens with `bob` reading and listing, and then shows a refused field update, a refused update of the whole record, a refused write and a refused delete.
+
+```surql
+-- Signed in as alice
+$auth;
+//- user:alice
+
+fn::sfs_me();
+//- 'alice'
+
+-- The caller argument does not change the owner
+fn::sfs_write('/home/alice/plan.md', 'Q4 plan', NONE, NONE, 'bob').{ path, owner };
+//- { owner: 'alice', path: '/home/alice/plan.md' }
+
+-- A rewrite does not increase the generation
+fn::sfs_write('/home/alice/plan.md', 'Q4 plan, revised').generation;
+//- 1
+
+-- The identity argument of the search functions is ignored
+fn::sfs_search_text('plan', 5, 'any', 'root').map(|$h| $h.path);
+//- ['/home/alice/plan.md']
+
+fn::sfs_write('/home/bob/hello.md', 'hello');
+//- 'An error occurred: sfs:not_found'
+
+-- Two folders that other users can enter, with a file in each
+fn::sfs_mkdir('/shared-rw', false).path;
+//- '/shared-rw'
+
+fn::sfs_chmod('/shared-rw', 511);
+//- true
+
+fn::sfs_write('/shared-rw/a.txt', 'a').path;
+//- '/shared-rw/a.txt'
+
+fn::sfs_chmod('/shared-rw/a.txt', 438);
+//- true
+
+fn::sfs_mkdir('/shared-ro', false).path;
+//- '/shared-ro'
+
+fn::sfs_write('/shared-ro/b.txt', 'b').path;
+//- '/shared-ro/b.txt'
+```
+
+```surql
+-- Signed in as bob
+fn::sfs_read('/home/alice/plan.md');
+//- 'An error occurred: sfs:not_found'
+
+fn::sfs_ls('/home').map(|$f| $f.path);
+//- ['/home/bob']
+
+-- Writes to the group tables need a system credential. The call returns true and adds nothing
+fn::sfs_add_group_member('platform', 'bob');
+//- true
+
+SELECT count() FROM group_member GROUP ALL;
+//- [{ count: 0 }]
+
+-- A refused field update is reverted without an error: the file allows everyone to write, but only its owner may change the mode
+fn::sfs_chmod('/shared-rw/a.txt', 384);
+//- true
+
+fn::sfs_stat('/shared-rw/a.txt').mode;
+//- 438
+
+-- A refused update of the whole record raises an error
+fn::sfs_chmod('/shared-ro/b.txt', 384);
+//- 'An error occurred: sfs:denied'
+
+-- A refused write and a refused delete return their usual result and change nothing
+fn::sfs_write('/shared-ro/b.txt', 'Bob edit').size;
+//- 1
+
+fn::sfs_read('/shared-ro/b.txt');
+//- 'b'
+
+fn::sfs_rm('/shared-ro/b.txt', false);
+//- true
+
+fn::sfs_stat('/shared-ro/b.txt').path;
+//- '/shared-ro/b.txt'
+```
+
+> [!WARNING]
+> Under record authentication the `generation` counter does not increase: the field has `PERMISSIONS FOR update WHERE false`, so the database does not keep the value that it computes. In the first session above, the rewrite of `/home/alice/plan.md` still reported generation 1, which is the same mechanism as the refused `chmod`: the field rule refused the value, and the statement succeeded. The counter keeps the value that it had, so a file that a system credential had already taken to generation 2 would stay at 2. Optimistic concurrency with `$if_generation` therefore cannot detect a conflicting write for a record user. See [Versions and history](/docs/agent-filesystem/concepts/versions-and-history).
+
+## See also
+
+- [Schema reference](/docs/agent-filesystem/reference/schema) for the tables, fields, indexes and events that these functions use.
+- [Permissions](/docs/agent-filesystem/security/permissions) for the owner, mode and gate model.
+- [Record access](/docs/agent-filesystem/security/record-access) for database-enforced permissions.
+- [MCP server](/docs/agent-filesystem/interfaces/mcp-server) and [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas) for the tools that agents call instead of these functions.

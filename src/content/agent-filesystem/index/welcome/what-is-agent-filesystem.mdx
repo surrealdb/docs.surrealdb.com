@@ -1,0 +1,181 @@
+---
+position: 0
+title: What is Agent Filesystem?
+description: "Agent Filesystem is a shared, versioned and searchable file tree for AI agents, stored in a SurrealDB table."
+---
+
+# What is Agent Filesystem?
+
+Agent Filesystem gives AI agents a durable, shared file tree stored in SurrealDB. An agent decides what to write and in which format, such as Markdown notes, JSON, HTML or code, and it works with ordinary paths like `/projects/atlas/plan.md`. The files outlive the session that wrote them, so a later session, another agent or a person can open them.
+
+This page describes what an agent can do with the filesystem, shows the same data through the Python library and through SurrealQL, and says what state the release is in. [Agent Filesystem architecture](/docs/agent-filesystem/welcome/architecture) describes how the parts fit together.
+
+## Files are records in a table
+
+A file or a folder is one record in the `file` table. Each record holds the name of the file and a link to its parent folder, and the path is computed from the chain of parents, so no record stores its own path. Renaming or moving a folder is therefore one update, and the paths of everything below it change with it.
+
+A folder is a record with no content. A text file keeps its content in a string field, and a binary file keeps its bytes in a bytes field. Every file also has an owner, a Unix-style mode, a content type, a content hash and a `generation` number that counts changes to the content.
+
+Because the data is an ordinary table, SurrealQL can read it directly, as the second half of the example below shows.
+
+## A first look
+
+The example uses the Python library to write two Markdown files, edit one of them, list the folder, search for a word and read the version history. It needs a SurrealDB 3.x server and the Python library. The library is not published on PyPI, so the second command installs it from the `next` branch of the repository:
+
+```bash
+surreal start --user root --pass secret memory
+pip install "surrealfs @ git+https://github.com/surrealdb/surrealfs.git@next"
+```
+
+The script signs in with the credentials that the server starts with, and it writes to the `first_look` database of the `agents` namespace. Run it once, on a database that holds no other files, because the output below changes when the database already holds files. The [Python quickstart](/docs/agent-filesystem/quickstarts/python) covers the setup in more detail.
+
+```python title="first_look.py"
+import asyncio
+
+from surrealdb import AsyncSurreal
+from surrealfs import SurrealFs, apply_schema
+
+
+async def main():
+    db = AsyncSurreal("ws://localhost:8000/rpc")
+    await db.signin({"username": "root", "password": "secret"})
+    await db.use("agents", "first_look")
+    await apply_schema(db)
+
+    fs = SurrealFs(db, user="alice")
+    await fs.write_text(
+        "/projects/atlas/plan.md",
+        "---\nstatus: draft\n---\n# Atlas launch plan\n\nSee [risks](risks.md).\n",
+    )
+    await fs.write_text(
+        "/projects/atlas/risks.md",
+        "# Risks\n\nThe vendor certificate expires in November.\n",
+    )
+
+    print(await fs.edit("/projects/atlas/plan.md", "draft", "approved"))
+
+    for entry in await fs.ls("/projects/atlas"):
+        print(entry.path, entry.generation)
+
+    for hit in await fs.search_text("certificate"):
+        print(hit.entry.path, round(hit.score, 2))
+
+    print([(v.generation, v.op) for v in await fs.history("/projects/atlas/plan.md")])
+    await db.close()
+
+
+asyncio.run(main())
+```
+
+```text title="Output"
+--- a/projects/atlas/plan.md
++++ b/projects/atlas/plan.md
+@@ -1,5 +1,5 @@
+ ---
+-status: draft
++status: approved
+ ---
+ # Atlas launch plan
+ 
+/projects/atlas/plan.md 2
+/projects/atlas/risks.md 1
+/projects/atlas/risks.md 0.94
+[(1, 'write')]
+```
+
+A few details about the example:
+
+- `SurrealFs(db, user="alice")` creates a client that acts as one named user. The user name is required, because the library applies its permission checks for that user. A name consists of letters, digits, `_` and `-`, and the name `root` skips every permission check.
+- `write_text` creates the missing parent folders `/projects` and `/projects/atlas`.
+- `edit` replaces the first occurrence of the old text and returns a unified diff. The `generation` of the file rises from 1 to 2.
+- `history` lists the states that were replaced, so after one edit it lists generation 1 and not the current generation 2.
+- The frontmatter at the top of `plan.md` is parsed into a queryable `meta` field.
+- The link to `risks.md` is recorded as a graph edge by the `edit` call. The first write of `plan.md` could not record it, because a link is recorded only when its target exists at the moment of the write or edit. Each later write or edit that still contains the link adds another edge, and deleting the link from the text does not remove one. A second run of the script on the same database therefore prints larger generations, a longer history and duplicate edges.
+
+## The same data in SurrealQL
+
+The records the library created can be read with SurrealQL. This command opens a SurrealQL shell on the database that the script wrote to, and the queries below run in it:
+
+```bash
+surreal sql --endpoint http://localhost:8000 --user root --pass secret --ns agents --db first_look
+```
+
+The first query lists every file and folder. The schema also seeds an empty `/home` folder, which is the parent of each user's private home folder.
+
+```surql
+SELECT path, is_folder, owner, generation FROM file ORDER BY path;
+```
+
+```surql title="Output"
+[
+	{ generation: 1, is_folder: true, owner: 'root', path: '/home' },
+	{ generation: 1, is_folder: true, owner: 'alice', path: '/projects' },
+	{ generation: 1, is_folder: true, owner: 'alice', path: '/projects/atlas' },
+	{ generation: 2, is_folder: false, owner: 'alice', path: '/projects/atlas/plan.md' },
+	{ generation: 1, is_folder: false, owner: 'alice', path: '/projects/atlas/risks.md' }
+]
+```
+
+The next three queries call the full-text search function, read the version history and read the graph edge that the Markdown link created:
+
+```surql
+-- The last argument is the identity whose read permissions filter the results
+SELECT path FROM fn::sfs_search_text('certificate', 5, 'any', 'alice');
+//- [{ path: '/projects/atlas/risks.md' }]
+
+-- The states that were replaced, one record per replaced state
+SELECT path, generation, op FROM file_version;
+//- [{ generation: 1, op: 'write', path: '/projects/atlas/plan.md' }]
+
+-- The link in plan.md as a graph edge
+SELECT in.path AS source, out.path AS target FROM links_to;
+//- [{ source: '/projects/atlas/plan.md', target: '/projects/atlas/risks.md' }]
+```
+
+> [!NOTE]
+> These queries ran with a root credential. A SurrealDB root, namespace or database user is called a system credential here, and SurrealDB does not apply table permissions to it, so the queries bypass the permission checks that the Python library applies for `alice`. The search functions take the caller as an argument for that reason, and they raise `search needs an identity` when it is missing. See [Permissions](/docs/agent-filesystem/security/permissions).
+
+## What an agent can do
+
+The table describes the Python library, which is the most complete implementation. The Rust command-line tool and the TypeScript SDK cover a subset of these capabilities.
+
+| Capability | What it does |
+| --- | --- |
+| **Read and write files** | Creates, reads, edits, appends to, copies, moves and removes text and binary files. Reads the start, the end or a range of lines of a file, and matches paths with glob patterns, optionally filtered on frontmatter fields. See [Data model](/docs/agent-filesystem/concepts/data-model). |
+| **Keep a history** | Keeps the previous state of a file whenever its content, mode, name or location changes, and keeps the last state of a removed file. `history`, `diff`, `restore` and `undelete` read those versions. History is recorded under the path that the file had at the time, so a rename starts a new history. See [Versions and history](/docs/agent-filesystem/concepts/versions-and-history). |
+| **Search** | Indexes every text file for full-text search ranked with BM25. Semantic search uses embeddings that you supply, and hybrid search fuses the two rankings. `grep` matches text exactly, or as a regular expression on request. The `search` tool of the MCP server and the Hermes plugin matches words only in this release. See [File search](/docs/agent-filesystem/concepts/search). |
+| **Link files** | Records the Markdown links and wikilinks of a file written or edited through the library as `links_to` edges to the files that exist, adds typed edges with `relate`, and lists the files that link to a file with `backlinks`. Each write or edit adds an edge for every link that is still in the text, and an edge stays after its link is deleted. See [Links and entities](/docs/agent-filesystem/concepts/links-and-entities). |
+| **Share files and keep home folders private** | Creates files outside `/home` readable and writable by every user, with the mode `0o666` for files and `0o777` for folders, until the owner runs `chmod`. Keeps each user's home folder, `/home/<user>`, private for reading, listing, writing and searching. The Python library enforces these rules for a client that signs in with a system credential, and some calls skip the checks, among them `history`, `diff` between two generations, `backlinks`, `watch` and workspace merges. See [Permissions](/docs/agent-filesystem/security/permissions#operations-that-do-not-apply-the-callers-permissions) and, for `backlinks`, [Links and entities](/docs/agent-filesystem/concepts/links-and-entities#backlinks-and-neighbours). |
+| **Coordinate writers** | Refuses a write that passes `if_generation` when the file changed since the caller read it. The check works under a system credential, and it does not work under [record access](/docs/agent-filesystem/security/record-access#differences-from-system-credentials), where the generation does not advance. Appends text atomically, records advisory leases, which do not block writes, collects edits to existing text files in workspaces for a later merge, and passes tasks between agents as files in mailboxes. A write without `if_generation` replaces the content, and the last writer wins. See [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases#writes-without-a-generation). |
+| **Watch for changes** | Streams changes to files as they happen, using a SurrealDB live query. An event for a changed file carries its text, and one write can produce more than one event, so an event is a signal to read the file again. See [Python SDK](/docs/agent-filesystem/interfaces/python-sdk). |
+
+Agents use these capabilities through tools. The MCP server, the pydantic-ai toolset, the raw JSON tool definitions and the Hermes plugin expose the same 31 tools, which are generated from one registry. The MCP server adds a 32nd tool, `brain_recall`, when Agent Memory is configured, and the Hermes plugin prefixes each tool name with `surrealfs_`. The tool names follow the Unix commands that models already know (`ls`, `cat`, `grep`, `mkdir`, `cp`, `mv`, `rm`, `chmod`), with `write_file`, `edit`, `search` and `history` for the operations that have no single Unix equivalent.
+
+Not every capability works through the tools in this release. The `fork_workspace` tool always fails, the `acquire_lease` tool takes the lease and then returns an error, and the `tree` tool fails for the path `/`, which is its default. Only `append_file`, `restore` and `undelete` print the generation that they leave, and `history` lists the earlier ones. The `write_file` and `edit` tools, `cat` and `ls` do not report it, so after a `write_file` call an agent does not know which value to pass as `if_generation`. Watching changes, the mailbox methods and writing into a workspace have no tool, and they are available through the Python library. [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas) lists every tool and its arguments, and its [known issues](/docs/agent-filesystem/interfaces/tool-schemas#known-issues) describe the failures.
+
+## Status
+
+Agent Filesystem is in beta. The API, the schema and the command-line interfaces may change in breaking ways between releases, and the project does not yet recommend it for production use.
+
+These pages describe version 0.2.0 of the `surrealfs` package, built from the `next` branch of the repository. That build has 31 tools in its registry. A build from the repository's default branch can have fewer, and the Claude plugin builds the default branch unless `SURREALFS_SOURCE` names another source.
+
+The Python library and the Rust command-line tool use one SurrealQL schema, the file `surrealfs/schema/file.surql`. The TypeScript SDK embeds an older copy of that schema, which defines 44 of its 76 functions and 15 of its 32 tables. Several of its methods, among them `search`, `chmod` and `relate`, also call the current functions with the wrong arguments, so they fail even when the database has the current schema. The Python library is the most complete implementation. Pages in this documentation that say something works name the implementation, and [Limits and caveats](/docs/agent-filesystem/operations/limits-and-caveats) lists the known defects and the parts that are not finished.
+
+Agent Filesystem needs a SurrealDB 3.x server. The behaviour described in these pages was checked against SurrealDB 3.2.3, and earlier 3.x releases were not tested.
+
+## Names
+
+Agent Filesystem is the name of the product. SurrealFS is the name of the project repository, [surrealdb/surrealfs](https://github.com/surrealdb/surrealfs), and it appears in the identifiers that come from it:
+
+- The `surrealfs` Python package and the `SurrealFs` class.
+- The `surrealfs` and `surrealfs-mcp` commands, the `surrealfs-rs` command-line tool written in Rust, and the `surrealfs-server` gateway.
+- The `@surrealdb/fs` TypeScript package.
+- The `SURREALFS_*` environment variables and the `fn::sfs_*` SurrealQL functions.
+
+The connection settings are the exception, because they use `SURREALDB_*` names.
+
+## Where to go next
+
+- [Agent Filesystem and Agent Memory](/docs/agent-filesystem/welcome/agent-filesystem-and-agent-memory) compares the two ways of giving an agent memory and shows how they combine.
+- [Agent Filesystem architecture](/docs/agent-filesystem/welcome/architecture) shows the table, the schema, the clients and where each part runs.
+- [Python quickstart](/docs/agent-filesystem/quickstarts/python), [command-line quickstart](/docs/agent-filesystem/quickstarts/command-line) and [MCP and Claude quickstart](/docs/agent-filesystem/quickstarts/mcp-and-claude) get a first filesystem running.
