@@ -1,0 +1,340 @@
+---
+position: 4
+title: Eve
+description: Connect eve agents to SurrealDB - tools that query your records with parameters and approval, and a custom memory provider with scoped vector recall and idempotent capture.
+---
+
+# Eve
+
+[eve](https://eve.dev) is Vercel's open-source framework for building agents in TypeScript. An eve agent is a directory of files: the model and instructions, one file for each tool, and optional memory slots, channels and schedules. eve runs each conversation as a durable workflow, so a session continues after a crash or a redeploy. This page connects an eve agent to SurrealDB in two ways: as tools that read and change your application's data, and as a memory provider that stores what the agent learns about each caller.
+
+> [!NOTE]
+> This page uses a SurrealDB database that you run. For a managed memory service with an eve adapter, see the [Agent Memory eve integration](/docs/agent-memory/integrations/frameworks/eve).
+
+## Requirements
+
+- [SurrealDB v3](/docs/running/installation), local or on [SurrealDB Cloud](/docs/running/cloud)
+- An eve project and Node.js 24 or later. To create a project, run `npx eve@latest init my-agent`.
+- An embedding model for the memory provider. The examples use `openai/text-embedding-3-small` through [Vercel AI Gateway](https://vercel.com/docs/ai-gateway).
+
+## What SurrealDB stores
+
+eve keeps its own state: the session history, the workflow steps and the values from `defineState`. SurrealDB holds the data that exists outside any single session:
+
+| Data | Where it lives |
+| --- | --- |
+| Conversation history and workflow progress | eve |
+| Orders, customers and the other records the agent works with | SurrealDB, reached through tools |
+| Facts the agent remembers about a caller across sessions | SurrealDB, through a memory provider |
+
+## Setup
+
+Start SurrealDB locally:
+
+```sh
+surreal start --user root --pass secret memory
+```
+
+Save the schema below as `schema.surql`. It defines the store's data, the `memory` table for the memory provider, and a database user for the agent:
+
+```surql title="schema.surql"
+DEFINE NAMESPACE IF NOT EXISTS app;
+USE NS app;
+DEFINE DATABASE IF NOT EXISTS main;
+USE DB main;
+
+DEFINE USER agent ON DATABASE PASSWORD 'strongPassword' ROLES EDITOR;
+
+DEFINE TABLE customer SCHEMAFULL;
+DEFINE FIELD name ON customer TYPE string;
+DEFINE FIELD email ON customer TYPE string;
+
+DEFINE TABLE product SCHEMAFULL;
+DEFINE FIELD name ON product TYPE string;
+DEFINE FIELD price ON product TYPE decimal;
+
+DEFINE TABLE order SCHEMAFULL;
+DEFINE FIELD customer ON order TYPE record<customer>;
+DEFINE FIELD items ON order TYPE array<record<product>>;
+DEFINE FIELD total ON order TYPE decimal;
+DEFINE FIELD status ON order TYPE 'pending' | 'shipped' | 'cancelled' DEFAULT 'pending';
+DEFINE FIELD created_at ON order TYPE datetime DEFAULT time::now() READONLY;
+
+DEFINE TABLE memory SCHEMAFULL;
+DEFINE FIELD scope ON memory TYPE string;
+DEFINE FIELD content ON memory TYPE string;
+DEFINE FIELD embedding ON memory TYPE array<float>;
+DEFINE FIELD created_at ON memory TYPE datetime DEFAULT time::now() READONLY;
+DEFINE INDEX memory_embedding ON memory FIELDS embedding HNSW DIMENSION 1536 DIST COSINE;
+
+CREATE customer:ada CONTENT { name: 'Ada Lovelace', email: 'ada@example.com' };
+CREATE product:lamp CONTENT { name: 'Desk lamp', price: 39.90dec };
+CREATE order:a1b2c3 CONTENT { customer: customer:ada, items: [product:lamp], total: 39.90dec };
+```
+
+Apply it:
+
+```sh
+curl -X POST -u "root:secret" -H "Accept: application/json" \
+  --data-binary @schema.surql http://localhost:8000/sql
+```
+
+## Install dependencies
+
+From the root of the eve project:
+
+```sh
+npm install surrealdb
+```
+
+eve projects already depend on `ai` and `zod`, which the examples also use.
+
+Add the connection details to `.env.local`, and to the Vercel project's environment variables before you deploy:
+
+```sh title=".env.local"
+SURREALDB_URL=http://localhost:8000
+SURREALDB_NAMESPACE=app
+SURREALDB_DATABASE=main
+SURREALDB_USER=agent
+SURREALDB_PASS=strongPassword
+```
+
+## Connect to SurrealDB
+
+Tools and memory providers run in your application's runtime, not in eve's sandbox, so they can read `process.env` and share one client. Put the client in `agent/lib/`:
+
+```ts title="agent/lib/surreal.ts"
+import { Surreal } from "surrealdb";
+
+let connection: Promise<Surreal> | undefined;
+
+export function getDb(): Promise<Surreal> {
+    connection ??= connect().catch((error) => {
+        connection = undefined;
+        throw error;
+    });
+    return connection;
+}
+
+async function connect(): Promise<Surreal> {
+    const db = new Surreal();
+    const namespace = process.env.SURREALDB_NAMESPACE!;
+    const database = process.env.SURREALDB_DATABASE!;
+
+    await db.connect(process.env.SURREALDB_URL!, {
+        namespace,
+        database,
+        authentication: {
+            namespace,
+            database,
+            username: process.env.SURREALDB_USER!,
+            password: process.env.SURREALDB_PASS!,
+        },
+    });
+    return db;
+}
+```
+
+`getDb()` stores the connection promise, so tool calls that start at the same time share one sign-in. The [Next.js page](/docs/build/integrations/vercel/nextjs#create-one-shared-client) explains this pattern in more detail.
+
+## Query data from a tool
+
+eve names each tool after its file, so `agent/tools/get_order.ts` becomes the `get_order` tool. The model chooses the input, and the tool passes it to a fixed query as a parameter:
+
+```ts title="agent/tools/get_order.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+import { getDb } from "../lib/surreal";
+
+export default defineTool({
+    description: "Look up an order by its id, with the customer and the items in it.",
+    inputSchema: z.object({
+        order_id: z.string().describe("The order id, such as order:a1b2c3"),
+    }),
+    async execute({ order_id }) {
+        const db = await getDb();
+        const [order] = await db
+            .query(
+                `SELECT id, status, total, created_at,
+                    customer.{ name, email } AS customer,
+                    items.{ name, price } AS items
+                FROM ONLY <record<order>> $order_id`,
+                { order_id },
+            )
+            .json();
+
+        return order ?? { error: `No order ${order_id}` };
+    },
+});
+```
+
+The record links in `customer` and `items` are followed inside the query, so one call returns the order with its customer and products. The cast `<record<order>> $order_id` makes the query fail unless the input is a record ID in the `order` table. For `order:a1b2c3`, the tool returns:
+
+```json title="Output"
+{
+    "created_at": "2026-10-15T05:07:01.376601Z",
+    "customer": { "email": "ada@example.com", "name": "Ada Lovelace" },
+    "id": "order:a1b2c3",
+    "items": [{ "name": "Desk lamp", "price": "39.9" }],
+    "status": "pending",
+    "total": "39.9"
+}
+```
+
+> [!IMPORTANT]
+> Do not give the model a tool that runs SurrealQL it writes itself. A fixed query with parameters limits each tool to one operation, and the agent's database user limits what any query can reach.
+
+## Change data from a tool
+
+A tool that changes data needs two more safeguards. eve can run a tool call again if the step was interrupted before it finished, so the change must give the same result when it runs twice. A person may also need to approve the change before it happens.
+
+```ts title="agent/tools/cancel_order.ts"
+import { defineTool } from "eve/tools";
+import { always } from "eve/tools/approval";
+import { z } from "zod";
+import { getDb } from "../lib/surreal";
+
+export default defineTool({
+    description: "Cancel an order that has not shipped yet.",
+    inputSchema: z.object({
+        order_id: z.string().describe("The order id, such as order:a1b2c3"),
+    }),
+    approval: always(),
+    async execute({ order_id }) {
+        const db = await getDb();
+        const [updated] = await db.query<[unknown[]]>(
+            `UPDATE <record<order>> $order_id
+                SET status = 'cancelled'
+                WHERE status = 'pending'`,
+            { order_id },
+        );
+
+        return updated.length > 0
+            ? { cancelled: true }
+            : { cancelled: false, reason: "The order is not pending" };
+    },
+});
+```
+
+The `WHERE status = 'pending'` condition makes the update safe to repeat: the first run cancels the order, and a second run matches no record and changes nothing. `approval: always()` pauses the call until a person approves it. The pause is durable, so the session continues from the same point after the approval arrives.
+
+## Back a memory slot with SurrealDB
+
+An eve memory slot binds a provider to a scope, such as the signed-in caller. Before each turn, eve calls the provider's `recall` handler and adds the messages it returns to the model's context. After the turn, it calls `capture` so that the provider can store what happened. The provider below stores each user message with its embedding, and recalls the five closest memories at the start of the next turn:
+
+```ts title="agent/lib/surreal-memory.ts"
+import { embed, type ModelMessage } from "ai";
+import { defineMemoryProvider } from "eve/memory";
+import { defineTool } from "eve/tools";
+import { RecordId } from "surrealdb";
+import { z } from "zod";
+import { getDb } from "./surreal";
+
+const embeddingModel = "openai/text-embedding-3-small";
+
+function userText(messages: readonly ModelMessage[]): string {
+    return messages
+        .filter((message) => message.role === "user")
+        .flatMap((message) =>
+            typeof message.content === "string"
+                ? [message.content]
+                : message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])),
+        )
+        .join("\n")
+        .trim();
+}
+
+export function surrealMemory() {
+    return defineMemoryProvider({
+        recall: {
+            async "turn.started"(ctx) {
+                const text = userText(ctx.turn.input);
+                if (!text) return null;
+
+                const { embedding } = await embed({ model: embeddingModel, value: text });
+                const db = await getDb();
+                const [memories] = await db.query<[{ id: RecordId; content: string }[]]>(
+                    `SELECT id, content FROM memory
+                    WHERE scope = $scope AND embedding <|5,100|> $embedding`,
+                    { scope: ctx.memory.scope.key, embedding },
+                );
+
+                return {
+                    messages: memories.map((memory) => ({
+                        id: memory.id.toString(),
+                        content: memory.content,
+                    })),
+                };
+            },
+        },
+        capture: {
+            async "turn.completed"(ctx) {
+                const text = userText(ctx.turn.input);
+                if (!text) return;
+
+                const { embedding } = await embed({ model: embeddingModel, value: text });
+                const db = await getDb();
+                await db.query("INSERT IGNORE INTO memory $memory", {
+                    memory: {
+                        id: new RecordId("memory", ctx.operationId),
+                        scope: ctx.memory.scope.key,
+                        content: text,
+                        embedding,
+                    },
+                });
+            },
+        },
+        async tools(ctx) {
+            return {
+                forget: defineTool({
+                    description: "Delete a remembered note by its id.",
+                    inputSchema: z.object({ id: z.string() }),
+                    async execute({ id }) {
+                        const db = await getDb();
+                        await db.query("DELETE <record<memory>> $id WHERE scope = $scope", {
+                            id,
+                            scope: ctx.memory.scope.key,
+                        });
+                        return { deleted: true };
+                    },
+                }),
+            };
+        },
+    });
+}
+```
+
+The provider follows the rules that eve sets for every memory provider:
+
+- **Every read and write is limited to `ctx.memory.scope.key`.** The `scope` condition is part of the vector search itself, so the `HNSW` search skips other callers' memories while it collects the five results, rather than filtering them out afterwards. The `forget` tool has the same condition, so the model cannot delete another caller's memory even with a valid record ID.
+- **Capture is idempotent.** eve can call a handler again with the same `operationId`. The memory record's ID is the `operationId`, and `INSERT IGNORE` leaves an existing record unchanged, so a repeated call stores nothing new.
+- **Recalled memories have stable IDs.** eve uses the `id` of each recalled message to replace an earlier copy of the same memory instead of adding a duplicate.
+
+Declare the slot in `agent/memory/`. The file name becomes the slot name, so the model sees the tool as `notes__forget`:
+
+```ts title="agent/memory/notes.ts"
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+import { surrealMemory } from "../lib/surreal-memory";
+
+export default defineMemory({
+    description: "Facts and preferences the caller has shared in earlier conversations.",
+    provider: surrealMemory(),
+    scope: byPrincipal,
+});
+```
+
+`byPrincipal` gives each authenticated caller their own scope. eve's [memory documentation](https://eve.dev/docs/memory) describes the other scopes, and [Build a memory provider](https://eve.dev/docs/memory/custom-provider) describes the full provider contract.
+
+This provider stores every user message, which keeps the example short. A production provider usually stores less: for example, it can ask a model to extract durable facts from the turn and store only those, or it can store nothing in `capture` and offer the model a `remember` tool instead.
+
+## Limit what the agent can reach
+
+The `agent` user in the schema has the `EDITOR` role on one database. To limit the agent further, give it a [record user](/docs/learn/security/authentication/users#record-users) and define table permissions, or split the work between two users: a `VIEWER` user for tools that only read, and an `EDITOR` user for the tools that need approval. [DEFINE USER](/docs/reference/query-language/statements/define/user) lists the roles.
+
+## See also
+
+- [AI SDK](/docs/build/integrations/vercel/ai-sdk), for search and graph tools outside an eve agent
+- [Similarity search](/docs/learn/data-models/vector-search/similarity-search)
+- [Record links and graph relations](/docs/learn/data-models/graph/record-links-vs-graph-relations)
+- [eve documentation](https://eve.dev/docs/getting-started)

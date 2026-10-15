@@ -1,0 +1,304 @@
+---
+position: 2
+title: Next.js
+description: Connect a Next.js App Router application on Vercel to SurrealDB - one shared client, Server Components, Server Actions, Route Handlers and browser live queries with record users.
+---
+
+# Next.js
+
+[Next.js](https://nextjs.org) renders React on the server, so most of your SurrealDB queries run in server code: Server Components read data, Server Actions change it, and Route Handlers serve it as JSON. This page builds a small task list that does all three, then adds live updates in the browser. The same code runs locally and on Vercel.
+
+## Requirements
+
+- [SurrealDB v3](/docs/running/installation), local or on [SurrealDB Cloud](/docs/running/cloud)
+- Next.js 16 with the App Router
+- Node.js 20.9 or later
+
+## Setup
+
+Start SurrealDB locally, either [installed directly](/docs/running/installation):
+
+```sh
+surreal start --user root --pass secret memory
+```
+
+or [with Docker](/docs/running/docker):
+
+```sh
+docker run --rm --pull always -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass secret
+```
+
+Save the schema below as `schema.surql`. It defines the namespace and database, a `task` table, and a database-level user for the application to sign in as:
+
+```surql title="schema.surql"
+DEFINE NAMESPACE IF NOT EXISTS app;
+USE NS app;
+DEFINE DATABASE IF NOT EXISTS main;
+USE DB main;
+
+DEFINE USER app_server ON DATABASE PASSWORD 'strongPassword' ROLES EDITOR;
+
+DEFINE TABLE task SCHEMAFULL;
+DEFINE FIELD title ON task TYPE string ASSERT $value.len() > 0;
+DEFINE FIELD done ON task TYPE bool DEFAULT false;
+DEFINE FIELD created_at ON task TYPE datetime DEFAULT time::now() READONLY;
+```
+
+Apply it through the `/sql` endpoint:
+
+```sh
+curl -X POST -u "root:secret" -H "Accept: application/json" \
+  --data-binary @schema.surql http://localhost:8000/sql
+```
+
+## Install dependencies
+
+In an existing Next.js project, add the SDK and the `server-only` package:
+
+```sh
+npm install surrealdb server-only
+```
+
+Add the connection details to `.env.local`. On Vercel, set the same variables in the project settings, as described in [Store credentials as environment variables](/docs/build/integrations/vercel#store-credentials-as-environment-variables):
+
+```sh title=".env.local"
+SURREALDB_URL=http://localhost:8000
+SURREALDB_NAMESPACE=app
+SURREALDB_DATABASE=main
+SURREALDB_USER=app_server
+SURREALDB_PASS=strongPassword
+```
+
+## Create one shared client
+
+Signing in with a password takes a few hundred milliseconds, because SurrealDB hashes the password on purpose to slow down guessing. Sign in once per server instance and reuse the client for every request. On Vercel's Fluid compute, one instance serves many requests, so a client stored at module scope is shared between them.
+
+```ts title="lib/surreal.ts"
+import "server-only";
+import { Surreal } from "surrealdb";
+
+let connection: Promise<Surreal> | undefined;
+
+export function getDb(): Promise<Surreal> {
+    connection ??= connect().catch((error) => {
+        connection = undefined;
+        throw error;
+    });
+    return connection;
+}
+
+async function connect(): Promise<Surreal> {
+    const db = new Surreal();
+    const namespace = process.env.SURREALDB_NAMESPACE!;
+    const database = process.env.SURREALDB_DATABASE!;
+
+    await db.connect(process.env.SURREALDB_URL!, {
+        namespace,
+        database,
+        authentication: {
+            namespace,
+            database,
+            username: process.env.SURREALDB_USER!,
+            password: process.env.SURREALDB_PASS!,
+        },
+    });
+    return db;
+}
+```
+
+Three details in this file matter:
+
+- `getDb()` stores the promise rather than the client. Requests that arrive while the first connection is still opening wait for the same promise, so the instance signs in only once. If the connection fails, the next call tries again.
+- `import "server-only"` makes the build fail if a Client Component imports this file, which keeps the credentials out of the browser bundle.
+- An `http://` or `https://` URL makes the SDK send each query as its own HTTP request. Nothing has to stay open while Vercel pauses the instance between requests.
+
+## Read data in a Server Component
+
+A Server Component can be `async` and query the database directly. The result type is passed as a generic, with one element for each statement in the query:
+
+```tsx title="app/page.tsx"
+import type { RecordId } from "surrealdb";
+import { getDb } from "@/lib/surreal";
+import { addTask } from "./actions";
+
+type Task = {
+    id: RecordId<"task">;
+    title: string;
+    done: boolean;
+};
+
+export default async function Page() {
+    const db = await getDb();
+    const [tasks] = await db.query<[Task[]]>(
+        "SELECT id, title, done, created_at FROM task ORDER BY created_at DESC LIMIT 50",
+    );
+
+    return (
+        <main>
+            <form action={addTask}>
+                <input name="title" required />
+                <button type="submit">Add task</button>
+            </form>
+            <ul>
+                {tasks.map((task) => (
+                    <li key={task.id.toString()}>{task.title}</li>
+                ))}
+            </ul>
+        </main>
+    );
+}
+```
+
+`created_at` is in the selection because SurrealDB requires a field used in `ORDER BY` to be selected.
+
+Record IDs arrive as `RecordId` objects, which keep the table and the key separate. React cannot pass a class instance such as `RecordId` from a Server Component to a Client Component, so convert it with `.toString()`, or call `.json()` on the query, before you pass a result down as a prop.
+
+## Change data in a Server Action
+
+A Server Action runs on the server when the form is submitted. Pass user input as a query parameter, never by building the query string, and then revalidate the page so that it shows the new record:
+
+```ts title="app/actions.ts"
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { getDb } from "@/lib/surreal";
+
+export async function addTask(formData: FormData) {
+    const title = String(formData.get("title") ?? "").trim();
+    if (!title) return;
+
+    const db = await getDb();
+    await db.query("CREATE task CONTENT { title: $title }", { title });
+
+    revalidatePath("/");
+}
+```
+
+The `ASSERT` on the `title` field rejects an empty title in the database as well, so the rule holds for every client, not only for this form.
+
+## Serve JSON from a Route Handler
+
+A Route Handler returns a `Response`. The `.json()` method on a query converts SurrealDB values such as record IDs and datetimes to their JSON forms, so the result can go straight into `Response.json()`:
+
+```ts title="app/api/tasks/route.ts"
+import { getDb } from "@/lib/surreal";
+
+export async function GET() {
+    const db = await getDb();
+    const [tasks] = await db
+        .query("SELECT id, title, done, created_at FROM task ORDER BY created_at DESC")
+        .json();
+
+    return Response.json(tasks);
+}
+```
+
+A request to `/api/tasks` returns the tasks:
+
+```json title="Sample output"
+[
+    {
+        "created_at": "2026-10-15T05:05:43.7823Z",
+        "done": false,
+        "id": "task:s97vxaoriwi01cuf7d5p",
+        "title": "Write docs"
+    }
+]
+```
+
+## Stream live updates to the browser
+
+A [live query](/docs/reference/javascript/concepts/live-queries) sends a message to the client each time a matching record changes. It needs a WebSocket connection that stays open, so it belongs in the browser rather than in a Vercel Function.
+
+The browser must never receive the `app_server` password. Instead, each person signs in as a [record user](/docs/learn/security/authentication/users#record-users), and table permissions decide what that user can see. Add a `user` table, a [record access method](/docs/reference/query-language/statements/define/access/record), and permissions on `task` to the schema:
+
+```surql title="schema.surql"
+DEFINE TABLE user SCHEMAFULL;
+DEFINE FIELD email ON user TYPE string;
+DEFINE FIELD password ON user TYPE string;
+DEFINE INDEX user_email ON user FIELDS email UNIQUE;
+
+DEFINE ACCESS account ON DATABASE TYPE RECORD
+    SIGNUP (CREATE user CONTENT { email: $email, password: crypto::argon2::generate($password) })
+    SIGNIN (SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(password, $password))
+    DURATION FOR SESSION 12h;
+
+DEFINE TABLE OVERWRITE task SCHEMAFULL
+    PERMISSIONS
+        FOR select FULL
+        FOR create, update, delete NONE;
+```
+
+`DEFINE TABLE OVERWRITE` replaces the earlier table definition and keeps its fields. With these permissions, a signed-in record user can read every task but cannot change one. The permissions apply only to record users, so the `app_server` user in the Server Action can still create tasks. Your sign-in flow calls `signin` or `signup` with `access: "account"` and receives an access token.
+
+The Client Component below connects with that token and keeps its list in step with the database:
+
+```tsx title="components/live-tasks.tsx"
+"use client";
+
+import { useEffect, useState } from "react";
+import { Surreal, Table } from "surrealdb";
+
+type Task = { id: string; title: string; done: boolean };
+
+export function LiveTasks({ token, initial }: { token: string; initial: Task[] }) {
+    const [tasks, setTasks] = useState(initial);
+
+    useEffect(() => {
+        const db = new Surreal();
+
+        async function subscribe() {
+            await db.connect(process.env.NEXT_PUBLIC_SURREALDB_URL!, {
+                namespace: process.env.NEXT_PUBLIC_SURREALDB_NAMESPACE,
+                database: process.env.NEXT_PUBLIC_SURREALDB_DATABASE,
+                authentication: token,
+            });
+
+            const live = await db.live<Omit<Task, "id">>(new Table("task"));
+            live.subscribe((message) => {
+                if (message.action === "KILLED") return;
+                const id = message.recordId.toString();
+                setTasks((current) => {
+                    const others = current.filter((task) => task.id !== id);
+                    if (message.action === "DELETE") return others;
+                    return [{ ...message.value, id }, ...others];
+                });
+            });
+        }
+
+        subscribe().catch(console.error);
+        return () => {
+            db.close();
+        };
+    }, [token]);
+
+    return (
+        <ul>
+            {tasks.map((task) => (
+                <li key={task.id}>{task.title}</li>
+            ))}
+        </ul>
+    );
+}
+```
+
+Set `NEXT_PUBLIC_SURREALDB_URL` to the WebSocket address of the server, such as `wss://<your-instance>.aws.surrealdb.cloud`. Variables with the `NEXT_PUBLIC_` prefix are included in the browser bundle, so put only the address, namespace and database in them, never a password.
+
+## Deploy to Vercel
+
+1. Make sure that Vercel can reach the database. A server on `localhost` is not reachable from a deployment, so use a SurrealDB Cloud instance or another server with a public address.
+2. Add `SURREALDB_URL`, `SURREALDB_NAMESPACE`, `SURREALDB_DATABASE`, `SURREALDB_USER` and `SURREALDB_PASS` to the project's environment variables, and the `NEXT_PUBLIC_` variables if you use live queries.
+3. Deploy:
+
+```sh
+vercel deploy
+```
+
+Routes that use the shared client run on the Node.js runtime, which is the default in Next.js and the runtime that Vercel recommends.
+
+## See also
+
+- [AI SDK](/docs/build/integrations/vercel/ai-sdk), which adds a chat route to an application like this one
+- [Connecting to SurrealDB](/docs/reference/javascript/concepts/connecting-to-surrealdb)
+- [Live queries](/docs/reference/javascript/concepts/live-queries)
+- [Record users](/docs/learn/security/authentication/users#record-users)
