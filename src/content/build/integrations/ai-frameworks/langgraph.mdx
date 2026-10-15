@@ -1,0 +1,411 @@
+---
+position: 11
+title: LangGraph
+description: Use SurrealDB as the checkpointer, long-term memory store and node cache for LangGraph.js agents and graphs with the @surrealdb/langgraph package.
+---
+
+# LangGraph
+
+[LangGraph.js](https://langchain-ai.github.io/langgraphjs/) is the TypeScript framework from LangChain for building stateful agents and multi-step graphs. The [`@surrealdb/langgraph`](https://www.npmjs.com/package/@surrealdb/langgraph) package stores the three kinds of state that LangGraph persists in a SurrealDB database that you run: conversation checkpoints, long-term memory, and cached node results.
+
+This page is for TypeScript and JavaScript applications. The companion package `@surrealdb/langchain` provides LangChain.js components such as a vector store, retrievers and tools, and its [README](https://github.com/surrealdb/langchain.py#readme) documents them. For Python, see [LangChain](/docs/build/integrations/ai-frameworks/langchain).
+
+| Class | LangGraph interface | What it stores |
+| --- | --- | --- |
+| `SurrealDBSaver` | `BaseCheckpointSaver` | Short-term state: the graph state of each thread after every step, so a conversation can continue, resume after an interrupt, or go back to an earlier step. |
+| `SurrealDBStore` | `BaseStore` | Long-term memory: JSON items in namespaces that every thread can read, with optional semantic search. |
+| `SurrealDBNodeCache` | `BaseCache` | Node results for nodes that declare a `cachePolicy`, so a repeated input does not run the node again. |
+
+> [!NOTE]
+> The same package also includes `AgentMemoryStore`, a read-only store that reads from the hosted [SurrealDB Agent Memory](/docs/agent-memory) service instead of your own database. It is documented on the [Agent Memory LangChain page](/docs/agent-memory/integrations/frameworks/langchain).
+
+## Requirements
+
+- [SurrealDB v3](/docs/running/installation), local or on [SurrealDB Cloud](/docs/manage/instances). The adapters check the server version when they connect and throw on v2.
+- Node.js 22+ or Bun 1+
+- `@langchain/core` 1.2.9+ and `@langchain/langgraph-checkpoint` 1.1.5+. LangChain v0.3 is not supported.
+
+## Setup
+
+Start SurrealDB locally, either [installed directly](/docs/running/installation):
+
+```sh
+surreal start --user root --pass secret memory
+```
+
+or [with Docker](/docs/running/docker):
+
+```sh
+docker run --rm --pull always -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass secret
+```
+
+The `memory` storage engine keeps data only until the server stops. To keep checkpoints across restarts, start the server with a [persistent storage engine](/docs/running/file-backed).
+
+## Install dependencies
+
+```sh
+bun add @surrealdb/langgraph @langchain/langgraph @langchain/core
+```
+
+The quick start below also uses the `langchain` package for `createAgent` and `@langchain/openai` for the model:
+
+```sh
+bun add langchain @langchain/openai
+```
+
+## Quick start
+
+`createAgent` accepts a checkpointer and a store, so you can pass both adapters to it directly. The checkpointer saves the conversation under the `thread_id` in the run config, which makes the second call aware of the first:
+
+```typescript
+import { ChatOpenAI } from "@langchain/openai";
+import { SurrealDBSaver, SurrealDBStore } from "@surrealdb/langgraph";
+import { createAgent } from "langchain";
+
+const surreal = {
+    url: "ws://localhost:8000",
+    username: "root",
+    password: "secret",
+    namespace: "app",
+    database: "agent",
+};
+
+const checkpointer = new SurrealDBSaver({ surreal });
+const store = new SurrealDBStore({ surreal });
+await store.start();
+
+const agent = createAgent({
+    model: new ChatOpenAI({ model: "gpt-4.1-mini" }),
+    tools: [],
+    checkpointer,
+    store,
+});
+
+const config = { configurable: { thread_id: "demo-thread" } };
+
+await agent.invoke(
+    { messages: [{ role: "user", content: "My name is Ada." }] },
+    config,
+);
+
+const result = await agent.invoke(
+    { messages: [{ role: "user", content: "What is my name?" }] },
+    config,
+);
+
+console.log(result.messages.at(-1)?.text);
+
+await checkpointer.close();
+await store.stop();
+```
+
+Each adapter creates its tables and indexes the first time it is used. You do not need to define a schema first.
+
+## Connect to SurrealDB
+
+Every adapter takes a `surreal` option. Pass it either a connection config or a `SurrealDBClient` that you created yourself.
+
+A connection config signs in with a username and password, or authenticates with a token:
+
+```typescript
+// Username and password
+const surreal = {
+    url: "ws://localhost:8000",
+    username: "root",
+    password: "secret",
+    namespace: "app",
+    database: "agent",
+};
+
+// Token, for example a record user's JWT
+const surrealWithToken = {
+    url: "wss://<your-instance>.aws.surrealdb.cloud",
+    token: process.env.SURREALDB_TOKEN!,
+    namespace: "app",
+    database: "agent",
+};
+```
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `url` | Yes | WebSocket or HTTP endpoint of the SurrealDB server. |
+| `username`, `password` | One of these or `token` | Credentials for `signin`. |
+| `token` | One of these or `username` and `password` | An existing access token for `authenticate`. |
+| `namespace` | No | Defaults to `langchain`. |
+| `database` | No | Defaults to `langchain`. |
+
+An adapter that receives a config opens its own connection and closes it in `close()` or `stop()`. To use one connection for several adapters, create a `SurrealDBClient` and pass it to each one. An adapter does not close a client that you passed in, so close it yourself when the application stops:
+
+```typescript
+import {
+    SurrealDBClient,
+    SurrealDBNodeCache,
+    SurrealDBSaver,
+    SurrealDBStore,
+} from "@surrealdb/langgraph";
+
+const client = new SurrealDBClient({
+    url: "ws://localhost:8000",
+    username: "root",
+    password: "secret",
+    namespace: "app",
+    database: "agent",
+});
+
+const checkpointer = new SurrealDBSaver({ surreal: client });
+const store = new SurrealDBStore({ surreal: client });
+const cache = new SurrealDBNodeCache({ surreal: client });
+
+// ...
+
+await client.close();
+```
+
+## Checkpointer
+
+`SurrealDBSaver` implements the full LangGraph `BaseCheckpointSaver` contract. Pass it as `checkpointer` to `createAgent`, or to `compile()` on a `StateGraph`:
+
+```typescript
+import { SurrealDBSaver } from "@surrealdb/langgraph";
+
+const checkpointer = new SurrealDBSaver({ surreal });
+
+const graph = builder.compile({ checkpointer });
+
+await graph.invoke(input, { configurable: { thread_id: "user-42" } });
+```
+
+LangGraph writes a checkpoint after each step of a run. Checkpoint data is serialised with the LangGraph serialiser and stored as SurrealDB `bytes`, so message objects and other state values come back with their types intact.
+
+### Read the history of a thread
+
+`list()` returns checkpoints newest first. It supports the `before`, `limit` and `filter` options, and fills in `pendingWrites`, so `getStateHistory()` on a compiled graph also reports pending tasks:
+
+```typescript
+const config = { configurable: { thread_id: "user-42" } };
+
+for await (const tuple of checkpointer.list(config, { limit: 5 })) {
+    console.log(
+        tuple.config.configurable?.checkpoint_id,
+        tuple.metadata?.step,
+        `${tuple.pendingWrites?.length ?? 0} pending writes`,
+    );
+}
+```
+
+Leave out `thread_id` to list checkpoints across all threads, and leave out `checkpoint_ns` to list across all namespaces. `filter` matches fields in the checkpoint metadata and takes the same operators as the store filter described in [Filter items](#filter-items).
+
+### Delete a thread
+
+`deleteThread()` removes every checkpoint and pending write for a thread in one transaction:
+
+```typescript
+await checkpointer.deleteThread("user-42");
+```
+
+### Options
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `surreal` | Required | A connection config or a `SurrealDBClient`. |
+| `checkpointsTable` | `langgraph_checkpoints` | Table for checkpoints. |
+| `writesTable` | `langgraph_checkpoint_writes` | Table for pending writes. |
+| `serde` | `JsonPlusSerializer` | A LangGraph `SerializerProtocol`. |
+| `skipInitSchema` | `false` | Do not create tables and indexes. See [Manage the schema yourself](#manage-the-schema-yourself). |
+| `skipVersionCheck` | `false` | Do not check that the server is v3 or later. |
+
+> [!NOTE]
+> The checkpointer reads checkpoint format v4 and later, which is the format that current LangGraph versions write. It refuses to load an older checkpoint rather than return state in a format the graph cannot use.
+
+## Long-term memory store
+
+`SurrealDBStore` implements the LangGraph `BaseStore`. A store holds JSON items that stay available across threads, such as user preferences or facts that an agent learnt in an earlier conversation. Each item has a namespace, which is an array of strings, and a key that is unique within that namespace.
+
+Call `start()` once before the first use. It connects, and creates the table and indexes:
+
+```typescript
+import { SurrealDBStore } from "@surrealdb/langgraph";
+
+const store = new SurrealDBStore({ surreal });
+await store.start();
+
+await store.put(["users", "alice", "preferences"], "theme", { value: "dark" });
+await store.put(["users", "alice", "preferences"], "language", { value: "en" });
+await store.put(["users", "bob", "preferences"], "theme", { value: "light" });
+
+const theme = await store.get(["users", "alice", "preferences"], "theme");
+console.log(theme?.value);
+```
+
+```text title="Output"
+{ value: 'dark' }
+```
+
+`put()` on an existing namespace and key replaces the item and updates its `updatedAt` time. `delete(namespace, key)` removes an item.
+
+`search()` takes a namespace prefix and returns the items under it, newest first. `listNamespaces()` returns the distinct namespaces under a prefix, and `maxDepth` shortens each one:
+
+```typescript
+const items = await store.search(["users", "alice"]);
+console.log(items.length);
+
+const namespaces = await store.listNamespaces({ prefix: ["users"], maxDepth: 2 });
+console.log(namespaces);
+```
+
+```text title="Output"
+2
+[ [ 'users', 'alice' ], [ 'users', 'bob' ] ]
+```
+
+Inside a graph node or an agent tool, LangGraph passes the store in the runtime config, so the node reads and writes the same SurrealDB table without a reference of its own.
+
+### Filter items
+
+`filter` matches fields inside the item value. A bare value means equality, several keys must all match, and these operators are supported: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin` and `$exists`.
+
+```typescript
+await store.search(["users"], {
+    filter: { value: { $in: ["dark", "high-contrast"] } },
+    limit: 20,
+});
+```
+
+### Semantic search
+
+To search items by meaning, give the store an `index` with an embeddings model and the number of dimensions it produces. The store then embeds each item when it is saved and defines an [HNSW vector index](/docs/learn/data-models/vector-search/overview) on the table:
+
+```typescript
+import { OpenAIEmbeddings } from "@langchain/openai";
+import { SurrealDBStore } from "@surrealdb/langgraph";
+
+const store = new SurrealDBStore({
+    surreal,
+    index: {
+        dims: 1536,
+        embeddings: new OpenAIEmbeddings({ model: "text-embedding-3-small" }),
+        fields: ["text"],
+    },
+});
+await store.start();
+
+await store.put(["users", "alice"], "pref-ui", { text: "Prefers dark mode" });
+await store.put(["users", "alice"], "pref-food", { text: "Is vegetarian" });
+
+const hits = await store.search(["users", "alice"], {
+    query: "user interface settings",
+    limit: 1,
+});
+
+console.log(hits[0]?.key, hits[0]?.score);
+```
+
+`fields` names the paths in the value to embed. Without it, the store embeds the whole value as JSON. To skip embedding for one item, pass `false` as the fourth argument to `put()`. With the default cosine distance, `score` is the cosine similarity, so a higher score is a closer match.
+
+If `search()` gets a `query` but the store has no `index`, it logs a warning once and returns recent items without ranking. Set `strictSearch: true` to throw an error instead.
+
+> [!IMPORTANT]
+> The vector index is created with the `dims` value from the first `start()`. If you change the embeddings model to one with a different number of dimensions, remove the index or use a new `tableName`.
+
+### Options
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `surreal` | Required | A connection config or a `SurrealDBClient`. |
+| `tableName` | `langgraph_store` | Table for items. |
+| `index` | None | `{ dims, embeddings, fields?, distanceStrategy? }`. Enables semantic search. |
+| `index.distanceStrategy` | `cosine` | `cosine`, `euclidean`, `manhattan` or `hamming`. |
+| `indexType` | `hnsw` | `hnsw`, `diskann` (SurrealDB 3.1+), or `none` for a brute-force search. |
+| `ef` | `40` | Search breadth for the vector index. A higher value is more accurate and slower. |
+| `strictSearch` | `false` | Throw when `search()` gets a `query` and no `index` is configured. |
+| `skipInitSchema` | `false` | Do not create the table and indexes. |
+| `skipVersionCheck` | `false` | Do not check that the server is v3 or later. |
+
+The store runs the operations in a batch one after another, not in a single transaction. A `put()` with an `index` calls the embeddings provider, and a transaction would keep a write lock open during that network call.
+
+## Node cache
+
+LangGraph v1 lets a node declare a `cachePolicy`. When the same node runs again with the same input before the time to live (TTL) ends, LangGraph returns the cached result and does not run the node. `SurrealDBNodeCache` keeps those results in SurrealDB, so the cache is shared between processes and stays after a restart. Pass it as `cache` to `compile()`:
+
+```typescript
+import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
+import { SurrealDBNodeCache } from "@surrealdb/langgraph";
+
+const cache = new SurrealDBNodeCache({ surreal });
+
+const State = Annotation.Root({
+    input: Annotation<string>(),
+    output: Annotation<string>(),
+});
+
+let calls = 0;
+
+const graph = new StateGraph(State)
+    .addNode(
+        "summarise",
+        async (state) => {
+            calls++;
+            return { output: state.input.toUpperCase() };
+        },
+        { cachePolicy: { ttl: 120 } },
+    )
+    .addEdge(START, "summarise")
+    .addEdge("summarise", END)
+    .compile({ cache });
+
+await graph.invoke({ input: "hello" });
+await graph.invoke({ input: "hello" });
+
+console.log(`node ran ${calls} time(s)`);
+
+await cache.close();
+```
+
+```text title="Output"
+node ran 1 time(s)
+```
+
+`ttl` is in seconds. A cached result without a TTL does not expire.
+
+LangGraph does not wait for a cache write to finish, so a write that fails cannot stop the graph. The cache catches the error and passes it to `onError`, which logs a console warning by default:
+
+```typescript
+const cache = new SurrealDBNodeCache({
+    surreal,
+    onError: (err) => logger.error({ err }, "node cache write failed"),
+});
+```
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `surreal` | Required | A connection config or a `SurrealDBClient`. |
+| `tableName` | `langgraph_cache` | Table for cached results. |
+| `serde` | `JsonPlusSerializer` | A LangGraph `SerializerProtocol`. |
+| `onError` | Console warning | Called when a cache write fails. |
+| `skipInitSchema` | `false` | Do not create the table. |
+| `skipVersionCheck` | `false` | Do not check that the server is v3 or later. |
+
+## Manage the schema yourself
+
+By default, each adapter runs `DEFINE TABLE IF NOT EXISTS`, `DEFINE FIELD` and `DEFINE INDEX` statements the first time it connects. This needs a user that can define tables, such as a namespace or database [system user](/docs/reference/query-language/statements/define/user) with the `EDITOR` or `OWNER` role.
+
+To run the application as a user with fewer permissions, create the schema once with a separate user or a migration, then set `skipInitSchema: true` on each adapter. The tables are:
+
+| Adapter | Default tables |
+| --- | --- |
+| `SurrealDBSaver` | `langgraph_checkpoints`, `langgraph_checkpoint_writes` |
+| `SurrealDBStore` | `langgraph_store` |
+| `SurrealDBNodeCache` | `langgraph_cache` |
+
+The quickest way to get the exact definitions is to let the adapters create the tables in a development database, then run [`INFO FOR TABLE`](/docs/reference/query-language/statements/info) on each one or use [`surreal export`](/docs/reference/cli/surrealdb-cli/commands/export).
+
+## Close connections
+
+An adapter that created its own connection closes it in `checkpointer.close()`, `store.stop()` or `cache.close()`. Call these when the process shuts down. If you passed a shared `SurrealDBClient`, these methods leave it open, and you close the client instead.
+
+## Examples and source
+
+- The [adapter repository](https://github.com/surrealdb/langchain.py) contains the source and runnable examples for an agent with a checkpointer, long-term memory, and node caching.
+- [LangChain](/docs/build/integrations/ai-frameworks/langchain) covers SurrealDB as a vector store for LangChain in Python.
+- [Vector search](/docs/learn/data-models/vector-search/overview) explains the HNSW and DiskANN indexes that semantic search uses.
+- [Agent Memory LangChain integration](/docs/agent-memory/integrations/frameworks/langchain) covers retrievers, tools and `AgentMemoryStore` for the hosted memory service.
