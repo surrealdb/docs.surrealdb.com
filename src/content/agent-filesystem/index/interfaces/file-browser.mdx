@@ -1,0 +1,128 @@
+---
+position: 11
+title: File browser
+description: "The Agent Filesystem web page: how to build and open it, what its explorer, editor, search, Brain Studio graph and chat panel do, which endpoints it calls, and its known problems."
+---
+
+# File browser
+
+The file browser is a web page that shows one Agent Filesystem database to a person. It has a tree of files and folders, a viewer and editor for the selected file, search, a graph view called Brain Studio, and a chat panel for an assistant. Use it to look at what agents have written and to correct it. The page is not a server. The [gateway](/docs/agent-filesystem/interfaces/gateway-server) serves it, together with the endpoints that it calls, so this page describes the page itself, and the gateway pages describe starting, configuring and securing the server.
+
+> [!NOTE]
+> Agent Filesystem is in beta. This page describes the page that the `next` branch of the SurrealFS repository builds, served by a gateway from the same branch. The description of the chat panel with an Anthropic key follows the gateway's source and is not confirmed against the Anthropic API, see [Chat panel](#chat-panel).
+
+> [!WARNING]
+> The page has no login, and it cannot send an `Authorization` header, so it works only with a gateway that has no `SURREALFS_SERVER_TOKEN`. That gateway accepts every request and acts as the `root` user, which sees every home folder and bypasses file permissions. Serving the page also requires a static directory, and in this release the gateway's static-file handler is not restricted to that directory, whether or not a token is set. Run the page only on a trusted machine, keep the gateway on its default address `127.0.0.1`, run it as a user that can read nothing sensitive, and stop it when you have finished. The [security section](/docs/agent-filesystem/interfaces/gateway-server#security) of the gateway page lists what other web pages and other local clients can do to a gateway.
+
+## Open the page
+
+The page is TypeScript source in `surrealfs/browser/ui`. It has to be compiled before a gateway can serve it, and no other build step does that. You need [Bun](https://bun.sh), a Rust toolchain for the gateway, and a running SurrealDB 3.x server, such as the in-memory one in the [command-line reference](/docs/agent-filesystem/interfaces/command-line#connect-to-a-database). Clone the repository, compile the page and build the gateway:
+
+```bash
+git clone --branch next https://github.com/surrealdb/surrealfs.git
+cd surrealfs
+(cd surrealfs/browser/ui && bun install && bun run build)
+cargo build -p surrealfs-server
+```
+
+The page build writes `index.html` and an `assets` folder to `surrealfs/browser/static`, which Git ignores. Start the gateway from the root of the repository, so that it finds that folder, with the SurrealDB settings in the environment. [Start the gateway](/docs/agent-filesystem/interfaces/gateway-server#start-the-gateway) describes every setting:
+
+```bash
+export SURREALDB_URL=http://127.0.0.1:8000
+export SURREALDB_NS=surrealfs SURREALDB_DB=demo
+export SURREALDB_USER=root SURREALDB_PASS=secret
+target/debug/surrealfs-server --bind 127.0.0.1:7933
+```
+
+```text title="Sample output"
+SurrealFS Server listening on http://127.0.0.1:7933 -> http://127.0.0.1:8000 (surrealfs/demo) [embeddings=false, chat=false]
+```
+
+Open `http://127.0.0.1:7933` in a browser. The repository's `just server` recipe builds the page and starts the gateway on that address in one step. A gateway that started from another directory, without `--static-dir`, answers a request for `/` with a JSON description of the service and not with the page. The command `surrealfs-rs serve gateway` starts the same gateway, and the page needs no change for it.
+
+## What the page shows
+
+The page has three columns: a left rail, a centre pane and a chat panel.
+
+- **Explorer.** The left rail lists every entry as a tree, with folders first and the first two levels open. A number beside **Explorer** counts the entries, folders included. The buttons **File** and **Folder** ask for a path and create an empty file or a folder, and the reload button reads the tree again. With nothing selected, the centre pane shows an overview page with shortcuts to create a file, create a folder and open Brain Studio.
+- **Viewer.** The page picks a view from the content type that is stored with the file. A file of type `text/markdown` opens as a preview, and the **Source** switch opens an editor. A file of type `text/html` opens in a frame whose `sandbox` attribute is empty, so its scripts do not run. JSON is formatted, a type that begins with `image/` is shown as an image, and other text opens in the editor. A file with no preview shows its type, its size and a download button. A folder shows how many entries it contains, counting nested ones.
+- **Toolbar.** A breadcrumb of the path, the **Document** and **Brain Studio** switch, a save button (also `Cmd+S` or `Ctrl+S`), a button to rename or move the entry, a delete button, and a button to print or save a Markdown file as PDF. The page asks before it discards unsaved edits or deletes an entry.
+- **Search.** The box in the left rail searches the content of files 250 milliseconds after you stop typing and lists up to 20 paths, each with a snippet of the match. A line under the box reads `full-text + vector` when the gateway embedded the query and `full-text only (set OPENAI_API_KEY)` otherwise. The gateway stores no vectors in this release, so the vector part of a search finds only the vectors that another client stored, such as the Python library's `reindex_embeddings`. See [File search](/docs/agent-filesystem/concepts/search#limitations-in-this-release).
+- **Chat.** The right panel is an assistant that reads and writes the same filesystem. See [Chat panel](#chat-panel).
+
+Four details affect what you see:
+
+- **Files that the gateway creates are typed `text/plain`.** A file created with the **File** button, or with a `PUT` to a path that does not exist, gets the type `text/plain`, whatever its extension. A `.md` file of that type opens in the editor and has no preview. The Python library types a Markdown file `text/markdown`, and an overwrite keeps the type that the file already has, so a file that an agent wrote with the library keeps its preview after you save it in the page.
+- **Binary files from the Python library have no preview.** `write_bytes` stores `application/octet-stream` unless you pass a type, so a PNG written that way shows `no inline preview` and a download button. The gateway guesses `image/png` from the extension when it serves the bytes, but the page decides from the stored type.
+- **A save replaces the whole content.** The page sends the new text with no generation number, so a save overwrites whatever another writer stored since the page loaded the file. See [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases) for the `if_generation` check that the Python library offers.
+- **Deleting a folder that holds entries fails.** The gateway answers `400` with `Directory not empty`, and the page shows that message in a status bar. The page offers its "delete everything" confirmation only for a `409` answer, so it never offers it. A `DELETE` request with `recursive=1` removes the folder and its contents, see the [REST API](/docs/agent-filesystem/interfaces/rest-api).
+
+## Brain Studio
+
+Brain Studio is a second view of the same data, drawn as a graph on a canvas. Each entry is a node. An edge joins a folder to each of its entries, with one exception: an entry directly under `/` gets no edge. Edges also show the five relations between files: `references`, `supersedes`, `derives_from`, `implements` and `links_to`.
+
+The view has a filter box, counts of nodes and edges, a panel named **Agent Presence Radar** that lists the active leases, and a **Timeline Playback Scrubber** over the latest versions. It reads the data again every five seconds, and you can pan the canvas by dragging and zoom with the mouse wheel.
+
+A `links_to` relation exists only when the Python library wrote the file, because the library derives relations from Markdown links. A file that is written through the gateway gets no `links_to` relation, so a graph of files that were written that way shows only the folder edges. See [Links and entities](/docs/agent-filesystem/concepts/links-and-entities).
+
+> [!WARNING]
+> Brain Studio does not work in this release. The counts in its header are correct, and the `/api/graph` and `/api/activity` data are not affected, but the canvas and its controls have the defects that the list below describes.
+
+- **The canvas loses its nodes.** The nodes that have edges leave the canvas within about ten seconds of loading, and the entries without edges stay on it. A header that reads `17 nodes` and `15 edges` can therefore sit above a canvas that draws two nodes.
+- **The filter breaks the canvas.** Typing a character in the filter box raises `TypeError: Cannot read properties of undefined (reading 'toLowerCase')`, and the canvas stops redrawing. Clicking a node fails the same way. The page expects a `path` field on each node, and the nodes that `/api/graph` returns have none.
+- **Every edge looks the same.** The dashed style for folder edges and the colours for the relations never apply, because the page expects the relation in a field named `relation` and `/api/graph` names it `kind`.
+- **The timeline cannot restore a version.** The `recent_versions` list that `/api/activity` returns has a `path` of `null` in every entry. The restore button sends that `null`, and the gateway answers `400` with `invalid type: null, expected a string at line 1 column 12`. The list also covers the latest 20 versions of all files together, and the page selects the oldest of them first.
+
+To restore a version, call `POST /api/restore` with a path and a generation, or use `surrealfs restore` or `surrealfs-rs restore`. See [Versions and history](/docs/agent-filesystem/concepts/versions-and-history).
+
+## Chat panel
+
+The chat panel needs `ANTHROPIC_API_KEY` in the gateway's environment. Without the key, a message produces a status bar line that reads `Set ANTHROPIC_API_KEY on the SurrealFS server to enable chat.`, and the endpoint answers `200` with that text in an `error` line. The `ONLINE` label in the panel header is fixed text and does not reflect whether the key is set. The `chat_enabled` field of the `/api/health` answer reports the setting.
+
+> [!NOTE]
+> The rest of this section follows the source of the gateway, `crates/surrealfs-server/src/chat.rs`, and of the page. The behaviour with a key is not confirmed against the Anthropic API. The [REST API](/docs/agent-filesystem/interfaces/rest-api) page describes the endpoint.
+
+With a key, a message starts a loop of up to 10 requests to the Anthropic Messages API, with a maximum of 4,096 tokens in each answer. The model is given the 15 tools of the gateway's MCP endpoint: `ls`, `cat`, `stat`, `write_file`, `append_file`, `edit_file`, `mkdir`, `rm`, `mv`, `cp`, `glob`, `grep`, `search_text`, `search_semantic` and `search_hybrid`. In this release `search_text` fails with `search needs an identity: pass $me, or connect as a record user`, and `search_semantic` returns an error unless `OPENAI_API_KEY` is set. The tools run with the identity of the request, which is `root` for the page. The model can therefore read, write, move and delete any file, and the conversation and the files it reads are sent to Anthropic.
+
+The gateway builds the whole reply first and returns it when the loop ends, so the text does not appear word by word. The panel lists each tool call as it arrives in that reply, and after the turn it reads the tree again and reloads the file on screen. When you have unsaved edits, it keeps them and says so.
+
+The gateway stores each conversation as a JSON file at `/_sessions/<date>/<time>-<slug>.json`, built from the UTC time of the first message and the first words of the message. The page sends that path back as `session` on the next message to continue the conversation, and the **New** button starts another. The page also sends the path of the open file, so that the model knows what you are looking at. Opening a file under `/_sessions` in the tree shows the conversation again in the panel.
+
+## What the page calls
+
+Each action in the page is one request to the gateway. Use the table to find the route in the [REST API](/docs/agent-filesystem/interfaces/rest-api) page when you call the same endpoint from a script:
+
+| Action in the page | Request |
+| --- | --- |
+| Load or reload the tree | `GET /api/tree` |
+| Open a file | `GET /raw?path=PATH` |
+| Save | `PUT /api/file` with the path and the new content |
+| New file or folder | `POST /api/file` with the path, and `"folder": true` for a folder |
+| Rename or move | `POST /api/move` |
+| Delete | `DELETE /api/file?path=PATH`, then the same request with `&recursive=1` only after a `409` answer |
+| Search | `GET /api/search?q=QUERY` |
+| Brain Studio, every five seconds | `GET /api/graph` and `GET /api/activity` |
+| Restore a version in Brain Studio | `POST /api/restore` |
+| Send a chat message | `POST /api/chat` |
+| Replay a conversation | `GET /api/session?path=PATH` |
+
+The page reads the whole tree in one request and keeps it in memory, so a database with many thousands of entries makes every reload larger. The tree has no paging.
+
+## Known problems in this release
+
+| Problem | Where it is described |
+| --- | --- |
+| Brain Studio loses its nodes, its filter raises an error and its timeline cannot restore a version. | [Brain Studio](#brain-studio) |
+| Files created through the gateway are typed `text/plain`, so a Markdown file has no preview. | [What the page shows](#what-the-page-shows) |
+| Deleting a folder that holds entries is refused, with no way to confirm a recursive delete. | [What the page shows](#what-the-page-shows) |
+| A save overwrites a newer version without a check. | [What the page shows](#what-the-page-shows) |
+| The page cannot send a token, so it fails with `Authentication required` when the gateway has `SURREALFS_SERVER_TOKEN`. | [Gateway server](/docs/agent-filesystem/interfaces/gateway-server#web-interface) |
+| The gateway requests embeddings but stores none, and it stores no sections, so a search that reports `full-text + vector` finds the same files as a full-text search unless another client stored vectors. | [File search](/docs/agent-filesystem/concepts/search#limitations-in-this-release) |
+
+## See also
+
+- [Gateway server](/docs/agent-filesystem/interfaces/gateway-server) for starting the gateway, its settings, authentication and security.
+- [REST API](/docs/agent-filesystem/interfaces/rest-api) for every route that the page calls.
+- [Remote clients](/docs/agent-filesystem/interfaces/remote-clients) for clients that use the gateway instead of connecting to SurrealDB.
+- [Permissions](/docs/agent-filesystem/security/permissions) for owners, modes and home folders.
+- [Links and entities](/docs/agent-filesystem/concepts/links-and-entities) for the relations that Brain Studio draws.

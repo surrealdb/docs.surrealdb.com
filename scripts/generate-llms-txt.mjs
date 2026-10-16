@@ -164,7 +164,16 @@ function byPriorityThenDepth(a, b) {
 }
 
 /** The sections, in the order they are written. */
-const ORDER = ["index", "learn", "build", "manage", "explore", "reference", "agent-memory"];
+const ORDER = [
+    "index",
+    "learn",
+    "build",
+    "manage",
+    "explore",
+    "reference",
+    "agent-memory",
+    "agent-filesystem",
+];
 
 /** Group collections by their first path segment, which is the top-level nav. */
 function sectionOf(id) {
@@ -228,6 +237,7 @@ const SECTION_TITLES = {
     explore: "Explore",
     reference: "Reference",
     "agent-memory": "Agent Memory",
+    "agent-filesystem": "Agent Filesystem",
 };
 
 /** Section list, deduplicated. */

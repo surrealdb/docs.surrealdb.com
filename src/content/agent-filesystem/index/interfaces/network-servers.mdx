@@ -1,0 +1,272 @@
+---
+position: 8
+title: WebDAV and S3 servers
+description: "Serve an Agent Filesystem tree over WebDAV and an S3-style REST API with surrealfs-rs: start commands, supported operations, credentials, limits and security."
+---
+
+# WebDAV and S3 servers
+
+The `surrealfs-rs` program can serve the file tree over two network protocols. The first is WebDAV, which file managers and WebDAV clients speak. The second is a subset of the S3 REST API, which tools such as `curl` and the AWS CLI can use for basic requests. Both servers read and write the same files as every other interface. This page explains how to start them, which requests they handle, how they treat credentials, and where they fall short of the protocols.
+
+> [!NOTE]
+> Agent Filesystem is in beta. This page describes the `next` branch of the SurrealFS repository. The examples and results on it come from running the servers with `curl` and, for S3, with the AWS CLI. Desktop WebDAV clients such as Finder and Windows Explorer, S3 SDKs and tools such as rclone were not tested.
+
+> [!WARNING]
+> Both servers serve a request that carries no credentials. When credentials are present they are only checked and not used, so every request runs as the identity that the server process signed in with, which is the root user unless you change `--user`. The servers have no TLS. Run them on the default loopback address, for local and trusted use. An address such as `0.0.0.0:8080` exposes the whole tree to anyone who can reach the port. See [Credentials and access control](#credentials-and-access-control).
+
+## Start a server
+
+Both servers are subcommands of `surrealfs-rs serve`. They connect to a running SurrealDB server, such as the in-memory one in the [command-line reference](/docs/agent-filesystem/interfaces/command-line#connect-to-a-database), and take the connection settings described there. The database needs the schema, so run `surrealfs-rs init` once first. On a database without the schema, a WebDAV `GET` of the root returns `404`, and a `PUT` returns `500` with `Function 'fn::sfs_write' not found`.
+
+<Synopsis>
+surrealfs-rs serve webdav [-a <ADDR>] [-p <PREFIX>]
+surrealfs-rs serve s3 [-a <ADDR>]
+</Synopsis>
+
+<OptionsTable
+    title="Options"
+    options={[
+        { "name": "--addr", "short": "-a", "value": "<ADDR>", "default": "127.0.0.1:8080 for webdav, 127.0.0.1:9000 for s3", "description": "The host and port to listen on." },
+        { "name": "--prefix", "short": "-p", "value": "<PREFIX>", "default": "/", "description": "WebDAV only. A URL path prefix that is removed from request paths and added to the `href` values in responses." }
+    ]}
+/>
+
+The commands run in the foreground until you stop them, and print nothing while they run. Each of the two servers is a separate process, so start both in separate terminals to serve both protocols. The examples below use the following setup:
+
+```bash
+export SURREALDB_URL=ws://127.0.0.1:8000/rpc
+export SURREALDB_PASS=secret
+export SURREALDB_NS=surrealfs SURREALDB_DB=docs
+
+surrealfs-rs init
+surrealfs-rs serve webdav
+```
+
+In a second terminal, start the S3 server the same way with `surrealfs-rs serve s3`.
+
+Both servers handle one request for each connection and close the connection after every response. They read the whole request body into memory, and they do not decode `Transfer-Encoding: chunked` request bodies.
+
+## WebDAV
+
+The WebDAV server maps the URL path to the file path, so `http://127.0.0.1:8080/reports/q3.md` is the file `/reports/q3.md`. The following session uses `curl`. It creates a folder, uploads a file and reads it back:
+
+```bash
+printf '# Q3 report\n\nRevenue grew.\n' > q3.md
+curl -i -X MKCOL http://127.0.0.1:8080/reports/
+curl -i -T q3.md http://127.0.0.1:8080/reports/q3.md
+curl -i http://127.0.0.1:8080/reports/q3.md
+```
+
+```text title="Sample output"
+HTTP/1.1 201 Created
+connection: close
+content-length: 0
+
+HTTP/1.1 201 Created
+content-length: 7
+connection: close
+etag: "gen-1"
+
+Created
+HTTP/1.1 200 OK
+content-type: text/plain
+content-length: 27
+connection: close
+accept-ranges: bytes
+etag: "gen-1"
+
+# Q3 report
+
+Revenue grew.
+```
+
+The order of the response headers varies from one run to the next. The `ETag` header is `"gen-"` followed by the file's [generation](/docs/agent-filesystem/concepts/concurrency-and-leases). A `PUT` with a text body can carry that value in `If-Match`, and the server refuses the write with `412 Precondition Failed` when the file has changed since:
+
+```bash
+curl -i -X PUT -H 'If-Match: "gen-9"' --data-binary "x" http://127.0.0.1:8080/reports/q3.md
+```
+
+```text title="Sample output"
+HTTP/1.1 412 Precondition Failed
+content-length: 51
+connection: close
+content-type: text/plain; charset=utf-8
+
+Precondition Failed: Resource modified concurrently
+```
+
+The check applies to text bodies only. A binary body is one that is not valid UTF-8. A `PUT` with a binary body and a stale `If-Match` returns `201 Created` with the current `ETag` and discards the write, so the client is told that the write succeeded when it did not. Do not rely on `If-Match` for binary files.
+
+### Supported methods
+
+| Method | Behaviour |
+| --- | --- |
+| `OPTIONS` | Returns `DAV: 1, 2` and the list of allowed methods. The list includes `POST`, which the server then answers with `405`. |
+| `PROPFIND` | Returns a `207 Multi-Status` response with `displayname`, `creationdate`, `getlastmodified`, `resourcetype` and `supportedlock`, and for files also `getcontentlength`, `getcontenttype` and `getetag`. The `Depth` header defaults to 1, `0` returns only the resource, and every other value, including `infinity`, behaves as 1. The request body is ignored, so every property is always returned. |
+| `GET`, `HEAD` | Returns the file with its stored content type, an `ETag` and `Accept-Ranges: bytes`. A single `Range` header such as `bytes=0-8` returns `206 Partial Content`. An `If-None-Match` header that equals the `ETag` returns `304`. A folder returns a small HTML index page. |
+| `PUT` | Writes the request body to a file and returns `201 Created` with the new `ETag`, also when it replaces an existing file. Missing parent folders are created. A body that is valid UTF-8 is stored as a text file with the type `text/plain`, and any other body is stored as binary data. An `If-Match` header makes the write conditional on the generation, for text bodies only. |
+| `DELETE` | Removes a file or a folder and returns `204`, or `404` when the path does not exist. A folder is removed with the same recursive removal as `surrealfs-rs rm -r`. Records more than one level below the folder stay in the database and still match `grep` and `stats`, even though the response is `204`. See the limit in the [command-line reference](/docs/agent-filesystem/interfaces/command-line#files-and-folders). |
+| `MKCOL` | Creates a folder and returns `201`. Missing parents are created, and a folder that exists is returned as created. A request with a body returns `415`. |
+| `MOVE` | Reads the `Destination` header, which can be a full URL or a path, and moves the file or folder there. It returns `201 Created`, also when the destination existed, and the existing destination is replaced. It returns `412` when `Overwrite: F` is set and the destination exists. A request without `Destination` returns `400`. |
+| `COPY` | Reads the `Destination` header in the same way and copies a file, with its content, to a new file. A copy onto an existing destination returns `412` when `Overwrite: F` is set and `500` otherwise, with a database error about the `child_unique` index, so delete the destination first. Copying a folder creates an empty folder and copies none of its contents. A request without `Destination` returns `400`. |
+| `LOCK`, `UNLOCK` | `LOCK` takes an advisory lease on the path for the `Timeout: Second-N` value, 60 seconds by default, and returns a `Lock-Token`. `UNLOCK` releases the lease. See the note below. |
+| `PROPPATCH` | Returns `207` and changes nothing. |
+| Any other method | Returns `405 Method Not Allowed`. This includes `POST` and `PATCH`. |
+
+The server accepts a `PUT` or `DELETE` of `.DS_Store` and of any name that starts with `._` and discards it, hides such names from `PROPFIND` and returns `404` for them. This keeps the metadata files that macOS writes out of the tree.
+
+A `LOCK` takes a lease for the holder name `webdav-client`, and the token it returns is not stored or checked. A second `LOCK` on the same path succeeds, and a `PUT` without a token succeeds while the lease is held. Leases are advisory in Agent Filesystem, so they inform other agents and do not stop writes. See [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases).
+
+### Limits
+
+- **No TLS.** The server speaks plain HTTP.
+- **Chunked uploads.** A request body must have a `Content-Length`. A `PUT` sent with chunked transfer encoding, which `curl -T -` uses for standard input, stores an empty or corrupt file.
+- **Expect header.** The server does not send `100 Continue`. A client that waits for it before it sends a large body pauses first. `curl` waits about one second, and `-H 'Expect:'` turns the wait off.
+- **Binary size.** A binary body is sent to the database in a form much larger than the file. In tests on the WebDAV server, a binary body of 2,300,000 random bytes was stored, and a body of 2,400,000 random bytes failed with `500` and `Message too long`. A text body of 54 MB was stored. The S3 server writes in the same way: a `PUT` of 2,000,000 random bytes was stored, and a `PUT` of 3,000,000 random bytes failed with `500 InternalError` and `Message too long`. Treat 2 MB as the limit for binary files.
+- **Encoded names.** `PROPFIND` writes the `href` values as they are, without percent-encoding or XML escaping. A file named `a b.txt` appears as `/reports/a b.txt`, and a name that contains `&` or `<` makes the `PROPFIND` response malformed XML and the HTML folder index malformed too. The server also decodes a `+` in a request path as a space, so `PUT /plus/a+b.txt` creates the file `a b.txt`.
+- **The prefix.** With `--prefix /dav`, a request to `/dav/reports/q3.md` and a request to `/reports/q3.md` reach the same file, so the prefix does not restrict access. The prefix is matched as a string and not as a path segment, so `--prefix /dav` turns a request for `/davinci/x.txt` into the file `/inci/x.txt`.
+- **Content types.** A file written through the server has the content type `text/plain`, also when its name ends in `.md`.
+- **Files stored with `upload`.** A file stored with `surrealfs-rs upload` reads as a folder, so a `GET` returns an HTML index. See [Commands that do not work yet](/docs/agent-filesystem/interfaces/command-line#commands-that-do-not-work-yet).
+
+## S3
+
+The S3 server uses path-style addressing only, so the first path segment is the bucket and the rest of the path is the object key. A bucket is a top-level folder: the request path `/archive/2026/hello.txt` is the file `/archive/2026/hello.txt`. `ListBuckets` therefore returns every top-level folder, including `home`.
+
+```bash
+curl -i -X PUT http://127.0.0.1:9000/archive
+curl -i -X PUT --data-binary "hello from s3" http://127.0.0.1:9000/archive/2026/hello.txt
+curl -s -X PUT --data-binary "plan" http://127.0.0.1:9000/archive/2026/q4/plan.txt
+curl -s "http://127.0.0.1:9000/archive?list-type=2&prefix=2026/&delimiter=/"
+```
+
+```text title="Sample output"
+HTTP/1.1 200 OK
+content-length: 0
+location: /archive
+connection: close
+
+HTTP/1.1 200 OK
+connection: close
+content-length: 0
+etag: "gen-1"
+
+<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Name>archive</Name>
+  <Prefix>2026/</Prefix>
+  <MaxKeys>1000</MaxKeys>
+  <IsTruncated>false</IsTruncated><Contents><Key>2026/hello.txt</Key><LastModified>2026-10-14T22:55:51.091252+00:00</LastModified><ETag>"gen-1"</ETag><Size>13</Size><StorageClass>STANDARD</StorageClass></Contents><CommonPrefixes><Prefix>2026/q4/</Prefix></CommonPrefixes></ListBucketResult>
+```
+
+The first listing in the next block also shows `reports`, because the WebDAV example above created that folder in the same database. The AWS CLI works for listing and uploading when it does not sign the request, with one setting. Pass `--no-sign-request` and the endpoint, and set `AWS_REQUEST_CHECKSUM_CALCULATION` to `when_required` (or run `aws configure set default.request_checksum_calculation when_required`). The tests used aws-cli 2.38.1.
+
+```bash
+export AWS_REQUEST_CHECKSUM_CALCULATION=when_required
+aws s3 ls --no-sign-request --endpoint-url http://127.0.0.1:9000
+aws s3 ls s3://archive/2026/ --no-sign-request --endpoint-url http://127.0.0.1:9000
+aws s3 cp ./q3.md s3://archive/2026/q3.md --no-sign-request --endpoint-url http://127.0.0.1:9000
+curl -s http://127.0.0.1:9000/archive/2026/q3.md
+```
+
+```text title="Sample output"
+2026-10-14 23:00:43 archive
+2026-10-14 23:00:41 home
+2026-10-14 23:00:41 reports
+                           PRE q4/
+2026-10-14 23:00:43         13 hello.txt
+upload: ./q3.md to s3://archive/2026/q3.md
+# Q3 report
+
+Revenue grew.
+```
+
+> [!WARNING]
+> Without that setting, the AWS CLI corrupts every object that it uploads, and it still prints `upload:`. By default, aws-cli 2.38.1 sends the body in the `aws-chunked` format with a checksum trailer, and the S3 server stores that framing as part of the object. In a test, a file of 27 bytes was stored as 77 bytes, beginning with the chunk length `1B` and a line break. With `when_required`, a `cmp` of the stored object against the local file found no difference, for a single request and for a multipart upload.
+
+> [!NOTE]
+> The S3 server is not compatible with signed requests from the AWS CLI or the AWS SDKs. A request that the CLI signs with credentials is refused with `403 AccessDenied`, even when a matching `s3` credential exists, and `aws s3 cp s3://archive/2026/q3.md ./q3.md` fails on the client with `fatal error: 'LastModified'`. Use unsigned requests, as above, or plain HTTP clients such as `curl`.
+
+### Supported operations
+
+| S3 operation | Request | Behaviour |
+| --- | --- | --- |
+| `ListBuckets` | `GET /` | Returns one bucket for each top-level folder. |
+| `CreateBucket` | `PUT /bucket` | Creates the top-level folder and returns `200`, also when the folder could not be created. |
+| `DeleteBucket` | `DELETE /bucket` | Removes the folder when it is empty, ignores any error, and returns `204`. A bucket that still holds objects is not deleted, and the response is still `204`. |
+| `ListObjects`, `ListObjectsV2` | `GET /bucket` with `prefix`, `delimiter` and `max-keys` | Walks the whole bucket. Honours `prefix`, a one-level `delimiter` with `CommonPrefixes`, and `max-keys` (default 1000). Version 1 and version 2 look the same, and `list-type` is not read. |
+| `PutObject` | `PUT /bucket/key` | Stores the body as a file, creating parent folders. The `ETag` is `"gen-N"` and not an MD5 digest. |
+| `GetObject` | `GET /bucket/key` | Returns the body with `Content-Type`, `ETag`, `Content-Length` and `Accept-Ranges`. A single `Range` header returns `206`. The response has no `Last-Modified` header. A folder returns `404 NoSuchKey`. |
+| `HeadObject` | `HEAD /bucket/key` | Returns the same headers without a body. Any failure is a plain `404`. |
+| `DeleteObject` | `DELETE /bucket/key` | Removes the file, ignores any error, and returns `204`. |
+| Multipart upload | `POST ?uploads`, `PUT ?uploadId=&partNumber=`, `POST ?uploadId=`, `DELETE ?uploadId=` | Holds the parts in the memory of the server process. On completion it joins every uploaded part in part-number order and ignores the part list in the request body. An upload that is not completed is lost when the server restarts. With `AWS_REQUEST_CHECKSUM_CALCULATION` set to `when_required`, the AWS CLI completed a multipart upload of a 20.6 MiB text file this way, and a `cmp` of the stored object against the original found no difference. The gateway does not support this operation. |
+
+Errors are returned as S3-style XML, for example `NoSuchKey`, `NoSuchBucket`, `NoSuchUpload`, `AccessDenied` and `InternalError`.
+
+Listings cannot be paged. `IsTruncated` is always `false` and no continuation token exists, so a request with `max-keys=2` on a bucket of five objects returns two keys and no way to reach the other three.
+
+These S3 operations are not supported:
+
+- `CopyObject`. A `PUT` with an `x-amz-copy-source` header is handled as a plain `PutObject` with an empty body and creates an object with 0 bytes.
+- `DeleteObjects`, the batch delete. The request `POST /bucket?delete` returns `405`.
+- Versioning, ACLs, tagging, presigned URLs and continuation tokens.
+
+> [!WARNING]
+> The server does not refuse a request for a sub-resource that it does not support. It runs the plain operation instead, so `PUT /bucket/key?acl` and `PUT /bucket/key?tagging` replace the content of the object with the XML request body. Do not point tools that set ACLs or tags at this server. A presigned URL is not refused either: the signature in the query string is ignored, and the request is served like any other request that carries no credentials.
+
+## Credentials and access control
+
+Credentials are stored with `surrealfs-rs credential create <KIND> <IDENTIFIER> <SECRET> <USER_ID>` and checked by the servers when a request carries an `Authorization` header. See [Protocol credentials](/docs/agent-filesystem/security/credentials) for how they are stored.
+
+```bash
+surrealfs-rs credential create webdav alice hunter123 alice
+surrealfs-rs credential create s3 AKIAEXAMPLE secretkey123 alice
+```
+
+The command creates a credential, and it does nothing when a credential with the same kind and identifier exists, as [Protocol credentials](/docs/agent-filesystem/security/credentials) and the [command-line reference](/docs/agent-filesystem/interfaces/command-line#permissions-and-sharing) explain.
+
+The two servers decide a request as follows:
+
+| Request | WebDAV | S3 |
+| --- | --- | --- |
+| No `Authorization` header | Served | Served |
+| `Basic` with a known identifier and the right secret | Served | Served |
+| `Basic` with a wrong secret or an unknown identifier | `401` with `WWW-Authenticate: Basic realm="SurrealFS WebDAV"` | `403 AccessDenied` |
+| `Bearer` with the identifier of a `bearer` credential | `401` | Served |
+| `Bearer` with an unknown token | `401` | `403 AccessDenied` |
+| `AWS4-HMAC-SHA256`, as sent by the AWS CLI and SDKs | `401` | `403 AccessDenied` |
+
+For `Basic`, the servers look for a `webdav` credential with the user name as its identifier, and then for an `s3` credential. The secret matches when it equals the stored value or when its SHA-256 digest, written in hexadecimal, equals the stored value. So you can store the unsalted digest of a password and clients then send the password, but the digest itself is also accepted as the password. A `bearer` credential takes the token as its identifier, and the `credential create` command still needs a value for the secret argument. The `bearer` check looks only at the token and does not check the secret stored with the credential.
+
+Three properties of this design matter when you decide whether the servers are suitable for your use:
+
+- **Anonymous access.** A request without an `Authorization` header is always served, so creating credentials does not close the servers.
+- **No scoping.** The identity of a valid credential is discarded after the check. The `user_id` stored with it has no effect on what the request can do. Every request runs as the server's own identity.
+- **No signature check.** The S3 server never verifies a request signature, so a client that knows the access key of an `s3` credential is served. Treat access keys as secrets.
+
+## Files created through the servers
+
+A text file that a client uploads is owned by the identity of the server process, which is `root` unless you pass `--caller` or `--user`, and has mode `0644`. A new folder has mode `0755`. A file with a binary body, which is one that is not valid UTF-8, is owned by `root` with mode `0666` whatever the options, so any user can overwrite it. An agent that works through the [Python SDK](/docs/agent-filesystem/interfaces/python-sdk) as another user can read a text file and cannot overwrite it. In a test with a Python client acting as `alice`, a read of a text file uploaded over WebDAV succeeded and a write failed with `Permission denied: cannot write to /reports/q3.md`.
+
+The Python tools, such as the `surrealfs` program and the MCP server, read `SURREALDB_NAMESPACE` and `SURREALDB_DATABASE`, and `surrealfs-rs` reads `SURREALDB_NS` and `SURREALDB_DB`. Set the first pair to the same values as the second so that the Python tools work in the same database, and select the same namespace and database when your own code opens the connection. See [Configuration](/docs/agent-filesystem/operations/configuration).
+
+## Through the gateway
+
+The [gateway server](/docs/agent-filesystem/interfaces/gateway-server) runs these two handlers on one port, WebDAV under `/dav` and S3 under `/s3`, next to its REST API, its MCP endpoint and the web interface. Five things differ from the standalone servers on this page:
+
+- **Caller.** The gateway runs a request as the user that the request names, and a stored credential names its `user_id`. Store a plain name such as `alice` as the `user_id`, and not `user:alice`, because a WebDAV write through the gateway fails with a `500` response for the second form.
+- **Requests without credentials.** With `SURREALFS_SERVER_TOKEN` set, the gateway answers `401` to a request without credentials, and it does not accept the server token on `/dav` or `/s3`.
+- **Indexing.** After a WebDAV `PUT` the gateway indexes the file, and it does not index an S3 `PUT`.
+- **Request size.** The limit is the HTTP body limit of the SurrealDB server and not the WebSocket message limit of the standalone servers. With the default limit, a text file of 3,000,000 bytes was stored and one of 5,000,000 bytes was refused.
+- **Multipart upload.** The gateway creates the S3 handler again for each request, so the parts of an upload are lost between requests, and `UploadPart` returns `404 NoSuchUpload`. In a test, the AWS CLI failed this way for a 20.6 MiB text file.
+
+## NFS and SFTP
+
+> [!WARNING]
+> The commands `surrealfs-rs serve nfs` and `surrealfs-rs serve sftp` do not start a server in this release. They print a line such as `NFS server configured on 127.0.0.1:2049` or `SFTP subsystem configured on 127.0.0.1:2222` and exit with status 0, and nothing listens on the port. An NFS mount or an SFTP client cannot connect, and `surrealfs-rs mount --nfs` prints a `sudo mount` command for a server that does not exist. Use WebDAV or S3, or the [Python SDK](/docs/agent-filesystem/interfaces/python-sdk), to reach the files.
+
+## See also
+
+- [Gateway server](/docs/agent-filesystem/interfaces/gateway-server) for the server that also runs these handlers, with its settings, authentication and security.
+- [Command-line reference](/docs/agent-filesystem/interfaces/command-line) for every `surrealfs-rs` command and option.
+- [Protocol credentials](/docs/agent-filesystem/security/credentials) for the credential kinds and how secrets are stored.
+- [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases) for generations, `If-Match` and advisory leases.

@@ -1,0 +1,173 @@
+---
+position: 4
+title: Limits and caveats
+description: "Which Agent Filesystem features are ready, ready with limits or not available in the beta, how Python, Rust and TypeScript differ, and known issues with workarounds."
+---
+
+# Limits and caveats
+
+This page lists which parts of Agent Filesystem are ready, which work with limits and which are not available, how the Python, Rust and TypeScript implementations differ, and the known issues with their workarounds. Read it before you depend on a feature that the other pages describe.
+
+> [!NOTE]
+> Agent Filesystem is in beta. The API, the schema and the command-line interfaces may change in breaking ways between releases, and the project does not yet recommend it for production use. The statuses below describe version 0.2.0.
+
+## How to read this page
+
+Each status was checked by running the feature against a SurrealDB 3.2 server with the Python library, the `surrealfs-rs` command, the gateway or the TypeScript package. A feature that no command, function or server in this release calls is Not available, because its code or its table exists and nothing triggers it. Those features are notebook extraction, connectors, the sending of webhooks, the serving of share links, the multilingual indexes and quota enforcement. The `gc` limit and the Containers section follow from the source. A status says how the feature behaves today, and a release can change it.
+
+| Status | Meaning |
+| --- | --- |
+| Ready | The feature has no known defect in this release. The whole release is still in beta. |
+| Ready with limits | The feature works, and the limits column says where it stops or what differs. |
+| Not available | The release has no working implementation of the feature: the code or table exists but does not do what its name says, nothing triggers it, or the implementation has no command for it. |
+| Not verified | The feature depends on a service or a client that its behaviour is not confirmed against. The limits column says which one. |
+
+The implementation column names where the status applies. Python is the `surrealfs` package, Rust is the `surrealfs-rs` command, and TypeScript is the TypeScript package in the repository, `@surrealdb/fs`. `Schema` marks something that the SurrealQL schema defines for every implementation, and `SurrealDB` marks a feature of the database itself. The Python library is the most complete of the three.
+
+## Feature status
+
+### Files and history
+
+| Capability | Implementation | Status | Limits |
+| --- | --- | --- | --- |
+| Create, read, edit, append, list, glob, copy, move and remove files and folders | Python | Ready with limits | `tree` with no path fails with `Not found: /`, so pass a folder path. Several writers whose first writes create the same new folder collide, and most of them fail. Create the folder with `mkdir` before the writers start. |
+| The same operations | Rust | Ready with limits | `ls -r` ignores `-r`. `rm -r` removes a folder and its direct children only. `chmod` reads a bare number as decimal. Text files get the mode `0o644` and folders get `0o755`. |
+| The same operations | TypeScript | Ready with limits | Text files only: there is no binary read or write, `head`, `tail`, range read or `undelete`. |
+| Binary files | Python | Ready with limits | The whole value is stored in one record. |
+| Version history: `history`, `diff`, `restore`, `undelete` | Python | Ready with limits | `history` lists the earlier states and not the current one. Each version is a full copy, and nothing prunes them. With a system credential the recorded author is the owner of the file. `undelete` restarts the generation at 1. |
+| Optimistic concurrency with `if_generation` | Python | Ready | The counter belongs to one file. |
+
+### Search and understanding
+
+| Capability | Implementation | Status | Limits |
+| --- | --- | --- | --- |
+| Full-text search (BM25) | Python | Ready with limits | English stemming only. |
+| Semantic and hybrid search | Python | Ready with limits | You supply the embedder, and its vectors must have 1,536 numbers. `reindex_embeddings` needs the library's `root` identity, and the package has no embedder and no indexing command. The tools of the MCP server and the Hermes plugins have no embedding function, so their `search` matches words only. |
+| Section search | Python | Ready with limits | The `score` of every `SectionHit` is 0.0. The `search_sections` tool replies `Section search requires embedding to be configured.` when no embedder is set. |
+| Search from other implementations | Rust, TypeScript | Not available | `surrealfs-rs` has no search command. The TypeScript `search` fails with `Failed to coerce argument $k`. |
+| Indexes for German, French, Spanish, Chinese, Japanese, Korean and code | Schema | Not available | The indexes exist, but nothing sets the `language` field that fills them, and no function queries them. |
+| Entities and near-duplicate detection | Gateway, Rust | Ready with limits | Only the gateway computes them, after it writes a file or when it receives `POST /api/index` with the path of a file. For a file that `surrealfs-rs` or the Python library wrote, `entities` and `near-dups` return `[]`. The extraction is rule-based: it finds `#tags`, ticket identifiers, `@mentions` and 15 fixed names of systems and companies. See [Content analysis](/docs/agent-filesystem/concepts/understanding-pipeline#what-the-gateway-does-after-a-write). |
+| The understanding pipeline, folder digests and context packs | Rust | Not available | `pack` returns the matching paths with empty content, `digest` returns no summary for any file, and `jobs claim` returns queued jobs that nothing runs automatically. The gateway completes the `symbols` jobs only when it receives `POST /api/index` without a `path`. |
+| Code symbols and language detection | Rust | Ready with limits | `symbols -i` indexes the symbols of a file on request. A write through the gateway indexes them too, and a write through `surrealfs-rs` or the Python library does not. |
+| Tabular files | Rust | Ready with limits | `table-load` loads a CSV file that is already in the filesystem, on request. |
+| Notebook extraction | Rust | Not available | The functions exist and nothing calls them. |
+
+### Collaboration
+
+| Capability | Implementation | Status | Limits |
+| --- | --- | --- | --- |
+| Advisory leases | Python | Ready with limits | A lease is advisory: another writer can still write to a leased file. The conflict error is `sfs:locked` and does not name the holder. The default lease lasts 60 seconds. |
+| Change feed with `watch` | Python | Ready with limits | A live query. The Rust command and the MCP tools have no equivalent. |
+| Mailboxes made of files | Python | Ready with limits | A convention over files under `/agents/<id>/inbox`. Inboxes are open by default, so any agent can send to, read, claim and complete any message. The library does not validate `agent_id`, so the value `../etc` writes the message to `/etc/inbox`. See [Mailboxes](/docs/agent-filesystem/concepts/mailboxes). |
+| Mailboxes made of records | Rust, TypeScript | Not available | The tables are not in the schema, and the two implementations use different tables. A claim is not exclusive, because it selects a message and then updates it with no condition on `state`. The TypeScript claim query is rejected by SurrealDB 3.2.3. No command or tool exposes them. |
+| Workspaces | Python | Ready with limits | Only edits to files that existed when the workspace was forked merge. A write in the workspace to a path that did not exist at the fork is dropped, even when the file exists in the main tree by the time of the merge, and the merge still reports `ok`. A merge fails when the base file changed, and there is no text-level merge. Workspace files appear under `/.workspaces` in recursive listings. |
+| Collaborative editing with CRDT | Python | Ready with limits | Edits that run one after another merge. Two edits to the same file at the same moment collide on the update sequence, and a caller receives a `QueryError` that names `idx_crdt_seq` or reports a transaction conflict. In some runs every caller receives one, although one of the edits was stored. When the writers share one `AsyncSurreal` connection, the `content` field can also end with the text of a caller whose update failed, so the text of the file omits the edit that succeeded and differs from the update log until the next successful edit. Take a lease before every edit of a collaborative file. |
+| Links and relations | Python | Ready with limits | There are five relation names, and `backlinks` and `get_neighbors` look one hop. A markdown link to a file that does not exist yet is not a backlink after the file is created. |
+
+### Security and sharing
+
+| Capability | Implementation | Status | Limits |
+| --- | --- | --- | --- |
+| Unix-style permissions and private home folders | Python | Ready with limits | The library enforces them for system credentials. The other implementations do not check writes. See [Permissions](/docs/agent-filesystem/security/permissions). |
+| Record access | Python | Ready with limits | It is opt-in and protects the `file` table. Other tables, such as `quota` and `usage`, accept records from every signed-in user. `surrealfs init` sets the fixed password `surrealfs-secret` unless you pass `--account-pass`. |
+| Groups | Rust, TypeScript | Ready with limits | Reads honour the group of a file. The Python library ignores it. A database that was set up with the schema embedded in the TypeScript package has no group tables. |
+| Legal hold | Rust | Ready with limits | It blocks removal through the Rust command. A Python `rm` ignores a hold, and a Python write or edit clears it. |
+| Client-side encryption | Rust | Ready with limits | `encrypt` and `decrypt` take a 32-byte key as a hex argument, so the key is visible in the process list. There is no key management. A copy of an encrypted file or a restored backup loses the `meta` fields that decryption needs. |
+| Credentials for WebDAV and S3 | Rust | Not available | A wrong password for a stored credential is refused. A request without credentials is served, and a valid credential does not change the identity of the request, so every request acts as the identity of the server. Secrets are stored in plain text, in a field named `secret_hash`. |
+| Share links | Rust | Not available | A token can be created, listed, resolved and revoked, and `resolve` prints the path and the mode. No server or command uses a token to open the file. |
+| Webhooks | Rust | Not available | Registrations are stored and nothing sends the requests. See [Webhooks](/docs/agent-filesystem/operations/webhooks). |
+| Connectors for Drive, Notion, GitHub and Slack | Rust | Not available | The connectors hold documents in memory and make no network calls. There is no command for them. |
+
+### Storage and data movement
+
+| Capability | Implementation | Status | Limits |
+| --- | --- | --- | --- |
+| Chunked upload with `upload`, `du` and `gc` | Rust | Not available | An uploaded file appears as a folder, reads back as empty, and is an empty folder in an archive or a backup. `du` counts only these files. `gc` reclaims only the chunks of unfinished uploads, which the source of the function shows. |
+| Quotas | Schema | Not available | The `quota` table exists and nothing reads it. See [Usage and statistics](/docs/agent-filesystem/operations/quotas-and-usage#quotas). |
+| Database export and import | SurrealDB | Ready with limits | Import into an empty database. See [Backup and restore](/docs/agent-filesystem/operations/backup-and-restore). |
+| Archives with `export` and `import` | Rust | Ready with limits | They keep paths and bytes only. `import` does not check entry names, so an entry whose name contains `..` can be written outside the target folder. Import only archives that you trust. |
+| Backup directory with `backup` and `restore-backup` | Rust | Ready with limits | A restore does not apply the owner or the `meta` fields, the manifest never records a group, and the blobs are not encrypted. |
+| Git import with `import-git` | Rust | Ready | It copies the working tree, records the commit metadata, and honours `.gitignore`. |
+| Git remote helper (`git push` to `surrealfs://`) | Rust | Not available | `git push` reports success and stores nothing. |
+| Statistics with `stats` | Rust | Ready with limits | `total_chunks` is always 0, and `dedup_ratio` is always 1.0. |
+
+### Network access and mounting
+
+| Capability | Implementation | Status | Limits |
+| --- | --- | --- | --- |
+| WebDAV server | Rust | Ready with limits | A request without credentials is served, and a valid credential does not restrict access, so every request acts as the identity of the server, which is `root` by default. It binds `127.0.0.1:8080`, so keep it on loopback. |
+| S3-style server for unsigned requests | Rust | Ready with limits | A request with an AWS Signature Version 4 `Authorization` header is refused, so a client that signs its requests, as AWS SDKs and the AWS CLI do by default, fails. Unsigned `PUT`, `GET`, `HEAD`, `DELETE` and list requests work. `CopyObject` creates an empty object, and a batch delete returns `405`. Requests without credentials are served, as for WebDAV. |
+| NFS and SFTP servers | Rust | Not available | `serve nfs` and `serve sftp` print a line and exit. Nothing listens. |
+| Mounting a filesystem with `mount` | Rust | Not available | `mount` creates the directory and mounts nothing. |
+| Interception of file calls (shim) | Rust | Not available | The crate compiles with Rust 1.99, and interception of file calls is not demonstrated. |
+
+### Clients and integrations
+
+| Capability | Implementation | Status | Limits |
+| --- | --- | --- | --- |
+| Python library | Python | Ready with limits | The package pins the `surrealdb` Python SDK to a beta version, `3.0.0b8`. |
+| MCP server | Python | Ready with limits | It serves 31 tools, and 32 when the Agent Memory bridge is configured. The `acquire_lease` tool takes the lease and then returns an error, the `fork_workspace` tool always fails, and a `tree` call with no path fails. |
+| Claude plugin | Python | Not verified | The plugin and marketplace manifests pass `claude plugin validate`. The behaviour of the plugin inside a Claude client is not confirmed. The launcher builds the server from the default branch of the project's GitHub repository unless `SURREALFS_SOURCE` names another source. That branch is older than the one these pages describe: it serves 15 tools and not 31. Set `SURREALFS_SOURCE` to the `next` branch or to a release tag. See [Claude plugin](/docs/agent-filesystem/interfaces/claude-plugin). |
+| pydantic-ai toolset and JSON tool definitions | Python | Ready with limits | They come from the same registry as the MCP tools, so `tree`, `acquire_lease` and `fork_workspace` fail in the same way. Under the pydantic-ai toolset the last two end the agent run with an exception. |
+| Hermes tool plugin and memory provider | Python | Not verified | The behaviour inside Hermes is not confirmed. Its tools come from the same registry as the MCP tools, so the same three failures apply. The memory provider on the repository's default branch fails against a package from `next`, see [Hermes plugins](/docs/agent-filesystem/interfaces/hermes#install-and-set-up). |
+| Gateway | Rust | Ready with limits | One server for the REST API, a SurrealQL endpoint, an MCP endpoint, WebDAV, S3, an assistant endpoint and the web page. Without `SURREALFS_SERVER_TOKEN` it needs no login and a request acts as `root` unless it names a user. `POST /api/rpc` runs any SurrealQL statement, and its static-file handler is not restricted to the page folder. See [Gateway server](/docs/agent-filesystem/interfaces/gateway-server). |
+| File browser | Gateway and TypeScript page | Ready with limits | The page cannot send a server token, a file that the gateway creates has no Markdown preview, and the page refuses to delete a folder that holds entries. Brain Studio loses its nodes, and its filter and timeline fail. See [File browser](/docs/agent-filesystem/interfaces/file-browser). |
+| Embeddings | Python, Rust | Not available | The package has no embedding function and no indexing command, and `reindex_embeddings` takes a function of your own. The gateway requests embeddings and stores none. |
+| Agent Memory bridge of the MCP server | Python | Not verified | It needs an Agent Memory context and an API key. Its behaviour against the Agent Memory service is not confirmed. |
+| TypeScript SDK | TypeScript | Ready with limits | `search`, `chmod`, `chown`, `relate` and `claimMailbox` fail, and `diff` fails unless it gets both generations. It checks no write permissions. See the differences below. |
+| Remote clients | Python, TypeScript | Not available | `SurrealFs.from_server` and `SurrealFs.connectServer` read a field that the gateway does not send, so every query comes back empty. Reads return nothing or fail with `NotFound`, and a write fails with `PermissionDenied` in Python or returns an entry with an empty path in TypeScript. The Rust program works. See [Remote clients](/docs/agent-filesystem/interfaces/remote-clients). |
+
+## Differences between the implementations
+
+The three implementations share one SurrealQL schema, but they do not behave the same way.
+
+| Area | Python | Rust (`surrealfs-rs`) | TypeScript |
+| --- | --- | --- | --- |
+| Permission checks on write, remove and move | Yes, for a system credential | No | No |
+| Reads of files that other users made private | Denied | Denied | Denied |
+| Private home folders | Yes, `0o700` | No. A folder under `/home` gets the mode `0o755`, so other users can read it. | No. A folder under `/home` gets the mode `0o755`. |
+| Default mode | `0o666` for files, `0o777` for folders | `0o644` for text files, `0o755` for folders | `0o644` for files, `0o755` for folders |
+| Groups | Ignored | Honoured on reads | Honoured on reads, when the database has the current schema |
+| Sign-in | Root, namespace, database and record users | A root user only | A system user. The library takes a connection that you open. |
+| Search | Full-text, semantic and hybrid | None in the command | Fails |
+| Schema | The current schema | The current schema | An embedded copy that is older and has no tables for groups, uploads, webhooks, quotas or the job queue |
+| Variable names | `SURREALDB_NAMESPACE`, `SURREALDB_DATABASE` | `SURREALDB_NS`, `SURREALDB_DB` | `SURREALDB_NAMESPACE`, `SURREALDB_DATABASE` |
+
+The permission rows follow from how each implementation calls the schema. Only the Python library applies the owner and mode rules to writes, and only record access makes the database apply them to every client. A `surrealfs-rs` or TypeScript caller can write over and remove a file that another user made private, although it cannot read the file. A folder that `surrealfs-rs` created, such as `/notes`, belongs to `root` and has the mode `0o755`, so a Python agent cannot write files there. [Permissions](/docs/agent-filesystem/security/permissions) describes the rules, and [Configuration reference](/docs/agent-filesystem/operations/configuration) lists the variable names.
+
+## Known issues and workarounds
+
+| Issue | Workaround |
+| --- | --- |
+| `SurrealFs.tree` and the `tree` tool fail for the path `/`, which is their default. | Pass a folder path, such as `/notes`. |
+| Several writers whose first writes create the same new folder collide. Most of them fail with a `QueryError` that names the unique index `child_unique` or reports a write conflict, or with `AlreadyExists`, depending on the storage engine. In 10 trials with six writers, 44 to 50 of the 60 calls failed. | Create the folder with `mkdir` before the writers start. With the folder created first, all 60 calls of a repeat of the trials succeeded. |
+| `surrealfs-rs chmod /file 600` sets the decimal value 600, which is the mode `0o1130`. | Write a leading zero: `chmod /file 0600`. |
+| `surrealfs-rs rm -r` removes only the folder and its direct children, and leaves the records below them with wrong paths. | Remove nested folders one level at a time, starting with the deepest one. |
+| `surrealfs-rs ls -r` ignores `-r`. | List each folder, or query the `file` table with SurrealQL. |
+| A write in a workspace to a path that did not exist when the workspace was forked, including a file that you create there, is dropped by `merge_workspace`, which reports `ok`. | Create the file in the main tree before you fork the workspace, and use workspaces for edits to existing files. |
+| Two concurrent edits to one CRDT file raise a `QueryError` that names `idx_crdt_seq` or reports a transaction conflict, and when the writers share one connection, `content` can end with the text of the caller that failed. | Do not retry on the error. A failed call can already have stored its edit, so a retry can end in `NotFound`: 7 of 18 trials of a retry loop on two connections did, and a loop on one shared connection lost an edit in 18 of 18 trials. Take a lease with `acquire_lock` before each edit, wait while it raises `ConflictError`, and release it afterwards. A lease kept both edits in 18 of 18 trials, on one shared connection and on two. See [Collaborative editing](/docs/agent-filesystem/concepts/collaborative-editing#concurrent-calls). |
+| The MCP `acquire_lease` tool returns an error after it takes the lease. | The lease exists, so call `release_lease` when you are done, or let the lease expire. |
+| The MCP `fork_workspace` tool always fails with `unexpected keyword argument 'source'`, so `merge_workspace` then reports `workspace not found`. | Fork with the Python `SurrealFs.fork_workspace` method. `merge_workspace` works for a workspace that you created that way. |
+| `surrealfs browser` and `surrealfs embed`, which the repository's README and Docker files name, fail with `invalid choice`, because the Python package no longer has those subcommands. | Serve the web page with the Rust gateway, see [File browser](/docs/agent-filesystem/interfaces/file-browser). The package has no indexing command, and `reindex_embeddings` takes a function of your own, see [Search](/docs/agent-filesystem/concepts/search). |
+| `surrealfs status` prints `Auth Level: record` when `SURREALDB_AUTH_LEVEL` is unset, although the connection uses a root user. | Set `SURREALDB_AUTH_LEVEL` explicitly. |
+| `surrealfs users` exits with status 0 after it reports `Failed`. | Check the output, or run `python -m surrealfs.users`, which returns status 1 after a failure. |
+| `surrealfs-rs webhook delete` reports `Deleted webhook` for an id with the `webhook:` prefix and for an id that does not exist, and deletes nothing. | Pass the key without the prefix, and check with `webhook list`. |
+| `surrealfs-rs webhook delete` does not check the owner of a registration, so any caller name can delete any registration, although it lists only its own. | Limit who can run `surrealfs-rs` against the database, because the command takes the caller name on trust. |
+| `surrealfs-rs` fails with `Function 'fn::sfs_ls' not found` on a new database. | Run `surrealfs-rs init` first. The Rust command does not apply the schema. |
+| `surrealfs-rs` and the Python tools use different default databases. | Set both pairs of variables, as the [configuration reference](/docs/agent-filesystem/operations/configuration#which-tool-reads-which-setting) shows. |
+
+## Webhooks and share links
+
+`surrealfs-rs webhook create` stores a registration with a path pattern, the events, a URL and a secret. Writing a file that matches the pattern sends no request, and the `webhook_delivery` table stays empty, because no part of the release sends webhook requests. The Rust library contains a function that signs and sends a request with retries, but nothing calls it, and the release defines no event names. [Webhooks](/docs/agent-filesystem/operations/webhooks) describes the registration and the sending code. To follow changes today, use the Python `watch` method, which streams changes with a SurrealDB live query.
+
+`surrealfs-rs share create` stores a token for a path, and `share resolve` prints the path and the mode of a token that is neither revoked nor expired. No server or command uses a token to open the file, so a share link does not give anyone access to the file.
+
+## Containers
+
+The repository contains a `Dockerfile` and a `docker-compose.yml`, and no image is published. [Deployment](/docs/agent-filesystem/operations/deployment#containers) lists what each part does when its commands run outside a container. The main problems are these:
+
+- The `Dockerfile` installs `.[mcp,browser,embed,agent-memory,crdt]`. The `browser` and `embed` extras no longer exist, so the install prints a warning for each and continues.
+- The compose services for the file browser and the embedding indexer run `surrealfs browser` and `surrealfs embed`. Neither subcommand exists, so both services fail with `invalid choice`.
+- The compose service for the MCP server runs `surrealfs mcp`. The server speaks over standard input and output, so a container that has no client attached would exit at once, and the compose restart policy `unless-stopped` would start it again repeatedly.
+- The repository's `docs/docker.md` describes a sidecar that runs `surrealfs mount`. The Python command has no `mount` subcommand, and `surrealfs-rs mount` mounts nothing.
+- The image installs the Python package only, and it holds the compiled web page. The gateway that serves the page, `surrealfs-server`, and the `surrealfs-rs` command are not in it, so nothing in the image serves the page.

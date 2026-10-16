@@ -1,0 +1,263 @@
+---
+position: 2
+title: Usage and statistics
+description: "Measure an Agent Filesystem with surrealfs status, surrealfs-rs stats and SurrealQL queries for file counts, sizes and version history. Quotas are not enforced."
+---
+
+# Usage and statistics
+
+This page shows how to measure what an Agent Filesystem holds: how many files and bytes it has, who owns them, and how much space the version history takes. The figures are the sizes of the content, and not the space that the database uses on disk, which also covers indexes, stored embeddings and the chunk and section records. Quotas are not enforced in this release, and the last section describes the table that exists for them.
+
+> [!NOTE]
+> The `quota` table exists, but no operation reads it, so a quota cannot limit what an agent writes. Measure growth with the commands below and limit it outside the filesystem.
+
+## Set up the sample database
+
+The examples need a running SurrealDB server and the `surreal`, `surrealfs` and `surrealfs-rs` commands. [Command-line reference](/docs/agent-filesystem/interfaces/command-line#install) shows how to install the last two, and the sample script imports the Python package that installs `surrealfs`. [Run a local server](/docs/agent-filesystem/operations/configuration#run-a-local-server) shows how to start a server that accepts the user `root` with the password `secret`.
+
+The examples use the database `usage` in the namespace `agents`. The `surrealfs` and `surrealfs-rs` commands read different variable names, and the `surreal` command reads a third set, so the setup exports all of them. The [configuration reference](/docs/agent-filesystem/operations/configuration#which-tool-reads-which-setting) explains why.
+
+```bash
+export SURREALDB_URL=ws://localhost:8000/rpc
+export SURREALDB_USER=root SURREALDB_PASS=secret
+export SURREALDB_NAMESPACE=agents SURREALDB_DATABASE=usage
+export SURREALDB_NS=agents SURREALDB_DB=usage
+export SURREALDB_AUTH_LEVEL=root SURREALFS_AGENT_USER=alice
+export SURREAL_USER=root SURREAL_PASS=secret
+```
+
+This script creates the four files that the examples measure: three text files that two users wrote, and a 256-byte binary file. The first file has two earlier versions. Your numbers will differ when you use other files.
+
+```python title="create_sample.py"
+import asyncio
+
+from surrealdb import AsyncSurreal
+from surrealfs import SurrealFs, apply_schema
+
+
+async def main():
+    async with AsyncSurreal("ws://localhost:8000/rpc") as db:
+        await db.signin({"username": "root", "password": "secret"})
+        await db.use("agents", "usage")
+        await apply_schema(db)
+
+        alice = SurrealFs(db, user="alice")
+        bob = SurrealFs(db, user="bob")
+        await alice.write_text("/notes/plan.md", "# Launch plan\n\nShip the beta on Friday.\n")
+        await alice.edit("/notes/plan.md", "Friday", "Monday")
+        await alice.append_text("/notes/plan.md", "\nOwner: alice\n")
+        await alice.write_text("/notes/ideas.md", "# Ideas\n\n- hybrid search\n- backups\n")
+        await bob.write_text("/reports/q3.md", "# Q3 report\n\n" + "Revenue grew. " * 40 + "\n")
+        await alice.write_bytes("/assets/logo.bin", bytes(range(256)))
+
+
+asyncio.run(main())
+```
+
+```bash
+python create_sample.py
+```
+
+## Count files with `surrealfs status` and `surrealfs-rs stats`
+
+`surrealfs status` connects, applies the schema and prints the number of records in the `file` table and the number of unexpired leases. The count includes folders, so the four files are counted together with the four folders `/home`, `/notes`, `/reports` and `/assets`. Set `SURREALDB_AUTH_LEVEL`, because `status` prints `record` when the variable is unset even though the connection then uses a root user.
+
+```bash
+surrealfs status
+```
+
+```text title="Sample output"
+SurrealFS v0.2.0
+----------------------------------------
+Server:       ws://localhost:8000/rpc (58.7ms latency)
+Namespace:    agents
+Database:     usage
+Auth Level:   root (identity: alice)
+Total Files:  8
+Active Leases:0
+```
+
+`surrealfs-rs stats` prints counters as JSON, and `--prometheus` prints the same counters in the Prometheus text format:
+
+```bash
+surrealfs-rs stats
+```
+
+```json title="Sample output"
+{
+  "total_files": 4,
+  "total_directories": 4,
+  "total_bytes": 919,
+  "total_chunks": 0,
+  "dedup_ratio": 1.0,
+  "active_shares": 0,
+  "active_webhooks": 0,
+  "groups_count": 0,
+  "legal_holds_count": 0
+}
+```
+
+| Field | Prometheus gauge | Meaning |
+| --- | --- | --- |
+| `total_files` | `surrealfs_files_total` | Records that are not folders |
+| `total_directories` | `surrealfs_directories_total` | Records that are folders |
+| `total_bytes` | `surrealfs_bytes_total` | The sum of the file sizes. A text file counts its characters, and a binary file counts its bytes. |
+| `total_chunks` | `surrealfs_chunks_total` | Always 0 in this release |
+| `dedup_ratio` | None | Always 1.0 in this release |
+| `active_shares` | `surrealfs_active_shares` | Share links that are not revoked |
+| `active_webhooks` | `surrealfs_active_webhooks` | Webhook registrations that are active |
+| `groups_count` | `surrealfs_groups_total` | Groups |
+| `legal_holds_count` | `surrealfs_legal_holds` | Files with a legal hold |
+
+Three details affect how you read the numbers:
+
+- `stats` reads every record of the `file` table, including the content of each file, and it counts across every user. It therefore takes longer on a database with many large files.
+- The command prints the Prometheus text and exits. No server in this release serves it over HTTP.
+- A file stored with `surrealfs-rs upload` counts as a folder. See [Chunked storage](#chunked-storage-with-du-and-gc).
+
+## Measure with SurrealQL
+
+The data is ordinary SurrealDB records, so a system user can measure it with SurrealQL. A file stores its `size` only when `surrealfs-rs upload` stored it, so the queries below take the size from the stored text or bytes. `bytes::len(<bytes>content)` counts the bytes of a text file, which differs from the character count that `stats` reports when the text holds non-ASCII characters.
+
+The queries below span several lines. The `surreal sql` shell treats each line as a complete statement unless you start it with `--multi`, which keeps reading until a semicolon, so this command starts the shell with that option. It reads the user and the password from `SURREAL_USER` and `SURREAL_PASS`, which the setup exported:
+
+```bash
+surreal sql --endpoint ws://localhost:8000 --ns agents --db usage --multi --pretty
+```
+
+The first query totals the files and bytes for each owner:
+
+```surql
+SELECT
+    owner,
+    count() AS files,
+    math::sum(
+        IF size IS NOT NONE { size }
+        ELSE IF content IS NOT NONE { bytes::len(<bytes>content) }
+        ELSE IF file IS NOT NONE { bytes::len(file) }
+        ELSE { 0 }
+    ) AS bytes
+FROM file
+WHERE is_folder = false
+GROUP BY owner;
+```
+
+```surql title="Sample output"
+[
+    {
+        bytes: 345,
+        files: 3,
+        owner: 'alice'
+    },
+    {
+        bytes: 574,
+        files: 1,
+        owner: 'bob'
+    }
+]
+```
+
+The second query lists the largest files:
+
+```surql
+SELECT
+    path,
+    IF size IS NOT NONE { size }
+    ELSE IF content IS NOT NONE { bytes::len(<bytes>content) }
+    ELSE IF file IS NOT NONE { bytes::len(file) }
+    ELSE { 0 } AS bytes
+FROM file
+WHERE is_folder = false
+ORDER BY bytes DESC
+LIMIT 3;
+```
+
+```surql title="Sample output"
+[
+    {
+        bytes: 574,
+        path: '/reports/q3.md'
+    },
+    {
+        bytes: 256,
+        path: '/assets/logo.bin'
+    },
+    {
+        bytes: 54,
+        path: '/notes/plan.md'
+    }
+]
+```
+
+## Version history growth
+
+Each change to the content, mode, name or location of a file stores the previous state in the `file_version` table, as a full copy, and removing a file stores a last version with the `op` value `delete`, which `undelete` reads. Nothing prunes the table, and this release has no setting for how long to keep versions. The next query shows which files have the most history. The `size` of a version counts the characters of a text file.
+
+```surql
+SELECT path, count() AS versions, math::sum(size) AS bytes
+FROM file_version
+GROUP BY path
+ORDER BY bytes DESC;
+```
+
+```surql title="Sample output"
+[
+    {
+        bytes: 80,
+        path: '/notes/plan.md',
+        versions: 2
+    }
+]
+```
+
+`file_version` is an ordinary table, so a system user can delete old versions with SurrealQL. This query counts the versions that are older than 90 days, without the versions that record a removal:
+
+```surql
+SELECT count() FROM file_version WHERE created_at < time::now() - 90d AND op != 'delete' GROUP ALL;
+```
+
+This statement deletes the same versions:
+
+```surql
+DELETE file_version WHERE created_at < time::now() - 90d AND op != 'delete';
+```
+
+> [!WARNING]
+> A deleted version cannot be restored with `restore` or compared with `diff`, so take a [database export](/docs/agent-filesystem/operations/backup-and-restore) first. The condition `op != 'delete'` keeps the versions that record a removal, because `undelete` reads them. Without the condition, the statement also deletes the last copy of every file that was removed more than 90 days ago, and `undelete` can no longer recover those files.
+
+## Chunked storage with `du` and `gc`
+
+`surrealfs-rs upload` stores a local file as content-addressed chunks, and two commands report on that storage:
+
+| Command | Output |
+| --- | --- |
+| `surrealfs-rs du [PATH]` | The number of uploaded files under the path, with their logical and stored bytes |
+| `surrealfs-rs gc [-m SECONDS]` | Deletes chunks that no upload uses and that are older than the age in seconds, by default 86400 |
+
+```bash
+head -c 300000 /dev/urandom > big.bin
+surrealfs-rs upload big.bin /assets/big.bin
+surrealfs-rs du /assets
+surrealfs-rs gc
+```
+
+```text title="Sample output"
+Uploaded 'big.bin' -> '/assets/big.bin' (300000 bytes, gen 1)
+/assets	files: 1	logical: 300000 B	stored: 300000 B
+Garbage collected 0 unreferenced blobs
+```
+
+> [!WARNING]
+> Chunked storage is not ready for use. A file stored with `upload` appears as a folder in `ls`, reads back as empty with `cat`, and is empty in an archive or a backup. `du` counts only these files and sees none of the files that you write with `write` or through the Python library. It reports the files of the caller, `stored` always equals `logical`, `rm` does not lower the totals, and `gc` removes only chunks from uploads that did not finish. See [Limits and caveats](/docs/agent-filesystem/operations/limits-and-caveats#storage-and-data-movement).
+
+## Quotas
+
+The schema defines a `quota` table with the fields `scope`, `max_bytes` and `max_files`, and a unique index on `scope`. No Python, Rust or TypeScript operation reads the table, and no function in the schema consults it. A write that exceeds a stored limit succeeds. Under record access, any signed-in user can also read, create, change and delete records in the `quota` table and in the `usage` table that `du` reads.
+
+To limit growth in this release, measure with the queries above, limit which agents have write access with [permissions](/docs/agent-filesystem/security/permissions), and remove old [versions](#version-history-growth).
+
+## Related pages
+
+- [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) describes how versions are recorded.
+- [Content storage](/docs/agent-filesystem/concepts/content-storage) describes how text, bytes and chunks are stored.
+- [Backup and restore](/docs/agent-filesystem/operations/backup-and-restore) covers exporting a database before you delete versions.
