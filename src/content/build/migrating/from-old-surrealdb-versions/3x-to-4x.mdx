@@ -1,7 +1,7 @@
 ---
 position: 6
 title: 3.x to 4.0
-description: What to do when a 3.x deployment moves to 4.0, covering the one-way switch to the 4.0 record format, export and import changes, the conversion of SurrealKV datastores, which HNSW, DiskANN and B-tree indexes to rebuild with REBUILD INDEX, and the behaviour changes in SurrealQL, configuration and Surrealism modules.
+description: What to do when a 3.x deployment moves to 4.0, covering the one-way switch to the 4.0 record format, export and import changes, the conversion of SurrealKV datastores, database compatibility levels and MIGRATE EXISTING ROWS, which HNSW, DiskANN and B-tree indexes to rebuild with REBUILD INDEX, and the behaviour changes in SurrealQL, configuration and Surrealism modules.
 ---
 
 # Upgrading from `3.x` to `4.0`
@@ -38,7 +38,8 @@ The upgrade does not rewrite any index, so an index keeps working after it. Some
 | HNSW index defined with `DIST JACCARD` or `DIST PEARSON` | Required | The graph was built on the previous ordering of these metrics, so it does not serve nearest-first searches. See [Jaccard and Pearson ranking](#jaccard-and-pearson-ranking). |
 | HNSW or DiskANN index in which more than nine records hold an identical vector, built before `3.3.1` | Required | Records are missing from KNN results. |
 | HNSW or DiskANN index that serves KNN queries with a selective filter | Optional | Results are correct, but the query reads each record instead of scoring from the index, which is slower. |
-| B-tree index on a field with no declared type, used by `ORDER BY ... LIMIT` or an open range such as `WHERE time > $since` | Optional | Results are correct, but the query sorts or scans the table instead of reading the index. |
+| B-tree index whose queries order by, count over or take a range over its fields | Optional | Results are correct, but `ORDER BY ... LIMIT` sorts every matching record, an open range such as `WHERE time > $since` reads the table, and `count()` reads records instead of counting index entries. See [Index plans and stored arrays](#index-plans-and-stored-arrays). |
+| B-tree index whose values include datetimes | Optional | The index keeps the `3.x` order, in which a whole second sorts after the fractions within it, so `ORDER BY` and ranges over a datetime can return records out of order or leave some out. See [Datetimes in an index](#datetimes-in-an-index). |
 
 The statement for each is the same:
 
@@ -54,7 +55,6 @@ On a datastore that several nodes share, such as TiKV, upgrade every node before
 
 ## Exports and imports
 
-- **`surreal db export --versions` fails.** A dump holds the current state of each record and has no way to hold its history, so `--versions` never changed the dump: it was accepted and ignored. It is now refused, as is the matching option of the SDKs, so a backup script that passes it exits with an error and writes no file. Remove the flag; the dump is the same without it.
 - **`POST /import` reports a partial import.** An import commits each statement on its own and continues past a failure. The endpoint now answers `422` with the failures in the body when any statement failed, where it answered `200`. The embedded engines in the JavaScript and Node SDKs now return the first failure as well. `surreal db start --import-file` logs the failures and still starts.
 - **Access methods with a key are not restored.** An export writes `DEFINE ACCESS` with a placeholder in place of the signing key, and `DEFINE ACCESS` now refuses that placeholder, because replaying it created an access whose key anyone could read. Restoring a dump reports one failure for each such access, and the database comes back without them. Define them again with their real keys after the restore. An access verified by a JWKS URL has no key and is restored as before.
 - **A dump can change the target database's settings.** For a database with a `COMMENT`, `CHANGEFEED` or `STRICT` clause, the export starts with `DEFINE DATABASE OVERWRITE`, which replaces those clauses on the database the dump is restored into. That statement needs a namespace or root user, so a database user cannot restore such a dump.
@@ -155,6 +155,40 @@ A parameter set with `LET` inside a transaction is discarded when the transactio
 ### `RETURN` inside a transaction
 
 A `RETURN` placed directly between `BEGIN` and `COMMIT` no longer ends the transaction. Its value is one of the results, and the statements after it still run and commit with the rest. Before `4.0` they were skipped and had no result. The same applies to a `RETURN` inside an `IF` placed directly in the transaction, which used to end the whole transaction and now ends only the `IF`. A `RETURN` inside a block or a function still ends that block or function. To stop part of a transaction early, put those statements in a block, `BEGIN; { ...; RETURN $value; ... }; COMMIT;`, and to cancel the transaction instead, use [`THROW`](/docs/reference/query-language/statements/throw).
+
+### Effects in schema clauses
+
+A `COMPUTED`, `ASSERT`, `VALUE` or `DEFAULT` clause, and every `PERMISSIONS` clause, may no longer write data, change the schema, call `sequence::nextval()` or `SLEEP`, whether directly or through a custom function it calls. A `VALUE` or `DEFAULT` clause may still call `sequence::nextval()`, `rand::*()` and `time::now()`. A JavaScript function, `eval::surql()` or a module function is refused in all of these clauses, because its effects cannot be known when the clause is defined. The definition is refused with an error that names the clause and the effect:
+
+```surql
+DEFINE FIELD view_count ON article COMPUTED (UPDATE stats:articles SET views += 1);
+```
+
+```surql title="Error output"
+'The COMPUTED clause must not have effects: `UPDATE` writes data'
+```
+
+This includes the `FOR create`, `FOR update` and `FOR delete` clauses of a table, which `3.3` allowed to write. A definition that a datastore already holds is kept, and its clause fails with the same error each time it reaches the effect, writing nothing. Move a write such as an audit log into a [`DEFINE EVENT`](/docs/reference/query-language/statements/define/event), whose body may still write. See [Clauses that must not have effects](/docs/reference/query-language/statements/define/field#clauses-that-must-not-have-effects).
+
+### `CONTAINS` over an array-element index
+
+An index on `tags.*` is used by a condition that takes each element of the field, such as `tags.* CONTAINS 'red'` or `'red' INSIDE tags[*]`. The plain form, `tags CONTAINS 'red'`, now reads the table, whether or not the field has a declared type. It returns the same records as before, and also any record whose `tags` is a string containing `'red'`, which the index used to leave out. To keep the index in use, write `.*` in the condition. See [Array-element composite indexes](/docs/reference/query-language/statements/define/indexes#array-element-composite-indexes).
+
+### Index plans and stored arrays
+
+An index stores an array once for each of its elements, so the planner can only take its order, its ranges and its counts as exact for a field that has never held an array. In `3.3` a declared type such as `TYPE int` was taken as proof of that, but `DEFINE FIELD` does not change records stored before it, so an older array could make a query return a record twice or match a condition it does not satisfy. In `4.0` a B-tree index records whether it has stored an array, and the planner relies on that record only. An index built by `3.3` recorded nothing and is planned as one that may hold arrays until it is rebuilt, which gives the same results more slowly. A statement that writes is always planned that way.
+
+### Datetimes in an index
+
+An index defined or rebuilt on `4.0` stores a datetime as a number of seconds and nanoseconds, so its entries are in time order. An index built by `3.x` keeps storing datetimes as text, in which `2026-08-28T09:00:00Z` sorts after `2026-08-28T09:00:00.152Z`, and answers exactly as it did on `3.x`. A datetime inside a record id keeps the text order on every release. Define or rebuild a B-tree index that may hold a datetime only once every node in a cluster runs `4.0`, because an earlier node writes entries that the new format cannot find.
+
+### Schema changes in a new datastore
+
+`4.0` gives each database a [compatibility level](/docs/reference/query-language/statements/define/database#compatibility-level). Every database in a datastore that `3.x` created stays at level 3, including the databases defined in it later, and behaves as it did on `3.x`, so nothing needs doing on upgrade. A new datastore starts its databases at level 4, where a `SCHEMAFULL` table that holds records refuses a field change its records might not satisfy unless the statement says what they become with [`MIGRATE EXISTING ROWS`](/docs/reference/query-language/statements/define/field#migrating-existing-records), and `REMOVE FIELD` deletes the field's stored values. A schema script that changes a field after records exist can therefore succeed in an upgraded production database and fail in a new test or development one. To use level 4 in an upgraded database, see [`ALTER DATABASE`](/docs/reference/query-language/statements/alter/database#compatibility).
+
+### Changing a table between `NORMAL` and `RELATION`
+
+`ALTER TABLE ... TYPE RELATION` and `DEFINE TABLE OVERWRITE ... TYPE RELATION` are refused while the table holds a record that is not an edge, and a change to `TYPE NORMAL` while it holds an edge. On `3.3` the change was accepted, and an export of the table then failed to import. `TYPE ANY` holds both kinds. See [Changing the table type](/docs/reference/query-language/statements/alter/table#changing-the-table-type).
 
 ### Writes to an aggregated view
 
