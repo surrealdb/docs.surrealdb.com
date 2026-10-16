@@ -6,7 +6,7 @@ description: "Configure which LLM runs at each processing stage. For every stage
 
 # Models per stage
 
-SurrealDB Agent Memory’s pipeline uses separate LLM stages with different latency and quality needs. Assign a model per stage rather than one model for everything. Embeddings are fixed deployment-wide.
+SurrealDB Agent Memory’s pipeline uses separate LLM stages with different latency and quality needs. A Context can store a model for each stage, but not every stage applies its setting yet: see [Which settings are applied](#which-settings-are-applied). Embeddings are fixed deployment-wide.
 
 For provider keys and Gemini defaults, see [Configuration](/docs/agent-memory/reference/configuration#default-provider-api-keys).
 
@@ -14,15 +14,15 @@ For provider keys and Gemini defaults, see [Configuration](/docs/agent-memory/re
 
 ### Extraction
 
-Runs on conversational turns and document jobs. Classifies content and extracts entities, attributes, relations, instructions, and uncertainties. Often on the critical path for `/facts?infer=full`, so latency matters.
+Runs on conversational turns and document jobs. Extracts entities, attributes, relations, actions, instructions, and uncertainties, with one structured-output call per window of text. Turn extraction is on the critical path for `POST /facts` with `"infer": "full"`, so latency matters.
 
 ### Reconciliation
 
-Optional LLM assist when structural entity merge is inconclusive. Not every write invokes it.
+Stored on the Context but not applied. Reconciliation matches entities by exact key and makes no model call, so this setting currently has no effect.
 
 ### Synthesis
 
-Powers `/chat` and `/reflect` answer generation from retrieved context. Quality usually matters more than on extraction.
+Intended for `/chat` and `/reflect` answer generation. The setting is stored but not applied yet: `/chat` and `/reflect` use the deployment default model, and `/chat` also accepts a per-call `model` that overrides it.
 
 ### Elaboration and consolidation
 
@@ -30,29 +30,32 @@ Background “dreaming” work on the worker tier: elaboration and consolidation
 
 ### Embedding
 
-Converts text (and multimodal content) into dense vectors for HNSW retrieval and the semantic cache. Fixed to **`gemini-embedding-2`** at **3072** dimensions. Not freely assignable per Context - Context config may only pin that same model id. Vector reads filter by **`embedding_model_id`**. After changing the deployment embedding model, run a [reindex](/docs/agent-memory/reference/management-api#force-reindex).
+Converts text (and multimodal content) into dense vectors for HNSW retrieval and the semantic cache. Fixed to **`gemini-embedding-2`** at **3072** dimensions. Not freely assignable per Context - Context config may only pin that same model id, and any other value is rejected with `400`. Vector reads filter by **`embedding_model_id`**.
 
 ## Configuring models per stage
 
-Model assignment is per-Context. Each LLM stage takes `{provider, model}`:
+Model assignment is per-Context. Set it in SurrealDB Studio under the Context's **Settings** → **configuration**, or through the SurrealDB Cloud API admin routes. Each LLM stage takes `{provider, model}`, and a change is a partial config, so this one sets two stages and leaves the rest alone:
 
-```http
-PATCH /api/v1/contexts/{context_id}
-Content-Type: application/json
-
+```json
 {
-  "config": {
-    "models": {
-      "extraction": { "provider": "google", "model": "gemini-2.5-flash" },
-      "synthesis": { "provider": "anthropic", "model": "claude-sonnet-4" },
-      "elaboration_consolidation": { "provider": "google", "model": "gemini-2.5-flash" },
-      "embedding": "gemini-embedding-2"
-    }
+  "models": {
+    "extraction": { "provider": "google", "model": "gemini-3.5-flash-lite" },
+    "elaboration_consolidation": { "provider": "google", "model": "gemini-3.8-flash" }
   }
 }
 ```
 
-Omit any stage to leave the current assignment (or deployment default) unchanged. Missing provider keys for a selected provider fail at configuration time rather than silently re-routing.
+Omit any stage to leave the current assignment (or deployment default) unchanged. With Google as the provider, the default is `gemini-3.5-flash-lite` for extraction and reconciliation and `gemini-3.8-flash` for the other stages. Missing provider keys for a selected provider fail at configuration time rather than silently re-routing. A model id that the provider does not list (for example `gemini-2.5-pro`) is rejected.
+
+### Which settings are applied
+
+| Stage | Applied |
+| --- | --- |
+| `extraction` | Yes for document ingest on the worker. Turn extraction on `POST /facts` uses the deployment default model. |
+| `reconciliation` | No. Stored only. |
+| `synthesis` | No. Stored only. `/chat` and `/reflect` use the deployment default, or the per-call `model` on `/chat`. |
+| `elaboration_consolidation` | Yes, for background elaboration and consolidation on the worker. On-demand `POST /elaborate` and `POST /consolidate` calls use the deployment default. |
+| `embedding` | Only `gemini-embedding-2` is accepted. |
 
 ## Supported providers
 
@@ -61,21 +64,25 @@ Omit any stage to leave the current assignment (or deployment default) unchanged
 | Google (Gemini) | LLM stages; **required** for embeddings |
 | OpenAI | LLM stages |
 | Anthropic | LLM stages |
+| Cerebras | LLM stages |
+| OpenRouter | LLM stages |
 
-Provider keys may be set deployment-wide (`SPECTRON_PROVIDER_*`) or per Context. Keys are write-only on the API; reads return which providers are configured, not the secrets.
+Use the provider names `google`, `openai`, `anthropic`, `cerebras`, and `openrouter` in the `provider` field. Model ids for Cerebras and OpenRouter are checked by shape rather than against a fixed list.
+
+Provider keys may be set for the deployment or per Context. Keys are write-only: reads return which providers are configured, not the secrets.
 
 ## Latency versus quality
 
 | Stage | Typical path | Prefer |
 | --- | --- | --- |
 | `extraction` | Sync on write / ingest | Fast, inexpensive model |
-| `reconciliation` | Occasional on write | Fast or mid-tier |
-| `synthesis` | `/chat`, `/reflect` | More capable when answer quality matters |
+| `reconciliation` | Not applied | - |
+| `synthesis` | Not applied; `/chat` and `/reflect` use the deployment default | - |
 | `elaboration_consolidation` | Worker background | Fast enough for batch work |
 | `embedding` | Ingest + query | Fixed: `gemini-embedding-2` (3072-dim) |
 
-A common pattern is a cheap model for extraction and a stronger model for synthesis only.
+A common pattern is a fast, inexpensive model for extraction. To use a stronger model for chat answers today, pass `model` on the `/chat` call.
 
 ## Changing the embedding model
 
-Embeddings are Gemini-only at 3072 dimensions. Switching the deployment embedding model requires a reindex so stored vectors and query vectors share one space. See [Management API - force reindex](/docs/agent-memory/reference/management-api#force-reindex).
+Embeddings are Gemini-only at 3072 dimensions, and `gemini-embedding-2` is the only accepted model. There is currently no reindex endpoint, so stored vectors cannot be re-embedded with a different model through the API.

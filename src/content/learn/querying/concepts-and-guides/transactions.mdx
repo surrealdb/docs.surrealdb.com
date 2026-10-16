@@ -182,6 +182,44 @@ This is normal under concurrent load, not a sign of data corruption. At scale, r
 
 Keep transactions short and touch the fewest keys necessary. Long-running transactions that overlap on hot keys see more conflicts.
 
+## Unique indexes under concurrent writes
+
+A `UNIQUE` index is the way to make an insert happen exactly once, for example so that two overlapping workers in a job queue cannot both enqueue the same notification. The index makes this safe because each index entry is a key, so two transactions that write the same indexed value write the same key, and the write conflict check on commit applies to it.
+
+When two concurrent transactions insert records with the same value for a `UNIQUE` index, neither waits for the other. Each checks the index against its own snapshot, in which the other's uncommitted record does not exist, so both statements succeed. The first transaction to commit wins. The second fails at `COMMIT` with a transaction conflict error that says the transaction can be retried, and none of its writes are kept. When the losing transaction runs again, its snapshot now holds the committed record, and the insert fails straight away with the unique index error:
+
+```surql
+DEFINE INDEX unique_key ON notification FIELDS key UNIQUE;
+
+-- Run by two workers at the same time; one commit fails with a
+-- transaction conflict, and its retry fails with the index error
+BEGIN;
+CREATE notification SET key = 'invoice-2041-sent';
+COMMIT;
+```
+
+```text title="Error output when the retry runs"
+Database index `unique_key` already contains 'invoice-2041-sent', with record `notification:...`
+```
+
+`INSERT IGNORE` and `INSERT ... ON DUPLICATE KEY UPDATE` are safe in the same way. They never produce a duplicate under concurrency, but they decide against the transaction's snapshot. A concurrent insert of the same record id or indexed value that commits first makes the other transaction fail with the retryable conflict error, rather than skipping its record or updating the existing one. On retry, the statement sees the committed record and skips or updates it as usual.
+
+An existence check written into the query gives no such guarantee. Without a unique index, both of the following transactions see no matching task in their snapshots, so both create one and both commit:
+
+```surql
+DEFINE TABLE task;
+
+BEGIN;
+IF !(SELECT * FROM task WHERE key = 'nightly-report') {
+    CREATE task SET key = 'nightly-report';
+};
+COMMIT;
+```
+
+This is the same rule as in PostgreSQL, where `INSERT ... WHERE NOT EXISTS (...)` is not safe on its own and a unique index is the fix. The difference is in how the conflict arrives: PostgreSQL makes the second inserter wait for the first and then raises the conflict, while SurrealDB lets both proceed and raises it at `COMMIT`. Retry logic therefore wraps the whole transaction.
+
+A unique index that applies to only some records, such as PostgreSQL's partial unique index, is covered under [conditional uniqueness](/docs/reference/query-language/statements/define/indexes#conditional-uniqueness).
+
 ## Write skew
 
 Snapshot isolation does not prevent **write skew**. Write skew occurs when two transactions each read overlapping state, make independent decisions, and both commit even though their combined effect breaks an invariant.

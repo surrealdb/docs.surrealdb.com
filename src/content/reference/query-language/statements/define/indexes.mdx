@@ -44,7 +44,6 @@ UNIQUE
   </TabItem>
   <TabItem label="Railroad Diagram">
 
-
 <RailroadDiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DEFINE"},{"type":"Terminal","text":"INDEX"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"OVERWRITE"},{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}]}},{"type":"NonTerminal","text":"@name"},{"type":"Terminal","text":"ON"},{"type":"Optional","child":{"type":"Terminal","text":"TABLE"}},{"type":"NonTerminal","text":"@table"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"FIELDS"},{"type":"Terminal","text":"COLUMNS"}]},{"type":"NonTerminal","text":"@fields"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"UNIQUE"},{"type":"Terminal","text":"COUNT"},{"type":"Sequence","children":[{"type":"Terminal","text":"FULLTEXT"},{"type":"Terminal","text":"ANALYZER"},{"type":"NonTerminal","text":"@analyzer"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"BM25"},{"type":"Optional","child":{"type":"Terminal","text":"(@k1, @b)"}}]}},{"type":"Optional","child":{"type":"Terminal","text":"HIGHLIGHTS"}}]},{"type":"Sequence","children":[{"type":"Terminal","text":"HNSW"},{"type":"Terminal","text":"DIMENSION"},{"type":"NonTerminal","text":"@dimension"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"TYPE"},{"type":"NonTerminal","text":"@type"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"DIST"},{"type":"NonTerminal","text":"@distance"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"EFC"},{"type":"NonTerminal","text":"@efc"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"M"},{"type":"NonTerminal","text":"@m"}]}}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"COMMENT"},{"type":"NonTerminal","text":"@string"}]}},{"type":"Optional","child":{"type":"Terminal","text":"CONCURRENTLY"}}]}]}' />
 
   </TabItem>
@@ -64,6 +63,30 @@ The following example creates a non-unique index for an age field on a user tabl
 -- optimise queries looking for users of a given age
 DEFINE INDEX userAgeIndex ON TABLE user FIELDS age;
 ```
+
+Besides `=` and comparisons such as `>` and `<`, a standard index is used for a range with `IN`, and for a string prefix with [`string::starts_with()`](/docs/reference/query-language/functions/database-functions/string#stringstarts_with). Before SurrealDB 3.3.1, these two scanned the whole table.
+
+```surql
+-- Both use the index from 3.3.1
+SELECT * FROM user WHERE age IN 18..30;
+SELECT * FROM user WHERE string::starts_with(name, 'Ann');
+```
+
+#### Indexing an array field
+
+On a field that holds an array, a standard index has one entry for each element. A condition still compares the whole value, so with `tags = ['a', 'b']`, the condition `tags = 'a'` is false and `tags = ['a', 'b']` is true, with or without the index. To find the records whose array holds an element, use [`CONTAINS`](/docs/reference/query-language/language-primitives/operators#contains-or-) or `CONTAINSANY` and index the elements with `tags.*`:
+
+```surql
+DEFINE INDEX post_tags ON post FIELDS tags.*;
+
+SELECT * FROM post WHERE tags CONTAINS 'a';
+SELECT * FROM post WHERE tags CONTAINSANY ['a', 'c'];
+```
+
+An index declared as `FIELDS tags` is not used for `CONTAINS`, and the query scans the table instead. The field may still hold a string written before its type was declared, and `CONTAINS` on a string looks for a substring, which an element lookup cannot find. For the same reason, use `tags.*` only when every stored value of the field is an array: a string is indexed whole, so `CONTAINS` through a `tags.*` index does not find a substring inside it.
+
+> [!WARNING]
+> Before SurrealDB 3.3.1, the query planner treated a `FIELDS tags` index on an array field as if each record held a single value, so a query could return different records with the index than without it. `count()` with `tags = 'a'` counted the records whose array held `'a'`, `tags = ['a', 'b']` returned nothing, a range such as `tags > 'a'` could return a record twice, and `ORDER BY tags` followed the order of the index entries. From 3.3.1 these return the same results as without the index on a field whose type is an array, such as `array<string>` or `option<array<string>>`, and the index does not need to be rebuilt. A field with no declared type, or a type that also allows a value that is not an array, keeps the earlier behaviour. So does a server started with [`SURREAL_PLANNER_STRATEGY`](/docs/reference/cli/db/environment-variables) set to `compute-only`.
 
 ### Unique index
 
@@ -165,6 +188,28 @@ SELECT count() FROM user GROUP ALL;
 [{ count: 4 }]
 ```
 
+#### Conditional uniqueness
+
+A `UNIQUE` index applies to every record in the table. `WHERE` is accepted only on a `COUNT` index, so `DEFINE INDEX ... UNIQUE WHERE ...` is a parse error. Because a unique index ignores `NONE`, a computed field that holds the value only when the condition is true gives the same effect as a partial unique index. The following index allows any number of inactive plans for an email address, but only one active plan:
+
+```surql
+DEFINE FIELD email ON plan TYPE string;
+DEFINE FIELD active ON plan TYPE bool;
+DEFINE FIELD active_email ON plan VALUE IF active { email } ELSE { NONE };
+DEFINE INDEX one_active_plan ON plan FIELDS active_email UNIQUE;
+
+CREATE plan SET email = 'ana@example.com', active = false;
+CREATE plan SET email = 'ana@example.com', active = false;
+CREATE plan SET email = 'ana@example.com', active = true;
+CREATE plan SET email = 'ana@example.com', active = true;
+```
+
+```text title="Error output"
+Database index `one_active_plan` already contains 'ana@example.com', with record `plan:...`
+```
+
+A unique index stays correct when transactions write at the same time: of two concurrent inserts with the same value, one commits and the other fails with a retryable transaction conflict. See [Unique indexes under concurrent writes](/docs/learn/querying/concepts-and-guides/transactions#unique-indexes-under-concurrent-writes).
+
 On a field that holds an array, an index has one entry for each element rather than one for the whole array. A `UNIQUE` index on such a field therefore makes every element unique across all records, so two records cannot share any element:
 
 ```surql
@@ -178,11 +223,47 @@ CREATE post:2 SET tags = ['b', 'c'];
 Database index `unique_tag` already contains 'b', with record `post:1`
 ```
 
-To make the array as a whole unique instead, so that two records cannot have the same set of tags but may share some, index a field that holds the array as a single value. Sorting it first makes `['b', 'a']` the same as `['a', 'b']`:
+To make the array as a whole unique instead, so that two records cannot have the same tags but may share some, end the field with [`...`](/docs/reference/query-language/language-primitives/idioms#flattening). The index then has one entry for the whole array:
+
+```surql
+DEFINE INDEX unique_tags ON post FIELDS tags... UNIQUE;
+
+CREATE post:1 SET tags = ['a', 'b'];
+CREATE post:2 SET tags = ['b', 'c'];
+CREATE post:3 SET tags = ['a', 'b'];
+```
+
+```text title="Error output"
+Database index `unique_tags` already contains ['a', 'b'], with record `post:1`
+```
+
+[`INFO FOR TABLE`](/docs/reference/query-language/statements/info) shows this index as `FIELDS tags…`, with a single ellipsis character, which SurrealQL also accepts in place of `...`. The order of the elements counts, so `['b', 'a']` is a different value from `['a', 'b']`. To treat the two as the same, index a field that holds the array sorted and converted to a single value:
 
 ```surql
 DEFINE FIELD tag_key ON post VALUE <string> tags.sort();
 DEFINE INDEX unique_tags ON post FIELDS tag_key UNIQUE;
+```
+
+A `UNIQUE` index compares values exactly, so `'Bob'` and `'bob'` count as different. For a case-insensitive unique value, end the indexed field with a method call that normalises it, and the index stores the result:
+
+```surql
+DEFINE INDEX unique_name ON user FIELDS name.lowercase() UNIQUE;
+
+CREATE user:1 SET name = 'Bob';
+CREATE user:2 SET name = 'bOB';
+```
+
+```text title="Error output"
+Database index `unique_name` already contains 'bob', with record `user:1`
+```
+
+A query uses this index when its condition repeats the same expression, such as `WHERE name.lowercase() = 'bob'`. A condition on `name` alone does not, and scans the table instead.
+
+The function-call form `string::lowercase(name)` is not accepted in `FIELDS`, and a record where `name` is `NONE` or not a string fails the write, because `lowercase()` cannot run on it. Alternatively, store the normalised value in a field of its own and index that field, which keeps the lowercase value visible in query results:
+
+```surql
+DEFINE FIELD name_key ON user VALUE name.lowercase();
+DEFINE INDEX unique_name ON user FIELDS name_key UNIQUE;
 ```
 
 ### Composite index
@@ -200,6 +281,24 @@ value = "NONE"
 -- Create an index on the account and email fields of the user table
 DEFINE INDEX test ON user FIELDS account, email UNIQUE;
 ```
+
+When more than one of the fields holds an array, the index has one entry for every combination of their elements. A record with `tags = ['a', 'b']` and `authors = ['x', 'y']` gives four entries, so a `UNIQUE` index refuses any later record that repeats one of those four pairs:
+
+```surql
+DEFINE INDEX tag_author ON post FIELDS tags, authors UNIQUE;
+
+CREATE post:1 SET tags = ['a', 'b'], authors = ['x', 'y'];
+CREATE post:2 SET tags = ['a'], authors = ['y'];
+```
+
+```text title="Error output"
+Database index `tag_author` already contains ['a', 'y'], with record `post:1`
+```
+
+A query that uses such an index returns each record once, however many of its entries match.
+
+> [!WARNING]
+> Before SurrealDB 3.3.1, an index over two or more array fields stored only some of the combinations, so the `CREATE post:2` above succeeded. An index written by an earlier release stays incomplete after upgrading until you run [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild) on it. Earlier releases could also return a record once for each matching entry when a query used a composite index with an array field, such as `FIELDS account, emails.*.address` queried by `account` alone. That needs no action after upgrading.
 
 #### Array-element composite indexes
 
@@ -447,6 +546,12 @@ Vector search indexes in SurrealDB support efficient [k-nearest neighbors](https
 > [!NOTE]
 > After a large insert or update, a vector index stores the new records separately until a background process merges them into its graph. Searches return correct results throughout, but are slower until that merge completes. [`INFO FOR INDEX`](/docs/reference/query-language/statements/info#index-information) reports this as `building.compacting`, which is separate from `building.status`.
 
+> [!WARNING]
+> From 3.0.0 until 3.3.1, an HNSW or DISKANN index lost track of records when more than nine of them held an identical vector. KNN results left out the tenth and later records, and could return fewer than `k` results after such records were deleted. SurrealDB 3.3.1 fixes this for new writes, but an index that was already affected stays that way until it is rebuilt. After upgrading, run [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild) on each vector index whose table can hold more than nine records with the same vector, such as duplicated embeddings or a placeholder vector.
+
+> [!WARNING]
+> Before SurrealDB 3.3.1, a KNN query could return fewer than `k` results for a user whose table `SELECT` permission hides some records. With no other condition in the `WHERE` clause, as in `WHERE embedding <|10|> $query`, hidden records took places in the top `k` and were then removed, so a record user who can see few of the records could get no results at all. Adding any other condition to the `WHERE` clause avoided this. A DISKANN index could also return no results for a query with a `SELECT` permission or another `WHERE` condition once the index had been compacted. SurrealDB 3.3.1 applies the permission while it searches, so both return the nearest records that the user can see.
+
 ### Types
 
 When defining a vector index with [HNSW](#hnsw-hierarchical-navigable-small-world), you can define the types the vector will be stored in. The `TYPE` clause is optional and can be used to specify the data type of the vector. SurrealDB supports the following types:
@@ -458,13 +563,10 @@ When defining a vector index with [HNSW](#hnsw-hierarchical-navigable-small-worl
 - `I32`: Represents 32-bit signed integers.
 - `I16`: Represents 16-bit signed integers.
 
-
 > [!NOTE]
 > In SurrealDB the default type for vectors is `F32`.
 
-<Since v="v3.1.0" />
-
-[DISKANN](#diskann-disk-based-approximate-nearest-neighbours) indexes accept a **narrower** set of element types: `F32`, `F16`, `I8`, and `U8` only, and only a subset of distance metrics - see the [DISKANN](#diskann-disk-based-approximate-nearest-neighbours) section below.
+[DISKANN](#diskann-disk-based-approximate-nearest-neighbours) indexes, available from SurrealDB 3.1, accept a **narrower** set of element types: `F32`, `F16`, `I8`, and `U8` only, and only a subset of distance metrics - see the [DISKANN](#diskann-disk-based-approximate-nearest-neighbours) section below.
 
 For example, to define a vector index with 64-bit signed integers, you can use the following query:
 
@@ -475,14 +577,11 @@ DEFINE INDEX idx_hnsw_embedding
 
 ### HNSW (Hierarchical Navigable Small World)
 
-
 This method uses a graph-based approach to efficiently navigate and search in high-dimensional spaces.
 While it is an approximate technique, it offers a high-performance balance between speed and accuracy, making it ideal for very large datasets.
 
-
 > [!NOTE]
 > Keep in mind the in-memory nature of HNSW when considering system resource allocation.
-
 
 <SurrealistMini orientation="horizontal" query="CREATE pts:3 SET point = [8,9,10,11];
 DEFINE INDEX mt_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN EFC 150 M 12;
@@ -504,7 +603,6 @@ Similar to M, but specifically for the bottom layer (the base layer) of the grap
 - LM (Multiplier for Level Generation):
 Used to determine the maximum level l for a new element during its insertion into the hierarchical structure. It is used in the formula l←⌊−ln⁡(unif(0..1))⋅mL⌋, where unif(0..1) is a uniform random variable between 0 and 1. This parameter influences the distribution of elements across different levels, impacting the overall balance and efficiency of the search structure.
 
-
 > [!NOTE]
 > You can only provide TYPE, M, and EFC. SurrealDB automatically computes M0 and LM with the most appropriate value. If not specified, M AND EFC are set to 12 and 150, respectively.  Refer to the [Vector Search Cheat Sheet](/docs/learn/data-models/vector-search/vector-indexes#vector-search-cheat-sheet) for the parameters allowed.
 
@@ -512,7 +610,7 @@ Used to determine the maximum level l for a new element during its insertion int
 
 <Since v="v3.0.0" />
 
-HNSW vector search caches element vectors in a bounded memory cache, reducing memory spikes and improving stability under load. The cache is a single budget **shared across every HNSW index** in the process, not a per-index allowance. It defaults to 256 MiB and can be modified via the `SURREAL_HNSW_CACHE_SIZE` [environment variable](/docs/reference/cli/surrealdb-cli/environment-variables). The value is an integer number of bytes - for example, `268435456` for the 256 MiB default.
+HNSW vector search caches element vectors in a bounded memory cache, reducing memory spikes and improving stability under load. The cache is a single budget **shared across every HNSW index** in the process, not a per-index allowance. It defaults to 256 MiB and can be modified via the `SURREAL_HNSW_CACHE_SIZE` [environment variable](/docs/reference/cli/db/environment-variables). The value is an integer number of bytes - for example, `268435456` for the 256 MiB default.
 
 This budget covers the cached **vectors** only. As noted above, the HNSW graph itself is held in memory: it is loaded on first use and is not bounded by this setting, so it must be sized for separately. If the full graph will not fit in RAM, DISKANN below is the index designed for that case.
 
@@ -553,7 +651,7 @@ While HNSW's graph is held resident in memory, a DISKANN index is **key-value-ba
 
 Vectors are stored and searched at **full precision**, applying no product quantisation or other compression. The only lever on per-vector size is the chosen `TYPE` (`F32`, `F16`, `I8`, or `U8`).
 
-The cache is a single budget **shared across every DISKANN index** in the process. It defaults to 256 MiB and can be capped with the `SURREAL_DISKANN_CACHE_SIZE` [environment variable](/docs/reference/cli/surrealdb-cli/environment-variables#cache-config), the DISKANN counterpart of `SURREAL_HNSW_CACHE_SIZE`. The value is an integer number of bytes - for example, `268435456` for the 256 MiB default.
+The cache is a single budget **shared across every DISKANN index** in the process. It defaults to 256 MiB and can be capped with the `SURREAL_DISKANN_CACHE_SIZE` [environment variable](/docs/reference/cli/db/environment-variables#cache-config), the DISKANN counterpart of `SURREAL_HNSW_CACHE_SIZE`. The value is an integer number of bytes - for example, `268435456` for the 256 MiB default.
 
 #### Choosing HNSW or DISKANN
 
@@ -578,36 +676,52 @@ LET $pt = [2,3,4,5];
 SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt;
 SELECT id FROM pts WHERE point <|2|> $pt EXPLAIN;" />
 
-## Verifying Index Utilization in Queries
+## Verifying index use in queries
 
-The [`EXPLAIN` clause](/docs/reference/query-language/statements/select#the-explain-clause) from SurrealQL shows the execution plan of the query, including whether it uses an index.
+The [`EXPLAIN` clause](/docs/reference/query-language/clauses/explain) shows the execution plan of a query, including whether it uses an index.
 
 ```surql
-SELECT * FROM user WHERE email='test@surrealdb.com' EXPLAIN FULL;
+DEFINE INDEX userEmailIndex ON user FIELDS email UNIQUE;
+CREATE user:test SET email = 'test@surrealdb.com';
+
+SELECT * FROM user WHERE email = 'test@surrealdb.com' EXPLAIN FULL;
 ```
 
-It also reveals details about which `operation` was used by the query planner and how many records matched the search criteria.
+An `IndexScan` operator names the index the query planner used. With `FULL`, each operator also reports `metrics`, including how many rows it produced (`output_rows`).
 
-```surql
-[
-    {
-        "detail": {
-            "plan": {
-                "index": "userEmailIndex",
-                "operator": "=",
-                "value": "test@surrealdb.com"
-            },
-            "table": "user"
-        },
-        "operation": "Iterate Index"
-    },
-    {
-        "detail": {
-            "count": 1
-        },
-        "operation": "Fetch"
-    }
-]
+```surql title="Sample output"
+{
+	attributes: {
+		projections: '*'
+	},
+	children: [
+		{
+			attributes: {
+				access: "= 'test@surrealdb.com'",
+				direction: 'Forward',
+				index: 'userEmailIndex',
+				predicate: "email = 'test@surrealdb.com'"
+			},
+			context: 'Db',
+			metrics: {
+				elapsed_ns: 2380999,
+				output_batches: 1,
+				output_rows: 1,
+				records_fetched: 0
+			},
+			operator: 'IndexScan'
+		}
+	],
+	context: 'Db',
+	metrics: {
+		elapsed_ns: 47083,
+		output_batches: 1,
+		output_rows: 1,
+		records_fetched: 0
+	},
+	operator: 'SelectProject',
+	total_rows: 1
+}
 ```
 
 ## Using the `ANY`/`ALL` operators for string indexes
@@ -629,16 +743,10 @@ value = "NONE"
 value = "[{ id: account:billy, name: 'Billy McConnell' }]"
 
 [[test.results]]
-value = "[{ id: account:billy, name: 'Billy McConnell' }]"
+value = '''"SelectProject [ctx: Db] [projections: *]\n    IndexScan [ctx: Db] [index: name_index, access: = 'Billy McConnell', direction: Forward, predicate: name INSIDE ['Billy McConnell']]\n"'''
 
 [[test.results]]
-value = "[{ id: account:billy, name: 'Billy McConnell' }]"
-
-[[test.results]]
-value = "[{ id: account:billy, name: 'Billy McConnell' }], [{ detail: { direction: 'forward', table: 'account' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 1 }, operation: 'Fetch' }]"
-
-[[test.results]]
-value = "[{ detail: { plan: { index: 'name_index', operator: 'union', value: ['Billy McConnell'] }, table: 'account' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 1 }, operation: 'Fetch' }]"
+value = '''"SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: account, direction: Forward, predicate: name CONTAINSANY ['Billy McConnell'], pre_decode_filter: yes]\n"'''
 
 */
 
@@ -649,7 +757,7 @@ CREATE account:billy SET name = "Billy McConnell";
 
 -- IN uses the index
 EXPLAIN SELECT * FROM account WHERE name IN ["Billy McConnell"];
-//- "SelectProject [ctx: Db] [projections: *]\n    IndexScan [ctx: Db] [index: name_index, access: = 'Billy McConnell', direction: Forward]\n"
+//- "SelectProject [ctx: Db] [projections: *]\n    IndexScan [ctx: Db] [index: name_index, access: = 'Billy McConnell', direction: Forward, predicate: name INSIDE ['Billy McConnell']]\n"
 
 -- CONTAINSANY scans the table
 EXPLAIN SELECT * FROM account WHERE name CONTAINSANY ["Billy McConnell"];
@@ -661,7 +769,6 @@ EXPLAIN SELECT * FROM account WHERE name CONTAINSANY ["Billy McConnell"];
 
 ## Rebuilding Indexes
 
-
 Indexes can be rebuilt using the [`REBUILD`](/docs/reference/query-language/statements/rebuild) statement. This can be useful when you want to update the index definition or when you want to rebuild the index to optimise performance.
 
 You may want to rebuild an index over time to ensure that the index is up-to-date with the latest data in the table.
@@ -670,7 +777,7 @@ You may want to rebuild an index over time to ensure that the index is up-to-dat
 /**[test]
 
 [[test.results]]
-error = ""The index 'userEmailIndex' does not exist""
+error = "The index 'userEmailIndex' does not exist"
 
 */
 
@@ -678,7 +785,6 @@ REBUILD INDEX userEmailIndex ON user;
 ```
 
 ## Using `IF NOT EXISTS` clause
-
 
 The `IF NOT EXISTS` clause can be used to define an index only if it does not already exist. You should use the `IF NOT EXISTS` clause when defining an index in SurrealDB if you want to ensure that the index is only created if it does not already exist. If the index already exists, the `DEFINE INDEX` statement will return an error.
 

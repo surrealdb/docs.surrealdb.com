@@ -29,12 +29,17 @@ Keywords extracted by RAKE also serve as seeds for `hybrid_graph` retrieval. Whe
 Retrieve the keyphrases extracted from a specific document:
 
 ```python
-from surrealdb.memory import Memory
+import os
+from surrealdb.memory import AsyncMemory
 
-memory = Memory(context="acme-prod", api_key=os.environ["AGENT_MEMORY_API_KEY"])
+memory = AsyncMemory(
+    context="acme-prod",
+    endpoint=os.environ["AGENT_MEMORY_ENDPOINT"],
+    api_key=os.environ["AGENT_MEMORY_API_KEY"],
+)
 
-keywords = await memory.documents.keywords.for_document(doc.id)
-for kw in keywords:
+response = await memory.documents.keywords.for_document(doc.id)
+for kw in response.keywords:
     print(kw.text, kw.score)
 # RETURN POLICY       1.8
 # UNOPENED ITEMS      1.5
@@ -46,7 +51,11 @@ for kw in keywords:
 ```javascript
 import { AgentMemory } from "@surrealdb/memory";
 
-const memory = new AgentMemory({ context: "acme-prod", apiKey: process.env.AGENT_MEMORY_API_KEY });
+const memory = new AgentMemory({
+    context: "acme-prod",
+    endpoint: process.env.AGENT_MEMORY_ENDPOINT,
+    apiKey: process.env.AGENT_MEMORY_API_KEY,
+});
 
 const keywords = await memory.documents.keywords.forDocument(doc.id);
 for (const kw of keywords) {
@@ -60,23 +69,24 @@ List all keywords in the Context, optionally filtered by minimum document count:
 
 ```python
 # Keywords that appear in at least 3 documents, sorted by frequency
-keywords = await memory.documents.keywords.list(
+page = await memory.documents.keywords.list(
     min_document_count=3,
     sort="-document_count",
 )
-for kw in keywords:
+for kw in page.keywords:
     print(kw.text, kw.document_count)
 ```
 
-### Get a keyword by text
+### Get a keyword by its normalised form
 
 ```python
 detail = await memory.documents.keywords.get("RETURN POLICY")
 print(detail.text)            # RETURN POLICY
-print(detail.score)           # 1.8
 print(detail.document_count)  # 12
-print([d.id for d in detail.documents])
+print([(d["id"], d["title"], d["score"]) for d in detail.documents])
 ```
+
+A keyword has no score of its own. The RAKE score belongs to the link between a keyword and a document, so it appears on each entry in `documents` and on the per-document keyword list.
 
 ### Vector search over keywords
 
@@ -84,8 +94,8 @@ Find keywords semantically similar to a query string. This uses the keyword text
 
 ```python
 similar = await memory.documents.keywords.search("refund policies", k=10)
-for kw in similar:
-    print(kw.text, kw.similarity)
+for kw in similar.results:
+    print(kw.text, kw.score)
 # RETURN POLICY     0.94
 # REFUND WINDOW     0.91
 # EXCHANGE POLICY   0.88
@@ -93,27 +103,35 @@ for kw in similar:
 
 ## BM25 full-text search
 
-SurrealDB Agent Memory indexes all chunk text in a full-text index using the `spectron_analyzer`. The analyzer applies two tokenisation passes:
+SurrealDB Agent Memory indexes all chunk text in a full-text index using one analyzer, `knowledge_text`, which every BM25 index in the schema shares:
 
-- **Blank tokenizer**: splits on whitespace only, preserving punctuation within tokens (useful for product codes like `MLWK3LL/A`)
-- **Class tokenizer**: splits on character class boundaries (letter/digit transitions), which separates alphanumeric identifiers without requiring spaces
+```surql
+DEFINE ANALYZER knowledge_text TOKENIZERS blank, class, camel, punct
+	FILTERS lowercase, snowball(english);
+```
 
-Both passes feed through two token filters:
+The four tokenizers together split text on:
 
-- **Lowercase**: case-normalisation for consistent matching
-- **Snowball**: English stemming (e.g. `returning` → `return`, `purchases` → `purchas`)
+- **`blank`**: whitespace
+- **`class`**: changes of character class, such as a letter followed by a digit
+- **`camel`**: camelCase boundaries
+- **`punct`**: punctuation characters
 
-This combination means that BM25 matches both exact-cased identifiers (via blank tokenizer) and inflected natural-language terms (via class tokenizer + Snowball).
+The tokens then pass through two filters:
+
+- **`lowercase`**: case-normalisation for consistent matching
+- **`snowball(english)`**: English stemming (e.g. `returning` → `return`, `purchases` → `purchas`)
+
+An identifier such as `MLWK3LL/A` is therefore split into its letter, digit and punctuation runs, and a query containing the same identifier is split the same way, so the two match. Inflected natural-language terms match through stemming.
 
 BM25 is invoked automatically when you use `mode="bm25"` or `mode="hybrid"` in the query endpoint. The BM25 score contributes to the RRF fusion in hybrid mode.
 
 ```python
 # Pure BM25 - best for exact-term matching
-hits = await memory.documents.query(
-    query="MLWK3LL/A MacBook Pro",
+response = await memory.documents.query(
+    "MLWK3LL/A MacBook Pro",
     mode="bm25",
     k=10,
-    scope=["org/acme"],
 )
 ```
 

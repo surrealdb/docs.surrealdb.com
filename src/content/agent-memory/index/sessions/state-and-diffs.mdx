@@ -6,15 +6,15 @@ description: "Reading structured memory state. Also tracking what changed betwee
 
 # State and diffs
 
-The state endpoints give you a structured, queryable view of everything SurrealDB Agent Memory has learned within a given scope. Rather than replaying the conversation history, you query the current knowledge graph directly - grouped by category and filtered by scope - and receive a clean, structured representation of what the agent knows.
+The state endpoints give you a structured, queryable view of everything SurrealDB Agent Memory has learned within the caller's read region. Rather than replaying the conversation history, you query the current knowledge graph directly - grouped by category - and receive a clean, structured representation of what the agent knows.
 
 ## The `/state` endpoint
 
 ```http
-GET /api/v1/{context_id}/state?scope[user]=alice&scope[org]=acme
+GET /api/v1/{context_id}/state?limit=100
 ```
 
-The scope parameters filter the state to the specified dimensional intersection. Omitting a dimension broadens the query - `scope[org]=acme` without a user returns the union of all user-level knowledge for that organisation.
+`limit` is the only parameter. It bounds each of the six underlying tables (entities, attributes, relations, actions, instructions, and unknowns), defaults to 100, and is capped at 500. The response covers everything the calling key can read; there is no scope filter on this endpoint.
 
 Response:
 
@@ -44,14 +44,15 @@ Response:
         "validUntil": null,
         "supersedes": "attr_01hy1b",
         "supersededBy": null,
-        "source": { "kind": "turn", "ref": "turn:01hy2…" },
+        "source": { "kind": "turn", "ref": "turn:01hy2…", "sessionId": "01hx7…" },
         "createdAt": "2026-05-12T16:24:00Z"
       }
     ],
-    "relations": []
+    "relations": [],
+    "actions": []
   },
-  "knowledge": { "entities": [], "attributes": [], "relations": [] },
-  "context": { "entities": [], "attributes": [], "relations": [] },
+  "knowledge": { "entities": [], "attributes": [], "relations": [], "actions": [] },
+  "context": { "entities": [], "attributes": [], "relations": [], "actions": [] },
   "instructions": [
     {
       "id": "instr_01hy4d",
@@ -64,7 +65,15 @@ Response:
       "about": "Whether Alice holds any equity in Acme.",
       "reason": "Equity was never mentioned in the conversation."
     }
-  ]
+  ],
+  "truncated": {
+    "entities": false,
+    "attributes": false,
+    "relations": false,
+    "actions": false,
+    "instructions": false,
+    "unknowns": false
+  }
 }
 ```
 
@@ -72,13 +81,16 @@ Response:
 
 | Field | Description |
 |---|---|
-| `identity` | Biographical facts, roles, and names - as `entities`, `attributes`, and `relations`. |
-| `knowledge` | Preferences, opinions, and skills, in the same three-part shape. |
-| `context` | Situational and recent-event memory, in the same three-part shape. |
+| `identity` | Biographical facts, roles, and names - as `entities`, `attributes`, `relations`, and `actions`. |
+| `knowledge` | Preferences, opinions, and skills, in the same four-part shape. |
+| `context` | Situational and recent-event memory, in the same four-part shape. |
 | `instructions` | Standing behavioural directives: `id`, `label`, `description`. |
 | `unknowns` | Things extraction could not resolve: `about` and `reason`. |
+| `truncated` | For each table, `true` when it had more rows than `limit`. |
 
-The three memory categories share one shape - each holds `entities`, `attributes`, and `relations`.
+The three memory categories share one shape - each holds `entities`, `attributes`, `relations`, and `actions`.
+
+`/state` is a bounded snapshot, not an export. To read a table completely, page through `/entities`, `/attributes`, `/relations`, or `/actions` with `page.nextCursor` instead.
 
 The endpoint always returns the current, canonical view: superseded attributes are not included. Each returned attribute carries `supersedes` and `supersededBy` links, so you can walk backwards from the current value. **Corrections are not part of this response** - they come back on the write that made them, described in [Showing what changed after a turn](#showing-what-changed-after-a-turn).
 
@@ -94,6 +106,7 @@ There is no `/state/diff` endpoint, and `/state` takes no `since` parameter - bu
 | `entities` | Entities created or matched |
 | `attributes` | Attributes asserted |
 | `relations` | Relations asserted |
+| `actions` | Events the turn described |
 | `instructions` | Standing directives picked up |
 | `uncertainties` | Things the extractor could not resolve |
 | `corrections` | Values this write superseded, with both sides |
@@ -105,12 +118,12 @@ A supersession is reported with the value it replaced, so no second request and 
 ```python
 state = await memory.state()
 
-print(state.identity.attributes)   # Current attribute list
+print(state.identity["attributes"])   # Current attribute list
 print(state.instructions)          # Active behavioural instructions
 print(state.unknowns)              # Flagged uncertainties
 ```
 
-`GET /state` takes no parameters at all - no scope, no time filter, no `since`. It returns everything the calling key can read. Narrow the result yourself, or read a single entity with `entities.get(…)`.
+`GET /state` takes only `limit` - no scope, no time filter, no `since`. It returns everything the calling key can read, up to `limit` rows per table. Narrow the result yourself, or read a single entity with `entities.get(…)`. The JavaScript SDK passes `limit` as `memory.state({ limit: 200 })`.
 
 To read as another principal, send the **`X-Spectron-On-Behalf-Of`** header. That is a request header available on every end-user route rather than a `state()` argument, and the effective authority is the intersection of your grants and the target's - delegation never widens access.
 
@@ -144,12 +157,13 @@ Response shape:
 
 | Field | Description |
 |---|---|
+| `selfFacts` | Facts about the calling principal's own entity, kept apart from facts about other people. |
 | `static` | Stable identity facts: name, role, organisation, contact details. |
 | `dynamic` | Frequently-updated attributes: location, status, current project, mood. |
 | `preferences` | Extracted preferences and stated likes or dislikes. |
 | `instructions` | Active behavioural directives applicable to this user. |
 
-The profile view does not include raw turn references. It is a synthesised snapshot intended for injection into system prompts or display in a "what does the AI know about me?" UI.
+Each entry in `selfFacts`, `static`, `dynamic`, and `preferences` carries `entity` and `entityType` (the entity the fact is about) alongside `key` and `value`, so a fact about a person the user mentioned is not read as a fact about the user. The profile view does not include raw turn references. It is a synthesised snapshot intended for injection into system prompts or display in a "what does the AI know about me?" UI.
 
 ## Driving real-time UI updates
 
@@ -195,4 +209,4 @@ Corrections are produced during reconciliation whenever a newly extracted attrib
 
 The correction is a summary of the change, not the full temporal record. The timestamps live on the attribute records themselves: the superseded record gets a `valid_until` and a `superseded_by` link, the new record a `valid_from` and a `supersedes` link. That is what makes historical queries - "what did the agent know about Alice's location in March 2026?" - return the right answer. Read the chain with `GET /entities/{type}/{name}/history/{key}`.
 
-Corrections accumulate and are never deleted. The full supersession chain for any attribute is always queryable, which means the audit trail for any fact is complete and irrevocable. See [Temporal validity](/docs/agent-memory/reasoning/temporal-validity) and [Reconciliation and supersession](/docs/agent-memory/reasoning/reconciliation-and-supersession) for the detailed model.
+Corrections do not delete the superseded record. The full supersession chain for any attribute stays queryable, so the audit trail for a fact is complete unless it is removed on purpose: [forget](/docs/agent-memory/operations/forget) with `purge: true` also removes the superseded history, and deleting a session removes its turns. See [Temporal validity](/docs/agent-memory/reasoning/temporal-validity) and [Reconciliation and supersession](/docs/agent-memory/reasoning/reconciliation-and-supersession) for the detailed model.

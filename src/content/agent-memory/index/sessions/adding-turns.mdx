@@ -8,17 +8,22 @@ description: "How to add conversation turns. Interpreting the structured extract
 
 A **turn** is a single message in a conversational thread. After a session is open, every message - whether from the user, the assistant, the system, or a tool - is recorded as a turn. SurrealDB Agent Memory processes each turn synchronously through an extraction pipeline and returns a structured diff of everything that was learned or changed.
 
-## The turns endpoint
+## Writing a turn
+
+A turn is written with the `/facts` endpoint. Pass the session id as `session_id` and the speaker as `role`:
 
 ```http
-POST /api/v1/{context_id}/sessions/{session_id}/turns
+POST /api/v1/{context_id}/facts
 Content-Type: application/json
 
 {
-  "role": "user",
-  "content": "I just got promoted to CTO"
+  "text": "I just got promoted to CTO",
+  "session_id": "01hx7…",
+  "role": "user"
 }
 ```
+
+`role` defaults to `user`. When `session_id` is left out, SurrealDB Agent Memory creates a new session for the write and returns its id as `sessionId` in the response.
 
 The request blocks until extraction is complete, then returns the structured result. Extraction is synchronous by design: the caller can use the returned diff to update application state, drive real-time UI, or trigger downstream logic without polling.
 
@@ -37,7 +42,7 @@ All four roles participate in provenance. Each turn is stored with its role, and
 
 When a turn arrives, SurrealDB Agent Memory runs the following steps synchronously before returning:
 
-1. **Named entity recognition** - identifies people, organisations, locations, products, and custom entity types configured in your context.
+1. **Named entity recognition** - identifies people, organisations, locations, products and the other entity types in the [fixed set](/docs/agent-memory/tuning/ontology-grounding#entity-types-are-a-fixed-set). A type outside that set is stored as `other`.
 2. **Attribute extraction** - extracts scalar properties of entities (job title, location, preference, status, and so on).
 3. **Relation extraction** - identifies directed relationships between entities.
 4. **Instruction detection** - recognises statements that express user preferences, behavioural instructions, or explicit requests about how the agent should behave.
@@ -58,33 +63,51 @@ const result = await memory.remember("I just got promoted to CTO", { sessionId: 
 
 ## Extraction result
 
-The response from a turn submission contains the full extraction diff for that turn.
+The response to a write contains the session and turn ids, and an `extraction` object with the full diff for that turn.
 
 ```json
 {
-  "turn_id": "turn:01hy2…",
-  "entities": [
-        { "id": "entity:01hy2a…", "type": "person", "label": "Alice",
-        "source_turn": "turn:01hy2…" }
-  ],
-  "attributes": [
-    {
-      "id": "attr:01hy2b…",
-      "entity": "entity:01hy2a…",
-      "key": "job_title",
-      "value": "CTO",
-      "valid_from": "2026-05-12T16:24:00Z",
-      "source_turn": "turn:01hy2…"
-    }
-  ],
-  "relations": [],
-  "instructions": [],
-  "uncertainties": [],
-  "corrections": []
+  "mode": "full",
+  "sessionId": "01hx7…",
+  "turnId": "01hy2…",
+  "extraction": {
+    "turnId": "01hy2…",
+    "entities": [
+      {
+        "id": "['person', 'alice']",
+        "name": "Alice",
+        "entityType": "person",
+        "memoryCategory": "identity",
+        "isNew": false
+      }
+    ],
+    "attributes": [
+      {
+        "id": "attr_01hy2b",
+        "entityId": "['person', 'alice']",
+        "key": "job_title",
+        "value": "CTO",
+        "memoryCategory": "identity"
+      }
+    ],
+    "relations": [],
+    "actions": [],
+    "instructions": [],
+    "uncertainties": [],
+    "corrections": [
+      {
+        "entityId": "['person', 'alice']",
+        "key": "job_title",
+        "oldValue": "Head of Platform",
+        "newValue": "CTO"
+      }
+    ]
+  },
+  "preview": false
 }
 ```
 
-### `turn_id`
+### `turnId`
 
 The stable identifier for this turn. Store it to correlate later reads - for example to label a `/state` snapshot taken immediately after the turn.
 
@@ -93,9 +116,10 @@ The stable identifier for this turn. Store it to correlate later reads - for exa
 Entities named or implied in the turn content. Each entity carries:
 
 - `id` - stable record identifier
-- `type` - entity type (e.g. `person`, `organisation`, `project`)
-- `label` - the canonical display name
-- `source_turn` - the turn that first introduced this entity
+- `name` - the canonical display name
+- `entityType` - entity type (e.g. `person`, `organisation`, `project`)
+- `memoryCategory` - `identity`, `knowledge`, or `context`
+- `isNew` - `true` when this turn created the entity, `false` when it matched an existing one
 
 An entity record is created once and then referenced by subsequent attributes and relations. If an entity was already known, the existing record is returned rather than a duplicate.
 
@@ -103,23 +127,26 @@ An entity record is created once and then referenced by subsequent attributes an
 
 Scalar facts about entities. Each attribute carries:
 
-- `entity` - the entity the attribute belongs to
+- `id` - the attribute record identifier
+- `entityId` - the entity the attribute belongs to
 - `key` - the attribute name (e.g. `job_title`, `location`, `preference`)
 - `value` - the extracted value
-- `valid_from` - when the attribute became valid (defaults to the turn timestamp)
-- `valid_until` - when the attribute ceased to be valid, if known
-- `source_turn` - the turn that produced this attribute
+- `memoryCategory` - the category the attribute was filed under
 
-Attributes are versioned. If the same key already exists for an entity and the new value differs, the prior attribute is superseded rather than overwritten. The supersession chain is preserved so the history of a fact is always queryable.
+Attributes are versioned. If the same key already exists for an entity and the new value differs, the prior attribute is superseded rather than overwritten. The supersession chain is preserved so the history of a fact is always queryable. Validity times and provenance are stored on the attribute record and returned by `/state` and `GET /entities/{type}/{name}/history/{key}`.
 
 ### `relations`
 
 Directed relationships between two entities. Each relation carries:
 
-- `from` - source entity
-- `to` - target entity
-- `type` - relationship type (e.g. `works_at`, `manages`, `owns`)
-- `source_turn` - the turn that established the relation
+- `subject` - source entity
+- `label` - relationship type (e.g. `works_at`, `manages`, `owns`)
+- `object` - target entity
+- `memoryCategory` - the category the relation was filed under
+
+### `actions`
+
+Events the turn describes: who did what, and when. Each action carries `actor`, `verb`, `object` (the thing acted on, as the extraction named it, or `null`), a one-line `summary`, `occurredAt` when the turn gave a time, and `memoryCategory`.
 
 ### `instructions`
 
@@ -127,22 +154,22 @@ Behavioural directives extracted from the turn. These are statements where the u
 
 Each instruction carries:
 
-- `text` - the normalised instruction text
-- `priority` - extracted priority level (`high`, `medium`, `low`)
-- `source_turn` - the turn that introduced the instruction
+- `id` - the instruction record identifier
+- `label` - a short name for the directive
+- `description` - the normalised instruction text
 
 ### `uncertainties`
 
-Statements extracted from the turn that SurrealDB Agent Memory cannot assert with confidence - negated claims, speculative language, conflicting signals, or information that requires human verification. These are stored separately from confirmed attributes and are surfaced in the state under `unknowns`.
+Statements extracted from the turn that SurrealDB Agent Memory cannot assert with confidence - negated claims, speculative language, conflicting signals, or information that requires human verification. Each carries `about` and `reason`. These are stored separately from confirmed attributes and are surfaced in the state under `unknowns`.
 
 ### `corrections`
 
 When reconciliation finds that a newly extracted fact contradicts an existing attribute, a correction record is produced. Each correction carries:
 
-- `attribute` - the attribute identifier that was corrected
-- `previous` - the prior value and its source turn
-- `current` - the new value and this turn as source
-- `timestamp` - when the correction occurred
+- `entityId` - the entity whose attribute changed
+- `key` - the attribute name
+- `oldValue` - the value that was superseded
+- `newValue` - the value from this turn
 
 Corrections are the mechanism through which SurrealDB Agent Memory handles conversational drift - for example, when a user corrects a name, updates their role, or revises a stated preference. See [Reconciliation and supersession](/docs/agent-memory/reasoning/reconciliation-and-supersession) for how the supersession chain works.
 
@@ -155,24 +182,24 @@ A common pattern is to compare the returned arrays against your local state and 
 ```python
 result = await memory.remember("Actually I moved to Berlin last month", session_id=session.id, role="user")
 
-for attr in result.attributes:
-    ui.render_attribute(attr.entity, attr.key, attr.value)
+for attr in result.extraction.attributes:
+    ui.render_attribute(attr["entityId"], attr["key"], attr["value"])
 
-for correction in result.corrections:
-    ui.strike_through(correction.previous.value)
-    ui.highlight_new(correction.current.value)
+for correction in result.extraction.corrections:
+    ui.strike_through(correction["oldValue"])
+    ui.highlight_new(correction["newValue"])
 ```
 
 ```javascript
 const result = await memory.remember("Actually I moved to Berlin last month", { sessionId: session.id, role: "user" });
 
-for (const attr of result.attributes) {
-    ui.renderAttribute(attr.entity, attr.key, attr.value);
+for (const attr of result.extraction?.attributes ?? []) {
+    ui.renderAttribute(attr.entityId, attr.key, attr.value);
 }
 
-for (const correction of result.corrections) {
-    ui.strikeThrough(correction.previous.value);
-    ui.highlightNew(correction.current.value);
+for (const correction of result.extraction?.corrections ?? []) {
+    ui.strikeThrough(correction.oldValue);
+    ui.highlightNew(correction.newValue);
 }
 ```
 
@@ -183,7 +210,7 @@ When you are driving the LLM loop yourself (as opposed to using `chat()`), recor
 ```python
 user_result = await memory.remember(user_message, session_id=session.id, role="user")
 
-context = await session.context(query=user_message)
+context = await memory.sessions.context(session.id, user_message)
 reply = your_llm.generate(system=context.context, user=user_message)
 
 assistant_result = await memory.remember(reply, session_id=session.id, role="assistant")
@@ -200,11 +227,11 @@ GET /api/v1/{context_id}/sessions/{session_id}/turns
 ```
 
 ```python
-turns = await session.turns()
+turns = await memory.sessions.turns(session.id)
 ```
 
 ```javascript
 const turns = await session.turns();
 ```
 
-The response is an ordered list of turns with their roles, content, and timestamps. Extraction results are not re-included in this listing; use the `/state` endpoint to query the facts that were produced.
+The response is a list of turns, oldest first, with their roles, content, and timestamps. It is paginated: `limit` defaults to 100 and is capped at 500, and `page.nextCursor` gives the next page. Extraction results are not re-included in this listing; use the `/state` endpoint to query the facts that were produced.

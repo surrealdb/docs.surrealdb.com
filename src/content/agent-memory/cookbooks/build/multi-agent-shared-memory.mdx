@@ -26,8 +26,8 @@ from surrealdb.memory import AsyncMemory
 
 client = AsyncMemory(
     context="acme-prod",
-    endpoint="https://spectron.example.com",
-    api_key="sk-...",
+    endpoint="https://memory.example.com",
+    api_key="sp-...",
 )
 
 SHARED_SCOPE = ["org/acme/project/market-research-q3"]
@@ -53,31 +53,37 @@ To prevent worker agents from writing to shared memory (read-only readers), issu
 
 ## Pattern 2: supervisor and workers
 
-A supervisor agent orchestrates several workers. Each worker operates in its own user/agent scope, but the supervisor aggregates their findings into a shared project scope.
+A supervisor agent orchestrates several workers. Each worker writes to its own scope, which is the project scope AND its own agent scope, and the supervisor aggregates their findings into the shared project scope.
+
+A scope list is a list of OR clauses, and each nested list is one AND clause. `["org/acme/project/research-pipeline", "agent/worker-1"]` is an OR, so a record tagged with it is readable by anyone who can read the project scope. `[["org/acme/project/research-pipeline", "agent/worker-1"]]` is one AND clause, so only a reader whose grants cover both paths can read the record.
 
 ```python
-SUPERVISOR_SCOPE = ["org/acme/project/research-pipeline"]
+PROJECT = "org/acme/project/research-pipeline"
+SUPERVISOR_SCOPE = [PROJECT]
 
 async def run_worker(topic: str, worker_id: str, client: AsyncMemory) -> str:
-    worker_scope = [*SUPERVISOR_SCOPE, f"agent/{worker_id}"]
-    async with client.sessions.create(scopes=worker_scope) as session:
-        # Worker researches its topic
-        context = await client.recall(topic, k=5)
-        findings = await llm.research(topic, context["hits"])
+    # One AND clause: the project scope and this worker's own scope
+    worker_scope = [[PROJECT, f"agent/{worker_id}"]]
+    session = await client.sessions.create(scopes=worker_scope)
 
-        # Worker stores findings in its own scope
-        await client.remember(
-            findings,
-            session_id=session.id,
-            memory_category="knowledge",
-        )
+    # Worker researches its topic
+    context = await client.recall(topic, k=5, lens=worker_scope)
+    findings = await llm.research(topic, context.hits)
 
-        # Return a summary for the supervisor
-        reflection = await client.reflect(
-            query=f"Summarise findings about {topic}",
-            persist=False,
-        )
-        return reflection.reflection
+    # Worker stores findings in its own scope
+    await client.remember(
+        findings,
+        session_id=session.id,
+        scopes=worker_scope,
+        memory_category="knowledge",
+    )
+
+    # Return a summary for the supervisor
+    reflection = await client.reflect(
+        query=f"Summarise findings about {topic}",
+        persist=False,
+    )
+    return reflection.reflection
 
 async def supervisor(client: AsyncMemory):
     topics = ["pricing trends", "competitor features", "customer sentiment"]
@@ -89,36 +95,39 @@ async def supervisor(client: AsyncMemory):
     ])
 
     # Supervisor aggregates findings into shared scope
-    async with client.sessions.create(scopes=SUPERVISOR_SCOPE) as session:
-        for topic, finding in zip(topics, results):
-            await client.remember(
-                f"[{topic}] {finding}",
-                session_id=session.id,
-                memory_category="knowledge",
-            )
-
-        # Supervisor synthesises and stores a final report
-        await client.reflect(
-            query="Synthesise all research findings into a coherent executive summary.",
-            persist=True,
+    session = await client.sessions.create(scopes=SUPERVISOR_SCOPE)
+    for topic, finding in zip(topics, results):
+        await client.remember(
+            f"[{topic}] {finding}",
+            session_id=session.id,
+            scopes=SUPERVISOR_SCOPE,
+            memory_category="knowledge",
         )
+
+    # Supervisor synthesises and stores a final report
+    await client.reflect(
+        query="Synthesise all research findings into a coherent executive summary.",
+        persist=True,
+    )
 ```
+
+This example shares one client between the workers to stay short. A lens narrows what a read returns, but it does not restrict access. To stop one worker reading another worker's memory, give each worker its own API key, bound to a principal whose grants cover the project scope and its own `agent/<id>` scope only.
 
 ## Scope hierarchy
 
-SurrealDB Agent Memory resolves **scope visibility** from OR-of-AND clauses on each record. For typical single-owner tags, a query at scope `["org/acme"]` retrieves org-wide memory and shared org facts, but not another user’s private record info unless your grant covers them.
+SurrealDB Agent Memory resolves **scope visibility** from OR-of-AND clauses on each record. A reader can read a record when its grants cover every path in at least one of the record's clauses. Grants reach down a scope tree, never up, so no read reaches a record tagged at an ancestor scope.
 
 ```text
-{org: "acme"}                    ← visible to all org agents
-{org: "acme", project: "alpha"}  ← visible to project alpha agents
-{org: "acme", project: "alpha", agent: "planner"}  ← planner only
+[["org/acme/project/alpha"]]                    visible to readers granted project alpha
+[["org/acme/project/alpha", "agent/planner"]]   visible only to readers granted project alpha AND agent/planner
+[["org/acme/project/alpha"], ["agent/planner"]] visible to readers granted project alpha OR agent/planner
 ```
 
-A supervisor querying at `{org: "acme", project: "alpha"}` sees:
-- Everything at the project scope (shared findings)
-- Everything at more specific scopes (individual worker findings)
+A supervisor granted `org/acme/project/alpha/*` and `agent/*` sees:
+- Everything tagged at the project scope (shared findings)
+- Everything tagged with the project scope AND a worker's agent scope (individual worker findings)
 
-A worker reading with a lens of `["org/acme/project/alpha/agent/worker-1"]` sees only its own memory and the shared project scope.
+A worker granted `org/acme/project/alpha/*` and `agent/worker-1` sees the shared project findings and its own findings, but not records tagged with another worker's agent scope. Neither of them sees a record tagged only `org/acme`, because that is an ancestor of the project scope. Grant patterns accept `/*` only as a trailing subtree marker.
 
 ## Preventing memory pollution
 
@@ -142,8 +151,9 @@ await memory.remember(
     "The enterprise customer segment prioritises SOC2 compliance over cost.",
 )
 
-# The extraction pipeline creates:
-# entity: CustomerSegment/enterprise
+# The extraction pipeline creates (entity types come from a fixed set,
+# so a customer segment is stored as `other`):
+# entity: other/enterprise
 # attribute: top_priority = "SOC2 compliance"
 # relation: enterprise → values → compliance_features
 ```
@@ -170,20 +180,17 @@ history = await memory.entities.history("person", "alice", "role")
 The supervisor pattern works best with a dedicated reflection pass that runs after all workers complete:
 
 ```python
-async with client.sessions.create(scopes=SUPERVISOR_SCOPE) as supervisor_session:
-    # Load all worker contributions
-    full_context = await client.profile()
+# Reflection reads the memory the supervisor's key can see,
+# which includes every worker's findings
+synthesis = await client.reflect(
+    query="What are the top-level conclusions across all worker findings? What is still uncertain?",
+    persist=True,
+)
 
-    # Synthesise
-    synthesis = await client.reflect(
-        query="What are the top-level conclusions across all worker findings? What is still uncertain?",
-        persist=True,
-    )
-    
-    print(synthesis.summary)
+print(synthesis.reflection)
 ```
 
-The persisted reflection becomes part of the shared scope's long-term memory and is included in future `profile()` calls.
+With `persist=True`, the attributes the reflection writes are returned in `synthesis.persisted_attributes` and become part of the shared memory, so later reads return them.
 
 ## JavaScript example
 
@@ -198,9 +205,10 @@ const client = new AgentMemory({
 
 const sharedScope = ["org/acme/project/market-research-q3"];
 
+// One AND clause: readable only with grants on the project and on worker-1
 await client.remember(
     "Competitor X raised prices by 20% in Q2.",
-    { scopes: [...sharedScope, "org/acme/project/market-research-q3/agent/worker-1"] },
+    { scopes: [["org/acme/project/market-research-q3", "agent/worker-1"]] },
 );
 
 const results = await client.recall("competitor pricing", { k: 10, lens: sharedScope });

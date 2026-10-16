@@ -27,11 +27,11 @@ const memory = new AgentMemory({
 // POST /tools/recall (configured as an ElevenLabs server tool)
 export async function POST(request: Request) {
     const { query, user_id } = await request.json();
-    const block = await memory.context(query, {
-        scope: [`org/acme/user/${user_id}`],
+    const { context } = await memory.context(query, {
+        lens: [`org/acme/user/${user_id}`],
         k: 8,
     });
-    return Response.json({ memory: block });
+    return Response.json({ memory: context });
 }
 ```
 
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     }));
 
     await memory.rememberMany(turns, {
-        scope: [`org/acme/user/${userId}`],
+        scopes: [`org/acme/user/${userId}`],
     });
 
     return new Response("ok");
@@ -66,7 +66,7 @@ export async function POST(request: Request) {
 
 ## Scope per caller
 
-Both endpoints scope to the caller with a slash path such as `["org/acme/user/alice"]`, derived from the dynamic variable or conversation metadata. Register paths with `agent-memory scopes create` before first use.
+Both endpoints scope to the caller with a slash path such as `["org/acme/user/alice"]`, derived from the dynamic variable or conversation metadata. The recall endpoint passes it as `lens`, and the webhook passes it as `scopes`. Register paths with `agent-memory scopes create` before first use.
 
 ## Next steps
 

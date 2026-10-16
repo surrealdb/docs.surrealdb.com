@@ -40,7 +40,6 @@ SELECT
   </TabItem>
   <TabItem label="Railroad Diagram">
 
-
 <RailroadDiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"SELECT"},{"type":"Choice","index":1,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"VALUE"},{"type":"NonTerminal","text":"@field"}]},{"type":"NonTerminal","text":"@fields"}]},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"AS"},{"type":"NonTerminal","text":"@alias"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"OMIT"},{"type":"NonTerminal","text":"@fields ..."}]}},{"type":"Terminal","text":"FROM"},{"type":"Optional","child":{"type":"Terminal","text":"ONLY"}},{"type":"NonTerminal","text":"@targets"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"WITH"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"NOINDEX"},{"type":"Sequence","children":[{"type":"Terminal","text":"INDEX"},{"type":"NonTerminal","text":"@indexes ..."}]}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"WHERE"},{"type":"NonTerminal","text":"@conditions"}]}},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"SPLIT"},{"type":"Optional","child":{"type":"Terminal","text":"ON"}},{"type":"NonTerminal","text":"@field, ..."}]},{"type":"Sequence","children":[{"type":"Terminal","text":"GROUP"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"ALL"},{"type":"Sequence","children":[{"type":"Optional","child":{"type":"Terminal","text":"BY"}},{"type":"NonTerminal","text":"@field, ..."}]}]}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"ORDER"},{"type":"Optional","child":{"type":"Terminal","text":"BY"}},{"type":"Choice","index":1,"children":[{"type":"Sequence","children":[{"type":"NonTerminal","text":"@field"},{"type":"Optional","child":{"type":"Terminal","text":"COLLATE"}},{"type":"Optional","child":{"type":"Terminal","text":"NUMERIC"}},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"ASC"},{"type":"Terminal","text":"DESC"}]}}]},{"type":"Terminal","text":"RAND()"}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"LIMIT"},{"type":"Optional","child":{"type":"Terminal","text":"BY"}},{"type":"NonTerminal","text":"@limit"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"START"},{"type":"Optional","child":{"type":"Terminal","text":"AT"}},{"type":"NonTerminal","text":"@start"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"FETCH"},{"type":"NonTerminal","text":"@fields ..."}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"TIMEOUT"},{"type":"NonTerminal","text":"@duration"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"FOR"},{"type":"Terminal","text":"UPDATE"}]}},{"type":"Optional","child":{"type":"Terminal","text":"TEMPFILES"}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"EXPLAIN"},{"type":"Optional","child":{"type":"Terminal","text":"FULL"}}]}},{"type":"Terminal","text":";"}]}]}' />
 
   </TabItem>
@@ -408,9 +407,7 @@ SELECT * OMIT password, opts.{ security, enabled } FROM person;
 
 To sort records, SurrealDB allows ordering on multiple fields and nested fields. Use the `ORDER BY` clause to specify a comma-separated list of field names that should be used to order the resulting records. The `ASC` and `DESC` keywords can be used to specify whether results should be sorted in an ascending or descending manner. The `COLLATE` keyword can be used to use Unicode collation when ordering text in string values, ensuring that different cases, and different languages are sorted in a consistent manner. Finally, the `NUMERIC` can be used to correctly sort text which contains numeric values.
 
-<Since v="v3.3.0" />
-
-Fields used only for sorting do not need to appear in the `SELECT` list. Sorting runs before projection, so the full record is available when the order keys are evaluated:
+From SurrealDB 3.3, fields used only for sorting do not need to appear in the `SELECT` list. Sorting runs before projection, so the full record is available when the order keys are evaluated:
 
 ```surql
 -- Return only event and subject, ordered by a field that is not selected
@@ -435,6 +432,49 @@ SELECT * FROM article ORDER BY title NUMERIC ASC;
 ```
 
 For more detail on collation, numeric ordering, and random order, see the [`ORDER` clause](/docs/reference/query-language/clauses/order).
+
+### Ranking records
+
+SurrealQL has no `RANK()` window function. To rank records, count the records that sort ahead of each one in a subquery, using `$parent` to refer to the outer record, and add one. Records with equal scores share a rank, and the rank after a tie is skipped, as in competition ranking (1, 1, 3, 4).
+
+This works because a record's rank is defined by how many records beat it, not by its position in the output. For each record of the outer query, the subquery reads the whole `player` table again and keeps only the records whose score is strictly greater than `$parent.score`, the score of the record being ranked. If two records score higher, the record is third, so the rank is that count plus one. In the example below, Cai's score of 70 is beaten by Ana and Ben, so the subquery returns two records and Cai's rank is 3. Ana and Ben each find no higher score, so both get rank 1, and because the comparison is `>` rather than `>=`, neither counts the other. The `ORDER BY` clause only sorts the final output, so the ranks come out the same in any order.
+
+```surql
+CREATE player:1 SET name = 'Ana', score = 90;
+CREATE player:2 SET name = 'Ben', score = 90;
+CREATE player:3 SET name = 'Cai', score = 70;
+CREATE player:4 SET name = 'Dee', score = 50;
+
+SELECT name, score, (SELECT id FROM player WHERE score > $parent.score).len() + 1 AS rank
+FROM player ORDER BY score DESC;
+```
+
+```surql title="Output"
+[
+	{ name: 'Ana', rank: 1, score: 90 },
+	{ name: 'Ben', rank: 1, score: 90 },
+	{ name: 'Cai', rank: 3, score: 70 },
+	{ name: 'Dee', rank: 4, score: 50 }
+]
+```
+
+For dense ranking, where the rank after a tie is the next number (1, 1, 2, 3), count the distinct higher scores instead:
+
+```surql
+SELECT name, score, (SELECT VALUE score FROM player WHERE score > $parent.score).distinct().len() + 1 AS rank
+FROM player ORDER BY score DESC;
+```
+
+```surql title="Output"
+[
+	{ name: 'Ana', rank: 1, score: 90 },
+	{ name: 'Ben', rank: 1, score: 90 },
+	{ name: 'Cai', rank: 2, score: 70 },
+	{ name: 'Dee', rank: 3, score: 50 }
+]
+```
+
+The subquery scans the table once for each record in the outer query, so this approach suits tables of modest size.
 
 ## The `LIMIT` clause
 
@@ -950,156 +990,38 @@ SELECT name FROM person WITH NOINDEX WHERE job = 'engineer'
 
 ## The `EXPLAIN` clause
 
-When `EXPLAIN` is used, the `SELECT` statement returns an explanation of its execution plan, which shows how the query will be performed. `EXPLAIN` can be followed by `FULL` to see the number of executed records.
-
-Here is the result when the field 'email' is not indexed. We can see that the execution plan will iterate over the whole table.
+When `EXPLAIN` is added, the `SELECT` statement returns its execution plan instead of its result. The plan is a tree of operators: an `IndexScan` reads the records through an index, and a `TableScan` reads every record in the table. `EXPLAIN FULL` also runs the query and adds `metrics` to each operator, such as the number of rows it produced.
 
 ```surql
-/**[test]
-
-[[test.results]]
-value = "[{ address: '1 Bagshot Row', email: 'tobie@surrealdb.com', id: person:tobie, name: 'Tobie' }]"
-
-[[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'person' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
-
-[[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'person' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 1 }, operation: 'Fetch' }]"
-
-*/
-
-CREATE person:tobie SET
-	name = "Tobie",
-	address = "1 Bagshot Row",
-	email = "tobie@surrealdb.com";
-
-SELECT * FROM person WHERE email='tobie@surrealdb.com' EXPLAIN;
-SELECT * FROM person WHERE email='tobie@surrealdb.com' EXPLAIN FULL;
-```
-
-```surql title="Output"
--------- Query --------
-
-[
-	{
-		detail: {
-			table: 'person'
-		},
-		operation: 'Iterate Table'
-	},
-	{
-		detail: {
-			type: 'Memory'
-		},
-		operation: 'Collector'
-	}
-]
-
--------- Query --------
-
-[
-	{
-		detail: {
-			table: 'person'
-		},
-		operation: 'Iterate Table'
-	},
-	{
-		detail: {
-			type: 'Memory'
-		},
-		operation: 'Collector'
-	},
-	{
-		detail: {
-			count: 1
-		},
-		operation: 'Fetch'
-	}
-]
-```
-
-Here is the result when the 'email' field is indexed. We can see that the execution plan will proceed by utilizing the index.
-
-```surql
-/**[test]
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "[{ address: '1 Bagshot Row', email: 'tobie@surrealdb.com', id: person:tobie, name: 'Tobie' }]"
-
-[[test.results]]
-value = "[{ detail: { plan: { index: 'fast_email', operator: '=', value: 'tobie@surrealdb.com' }, table: 'person' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
-
-[[test.results]]
-value = "[{ detail: { plan: { index: 'fast_email', operator: '=', value: 'tobie@surrealdb.com' }, table: 'person' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 1 }, operation: 'Fetch' }]"
-
-*/
-
 DEFINE INDEX fast_email ON TABLE person FIELDS email;
+CREATE person:tobie SET email = "tobie@surrealdb.com";
 
-CREATE person:tobie SET
-	name = "Tobie",
-	address = "1 Bagshot Row",
-	email = "tobie@surrealdb.com";
-
-SELECT * FROM person WHERE email='tobie@surrealdb.com' EXPLAIN;
-SELECT * FROM person WHERE email='tobie@surrealdb.com' EXPLAIN FULL;
+SELECT * FROM person WHERE email = 'tobie@surrealdb.com' EXPLAIN;
 ```
 
 ```surql title="Output"
--------- Query --------
-
-[
-	{
-		detail: {
-			plan: {
+{
+	attributes: {
+		projections: '*'
+	},
+	children: [
+		{
+			attributes: {
+				access: "= 'tobie@surrealdb.com'",
+				direction: 'Forward',
 				index: 'fast_email',
-				operator: '=',
-				value: 'tobie@surrealdb.com'
+				predicate: "email = 'tobie@surrealdb.com'"
 			},
-			table: 'person'
-		},
-		operation: 'Iterate Index'
-	},
-	{
-		detail: {
-			type: 'Memory'
-		},
-		operation: 'Collector'
-	}
-]
-
--------- Query --------
-
-[
-	{
-		detail: {
-			plan: {
-				index: 'fast_email',
-				operator: '=',
-				value: 'tobie@surrealdb.com'
-			},
-			table: 'person'
-		},
-		operation: 'Iterate Index'
-	},
-	{
-		detail: {
-			type: 'Memory'
-		},
-		operation: 'Collector'
-	},
-	{
-		detail: {
-			count: 1
-		},
-		operation: 'Fetch'
-	}
-]
+			context: 'Db',
+			operator: 'IndexScan'
+		}
+	],
+	context: 'Db',
+	operator: 'SelectProject'
+}
 ```
+
+The [`EXPLAIN` clause](/docs/reference/query-language/clauses/explain) page shows the plan with and without an index, and the output of `EXPLAIN FULL`.
 
 ## The `TIMEOUT` clause
 
@@ -1124,9 +1046,9 @@ This significantly reduces memory usage in exchange for slower performance.
 SELECT * FROM person ORDER BY name TEMPFILES;
 ```
 
-This requires the temporary directory to be set in the server configuration or when using the [`surreal start`](/docs/reference/cli/surrealdb-cli/commands/start) command.
+This requires the temporary directory to be set in the server configuration or when using the [`surreal db start`](/docs/reference/cli/db/commands/start) command.
 
-From SurrealDB 4.0, sorts, grouped aggregates, `DISTINCT` and join builds spill to temporary files by memory budget without `TEMPFILES`, and the temporary directory defaults to a `surrealdb` folder in the system temporary directory. See [Memory limits and spilling to disk](/docs/reference/cli/surrealdb-cli/environment-variables#memory-limits-and-spilling-to-disk) for the limits that control this.
+From SurrealDB 4.0, sorts, grouped aggregates, `DISTINCT` and join builds spill to temporary files by memory budget without `TEMPFILES`, and the temporary directory defaults to a `surrealdb` folder in the system temporary directory. See [Memory limits and spilling to disk](/docs/reference/cli/db/environment-variables#memory-limits-and-spilling-to-disk) for the limits that control this.
 
 ## The `VERSION` clause
 
@@ -1134,20 +1056,20 @@ If you are using a storage engine that supports versioning (SurrealKV or RocksDB
 
 You can then perform time-travel queries that query the state of a table at a specific point in time by using the `VERSION` clause in a `SELECT` query.
 
-This clause can be used on startup by adding `versioned=true` to the [datastore configuration parameters](/docs/reference/cli/surrealdb-cli/commands/start#datastore-configuration) when executing the `surreal start` command.
+This clause can be used on startup by adding `versioned=true` to the [datastore configuration parameters](/docs/reference/cli/db/commands/start#datastore-configuration) when executing the `surreal db start` command.
 
-```bash title="Examples of surreal start with versioning enabled"
+```bash title="Examples of surreal db start with versioning enabled"
 # Start with a versioned SurrealKV datastore with a root user
-surreal start --user root --pass secret "surrealkv://my_kv_db?versioned=true"
+surreal db start --user root --pass secret "surrealkv://my_kv_db?versioned=true"
 
 # Or disable authentication for quick anonymous access
-surreal start --unauthenticated "surrealkv://my_kv_db?versioned=true"
+surreal db start --unauthenticated "surrealkv://my_kv_db?versioned=true"
 
 # Start with a versioned SurrealKV datastore with a root user
-surreal start --user root --pass secret "surrealkv://my_db?versioned=true"
+surreal db start --user root --pass secret "surrealkv://my_db?versioned=true"
 ```
 
-The in-memory SurrealMX backend does not support versioned queries. From 3.3.0 it refuses `versioned=true` and a non-zero `retention` at startup, and a `VERSION` clause sent to it returns an error saying that the underlying datastore does not support versioned queries. <Since v="v3.3.0" />
+The in-memory SurrealMX backend does not support versioned queries. From 3.3.0 it refuses `versioned=true` and a non-zero `retention` at startup, and a `VERSION` clause sent to it returns an error saying that the underlying datastore does not support versioned queries.
 
 The `VERSION` clause is always followed by a [datetime](/docs/reference/query-language/language-primitives/data-types/datetimes). When the specified timestamp does not exist, an empty array is returned.
 

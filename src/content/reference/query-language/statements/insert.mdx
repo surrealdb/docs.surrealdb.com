@@ -26,7 +26,6 @@ INSERT [ RELATION ] [ IGNORE ] INTO @what
   </TabItem>
   <TabItem label="Railroad Diagram">
 
-
 <RailroadDiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"INSERT"},{"type":"Optional","child":{"type":"Terminal","text":"RELATION"}},{"type":"Optional","child":{"type":"Terminal","text":"IGNORE"}},{"type":"Terminal","text":"INTO"},{"type":"NonTerminal","text":"@what"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"NonTerminal","text":"@value"},{"type":"Sequence","children":[{"type":"Terminal","text":"(@fields)"},{"type":"Terminal","text":"VALUES"},{"type":"Terminal","text":"(@values)"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"ON DUPLICATE KEY UPDATE"},{"type":"NonTerminal","text":"@field = @value ..."}]}}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"RETURN"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"NONE"},{"type":"Terminal","text":"BEFORE"},{"type":"Terminal","text":"AFTER"},{"type":"Terminal","text":"DIFF"},{"type":"NonTerminal","text":"@statement_param, ..."},{"type":"Sequence","children":[{"type":"Terminal","text":"VALUE"},{"type":"NonTerminal","text":"@statement_param"}]}]}]}},{"type":"Terminal","text":";"}]}]}' />
 
   </TabItem>
@@ -110,6 +109,7 @@ Field names inside `ON DUPLICATE KEY UPDATE` refer to the fields of the existing
 
 [[test.results]]
 value = "[{ at_year: 2024, id: city:Calgary, population: 1665000 }]"
+skip-record-id-key = true
 
 */
 
@@ -137,6 +137,7 @@ skip-record-id-key = true
 [[test.results]]
 value = "[{ data_for: user:one, id: user_data:24gujsffwl4vt2zgp2yl, last_edited: d'2025-10-08T03:22:23.325474Z', some: 'data', times_updated: 1 }]"
 skip-record-id-key = true
+skip-datetime = true
 
 */
 
@@ -159,7 +160,7 @@ INSERT INTO user_data {
 
 [
 	{
-		for: user:one,
+		data_for: user:one,
 		id: user_data:kp78dubsxmp4f04x0de3,
 		some: 'data'
 	}
@@ -169,7 +170,7 @@ INSERT INTO user_data {
 
 [
 	{
-		for: user:one,
+		data_for: user:one,
 		id: user_data:kp78dubsxmp4f04x0de3,
 		last_edited: d'2025-07-14T05:15:52.146Z',
 		some: 'data',
@@ -184,9 +185,14 @@ Using the insert statement, it is possible to copy records easily between tables
 /**[test]
 
 [[test.results]]
-value = "[]"
+value = "[{ celsius: 18.5f, city: 'San Francisco', id: temperature:1 }]"
+
+[[test.results]]
+value = "[{ celsius: 18.5f, city: 'San Francisco', id: recordings_san_francisco:1 }]"
 
 */
+
+CREATE temperature:1 SET city = 'San Francisco', celsius = 18.5;
 
 INSERT INTO recordings_san_francisco (SELECT * FROM temperature
   WHERE city = 'San Francisco');
@@ -199,6 +205,7 @@ Furthermore, it is possible to perform a bulk insert in a single query. The `@wh
 
 [[test.results]]
 value = "[{ id: person:jaime, name: 'Jaime', surname: 'Morgan Hitchcock' }, { id: person:tobie, name: 'Tobie', surname: 'Morgan Hitchcock' }]"
+skip-record-id-key = true
 
 */
 
@@ -217,6 +224,7 @@ While attempting to insert one or more records via the `INSERT` statement, if th
 
 [[test.results]]
 value = "[{ id: person:jaime, name: 'Jaime', surname: 'Morgan Hitchcock' }, { id: person:tobie, name: 'Tobie', surname: 'Morgan Hitchcock' }]"
+skip-record-id-key = true
 
 */
 
@@ -227,6 +235,27 @@ INSERT IGNORE INTO person [
    { id: "jaime", name: "Jaime", surname: "Morgan Hitchcock" }, -- will not throw an error
 ];
 ```
+
+A unique index violation is skipped in the same way. A record that would break a `UNIQUE` index is ignored and the rest of the statement still runs, which gives an insert-if-not-exists pattern without a separate check. Without `IGNORE`, the same statement fails with an error.
+
+```surql
+DEFINE INDEX unique_email ON user FIELDS email UNIQUE;
+INSERT INTO user { id: 'one', email: 'a@example.com' };
+
+-- The first record repeats an existing email and is skipped
+INSERT IGNORE INTO user [
+	{ id: 'two', email: 'a@example.com' },
+	{ id: 'three', email: 'b@example.com' }
+];
+```
+
+```surql title="Output"
+[{ email: 'b@example.com', id: user:three }]
+```
+
+Only the records that were inserted are returned, so an empty array means that every record was skipped.
+
+The pattern is also safe when two transactions insert the same record at the same time. `IGNORE` decides against the transaction's own snapshot, so it does not skip a record that another transaction has inserted but not yet committed. Instead, the transaction that commits second fails with a transaction conflict error and can be retried, and on the retry the record is skipped as usual. `ON DUPLICATE KEY UPDATE` behaves the same way. See [Unique indexes under concurrent writes](/docs/learn/querying/concepts-and-guides/transactions#unique-indexes-under-concurrent-writes).
 
 From SurrealDB 4.0 (and 3.3.4), `IGNORE` skips only a duplicate record ID or a conflict with a `UNIQUE` index. Any other error still fails the statement, including a value that cannot be coerced to the type of its field, a failed `ASSERT`, and a `THROW` in an event.
 
@@ -300,7 +329,7 @@ INSERT INTO company {
 	[
 		{
 			op: 'replace',
-			path: '/',
+			path: '',
 			value: {
 				founded: '2021-09-10',
 				founders: [
@@ -423,6 +452,7 @@ The `INSERT` statement supports bulk insert, which allows multiple records to be
 
 [[test.results]]
 value = "[{ id: person:jaime, name: 'Jaime', surname: 'Morgan Hitchcock' }, { id: person:tobie, name: 'Tobie', surname: 'Morgan Hitchcock' }]"
+skip-record-id-key = true
 
 */
 
@@ -431,6 +461,23 @@ INSERT INTO person [
    { id: "tobie", name: "Tobie", surname: "Morgan Hitchcock" },
    -- ... 1000 more records
 ];
+```
+
+A bulk insert can also take an `ON DUPLICATE KEY UPDATE` clause. Each object in the array is inserted in turn, so when the same record ID appears more than once, the first object creates the record and each later one runs the update against the record as it stands at that point. The statement returns the record after each attempt, which shows the update applying once per duplicate. Counting page visits from a batch of events works this way:
+
+```surql
+INSERT INTO page [
+	{ id: page:home, visits: 1 },
+	{ id: page:home, visits: 1 },
+	{ id: page:home, visits: 1 },
+	{ id: page:home, visits: 1 },
+	{ id: page:about, visits: 1 },
+	{ id: page:about, visits: 1 }
+] ON DUPLICATE KEY UPDATE visits += 1;
+//- [{ id: page:home, visits: 1 }, { id: page:home, visits: 2 }, { id: page:home, visits: 3 }, { id: page:home, visits: 4 }, { id: page:about, visits: 1 }, { id: page:about, visits: 2 }]
+
+SELECT * FROM page;
+//- [{ id: page:about, visits: 2 }, { id: page:home, visits: 4 }]
 ```
 
 ## Choosing the table with a parameter
@@ -468,15 +515,19 @@ value = "[{ id: person:1 }, { id: person:2 }, { id: person:3 }]"
 
 [[test.results]]
 value = "[{ id: likes:object, in: person:1, out: person:2 }]"
+skip-record-id-key = true
 
 [[test.results]]
 value = "[{ id: likes:array, in: person:1, out: person:2 }, { id: likes:array_two, in: person:2, out: person:3 }]"
+skip-record-id-key = true
 
 [[test.results]]
 value = "[{ id: likes:values, in: person:1, out: person:2 }]"
+skip-record-id-key = true
 
 [[test.results]]
 value = "[[likes:array, likes:object, likes:values], [likes:array_two], []]"
+skip-record-id-key = true
 
 */
 
@@ -513,12 +564,9 @@ INSERT RELATION INTO likes (in, id, out)
 
 -- Select the value of the likes field
 SELECT VALUE ->likes FROM person;
-
 ```
 
-<Since v="v3.1.5" />
-
-When `INSERT RELATION` specifies an explicit edge `id` that already exists, SurrealDB returns a record-exists error instead of updating the edge in place. You can use `ON DUPLICATE KEY UPDATE` to merge into the existing relation, in the same way as a normal [`INSERT`](/docs/reference/query-language/statements/insert#example-usage):
+From SurrealDB 3.1.5, when `INSERT RELATION` specifies an explicit edge `id` that already exists, SurrealDB returns a record-exists error instead of updating the edge in place. You can use `ON DUPLICATE KEY UPDATE` to merge into the existing relation, in the same way as a normal [`INSERT`](/docs/reference/query-language/statements/insert#example-usage):
 
 ```surql
 /**[test]

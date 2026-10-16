@@ -1,34 +1,39 @@
 ---
 position: 9
 title: Table
-description: Type-safe table references for query operations.
+description: Table references, optionally typed with the records they contain.
 ---
 
 
-# `Table<T>` {#table}
+# `Table<Tb, T>` {#table}
 
-The `Table` class provides type-safe references to database tables, enabling TypeScript type checking for query results.
+The `Table` class is a reference to a database table. It can optionally carry the type of the records stored in the table, so that TypeScript type checks query results and the data you write.
 
 **Import:**
 ```ts
 import { Table } from 'surrealdb';
 ```
 
-**Source:** [value/table.ts](https://github.com/surrealdb/surrealdb.js/blob/main/packages/sdk/src/value/table.ts)
+**Source:** [value/table.ts](https://github.com/surrealdb/surrealdb.js/blob/main/packages/sqon/src/value/table.ts)
 
 ## Type parameters
 
-- `T` - The record type for this table (optional, defaults to `string`)
+- `Tb` - The table name, as a string literal type (optional, defaults to `string`)
+- `T` - The type of the records in this table (optional, defaults to `unknown`)
+
+> [!NOTE]
+> `T` is a compile-time annotation only. It is not validated against the data returned by the server.
 
 ## Constructor
 
-### `new Table<T>(name)` {#constructor}
+### `new Table(name)` {#constructor}
 
 Create a new table reference.
 
 ```ts title="Syntax"
 new Table(name)
 new Table<RecordType>(name)
+new Table<"name", RecordType>(name)
 ```
 
 #### Parameters
@@ -55,7 +60,7 @@ new Table<RecordType>(name)
 // Basic table reference
 const users = new Table('users');
 
-// Type-safe table reference
+// Table reference with a record type
 interface User {
     id: RecordId;
     name: string;
@@ -68,13 +73,63 @@ const users = new Table<User>('users');
 const allUsers: User[] = await db.select(users);
 ```
 
+### Declaring a typed table {#typed}
+
+There are four ways to give a table a record type. They differ in whether the table name is kept as a literal type (`"users"`) or widened to `string`.
+
+```ts
+// 1. Record type only
+const users = new Table<User>('users');                    // Table<string, User>
+
+// 2. Table.of: keeps the literal name and the record type
+const users = Table.of<User>()('users');                   // Table<"users", User>
+
+// 3. Annotated variable: the name is inferred, the record type comes from the annotation
+const users: Table<'users', User> = new Table('users');    // Table<"users", User>
+
+// 4. Both type arguments, explicitly
+const users = new Table<'users', User>('users');           // Table<"users", User>
+```
+
+Form 1 is the shortest and is enough for most code. Use forms 2 to 4 if you need the table name as a literal type, for example in a function that only accepts `Table<'users', User>`. A table declared with form 1 is `Table<string, User>`, which can't be passed where a `Table<'users', User>` is expected.
+
+In forms 3 and 4, a table name or record type that doesn't match the annotation is a compile error:
+
+```ts
+const users: Table<'user', User> = new Table('users');    // Error: "users" is not "user"
+```
+
+A table created without a record type, such as `new Table('users')`, is `Table<'users', unknown>`. You can still give the record type on the call instead:
+
+```ts
+const allUsers = await db.select<User>(new Table('users'));
+```
+
+The record type is picked up by `select`, `create`, `update`, `upsert`, `delete` and `insert`.
+
+A `RecordId` or `RecordIdRange` created from a typed table keeps the record type, so the methods that take one infer it as well:
+
+```ts
+const users = Table.of<User>()('users');
+const id = new RecordId(users, 'john');   // RecordId<"users", string, User>
+const range = new RecordIdRange(users, new BoundIncluded(1), new BoundExcluded(5));
+
+const user = await db.select(id);         // User | undefined (with `id`)
+const some = await db.select(range);      // User[] (with `id`)
+```
+
+Both take the record type as a third type parameter, `RecordId<Tb, Id, T>` and `RecordIdRange<Tb, Id, T>`. There is no `new RecordId<User>(...)` shorthand: take the record type from a typed table, or annotate the variable, as in `const id: RecordId<'users', string, User> = new RecordId('users', 'john')`.
+
+> [!NOTE]
+> Passing an explicit type that differs from the table's own record type, such as `db.select<Post>(users)` where `users` is a `Table<'users', User>`, is not an error: the explicit type takes precedence. Prefer letting the type come from the table.
+
 ## Properties
 
 ### `name` {#name}
 
 The table name.
 
-**Type:** `string`
+**Type:** `Tb` (the table name type, `string` unless declared as a literal)
 
 ```ts
 const users = new Table('users');
@@ -156,7 +211,7 @@ interface Post {
 const db = new Surreal();
 await db.connect('ws://localhost:8000');
 
-// Create type-safe table references
+// Create typed table references
 const users = new Table<User>('users');
 const posts = new Table<Post>('posts');
 
@@ -340,16 +395,17 @@ try {
 
 ```ts
 // Create reusable functions
+// `Table<string, T>` accepts any table, and picks up its record type
 async function getAllFromTable<T>(
     db: Surreal,
-    table: Table<T>
+    table: Table<string, T>
 ): Promise<T[]> {
     return db.select(table);
 }
 
 async function deleteAllFromTable<T>(
     db: Surreal,
-    table: Table<T>
+    table: Table<string, T>
 ): Promise<T[]> {
     return db.delete(table);
 }
@@ -427,17 +483,19 @@ const john = await userRepo.findByEmail('john@example.com');
 
 ## Best practices
 
-### 1. Use type parameters
+### 1. Give tables a record type
 
 ```ts
 // Good: Type-safe
 const users = new Table<User>('users');
-const results: User[] = await db.select(users);
+const results = await db.select(users); // User[] (with `id`)
 
-// Avoid: No type safety
+// Avoid: No record type
 const users = new Table('users');
-const results = await db.select(users); // any[]
+const results = await db.select(users); // unknown[]
 ```
+
+If you need the table name as a literal type as well, see [Declaring a typed table](#typed).
 
 ### 2. Define interfaces for tables
 
@@ -452,7 +510,7 @@ interface User {
 
 const users = new Table<User>('users');
 
-// Avoid: Using 'any' or no interface
+// Avoid: Using 'unknown' or no interface
 const users = new Table('users');
 ```
 
@@ -509,7 +567,7 @@ const posts = new Table<Post>(Tables.Posts);
 ### Table factory
 
 ```ts
-function createTable<T>(name: string): Table<T> {
+function createTable<T>(name: string): Table<string, T> {
     return new Table<T>(name);
 }
 
