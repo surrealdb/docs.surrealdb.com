@@ -616,6 +616,17 @@ When you need to write new documentation or update existing articles, make use o
 3. Check British English and links.
 4. `bun run qa` and `bun run qc`.
 
+## Environment variables and flags
+
+Settings are documented in two places, and a change to one usually needs the other:
+
+- The [environment variables](src/content/reference/cli/db/environment-variables.mdx) page and the command pages describe each setting in the current release.
+- The [version history chart](src/content/reference/cli/db/version-history.mdx) shows which `SURREAL_` variables and `surreal db` flags each release had, with their first and last versions and their defaults. Its data is `public/cli-history/data.json`, which `public/cli-history/history.html` and `history.js` render.
+
+The chart covers tagged releases only, read from the source at each tag, so it changes when a release is tagged rather than when a page is edited. After a release, add its tag to `data.json`: a new entry in `tags`, and updated `[first, last]` ranges and defaults in `items` for every variable or flag the release added, removed or changed. Then update the version the page names as its latest, which appears in its `description`, its opening paragraph and its scope section. A setting that a release removes stays in the chart with its last version, so never delete an item.
+
+When a page documents a setting as added, removed or changed in a version that is already tagged, check that the chart agrees. A setting that is documented on a branch for an unreleased version, such as `3.4` for 4.0, goes into the chart once that version is tagged.
+
 ## Content collections
 
 Content lives in `src/content`. Frontmatter schemas live in
