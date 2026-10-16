@@ -307,7 +307,7 @@ take a `LET`, a `THROW`, a `BREAK`, a `CONTINUE`, or two statements separated by
 the wrong token and names a construct the reader never wrote. The form also
 persists: a `DEFINE FUNCTION`, `DEFINE FIELD` or `DEFINE EVENT` keeps a body in
 the schema, and the stored form is never normalised, so `INFO FOR DB` and
-`surreal export` both emit `THEN … END` again and `surreal import` has to parse
+`surreal db export` both emit `THEN … END` again and `surreal db import` has to parse
 it back. That round trip is what keeps the parse path in the server, so treat
 the syntax as permanent and simply never teach it.
 
@@ -492,7 +492,7 @@ thing, not when it passes a word count.
 
 **One home per topic.** Where a subject genuinely needs both a guide and a
 reference, write both, and give them titles that survive being seen apart -
-"Python quickstart" against "Python SDK", "Authenticating surrealctl" against
+"Python quickstart" against "Python SDK", "Authenticating surreal cloud" against
 "Authentication reference". Two pages called "Authentication" are
 indistinguishable in a search result, in `llms.txt`, and to an agent choosing
 which to fetch. Whichever page is not the authority on a mechanism summarises it
@@ -842,7 +842,7 @@ Write the usage lines as the block body:
 
 ```mdx
 <Synopsis>
-surrealctl instance create [OPTIONS] <NAME>
+surreal cloud instance create [OPTIONS] <NAME>
 </Synopsis>
 ```
 
@@ -858,7 +858,7 @@ button, because a synopsis is not paste-ready.
 <OptionsTable
 	title="Options"
 	options={[
-		{ "name": "--type", "short": "-t", "value": "<TYPE>", "env": "SURREALCTL_TYPE", "description": "Instance type to provision." },
+		{ "name": "--type", "short": "-t", "value": "<TYPE>", "env": "SURREAL_CLOUD_TYPE", "description": "Instance type to provision." },
 		{ "name": "--replicas", "type": "number", "default": 1, "description": "Number of `scale` plan replicas." }
 	]}
 />

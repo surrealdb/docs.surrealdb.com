@@ -1,0 +1,1502 @@
+---
+position: 6
+title: surreal cloud instance
+description: Reference for surreal cloud instance - create, update, pause, resume, delete and watch instances, read status, endpoint, logs, metrics and usage, mint database tokens, open sql, import and export through surreal db, and manage capabilities and backups.
+---
+
+# surreal cloud instance
+
+`surreal cloud instance` manages instances: the databases themselves. It is the largest group in the CLI, and covers provisioning, scaling, observability, credentials, capabilities and backups. Three of its commands, `sql`, `import` and `export`, run the database through the `surreal` launcher as [`surreal db sql`](/docs/reference/cli/db/commands/sql), [`surreal db import`](/docs/reference/cli/db/commands/import) and [`surreal db export`](/docs/reference/cli/db/commands/export).
+
+This group declares the scopes `read:cloud` and `write:cloud-instances`. A personal access token is read-only here: the gateway refuses every non-GET Cloud route for one, so the commands that change an instance answer 403 and exit `4` regardless of the token's scopes. See [Authentication](/docs/reference/cli/cloud/authentication#what-a-personal-access-token-cannot-do).
+
+<Synopsis>
+surreal cloud instance <COMMAND> [OPTIONS]
+surreal cloud instances <COMMAND> [OPTIONS]
+</Synopsis>
+
+| Verb | Purpose | Alias |
+| --- | --- | --- |
+| [`list`](#instance-list) | List the instances in an organisation | `ls` |
+| [`get`](#instance-get) | Show one instance | |
+| [`create`](#instance-create) | Create an instance | |
+| [`update`](#instance-update) | Change an instance's type, size, or version | |
+| [`delete`](#instance-delete) | Delete an instance and everything in it | `rm` |
+| [`pause`](#instance-pause) | Pause a running instance | |
+| [`resume`](#instance-resume) | Resume a paused instance | |
+| [`watch`](#instance-watch) | Watch an operation that was started elsewhere | |
+| [`status`](#instance-status) | Show an instance's deployment phase and restorable snapshots | |
+| [`endpoint`](#instance-endpoint) | Print the endpoint a client connects to | |
+| [`token`](#instance-token) | Mint a database token for an instance | |
+| [`jwks`](#instance-jwks) | Fetch the key set that verifies an instance's tokens | |
+| [`sql`](#instance-sql) | Open a SurrealQL session against an instance | |
+| [`import`](#instance-import) | Import a file into an instance | |
+| [`export`](#instance-export) | Export an instance to a file | |
+| [`metrics`](#instance-metrics) | Show an instance's resource metrics | |
+| [`logs`](#instance-logs) | Show an instance's logs | |
+| [`usage`](#instance-usage) | Show what an instance has consumed | |
+| [`estimate`](#instance-estimate) | Estimate what an instance would cost | |
+| [`capabilities get`](#instance-capabilities-get) | Show an instance's capability configuration | |
+| [`capabilities set`](#instance-capabilities-set) | Change an instance's capability configuration | |
+| [`backup list`](#instance-backup-list) | List the snapshots an instance can be restored from | `ls` |
+| [`backup create`](#instance-backup-create) | Take a backup of an instance now | |
+| [`backup policy get`](#instance-backup-policy-get) | Show the backup retention policy | |
+| [`backup policy set`](#instance-backup-policy-set) | Change the backup retention policy | |
+
+## Naming an instance
+
+Four spellings are accepted: the id, the slug, the name, or `org/name`. Only a bare id avoids a lookup against the organisation. A slug always contains a hyphen, so it can never be mistaken for an id.
+
+```bash
+surreal cloud instance get production
+surreal cloud instance get production-6xk2
+surreal cloud instance get acme/production
+surreal cloud instance get 67upif0m8sh1cn1p2c8t
+```
+
+Omit the reference entirely and, on a terminal, you get a picker. Elsewhere it is a usage error, exit `2`, listing what was available:
+
+```text
+No instance was given and this session cannot prompt.
+Name one, or pass --org to change which organization is searched.
+
+Available:
+  production
+  staging
+```
+
+There is deliberately no `instance use`, and no default instance: a sticky implicit target is fine for a noun whose verbs are mostly reads, and wrong for one whose verbs include `delete`. The organisation searched comes from `--org` and the [precedence chain](/docs/reference/cli/cloud/global-flags#the-precedence-chain), and [`org use`](/docs/reference/cli/cloud/commands/org#org-use) can remember one.
+
+Every `[INSTANCE]` argument below behaves this way: only the organisation is resolved from context, so without an instance argument a command prompts on a terminal and refuses elsewhere.
+
+A command that waits for the instance (`create`, `update`, `delete`, `pause`, `resume` and `watch`) follows the rules in [Long-running operations](/docs/reference/cli/cloud/long-running-operations). The waiting default is on, the timeout is 15 minutes, a timeout exits `10`, and an instance that enters a failed state exits `6`. `--wait-timeout` takes a duration such as `30s`, `10m` or `2h`, and a bare number is seconds.
+
+## surreal cloud instance list {#instance-list}
+
+List the instances in an organisation.
+
+<Synopsis>
+surreal cloud instance list [OPTIONS]
+</Synopsis>
+
+This command takes no positional argument, deliberately: a positional here would read as an *instance*. The organisation comes from `--org` and the [precedence chain](/docs/reference/cli/cloud/global-flags#the-precedence-chain).
+
+Accepts the [list presentation flags](/docs/reference/cli/cloud/output-and-exit-codes#list-presentation-flags) and nothing else. Column ids are `name`, `state`, `type`, `version`, `region`, `compute_units` and `storage`, with `id`, `slug`, `host`, `access_type` and `organization_id` under `--wide`. An organisation with no instances is a success: exit `0`, a note, and an empty array under `--json`.
+
+```bash
+surreal cloud instance list
+```
+
+```text title="Output"
+NAME        STATE   TYPE          VERSION  REGION     UNITS  STORAGE
+production  ready   production-2  3.2.4    aws-euw1       4   100 GB
+staging     paused  shared-1      3.2.4    aws-euw1       1    10 GB
+```
+
+```bash title="Ready instances only, as names"
+surreal cloud instance list --json | jq -r '.[] | select(.state == "ready") | .name'
+```
+
+## surreal cloud instance get {#instance-get}
+
+Show one instance.
+
+<Synopsis>
+surreal cloud instance get [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug, name, or org/name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+This command has no options of its own.
+
+```bash
+surreal cloud instance get production
+```
+
+```bash title="One field, for a script"
+surreal cloud instance get production --json | jq -r .state
+```
+
+The detail view reports the id, slug, state, type, version, region, compute units, storage, access type, endpoint, private host when there is one, and the owning organisation. It adds the storage cool-off when storage cannot be changed yet, the storage backend and backup retention when the platform reports them, and the versions the instance can upgrade to.
+
+## surreal cloud instance create {#instance-create}
+
+Create an instance.
+
+<Synopsis>
+surreal cloud instance create [OPTIONS] --type <SLUG> --region <SLUG> <NAME>
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "<NAME>",
+            "required": true,
+            "description": "A name for the instance. Between 1 and 30 characters, counted after trimming."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--type",
+            "value": "<SLUG>",
+            "required": true,
+            "description": "The instance type, by slug. See `surreal cloud catalog instance-types`. Must be one the organisation's plan offers."
+        },
+        {
+            "name": "--region",
+            "value": "<SLUG>",
+            "required": true,
+            "description": "The region to deploy into, by slug. See `surreal cloud catalog regions`. Must be one the organisation's plan offers."
+        },
+        {
+            "name": "--version",
+            "value": "<VERSION>",
+            "description": "The SurrealDB version to run. Defaults to the platform's current one."
+        },
+        {
+            "name": "--compute-units",
+            "value": "<N>",
+            "description": "How many compute units to run, for the types that scale. Minimum 1."
+        },
+        {
+            "name": "--storage",
+            "value": "<GB>",
+            "description": "Storage to allocate, in gigabytes. Minimum 1."
+        },
+        {
+            "name": "--access-type",
+            "value": "<ACCESS>",
+            "description": "How the instance may be reached: `public`, `private` or `dual`."
+        },
+        {
+            "name": "--restore-from",
+            "value": "<INSTANCE/SNAPSHOT>",
+            "description": "Restore from a snapshot, as `<instance>/<snapshot>`."
+        },
+        {
+            "name": "--wait",
+            "description": "Wait for the instance to become ready. On by default."
+        },
+        {
+            "name": "--no-wait",
+            "description": "Return as soon as the API accepts the request."
+        },
+        {
+            "name": "--wait-timeout",
+            "value": "<DURATION>",
+            "default": "15m",
+            "description": "How long to wait before giving up. A duration such as `30s`, `10m` or `2h`."
+        }
+    ]}
+/>
+
+| `--access-type` value | Meaning |
+| --- | --- |
+| `public` | Reachable over the public internet. The API's own default |
+| `private` | Reachable over PrivateLink only. Needs PrivateLink on the organisation |
+| `dual` | Reachable both ways |
+
+```bash title="Create and wait for it to be ready"
+surreal cloud instance create api --type shared-1 --region aws-euw1
+```
+
+```bash title="A production instance with room to grow"
+surreal cloud instance create production \
+    --type production-2 \
+    --region aws-euw1 \
+    --compute-units 4 \
+    --storage 100
+```
+
+```bash title="Clone from a snapshot"
+surreal cloud instance create staging \
+    --type shared-1 \
+    --region aws-euw1 \
+    --restore-from production/rsnapshot-20260811-150405
+```
+
+The command prints `Creating <name> (<slug>).` on stderr as soon as the API accepts the request. With the wait, it then reports progress and emits a fresh detail view of the ready instance. With `--no-wait` it emits the accepted request and hints at `surreal cloud instance watch <name>`.
+
+The organisation comes from `--org` and the [precedence chain](/docs/reference/cli/cloud/global-flags#the-precedence-chain).
+
+**Refusals**, all exit `2` and all before any request:
+
+- A name outside 1 to 30 characters, with the length it counted.
+- `--compute-units` below 1 (`Compute units start at 1.`), or `--storage` below 1 (`Storage starts at 1 GB.`).
+- A `--type` or `--region` that the organisation's plan does not offer. The message suggests the closest match and lists what is available. This check is skipped when the plan lists none.
+- A malformed `--restore-from`, which is split on the last `/`:
+
+```text
+`prod-snap-1` is not a snapshot reference. Use <instance>/<snapshot>, for example
+production/rsnapshot-20250128-150405.
+Run `surreal cloud instance status <instance>` to list the snapshots an instance can be restored from.
+```
+
+> [!WARNING]
+> The create route accepts no idempotency key, so a retried create is a second instance and a second bill. `surreal cloud` does not retry it after a timeout or a `502`, because the request may already have been processed. It replays only a `429` or `401`, which the gateway answers before any handler runs. If a create times out, run [`instance list`](#instance-list) before running it again.
+
+## surreal cloud instance update {#instance-update}
+
+Change an instance's type, size, or version.
+
+<Synopsis>
+surreal cloud instance update [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug, name, or org/name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--type",
+            "value": "<SLUG>",
+            "description": "Move to this instance type, by slug."
+        },
+        {
+            "name": "--compute-units",
+            "value": "<N>",
+            "description": "Scale to this many compute units. Minimum 1."
+        },
+        {
+            "name": "--storage",
+            "value": "<GB>",
+            "description": "Grow storage to this many gigabytes. Minimum 1."
+        },
+        {
+            "name": "--version",
+            "value": "<VERSION>",
+            "description": "Upgrade to this SurrealDB version."
+        },
+        {
+            "name": "--access-type",
+            "value": "<ACCESS>",
+            "description": "Change how the instance may be reached: `public`, `private` or `dual`."
+        },
+        {
+            "name": "--wait",
+            "description": "Wait for the instance to become ready again. On by default."
+        },
+        {
+            "name": "--no-wait",
+            "description": "Return as soon as the API accepts the last change."
+        },
+        {
+            "name": "--wait-timeout",
+            "value": "<DURATION>",
+            "default": "15m",
+            "description": "How long to wait before giving up. A duration such as `30s`, `10m` or `2h`."
+        }
+    ]}
+/>
+
+There is no single update route on the API - each field has its own - so one invocation is several requests. They are applied in a fixed order and stop at the first failure:
+
+1. `--type`
+2. `--compute-units`
+3. `--storage`
+4. `--version`
+5. `--access-type`
+
+> [!IMPORTANT]
+> Every one of these restarts the instance. A single `instance update` that changes three fields restarts it once per field, in the order above.
+
+```bash title="Scale up"
+surreal cloud instance update production --compute-units 8
+```
+
+```bash title="Upgrade the SurrealDB version"
+surreal cloud instance update production --version 3.2.4
+```
+
+```bash title="Move to a larger instance type"
+surreal cloud instance update production --type production-4
+```
+
+Each change prints `Set the <field> to <value>.` on stderr as it is accepted. The command stops at the first request the API refuses, so earlier changes stay applied. On the platform a change of instance type counts as a storage change, so passing `--type` and `--storage` together can be refused at the storage step after the type has already changed. The [Storage limits on Start](/docs/manage/instances/scaling#storage-limits-on-start) page lists the storage each type starts with.
+
+With the wait, the command then waits for the instance to be ready again and emits a fresh detail view. With `--no-wait` it hints at `surreal cloud instance watch <name>` and emits the instance as it stands.
+
+**Refusals**, all exit `2`:
+
+- No flags at all:
+
+```text
+Nothing to update. Pass at least one of --type, --compute-units, --storage, --version, or --access-type.
+```
+
+- `--compute-units` below 1 (`Compute units start at 1.`), or `--storage` below 1 (`Storage starts at 1 GB.`).
+- `--storage` while the storage cool-off is in force, naming the interval and, when known, when storage was last changed:
+
+```text
+`production` cannot be resized yet: storage may be changed only once every 6 hours.
+It was last changed at 2026-08-11T10:00:00Z.
+```
+
+- `--compute-units` outside the current type's range, when `--type` is not also being changed:
+
+```text
+`shared-1` accepts 1-2 compute units; 8 is outside that.
+```
+
+## surreal cloud instance delete {#instance-delete}
+
+Delete an instance and everything in it.
+
+<Synopsis>
+surreal cloud instance delete [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug, name, or org/name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--force",
+            "description": "Delete without confirming."
+        },
+        {
+            "name": "--wait",
+            "description": "Wait for the instance to disappear. On by default."
+        },
+        {
+            "name": "--no-wait",
+            "description": "Return as soon as the API accepts the request."
+        },
+        {
+            "name": "--wait-timeout",
+            "value": "<DURATION>",
+            "default": "15m",
+            "description": "How long to wait before giving up."
+        }
+    ]}
+/>
+
+```bash title="Delete, with a confirmation"
+surreal cloud instance delete staging
+```
+
+```bash title="Delete from a teardown script"
+surreal cloud instance delete staging --force --json
+```
+
+The confirmation names the instance, its slug and its region, so the wrong terminal tab is caught before the request. Declining prints `Nothing was deleted.` and exits `0` with no document. In a non-interactive session without `--force` or `--yes`, it exits `2` having sent nothing.
+
+The delete route answers with no body, so the emitted document is synthesised. Its `state` is `deleted` once the wait has seen the instance disappear, and `deleting` under `--no-wait`, which also hints at `surreal cloud instance watch <name> --until deleted`:
+
+```json title="Output"
+{
+  "id": "67upif0m8sh1cn1p2c8t",
+  "name": "staging",
+  "slug": "staging-4jd1",
+  "state": "deleted"
+}
+```
+
+While waiting, a `404` is the success condition - there is nothing left to fetch.
+
+## surreal cloud instance pause {#instance-pause}
+
+Pause a running instance.
+
+<Synopsis>
+surreal cloud instance pause [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug, name, or org/name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--wait",
+            "description": "Wait for the instance to pause. On by default."
+        },
+        {
+            "name": "--no-wait",
+            "description": "Return as soon as the API accepts the request."
+        },
+        {
+            "name": "--wait-timeout",
+            "value": "<DURATION>",
+            "default": "15m",
+            "description": "How long to wait before giving up."
+        }
+    ]}
+/>
+
+```bash
+surreal cloud instance pause staging
+```
+
+With the wait, the command emits a fresh detail view once the instance has paused. With `--no-wait` it emits the accepted response and hints at `surreal cloud instance watch <name> --until paused`.
+
+Pausing something already paused prints a note and still emits a document, exit `0`. The shape of the answer does not change with remote state, so a script does not need to know which case it hit.
+
+## surreal cloud instance resume {#instance-resume}
+
+Resume a paused instance.
+
+<Synopsis>
+surreal cloud instance resume [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug, name, or org/name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--wait",
+            "description": "Wait for the instance to become ready. On by default."
+        },
+        {
+            "name": "--no-wait",
+            "description": "Return as soon as the API accepts the request."
+        },
+        {
+            "name": "--wait-timeout",
+            "value": "<DURATION>",
+            "default": "15m",
+            "description": "How long to wait before giving up."
+        }
+    ]}
+/>
+
+```bash
+surreal cloud instance resume staging
+```
+
+Resuming something already ready behaves like pausing something already paused: a note, a document, exit `0`. Resuming is usually slower than pausing, so the wait matters more here. With `--no-wait` the command hints at `surreal cloud instance watch <name>`.
+
+## surreal cloud instance watch {#instance-watch}
+
+Watch an operation that was started elsewhere.
+
+<Synopsis>
+surreal cloud instance watch [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug, name, or org/name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--until",
+            "value": "<STATE>",
+            "default": "ready",
+            "description": "The state to wait for: `ready`, `paused` or `deleted`."
+        },
+        {
+            "name": "--wait-timeout",
+            "value": "<DURATION>",
+            "default": "15m",
+            "description": "How long to watch before giving up."
+        }
+    ]}
+/>
+
+There is no `--wait` or `--no-wait` here, because a watch is nothing but a wait. The exit codes are those of any wait: `10` on timeout, `6` when the instance settles in a different state, and `5` when it disappears while you wait for another state.
+
+| `--until` value | Finishes when |
+| --- | --- |
+| `ready` | The instance is running and healthy |
+| `paused` | The instance is deliberately stopped |
+| `deleted` | The instance is gone - a `404` while polling is what finishes this one |
+
+```bash title="Pick up a create started in an earlier CI job"
+surreal cloud instance watch api
+```
+
+```bash title="Wait for a pause to complete"
+surreal cloud instance watch staging --until paused
+```
+
+> [!NOTE]
+> This is the one command where `--json` writes to stdout continuously. The transitions *are* the answer, so the newline-delimited stream goes to stdout and nothing else is emitted. In text mode the run ends with a fresh detail view, except under `--until deleted`, where there is nothing left to fetch. Elsewhere, `--json` puts the progress stream on stderr and one final document on stdout.
+
+```bash title="Follow the transitions as they happen"
+surreal cloud instance watch api --json | jq -r '.event + " " + (.state // "")'
+```
+
+## surreal cloud instance status {#instance-status}
+
+Show an instance's deployment phase and restorable snapshots.
+
+<Synopsis>
+surreal cloud instance status [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug, name, or org/name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+Also accepts the [list presentation flags](/docs/reference/cli/cloud/output-and-exit-codes#list-presentation-flags), which arrange the snapshot table. Column ids are `snapshot_id`, `started_at`, `tiers` and `on_demand`, with `valid_versions` under `--wide`.
+
+```bash
+surreal cloud instance status production
+```
+
+The answer is one composite document: a phase, then the snapshots the instance can be restored from. In plain mode the phase is written as `phase<tab><Phase>` before the table, so `grep ^phase` works the same way it does on [`instance get`](#instance-get). An instance with no restorable snapshots gets a note on stderr rather than an empty table with no explanation.
+
+Snapshot ids from here are what [`instance create --restore-from`](#instance-create) expects.
+
+## surreal cloud instance endpoint {#instance-endpoint}
+
+Print the endpoint a client connects to.
+
+<Synopsis>
+surreal cloud instance endpoint [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug, name, or org/name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+This command has no options of its own.
+
+The output is the bare endpoint plus a newline, byte-identical in rich and plain output, so `$(…)` captures exactly the value with no label and no styling.
+
+```bash
+ENDPOINT=$(surreal cloud instance endpoint production)
+surreal db sql --endpoint "$ENDPOINT" --namespace app --database main
+```
+
+```bash title="Under --json, the hosts come too"
+surreal cloud instance endpoint production --json
+```
+
+```json title="Output"
+{
+  "endpoint": "wss://production-6xk2.aws-euw1.surreal.cloud",
+  "host": "production-6xk2.aws-euw1.surreal.cloud",
+  "private_host": null,
+  "access_type": "public"
+}
+```
+
+The endpoint has the `wss://` scheme. A private-only instance produces a warning on stderr rather than a refusal - the endpoint is still correct, it is simply not reachable from where you are. The endpoint carries no credential: to connect, add a token from [`instance token`](#instance-token).
+
+## surreal cloud instance token {#instance-token}
+
+Mint a database token for an instance.
+
+<Synopsis>
+surreal cloud instance token [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug, name, or org/name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--reveal",
+            "description": "Print the token even when stdout is a terminal."
+        }
+    ]}
+/>
+
+This is a *database* token - the credential a SurrealDB client authenticates with. It is not a [personal access token](/docs/reference/cli/cloud/commands/token), which authenticates against the control plane.
+
+```bash title="Copy it to the clipboard"
+surreal cloud instance token production | pbcopy
+```
+
+```bash title="Use it with the database CLI"
+SURREAL_TOKEN=$(surreal cloud instance token production) \
+    surreal db sql --endpoint "$(surreal cloud instance endpoint production)" --namespace app --database main
+```
+
+To open a session without handling the token yourself, use [`instance sql`](#instance-sql), which does the same thing.
+
+**Refusals.** Printing a credential into a terminal's scrollback is refused, exit `2`, and the check happens *before* the token is minted - so a forgotten `--reveal` never costs a credential nobody can recover:
+
+```text
+Refusing to print a database token to a terminal, where it would stay in your scrollback.
+Pipe it:  surreal cloud instance token production | pbcopy
+Or pass --reveal if you meant to see it.
+```
+
+Under `--json` the answer is a document with three fields, `kind` (`instance_token`), `instance_id` and `token`, so `surreal cloud instance token production --json | jq -r .token` works. Without `--json`, the bare token is the whole of stdout.
+
+## surreal cloud instance jwks {#instance-jwks}
+
+Fetch the key set that verifies an instance's tokens.
+
+<Synopsis>
+surreal cloud instance jwks [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug, name, or org/name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+Also accepts the [list presentation flags](/docs/reference/cli/cloud/output-and-exit-codes#list-presentation-flags). Column ids are the JWK member names - `kid`, `kty`, `alg` and `use`, with `crv` under `--wide` - so a member the key type does not carry renders as missing rather than empty.
+
+```bash title="Inspect the keys"
+surreal cloud instance jwks production
+```
+
+```bash title="Pipe the whole key set into a verifier"
+surreal cloud instance jwks production --json > jwks.json
+```
+
+Under `--json` the whole key set is emitted, `keys` wrapper included, so it can be handed straight to a JWT library.
+
+A key set is public, so this is the one instance route that does not need a Cloud session. Addressing the instance by id avoids any lookup; a name or slug still needs to list the organisation's instances first, which needs a credential.
+
+## Handing off to the database
+
+`sql`, `import` and `export` do not speak SurrealQL themselves. Each one resolves the instance, mints a short-lived database token, and then becomes the matching database command, run through the `surreal` launcher:
+
+| Command | Runs | Endpoint scheme |
+| --- | --- | --- |
+| `surreal cloud instance sql` | `surreal db sql` | `wss://` |
+| `surreal cloud instance import` | `surreal db import` | `https://` |
+| `surreal cloud instance export` | `surreal db export` | `https://` |
+
+What the handoff passes to the database:
+
+- `--endpoint` is added as `<scheme>://<instance host>`, unless the arguments after `--` already contain `--endpoint` or `-e`, in which case yours is used and nothing is added.
+- The token is passed in the environment as `SURREAL_TOKEN`, never on the command line, so it does not appear in `ps` output or shell history.
+- `--namespace` and `--database` become `SURREAL_NAMESPACE` and `SURREAL_DATABASE` in the child's environment.
+- Everything after `--` is forwarded unchanged, because the database's own flags are documented on its own pages and change independently. Pass them as you would to `surreal db sql`, `surreal db import` or `surreal db export`.
+
+The database is reached only through the launcher, at the path the launcher records in `SURREAL_CLI_LAUNCHER`. The component does not search `PATH` for a `surreal` binary, install anything, or fetch the database itself. If the database is not installed, the launcher offers to install it when it runs the command. Unattended, in CI or with `--no-input`, the launcher exits `12` and names the install command instead. See [`surreal`](/docs/reference/cli/launcher).
+
+Run `surreal-cloud` directly rather than as `surreal cloud` and these three commands refuse with exit `2`, because there is no launcher to hand off to. They check this first, before anything else, so no token is minted for nothing.
+
+On Unix the handoff replaces the process, so the database command owns the terminal, signals and exit code. On Windows the command stays alive and forwards the database's exit code.
+
+Two warnings, neither of which stops the handoff: the instance is private-only, so its host resolves only inside its own network, and the instance is paused, failed or deleted, so the connection will probably be refused. `Connecting to <name> at <host>.` goes to stderr as the last thing printed, so `export -- -` can be piped without the note getting into the data.
+
+## surreal cloud instance sql {#instance-sql}
+
+Open a SurrealQL session against an instance.
+
+<Synopsis>
+surreal cloud instance sql [OPTIONS] [INSTANCE] [-- <ARGS>...]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug or name. Omit to choose interactively."
+        },
+        {
+            "name": "[ARGS]...",
+            "description": "Arguments for `surreal db sql`, after a `--` separator."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--namespace",
+            "value": "<NS>",
+            "description": "The namespace to open."
+        },
+        {
+            "name": "--database",
+            "value": "<DB>",
+            "description": "The database to open."
+        }
+    ]}
+/>
+
+This runs [`surreal db sql`](/docs/reference/cli/db/commands/sql) against the instance, as described in [Handing off to the database](#handing-off-to-the-database).
+
+```bash title="Open a shell"
+surreal cloud instance sql production --namespace app --database main
+```
+
+```bash title="Pass flags through to surreal db sql"
+surreal cloud instance sql production -- --ns app --db main --pretty
+```
+
+```bash title="Run a query from a pipeline"
+echo "SELECT count() FROM person GROUP ALL;" \
+    | surreal cloud instance sql production --namespace app --database main
+```
+
+`--namespace` and `--database` are optional here, because `surreal db sql` accepts a session without them.
+
+## surreal cloud instance import {#instance-import}
+
+Import a file into an instance.
+
+<Synopsis>
+surreal cloud instance import [OPTIONS] [INSTANCE] [-- <ARGS>...]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug or name. Omit to choose interactively."
+        },
+        {
+            "name": "[ARGS]...",
+            "description": "Arguments for `surreal db import`, after a `--` separator. The file to load goes here."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--namespace",
+            "value": "<NS>",
+            "required": true,
+            "description": "The namespace to import into. Required by this command, though `--help` does not mark it so."
+        },
+        {
+            "name": "--database",
+            "value": "<DB>",
+            "required": true,
+            "description": "The database to import into. Required by this command, though `--help` does not mark it so."
+        }
+    ]}
+/>
+
+This runs [`surreal db import`](/docs/reference/cli/db/commands/import) against the instance, as described in [Handing off to the database](#handing-off-to-the-database). The file is the positional argument of the database command, so it goes after the `--`.
+
+```bash
+surreal cloud instance import production --namespace app --database main -- ./seed.surql
+```
+
+**Refusals.** `surreal db import` requires both a namespace and a database, so this command does too. The check fires before a token is minted, exit `2`:
+
+```text
+`surreal cloud instance import` needs both --namespace and --database; `surreal import` requires them.
+```
+
+See [`surreal db import`](/docs/reference/cli/db/commands/import) for the flags available after the `--`.
+
+## surreal cloud instance export {#instance-export}
+
+Export an instance to a file.
+
+<Synopsis>
+surreal cloud instance export [OPTIONS] [INSTANCE] [-- <ARGS>...]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug or name. Omit to choose interactively."
+        },
+        {
+            "name": "[ARGS]...",
+            "description": "Arguments for `surreal db export`, after a `--` separator. The destination goes here, or `-` for stdout."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--namespace",
+            "value": "<NS>",
+            "required": true,
+            "description": "The namespace to export from. Required by this command, though `--help` does not mark it so."
+        },
+        {
+            "name": "--database",
+            "value": "<DB>",
+            "required": true,
+            "description": "The database to export from. Required by this command, though `--help` does not mark it so."
+        }
+    ]}
+/>
+
+This runs [`surreal db export`](/docs/reference/cli/db/commands/export) against the instance, as described in [Handing off to the database](#handing-off-to-the-database).
+
+```bash title="Export to a file"
+surreal cloud instance export production --namespace app --database main -- ./backup.surql
+```
+
+```bash title="Export to stdout and compress"
+surreal cloud instance export production --namespace app --database main -- - | gzip > backup.surql.gz
+```
+
+Like `import`, this refuses a missing namespace or database before minting anything. The destination and the export selection flags, such as `--tables` or `--only`, belong to [`surreal db export`](/docs/reference/cli/db/commands/export). With no destination the database writes to stdout. Everything this command itself prints goes to stderr, so the dump on stdout stays clean.
+
+For a managed snapshot rather than a SurrealQL dump, use [`instance backup create`](#instance-backup-create).
+
+## surreal cloud instance metrics {#instance-metrics}
+
+Show an instance's resource metrics.
+
+<Synopsis>
+surreal cloud instance metrics [OPTIONS] --metric <METRIC> [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug or name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--metric",
+            "value": "<METRIC>",
+            "required": true,
+            "description": "Which metric to read, such as `cpu`, `memory` or `disk`."
+        },
+        {
+            "name": "--from",
+            "value": "<TIME>",
+            "description": "Start of the window, as an RFC 3339 timestamp."
+        },
+        {
+            "name": "--to",
+            "value": "<TIME>",
+            "description": "End of the window, as an RFC 3339 timestamp."
+        },
+        {
+            "name": "--samples",
+            "description": "Show every sample instead of one summary per series."
+        }
+    ]}
+/>
+
+Also accepts the [list presentation flags](/docs/reference/cli/cloud/output-and-exit-codes#list-presentation-flags). Summary rows carry `series`, `last`, `min`, `mean`, `max` and `unit`, with `samples` and `gaps` under `--wide`; sample rows carry `timestamp`, `series` and `value`, with `unit` under `--wide`.
+
+`--metric` is a free-form string rather than a fixed set, because the platform's metric vocabulary is not published anywhere the CLI can read it.
+
+```bash title="A summary per series"
+surreal cloud instance metrics production --metric cpu
+```
+
+```bash title="Every sample over a window"
+surreal cloud instance metrics production \
+    --metric memory \
+    --from 2026-08-11T10:00:00Z \
+    --to 2026-08-11T12:00:00Z \
+    --samples
+```
+
+Timestamps are validated locally and forwarded byte-for-byte, never reformatted:
+
+```text
+Ensure `11-08-2026` is an RFC3339 timestamp, such as 2026-08-11T10:00:00Z
+```
+
+`--samples` chooses a table, not a payload: `--json` carries the whole document either way. A note on stderr states the metric, its unit and the window, which matters when neither bound is given because the API then chooses the window. An empty window prints a note suggesting a wider `--from` or a check of the metric name.
+
+## surreal cloud instance logs {#instance-logs}
+
+Show an instance's logs.
+
+<Synopsis>
+surreal cloud instance logs [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug or name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--from",
+            "value": "<TIME>",
+            "description": "Start of the window, as an RFC 3339 timestamp."
+        },
+        {
+            "name": "--to",
+            "value": "<TIME>",
+            "description": "End of the window, as an RFC 3339 timestamp. Conflicts with `--follow`."
+        },
+        {
+            "name": "--level",
+            "value": "<LEVELS>",
+            "description": "Show only these levels, comma-separated. Filtered locally; the API has no level parameter."
+        },
+        {
+            "name": "--follow",
+            "short": "-f",
+            "description": "Keep printing new lines. There is no streaming endpoint, so this polls."
+        }
+    ]}
+/>
+
+Also accepts the [list presentation flags](/docs/reference/cli/cloud/output-and-exit-codes#list-presentation-flags). Column ids are `timestamp`, `level` and `message`, with `pod` under `--wide`.
+
+```bash title="Recent lines"
+surreal cloud instance logs production
+```
+
+```bash title="Errors and warnings only"
+surreal cloud instance logs production --level error,warn
+```
+
+```bash title="Follow, and hand each line to jq"
+surreal cloud instance logs production --follow --json | jq -r '.timestamp + " " + .message'
+```
+
+`--level` is a display filter applied on this side, and a note reports how many lines were hidden by it. `--json` still carries every line the API sent. `--limit` takes from the start of the window, matching its meaning elsewhere, so to read the most recent lines, narrow the window with `--from`.
+
+`--follow` polls with a moving start time at a fixed five-second interval - there is no streaming endpoint and no interval flag. It runs until interrupted, and lines on the boundary between two polls are not printed twice. Under `--follow --json`, each new line is written as newline-delimited JSON on stdout; in text mode a table is printed per batch, with the header only on the first.
+
+## surreal cloud instance usage {#instance-usage}
+
+Show what an instance has consumed.
+
+<Synopsis>
+surreal cloud instance usage [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug or name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+Accepts the [list presentation flags](/docs/reference/cli/cloud/output-and-exit-codes#list-presentation-flags) and nothing else - this route takes no query parameters at all. Column ids are `instance_id`, `metric_type`, `compute_hours`, `disk_used_bytes`, `period_start` and `period_end`, with `instance_type` and `source` under `--wide`.
+
+```bash
+surreal cloud instance usage production
+```
+
+For every instance in the organisation at once, use [`org usage`](/docs/reference/cli/cloud/commands/org#org-usage).
+
+## surreal cloud instance estimate {#instance-estimate}
+
+Estimate what an instance would cost.
+
+<Synopsis>
+surreal cloud instance estimate [OPTIONS] --type <SLUG> --region <REGION>
+</Synopsis>
+
+This command takes no positional argument: it prices a hypothetical instance, so there is nothing to name.
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--type",
+            "value": "<SLUG>",
+            "required": true,
+            "description": "The instance type to price, by slug."
+        },
+        {
+            "name": "--region",
+            "value": "<REGION>",
+            "required": true,
+            "description": "The region to price it in."
+        },
+        {
+            "name": "--units",
+            "value": "<N>",
+            "description": "How many compute units. Defaults to the type's own. Minimum 1."
+        },
+        {
+            "name": "--storage",
+            "value": "<GB>",
+            "description": "How much storage, in gigabytes. Defaults to the type's own. Minimum 1."
+        }
+    ]}
+/>
+
+```bash title="Price a change before making it"
+surreal cloud instance estimate --type production-4 --region aws-euw1 --units 8 --storage 250
+```
+
+Flags you omit are left out of the request rather than sent as null, so the platform's own defaults for that type apply. The estimate is for the organisation resolved from `--org` and the [precedence chain](/docs/reference/cli/cloud/global-flags#the-precedence-chain). Nothing is created or billed. The result shows the type, the region, any units or storage you gave, the cost with its currency symbol, and the currency.
+
+**Refusals**, exit `2`:
+
+```text
+An instance has at least 1 compute unit; 0 was given.
+An instance has at least 1GB of storage; 0 was given.
+```
+
+This is the one place the API does not use integer minor units - the cost is a number in a named currency - and `--json` keeps the raw value.
+
+## surreal cloud instance capabilities get {#instance-capabilities-get}
+
+Show an instance's capability configuration.
+
+<Synopsis>
+surreal cloud instance capabilities get [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug or name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+This command has no options of its own.
+
+```bash
+surreal cloud instance capabilities get production
+```
+
+The view lists `allow_scripting`, `allow_guests` and `allow_insecure_storable_closures`, then the allowed and denied list for each of `experimental`, `arbitrary_query`, `eval_query`, `rpc_methods`, `http_endpoints`, `networks` and `functions`, named as the API names them (`allowed_functions`, `denied_networks` and so on). A setting the API did not send is left out, which is different from an empty list: an explicitly empty list is shown as `(none)` and permits nothing in that category, while an absent one leaves SurrealDB's default in force. Capabilities this build does not know about are shown as they arrive.
+
+Under `--json` the nested capabilities object is emitted, not the whole instance - so it can be diffed against another instance directly.
+
+```bash title="Compare two instances"
+diff <(surreal cloud instance capabilities get staging --json) \
+     <(surreal cloud instance capabilities get production --json)
+```
+
+## surreal cloud instance capabilities set {#instance-capabilities-set}
+
+Change an instance's capability configuration.
+
+<Synopsis>
+surreal cloud instance capabilities set [OPTIONS] [INSTANCE]
+</Synopsis>
+
+The capabilities route is a full replacement, so this command reads the current configuration, applies the flags given here, shows what would change, and asks before writing. A list flag **replaces** that list rather than adding to it, and anything not named is left exactly as it is - including capabilities this build does not know about.
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug or name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--allow-scripting",
+            "description": "Allow embedded scripting functions. Conflicts with `--deny-scripting`."
+        },
+        {
+            "name": "--deny-scripting",
+            "description": "Refuse embedded scripting functions."
+        },
+        {
+            "name": "--allow-guests",
+            "description": "Allow unauthenticated guest access. Conflicts with `--deny-guests`."
+        },
+        {
+            "name": "--deny-guests",
+            "description": "Refuse unauthenticated guest access."
+        },
+        {
+            "name": "--allow-experimental",
+            "value": "<NAMES>",
+            "description": "Experimental features to allow, comma-separated."
+        },
+        {
+            "name": "--deny-experimental",
+            "value": "<NAMES>",
+            "description": "Experimental features to deny, comma-separated."
+        },
+        {
+            "name": "--allow-arbitrary-query",
+            "value": "<TARGETS>",
+            "description": "Arbitrary-query targets to allow, comma-separated."
+        },
+        {
+            "name": "--deny-arbitrary-query",
+            "value": "<TARGETS>",
+            "description": "Arbitrary-query targets to deny, comma-separated."
+        },
+        {
+            "name": "--allow-eval-query",
+            "value": "<TARGETS>",
+            "description": "Eval-query targets to allow, comma-separated."
+        },
+        {
+            "name": "--deny-eval-query",
+            "value": "<TARGETS>",
+            "description": "Eval-query targets to deny, comma-separated."
+        },
+        {
+            "name": "--allow-rpc",
+            "value": "<METHODS>",
+            "description": "RPC methods to allow, comma-separated."
+        },
+        {
+            "name": "--deny-rpc",
+            "value": "<METHODS>",
+            "description": "RPC methods to deny, comma-separated."
+        },
+        {
+            "name": "--allow-http",
+            "value": "<ENDPOINTS>",
+            "description": "HTTP endpoints to allow, comma-separated."
+        },
+        {
+            "name": "--deny-http",
+            "value": "<ENDPOINTS>",
+            "description": "HTTP endpoints to deny, comma-separated."
+        },
+        {
+            "name": "--allow-net",
+            "value": "<TARGETS>",
+            "description": "Networks to allow, comma-separated."
+        },
+        {
+            "name": "--deny-net",
+            "value": "<TARGETS>",
+            "description": "Networks to deny, comma-separated."
+        },
+        {
+            "name": "--allow-funcs",
+            "value": "<FUNCTIONS>",
+            "description": "Functions to allow, comma-separated."
+        },
+        {
+            "name": "--deny-funcs",
+            "value": "<FUNCTIONS>",
+            "description": "Functions to deny, comma-separated."
+        },
+        {
+            "name": "--force",
+            "description": "Replace the capabilities without confirming."
+        }
+    ]}
+/>
+
+```bash title="Turn scripting off"
+surreal cloud instance capabilities set production --deny-scripting
+```
+
+```bash title="Replace the allowed function list"
+surreal cloud instance capabilities set production --allow-funcs "array,string,time"
+```
+
+```bash title="Deny outbound HTTP from a script"
+surreal cloud instance capabilities set production --deny-funcs "http::*" --force
+```
+
+The diff is printed on stderr in every output mode, `--json` included, then confirmed unless `--force` or the global `--yes` is given. `--quiet` suppresses the diff, so combine it with `--force` rather than with a prompt. Declining prints `Nothing was changed.` and exits `0`. In a non-interactive session without `--force` or `--yes`, the command exits `2` having written nothing.
+
+Flags for the same capability in opposite directions, such as `--allow-scripting` with `--deny-scripting`, are a usage error. A list flag may be given together with its opposite, for example `--allow-funcs` and `--deny-funcs`, and each replaces its own list. Setting a list to the value it already has is not a change. There is no flag for `allow_insecure_storable_closures`: `set` leaves it as it is.
+
+On success the command prints the configuration now in force.
+
+**Refusals and short-circuits.** No flags at all is a usage error, exit `2`, before any request:
+
+```text
+Nothing to set. Pass at least one capability flag, such as --allow-scripting or --deny-funcs http::*.
+Run `surreal cloud instance capabilities get` to see the current configuration.
+```
+
+Flags that would change nothing produce a note and exit `0` without a write:
+
+```text
+`production` already has those capabilities. Nothing was changed.
+```
+
+## surreal cloud instance backup list {#instance-backup-list}
+
+List the snapshots an instance can be restored from.
+
+<Synopsis>
+surreal cloud instance backup list [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug or name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+Accepts the [list presentation flags](/docs/reference/cli/cloud/output-and-exit-codes#list-presentation-flags) and nothing else. Column ids are `snapshot_id`, `started_at`, `tiers` and `on_demand`, with `valid_versions` under `--wide`.
+
+```bash
+surreal cloud instance backup list production
+```
+
+```bash title="The newest snapshot id"
+surreal cloud instance backup list production --sort started_at --reverse --limit 1 \
+    --columns snapshot_id --no-header
+```
+
+There is no backup collection route on the API, so this reads the snapshots off the instance's status route. `--json` carries the snapshot array rather than the whole status document, and an instance too new to have been backed up gives an empty array and a note. [`instance status`](#instance-status) shows the same snapshots alongside the deployment phase.
+
+## surreal cloud instance backup create {#instance-backup-create}
+
+Take a backup of an instance now.
+
+<Synopsis>
+surreal cloud instance backup create [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug or name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+This command has no options of its own, and carries no `--wait` or `--no-wait`.
+
+```bash
+surreal cloud instance backup create production
+```
+
+The route answers with no body, so the document is synthesised:
+
+```json title="Output"
+{
+  "instance_id": "67upif0m8sh1cn1p2c8t",
+  "status": "accepted"
+}
+```
+
+A replayed request is a second snapshot, so this call is not retried after a timeout or a `502`. Requesting a backup while one is already queued answers with a `429` that is reported as a conflict, exit `6`, rather than as a rate limit - the condition is "one is already running", not "you are asking too often". Only one on-demand backup runs at a time.
+
+Poll [`instance backup list`](#instance-backup-list) to see the snapshot appear.
+
+## surreal cloud instance backup policy get {#instance-backup-policy-get}
+
+Show the backup retention policy.
+
+<Synopsis>
+surreal cloud instance backup policy get [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug or name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+This command has no options of its own.
+
+```bash
+surreal cloud instance backup policy get production
+```
+
+The answer reports each retention tier, how often snapshots are taken, and which tiers this organisation's plan allows you to change - which is what [`backup policy set`](#instance-backup-policy-set) will accept.
+
+## surreal cloud instance backup policy set {#instance-backup-policy-set}
+
+Change the backup retention policy.
+
+<Synopsis>
+surreal cloud instance backup policy set [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id, slug or name. Omit to choose interactively."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--daily",
+            "value": "<DAYS>",
+            "description": "How many days of daily snapshots to keep, or the literal `default`."
+        },
+        {
+            "name": "--weekly",
+            "value": "<WEEKS>",
+            "description": "How many weeks of weekly snapshots to keep, or the literal `default`."
+        },
+        {
+            "name": "--monthly",
+            "value": "<MONTHS>",
+            "description": "How many months of monthly snapshots to keep, or the literal `default`."
+        },
+        {
+            "name": "--frequency-hours",
+            "value": "<HOURS>",
+            "description": "How often to take a snapshot, in hours. Checked against the allow-list this organisation's plan publishes, not against a range."
+        },
+        {
+            "name": "--force",
+            "description": "Change the policy without confirming."
+        }
+    ]}
+/>
+
+The three retention flags also accept the literal `default`, which restores this organisation's own value for that tier. `--frequency-hours` has no `default` form, because the platform gives it no resettable value.
+
+`--frequency-hours` is an **allow-list**, not a range: the plan publishes the intervals it offers, and a value sitting between two of them is refused rather than rounded. Run [`backup policy get`](#instance-backup-policy-get) to see which intervals this plan offers.
+
+```bash title="Keep a fortnight of dailies"
+surreal cloud instance backup policy set production --daily 14
+```
+
+```bash title="Snapshot every six hours"
+surreal cloud instance backup policy set production --frequency-hours 6
+```
+
+```bash title="Reset the monthly tier to the organisation's own value"
+surreal cloud instance backup policy set production --monthly default
+```
+
+**Confirmation.** Only a *reduction* asks. Lengthening a retention cannot lose a snapshot, so it is applied without a prompt. A reset to `default` counts as a reduction, because the organisation's own value is not known in advance. Changing only `--frequency-hours` never asks, because taking snapshots less often deletes none. The shortened tiers are listed on stderr and the question names the instance. Declining prints `The policy was not changed.` and exits `0`. In a non-interactive session without `--force` or `--yes`, a reduction exits `2` having changed nothing.
+
+**Refusals**, exit `2`:
+
+- No flags at all:
+
+```text
+Nothing to set. Pass --daily, --weekly, --monthly or --frequency-hours.
+Each retention flag also takes the literal `default`, which restores this organization's own value for that tier.
+```
+
+- A tier the plan does not allow changing:
+
+```text
+This organization's plan does not allow changing the monthly retention on `production`.
+Run `surreal cloud instance backup policy get` to see which tiers are editable.
+```
+
+- A value outside the plan's bounds, naming the bound it broke:
+
+```text
+Daily retention must be between 1 and 30 days on this plan; 90 was given.
+```
+
+- A `--frequency-hours` the plan does not offer, listing the intervals it does:
+
+```text
+A backup every 5 hours is not offered on this plan. Choose one of: 6, 12, 24.
+```
+
+## Related pages
+
+- [Long-running operations](/docs/reference/cli/cloud/long-running-operations) - `--wait`, `--no-wait`, polling and exit code `10`
+- [`org` commands](/docs/reference/cli/cloud/commands/org) - the organisation that owns these instances
+- [`catalog` commands](/docs/reference/cli/cloud/commands/catalog) - the type, region and version slugs `create` and `update` expect
+- [The `surreal` launcher](/docs/reference/cli/launcher) - how `sql`, `import` and `export` reach the database component
+- [Overview](/docs/reference/cli/cloud) - the rest of the reference
+- [SurrealDB CLI](/docs/reference/cli/db) - the data plane: `surreal db sql`, `surreal db import`, `surreal db export`
