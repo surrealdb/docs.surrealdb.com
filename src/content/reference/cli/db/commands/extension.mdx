@@ -1,0 +1,344 @@
+---
+position: 12
+title: extension
+description: The surreal db extension command scaffolds, builds, inspects, runs, signs, installs and upgrades Surrealism extensions packaged as .surli archives, and edits a project's package.toml.
+---
+
+<Since v="v4.0.0" />
+
+The `extension` command works with [Surrealism](/docs/learn/extensions/plugins/overview) extensions: it scaffolds a project, builds it into a `.surli` archive, inspects and runs the archive, signs it, and installs it into a database. Before SurrealDB 4.0, the command was `surreal db module`, which still works as a hidden alias.
+
+<Synopsis>
+surreal db extension [OPTIONS] <COMMAND>
+</Synopsis>
+
+| Subcommand | Purpose |
+| --- | --- |
+| [`init`](#extension-init) | Scaffold a new extension project. |
+| [`build`](#extension-build) | Build the project into a `.surli` archive. |
+| [`run`](#extension-run) | Run a function of an archive with arguments. |
+| [`sig`](#extension-sig) | Show a function's signature. |
+| [`info`](#extension-info) | List the functions an archive exports. |
+| [`config`](#extension-config) | Read and change the project's `package.toml`. |
+| [`sign`](#extension-sign) | Sign an archive with an SSH key or through Sigstore. |
+| [`install`](#extension-install) | Check an archive's signer and capabilities, and define it in a database. |
+| [`upgrade`](#extension-upgrade) | Redefine an installed extension from a new archive. |
+| `version` | Print the Surrealism version. |
+
+## surreal db extension init {#extension-init}
+
+Scaffold a new extension project: a Rust crate with a `package.toml`, a `.cargo/config.toml` and a starter `src/lib.rs`.
+
+<Synopsis>
+surreal db extension init [OPTIONS] [PATH]
+</Synopsis>
+
+<OptionsTable
+    title="Options"
+    options={[
+        { "name": "[PATH]", "description": "Directory to create the project in. The current directory is used when omitted." },
+        { "name": "--headless", "description": "Scaffold without prompting, for use in scripts and CI. Requires `--org`." },
+        { "name": "--org", "value": "<ORG>", "description": "Organisation the extension belongs to." },
+        { "name": "--name", "value": "<NAME>", "description": "Name of the extension. The directory name is used when omitted." }
+    ]}
+/>
+
+```bash
+surreal db extension init --headless --org acme --name demo ./demo
+```
+
+The `package.toml` it writes names the package, and lists under `[capabilities]` what the extension will ask for when it is installed:
+
+```toml title="package.toml"
+target = "rust"
+abi = 4
+
+[package]
+organisation = "acme"
+name = "demo"
+version = "1.0.0"
+
+[capabilities]
+allow_scripting = false
+allow_arbitrary_queries = false
+allow_write = false
+allow_functions = []
+allow_net = []
+strict_timeout = true
+```
+
+A project from SurrealDB 3.3 or earlier has a `surrealism.toml` instead, which is still read when there is no `package.toml`. The `.cargo/config.toml` holds the `tokio_unstable` flag, commented out. Uncomment it when a dependency needs Tokio's `net` feature.
+
+## surreal db extension build {#extension-build}
+
+Build the project into a `.surli` archive, and print the archive's digest.
+
+<Synopsis>
+surreal db extension build [OPTIONS] [SOURCE_PATH]
+</Synopsis>
+
+<OptionsTable
+    title="Options"
+    options={[
+        { "name": "[SOURCE_PATH]", "description": "Path to the project. The current directory is used when omitted." },
+        { "name": "--out", "short": "-o", "value": "<OUT>", "description": "Path or file name of the archive. Defaults to `<organisation>-<name>-<version>.surli` in the project directory." },
+        { "name": "--debug", "description": "Build in debug mode, which skips the optimisation pass for a faster build." }
+    ]}
+/>
+
+```bash
+surreal db extension build
+```
+
+```text title="Sample output"
+Building WASM module (target: wasm32-wasip2, profile: release)...
+Optimizing bundle...
+Pre-initialising...
+Extracting function signatures...
+Packed ./acme-demo-1.0.0.surli (digest sha256:7b36da7d8386c1561b7d61f83f39a3bf590e25b774d935d9f8252604e80134b5)
+```
+
+The build runs the extension's `init` function once and stores the result in the archive, so every call starts from that state with fresh memory. The digest is the SHA-256 hash of the archive's `MANIFEST`, which lists every file in the archive with its own hash. A definition's [`DIGEST`](/docs/reference/query-language/statements/define/extension#digest) pins this value.
+
+## surreal db extension run {#extension-run}
+
+Run one function of an archive, without a database. Repeat `--arg` for each argument, written as a SurrealQL value.
+
+<Synopsis>
+surreal db extension run [OPTIONS] --fnc <FNC> <FILE>
+</Synopsis>
+
+<OptionsTable
+    title="Options"
+    options={[
+        { "name": "<FILE>", "required": true, "description": "Path to the `.surli` archive." },
+        { "name": "--fnc", "value": "<FNC>", "required": true, "description": "Name of the function to run." },
+        { "name": "--arg", "value": "<ARGS>", "description": "A value passed to the function. Repeat it for each argument." }
+    ]}
+/>
+
+```bash
+surreal db extension run --fnc greet --arg '"Ada"' acme-demo-1.0.0.surli
+```
+
+```text title="Output"
+✅ 'Hello, Ada!'
+```
+
+## surreal db extension sig {#extension-sig}
+
+Show the signature of one function in an archive.
+
+<Synopsis>
+surreal db extension sig [OPTIONS] --fnc <FNC> <FILE>
+</Synopsis>
+
+```bash
+surreal db extension sig --fnc greet acme-demo-1.0.0.surli
+```
+
+```text title="Output"
+Signature:
+ - greet(name: string) -> string [readonly]
+```
+
+## surreal db extension info {#extension-info}
+
+List the package and the functions an archive exports. `<mod>` stands for the name the extension is given when it is defined.
+
+<Synopsis>
+surreal db extension info [OPTIONS] <FILE>
+</Synopsis>
+
+```bash
+surreal db extension info acme-demo-1.0.0.surli
+```
+
+```text title="Output"
+Info for @acme/demo@1.0.0
+===========================
+
+- <mod>::greet(name: string) -> string [readonly]
+- <mod>::add(a: int, b: int) -> int [readonly]
+- <mod>() -> string [readonly]
+```
+
+## surreal db extension config {#extension-config}
+
+Read and change the project's `package.toml`. Each subcommand takes `--path` to name the project directory, which defaults to the current directory, and keeps the file's comments and ordering.
+
+| Subcommand | Purpose |
+| --- | --- |
+| `show` | Print the package file. |
+| `get <KEY>` | Print one value, such as `package.version` or `capabilities.allow_net`. |
+| `set <KEY> <VALUE>` | Set one value. |
+| `add <KEY> <VALUE>` | Add a value to `capabilities.allow_net` or `capabilities.allow_functions`. |
+| `remove <KEY> <VALUE>` | Remove a value from one of those lists. |
+| `signer ssh <FILE>` | Name an SSH public key as the package's signer. |
+| `signer github --repo <OWNER/NAME> --workflow <FILE>` | Name a GitHub Actions workflow as the signer, for Sigstore keyless signing. |
+| `signer gitlab` | Name a GitLab CI pipeline as the signer. |
+| `signer remove` | Remove the signer. |
+| `fs add <DIR> [--as <PATH>]` | Bundle a directory into the archive's read-only filesystem. |
+| `fs remove <PATH>` | Remove a bundled directory. |
+
+The capabilities requested in `package.toml` are what [`install`](#extension-install) shows and asks to grant. An extension receives only the capabilities that its definition grants.
+
+```bash
+surreal db extension config add capabilities.allow_net api.colour.io:443
+surreal db extension config add capabilities.allow_functions http::get
+surreal db extension config set capabilities.allow_write true
+```
+
+## surreal db extension sign {#extension-sign}
+
+Sign an archive, which adds a `SIGNATURE` file to it. The project's `package.toml` must name a signer first, with `config signer`, and the archive must be built after that, so that the signer is part of the signed `MANIFEST`.
+
+<Synopsis>
+surreal db extension sign [OPTIONS] <FILE>
+</Synopsis>
+
+<OptionsTable
+    title="Options"
+    options={[
+        { "name": "<FILE>", "required": true, "description": "The `.surli` archive to sign." },
+        { "name": "--key", "value": "<KEY>", "description": "Sign with an SSH private key, through `ssh-keygen -Y sign`, instead of Sigstore." },
+        { "name": "--bundle", "value": "<FILE>", "description": "Import a Sigstore bundle made over the archive's `MANIFEST`." },
+        { "name": "--trusted-root", "value": "<FILE>", "description": "A Sigstore `trusted_root.json` to verify the signature against. Required with `--bundle` and with a private Sigstore instance." },
+        { "name": "--fulcio-url", "value": "<URL>", "default": "https://fulcio.sigstore.dev", "description": "Certificate authority for keyless signing." },
+        { "name": "--rekor-url", "value": "<URL>", "default": "https://log2025-1.rekor.sigstore.dev", "description": "Transparency log for keyless signing." },
+        { "name": "--tsa-url", "value": "<URL>", "default": "https://timestamp.sigstore.dev/api/v1/timestamp", "description": "Timestamp authority for keyless signing." },
+        { "name": "--out", "short": "-o", "value": "<FILE>", "description": "Write the signed archive here instead of replacing the input." }
+    ]}
+/>
+
+Without `--key` or `--bundle`, the command signs keyless through Sigstore, which needs the identity of a CI workflow, such as GitHub Actions. With an SSH key:
+
+```bash
+surreal db extension config signer ssh ~/.ssh/release.pub
+surreal db extension build
+surreal db extension sign --key ~/.ssh/release acme-demo-1.0.0.surli
+```
+
+```text title="Sample output"
+Signed acme-demo-1.0.0.surli (sha256:7b36da7d8386c1561b7d61f83f39a3bf590e25b774d935d9f8252604e80134b5)
+```
+
+Signing does not change the digest, because the signature is a separate file that the `MANIFEST` does not list.
+
+## surreal db extension install {#extension-install}
+
+Install an archive into a database. The command reads the archive, shows its package, signer, digest, functions and the capabilities it requests, and asks which to accept. It then runs [`DEFINE EXTENSION`](/docs/reference/query-language/statements/define/extension) with the `DIGEST`, `SIGNER` and `CAPABILITIES` filled in.
+
+<Synopsis>
+surreal db extension install [OPTIONS] --as <NAME> --namespace <NAMESPACE> --database <DATABASE> <SOURCE>
+</Synopsis>
+
+<OptionsTable
+    title="Options"
+    options={[
+        { "name": "<SOURCE>", "required": true, "description": "`silo::<org>::<pkg><x.y.z>`, or `f\"<bucket>:/<path>.surli\"` for an archive that is already in a bucket of the database." },
+        { "name": "--as", "value": "<NAME>", "required": true, "description": "The name to call the extension by, as in `ext::<name>::<function>()`." },
+        { "name": "--trust-signer", "value": "<SIGNER>", "description": "The signer to accept without asking: `any`, an SSH key fingerprint (`SHA256:…`), or a Sigstore identity (the workflow URL), optionally followed by its issuer. Any other signer is refused." },
+        { "name": "--with-capability", "value": "<CAP>", "description": "Grant one requested capability without asking: `net:<target>`, `functions:<pattern>`, `queries`, `scripting`, `write`, `no-strict-timeout`, `memory=<bytes>` or `timeout=<duration>`. Repeat it for each. It cannot grant more than the archive requests." },
+        { "name": "--unsigned", "description": "Install without verifying a signature, and record the extension as `UNSIGNED`. The only way to install an unsigned archive." },
+        { "name": "--dry-run", "description": "Show the review and ask the same questions, then print the statement instead of running it." },
+        { "name": "--offline", "description": "Skip the online checks of a Sigstore signature. The offline verification still runs." },
+        { "name": "--trust-root", "value": "<FILE>", "description": "A Sigstore `trusted_root.json` to verify a signature against, for a private Sigstore or an air-gapped install." },
+        { "name": "--silo-endpoint", "value": "<URL>", "env": "SURREAL_SURREALISM_SILO_ENDPOINT", "default": "https://silo.surrealdb.com", "description": "The Silo registry address." }
+    ]}
+/>
+
+The command also takes the usual connection options: `--endpoint`, `--username` and `--password` or `--token`, `--auth-level`, `--namespace` and `--database`, or the matching `SURREAL_*` environment variables. The user needs permission to define extensions in the database, and read access to the bucket for a bucket source.
+
+```bash
+surreal db extension install 'f"extensions:/acme-colour-1.0.0.surli"' --as colour \
+    -e ws://localhost:8000 -u root -p secret --ns app --db main \
+    --trust-signer SHA256:WAbQymSgov5xQFo9qtOeZGglO/HWeqqovf6ztZ0HM7U \
+    --with-capability net:api.colour.io:443
+```
+
+```text title="Sample output"
+  Package     acme/colour 1.0.0 from f"extensions:/acme-colour-1.0.0.surli"
+  Signed by   key ssh-ed25519 SHA256:WAbQymSgov5xQFo9qtOeZGglO/HWeqqovf6ztZ0HM7U
+              ✓ matches package.toml [signer]: key SHA256:WAbQymSgov5xQFo9qtOeZGglO/HWeqqovf6ztZ0HM7U
+  Anchor      the key itself (confirm its fingerprint with the publisher)
+  Digest      sha256:8be7b49f1f3116e0f723c55ca0c9658452165fd2338995ab36a9ecf3b29c79fa
+  Adds        ext::colour::blend, ext::colour::recolour
+  Needs       network     api.colour.io:443
+  · functions http::get                           requested, not granted (--with-capability grants it)
+
+Trust this signer? yes (--trust-signer)
+Capabilities: as granted by --with-capability
+
+Installed ext::colour
+```
+
+Every decision is a named flag, and there is no option that accepts everything. Without a terminal, a run that leaves a decision open fails and names the flag it needs:
+
+```text title="Error output"
+Trust this signer? needs an answer: run in a terminal, or pass --trust-signer <signer|any>
+```
+
+## surreal db extension upgrade {#extension-upgrade}
+
+Redefine an installed extension from a new archive with `DEFINE EXTENSION OVERWRITE`. The command compares the new archive with the installed definition, keeps the `PERMISSIONS` and `COMMENT`, and starts from the capabilities granted at install, so that only capabilities the new archive requests beyond the installed one need approval.
+
+<Synopsis>
+surreal db extension upgrade [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> <NAME> [SOURCE]
+</Synopsis>
+
+<OptionsTable
+    title="Options"
+    options={[
+        { "name": "<NAME>", "required": true, "description": "The installed extension's name, as in `ext::<name>`." },
+        { "name": "[SOURCE]", "description": "The new source. Defaults to the newest Silo release of the installed package, or the installed bucket file read again." },
+        { "name": "--trust-signer", "value": "<SIGNER>", "description": "As for `install`." },
+        { "name": "--allow-signer-change", "description": "Accept a signer that differs from the installed one. `--trust-signer` must still name it." },
+        { "name": "--allow-downgrade", "description": "Allow moving to a lower version than the installed one." },
+        { "name": "--allow-package-change", "description": "Allow moving to another organisation or package." },
+        { "name": "--with-capability", "value": "<CAP>", "description": "As for `install`. Without it, a run without a terminal keeps the installed grant and grants nothing new." }
+    ]}
+/>
+
+```bash
+surreal db extension upgrade colour 'f"extensions:/acme-colour-1.1.0.surli"' \
+    -e ws://localhost:8000 -u root -p secret --ns app --db main \
+    --trust-signer SHA256:WAbQymSgov5xQFo9qtOeZGglO/HWeqqovf6ztZ0HM7U
+```
+
+Upload each release under its own file name, as above. When a new archive replaces the installed file under the same name, the installed archive can no longer be read, so the command cannot check for a downgrade or a change of package, and in a script it then needs both `--allow-downgrade` and `--allow-package-change`.
+
+## Command help
+
+```bash
+surreal db extension --help
+```
+
+```text title="Output"
+Build, inspect and run Surrealism extensions
+
+Usage: surreal extension [OPTIONS] <COMMAND>
+
+Commands:
+  init     Initialize a new Surrealism module project
+  run      Run a function with arguments
+  sig      Show the function signature
+  info     Show the module information
+  build    Build a WASM module
+  sign     Sign a .surli archive: Sigstore keyless from CI, an SSH key, or an imported bundle
+  config   Read and change the project's package.toml
+  install  Install an extension into a database: inspect, approve, define
+  upgrade  Upgrade an installed extension: compare signer and capabilities, redefine
+  version  Output the Surrealism version information
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+## Further reading
+
+- [Surrealism overview](/docs/learn/extensions/plugins/overview): the end-to-end workflow
+- [`DEFINE EXTENSION`](/docs/reference/query-language/statements/define/extension): `DIGEST`, `SIGNER`, `UNSIGNED` and `CAPABILITIES`
+- [Creating custom extensions](/docs/learn/extensions/guides/creating-custom-modules): attributes, `package.toml` and bundled filesystems

@@ -1,12 +1,12 @@
 ---
 position: 3
-title: Module architecture
-description: "How Surrealism modules are packaged, sandboxed, and invoked by SurrealDB, including exports metadata, runtime limits, and load strategy."
+title: Extension architecture
+description: "How Surrealism extensions are packaged, sandboxed, and invoked by SurrealDB, including exports metadata, fresh memory per call, runtime limits, and load strategy."
 ---
 
-# Module architecture
+# Extension architecture
 
-[Surrealism](/docs/learn/extensions/plugins/overview) modules are Rust crates packaged as `.surli` archives. Each archive contains your compiled component plus metadata about exported `#[surrealism]` functions. SurrealDB reads this metadata to map SurrealQL calls to module exports without recompiling the database.
+[Surrealism](/docs/learn/extensions/plugins/overview) extensions are Rust crates packaged as `.surli` archives. Each archive contains your compiled component plus metadata about exported `#[surrealism]` functions. SurrealDB reads this metadata to map SurrealQL calls to the extension's exports without recompiling the database.
 
 ## Component target and sandbox
 
@@ -14,23 +14,29 @@ Surrealism builds target WASI Preview 2 (`wasm32-wasip2`) and run through the WA
 
 ## Interaction with the engine
 
-The module does not link directly into SurrealDB’s core. Instead, the engine loads it in the Surrealism runtime, resolves exports, and marshals values between SurrealQL and your Rust functions through the Surrealism ABI. You work with SDK-exposed types and host imports, not arbitrary process memory. From SurrealDB 4.0, a function reaches the database through a `Transaction` handle that is valid only for the duration of the call.
+The extension does not link directly into SurrealDB’s core. Instead, the engine loads it in the Surrealism runtime, resolves exports, and marshals values between SurrealQL and your Rust functions through the Surrealism ABI. You work with SDK-exposed types and host imports, not arbitrary process memory. From SurrealDB 4.0, a function reaches the database through a `Transaction` handle that is valid only for the duration of the call.
 
-At build time, Surrealism also extracts an exports manifest (names, argument types, return type, whether the function takes a writeable transaction, optional comment) and stores it in the archive. That allows metadata lookups without instantiating the module for every query-planning or introspection operation.
+At build time, Surrealism also extracts an exports manifest (names, argument types, return type, whether the function takes a writeable transaction, optional comment) and stores it in the archive. That allows metadata lookups without instantiating the extension for every query-planning or introspection operation.
 
 ## Runtime execution model
 
-Surrealism uses pooled module controllers so invocations can reuse warm execution contexts instead of rebuilding runtime state for each call.
+<Since v="v4.0.0" />
 
-- **Pool ceiling:** per-module controller pool size is capped by `SURREAL_SURREALISM_MAX_POOL_SIZE`.
-- **Timeout mode:** strict timeout behaviour can be configured by module/runtime settings.
-- **Resource ceilings:** memory and execution time limits can be enforced with Surrealism environment variables.
+Each call to an extension function runs on a fresh instance of the extension, with fresh memory, and the instance is discarded when the call returns. Nothing a call writes to memory is visible to the next call, so an extension cannot carry state between calls in memory. Keep state that has to last in records, through the `Transaction` handle.
+
+Starting a fresh instance costs little because the build has already done the slow part: [`surreal db extension build`](/docs/reference/cli/db/commands/extension#extension-build) runs the extension's `init` function once, and stores the resulting memory in the archive. Every instance starts from that state, so work done in `init`, such as loading an attached file, is not repeated on each call.
+
+- **Concurrency:** `SURREAL_SURREALISM_MAX_CONCURRENT_INVOCATIONS` (64 by default) sets how many calls run at once across the datastore. A call that finds no free slot waits within its query's timeout, and calls from inside another extension have slots of their own.
+- **Resource limits:** `SURREAL_SURREALISM_MAX_MEMORY` and `SURREAL_SURREALISM_MAX_EXECUTION_TIME` cap every call. An extension's [`CAPABILITIES`](/docs/reference/query-language/statements/define/extension#capabilities) can set lower limits, never higher ones.
+- **Timeouts:** every call stops at the execution time limit or at the query's timeout. An extension defined with `strict_timeout: false` runs without that check only on a server started with `SURREAL_SURREALISM_ALLOW_UNBOUNDED_EXECUTION`.
+
+Before SurrealDB 4.0, a pool of instances was reused between calls, and an instance kept its memory from one call to the next.
 
 For a complete list of server-level variables, see [environment variables](/docs/reference/cli/db/environment-variables#surrealism-config).
 
-## Module loading strategy
+## Loading strategy
 
-By default, SurrealDB eagerly compiles defined Surrealism modules at startup to reduce first-call latency. If you prefer lazy loading, start the server with:
+By default, SurrealDB compiles the extensions that are defined when it starts, to reduce the latency of the first call. If you prefer lazy loading, start the server with:
 
 ```bash
 surreal db start --lazy-surrealism
@@ -56,10 +62,10 @@ surreal db start
 
 ## Lifecycle
 
-The end-to-end lifecycle is: **build** your crate with [`surreal db module`](/docs/reference/cli/db/commands/module), **upload** the `.surli` archive (typically via [`DEFINE BUCKET`](/docs/reference/query-language/statements/define/bucket)), **define** the module ([`DEFINE MODULE`](/docs/reference/query-language/statements/define/module)), then **invoke** functions from queries.
+The end-to-end lifecycle is: **build** your crate with [`surreal db extension build`](/docs/reference/cli/db/commands/extension#extension-build), optionally **sign** the archive, **upload** it (typically to a [bucket](/docs/reference/query-language/statements/define/bucket)), **define** the extension with [`DEFINE EXTENSION`](/docs/reference/query-language/statements/define/extension) or [`surreal db extension install`](/docs/reference/cli/db/commands/extension#extension-install), then **invoke** functions from queries.
 
 Operational teams often automate upload and definition in CI so test and production databases stay aligned. The [overview](/docs/learn/extensions/plugins/overview) summarises this flow.
 
 ## Security
 
-Treat every module as privileged code that can affect data your database can access. Sandboxing limits host access, but a module can still implement logic that leaks or corrupts data if you expose it to the wrong scopes. Load only WASM you trust, pin versions, and follow least privilege for namespaces, databases, and credentials that call into Surrealism functions.
+Treat every extension as privileged code that can affect data your database can access. Sandboxing limits host access, but an extension can still implement logic that leaks or corrupts data if you expose it to the wrong scopes. Load only code you trust: a [`SIGNER`](/docs/reference/query-language/statements/define/extension#signer-and-unsigned) checks who built the archive, the `DIGEST` pins the exact build, and `CAPABILITIES` grants only the network access, functions and writes that the extension needs. Follow least privilege for namespaces, databases, and credentials that call into Surrealism functions.
