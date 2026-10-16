@@ -1,0 +1,169 @@
+---
+position: 14
+title: Runtime validation
+description: Check data against a Surqlize schema before it is written with db.validated(), and validate data at the edge of your application with safeParse() and parse(), including ValidationError, its issues, and the create, update, and row modes.
+---
+
+# Runtime validation
+
+TypeScript checks your data when you compile. Data that comes from a form, an API request, or `JSON.parse` is only checked when you check it. Surqlize can validate the data a write carries against the table schema before it is sent to SurrealDB. Validation is off by default.
+
+## Validating every write
+
+`db.validated()` returns a view of the ORM in which `create`, `insert`, `update`, `upsert`, and `relate` check their data first. It shares the connection with the ORM it came from, as `withSignal()` does.
+
+```ts title="Turn on validation"
+import { orm, t, table, ValidationError } from "surqlize";
+
+const user = table("user", {
+    name: t.string(),
+    age: t.number(),
+    address: t.object({ city: t.string() }),
+    tags: t.array(t.string()),
+});
+
+const db = orm(surreal, user).validated();
+
+const body = JSON.parse('{ "name": 42, "address": { "city": 1 }, "tags": ["a", 2] }');
+
+try {
+    await db.create("user").content(body);
+} catch (error) {
+    console.log(String(error));
+}
+```
+
+```text title="Error output"
+ValidationError: Invalid data for table "user": 4 validation errors
+  - name: expected string, received 42
+  - age: expected number, received undefined
+  - address.city: expected string, received 1
+  - tags[1]: expected string, received 2
+```
+
+The query is not sent when validation fails. The same check runs for queries in [batches](/docs/libraries/surqlize-typescript/transactions), inside transactions, and for queries that call `.prepare()`. It carries over to a view made with `withSignal()`.
+
+A single query can opt in or out, whatever the ORM is set to:
+
+```ts title="Validate one query"
+const plain = orm(surreal, user);
+const input = { name: "Ada", age: 36, address: { city: "London" }, tags: ["maths"] };
+
+// Check one query on an ORM without validation
+await plain.create("user").validated().content(input);
+
+// Skip the check for one query on a validated ORM
+await db.create("user").validated(false).content(input);
+```
+
+## What is checked
+
+The check depends on the write method and on whether the write creates a record or changes one. A new record must have every required field. A required field is one that is not `option<...>`, is not `id` (or `in` and `out` on an edge), and, on `create` and `insert`, does not have a `.default()`.
+
+| Data | Checked as |
+| ---- | ---------- |
+| `.content()` on `create`, and the records of `insert()` | The full input. Every required field must be present and valid. Fields with a `.default()` may be left out. |
+| `.content()` on `relate` | The full input. Every required field must be present and valid. A field with a `.default()` must also be given. |
+| `.content()`, `.replace()` on `update` and `upsert` | The full record, because the write replaces the stored record. Every field must be present and valid, including fields with a `.default()`. |
+| `.replace()` on `create` | The full record. Defaults are not filled in, so every field must be given. |
+| `.set()` and `.merge()` on `create` | Each supplied field is checked. The new record must also have every required field, after defaults are filled in. |
+| `.set()` and `.merge()` on `relate` | Each supplied field is checked. Every required field must be given, including fields with a `.default()`. |
+| `.set()` and `.merge()` on `update` | Each supplied field is checked. The stored record keeps the other fields, so none are required. |
+| `.set()` and `.merge()` on `upsert` | Each supplied field is checked. When the upsert creates a record, the required fields are not checked. |
+| `.onDuplicate()` on `insert` | Each assigned field is checked. |
+| `.patch()` | Not checked. |
+
+A few details:
+
+- A field given as `undefined` counts as not given.
+- Assignments with dotted paths, such as `"address.city"`, are checked against the nested field.
+- The operands of `+=` and `-=` are checked for number and array fields. Other operands are left to the database.
+- Nested objects, arrays, tuples, unions, record links (including the table that is linked), and tables linked to a class are all checked.
+- Computed fields are read-only, so supplying a value for one is an issue.
+- Fields that the schema does not declare are ignored, and so are `.patch()` operations.
+- Values that SurrealDB evaluates itself, such as `expr(...)` defaults and subquery expressions, are not checked on the client.
+- Validation never changes your data. What is checked is what is sent, and defaults are still filled in by the query.
+
+## ValidationError
+
+`ValidationError` extends `OrmError`. It does not stop at the first problem. `error.issues` lists every failing field, and `error.table` names the table.
+
+Each issue has these properties:
+
+| Property | Description |
+| -------- | ----------- |
+| `path` | Where the value sits, such as `address.city`, `tags[1]`, or `[2].age` for the third record of an `insert`. `(root)` stands for the data itself. |
+| `expected` | What the schema expects there, such as `number` or `string or number`. |
+| `received` | The value that was found, or `undefined` when the field is missing. |
+| `message` | A readable one-line description. |
+
+```ts title="Read the issues"
+import { ValidationError } from "surqlize";
+
+try {
+    await db.create("user").content(body);
+} catch (error) {
+    if (error instanceof ValidationError) {
+        for (const issue of error.issues) {
+            console.log(issue.path, issue.expected, issue.received);
+        }
+    }
+}
+```
+
+## Validating data yourself
+
+Tables and edges have the same check as standalone methods, for example at the edge of your API. `safeParse()` returns a result and never throws. `parse()` returns the typed data or throws the same `ValidationError`.
+
+```ts title="Validate a request body"
+async function createUser(body: unknown) {
+    const result = user.safeParse(body); // mode "create" by default
+
+    if (!result.success) {
+        return { status: 400, issues: result.error.issues };
+    }
+
+    await db.create("user").content(result.data); // result.data has the type of the create input
+    return { status: 201 };
+}
+
+const requestBody = { name: "Ada", age: 36, address: { city: "London" }, tags: ["maths"] };
+const input = user.parse(requestBody); // the typed data, or a thrown ValidationError
+```
+
+The `mode` option says what the data is, and the type of `data` follows it:
+
+| Mode | Data | Type of `data` |
+| ---- | ---- | -------------- |
+| `"create"` (default) | The input of a create or insert. Fields with a default and optional fields can be left out, and computed fields are rejected. | `CreateInput` |
+| `"update"` | A partial write. | A partial record |
+| `"row"` | A whole stored record, including `id` and computed fields. | The record type |
+
+```ts title="Validate partial writes and stored records"
+import { RecordId } from "surrealdb";
+
+const patch = { age: 37 };
+const row = { id: new RecordId("user", "ada"), name: "Ada", age: 36, address: { city: "London" }, tags: [] };
+
+user.safeParse(patch, { mode: "update" });
+user.safeParse(row, { mode: "row" });
+```
+
+Validation does not convert the data: it returns what you passed. The one exception is `"row"` mode on a table [linked to a class](/docs/libraries/surqlize-typescript/schema#linking-a-class-to-a-table), where the data is hydrated into an instance of the class, as selects do.
+
+Two lower-level checks exist alongside them. `table.validate(value)` is a type guard for a whole stored record, `id` included. The `t.*` types have `validate()` and `parse()` methods for a single value, and `parse()` throws a `TypeParseError`, which stops at the first mismatch where `ValidationError` lists every one. See [error handling](/docs/libraries/surqlize-typescript/error-handling).
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Mutations"
+        description="How each write method treats required fields."
+        href="/docs/libraries/surqlize-typescript/mutations"
+    />
+    <IconBox
+        title="Type inference"
+        description="Get the type of the create input and the stored record."
+        href="/docs/libraries/surqlize-typescript/type-inference"
+    />
+</Boxes>
