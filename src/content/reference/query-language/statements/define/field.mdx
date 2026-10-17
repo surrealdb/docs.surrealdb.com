@@ -39,6 +39,9 @@ DEFINE FIELD [ OVERWRITE | IF NOT EXISTS ] @name ON [ TABLE ] @table
 		| FOR update @expression
 	] ]
   [ COMMENT @string ]
+  [ MIGRATE EXISTING ROWS AS @name USING @expression [ FALLBACK @value ] ]
+  [ GRAPHQL_ALIAS @string ]
+  [ GRAPHQL_DEPRECATED @string ]
 ```
 
   </TabItem>
@@ -656,6 +659,117 @@ UPDATE item SET status = "new" WHERE status IS NONE;
 
 A [computed field](#computed-fields) needs no update, because it is calculated when the record is read.
 
+On a `SCHEMAFULL` table in a database at compatibility level 4, a new field whose type does not accept `NONE`, such as `TYPE int`, is refused while the table holds records, because none of them has a value for it yet. A `DEFAULT` does not change this, since it only applies to records created later. Either define the field as `option<int>`, or give the existing records a value as described in [Migrating existing records](#migrating-existing-records).
+
+## Migrating existing records
+
+<Since v="v4.0.0" />
+
+A field's definition describes the values its records hold, but changing the definition does not rewrite records already stored. A `MIGRATE EXISTING ROWS` clause on `DEFINE FIELD` or [`ALTER FIELD`](/docs/reference/query-language/statements/alter/field) says what those records become:
+
+```syntax title="SurrealQL Syntax"
+MIGRATE EXISTING ROWS AS @name USING @expression [ FALLBACK @value ]
+```
+
+- **`AS @name`** names the migration, so that it runs once however many times the statement runs. See [Running a schema script again](#running-a-schema-script-again).
+- **`USING @expression`** computes each record's new value from `$value`, its old value. The expression can call built-in functions, but not a custom function, a model, a script or an extension, and it cannot hold a statement, which includes a `SELECT` and an `IF` block. To choose a value by case, look it up in an object instead, as in `{ published: 'live' }[$value] ?? $value`.
+- **`FALLBACK @value`** is a constant to store when the expression fails or its result does not fit the new definition. It may be left out only when SurrealDB can prove that the expression never fails and always produces a value that fits, which a cast such as `<string> $value` does not yet satisfy, so include a `FALLBACK` unless the statement is accepted without one.
+
+```surql
+-- In a database at compatibility level 4
+DEFINE TABLE product SCHEMAFULL;
+DEFINE FIELD stock ON product TYPE string;
+CREATE product:1 SET stock = '7';
+CREATE product:2 SET stock = 'unknown';
+
+DEFINE FIELD OVERWRITE stock ON product TYPE int
+    MIGRATE EXISTING ROWS AS stock_to_int USING <int> $value FALLBACK 0;
+
+SELECT * FROM product;
+```
+
+```surql title="Output"
+[
+	{ id: product:1, stock: 7 },
+	{ id: product:2, stock: 0 }
+]
+```
+
+A migration takes effect when the statement commits: a record is converted the first time it is read, and a background job rewrites every record of the table. The same clause adds a required field to a table that already has records, with the expression giving each record its value:
+
+```surql
+DEFINE FIELD reorder_level ON product TYPE int
+    MIGRATE EXISTING ROWS AS add_reorder_level USING 10;
+```
+
+To remove the fields that the table no longer defines from every record, use `REMOVE UNDECLARED FIELDS` on [`ALTER TABLE`](/docs/reference/query-language/statements/alter/table):
+
+```surql
+ALTER TABLE product MIGRATE EXISTING ROWS AS drop_old_fields REMOVE UNDECLARED FIELDS;
+```
+
+A migration cannot change a field that something else is derived from: a field an index reads, a field of a view or of a view's source table, a field with `REFERENCE`, `INLINE` or `COMPUTED`, and `id`, `in` and `out`. For a field an index reads, remove the index, migrate the field, then define the index again.
+
+`INFO FOR TABLE` lists the migrations a table has run under `migrations`, and names the fields whose stored values are all known to fit their definition under `guaranteed`.
+
+### Running a schema script again
+
+A schema script is often run more than once: on every deploy, by an application that applies its schema when it starts, or through [`surreal db import`](/docs/reference/cli/db/commands/import). `DEFINE FIELD OVERWRITE` gives the same result each time, but a transform applied twice usually does not. A table therefore records the name of every migration it has run, and skips a migration whose name it has already run.
+
+```surql
+DEFINE TABLE item SCHEMAFULL;
+DEFINE FIELD price ON item TYPE int;
+CREATE item:1 SET price = 5;
+
+-- Prices move from whole units to cents
+DEFINE FIELD OVERWRITE price ON item TYPE int
+    MIGRATE EXISTING ROWS AS price_to_cents USING $value * 100 FALLBACK 0;
+
+-- Running the same statement again leaves the prices as they are
+DEFINE FIELD OVERWRITE price ON item TYPE int
+    MIGRATE EXISTING ROWS AS price_to_cents USING $value * 100 FALLBACK 0;
+
+SELECT price FROM item;
+```
+
+```surql title="Output"
+[{ price: 500 }]
+```
+
+Without the name, the second statement would multiply the prices again, to `50000`. Running a name that the table has already run with a different transform is refused, because the name no longer says which transform the records went through. Choose a new name for each new migration, in the same way as the migration IDs of other schema tools.
+
+The names stay with the table and appear under `migrations` in `INFO FOR TABLE`, so they also record which conversions the table's records have been through. This is also why `ALTER TABLE ... REMOVE UNDECLARED FIELDS` takes a name, although running it twice would do no harm. A migration cannot be undone: once it has run, the old values are gone.
+
+### When a migration is required
+
+A database has a [compatibility level](/docs/reference/query-language/statements/define/database#compatibility-level), `3` or `4`. In a database at level 4, a `SCHEMAFULL` table that holds records refuses a change to a field unless every value the old definition accepted also fits the new one, or the statement carries `MIGRATE EXISTING ROWS`. Widening a type, such as `option<int>` to `option<int | string>`, needs no migration. Narrowing it, or changing it to another type, does:
+
+```surql
+-- In a database at compatibility level 4
+DEFINE TABLE person SCHEMAFULL;
+DEFINE FIELD age ON person TYPE int;
+CREATE person:1 SET age = 37;
+
+DEFINE FIELD OVERWRITE age ON person TYPE string;
+```
+
+```surql title="Error output"
+'Cannot change field `age` of table `person`: the table is SCHEMAFULL in a database at compatibility level 4 and has rows, and the new definition does not accept every value the old one did: add MIGRATE EXISTING ROWS'
+```
+
+Adding a field counts as a change from no definition, under which every existing record holds `NONE`. A new field with a type that does not accept `NONE` therefore needs a migration that gives those records a value:
+
+```surql
+DEFINE FIELD stock ON item TYPE int
+    MIGRATE EXISTING ROWS AS add_stock USING 0;
+```
+
+A field defined as `option<int>` needs no migration, and records can be given a value later. Changing it to `TYPE int` afterwards is still a narrowing, though, and needs `MIGRATE EXISTING ROWS` even when every record already holds an integer, because the check compares the two definitions and not the stored values.
+
+At level 4, [`REMOVE FIELD`](/docs/reference/query-language/statements/remove#behaviour-after-removal) on a `SCHEMAFULL` table also removes the field's stored values, so a field defined again later with the same name starts empty.
+
+At level 3, a table accepts any change to its fields, as in SurrealDB 3.x, and records written before the change keep the values they held. `MIGRATE EXISTING ROWS` works at both levels, and a `SCHEMALESS` table accepts any change at either level.
+
 ## Computed fields
 
 <Since v="v3.0.0" />
@@ -959,6 +1073,30 @@ CREATE acl:also_invalid SET
   resource = document:SurrealDB_whitepaper;
 ```
 
+## GraphQL names and deprecation
+
+<Since v="v3.1.0" />
+
+`GRAPHQL_ALIAS` sets the name a field has in the [GraphQL schema](/docs/learn/querying/graphql/overview), in place of the field name. The alias is used on the object type, the create and update input types, and the filter. It must be a valid GraphQL name, matching `[_A-Za-z][_0-9A-Za-z]*`, and any other value is rejected when the field is defined.
+
+`GRAPHQL_DEPRECATED` takes a reason, which the schema adds to the start of the field's description as `[Deprecated: reason]`. The `isDeprecated` flag in GraphQL introspection stays false.
+
+```surql
+DEFINE FIELD first_name ON person TYPE option<string> GRAPHQL_ALIAS "firstName" GRAPHQL_DEPRECATED "Use name instead";
+```
+
+A GraphQL query then selects the field as `firstName`:
+
+```graphql title="Query"
+{ persons { id firstName } }
+```
+
+```json title="Output"
+{"data":{"persons":[{"id":"person:amy","firstName":null}]}}
+```
+
+Fields defined with `READONLY` or `COMPUTED` are not part of the create and update input types, because a mutation cannot set them. A `COMPUTED` field appears in the object type only if it has a `TYPE`.
+
 ## Setting permissions on fields
 
 By default, the permissions on a field will be set to `FULL` unless otherwise specified. The table is the main access gate, while field permissions only narrow further when you need to (for example, when hiding a password). With `FULL`, a field follows the [table](/docs/reference/query-language/statements/define/table#defining-permissions)'s rules without adding its own. Tables default the other way: omitting table `PERMISSIONS` in a `DEFINE` statement stores `PERMISSIONS NONE`.
@@ -1212,21 +1350,6 @@ CREATE log:bad SET level = "info", time = time::now(), message = "Database start
 CREATE log:[user:one, "info", time::now()] SET message = "Database started";
 ```
 
-### `ASSERT` and `DEFAULT` on `id`
-
-<Since v="v3.2.0" />
-
-`ASSERT` on the `id` field is evaluated like any other field assertion. Inside the assertion, `$value` is the whole record id; use `id.id()` (or `record::id($value)`) to inspect the key portion. Assertions run on create for generated, default-supplied, and explicitly supplied ids, and are skipped on update and under `OPTION IMPORT`.
-
-`DEFAULT` supplies the record id when none is given in `CREATE` or `INSERT`, evaluated in the session context and coerced to the declared type. An explicit id in the statement always wins. `DEFAULT ALWAYS` is not allowed on `id`.
-
-```surql
-DEFINE FIELD id ON user TYPE string DEFAULT rand::ulid() ASSERT id.id().is_ulid();
-CREATE user SET name = 'Ada';
-```
-
-`VALUE`, `REFERENCE`, `COMPUTED`, `READONLY`, `FLEXIBLE`, and non-key `TYPE` clauses are forbidden on `id`, a restriction which applies to [`ALTER FIELD`](/docs/reference/query-language/statements/alter/field) statements as well.
-
 ```surql title="Output"
 -------- Query --------
 
@@ -1246,34 +1369,164 @@ CREATE user SET name = 'Ada';
 ]
 ```
 
+### Naming the components of an array id
+
+<Since v="v4.0.0" />
+
+The elements of an array record ID can be given names in the type of the `id` field. Each name becomes a read-only field that holds the matching element of the ID, so `city` reads `id[0]` and `time` reads `id[1]`. The names appear in the output of `SELECT *`, but they are not stored in the body of the record.
+
+```surql
+DEFINE FIELD id ON reading TYPE [city: string, time: datetime];
+
+CREATE reading SET city = 'London', time = d'2024-01-01T00:00:00Z', temp = 5.1;
+CREATE reading SET city = 'London', time = d'2024-01-02T00:00:00Z', temp = 6.3;
+CREATE reading SET city = 'Rome', time = d'2024-01-02T00:00:00Z', temp = 11.0;
+
+SELECT * FROM reading
+WHERE city = 'London' AND time >= d'2024-01-02T00:00:00Z' AND time < d'2024-01-03T00:00:00Z';
+```
+
+```surql title="Output"
+[
+	{
+		city: 'London',
+		id: reading:[
+			'London',
+			d'2024-01-02T00:00:00Z'
+		],
+		temp: 6.3f,
+		time: d'2024-01-02T00:00:00Z'
+	}
+]
+```
+
+A `WHERE` clause on the named components is read as a range over the record keys, so the query reads only the matching part of the table instead of scanning all of it. The plan uses the longest run of equality tests from the first component, followed by one range on the next component, and `EXPLAIN` shows it as a `KeyRangeScan`. A `WHERE` clause on a component with `IN` or `OR` is read as several ranges. The remaining conditions of the clause, such as `temp > 6`, are still applied to each record that the range returns, and a condition on a field that is not a component reads the whole table as before.
+
+`ORDER BY` on a component that follows the tests in the `WHERE` clause can be read from the scan in key order. A query for the latest records of one city reads the keys backwards from the end of that city's range, so `LIMIT` stops the scan early:
+
+```surql
+SELECT * FROM reading WHERE city = 'London' ORDER BY time DESC LIMIT 10;
+```
+
+A datetime in a record key is compared to the whole second, so the planner keeps the sort and the filter for a `datetime` component, and these decide the final order and the final result.
+
+#### Writing records
+
+A record gets its ID from an explicit ID in the statement, or else from the values of all components set with `SET` or `CONTENT`, or else from a `DEFAULT` on the `id` field. The values of the components are taken into the ID, and the named fields still read them back. A component that is given both in the ID and in `SET` has to have the same value in both places.
+
+```surql
+CREATE reading:['London', d'2024-02-01T00:00:00Z'] SET city = 'Rome';
+//- "Found 'Rome' for the `city` field, but it is part of the record id of `reading` and does not match it"
+
+CREATE reading:['London'];
+//- 'The record id of `reading` has the components [city, time], but 1 value was given'
+
+CREATE reading SET city = 'London', temp = 3;
+//- 'Cannot create a record in `reading` without the record id component `time`: set `time`, give the record id, or define a DEFAULT on the `id` field'
+
+CREATE reading SET city = 'London', time = 'yesterday';
+//- "Couldn't coerce value for the record id component `time` of `reading`: Expected `datetime` but found `'yesterday'`"
+```
+
+An `UPDATE` cannot change a component, because a component is part of the ID that the record is stored under.
+
+#### Rules for components
+
+- A component can be a `string`, `int`, `datetime`, `uuid`, `duration`, `bool` or `record`. These are the types that keep their order when stored in a key, so other types, such as `decimal`, are refused when the field is defined.
+- An `int` component accepts only whole numbers. A float or decimal with no fractional part, such as `2.0`, is converted to an `int`, and any other number is refused.
+- A name has to be a plain identifier of ASCII letters, digits and underscores that does not start with a digit, and it cannot be the name of another field of the table.
+- The names can be used only as the whole type of the `id` field. They are not accepted inside a type such as `array<[city: string]>`.
+- A component can be indexed like any other field, for example with `DEFINE INDEX by_time ON reading FIELDS time`.
+
+```surql
+DEFINE FIELD id ON reading TYPE [price: decimal, time: datetime];
+```
+
+```surql title="Error output"
+'The record id component `price` of `reading` cannot have the type `decimal`: only string, int, datetime, uuid, duration, bool and record components keep their order in storage'
+```
+
+#### Existing records
+
+When the statement is run on a table that already has records, every record is checked inside the same transaction. The statement is refused, and nothing is defined, if a record does not fit the type, or if it stores a field with the name of a component and a different value from its ID.
+
+```surql
+CREATE reading:['London', d'2024-01-01T00:00:00Z'] SET city = 'Rome';
+DEFINE FIELD id ON reading TYPE [city: string, time: datetime];
+```
+
+```surql title="Error output"
+"Cannot give `reading` the record id [city: string, time: datetime]: the record reading:['London', d'2024-01-01T00:00:00Z'] stores a `city` field that differs from its record id. Remove it first, for example with UPDATE reading UNSET city"
+```
+
+> [!WARNING]
+> A table whose `id` field names its components cannot be read by an earlier release. Define the names only when every node of the deployment runs SurrealDB 4.0 or later, because a node that runs an earlier release cannot load the table. Nothing is stored differently, so removing the names makes the table readable again.
+
+### `ASSERT` and `DEFAULT` on `id`
+
+<Since v="v3.2.0" />
+
+`ASSERT` on the `id` field is evaluated like any other field assertion. Inside the assertion, `$value` is the whole record id; use `id.id()` (or `record::id($value)`) to inspect the key portion. Assertions run on create for generated, default-supplied, and explicitly supplied ids, and are skipped on update and under `OPTION IMPORT`.
+
+`DEFAULT` supplies the record id when none is given in `CREATE` or `INSERT`, evaluated in the session context and coerced to the declared type. An explicit id in the statement always wins. `DEFAULT ALWAYS` is not allowed on `id`.
+
+```surql
+DEFINE FIELD id ON user TYPE string DEFAULT rand::ulid() ASSERT id.id().is_ulid();
+CREATE user SET name = 'Ada';
+```
+
+`VALUE`, `REFERENCE`, `COMPUTED`, `READONLY`, `FLEXIBLE`, and non-key `TYPE` clauses are forbidden on `id`, a restriction which applies to [`ALTER FIELD`](/docs/reference/query-language/statements/alter/field) statements as well.
+
+## Clauses that must not have effects
+
+The `COMPUTED`, `ASSERT`, `VALUE` and `DEFAULT` clauses of a field, and the `PERMISSIONS` clauses of a field, a table, a function or a parameter, are code that the database runs on behalf of whoever writes or reads a record. None of them may have an effect that lasts after the clause is evaluated. A clause is refused when it is defined if it:
+
+- writes data, with `CREATE`, `UPDATE`, `UPSERT`, `INSERT`, `DELETE` or `RELATE`
+- changes the schema, with a `DEFINE`, `ALTER` or `REMOVE` statement
+- calls `sequence::nextval()`, except in a `VALUE` or `DEFAULT` clause
+- waits with `SLEEP`
+- calls a JavaScript function, `eval::surql()` or an [extension](/docs/reference/query-language/statements/define/extension) function, whose effects cannot be known when the clause is defined
+
+```surql
+DEFINE FIELD view_count ON article COMPUTED (UPDATE stats:articles SET views += 1);
+```
+
+```surql title="Error output"
+'The COMPUTED clause must not have effects: `UPDATE` writes data'
+```
+
+A custom function that the clause calls is checked as well, including the functions that it calls in turn:
+
+```surql
+DEFINE FUNCTION fn::record_view() -> int { CREATE view_log SET at = time::now(); RETURN 1; };
+DEFINE FIELD view_count ON article COMPUTED fn::record_view();
+```
+
+```surql title="Error output"
+'The COMPUTED clause must not have effects: it calls `fn::record_view`, in whose body `CREATE` writes data'
+```
+
+A `VALUE` or `DEFAULT` clause runs once, when a record is written, so it may still draw the next number of a sequence. Random values and the clock are allowed in every clause:
+
+```surql
+DEFINE SEQUENCE invoice_number;
+DEFINE FIELD number ON invoice TYPE int DEFAULT sequence::nextval('invoice_number');
+DEFINE FIELD token ON invoice TYPE uuid DEFAULT rand::uuid();
+DEFINE FIELD updated_at ON invoice TYPE datetime VALUE time::now();
+```
+
+A function that does not exist yet is not checked when the clause is defined, and a function can be redefined later to write. In both cases the clause fails with the same error each time it is evaluated and reaches the effect, and nothing is written. The same applies to a definition stored by an earlier release that allowed the effect. Check which definitions call a function before changing its body. See [Functions called from schema clauses](/docs/reference/query-language/statements/define/function#functions-called-from-schema-clauses).
+
+A side effect that should happen when a record changes, such as a write to an audit log, belongs in [`DEFINE EVENT`](/docs/reference/query-language/statements/define/event), whose body may write.
+
+> [!NOTE]
+> These rules are new in SurrealDB 4.0. In 3.3, only a `COMPUTED` body and a `FOR select` clause were stopped from writing, and only when the write was reached, while the `FOR create`, `FOR update` and `FOR delete` clauses, `VALUE`, `DEFAULT` and `ASSERT` could write.
+
 ## Restrictions on computed fields
 
 <Since v="v3.3.0" />
 
-A [`COMPUTED`](#computed-fields) body is evaluated on every read of the field, inside the transaction of the statement that reads it. Two rules follow from that.
-
-### A computed body must be read-only
-
-`DEFINE FIELD` refuses a `COMPUTED` body that modifies data directly. A write inside a body can never succeed inside a plain `SELECT`, so the definition is rejected instead of leaving behind a field that fails on every read.
-
-```surql
--- Refused: the body modifies data
-DEFINE FIELD view_count ON article COMPUTED (UPDATE stats:articles SET views += 1);
-```
-
-The definition-time check covers the body itself, including subqueries, blocks, closures and the arguments of a call. It does not follow a call into a [custom function](/docs/reference/query-language/statements/define/function), because the function is stored separately and can be redefined later. A body that calls a function which writes is therefore accepted, and each read that reaches the write fails with `A COMPUTED clause cannot contain a statement that modifies data`.
-
-```surql
-DEFINE FUNCTION fn::record_view() -> int { CREATE view_log SET at = time::now(); RETURN 1; };
-
--- Accepted, but every read of `view_count` now fails
-DEFINE FIELD view_count ON article COMPUTED fn::record_view();
-```
-
-The same read-time refusal applies to a write reached through [`eval::surql()`](/docs/reference/query-language/functions/database-functions/eval#evalsurql), a JavaScript function, or a closure that arrives as data, and to a function that is changed to write after the field is defined. See [Functions that other definitions require to stay read-only](/docs/reference/query-language/statements/define/function#functions-that-other-definitions-require-to-stay-read-only).
-
-> [!NOTE]
-> The definition-time check also applies under `OPTION IMPORT`, so importing an [export](/docs/reference/cli/db/commands/export) that holds a `COMPUTED` body with a direct write fails at that `DEFINE FIELD` statement.
+A [`COMPUTED`](#computed-fields) body is evaluated on every read of the field, inside the transaction of the statement that reads it. It is one of the [clauses that must not have effects](#clauses-that-must-not-have-effects), and the rules below also apply to it.
 
 ### A computed body is capped at the definer's permissions
 

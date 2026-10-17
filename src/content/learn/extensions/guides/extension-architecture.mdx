@@ -1,0 +1,87 @@
+---
+position: 3
+title: Extension architecture
+description: "How Surrealism extensions are packaged, sandboxed, and invoked by SurrealDB, including exports metadata, fresh memory per call, runtime limits, and load strategy."
+---
+
+# Extension architecture
+
+[Surrealism](/docs/learn/extensions/plugins/overview) extensions are Rust crates packaged as `.surli` archives. Each archive contains your compiled component plus metadata about exported `#[surrealism]` functions. SurrealDB reads this metadata to map SurrealQL calls to the extension's exports without recompiling the database.
+
+## Component target and sandbox
+
+Surrealism builds target WASI Preview 2 (`wasm32-wasip2`) and run through the WASM component model runtime. Your code does not execute as a native library on the host. The runtime boundary provides sandboxing where memory, execution time, filesystem access, and host capabilities can be constrained by server policy.
+
+## Interaction with the engine
+
+The extension does not link directly into SurrealDB’s core. Instead, the engine loads it in the Surrealism runtime, resolves exports, and marshals values between SurrealQL and your Rust functions through the Surrealism ABI. You work with SDK-exposed types and host imports, not arbitrary process memory. From SurrealDB 4.0, a function reaches the database through a `Transaction` handle that is valid only for the duration of the call.
+
+At build time, Surrealism also extracts an exports manifest (names, argument types, return type, whether the function takes a writeable transaction, optional comment) and stores it in the archive. That allows metadata lookups without instantiating the extension for every query-planning or introspection operation.
+
+## Runtime execution model
+
+<Since v="v4.0.0" />
+
+Each call to an extension function runs on a fresh instance of the extension, with fresh memory, and the instance is discarded when the call returns. Nothing a call writes to memory is visible to the next call, so an extension cannot carry state between calls in memory. Keep state that has to last in records, through the `Transaction` handle.
+
+Starting a fresh instance costs little because the build has already done the slow part: [`surreal db extension build`](/docs/reference/cli/db/commands/extension#extension-build) runs the extension's `init` function once, and stores the resulting memory in the archive. Every instance starts from that state, so work done in `init`, such as loading an attached file, is not repeated on each call.
+
+- **Concurrency:** `SURREAL_SURREALISM_MAX_CONCURRENT_INVOCATIONS` (64 by default) sets how many calls run at once across the datastore. A call that finds no free slot waits within its query's timeout, and calls from inside another extension have slots of their own.
+- **Resource limits:** `SURREAL_SURREALISM_MAX_MEMORY` and `SURREAL_SURREALISM_MAX_EXECUTION_TIME` cap every call. An extension's [`CAPABILITIES`](/docs/reference/query-language/statements/define/extension#capabilities) can set lower limits, never higher ones.
+- **Timeouts:** every call stops at the execution time limit or at the query's timeout. An extension defined with `strict_timeout: false` runs without that check only on a server started with `SURREAL_SURREALISM_ALLOW_UNBOUNDED_EXECUTION`.
+
+Before SurrealDB 4.0, a pool of instances was reused between calls, and an instance kept its memory from one call to the next.
+
+### Compared with serverless functions
+
+The model is close to that of serverless platforms such as AWS Lambda, and closer still to WebAssembly platforms such as Fastly Compute, which also start a fresh instance for each request. The main points of comparison are:
+
+| | Surrealism extensions | AWS Lambda | Fastly Compute |
+| --- | --- | --- | --- |
+| State between calls | Never kept: every call starts from the build-time snapshot | Often kept, because a warm execution environment is reused, but not guaranteed | Never kept: every request gets a fresh instance |
+| Setup | `init` runs once, when the extension is built | Runs on each cold start, or once for a snapshot with SnapStart | Runs once at build time with a pre-initialiser such as Wizer |
+| Where it runs | Inside the database server, in the transaction of the query that called it | In a separate execution environment, reached over the network | In a separate instance at the edge, reached over the network |
+| Lasting state | Records, through the `Transaction` handle | An external store, such as DynamoDB or S3 | An external store, such as a key-value store |
+| Concurrency limit | `SURREAL_SURREALISM_MAX_CONCURRENT_INVOCATIONS` | The account's or the function's concurrency limit | Set by the platform |
+
+The difference from Lambda that matters most when porting code is the first row. Code that keeps a cache or a connection in a global variable, and works on Lambda because a warm environment is often reused, finds the variable empty on every call here. Compute such data in `init` so that it is part of the snapshot, or keep it in records.
+
+Running in the database also changes what a call can do. An extension reads and writes through the transaction of the query that called it, so its reads see that transaction's uncommitted writes, and its own writes commit or roll back with the rest of the query. A function on a serverless platform has to connect to the database as a separate client, in a separate transaction.
+
+For a complete list of server-level variables, see [environment variables](/docs/reference/cli/db/environment-variables#surrealism-config).
+
+## Loading strategy
+
+By default, SurrealDB compiles the extensions that are defined when it starts, to reduce the latency of the first call. If you prefer lazy loading, start the server with:
+
+```bash
+surreal db start --lazy-surrealism
+```
+
+Or set:
+
+<Tabs syncKey="shell">
+
+<TabItem label="Bash">
+```bash
+SURREAL_LAZY_SURREALISM=true surreal db start
+```
+</TabItem>
+
+<TabItem label="PowerShell">
+```powershell
+$env:SURREAL_LAZY_SURREALISM = "true"
+surreal db start
+```
+</TabItem>
+</Tabs>
+
+## Lifecycle
+
+The end-to-end lifecycle is: **build** your crate with [`surreal db extension build`](/docs/reference/cli/db/commands/extension#extension-build), optionally **sign** the archive, **upload** it (typically to a [bucket](/docs/reference/query-language/statements/define/bucket)), **define** the extension with [`DEFINE EXTENSION`](/docs/reference/query-language/statements/define/extension) or [`surreal db extension install`](/docs/reference/cli/db/commands/extension#extension-install), then **invoke** functions from queries.
+
+Operational teams often automate upload and definition in CI so test and production databases stay aligned. The [overview](/docs/learn/extensions/plugins/overview) summarises this flow.
+
+## Security
+
+Treat every extension as privileged code that can affect data your database can access. Sandboxing limits host access, but an extension can still implement logic that leaks or corrupts data if you expose it to the wrong scopes. Load only code you trust: a [`SIGNER`](/docs/reference/query-language/statements/define/extension#signer-and-unsigned) checks who built the archive, the `DIGEST` pins the exact build, and `CAPABILITIES` grants only the network access, functions and writes that the extension needs. Follow least privilege for namespaces, databases, and credentials that call into Surrealism functions.

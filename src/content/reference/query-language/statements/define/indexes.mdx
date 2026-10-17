@@ -304,34 +304,38 @@ A query that uses such an index returns each record once, however many of its en
 
 <Since v="v3.1.0" />
 
-From SurrealDB 3.1.0, a composite index can lead with an **array-element** field (`tags.*`) so containment predicates combine with ordering on a trailing field without a full table scan. This supports patterns such as `WHERE tags CONTAINS 'x' ORDER BY age DESC LIMIT N` and the multi-value forms `CONTAINSANY` / `ANYINSIDE` on array fields.
+From SurrealDB 3.1.0, a composite index can lead with an **array-element** field (`tags.*`) so containment predicates combine with ordering on a trailing field without a full table scan. This supports patterns such as `WHERE tags.* CONTAINS 'x' ORDER BY age DESC LIMIT N` and the multi-value forms `CONTAINSANY` / `ANYINSIDE` on array fields.
 
 ```surql
 DEFINE INDEX tag_age ON article FIELDS tags.*, age;
 
 -- Bounded index walk (check with EXPLAIN FULL)
 SELECT * FROM article
-WHERE tags CONTAINS 'release-notes'
+WHERE tags.* CONTAINS 'release-notes'
 ORDER BY age DESC
 LIMIT 10;
 ```
 
 `CONTAINSALL` / `ALLINSIDE` may still apply a residual filter above the union when intersection semantics require it. See [operators](/docs/reference/query-language/language-primitives/operators) and [`EXPLAIN`](/docs/reference/query-language/statements/explain) to confirm the planner choice.
 
-A composite index can include more than one array field, and a record can hold arrays in all of them. A query uses the index for the condition on the first field, and checks the condition on the second field against each record that the index returns:
+A containment condition uses an index on `tags.*` only when it takes each element of the field, as `tags.* CONTAINS 'x'`, `tags[*] CONTAINS 'x'` and `'x' INSIDE tags[*]` do. From SurrealDB 4.0, the plain form `tags CONTAINS 'x'` reads the table instead, because a record whose `tags` is a string, an object or a range can satisfy it without holding `'x'` as an element, and the index has no entry for such a record.
+
+> [!NOTE]
+> From SurrealDB 4.0, a field declared as a [set](/docs/reference/query-language/language-primitives/data-types/sets#paths-and-indexes-over-sets) is indexed as a whole by `.*`, not element by element. `WHERE s CONTAINS 3` on a set field reads the records instead of using the index, and a `UNIQUE` index over `s.*` treats the whole set as the key.
+
+A composite index can include more than one array field, and a record can hold arrays in all of them. The index holds an entry for each combination of their elements, so a query with a condition on each field reads both from the index:
 
 ```surql
 DEFINE INDEX tags_sizes ON product FIELDS tags.*, sizes.*;
 CREATE product:jumper SET tags = ["wool", "winter"], sizes = ["S", "M"];
 CREATE product:shirt SET tags = ["cotton"], sizes = ["M", "L"];
 
-EXPLAIN SELECT id FROM product WHERE tags CONTAINS "wool" AND sizes CONTAINS "M";
+EXPLAIN SELECT id FROM product WHERE tags.* CONTAINS "wool" AND sizes.* CONTAINS "M";
 ```
 
 ```text title="Output"
 SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: sizes CONTAINS 'M']
-        IndexScan [ctx: Db] [index: tags_sizes, access: ['wool'], direction: Forward]
+    IndexScan [ctx: Db] [table: product, index: tags_sizes, access: ['wool', 'M'], direction: Forward]
 ```
 
 ### Count index
@@ -470,13 +474,12 @@ DEFINE INDEX active_users ON users COUNT WHERE status = "active" CONCURRENTLY;
 DEFINE INDEX idx2 ON person FIELD name;
 ```
 
-```surql title="Output"
-'There was a problem with the database: Parse error: Unexpected token `FIELD`, expected Eof
+```text title="Error output"
+Parse error: Expected at least one column - Use FIELDS to define columns
  --> [1:29]
   |
 1 | DEFINE INDEX idx2 ON person FIELD name;
-  |                             ^^^^^ 
-'
+  |                             ^^^^^
 ```
 
 ### Full-text search (`FULLTEXT`) index
@@ -644,7 +647,7 @@ Queries use the **same** KNN operator shape as HNSW: `<|K, EF|>` (approximate) o
 
 #### Memory model and cache size
 
-While HNSW's graph is held resident in memory, a DISKANN index is **key-value-backed**. The graph, its adjacency lists, and the full-precision element vectors are persisted in the key-value store (for example, on disk under RocksDB) and remain the source of truth. Only a bounded in-memory cache holds the hot working set, while cold nodes and vectors are streamed from the key-value store on demand. A DISKANN index's resident memory is therefore bounded by the cache size rather than by the size of the dataset, which is what makes it suitable for larger-than-memory workloads.
+While HNSW's graph is held resident in memory, a DISKANN index is **key-value-backed**. The graph, its adjacency lists, and the full-precision element vectors are persisted in the key-value store (for example, on disk under SurrealKV or RocksDB) and remain the source of truth. Only a bounded in-memory cache holds the hot working set, while cold nodes and vectors are streamed from the key-value store on demand. A DISKANN index's resident memory is therefore bounded by the cache size rather than by the size of the dataset, which is what makes it suitable for larger-than-memory workloads.
 
 Vectors are stored and searched at **full precision**, applying no product quantisation or other compression. The only lever on per-vector size is the chosen `TYPE` (`F32`, `F16`, `I8`, or `U8`).
 
@@ -725,7 +728,7 @@ An `IndexScan` operator names the index the query planner used. With `FULL`, eac
 
 <Since v="v2.4.0" />
 
-An index on a string field is used by `=` and by `IN` with an array of values. The containment operators `CONTAINS`, `CONTAINSANY`, `ALLINSIDE` and `ANYINSIDE` return the same records on such a field, but they scan the table, because they only use an index defined on the elements of an array field (such as `tags.*`). `CONTAINS` on a string is a substring match.
+An index on a string field is used by `=` and by `IN` with an array of values. The containment operators `CONTAINS`, `CONTAINSANY`, `ALLINSIDE` and `ANYINSIDE` return the same records on such a field, but they scan the table, because they only use an index defined on the elements of an array field (such as `tags.*`), through a condition that takes each element (such as `tags.* CONTAINS 'x'`). `CONTAINS` on a string is a substring match.
 
 ```surql
 /**[test]
