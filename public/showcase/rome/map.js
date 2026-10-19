@@ -160,6 +160,25 @@
 	// ---- entity ------------------------------------------------------------------------
 	function valueAt(h, auc) { return h.chain.find(c => c.from <= auc && (c.until === null || auc < c.until))?.value; }
 
+	// Agent Memory keeps a value until a later fact supersedes it, and in sparse data
+	// nothing may: Varus stays governor of Germania for centuries. The page treats a value
+	// as supported until the death of the person it names, or for 60 years after it was
+	// set, apart from slow-changing keys, and says so when it shows one beyond that.
+	const SLOW_KEYS = /^(controlled_by|government|capital|founded_by|state_religion|name)$/;
+	const deathOf = new Map();
+	for (const e of events) if (e.kind === "death" && e.actor && !deathOf.has(e.actor)) deathOf.set(e.actor, e.auc);
+	function supportedUntil(key, c) {
+		let end = c.until ?? Infinity;
+		for (const who of String(c.value).split(/ and /)) { const d = deathOf.get(who.trim()); if (d !== undefined && d >= c.from) end = Math.min(end, d); }
+		if (!SLOW_KEYS.test(key)) end = Math.min(end, c.from + 60);
+		return end;
+	}
+	function valueNote(h, auc) {
+		const c = h.chain.find(c => c.from <= auc && (c.until === null || auc < c.until));
+		if (!c) return undefined;
+		return auc >= supportedUntil(h.key, c) ? `${c.value} (set in ${label(c.from)}, no later record)` : c.value;
+	}
+
 	function renderEntity() {
 		$("entityPanel").hidden = !state.entities.length;
 		$("lifetime").hidden = !state.entities.length;
@@ -190,7 +209,7 @@
 		// What memory holds for this entity at the selected time.
 		const hs = historiesOf.get(state.entity) ?? [];
 		const at = b;
-		const rows = hs.map(h => ({ key: h.key, value: valueAt(h, at), changes: h.chain.filter(c => c.from >= a && c.from <= b) })).filter(r => r.value !== undefined || r.changes.length);
+		const rows = hs.map(h => ({ key: h.key, value: valueNote(h, at), changes: h.chain.filter(c => c.from >= a && c.from <= b) })).filter(r => r.value !== undefined || r.changes.length);
 		$("stateBox").innerHTML = !hs.length ? `<p class="note">No changing values (rulers, control, offices) are recorded for ${esc(state.entity)}.</p>` : `
 			<div class="card"><b>In memory as of ${label(at)}</b> <span class="note">${fromMemory ? "captured from Agent Memory's history endpoint" : "rebuilt from the uploaded state facts"}</span>
 			${rows.length ? `<table><tr><th>key</th><th>value</th><th>changes in this period</th></tr>${rows.map(r => `<tr><td>${esc(r.key)}</td><td>${esc(r.value ?? "-")}</td><td>${r.changes.map(c => `${label(c.from)}: ${esc(c.value)}`).join("<br>") || ""}</td></tr>`).join("")}</table>` : `<p class="note">Nothing recorded yet at this date.</p>`}</div>`;
@@ -203,7 +222,7 @@
 		if (A === null || B === null) { $("cmpOut").innerHTML = `<p class="note">Years look like "216 BC" or "AD 1204".</p>`; return; }
 		const hs = historiesOf.get(state.entity) ?? [];
 		$("cmpOut").innerHTML = `<table><tr><th>key</th><th>${label(A)}</th><th>${label(B)}</th></tr>${hs.map(h => {
-			const x = valueAt(h, A), y = valueAt(h, B);
+			const x = valueNote(h, A), y = valueNote(h, B);
 			if (x === undefined && y === undefined) return "";
 			return `<tr class="${x !== y ? "changed" : ""}"><td>${esc(h.key)}</td><td>${esc(x ?? "not yet known")}</td><td>${esc(y ?? "not yet known")}</td></tr>`;
 		}).join("")}</table>`;
@@ -415,12 +434,12 @@
 		const shown = [...mine, ...own_].map(e => e.auc);
 		let lo = all ? 1 : Math.max(1, Math.min(...shown) - 3), hi = all ? 2206 : Math.min(2206, Math.max(...shown) + 3);
 		// Value lanes: the entity's own histories, then histories that name it as a value.
-		const own = (historiesOf.get(n) ?? []).map(h => ({ label: h.key.replace(/_/g, " "), chain: h.chain }));
+		const own = (historiesOf.get(n) ?? []).map(h => ({ label: h.key.replace(/_/g, " "), key: h.key, chain: h.chain }));
 		const asValue = [];
 		for (const h of histories) {
 			if (h.entity === n) continue;
 			const segs = h.chain.filter(c => String(c.value).split(/ and |, /).includes(n) || c.value === n);
-			if (segs.length) asValue.push({ label: `${h.entity} · ${h.key.replace(/_/g, " ")}`, chain: segs, entity: h.entity, full: h.chain });
+			if (segs.length) asValue.push({ label: `${h.entity} · ${h.key.replace(/_/g, " ")}`, key: h.key, chain: segs, entity: h.entity, full: h.chain });
 		}
 		// A value held by a person ends at their death, when nothing in the data supersedes it.
 		const died = everything.find(e => e.kind === "death" && (e.actor === n || e.cast?.[0] === n))?.auc;
@@ -444,12 +463,17 @@
 		const lanes = [];
 		const group = t => { svg += `<text class="group" x="8" y="${y + 14}">${esc(t)}</text>`; y += 22; };
 		const laneLabel = (t, target) => `<text x="8" y="${y + 15}" ${target ? `class="lane-label" data-n="${esc(target)}"` : ""}>${esc(t.length > 34 ? t.slice(0, 33) + "…" : t)}</text>`;
-		const bar = (c, i, title) => {
-			const a = Math.max(lo, c.from), b = Math.min(hi, c.until ?? Math.max(c.from + 1, hi));
-			if (b < lo || a > hi) return "";
-			const w = Math.max(2, x(b) - x(a));
-			return `<rect class="mark" x="${x(a)}" y="${y + 4}" width="${w}" height="${laneH - 8}" rx="3" fill="${PALETTE[i % PALETTE.length]}" opacity=".8" data-tip="${esc(`${title}: ${c.value}, from ${label(c.from)}${c.until ? " to " + label(c.until) : ""}`)}"/>`
+		const bar = (c, i, title, key) => {
+			const end = Math.min(hi, c.until ?? Math.max(c.from + 1, hi));
+			const solidEnd = Math.min(end, Math.max(c.from + 1, supportedUntil(key, c)));
+			const a = Math.max(lo, c.from), b = solidEnd;
+			if (end < lo || a > hi) return "";
+			const w = Math.max(2, x(b) - x(a)), colour = PALETTE[i % PALETTE.length];
+			let out = `<rect class="mark" x="${x(a)}" y="${y + 4}" width="${w}" height="${laneH - 8}" rx="3" fill="${colour}" opacity=".8" data-tip="${esc(`${title}: ${c.value}, from ${label(c.from)}${c.until && c.until <= solidEnd ? " to " + label(c.until) : ""}`)}"/>`
 				+ (w > 60 ? `<text x="${x(a) + 4}" y="${y + 15}" style="fill:#fff; pointer-events:none">${esc(String(c.value).slice(0, Math.floor(w / 6.5)))}</text>` : "");
+			// Beyond its support the value is still held, with nothing later to replace it.
+			if (end > solidEnd) out += `<line class="mark" x1="${x(b)}" x2="${x(end)}" y1="${y + laneH / 2}" y2="${y + laneH / 2}" stroke="${colour}" stroke-width="2" stroke-dasharray="3 4" opacity=".6" data-tip="${esc(`${title}: Agent Memory still holds ${c.value} (set in ${label(c.from)}); no later record supersedes it`)}"/>`;
+			return out;
 		};
 				// axis
 		const step = [10, 25, 50, 100, 200, 250, 500].find(s => (hi - lo) / s <= 12) ?? 500;
@@ -465,13 +489,13 @@
 
 		if (own.length) {
 			group("In memory: " + n);
-			for (const [i, l] of own.entries()) { svg += laneLabel(l.label) + l.chain.map(c => bar(c, i, l.label)).join(""); y += laneH; }
+			for (const [i, l] of own.entries()) { svg += laneLabel(l.label) + l.chain.map(c => bar(c, i, l.label, l.key)).join(""); y += laneH; }
 		}
 		if (asValue.length) {
 			group(`Named in other histories`);
 			const ranked = asValue.map(l => ({ ...l, weight: l.chain.reduce((t, c) => t + Math.max(1, Math.min(c.until ?? c.from + 1, 2206) - c.from), 0) })).sort((p, q) => q.weight - p.weight);
 			if (ranked.length > LEVEL.named) group(`(${ranked.length - LEVEL.named} more at a higher detail level)`);
-			for (const [i, l] of ranked.slice(0, LEVEL.named).entries()) { svg += laneLabel(l.label, l.entity) + l.chain.map(c => bar(c, i + 3, l.label)).join(""); y += laneH; }
+			for (const [i, l] of ranked.slice(0, LEVEL.named).entries()) { svg += laneLabel(l.label, l.entity) + l.chain.map(c => bar(c, i + 3, l.label, l.key)).join(""); y += laneH; }
 		}
 		group(`Events (${mine.length} of ${everything.length}, most important first)`);
 		const kindShape = (e, cx, cy) => e.kind === "birth" ? `<circle cx="${cx}" cy="${cy}" r="4" fill="#fff" stroke="#2f6b8a" stroke-width="2"` : e.kind === "death" ? `<rect x="${cx - 4}" y="${cy - 4}" width="8" height="8" fill="#333"` : `<path d="M${cx} ${cy - 5} L${cx + 5} ${cy} L${cx} ${cy + 5} L${cx - 5} ${cy} Z" fill="${e.rome === "core" ? "#b0302a" : "#c98c86"}"`;
@@ -599,7 +623,6 @@
 		}
 		// 2. The places of the events, as they stood when each event happened: only the
 		// values current then, and a new line only when they differ from the last one.
-		const SLOW_KEYS = /^(controlled_by|government|capital|founded_by|state_religion)$/;
 		const lastAt = new Map();
 		for (const e of sel) {
 			const pl = e.place?.title;
