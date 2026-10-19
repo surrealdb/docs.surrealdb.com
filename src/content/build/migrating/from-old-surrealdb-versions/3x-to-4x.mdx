@@ -18,7 +18,7 @@ Take and verify a [`surreal db export`](/docs/reference/cli/db/commands/export) 
 The data stored on disk is out-of-date with this version (Expected: 3, Actual: 4). Please follow the upgrade guides in the documentation, or use a clean storage directory if this is intended to be a new instance
 ```
 
-The way back to `3.3` is to restore the export into a new datastore created by `3.3`. For a RocksDB or SurrealKV datastore, a second way back is to convert the data ahead of time with `skv migrate`, which writes a new directory for `4.0` to start on, so that the original stays untouched and `3.3` can still start on it. See [Converting ahead of time with `skv`](/docs/manage/self-hosted/deployment-models#converting-ahead-of-time-with-skv).
+The way back to `3.3` is to restore the export into a new datastore created by `3.3`. A DiskANN index that `4.0` has built or compacted cannot be searched by `3.x`, even in a datastore that `skv migrate` kept in the `3.x` format, so rebuild each DiskANN index with `REBUILD INDEX` after going back. For a RocksDB or SurrealKV datastore, a second way back is to convert the data ahead of time with `skv migrate`, which writes a new directory for `4.0` to start on, so that the original stays untouched and `3.3` can still start on it. See [Converting ahead of time with `skv`](/docs/manage/self-hosted/deployment-models#converting-ahead-of-time-with-skv).
 
 ## The 4.0 record format
 
@@ -40,6 +40,8 @@ The upgrade does not rewrite any index, so an index keeps working after it. Some
 | HNSW or DiskANN index that serves KNN queries with a selective filter | Optional | Results are correct, but the query reads each record instead of scoring from the index, which is slower. |
 | B-tree index whose queries order by, count over or take a range over its fields | Optional | Results are correct, but `ORDER BY ... LIMIT` sorts every matching record, an open range such as `WHERE time > $since` reads the table, and `count()` reads records instead of counting index entries. See [Index plans and stored arrays](#index-plans-and-stored-arrays). |
 | B-tree index whose values include datetimes | Optional | The index keeps the `3.x` order, in which a whole second sorts after the fractions within it, so `ORDER BY` and ranges over a datetime can return records out of order or leave some out. See [Datetimes in an index](#datetimes-in-an-index). |
+| HNSW or DiskANN index over a table with record ids that differ only in the kind of a number inside them, such as `pt:[1]` and `pt:[1dec]` | Required | The index treats such records as one, so a KNN search finds only one of them, and deleting one can remove the other's vector. |
+| B-tree index that has held one decimal written two ways, such as `2.5dec` and a computed `2.50dec` | Required | An equality or a range read from the index returns fewer records than the same query `WITH NOINDEX`. Rebuilding a `UNIQUE` index fails if the table holds both forms of one value, so remove the duplicates first. |
 
 The statement for each is the same:
 
@@ -52,6 +54,8 @@ Run `REBUILD INDEX` as its own statement, not inside a transaction, for an index
 ## Clusters
 
 On a datastore that several nodes share, such as TiKV, upgrade every node before writes to a DiskANN index resume. Stop writes to DiskANN indexes, or stop the whole cluster, while the nodes are replaced. An earlier release can clear the state that tracks a `4.0` node's pending writes to the index, and those writes are then missing from KNN results. A datastore that one node opens alone (in memory, RocksDB or SurrealKV) needs nothing. Define or rebuild vector indexes only once every node runs `4.0`, as the table above says.
+
+Two more steps apply only while nodes of different releases share a datastore. Finish upgrading every node before defining a field whose name is a reserved keyword and whose type is an array or a set, such as `` DEFINE FIELD `select` ON t TYPE array<string> ``, because a `3.3` node stores part of that definition where `4.0` does not read it. Do not run a node of a `3.3.0` pre-release alongside `4.0`.
 
 ## Exports and imports
 
@@ -66,9 +70,65 @@ On a datastore that several nodes share, such as TiKV, upgrade every node before
 
 ## Behaviour changes
 
+### Results without `ORDER BY`
+
+`4.0` can split a statement's scan into parts that run at the same time, so a statement without `ORDER BY` returns its records in no particular order. A `LIMIT` or `START` without `ORDER BY` returns some of the matching records, not the first ones by record id. On `3.x` such a query usually returned records in the order of their keys, and an application can have come to rely on that. Add `ORDER BY` wherever the order matters, for example `ORDER BY id` to get records in the order of their ids. With `ORDER BY`, the order is exact, ties included.
+
+The records a statement returns are otherwise the same, and so are counts, aggregates and the state that a write leaves behind. When several records make a statement fail, the error reported is the one from any of them, not necessarily the first by record id, and a failed write still commits nothing.
+
+### Comparing floats with decimals
+
+A float is now equal to a decimal only when the decimal is exactly the float's value. Most fractions have no exact binary representation, so `0.1f = 0.1dec` is now `false`, while `0.5f = 0.5dec` and `1f = 1dec` stay `true`:
+
+```surql
+[0.1f = 0.1dec, 0.5f = 0.5dec, 1f = 1dec];
+```
+
+```surql title="Output"
+[false, true, true]
+```
+
+A query that compares a decimal field with a float literal or parameter below `1` can stop matching records it matched on `3.3`. Compare with a decimal instead, such as `price = 0.1dec` or `price = <decimal> $amount`. The Rust SDK's `Number` and `Value` compare in the same way.
+
+### Writes that create a table need permission to define it
+
+A `CREATE`, `UPSERT`, `INSERT` or `RELATE` on a table that does not exist yet defines the table, and from `4.0` a system user needs permission to run `DEFINE TABLE` for that. A database user with the `VIEWER` role now gets `IAM error: Not enough permissions to perform this action`, where `3.3` defined the table and refused only the write. Record users are not affected.
+
+### Integer sums and means
+
+`math::sum` over integers raises an error when the total leaves the range of an `int`, where it used to wrap around to a wrong value, and `math::mean` over integers adds them exactly before dividing, so its result no longer depends on the order of the values:
+
+```surql
+math::mean([299, -4611686018427387904, 299, 4611686018427387904]);
+```
+
+```surql title="Output"
+149.5
+```
+
+On `3.3` the same call returns `256f`. In an aggregated view, `math::sum` over integers now stores an `int`, where it stored a `float`, and `math::sum`, `math::min` and `math::max` skip records that have no value for the field instead of refusing them. A view defined on `3.3` keeps its `float` totals until it is defined again with `DEFINE TABLE OVERWRITE`.
+
+### A blocking `DEFINE INDEX` commits before its build
+
+A `DEFINE INDEX` or `REBUILD INDEX` without `CONCURRENTLY`, run as a statement of its own, now commits and then waits for its build, instead of holding one transaction open for the whole build. It still returns only once the index is ready, and queries use the index only from then. Three things change for such a statement:
+
+- Other sessions see the new index while it builds, in `INFO FOR TABLE`, and `INFO FOR INDEX` reports the build's progress.
+- A `DEFINE INDEX` whose build fails, such as on a `UNIQUE` violation, fails, and its definition is then removed in a second transaction. If the server stops before that removal, the index stays defined with its build in `Error`, which `REMOVE INDEX` or `REBUILD INDEX` clears.
+- The query timeout, the transaction timeout and cancelling the query stop the wait. A `DEFINE INDEX` stopped this way has its definition removed, and a `REBUILD INDEX` finishes its build in the background.
+
+A statement inside `BEGIN ... COMMIT` keeps the earlier behaviour, and commits or rolls back with its index.
+
+### JSON Patch paths
+
+`UPDATE ... PATCH` reads each `path` as an RFC 6901 JSON Pointer. Only `/` separates the parts of a path, so a dot is an ordinary character in a key: `/x.y` now means the key `x.y`, where `3.3` read it as `y` inside `x`. Write a nested path with slashes, as in `/x/y`. A key that contains `/` or `~` is written with `~1` or `~0`, so `/a~1b` targets the key `a/b`.
+
+### Query parameters in HTTP `/sql` requests
+
+A parameter given in the query string of a `/sql` request is bound as the value its JSON encodes, so `?data={"a":1}` binds an object and `?limit=10` binds the number `10`. A value that is not valid JSON is still bound as a string. To pass a number or `true` as a string, quote it in JSON, as in `?code="10"`.
+
 ### Surrealism modules are now extensions
 
-Surrealism modules are called extensions from `4.0`. `DEFINE EXTENSION`, `ALTER EXTENSION`, `REMOVE EXTENSION`, `ext::` calls and the `surreal db extension` command replace `MODULE`, `mod::` and `surreal db module`. The old spellings still work and log a deprecation warning, and `INFO FOR DB` lists definitions under `extensions` in place of `modules`. Every existing module needs two changes:
+Surrealism modules are called extensions from `4.0`. `DEFINE EXTENSION`, `ALTER EXTENSION`, `REMOVE EXTENSION` and `ext::` calls replace `MODULE` and `mod::`, and the command-line tooling moves from `surreal db module` to its own component of the Surreal CLI, [`surreal ext`](/docs/reference/cli/ext). The old SurrealQL spellings still work and log a deprecation warning, `surreal db module` and `surreal db extension` only print where the commands have moved, and `INFO FOR DB` lists definitions under `extensions` in place of `modules`. Every existing module needs two changes:
 
 - **Rebuild it.** `4.0` refuses a `.surli` file built for `3.3` or earlier with `Unsupported ABI version: expected 4, got 2`. Database access moves to a `Transaction` parameter, `#[surrealism(writeable)]` is replaced by `Transaction<ReadWrite>`, the module key-value store is removed, and the project file becomes `package.toml`. See [Upgrading a module to 4.0](/docs/learn/extensions/guides/surrealism-attribute-reference#upgrading-a-module-to-40).
 - **Define it again.** A definition stored by `3.x` has no `DIGEST` or signer, so `4.0` refuses to call it until it is defined again with `SIGNER` or `UNSIGNED`. A new definition grants the extension no network access, function calls or writes unless its `CAPABILITIES` say so. See [`DEFINE EXTENSION`](/docs/reference/query-language/statements/define/extension).
@@ -206,6 +266,12 @@ A table that names the components of its array record id cannot be read by an ea
 ## Configuration
 
 - `SURREAL_MAX_CONCURRENT_TASKS` is removed, and `4.0` ignores it.
+- Statements that scan many records split the scan into parts that run in parallel, on a pool of workers with one place for each core beyond the statement's own. `SURREAL_MORSEL_PLACES` limits how many places one statement can hold (no limit by default, and `0` runs every statement on its own task), `SURREAL_MORSEL_OLTP_RESERVE` keeps places free for short statements (`1` by default), and `SURREAL_MORSEL_PLACE_QUANTUM` sets how long a worker keeps a place while another statement waits for one (`8` by default). Index builds and background index compaction use the same pool, so on a host with two cores or fewer they run on one task unless `SURREAL_MORSEL_OLTP_RESERVE` is set to `0`. `SURREAL_HNSW_BUILD_PARALLELISM` is now an upper limit on the width of an HNSW build, and the pool decides the width it actually gets.
+- A network target that starts with `*.`, such as `--allow-net "*.example.com"`, now matches every subdomain of that domain. On `3.3` it was read as an exact host name and matched nothing, so check such entries in `--allow-net` and `--deny-net`, and in the network capabilities of extensions: an allow rule that had no effect now allows, and a deny rule now denies. See [Network](/docs/learn/security/authorization/capabilities#network).
+- `SURREAL_SURREALISM_SILO_ENDPOINT` is no longer read. `silo::` packages always come from `https://silo.surrealdb.com`, and an archive served from anywhere else is defined from a bucket.
+- `surreal sql` exits with status `1` when its input is piped and a statement fails or a line does not parse, where it always exited with `0`. A script that pipes queries into `surreal sql` and continues after a failure now stops at that point if it checks the exit status. An interactive session is unchanged.
+- `surreal start --import-file` runs the file in the default namespace and database, so a file without `USE` statements is imported, where `3.3` skipped it. A file that does not parse fails startup at once, where `3.3` retried it for the length of the startup timeout.
+- `surreal upgrade` no longer downloads anything, because the Surreal CLI installs and upgrades the database. It prints how to get the Surreal CLI and exits with an error. `surreal v2` is removed, and `--online-version-check` is accepted and ignored.
 - `SURREAL_SURREALISM_MAX_POOL_SIZE` is removed, because each extension call runs on a fresh instance. `SURREAL_SURREALISM_MAX_CONCURRENT_INVOCATIONS` (64 by default) limits how many calls run at once instead. See [Surrealism config](/docs/reference/cli/db/environment-variables#surrealism-config).
 - `--planner-strategy` and `SURREAL_PLANNER_STRATEGY` are deprecated and have no effect. The server logs a warning at start, and the option can be removed from the configuration.
 - A KNN search over an HNSW index with a pre-filter no longer widens its search fourfold. It reads the new `SURREAL_KNN_PREFILTER_HNSW_EF_BOOST`, which defaults to `1`, and scores the matching records directly wherever that costs less than walking the graph. `SURREAL_KNN_PREFILTER_EF_BOOST` keeps its default of `4` and now applies to DiskANN only. A deployment that tuned HNSW searches with `SURREAL_KNN_PREFILTER_EF_BOOST` sets `SURREAL_KNN_PREFILTER_HNSW_EF_BOOST` instead, and `4` restores the previous width.
