@@ -1,0 +1,253 @@
+---
+position: 3
+title: AI SDK
+description: Use SurrealDB with the Vercel AI SDK 7 - store embeddings from embedMany, give models vector search and graph traversal tools, and persist chat history in a Next.js route.
+---
+
+# AI SDK
+
+The [AI SDK](https://ai-sdk.dev) is Vercel's TypeScript library for calling language and embedding models. SurrealDB stores the data that those calls need: embeddings in a vector index, the relations between documents as graph edges, and the chat history of each conversation. This page builds a question-answering chat route in which the model searches a knowledge base through tools that query SurrealDB.
+
+> [!NOTE]
+> This page stores data in a SurrealDB database that you run. For managed long-term memory that the AI SDK reads and writes through middleware, see the [Agent Memory AI SDK integration](/docs/agent-memory/integrations/ai-sdks/vercel-ai-sdk).
+
+## Requirements
+
+- [SurrealDB v3](/docs/running/installation), local or on [SurrealDB Cloud](/docs/running/cloud)
+- AI SDK 7 (the `ai` package) and Node.js 22 or later
+- Access to [Vercel AI Gateway](https://vercel.com/docs/ai-gateway), through the `AI_GATEWAY_API_KEY` environment variable locally or automatically on Vercel. The examples pass models as `provider/model` strings, which go through the gateway.
+
+## Setup
+
+Start SurrealDB locally:
+
+```sh
+surreal start --user root --pass secret memory
+```
+
+Save the schema below as `schema.surql`. The `HNSW` index uses 1536 dimensions, because that is the size of the vectors that `openai/text-embedding-3-small` returns. If you use another embedding model, set `DIMENSION` to its output size.
+
+```surql title="schema.surql"
+DEFINE NAMESPACE IF NOT EXISTS app;
+USE NS app;
+DEFINE DATABASE IF NOT EXISTS main;
+USE DB main;
+
+DEFINE USER app_server ON DATABASE PASSWORD 'strongPassword' ROLES EDITOR;
+
+-- Documents and their embeddings
+DEFINE TABLE document SCHEMAFULL;
+DEFINE FIELD title ON document TYPE string;
+DEFINE FIELD content ON document TYPE string;
+DEFINE FIELD embedding ON document TYPE array<float>;
+DEFINE INDEX document_embedding ON document FIELDS embedding HNSW DIMENSION 1536 DIST COSINE;
+
+-- One document cites another
+DEFINE TABLE cites SCHEMAFULL TYPE RELATION FROM document TO document;
+
+-- Chat history, one record per conversation
+DEFINE TABLE conversation SCHEMALESS;
+```
+
+Apply it:
+
+```sh
+curl -X POST -u "root:secret" -H "Accept: application/json" \
+  --data-binary @schema.surql http://localhost:8000/sql
+```
+
+The `conversation` table is schemaless because the AI SDK message format has many part types, and the application reads the history back in the same shape it wrote it.
+
+## Install dependencies
+
+```sh
+npm install ai @ai-sdk/react zod surrealdb
+```
+
+The examples use the `getDb()` helper from the Next.js page, which signs in once and shares the client between requests. Create `lib/surreal.ts` as shown in [Create one shared client](/docs/build/integrations/vercel/nextjs#create-one-shared-client), and set the `SURREALDB_*` environment variables listed there.
+
+## Store documents with embeddings
+
+`embedMany` returns one embedding for each input value, in the same order. Combine each embedding with its document and insert them all with one `INSERT` statement:
+
+```ts title="lib/ingest.ts"
+import { embedMany } from "ai";
+import { getDb } from "@/lib/surreal";
+
+export async function ingest(documents: { title: string; content: string }[]) {
+    const { embeddings } = await embedMany({
+        model: "openai/text-embedding-3-small",
+        values: documents.map((document) => document.content),
+    });
+
+    const db = await getDb();
+    await db.query("INSERT INTO document $documents", {
+        documents: documents.map((document, index) => ({
+            ...document,
+            embedding: embeddings[index],
+        })),
+    });
+}
+```
+
+When one document refers to another, record it as an edge so that a tool can follow it later:
+
+```surql
+RELATE document:knn->cites->document:hnsw;
+```
+
+## Give the model a search tool
+
+A tool is a function that the model can decide to call. This one embeds the question with the same model that embedded the documents, and runs a nearest-neighbour search against the `HNSW` index:
+
+```ts title="lib/tools.ts"
+import { embed, tool } from "ai";
+import { z } from "zod";
+import { getDb } from "@/lib/surreal";
+
+export const searchDocuments = tool({
+    description: "Search the knowledge base for passages that answer a question.",
+    inputSchema: z.object({
+        query: z.string().describe("The question or topic to search for"),
+    }),
+    execute: async ({ query }) => {
+        const { embedding } = await embed({
+            model: "openai/text-embedding-3-small",
+            value: query,
+        });
+
+        const db = await getDb();
+        const [results] = await db
+            .query(
+                `SELECT id, title, content, vector::distance::knn() AS distance
+                FROM document
+                WHERE embedding <|5,100|> $embedding
+                ORDER BY distance`,
+                { embedding },
+            )
+            .json();
+
+        return results;
+    },
+});
+```
+
+In `<|5,100|>`, `5` is the number of documents to return and `100` is the size of the candidate list that the `HNSW` search keeps while it looks for them. A larger second number finds closer matches more reliably and takes longer. `vector::distance::knn()` returns the distance that the search computed, so the query does not calculate it twice. [Similarity search](/docs/learn/data-models/vector-search/similarity-search) explains the operator and how to combine it with a `WHERE` filter.
+
+`.json()` turns each record ID into a string such as `document:knn`, which the model can read and pass back to another tool.
+
+## Give the model a graph tool
+
+Vector search finds passages that use similar words. The `cites` edges add something that similarity cannot find: which documents depend on a passage, and which ones it depends on. A second tool lets the model follow those edges from a document that the search returned:
+
+```ts title="lib/tools.ts"
+export const relatedDocuments = tool({
+    description: "List the documents that a document cites and the documents that cite it.",
+    inputSchema: z.object({
+        id: z.string().describe("A document id returned by searchDocuments, such as document:abc"),
+    }),
+    execute: async ({ id }) => {
+        const db = await getDb();
+        const [result] = await db
+            .query(
+                `SELECT
+                    ->cites->document.{ id, title } AS cites,
+                    <-cites<-document.{ id, title } AS cited_by
+                FROM ONLY <record<document>> $id`,
+                { id },
+            )
+            .json();
+
+        return result;
+    },
+});
+```
+
+The model supplies `id` as a string. The cast `<record<document>> $id` turns it into a record ID, and the query fails unless the string is a record ID in the `document` table. The model therefore cannot use this tool to read from any other table. For `document:knn`, the tool returns:
+
+```json title="Output"
+{
+    "cited_by": [],
+    "cites": [{ "id": "document:hnsw", "title": "HNSW indexes" }]
+}
+```
+
+## Keep chat history in SurrealDB
+
+The route below loads the stored messages of a conversation, adds the new message from the client, and streams the answer. When the stream ends, `onEnd` receives the complete list of messages, including the new answer and its tool calls, and the route saves it:
+
+```ts title="app/api/chat/route.ts"
+import { convertToModelMessages, isStepCount, streamText, type UIMessage } from "ai";
+import { RecordId } from "surrealdb";
+import { relatedDocuments, searchDocuments } from "@/lib/tools";
+import { getDb } from "@/lib/surreal";
+
+export async function POST(request: Request) {
+    const { id, message }: { id: string; message: UIMessage } = await request.json();
+
+    const db = await getDb();
+    const conversation = new RecordId("conversation", id);
+
+    const [stored] = await db.query<[UIMessage[] | undefined]>(
+        "SELECT VALUE messages FROM ONLY $conversation",
+        { conversation },
+    );
+    const messages = [...(stored ?? []), message];
+
+    const result = streamText({
+        model: "anthropic/claude-sonnet-5.5",
+        instructions: "Answer from the knowledge base. Call searchDocuments before answering.",
+        messages: await convertToModelMessages(messages),
+        tools: { searchDocuments, relatedDocuments },
+        stopWhen: isStepCount(5),
+    });
+
+    return result.toUIMessageStreamResponse({
+        originalMessages: messages,
+        onEnd: async ({ messages }) => {
+            await db.query(
+                "UPSERT $conversation CONTENT { messages: $messages, updated_at: time::now() }",
+                { conversation, messages },
+            );
+        },
+    });
+}
+```
+
+Some details of this route:
+
+- The client sends only the new message, and the server owns the history. Configure `useChat` on the client to send `{ id, message }` instead of the full list, as shown below.
+- `SELECT VALUE messages FROM ONLY $conversation` returns `undefined` for a new conversation, so the first request starts with an empty history.
+- `stopWhen: isStepCount(5)` lets the model call tools and read their results for up to five steps before it must answer.
+- The conversation ID comes from the client. If conversations belong to signed-in users, check that the user owns the conversation before you load it.
+
+The client component gives `useChat` a transport that sends the conversation ID and the last message only:
+
+```tsx title="components/chat.tsx"
+"use client";
+
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
+
+export function Chat({ id }: { id: string }) {
+    const { messages, sendMessage } = useChat({
+        id,
+        transport: new DefaultChatTransport({
+            api: "/api/chat",
+            prepareSendMessagesRequest: ({ id, messages }) => ({
+                body: { id, message: messages.at(-1) },
+            }),
+        }),
+    });
+
+    // Render messages and call sendMessage({ text }) from a form
+}
+```
+
+## See also
+
+- [Next.js](/docs/build/integrations/vercel/nextjs)
+- [Eve](/docs/build/integrations/vercel/eve), for agents that run as durable workflows
+- [Vector indexes](/docs/learn/data-models/vector-search/vector-indexes)
+- [Hybrid search](/docs/learn/data-models/vector-search/hybrid-search), to combine vector and full-text results
+- [AI SDK documentation](https://ai-sdk.dev/docs)

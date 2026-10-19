@@ -638,6 +638,24 @@ When you need to write new documentation or update existing articles, make use o
 3. Check British English and links.
 4. `bun run qa` and `bun run qc`.
 
+## Environment variables and flags
+
+Settings are documented in two places, and a change to one usually needs the other:
+
+- The [environment variables](src/content/reference/cli/db/environment-variables.mdx) page and the command pages describe each setting in the current release.
+- The [version history chart](src/content/reference/cli/db/version-history.mdx) shows which `SURREAL_` variables and `surreal db` flags each release had, with their first and last versions and their defaults. Its data is `public/cli-history/data.json`, which `public/cli-history/history.html` and `history.js` render.
+
+The chart covers tagged releases only, read from the source at each tag, so it changes when a release is tagged rather than when a page is edited. After a release, regenerate it:
+
+```bash
+git -C ~/surrealdb fetch --tags
+bun run generate:cli-history
+```
+
+`scripts/cli-history/generate.ts` reads every release tag of a local clone of surrealdb/surrealdb (`~/surrealdb`, or `SURREALDB_REPO`) with git only, takes release dates from `gh release list`, and writes `public/cli-history/data.json`, with its intermediate files in `generated/cli-history`. A run over all tags takes under a minute. Then update the version the page names as its latest, which appears in its `description`, its opening paragraph and its scope section. Check the diff of `data.json` before committing: a new tag should add a tag entry and extend or close ranges, and an unexpected swing in the counts the script prints usually means a source file moved and the extractor needs a new path.
+
+When a page documents a setting as added, removed or changed in a version that is already tagged, check that the chart agrees. A setting that is documented on a branch for an unreleased version, such as `3.4` for 4.0, goes into the chart once that version is tagged.
+
 ## Content collections
 
 Content lives in `src/content`. Frontmatter schemas live in
