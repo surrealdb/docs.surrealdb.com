@@ -66,6 +66,10 @@ You can use the HTTP endpoints to perform the following actions:
             <td scope="row" data-label="Description">Exports all data for a specific Namespace and Database</td>
         </tr>
         <tr>
+            <td scope="row" data-label="Function"><a href="#kvexport"><code>POST /kvexport</code></a></td>
+            <td scope="row" data-label="Description">Streams the datastore's entire keyspace from one snapshot (experimental)</td>
+        </tr>
+        <tr>
             <td scope="row" data-label="Function"><a href="#signup"><code>POST /signup</code></a></td>
             <td scope="row" data-label="Description">Signs-up as a record user using a specific record access method</td>
         </tr>
@@ -609,6 +613,110 @@ curl -X POST \
         "records": true
       }' \
   http://localhost:8000/export
+```
+
+<br />
+
+## `POST /kvexport` {#kvexport}
+
+This HTTP RESTful endpoint streams the open datastore's entire keyspace from a single snapshot. Unlike [`POST /export`](#export), which writes a SurrealQL export of one Namespace and Database, `/kvexport` streams the raw stored bytes of the whole datastore, so another instance can be seeded from a byte-level copy. It is a low-level operation, intended for migrating or cloning a datastore rather than for everyday backups.
+
+> [!IMPORTANT]
+> `POST /kvexport` is an experimental feature and is off by default. Start the server with `--allow-experimental kvexport` to enable it. It has its own HTTP route target, so `--deny-http kvexport` turns it off without affecting [`/export`](#export). See the [capabilities documentation](/docs/learn/security/authorization/capabilities) for how experimental features are enabled.
+
+> [!WARNING]
+> The stream carries the raw stored bytes, so it includes everything a SurrealQL export redacts: password hashes, each user's token-signing key, and the keys of access methods. A reader of the stream can mint tokens for this instance that outlive a password change. Only the root user with the owner role can call this endpoint, and every lower role is refused. The route reads no request body until the caller is authorised, and it never logs a request or response body.
+
+### Headers
+
+<table>
+    <thead>
+        <tr>
+            <th colspan="2">Header</th>
+            <th colspan="2">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td colspan="2" scope="row" data-label="Header">
+                <code>Authorization</code>
+                <label label="required" />
+            </td>
+            <td colspan="2" scope="row" data-label="Header">
+                Authenticates the caller as the root user with the owner role, which this endpoint requires.
+            </td>
+        </tr>
+    </tbody>
+</table>
+
+The endpoint streams the whole datastore, so it does not take the `Surreal-NS` or `Surreal-DB` headers.
+
+#### Request body
+
+The request body is an optional JSON object of up to 128 MiB. An empty body asks for the whole keyspace.
+
+<table>
+    <thead>
+        <tr>
+            <th>Field</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>
+                `after`
+                <label label="optional" />
+            </td>
+            <td>
+                The hex encoding of a key. The stream starts at the first key after it, in key order. A caller that resumes a copy passes the last key it wrote.
+            </td>
+        </tr>
+        <tr>
+            <td>
+                `latest_only`
+                <label label="optional" />
+            </td>
+            <td>
+                Set to `true` to copy a datastore that keeps version history. The stream then carries each key's latest value only. Without it, a versioned datastore is refused with `409 Conflict` rather than copied without its history.
+            </td>
+        </tr>
+    </tbody>
+</table>
+
+### Response
+
+The response is streamed, never compressed, and has the content type `application/vnd.surrealdb.kvexport`. It has four parts:
+
+1. The four bytes `SKVX` and a format byte (`1`).
+2. A `u32` length and that many bytes of JSON holding the source's keyspace version, read in the same snapshot as the data. A target checks it before it writes anything.
+3. The data frames. Each frame is a `1` byte, a `u32` key length, the key, a `u32` value length, and the value.
+4. A `0` byte, then the 32-byte BLAKE3 digest of every byte before it.
+
+All lengths are little-endian. Every frame is read in one transaction, so the stream is a single snapshot of the keyspace, whatever the source commits while it is served. Frames come in key order, except the keyspace version key, which comes last. A body that stops before the digest, or whose digest does not match, was cut short.
+
+### Example usage
+
+> [!NOTE]
+> The `-u` in the examples below is curl shorthand for an Authorization header (username and password), here the root user `root` with the password `secret`. The `-o` writes the output to a file.
+
+```bash title="Request"
+curl -X POST \
+  -u "root:secret" \
+  -o datastore.kvexport \
+  http://localhost:8000/kvexport
+```
+
+```bash title="Resuming after a key, latest values only"
+curl -X POST \
+  -u "root:secret" \
+  -H "Content-Type: application/json" \
+  -o datastore.kvexport \
+  -d '{
+        "after": "<hex-of-last-written-key>",
+        "latest_only": true
+      }' \
+  http://localhost:8000/kvexport
 ```
 
 <br />
