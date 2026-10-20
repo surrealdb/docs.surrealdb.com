@@ -1,7 +1,7 @@
 ---
 position: 6
 title: 3.x to 4.0
-description: What to do when a 3.x deployment moves to 4.0, covering the one-way switch to the 4.0 record format, export and import changes, the conversion of SurrealKV datastores, database compatibility levels and MIGRATE EXISTING ROWS, which HNSW, DiskANN and B-tree indexes to rebuild with REBUILD INDEX, and the behaviour changes in SurrealQL, configuration and Surrealism modules.
+description: What to do when a 3.x deployment moves to 4.0, covering the one-way switch to the 4.0 record format, export and import changes, the removal of RocksDB and IndexedDB, the conversion of SurrealKV and RocksDB datastores, database compatibility levels and MIGRATE EXISTING ROWS, which HNSW, DiskANN and B-tree indexes to rebuild with REBUILD INDEX, and the behaviour changes in SurrealQL, configuration and Surrealism modules.
 ---
 
 # Upgrading from `3.x` to `4.0`
@@ -24,8 +24,8 @@ The way back to `3.3` is to restore the export into a new datastore created by `
 
 `4.0` writes records and definitions in a new on-disk format. A `3.x` release cannot read it, which is why the upgrade is one-way. When the switch happens depends on the storage engine:
 
-- **In memory, RocksDB and SurrealKV.** Only one process writes to these datastores, so the first `4.0` start switches the datastore to the new format straight away. From then on, every record and definition it writes uses the new format.
-- **TiKV and IndexedDB.** Several processes can write to these datastores at once, possibly of different releases, so the datastore keeps writing the `3.x` format after the upgrade. Once every node runs `4.0`, start the nodes with `SURREAL_FEATURE_LEVEL=4.0` to switch it. The switch is refused, with a warning in the log, while any running node reports an older release.
+- **In memory and SurrealKV.** Only one process writes to these datastores, so the first `4.0` start switches the datastore to the new format straight away. From then on, every record and definition it writes uses the new format.
+- **TiKV.** Several processes can write to this datastore at once, possibly of different releases, so it keeps writing the `3.x` format after the upgrade. Once every node runs `4.0`, start the nodes with `SURREAL_FEATURE_LEVEL=4.0` to switch it. The switch is refused, with a warning in the log, while any running node reports an older release.
 
 A new datastore of any kind starts in the new format. A datastore can hold records in both formats at once, and `4.0` reads both, so nothing is rewritten in bulk and the switch takes no time of its own.
 
@@ -53,7 +53,7 @@ Run `REBUILD INDEX` as its own statement, not inside a transaction, for an index
 
 ## Clusters
 
-On a datastore that several nodes share, such as TiKV, upgrade every node before writes to a DiskANN index resume. Stop writes to DiskANN indexes, or stop the whole cluster, while the nodes are replaced. An earlier release can clear the state that tracks a `4.0` node's pending writes to the index, and those writes are then missing from KNN results. A datastore that one node opens alone (in memory, RocksDB or SurrealKV) needs nothing. Define or rebuild vector indexes only once every node runs `4.0`, as the table above says.
+On a datastore that several nodes share, such as TiKV, upgrade every node before writes to a DiskANN index resume. Stop writes to DiskANN indexes, or stop the whole cluster, while the nodes are replaced. An earlier release can clear the state that tracks a `4.0` node's pending writes to the index, and those writes are then missing from KNN results. A datastore that one node opens alone (in memory or SurrealKV) needs nothing. Define or rebuild vector indexes only once every node runs `4.0`, as the table above says.
 
 Two more steps apply only while nodes of different releases share a datastore. Finish upgrading every node before defining a field whose name is a reserved keyword and whose type is an array or a set, such as `` DEFINE FIELD `select` ON t TYPE array<string> ``, because a `3.3` node stores part of that definition where `4.0` does not read it. Do not run a node of a `3.3.0` pre-release alongside `4.0`.
 
@@ -64,9 +64,22 @@ Two more steps apply only while nodes of different releases share a datastore. F
 - **A dump can change the target database's settings.** For a database with a `COMMENT`, `CHANGEFEED` or `STRICT` clause, the export starts with `DEFINE DATABASE OVERWRITE`, which replaces those clauses on the database the dump is restored into. That statement needs a namespace or root user, so a database user cannot restore such a dump.
 - **Dumps from earlier releases can exceed the write-key limit.** Where `SURREAL_TRANSACTION_MAX_WRITE_KEYS` is set, a dump written by an earlier release can contain statements that write more keys than the limit allows, because the earlier exporter did not count the keys of `REFERENCE` fields. Take new exports after the upgrade, or raise the limit while restoring an older one.
 
+## RocksDB and IndexedDB are removed
+
+`4.0` removes the RocksDB and IndexedDB storage engines. SurrealKV is the only on-disk engine, on a server, in an embedded SDK and in the browser. A server or an SDK that connects with `rocksdb://` or `indxdb://` fails with an error that names the replacement:
+
+```text title="Error output"
+The `rocksdb://` scheme is no longer supported; use `surrealkv://` instead
+```
+
+- **A RocksDB datastore** is converted to SurrealKV the first time `4.0` opens it with a `surrealkv://` path in place of `rocksdb://`, and keeps its versions where it ran with versioning enabled. The conversion is one-way, so take a copy of the data directory as well as the export described above. To leave the original directory as `3.3` wrote it, convert it into a new directory with `skv migrate` before the first start instead. See [Moving a RocksDB database to SurrealKV](/docs/manage/self-hosted/deployment-models#moving-a-rocksdb-database-to-surrealkv).
+- **RocksDB settings are no longer read.** This covers the `SURREAL_ROCKSDB_*` and `SURREAL_DS_ROCKSDB_*` environment variables and the RocksDB parameters of a `rocksdb://` path. SurrealKV has its own, smaller set, listed under [SurrealKV environment variables](/docs/reference/cli/db/environment-variables#surrealkv-environment-variables).
+- **The Rust SDK** no longer has the `kv-rocksdb` and `kv-indxdb` features or the `RocksDb` and `IndxDb` engines. Use the `kv-surrealkv` feature and the `SurrealKv` engine.
+- **In the browser**, the [Wasm engine](/docs/reference/javascript/engines/wasm) connects with `surrealkv://name`, which keeps the database in the browser's Origin Private File System and runs in a dedicated worker. Data in an IndexedDB database of the same name is copied in the first time the database is opened, and the IndexedDB database is only read.
+
 ## SurrealKV datastores
 
-`4.0` uses SurrealKV 1.0, which has a new on-disk format, and SurrealKV replaces RocksDB as the recommended on-disk engine. RocksDB remains available. A datastore written by SurrealKV on `3.3` or earlier is converted the first time a `4.0` node opens it, with its versions kept, and an earlier release cannot open it afterwards. Take a copy of the data directory as well as the export described above, or convert the datastore into a new directory with `skv migrate` before the first start, which leaves the original as `3.3` wrote it. See [Converting ahead of time with `skv`](/docs/manage/self-hosted/deployment-models#converting-ahead-of-time-with-skv). The same conversion lets a RocksDB datastore move to SurrealKV without an export, which is described in [Moving a RocksDB database to SurrealKV](/docs/manage/self-hosted/deployment-models#moving-a-rocksdb-database-to-surrealkv).
+`4.0` uses SurrealKV 1.0, which has a new on-disk format. A datastore written by SurrealKV on `3.3` or earlier is converted the first time a `4.0` node opens it, with its versions kept, and an earlier release cannot open it afterwards. Take a copy of the data directory as well as the export described above, or convert the datastore into a new directory with `skv migrate` before the first start, which leaves the original as `3.3` wrote it. See [Converting ahead of time with `skv`](/docs/manage/self-hosted/deployment-models#converting-ahead-of-time-with-skv).
 
 ## Behaviour changes
 
@@ -161,6 +174,10 @@ A range that starts past the end returns `[]`, and a negative bound still return
 ### Rust SDK: a dropped transaction rolls back
 
 A client-side [`Transaction`](/docs/reference/rust/concepts/transaction#using-a-client-side-transaction) that is dropped without `commit()` or `cancel()` is now rolled back on a background task, where it used to stay open on the server until the connection closed.
+
+### Isolation levels over the PostgreSQL wire protocol
+
+A PostgreSQL client's `BEGIN ISOLATION LEVEL ...` is now applied rather than accepted and ignored. `SERIALIZABLE` opens a [serializable transaction](/docs/learn/querying/concepts-and-guides/transactions#serializable-isolation) on SurrealMX and SurrealDS, and fails with SQLSTATE `0A000` (`feature_not_supported`) on the other storage engines, where `3.3` ran the transaction at snapshot isolation. `REPEATABLE READ`, `READ COMMITTED` and `READ UNCOMMITTED` run at snapshot isolation, as before. A client or driver that sets `SERIALIZABLE` by default needs to request `REPEATABLE READ` instead on those engines.
 
 ### Surrealism modules are now extensions
 

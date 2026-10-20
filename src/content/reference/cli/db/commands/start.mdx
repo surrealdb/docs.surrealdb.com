@@ -23,7 +23,7 @@ surreal db start [OPTIONS] [PATH]
             "name": "[PATH]",
             "default": "memory",
             "env": "SURREAL_PATH",
-            "description": "Where the server stores data. Combine a backend name with `:` or `://` and an address or filename, for example `surrealkv://mydb` or `rocksdb:database`. See the Positional argument section below."
+            "description": "Where the server stores data. Combine a backend name with `:` or `://` and an address or filename, for example `surrealkv://mydb` or `surrealkv:database`. See the Positional argument section below."
         }
     ]}
 />
@@ -180,35 +180,89 @@ surreal db sql --endpoint http://127.0.0.1:8000 --namespace my_namespace \
 
 In the `surreal db start` command, the path argument is used to specify the location of the database. If no argument is given, the default of `memory` for storage [in memory](/docs/running/in-memory) is assumed.
 
-Arguments for persistent backends are a combination of the backend name, a `:` or `://`, and an address or filename - for example `surrealkv://mydb` or `rocksdb:database`. The available backends are:
+Arguments for persistent backends are a combination of the backend name, a `:` or `://`, and an address or filename - for example `surrealkv://mydb` or `surrealkv:database`. The available backends are:
+
+<Tabs syncKey="surrealkv-version">
+<TabItem label="SurrealDB 4.0 and later">
 
 - `memory` (or no argument) for in-memory storage
-- `surrealkv` for SurrealKV, the recommended on-disk backend from SurrealDB 4.0
-- `rocksdb` for RocksDB, the recommended on-disk backend before 4.0
+- `surrealkv` for SurrealKV, the on-disk backend
+- `tikv` for TiKV
+
+SurrealDB 4.0 removed the `rocksdb` and `indxdb` backends. A path that names either fails with ``The `rocksdb://` scheme is no longer supported; use `surrealkv://` instead``, and starting the server with `surrealkv://` on a RocksDB data directory converts it. See [Moving a RocksDB database to SurrealKV](/docs/manage/self-hosted/deployment-models#moving-a-rocksdb-database-to-surrealkv).
+
+</TabItem>
+<TabItem label="Before SurrealDB 4.0">
+
+- `memory` (or no argument) for in-memory storage
+- `surrealkv` for SurrealKV
+- `rocksdb` for RocksDB, the recommended on-disk backend
 - `indxdb` for IndexedDB
 - `tikv` for TiKV
 
+</TabItem>
+</Tabs>
+
 ### Absolute vs. relative paths
 
-The datastorage flavour (`rocksdb`, `surrealkv`, etc.) followed by `:` or `://` will be recognised as a relative path, which is resolved from the directory you run `surreal db start` in. Running `surreal db start rocksdb:mydb` from `/home/ann/projects` stores the data in `/home/ann/projects/mydb`, and running the same command from another directory creates a new, empty database there. Use an absolute path for a server that is started from different places, such as by a service manager. Any other number of slashes such as `rocksdb:/path` or `surrealkv:///path` will be interpreted as an absolute path. As a short absolute path of this nature will often require elevated permissions, the output for this command may end in this sort of error.
+The datastorage flavour (`surrealkv`, `tikv`, etc.) followed by `:` or `://` will be recognised as a relative path, which is resolved from the directory you run `surreal db start` in. Running `surreal db start surrealkv:mydb` from `/home/ann/projects` stores the data in `/home/ann/projects/mydb`, and running the same command from another directory creates a new, empty database there. Use an absolute path for a server that is started from different places, such as by a service manager. Any other number of slashes such as `surrealkv:/path` or `surrealkv:///path` will be interpreted as an absolute path. As a short absolute path of this nature will often require elevated permissions, the output for this command may end in this sort of error.
 
 ```text
-Failed to create RocksDB directory: `Os { code: 30, kind: ReadOnlyFilesystem, message: "Read-only file system" }`.
+There was a problem with the datastore: IO error: Read-only file system (os error 30)
 ```
 
 If you see this error without having intended to start the server on an absolute path, it is likely that the path passed in unintentionally contains either one slash or more than two slashes.
 
 > [!NOTE]
-> Be sure not to use multiple storage backends in the same location, such as `rocksdb://path/to/database` followed by `surrealkv://path/to/database`. As storage is entirely delegated to the backend, the CLI is not aware of the structure of the data itself. While each backend uses its own file names and directory structure to store data, it is possible that data overwrite or other issues may occur.
+> Be sure not to point two storage backends at the same location. As storage is entirely delegated to the backend, the CLI is not aware of the structure of the data itself. While each backend uses its own file names and directory structure to store data, it is possible that data overwrite or other issues may occur. The one deliberate exception is a RocksDB directory from before 4.0, which SurrealKV converts when it opens it.
 
 > [!IMPORTANT]
 > **TiKV** (`tikv://…`) is supported for local multi-node experimentation with the Community edition. Production multi-node HA uses distributed storage on [SurrealDB Cloud Scale](https://surrealdb.com/pricing/scale) or [SurrealDB Enterprise](https://surrealdb.com/enterprise). See [Run a multi-node cluster](/docs/running/multi-node) and [Deployment](/docs/manage/self-hosted/deployment-models). To provision and scale those instances from a script rather than a browser, see [`surreal cloud`](/docs/reference/cli/cloud).
 
 ## Datastore configuration
 
-<Tabs>
+<Tabs syncKey="surrealkv-version">
 
-<TabItem label="3.x">
+<TabItem label="SurrealDB 4.0 and later">
+
+Configuring a datastore is done by passing in a string that begins with the datastore name, a path if persistent storage is needed, and optional parameters. Some examples:
+
+```bash
+surreal db start --user root --pass secret "surrealkv://path/to/db?versioned=true&sync=every&retention=30d"
+surreal db start --user root --pass secret "mem://tmp/data?aol=sync&snapshot=60s&sync=5s"
+```
+
+Each database store supports different parameters.
+
+### Supported parameters for Memory (SurrealMX)
+
+The memory backend does not support versioned queries. From 3.3.0 a server started on it with `versioned=true` or a non-zero `retention`, whether through the parameters or the matching `SURREAL_DATASTORE_VERSIONED` and `SURREAL_DATASTORE_RETENTION` environment variables, fails to start. `versioned=false` and a zero retention are accepted. To use the [`VERSION` clause](/docs/reference/query-language/statements/select#the-version-clause), start the server on SurrealKV instead.
+
+- `aol` (`never`, `sync`, or `async`), for writing changes to an append-only log file
+- `snapshot` (a duration string, e.g. `60s`), for periodically writing a snapshot of the database to the file system
+- `sync` (`never`, `every`, or a duration string like `5s`), for specifying when to flush the append-only log file to the file system
+  - `never` - (default) leave flushing to the OS (least durable)
+  - `every` - sync on every commit (most durable)
+  - `interval` - periodic background flushing at the given interval
+
+Persistence for the memory backend is used for the following:
+
+- Append-Only Log (AOL) - Synchronous/asynchronous modes for durability
+- Snapshots - Periodic full database state capture
+- Data Recovery - Automatic recovery from snapshots + AOL on startup
+- AOL Truncation - Automatic cleanup after snapshots
+
+### Supported parameters for SurrealKV
+- `versioned` (`true` or `false`)
+- `retention` (a duration string, e.g. `30d`, `24h`, `30m`)
+- `sync` (`never`, `every`, or a duration string like `5s`), for specifying when to flush the database to the file system
+  - `every` - (default) sync before completing and confirming each transaction (most durable)
+  - `never` - leave flushing to the OS (least durable)
+  - `interval` - periodic background flushing at the given interval
+
+</TabItem>
+
+<TabItem label="Before SurrealDB 4.0">
 
 Configuring a datastore is done by passing in a string that begins with the datastore name, a path if persistent storage is needed, and optional parameters. Some examples:
 
@@ -256,7 +310,7 @@ Persistence for the memory backend is used for the following:
 
 </TabItem>
 
-<TabItem label="2.x">
+<TabItem label="SurrealDB 2.x">
 
 To start a SurrealDB instance with RocksDB as the storage engine, include the `rocksdb://` prefix in the path argument.
 
@@ -320,7 +374,7 @@ WARN surrealdb::net: SIGINT received. Waiting for a graceful shutdown. A second 
 INFO surrealdb::net: Web server stopped. Bye!
 ```
 
-A second signal during the shutdown stops the process at once, without waiting. On a persistent backend such as SurrealKV or RocksDB, data from committed transactions is kept either way, subject to the backend's [`sync` setting](#datastore-configuration). On the in-memory backend, all data is lost when the process stops unless [persistence](#supported-parameters-for-memory-surrealmx) is configured.
+A second signal during the shutdown stops the process at once, without waiting. On a persistent backend such as SurrealKV, data from committed transactions is kept either way, subject to the backend's [`sync` setting](#datastore-configuration). On the in-memory backend, all data is lost when the process stops unless [persistence](#supported-parameters-for-memory-surrealmx) is configured.
 
 ## Enabling capabilities
 
