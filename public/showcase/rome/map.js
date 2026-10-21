@@ -167,16 +167,33 @@
 	const SLOW_KEYS = /^(controlled_by|government|capital|founded_by|state_religion|name)$/;
 	const deathOf = new Map();
 	for (const e of events) if (e.kind === "death" && e.actor && !deathOf.has(e.actor)) deathOf.set(e.actor, e.auc);
-	function supportedUntil(key, c) {
+	// A slow-changing value such as who controls a place has no time limit of its own, but it
+	// still needs evidence: Milan stays Byzantine to 1453 although nothing about Milan is
+	// recorded after AD 540. So an ongoing value is supported until the last record of the
+	// place it describes, and a controller until the last record of the controller too.
+	// A founding or a name does not expire.
+	const ONGOING_KEYS = /^(controlled_by|government|capital|state_religion)$/;
+	const lastSeen = new Map();
+	const seen = (n, auc) => { if (n && auc > (lastSeen.get(n) ?? -Infinity)) lastSeen.set(n, auc); };
+	for (const e of events) {
+		for (const n of [e.actor, e.object, e.place?.title, ...(e.names ?? []), ...(e.cast ?? [])]) seen(n && canon(n), e.auc);
+		for (const st of e.states ?? []) { seen(st.entity, e.auc); seen(st.value, e.auc); }
+	}
+	for (const h of histories) for (const c of h.chain) { seen(h.entity, c.from); seen(c.value, c.from); }
+	function supportedUntil(key, c, entity) {
 		let end = c.until ?? Infinity;
 		for (const who of String(c.value).split(/ and /)) { const d = deathOf.get(who.trim()); if (d !== undefined && d >= c.from) end = Math.min(end, d); }
 		if (!SLOW_KEYS.test(key)) end = Math.min(end, c.from + 60);
+		if (ONGOING_KEYS.test(key)) {
+			const evidence = [entity, key === "controlled_by" ? c.value : null].map(n => lastSeen.get(n)).filter(a => a !== undefined);
+			if (evidence.length) end = Math.min(end, Math.max(c.from + 1, ...[Math.min(...evidence)]));
+		}
 		return end;
 	}
 	function valueNote(h, auc) {
 		const c = h.chain.find(c => c.from <= auc && (c.until === null || auc < c.until));
 		if (!c) return undefined;
-		return auc >= supportedUntil(h.key, c) ? `${c.value} (set in ${label(c.from)}, no later record)` : c.value;
+		return auc >= supportedUntil(h.key, c, h.entity) ? `${c.value} (set in ${label(c.from)}, no later record)` : c.value;
 	}
 
 	function renderEntity() {
@@ -463,9 +480,9 @@
 		const lanes = [];
 		const group = t => { svg += `<text class="group" x="8" y="${y + 14}">${esc(t)}</text>`; y += 22; };
 		const laneLabel = (t, target) => `<text x="8" y="${y + 15}" ${target ? `class="lane-label" data-n="${esc(target)}"` : ""}>${esc(t.length > 34 ? t.slice(0, 33) + "…" : t)}</text>`;
-		const bar = (c, i, title, key) => {
+		const bar = (c, i, title, key, entity) => {
 			const end = Math.min(hi, c.until ?? Math.max(c.from + 1, hi));
-			const solidEnd = Math.min(end, Math.max(c.from + 1, supportedUntil(key, c)));
+			const solidEnd = Math.min(end, Math.max(c.from + 1, supportedUntil(key, c, entity)));
 			const a = Math.max(lo, c.from), b = solidEnd;
 			if (end < lo || a > hi) return "";
 			const w = Math.max(2, x(b) - x(a)), colour = PALETTE[i % PALETTE.length];
@@ -489,13 +506,13 @@
 
 		if (own.length) {
 			group("In memory: " + n);
-			for (const [i, l] of own.entries()) { svg += laneLabel(l.label) + l.chain.map(c => bar(c, i, l.label, l.key)).join(""); y += laneH; }
+			for (const [i, l] of own.entries()) { svg += laneLabel(l.label) + l.chain.map(c => bar(c, i, l.label, l.key, n)).join(""); y += laneH; }
 		}
 		if (asValue.length) {
 			group(`Named in other histories`);
 			const ranked = asValue.map(l => ({ ...l, weight: l.chain.reduce((t, c) => t + Math.max(1, Math.min(c.until ?? c.from + 1, 2206) - c.from), 0) })).sort((p, q) => q.weight - p.weight);
 			if (ranked.length > LEVEL.named) group(`(${ranked.length - LEVEL.named} more at a higher detail level)`);
-			for (const [i, l] of ranked.slice(0, LEVEL.named).entries()) { svg += laneLabel(l.label, l.entity) + l.chain.map(c => bar(c, i + 3, l.label, l.key)).join(""); y += laneH; }
+			for (const [i, l] of ranked.slice(0, LEVEL.named).entries()) { svg += laneLabel(l.label, l.entity) + l.chain.map(c => bar(c, i + 3, l.label, l.key, l.entity)).join(""); y += laneH; }
 		}
 		group(`Events (${mine.length} of ${everything.length}, most important first)`);
 		const kindShape = (e, cx, cy) => e.kind === "birth" ? `<circle cx="${cx}" cy="${cy}" r="4" fill="#fff" stroke="#2f6b8a" stroke-width="2"` : e.kind === "death" ? `<rect x="${cx - 4}" y="${cy - 4}" width="8" height="8" fill="#333"` : `<path d="M${cx} ${cy - 5} L${cx + 5} ${cy} L${cx} ${cy + 5} L${cx - 5} ${cy} Z" fill="${e.rome === "core" ? "#b0302a" : "#c98c86"}"`;
