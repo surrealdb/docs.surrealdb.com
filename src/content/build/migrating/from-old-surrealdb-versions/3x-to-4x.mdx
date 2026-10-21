@@ -316,6 +316,38 @@ An `UPDATE` or `DELETE` on an aggregated view whose `WHERE` clause on a group co
 
 A table that names the components of its array record id cannot be read by an earlier release, so define the names only when every node runs `4.0` or later, and while nothing writes to the table. See [Naming the components of an array id](/docs/reference/query-language/statements/define/field#naming-the-components-of-an-array-id).
 
+### Full-text scores
+
+BM25 now weighs a term with `ln(1 + (N - n + 0.5) / (n + 0.5))`, so every match gets a score above zero. On `3.3`, a term found in half or more of the indexed documents weighed `0`, so on a small or uniform dataset `search::score()` often returned `0` for every match. Scores are higher in general on `4.0`, and the order of results can change where common terms carried no weight before. Check any query that compares a score against a fixed threshold. See [How common terms are weighted](/docs/learn/data-models/full-text-search/scoring-and-ranking#how-common-terms-are-weighted).
+
+### A record id read from a string
+
+A string read as a record id must be a record id as a whole. `type::record("user:john-doe")` and `<record> "user:john-doe"` now fail with ``Could not cast into `record` using input `'user:john-doe'` ``, where `3.3` silently stopped at the first character that cannot appear in an unescaped key and returned `user:john`. For the same reason, `string::is_record("user:john-doe")` returns `false`. Escape the key, as in ``type::record("user:`john-doe`")``, or pass the table and the key separately, as in `type::record("user", "john-doe")`. Both forms work on `3.3` as well.
+
+### Literal types convert their members
+
+A literal type such as `[int]` or `{ a: int }` now converts each member to its type, as `array<int>` already did. `LET $v: [int] = [1.0]` gives `[1]`, where `3.3` kept `[1f]` after checking that it could be converted.
+
+### Nested aggregates in `GROUP BY`
+
+An aggregate inside another aggregate is refused in a grouped query, with `Nested aggregate functions are not supported`. On `3.3`, `SELECT g, math::mean(math::mean(s)) AS m FROM nd GROUP BY g` averaged each record's array and then the group. Compute the inner value in a subquery and aggregate that, which works on both versions:
+
+```surql
+SELECT g, math::mean(m) AS m FROM (SELECT g, math::mean(s) AS m FROM nd) GROUP BY g;
+```
+
+### `UPSERT` that creates a record checks the schema
+
+An `UPSERT` with a `WHERE` clause that matches nothing, and so creates a record, now reports a schema error such as a missing required field. On `3.3` it returned `[]` and wrote nothing, so the failure went unnoticed.
+
+### Full-text matches over value rows
+
+A `@@` condition on a row built from a value, such as an object or array in `FROM` or a parameter holding one, is judged on the row's own content. On `3.3`, such a row with an `id` naming a stored record could be judged on that record's full-text index entry instead, so `SELECT text FROM doc, [{ id: doc:1, text: 'unrelated' }] WHERE text @@ 'quick'` also returned the value row when `doc:1` contained `quick`. A statement that mixes a table with value rows now judges the value rows without the index.
+
+### Views keyed by a projected `id`
+
+A view whose projection sets `id`, such as `DEFINE TABLE spend AS SELECT customer AS id, total FROM purchase`, keys each row by that value on every write, so later writes update the same row. On `3.3`, only the initial fill used the projected `id`, later writes keyed the row by the source record, and an `id` that was not a record id failed the definition. See [Pre-computed table views](/docs/reference/query-language/statements/define/table#choosing-the-id-of-a-view-row).
+
 ## Configuration
 
 - `SURREAL_MAX_CONCURRENT_TASKS` is removed, and `4.0` ignores it.
@@ -328,6 +360,7 @@ A table that names the components of its array record id cannot be read by an ea
 - `SURREAL_SURREALISM_MAX_POOL_SIZE` is removed, because each extension call runs on a fresh instance. `SURREAL_SURREALISM_MAX_CONCURRENT_INVOCATIONS` (64 by default) limits how many calls run at once instead. See [Surrealism config](/docs/reference/cli/db/environment-variables#surrealism-config).
 - `--planner-strategy` and `SURREAL_PLANNER_STRATEGY` are deprecated and have no effect. The server logs a warning at start, and the option can be removed from the configuration.
 - A KNN search over an HNSW index with a pre-filter no longer widens its search fourfold. It reads the new `SURREAL_KNN_PREFILTER_HNSW_EF_BOOST`, which defaults to `1`, and scores the matching records directly wherever that costs less than walking the graph. `SURREAL_KNN_PREFILTER_EF_BOOST` keeps its default of `4` and now applies to DiskANN only. A deployment that tuned HNSW searches with `SURREAL_KNN_PREFILTER_EF_BOOST` sets `SURREAL_KNN_PREFILTER_HNSW_EF_BOOST` instead, and `4` restores the previous width.
+- Memory-sized defaults, such as the SurrealKV block cache, follow the tightest memory limit of the cgroup the process runs in, including a systemd unit's `MemoryMax`. On `3.3`, only a limit at the root of the cgroup hierarchy was read, so a server capped by systemd sized its caches from the whole host's memory. A server in a container is unaffected. See [Storage backend environment variables](/docs/reference/cli/db/environment-variables#storage-backend-environment-variables).
 - `SURREAL_FEATURE_LEVEL` switches a datastore to the 4.0 record format, as described in [The 4.0 record format](#the-40-record-format).
 
 `4.0` also adds settings that bound the memory a node and each query can use. They are listed in the [environment variables](/docs/reference/cli/db/environment-variables#limits-config) reference.
