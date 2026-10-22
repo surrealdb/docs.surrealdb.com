@@ -539,14 +539,7 @@ value = "[true, true, false, true]"
 
 */
 
-array::boolean_and(["true",
-  "false",
-  1,
-  1],
-  ["true",
-  "true",
-  0,
-  "true"]);
+array::boolean_and(["true", "false", 1, 1], ["true", "true", 0, "true"]);
 ```
 
 ```surql title="Output"
@@ -591,14 +584,7 @@ value = "[false, true, true, true]"
 
 */
 
-array::boolean_or([false,
-  true,
-  false,
-  true],
-  [false,
-  false,
-  true,
-  true]);
+array::boolean_or([false, true, false, true], [false, false, true, true]);
 ```
 
 ```surql title="Output"
@@ -625,14 +611,7 @@ value = "[false, true, true, false]"
 
 */
 
-array::boolean_xor([false,
-  true,
-  false,
-  true],
-  [false,
-  false,
-  true,
-  true]);
+array::boolean_xor([false, true, false, true], [false, false, true, true]);
 ```
 
 ```surql title="Output"
@@ -1281,15 +1260,16 @@ value = "[1, 2, 3, 4, 'SurrealDB', 5, 6, [7, 8]]"
 
 */
 
-array::flatten([ [1,
-  2],
-  [3,
-  4],
-  'SurrealDB',
-  [5,
-  6,
-  [7,
-  8]] ]);
+array::flatten([
+    [1, 2],
+    [3, 4],
+    'SurrealDB',
+    [
+        5,
+        6,
+        [7, 8]
+    ]
+]);
 ```
 
 ```surql title="Output"
@@ -1480,21 +1460,7 @@ value = "[1, 2, 3, 4, 5, 6, 7, 8, 9]"
 
 */
 
-array::group([1,
-  2,
-  3,
-  4,
-  [3,
-  5,
-  6],
-  [2,
-  4,
-  5,
-  6],
-  7,
-  8,
-  8,
-  9]);
+array::group([1, 2, 3, 4, [3, 5, 6], [2, 4, 5, 6], 7, 8, 8, 9]);
 ```
 
 ```surql title="Output"
@@ -1722,14 +1688,7 @@ value = "[true, false, false, false]"
 
 */
 
-array::logical_and([true,
-  false,
-  true,
-  false],
-  [true,
-  true,
-  false,
-  false]);
+array::logical_and([true, false, true, false], [true, true, false, false]);
 ```
 
 ```surql title="Output"
@@ -1779,14 +1738,7 @@ value = "[true, true, true, false]"
 
 */
 
-array::logical_or([true,
-  false,
-  true,
-  false],
-  [true,
-  true,
-  false,
-  false]);
+array::logical_or([true, false, true, false], [true, true, false, false]);
 ```
 
 ```surql title="Output"
@@ -1829,14 +1781,7 @@ value = "[false, true, true, false]"
 
 */
 
-array::logical_xor([true,
-  false,
-  true,
-  false],
-  [true,
-  true,
-  false,
-  false]);
+array::logical_xor([true, false, true, false], [true, true, false, false]);
 ```
 
 ```surql title="Output"
@@ -2952,14 +2897,7 @@ value = '''["What's", 'it', 'got', 'in', 'its', 'pocketses?']'''
 
 */
 
-array::swap(["What's",
-  "its",
-  "got",
-  "in",
-  "it",
-  "pocketses?"],
-  1,
-  4);
+array::swap(["What's", "its", "got", "in", "it", "pocketses?"], 1, 4);
 ```
 
 ```surql title="Output"
