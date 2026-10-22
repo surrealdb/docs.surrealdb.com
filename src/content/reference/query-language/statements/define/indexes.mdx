@@ -911,6 +911,29 @@ CREATE t:3 SET a = 2;
 'Database index `ua` on table `t` failed to build, so it cannot enforce UNIQUE for this write: fix the duplicate values and run REBUILD INDEX, or REMOVE INDEX'
 ```
 
+## Defining an index inside a transaction
+
+A `DEFINE INDEX` without `CONCURRENTLY` builds the index in transactions of its own, which commit before the transaction that holds the statement. When the statement shares its transaction with other statements, such as inside `BEGIN ... COMMIT`, and the table already holds records, the rest of that transaction cannot read the entries the build wrote. From SurrealDB 4.0, the transaction handles the index as follows until it commits:
+
+- Queries in the transaction do not use the new index. A query on the indexed fields reads the table instead, so its result is correct. A full-text match fails with `There was no suitable index supporting the expression`, and a nearest-neighbour search ranks the records of the table, as it does while a vector index builds.
+- A `UNIQUE` index still checks the values the build indexed, so a duplicate of an existing value fails at the statement with the usual uniqueness error.
+- A statement that deletes a record the build indexed, or changes one of its indexed fields, is refused and names the record and the index. A change to fields outside the index is allowed, and so is any change to a record that the transaction created after the definition.
+
+```surql
+CREATE product:1 SET sku = 'A-1';
+
+BEGIN;
+DEFINE INDEX sku ON product FIELDS sku UNIQUE;
+UPDATE product:1 SET sku = 'A-2';
+COMMIT;
+```
+
+```surql title="Error output"
+'Cannot change record `product:1`: index `sku` was defined by this transaction, and the build that ran for it wrote an entry for the record that this transaction cannot see. Define the index CONCURRENTLY, or commit the definition before changing the record.'
+```
+
+As the error says, define the index with `CONCURRENTLY`, or commit the definition before the statements that change the records. A `CONCURRENTLY` build starts after the transaction closes, so none of these rules applies to it. An index defined over a table with no records has nothing to build, and the transaction reads and writes it as usual. If the transaction is cancelled or fails, the definition is removed with it.
+
 ## The `DEFER` clause
 
 <Since v="v2.5.0" />
