@@ -654,7 +654,7 @@ DEFINE INDEX diskann_pts
 | Clause | Default | Notes |
 | --- | --- | --- |
 | `DIST` | `EUCLIDEAN` | Only `EUCLIDEAN`, `COSINE`, `INNER_PRODUCT`, and `COSINE_NORMALIZED` are valid for DISKANN. |
-| `TYPE` | `F32` | Must be one of `F32`, `F16`, `I8`, `U8`. `COSINE_NORMALIZED` further requires `F32` or `F16`. |
+| `TYPE` | `F32` | Must be one of `F32`, `F16`, `I8`, `U8`. `COSINE_NORMALIZED` further requires `F32` or `F16`. From SurrealDB 4.0, `I8` and `U8` allow a `DIMENSION` of at most 33025. |
 | `DEGREE` | `64` | Target maximum graph degree (`> 0`). |
 | `L_BUILD` | `100` | Construction search-list size (`> 0`). |
 | `ALPHA` | `1.2` | DiskANN pruning parameter. |
@@ -666,7 +666,7 @@ Queries use the **same** KNN operator shape as HNSW: `<|K, EF|>` (approximate) o
 
 While HNSW's graph is held resident in memory, a DISKANN index is **key-value-backed**. The graph, its adjacency lists, and the full-precision element vectors are persisted in the key-value store (for example, on disk under SurrealKV) and remain the source of truth. Only a bounded in-memory cache holds the hot working set, while cold nodes and vectors are streamed from the key-value store on demand. A DISKANN index's resident memory is therefore bounded by the cache size rather than by the size of the dataset, which is what makes it suitable for larger-than-memory workloads.
 
-Vectors are stored and searched at **full precision**, applying no product quantisation or other compression. The only lever on per-vector size is the chosen `TYPE` (`F32`, `F16`, `I8`, or `U8`).
+Vectors are stored at **full precision**, and every distance a query reports is computed from the full vector. From SurrealDB 4.0, a DISKANN index of `TYPE F32` or `TYPE F16` also keeps an 8-bit code of each vector, which adds one byte per dimension to each vector. A search compares candidates using these codes, then ranks its nearest results from the full vectors. An index defined before 4.0 has the codes only after [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild), and setting the [`SURREAL_DISKANN_QUANTIZED_SEARCH`](/docs/reference/cli/db/environment-variables#vector-search-config) environment variable to `false` makes a search compare full vectors throughout. Apart from the codes, the size of each vector depends only on the chosen `TYPE` (`F32`, `F16`, `I8`, or `U8`).
 
 The cache is a single budget **shared across every DISKANN index** in the process. It defaults to 256 MiB and can be capped with the `SURREAL_DISKANN_CACHE_SIZE` [environment variable](/docs/reference/cli/db/environment-variables#cache-config), the DISKANN counterpart of `SURREAL_HNSW_CACHE_SIZE`. The value is an integer number of bytes - for example, `268435456` for the 256 MiB default.
 
@@ -805,7 +805,7 @@ REBUILD INDEX userEmailIndex ON user;
 
 The `IF NOT EXISTS` clause can be used to define an index only if it does not already exist. If an index with the same name already exists, the statement does nothing and returns `NONE`, even when the new definition is different. The existing index keeps its old definition. Without the clause, defining an index that already exists returns the error `The index 'example' already exists`.
 
-This makes `IF NOT EXISTS` useful in a schema script that runs each time an application starts, because an existing index is not built again. It also means that a changed definition in the script is never applied. To change an index, use the `OVERWRITE` clause, or `REMOVE INDEX` followed by `DEFINE INDEX`.
+An existing index is not built again, but a changed definition in the statement is never applied either. To change an index, use the `OVERWRITE` clause, or `REMOVE INDEX` followed by `DEFINE INDEX`. For a schema script that runs each time an application starts, `OVERWRITE` is usually the better choice from SurrealDB 4.0, because it applies a changed definition and keeps an unchanged index as it is.
 
 ```surql
 /**[test]
@@ -823,7 +823,11 @@ DEFINE INDEX IF NOT EXISTS example ON example FIELDS example;
 
 The `OVERWRITE` clause can be used to define an index and overwrite an existing one if it already exists. You should use the `OVERWRITE` clause when you want to modify an existing index definition. If the index already exists, the `DEFINE INDEX` statement will overwrite the existing definition with the new one.
 
-`OVERWRITE` always builds the index again from the data in the table, even when the definition has not changed. On a large table this can take some time, so a schema script that runs each time an application starts should use `IF NOT EXISTS` for indexes that have not changed, and `OVERWRITE` only for an index whose definition has changed.
+From SurrealDB 4.0, `OVERWRITE` builds the index again only when it needs to. When the table, the fields, and the index type with its parameters are the same as before, and the existing index is ready, the index and its data are kept and only the definition is replaced. A changed `COMMENT` is therefore applied without a rebuild, and a schema script that runs each time an application starts can use `OVERWRITE` for every index. The index is built again from the data in the table when the definition changes, when the existing index is still building or failed to build, or when it was built by an earlier release in an older index format.
+
+An unchanged `OVERWRITE` does not tokenise the records again after an analyzer changes, because the index definition is the same. To build an unchanged index again, use [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild).
+
+Before SurrealDB 4.0, `OVERWRITE` built the index again every time, even when the definition had not changed. On those versions, `IF NOT EXISTS` is the way to define an unchanged index without a rebuild.
 
 ```surql
 /**[test]
@@ -890,6 +894,21 @@ When both stages are complete, the index status changes to **ready**, meaning th
 		status: 'ready'
 	}
 }
+```
+
+If the build fails, for example because a `UNIQUE` index finds two records with the same value, the index stays defined and `INFO FOR INDEX` shows `status: 'error'` with the reason. From SurrealDB 4.0, while a `UNIQUE` index is in this state, a write that adds a value to it is refused, because the index cannot check that the value is unique. Deletes, and writes that do not set the indexed fields, still succeed. To recover, remove the duplicate values and run [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild), or remove the index with `REMOVE INDEX`.
+
+```surql
+CREATE t:1 SET a = 1;
+CREATE t:2 SET a = 1;
+DEFINE INDEX ua ON t FIELDS a UNIQUE CONCURRENTLY;
+-- Wait for the background build to fail
+SLEEP 500ms;
+CREATE t:3 SET a = 2;
+```
+
+```surql title="Error output"
+'Database index `ua` on table `t` failed to build, so it cannot enforce UNIQUE for this write: fix the duplicate values and run REBUILD INDEX, or REMOVE INDEX'
 ```
 
 ## The `DEFER` clause

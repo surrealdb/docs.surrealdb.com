@@ -31,13 +31,17 @@ A new datastore of any kind starts in the new format. A datastore can hold recor
 
 ## Indexes to rebuild
 
-The upgrade does not rewrite any index, so an index keeps working after it. Some indexes give wrong results or answer more slowly until they are rebuilt. Rebuild them once every node in a cluster runs `4.0`.
+The upgrade does not rewrite any index, so an index keeps working after it. Some indexes give wrong results or answer more slowly until they are rebuilt. Rebuild them once every node in a cluster runs `4.0`. On TiKV, a rebuilt full-text, HNSW or DiskANN index takes the 4.0 index layout, and with it the faster searches described below, only after the datastore has switched to the 4.0 record format with `SURREAL_FEATURE_LEVEL=4.0`. See [The 4.0 record format](#the-40-record-format).
 
 | Index | Rebuild | What happens otherwise |
 | --- | --- | --- |
 | HNSW index defined with `DIST JACCARD` or `DIST PEARSON` | Required | The graph was built on the previous ordering of these metrics, so it does not serve nearest-first searches. See [Jaccard and Pearson ranking](#jaccard-and-pearson-ranking). |
 | HNSW or DiskANN index in which more than nine records hold an identical vector, built before `3.3.1` | Required | Records are missing from KNN results. |
 | HNSW or DiskANN index that serves KNN queries with a selective filter | Optional | Results are correct, but the query reads each record instead of scoring from the index, which is slower. |
+| HNSW or DiskANN index | Optional | Results are correct, but a KNN search reads each result's vector to find its records, and a DiskANN search compares full vectors instead of 8-bit codes, which is slower. A rebuilt DiskANN index of `TYPE F32` or `TYPE F16` keeps one code byte for each dimension of each vector, which makes it about 12% larger for `F32` and 20% for `F16`. |
+| DiskANN index of `TYPE I8` or `TYPE U8` with a `DIMENSION` above 33025 | Remove and define again | The index fails when a query or a write opens it, and `DEFINE INDEX` now refuses it with `DISKANN TYPE I8 and U8 support DIMENSION up to 33025`. Remove it and define it again with a `DIMENSION` of at most 33025, or with `TYPE F16` or `TYPE F32`. |
+| Full-text index on a table in which a record was updated, keeping one of its terms, and later deleted | Required | The deleted record stays counted under that term, so BM25 treats the term as more common than it is and gives lower scores. The records that match are the same. |
+| Full-text index used for ranked queries, such as `ORDER BY search::score(1) DESC LIMIT 10` | Optional | Results are correct, but the query scores every matching record instead of skipping the ones that cannot enter the top results, which is slower. |
 | B-tree index whose queries order by, count over or take a range over its fields | Optional | Results are correct, but `ORDER BY ... LIMIT` sorts every matching record, an open range such as `WHERE time > $since` reads the table, and `count()` reads records instead of counting index entries. See [Index plans and stored arrays](#index-plans-and-stored-arrays). |
 | B-tree index whose values include datetimes | Optional | The index keeps the `3.x` order, in which a whole second sorts after the fractions within it, so `ORDER BY` and ranges over a datetime can return records out of order or leave some out. See [Datetimes in an index](#datetimes-in-an-index). |
 | HNSW or DiskANN index over a table with record ids that differ only in the kind of a number inside them, such as `pt:[1]` and `pt:[1dec]` | Required | The index treats such records as one, so a KNN search finds only one of them, and deleting one can remove the other's vector. |
@@ -62,6 +66,8 @@ Two more steps apply only while nodes of different releases share a datastore. F
 - **`POST /import` reports a partial import.** An import commits each statement on its own and continues past a failure. The endpoint now answers `422` with the failures in the body when any statement failed, where it answered `200`. The embedded engines in the JavaScript and Node SDKs now return the first failure as well. `surreal db start --import-file` logs the failures and still starts.
 - **Access methods with a key are not restored.** An export writes `DEFINE ACCESS` with a placeholder in place of the signing key, and `DEFINE ACCESS` now refuses that placeholder, because replaying it created an access whose key anyone could read. Restoring a dump reports one failure for each such access, and the database comes back without them. Define them again with their real keys after the restore. An access verified by a JWKS URL has no key and is restored as before.
 - **A dump can change the target database's settings.** For a database with a `COMMENT`, `CHANGEFEED` or `STRICT` clause, the export starts with `DEFINE DATABASE OVERWRITE`, which replaces those clauses on the database the dump is restored into. That statement needs a namespace or root user, so a database user cannot restore such a dump.
+- **An export to standard output holds only the dump.** `surreal export -` now writes its log lines to standard error, so the output can be redirected to a file without `--log none`. An import drops a UTF-8 byte order mark at the start of a file, and refuses a UTF-16 file with an error that names the encoding, where it reported `Invalid token`. Windows PowerShell 5 saves redirected output as UTF-16, so export to a file with `surreal export <file>` there. See [`surreal db export`](/docs/reference/cli/db/commands/export).
+- **The Docker image's data directories belong to the container user.** In the `4.0` image, `/data` and `/logs` are owned by uid and gid `65532`, the user the image runs as, so a new named volume mounted at `/data` is writable without `user: root`. A bind mount keeps the ownership of the host directory.
 - **Dumps from earlier releases can exceed the write-key limit.** Where `SURREAL_TRANSACTION_MAX_WRITE_KEYS` is set, a dump written by an earlier release can contain statements that write more keys than the limit allows, because the earlier exporter did not count the keys of `REFERENCE` fields. Take new exports after the upgrade, or raise the limit while restoring an older one.
 
 ## RocksDB and IndexedDB are removed
@@ -103,13 +109,27 @@ A float is now equal to a decimal only when the decimal is exactly the float's v
 
 A query that compares a decimal field with a float literal or parameter below `1` can stop matching records it matched on `3.3`. Compare with a decimal instead, such as `price = 0.1dec` or `price = <decimal> $amount`. The Rust SDK's `Number` and `Value` compare in the same way.
 
+### Decimal literals with more than 28 places
+
+A `dec` literal with a significant digit more than 28 places after the decimal point is now a parse error, where `3.3` rounded it to 28 places:
+
+```surql
+0.0000000000000000000000000000001dec;
+```
+
+```text title="Error output"
+Parse error: Failed to parser decimal: Scale exceeds the maximum precision allowed: 31 > 28
+```
+
+Zeros after the last significant digit do not count, so `1.500000000000000000000000000000dec` gives `1.5dec`. Shorten such literals to 28 places. A `<decimal>` cast from a string still rounds as before. See [Decimal numbers](/docs/reference/query-language/language-primitives/data-types/numbers#decimal-numbers).
+
 ### Writes that create a table need permission to define it
 
 A `CREATE`, `UPSERT`, `INSERT` or `RELATE` on a table that does not exist yet defines the table, and from `4.0` a system user needs permission to run `DEFINE TABLE` for that. A database user with the `VIEWER` role now gets `IAM error: Not enough permissions to perform this action`, where `3.3` defined the table and refused only the write. Record users are not affected.
 
 ### Integer sums and means
 
-`math::sum` over integers raises an error when the total leaves the range of an `int`, where it used to wrap around to a wrong value, and `math::mean` over integers adds them exactly before dividing, so its result no longer depends on the order of the values:
+`math::sum`, `math::product` and `math::spread` over integers raise an error when the result leaves the range of an `int`, such as `Cannot perform multiplication with '9223372036854775807' and '2'`, where they used to wrap around to a wrong value, and `math::mean` over integers adds them exactly before dividing, so its result no longer depends on the order of the values:
 
 ```surql
 math::mean([299, -4611686018427387904, 299, 4611686018427387904]);
@@ -119,17 +139,23 @@ math::mean([299, -4611686018427387904, 299, 4611686018427387904]);
 149.5
 ```
 
-On `3.3` the same call returns `256f`. In an aggregated view, `math::sum` over integers now stores an `int`, where it stored a `float`, and `math::sum`, `math::min` and `math::max` skip records that have no value for the field instead of refusing them. A view defined on `3.3` keeps its `float` totals until it is defined again with `DEFINE TABLE OVERWRITE`.
+On `3.3` the same call returns `256f`. A [sequence](/docs/reference/query-language/statements/define/sequence) that reaches the end of the `int` range fails with `The sequence is exhausted: no value can be issued below i64::MAX`, and the largest value it issues is `9223372036854775806`.
+
+In an aggregated view, `math::sum` over integers now stores an `int`, where it stored a `float`. `math::sum`, `math::min`, `math::max`, `math::mean`, `math::stddev` and `math::variance` skip a value that is not a number, including a missing one, as the view's `SELECT` does. On `3.3` such a write to the source table failed. A view defined on `3.3` keeps its `float` totals until it is defined again with `DEFINE TABLE OVERWRITE`.
 
 ### A blocking `DEFINE INDEX` commits before its build
 
 A `DEFINE INDEX` or `REBUILD INDEX` without `CONCURRENTLY`, run as a statement of its own, now commits and then waits for its build, instead of holding one transaction open for the whole build. It still returns only once the index is ready, and queries use the index only from then. Three things change for such a statement:
 
 - Other sessions see the new index while it builds, in `INFO FOR TABLE`, and `INFO FOR INDEX` reports the build's progress.
-- A `DEFINE INDEX` whose build fails, such as on a `UNIQUE` violation, fails, and its definition is then removed in a second transaction. If the server stops before that removal, the index stays defined with its build in `Error`, which `REMOVE INDEX` or `REBUILD INDEX` clears.
+- A `DEFINE INDEX` whose build fails, such as on a `UNIQUE` violation, fails, and its definition is then removed in a second transaction. If the server stops before that removal, the index stays defined with its build in `Error`, which `REMOVE INDEX` or `REBUILD INDEX` clears. While a `UNIQUE` index is in `Error`, after this or after a failed `CONCURRENTLY` build, a write that adds a value to it is refused with ``Database index `ua` on table `u` failed to build, so it cannot enforce UNIQUE for this write`` until the index is rebuilt or removed. On `3.3` such writes were accepted without a uniqueness check.
 - The query timeout, the transaction timeout and cancelling the query stop the wait. A `DEFINE INDEX` stopped this way has its definition removed, and a `REBUILD INDEX` finishes its build in the background.
 
 A statement inside `BEGIN ... COMMIT` keeps the earlier behaviour, and commits or rolls back with its index.
+
+### An unchanged `DEFINE INDEX OVERWRITE` keeps its index
+
+A `DEFINE INDEX OVERWRITE` that gives a ready index the same table, fields, index type and parameters now keeps the index and its data and replaces only the definition, so a changed `COMMENT` applies without a build. `3.3` built the index again. An index that is building, has failed or was built in an earlier index format is still built again. For the same reason, an unchanged `OVERWRITE` no longer applies a changed analyzer to a full-text index: after `DEFINE ANALYZER OVERWRITE`, run [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild). See [Using `OVERWRITE` clause](/docs/reference/query-language/statements/define/indexes#using-overwrite-clause).
 
 ### JSON Patch paths
 
@@ -152,6 +178,14 @@ LET $value = 10;
 ```
 
 The same applies to a variable passed with a query, so an application that sends a variable called `input` or `value`, such as `?input=5` on an HTTP `/sql` request or `{ input: 5 }` from an SDK, now gets this error where `3.3` accepted the variable. Rename such variables, for example to `$data` or `$amount`.
+
+### Bearer tokens are checked against their grant
+
+A token issued by a [`BEARER`](/docs/reference/query-language/statements/define/access/bearer) access method is checked against its grant on every request, so [revoking the grant](/docs/reference/query-language/statements/access#revoke) refuses the token from the next request. A token from a database-level bearer signin can now be used for queries. Tokens issued before the upgrade are refused, and their holders have to sign in with the bearer key again.
+
+### `$auth.id` reads no record
+
+[`$auth.id`](/docs/reference/query-language/language-primitives/parameters#auth) gives the signed-in record user's record id from the session, without reading the record. It gives the id where the user cannot select their own record, and after the record is deleted, so a field defined with `VALUE $auth.id` now stores the id in both cases, where `3.3` stored nothing. Any other field, such as `$auth.name`, still reads the record and is `NONE` unless the user may select it. A condition such as `$auth.id != NONE` is now true for every record user, so it does not show that the record exists.
 
 ### Array ranges past the end of an array
 
@@ -221,6 +255,10 @@ vector::similarity::jaccard([1, 1, 0, 0], [1, 0, 1, 0]);
 ```
 
 On `3.3.1` the same call returns `1f`. A KNN search over an index with `DIST JACCARD` or `DIST PEARSON` ranks by the distance `1 - similarity`, so the nearest vector comes first. For the query vector `[1, 1, 1]`, an indexed vector `[1, 1, 1]` has distance `0f` on `4.0`, where `3.3.1` ranked it last.
+
+### Vector distances over floats
+
+The [`vector::distance::*`](/docs/reference/query-language/functions/database-functions/vector) functions, `vector::similarity::cosine`, `vector::similarity::jaccard`, `vector::dot` and brute-force KNN searches add up the elements of a float vector of eight or more elements in a different order. A result can differ from `3.3` in its last digits. Where the terms cancel, as in a dot product or a cosine similarity close to zero, the difference can be as large as the result, including its sign, and records at nearly equal distances can change places. Vectors of fewer than eight elements, and vectors of integers or decimals, give the same results as before.
 
 ### Paths over sets
 
@@ -320,6 +358,10 @@ An index defined or rebuilt on `4.0` stores a datetime as a number of seconds an
 
 An `UPDATE` or `DELETE` on an aggregated view whose `WHERE` clause on a group column matches no row now returns `[]`. It used to return the error that a view is read-only. A write that matches rows is still refused.
 
+### `GROUP ALL` views keep their record
+
+A view defined with `GROUP ALL` now holds its one record from the moment it is defined, with the aggregates of no records, so `count()` gives `0` over an empty source table. Deleting the last source record empties that record instead of deleting it. On `3.3` the view had no record until the first source record arrived, and lost it with the last one, so an event defined on such a view now gets `UPDATE` in `$event` where `3.3` gave `CREATE` or `DELETE`. See [Pre-computed table views](/docs/reference/query-language/statements/define/table#pre-computed-table-views).
+
 ### Named record id components
 
 A table that names the components of its array record id cannot be read by an earlier release, so define the names only when every node runs `4.0` or later, and while nothing writes to the table. See [Naming the components of an array id](/docs/reference/query-language/statements/define/field#naming-the-components-of-an-array-id).
@@ -336,7 +378,7 @@ A string read as a record id must be a record id as a whole. `type::record("user
 
 A literal type such as `[int]` or `{ a: int }` now converts each member to its type, as `array<int>` already did. `LET $v: [int] = [1.0]` gives `[1]`, where `3.3` kept `[1f]` after checking that it could be converted.
 
-### Aggregate arguments in `GROUP BY`
+### Nested aggregates in `GROUP BY`
 
 An aggregate inside another aggregate is refused in a grouped query, with `Nested aggregate functions are not supported`. On `3.3`, `SELECT g, math::mean(math::mean(s)) AS m FROM nd GROUP BY g` averaged each record's array and then the group. Compute the inner value in a subquery and aggregate that, which works on both versions:
 
@@ -344,7 +386,7 @@ An aggregate inside another aggregate is refused in a grouped query, with `Neste
 SELECT g, math::mean(m) AS m FROM (SELECT g, math::mean(s) AS m FROM nd) GROUP BY g;
 ```
 
-An aggregate such as `math::mean()`, `math::sum()` or `math::max()` in a grouped query takes one number from each record, so an array argument is now refused. `SELECT g, math::mean(object::values(serie)) AS m FROM nd GROUP BY g` fails with ``Expected `number` but found `[1, 3]` ``. On `3.3` the same query returned `NONE` for `math::mean()` and `math::max()`, and `0` for `math::sum()`, without an error. The subquery above is also the fix for this case. See [Aggregate functions](/docs/reference/query-language/clauses/group#aggregate-functions).
+See [Aggregate functions](/docs/reference/query-language/clauses/group#aggregate-functions).
 
 ### `UPSERT` that creates a record checks the schema
 
@@ -371,6 +413,7 @@ A view whose projection sets `id`, such as `DEFINE TABLE spend AS SELECT custome
 - `--planner-strategy` and `SURREAL_PLANNER_STRATEGY` are deprecated and have no effect, because queries run on a single execution engine. The three values `3.3` accepted (`best-effort`, `compute-only` and `all-read-only`) still start the server, with a warning, and any other value now stops it from starting, so remove the option from the configuration. One difference between `3.3`'s planners was a `RETURN` inside a block in a `WHERE` clause: the default planner took it as the result of the whole `SELECT`, and `compute-only` as the value of the condition for each record. `4.0` gives the `compute-only` result.
 - A KNN search over an HNSW index with a pre-filter no longer widens its search fourfold. It reads the new `SURREAL_KNN_PREFILTER_HNSW_EF_BOOST`, which defaults to `1`, and scores the matching records directly wherever that costs less than walking the graph. `SURREAL_KNN_PREFILTER_EF_BOOST` keeps its default of `4` and now applies to DiskANN only. A deployment that tuned HNSW searches with `SURREAL_KNN_PREFILTER_EF_BOOST` sets `SURREAL_KNN_PREFILTER_HNSW_EF_BOOST` instead, and `4` restores the previous width.
 - Memory-sized defaults, such as the SurrealKV block cache, follow the tightest memory limit of the cgroup the process runs in, including a systemd unit's `MemoryMax`. On `3.3`, only a limit at the root of the cgroup hierarchy was read, so a server capped by systemd sized its caches from the whole host's memory. A server in a container is unaffected. See [Storage backend environment variables](/docs/reference/cli/db/environment-variables#storage-backend-environment-variables).
+- `SURREAL_SURREALKV_GROUPED_COMMIT_TIMEOUT`, `SURREAL_SURREALKV_GROUPED_COMMIT_WAIT_THRESHOLD` and `SURREAL_SURREALKV_GROUPED_COMMIT_MAX_BATCH_SIZE`, and the same settings as parameters of a `surrealkv://` path, are removed, because SurrealKV groups the syncs of concurrent commits itself. A server started with one of them logs `The surrealkv_grouped_commit_timeout setting has no effect and is ignored`, naming the setting, and starts. With `sync=every` on the `surrealkv://` path, which is the default, a commit is now visible to other transactions only once it is synced to disk. See [SurrealKV environment variables](/docs/reference/cli/db/environment-variables#surrealkv-environment-variables).
 - `SURREAL_FEATURE_LEVEL` switches a datastore to the 4.0 record format, as described in [The 4.0 record format](#the-40-record-format).
 
 `4.0` also adds settings that bound the memory a node and each query can use. They are listed in the [environment variables](/docs/reference/cli/db/environment-variables#limits-config) reference.
