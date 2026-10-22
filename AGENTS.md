@@ -338,6 +338,18 @@ The word `THEN` is unrelated and correct in `DEFINE EVENT … THEN`,
 Leave those, and leave historical `THEN … END` in release notes and migration
 pages, which stay chronological.
 
+**Escaping parts of a record ID.** Write a table name or record key that needs
+escaping between backticks: ``user:`john-doe` ``. SurrealDB has displayed
+escaped parts this way since 3.0, so the example matches the output a reader
+sees, and a backtick is on every keyboard. The `⟨ ⟩` brackets from 2.x still
+parse, for compatibility, but an example that uses them teaches a form
+SurrealDB no longer prints, and leaves the reader with two spellings of one
+record ID. Keep `⟨ ⟩` only where the subject is 2.x or the compatibility
+itself, as on the record IDs page and in migration guides. This one arrives
+from outside as well as from habit: a PR's own release note used
+`user:⟨john-doe⟩` in October 2026, so check wording copied from a PR or an
+issue before it reaches a page.
+
 **`RETURN` in examples.** Bare expressions are valid statements that yield the
 same value, so a snippet that is a single expression drops the leading
 `RETURN`: the bare form is the fragment a reader can paste into a `SELECT`
