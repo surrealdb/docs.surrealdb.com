@@ -559,7 +559,7 @@ INFO FOR DB;
 }
 ```
 
-You can also set independent rules for selecting, creating, updating, and deleting data. Each `FOR` clause is a SurrealQL expression evaluated in the context of the current authentication (often using [`$auth`](/docs/learn/security/authorization/permissions-and-row-level-security)).
+You can also set independent rules for selecting, creating, updating, and deleting data. Each `FOR` clause is a SurrealQL expression, usually one that compares the record with [`$auth`](/docs/reference/query-language/language-primitives/parameters#auth).
 
 ```surql
 /**[test]
@@ -588,6 +588,27 @@ DEFINE TABLE post SCHEMALESS
 ;
 ```
 
+A table or field `PERMISSIONS` clause reads data with the authority of the schema that defines it, not with the caller's permissions. `$auth` and the record being checked are the caller's, but any other record the clause reads is read without checking the caller's permissions. This applies to following a record id such as `$auth.admin`, a subquery, a graph traversal, and a function that the clause calls. So a clause can test fields of the user's own record even when the user may not select it. A field's `VALUE`, `DEFAULT`, `ASSERT` and `COMPUTED` clauses, and a function called from a query, run with the caller's permissions instead.
+
+`record::exists()` and `.exists()` are the exception: inside a permission clause they are checked against the caller's permissions, so they return `false` for a record the caller cannot select, and the clause denies access. To test whether such a record exists, follow its id instead, as in `lookup:[$auth, 'ok'].id != NONE`.
+
+Each write is checked only against its own clause: `FOR create`, `FOR update` or `FOR delete`. If that clause allows it, the record is written. The statement's result is then filtered by `FOR select`, so a record user who may create records in a table but not select them receives `[]`, although the record was written. In the same way, `UPDATE` and `DELETE` with a `WHERE` clause can match records that the caller cannot select. To return a user's own writes to them, add a narrow select rule such as `FOR select WHERE owner = $auth`.
+
+```surql
+-- Defined by a system user: record users may create notes, but not select them
+DEFINE TABLE note PERMISSIONS FOR create WHERE owner = $auth;
+
+-- Run as a record user: the first note is written, the second is refused
+CREATE note SET owner = $auth, text = 'Draft';
+//- []
+
+CREATE note SET owner = person:someone_else, text = 'Draft';
+//- []
+```
+
+> [!WARNING]
+> A write that its permission clause refuses does not raise an error. The statement returns `[]` with status `OK` (`CREATE ONLY` returns `NONE`), and the other statements in the transaction still commit. This result is the same as for a write that succeeded but that `FOR select` hides, and `RETURN NONE` gives the same result for both.
+
 Field permissions work the same way but default to `PERMISSIONS FULL` instead of `NONE`. This is because the table is the main access gate, while field permissions only narrow further when you need to (for example hiding a password). With `FULL`, a field follows the table's rules without adding its own. See [`DEFINE FIELD`](/docs/reference/query-language/statements/define/field#setting-permissions-on-fields) and [Permissions & row-level security](/docs/learn/security/authorization/permissions-and-row-level-security).
 
 ### Writes inside a permission clause
@@ -610,7 +631,7 @@ DEFINE TABLE post PERMISSIONS
 	FOR create, update WHERE fn::audit($value.id) AND user = $auth.id;
 ```
 
-Nevertheless, [`DEFINE EVENT`](/docs/reference/query-language/statements/define/event) is the preferred option for this. An event is evaluated with the caller's own permissions, states the side effect where a reader expects to find it, and does not run on every access check.
+Nevertheless, [`DEFINE EVENT`](/docs/reference/query-language/statements/define/event) is the preferred option for this. An event runs [without permission checks](/docs/reference/query-language/statements/define/event#events-and-permissions), states the side effect where a reader expects to find it, and does not run on every access check.
 
 The check runs where the write is reached, so it is exact however the write is arrived at - written into the clause directly, reached through a [custom function](/docs/reference/query-language/statements/define/function), or through `eval`, a script or a closure passed as data. Call depth and indirection make no difference to it.
 
