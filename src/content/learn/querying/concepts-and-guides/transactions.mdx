@@ -134,6 +134,77 @@ SELECT * FROM account;
 ]
 ```
 
+## Control flow inside a transaction
+
+`THROW` is the way to abandon a transaction. To change course without abandoning it, put the statements that depend on a condition inside a block. A block inside `BEGIN ... COMMIT` is part of the same transaction, so everything it writes commits or rolls back with the rest. Inside it, `RETURN` leaves the block early, `IF` chooses between branches, and `FOR` with `CONTINUE` and `BREAK` controls a loop. None of these is an error, so the transaction still commits.
+
+### Skipping the rest of the work
+
+An early `RETURN` works as a guard clause. In the following example, a vote is recorded every time, but the item's score total only changes when the vote's score changes. The block returns a value that says which happened:
+
+```surql
+DEFINE TABLE vote;
+CREATE item:lamp SET score_total = 0;
+
+BEGIN;
+{
+    LET $previous = (SELECT VALUE score FROM ONLY vote:ana_lamp);
+    UPSERT vote:ana_lamp SET score = 4, voted_at = time::now();
+    IF $previous == 4 {
+        RETURN "unchanged";
+    };
+    UPDATE item:lamp SET score_total += 4 - ($previous ?? 0);
+    RETURN "counted";
+};
+COMMIT;
+```
+
+```surql title="Output of the block on the first run"
+'counted'
+```
+
+```surql title="Output of the block when the same score is sent again"
+'unchanged'
+```
+
+On the second run the vote's `voted_at` is still updated and committed, while `item:lamp` keeps its total of `4`. A `THROW` in place of the `RETURN` would have rolled back the vote as well, and reported an error.
+
+`RETURN` leaves the block, not the transaction: statements after the block still run, and `COMMIT` commits them. Use a block for a guard clause like this one, rather than a `RETURN` placed directly between `BEGIN` and `COMMIT`.
+
+### Loops
+
+`CONTINUE` moves to the next item of a `FOR` loop, and `BREAK` ends the loop. In the following example, order lines with no quantity are skipped, and shipping stops at the first line the stock cannot cover:
+
+```surql
+CREATE product:keyboard SET stock = 5;
+LET $lines = [
+    { order: order:a, quantity: 2 },
+    { order: order:b, quantity: 0 },
+    { order: order:c, quantity: 2 },
+    { order: order:d, quantity: 3 },
+    { order: order:e, quantity: 1 }
+];
+
+BEGIN;
+FOR $line IN $lines {
+    IF $line.quantity == 0 { CONTINUE };
+    IF product:keyboard.stock < $line.quantity { BREAK };
+    UPDATE product:keyboard SET stock -= $line.quantity;
+    CREATE shipment SET order = $line.order, quantity = $line.quantity;
+};
+COMMIT;
+
+SELECT VALUE order FROM shipment ORDER BY order;
+```
+
+```surql title="Output"
+[order:a, order:c]
+```
+
+Order `d` needs three keyboards when one is left, so the loop stops there, and order `e` is not shipped even though it would fit. To skip lines that do not fit and keep going, use `CONTINUE` in place of `BREAK`.
+
+`BEGIN`, `COMMIT` and `CANCEL` themselves only take effect as statements of their own, not inside a block or a loop. See [Cancelling a transaction](/docs/reference/query-language/language-primitives/transactions#cancelling-a-transaction).
+
 ## Snapshot isolation
 
 Every SurrealDB transaction runs under **snapshot isolation**. When a transaction starts, it sees a consistent point-in-time view of the database. That snapshot stays stable for the lifetime of the transaction, so reads inside the transaction do not observe concurrent writes from other transactions until commit.
