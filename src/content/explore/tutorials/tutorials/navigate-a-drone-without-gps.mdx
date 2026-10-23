@@ -1,0 +1,290 @@
+---
+position: 9
+title: Navigate a drone without GPS
+description: "Locate a drone from aerial photos with vector search, narrow the search with a geospatial prior, and plan each leg with geo::distance, geo::bearing and INTERSECTS to keep out of a neighbouring country."
+---
+
+This tutorial uses SurrealDB to find where a drone is from the photos it takes, without satellite navigation, and then to steer it to a destination while it stays out of a restricted country. It combines [vector search](/docs/learn/data-models/vector-search/overview) and [geospatial queries](/docs/learn/data-models/geospatial/overview) in the same statements, and it is for readers who know basic SurrealQL and want to see the two features work together.
+
+<img src="~/assets/img/tutorials/drone-navigation-mission.jpg" alt="Aerial map of the area where France, Germany and Luxembourg meet. A red no-fly zone covers Luxembourg. A blue route goes from the launch point in France east to a waypoint, then north to the destination in Germany. A dotted straight line from launch to destination crosses the no-fly zone." />
+
+Satellite navigation signals can be jammed or spoofed. A drone with a downward camera can still compare each photo with a map of aerial images it carries, and the closest match gives its position. Vector search finds the match. Geospatial queries make the match reliable, and then answer the navigation questions: which country the drone is in, how far it is to the destination, which direction to fly, and whether the straight route crosses a no-fly zone.
+
+When you finish, you will have run each of those queries on the data from a simulated flight over real imagery.
+
+## How the demo works
+
+The demo has three parts, and SurrealDB answers every question in each part with one query.
+
+| Part              | Question                                        | SurrealQL                                                   |
+| ----------------- | ----------------------------------------------- | ----------------------------------------------------------- |
+| Locate            | Which map tile looks most like this photo?      | A KNN search on an HNSW index                               |
+| Narrow the search | Which tiles can the drone have reached?         | `geo::distance()` in the same `WHERE` clause                |
+| Navigate          | Which country, how far, which way, is it clear? | `INSIDE`, `geo::distance()`, `geo::bearing()`, `INTERSECTS` |
+
+To compare a photo with the map, the drone does not compare pixels. An image model turns each picture into an embedding: a list of numbers that describes what the picture shows. Two pictures of the same fields, roads and woods give embeddings that point in nearly the same direction, even when the light, the season or the angle differs. A search for the nearest embeddings is therefore a search for the most similar pictures.
+
+On a real drone, the drone sends two kinds of value to the database: the embedding of each photo, and its positions and routes as geometry values. Every SurrealDB SDK has geometry types, so a client sends a point or a line as a geometry rather than as a plain object. In this tutorial the photos are already stored in the dataset, so each query reads them from there.
+
+## Requirements
+
+- SurrealDB 3.3 or later. The queries on this page were run on SurrealDB 3.3.4 and 4.0.
+- The [Surreal CLI](/docs/reference/cli), to start a database and import the dataset.
+
+## The area and the mission
+
+The demo flies around the point where France, Germany and Luxembourg meet, on the river Moselle beside the village of Schengen. The area is a square of 6 × 6 km centred on that point. It holds vineyards, villages, forest, a motorway bridge and the river, so neighbouring parts of the map look different from each other in most places.
+
+The drone has a flight plan: it starts in France and must reach a destination in Germany. It has no permission to enter Luxembourg, so its route must stay out of Luxembourg's airspace, even though the straight line from the start to the destination crosses it.
+
+Each country's border is a polygon: a closed line of points, with a straight edge between each pair. Real borders follow rivers, roads and field boundaries, so these polygons have many points. The demo joins the municipal boundaries from OpenStreetMap for each country, which gives a polygon that reaches beyond the edge of the imagery:
+
+<img src="~/assets/img/tutorials/drone-navigation-borders.jpg" alt="Three coloured outlines, each drawn with a dot at every vertex: France in blue, made of 11 communes with 1,178 vertices; Luxembourg in red, the commune of Schengen with 1,217 vertices; and Germany in yellow, the municipality of Perl with 804 vertices. A white square in the middle marks the 6 by 6 km area with imagery." />
+
+| Country    | Joined from         | Vertices |
+| ---------- | ------------------- | -------- |
+| France     | 11 communes         | 1,178    |
+| Luxembourg | Schengen            | 1,217    |
+| Germany    | Perl                | 804      |
+
+The area also holds one detail that a border check must handle. The stretch of the Moselle north of the meeting point belongs to Germany and Luxembourg jointly, so it is inside neither polygon. It shows as the thin gap between the red and the yellow outlines.
+
+## 1. Load the dataset
+
+The dataset holds the map, the borders, the no-fly zone and the photos from one flight. It is a SurrealQL file of 18 MB.
+
+1. Download the file:
+
+	```bash
+	curl -O https://datasets.surrealdb.com/datasets/drone-navigation/schengen.surql
+	```
+
+2. Start SurrealDB in memory:
+
+	```bash
+	surreal start memory --user root --pass secret
+	```
+
+3. In a second terminal, import the file:
+
+	```bash
+	surreal import --endpoint http://localhost:8000 --username root --password secret --namespace demo --database nav schengen.surql
+	```
+
+4. Open a SurrealQL shell on the same database:
+
+	```bash
+	surreal sql --endpoint http://localhost:8000 --username root --password secret --namespace demo --database nav
+	```
+
+To verify the import, count the records:
+
+```surql
+count(SELECT id FROM tile);
+//- 6962
+
+count(SELECT id FROM photo);
+//- 38
+
+count(SELECT id FROM country);
+//- 3
+```
+
+## 2. Read the schema
+
+The dataset defines five tables:
+
+```surql
+DEFINE TABLE tile SCHEMAFULL;
+DEFINE FIELD centre ON tile TYPE geometry<point>;
+DEFINE FIELD country ON tile TYPE string;
+DEFINE FIELD season ON tile TYPE string;
+DEFINE FIELD embedding ON tile TYPE array<float>;
+DEFINE INDEX tile_embedding ON tile FIELDS embedding HNSW DIMENSION 384 DIST COSINE;
+
+DEFINE TABLE country SCHEMAFULL;
+DEFINE FIELD area ON country TYPE geometry<polygon | multipolygon>;
+
+DEFINE TABLE zone SCHEMAFULL;
+DEFINE FIELD area ON zone TYPE geometry<polygon | multipolygon>;
+DEFINE FIELD reason ON zone TYPE string;
+
+DEFINE TABLE place SCHEMAFULL;
+DEFINE FIELD at ON place TYPE geometry<point>;
+
+DEFINE TABLE photo SCHEMAFULL;
+DEFINE FIELD embedding ON photo TYPE array<float>;
+DEFINE FIELD prior ON photo TYPE geometry<point>;
+DEFINE FIELD truth ON photo TYPE geometry<point>;
+```
+
+- **`tile`:** one square of the map, 200 × 200 m. The tiles overlap, with one every 100 m. `centre` is the longitude and latitude of the middle of the square, which the imagery's own coordinates give, so the best match for a photo gives a position directly. `embedding` holds 384 numbers from the image model DINOv2 (small), and the HNSW index lets a search find the nearest embeddings without comparing every tile.
+- **`country`:** the three border polygons. `zone:no_fly` is Luxembourg's border moved outwards by 150 m. A drone never knows its position exactly, so the margin keeps an error of up to 150 m on the safe side of the border.
+- **`place`:** the flight plan: `place:launch`, `place:waypoint` and `place:destination`.
+- **`photo`:** the 38 photos the drone took, one every 10 seconds. `prior` is where the drone believed it was when it took the photo, and `truth` is where it was.
+
+The map holds two seasons of imagery, with 3,481 tiles each: the current imagery from each country, and older imagery from 2018-2020 that includes a winter for Luxembourg. A map with two seasons matches a photo from a third season much better than a map with one. The photos come from imagery of a third date, which no tile uses.
+
+`DIST COSINE` compares the direction of two embeddings, which suits image models whose vectors are normalised.
+
+## 3. Locate the drone from a photo
+
+The first query asks for the tiles most similar to `photo:4`:
+
+```surql
+LET $photo = photo:4.embedding;
+SELECT id, centre, country, vector::distance::knn() AS dist FROM tile
+	WHERE embedding <|3,100|> $photo
+	ORDER BY dist;
+```
+
+```surql title="Output"
+[
+	{ centre: (6.380141f, 49.45143f), country: 'FR', dist: 0.07180816062627171f, id: tile:current_t_38_49 },
+	{ centre: (6.380141f, 49.452329f), country: 'FR', dist: 0.07188340563156848f, id: tile:current_t_38_48 },
+	{ centre: (6.380141f, 49.450532f), country: 'FR', dist: 0.0751819173409447f, id: tile:current_t_38_50 }
+]
+```
+
+The best match is 2.1 km from where the photo was taken. The photo shows woodland, and woodland looks alike in many places, so a search over the whole map can choose a place that only resembles the right one.
+
+### Narrow the search with a geospatial prior
+
+The drone also knows roughly where it is. It knows its last position, its compass heading, its airspeed and the time since the last photo, so it can calculate where it probably is now. This calculation is called dead reckoning, and its result is stored as `prior`. Dead reckoning drifts, because the drone does not know the wind exactly, but it is rarely wrong by more than a few hundred metres between two photos.
+
+Add the estimate to the same `WHERE` clause as a condition on distance:
+
+```surql
+LET $photo = photo:4.embedding;
+LET $prior = photo:4.prior;
+SELECT id, centre, country, vector::distance::knn() AS dist FROM tile
+	WHERE geo::distance(centre, $prior) < 400
+	AND embedding <|3,100|> $photo
+	ORDER BY dist;
+```
+
+```surql title="Output"
+[
+	{ centre: (6.352494f, 49.455923f), country: 'FR', dist: 0.08955560676140373f, id: tile:current_t_18_44 },
+	{ centre: (6.353877f, 49.456822f), country: 'FR', dist: 0.1259728217041406f, id: tile:current_t_19_43 },
+	{ centre: (6.352494f, 49.455025f), country: 'FR', dist: 0.14902399868057126f, id: tile:current_t_18_45 }
+]
+```
+
+The best match is now 5 m from where the photo was taken. Its distance of `0.090` is larger than the `0.072` of the wrong place: the wrong place looks more like the photo than the right place does, and the prior is what excludes it.
+
+<img src="~/assets/img/tutorials/drone-navigation-locate.jpg" alt="Aerial map with the photo shown in a corner. A dashed blue circle of 400 m surrounds the drone's estimated position, and inside it blue squares mark the best matches, at the point where the photo was taken. Orange squares 2.1 km to the east mark the best matches from a search over the whole map." />
+
+SurrealDB checks the distance condition while it walks the HNSW graph, so tiles outside the radius never take one of the three result places. See [filtering through vector search](/docs/learn/data-models/vector-search/similarity-search#filtering-through-vector-search). Here the prior was 107 m from the true position, and the radius of 400 m allows for that error.
+
+### Results over 200 photos
+
+The table shows how the two queries performed on 200 photos taken at random positions in the area. Each photo came from imagery of the third date. To match the errors a compass and a barometer leave, each photo was rotated by up to 10°, scaled by up to 15%, and changed in brightness and colour:
+
+<img src="~/assets/img/tutorials/drone-navigation-simulated-photo.jpg" alt="Three images of the same patch of woodland with a track in the corner: the map tile from the current imagery, the newer imagery of the same place with slightly different colours, and the simulated photo, which is the newer imagery turned a few degrees, scaled and paler." />
+
+The prior was 150 m from the true position each time.
+
+| Query                      | Median error | Within 500 m | Country correct |
+| -------------------------- | ------------ | ------------ | --------------- |
+| Vector search only         | 102 m        | 68%          | 86%             |
+| Vector search with a prior | 62 m         | 99%          | 98%             |
+
+The tiles are 100 m apart, so a median error of 62 m is close to the best the grid allows.
+
+## 4. Find which country the drone is in
+
+With a position, an `INSIDE` check against the borders gives the country:
+
+```surql
+(SELECT VALUE id.id() FROM country WHERE photo:4.truth INSIDE area)[0] ?? 'LU-DE';
+```
+
+```surql title="Output"
+'FR'
+```
+
+The [`??` operator](/docs/reference/query-language/language-primitives/operators) handles the river north of the meeting point. A position there is inside no country's polygon, so the subquery returns an empty array, and `??` returns `'LU-DE'` in place of `NONE`:
+
+```surql
+(SELECT VALUE id.id() FROM country WHERE (6.3674, 49.4775) INSIDE area)[0] ?? 'LU-DE';
+```
+
+```surql title="Output"
+'LU-DE'
+```
+
+## 5. Plan the next leg
+
+At each position, one query gives the distance to the destination, the direction to fly, and whether the straight route to the destination stays clear of the no-fly zone. `$leg` is a line from the current position to the destination, which the drone sends as a geometry. At the launch point it is:
+
+```surql
+LET $leg = { type: 'LineString', coordinates: [[6.345, 49.455], [6.392, 49.488]] };
+{
+	country: (SELECT VALUE id.id() FROM country WHERE place:launch.at INSIDE area)[0] ?? 'LU-DE',
+	distance: geo::distance(place:launch.at, place:destination.at),
+	bearing: geo::bearing(place:launch.at, place:destination.at),
+	direct_is_clear: !($leg INTERSECTS zone:no_fly.area),
+};
+```
+
+```surql title="Output"
+{
+	bearing: 42.766710281515884f,
+	country: 'FR',
+	direct_is_clear: false,
+	distance: 4999.827558294178f
+}
+```
+
+`geo::distance()` returns metres. `geo::bearing()` returns degrees from north, positive towards the east, so `42.8` means north-east.
+
+The straight route from the launch point crosses the no-fly zone, so the drone flies to `place:waypoint` first. The waypoint is across the Moselle from the launch point, south of the meeting point and still in France, and both legs through it are clear:
+
+<img src="~/assets/img/tutorials/drone-navigation-waypoint.jpg" alt="Close view of the launch point and the no-fly zone. A red dashed line from the launch point to the north-east crosses the no-fly zone. A blue line goes east from the launch point to the waypoint across the Moselle, then north-east into Germany, and stays outside the zone." />
+
+The drone asks the same question at every position, and it changes to the direct route as soon as `direct_is_clear` is `true`.
+
+## 6. Fly the route
+
+The simulated flight repeats one loop every 10 seconds:
+
+1. Turn into the estimated wind, so the drone moves along the bearing from the last query.
+2. Fly for 10 seconds at 15 m/s.
+3. Estimate the new position by dead reckoning.
+4. Take a photo, and locate it with the prior from step 3.
+5. Update the wind estimate from the gap between the located position and the prior.
+6. Run the leg query from the located position.
+
+A wind of about 3 m/s blows from the south-east, which pushes the drone north-west towards Luxembourg. The drone does not know the wind at the start. It learns it from the photos: each time a photo puts the drone somewhere other than where dead reckoning expected, the difference shows how far the wind moved it. The flight was run twice: once with the photos, and once with dead reckoning only, which cannot learn the wind.
+
+<img src="~/assets/img/tutorials/drone-navigation-flight.jpg" alt="Map of the area showing two flights from France to Germany. A blue line, where the drone flew while steering by its photos, goes east along the edge of the red no-fly zone, crosses into Germany and ends at the destination, with a yellow dot near it for each position the drone believed it was at. A solid orange line, where the drone flew with dead reckoning only, drifts north into Luxembourg and out of the area, while a dashed orange line shows that drone believing it was on its route." />
+
+The blue line is where the drone flew, which the drone itself never knows. The yellow dots are where it believed it was after each photo, and it steered by those dots, so the distance from a dot to the blue line is its position error at that moment.
+
+| Run                 | Steps | Final distance from destination | Largest position error | Steps in Luxembourg |
+| ------------------- | ----- | ------------------------------- | ---------------------- | ------------------- |
+| With photos         | 39    | 104 m                           | 232 m                  | 0                   |
+| Dead reckoning only | 39    | 1,096 m                         | 1,106 m                | 2                   |
+
+With photos, the drone flew towards the waypoint for the first 13 steps, then changed to the direct route when the leg query reported it clear. It never entered Luxembourg. With dead reckoning only, the wind carried the drone into Luxembourg while it believed it was on its route, and it stopped a kilometre from the destination when it believed it had arrived.
+
+## Limits of the simulation
+
+The demo simulates its photos, and a real flight differs in some ways:
+
+- **Photos:** each photo is a crop of an orthophoto, which is an aerial image corrected so that it looks straight down. A real camera tilts, and its pictures change with altitude and lens.
+- **Heading and altitude:** the demo assumes the compass and the barometer still work, so it only rotates and scales each photo by a small error. A drone without a compass would need tiles at several rotations.
+- **Featureless ground:** water, large fields and snow give weak matches. The gap between the best and the second-best `dist` is a measure of confidence, and a real system would trust the dead reckoning more when that gap is small.
+- **Grid size:** tiles 100 m apart limit the accuracy to about 50 m. Closer tiles give a better position and more records.
+
+## Data sources
+
+- **Aerial imagery:** [IGN](https://geoservices.ign.fr/) (France), [LVGL Saarland](https://geoportal.saarland.de/) (Germany) and [ACT geoportail.lu](https://www.geoportail.lu/) (Luxembourg), each from its open web map service.
+- **Borders:** municipal boundaries from [OpenStreetMap](https://www.openstreetmap.org/copyright), © OpenStreetMap contributors, joined into one polygon for each country.
+
+## Next steps
+
+- [Similarity search](/docs/learn/data-models/vector-search/similarity-search) explains how a `WHERE` condition works during a KNN search.
+- [Spatial queries](/docs/learn/data-models/geospatial/spatial-queries) explains the containment and intersection questions that `INSIDE` and `INTERSECTS` answer.
+- [Distance and proximity](/docs/learn/data-models/geospatial/distance-and-proximity) covers `geo::distance()`, and the [`geo` functions](/docs/reference/query-language/functions/database-functions/geo#geobearing) reference documents `geo::bearing()`.
