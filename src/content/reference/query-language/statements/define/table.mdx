@@ -491,6 +491,24 @@ As mentioned though, there are a few limitations to keep in mind.
 
 Defining a view runs its query over the records already in the source table, so the view starts with their results rather than empty. After that, only writes to the source table update it.
 
+A view defined with `GROUP ALL` has its one record from the moment it is defined, also when the source table is empty, with the aggregates of no records: `count()` is `0`. Deleting the last source record resets that record to the same values instead of deleting it. An event defined on such a view therefore receives `UPDATE` in `$event` for every change, and never `CREATE` or `DELETE`.
+
+```surql
+DEFINE TABLE sale;
+DEFINE TABLE sales_total AS SELECT count() AS sales, math::sum(amount) AS total FROM sale GROUP ALL;
+SELECT * FROM sales_total;
+```
+
+```surql title="Output"
+[
+	{
+		id: sales_total:[],
+		sales: 0,
+		total: 0
+	}
+]
+```
+
 Writes made under `OPTION IMPORT`, which is how [`surreal db import`](/docs/reference/cli/db/commands/import) loads data, do not trigger the view. To bring a view up to date after an import, define it again with `OVERWRITE`, which runs the query over every record in the source table:
 
 ```surql
@@ -511,6 +529,31 @@ SELECT VALUE id FROM fr_feed;
 ```surql title="Output"
 [fr_feed:1, fr_feed:2]
 ```
+
+### Choosing the `id` of a view row
+
+Each row of a view is keyed by the record it came from, or for a grouped view, by its group. A projection that sets `id` keys the rows by that value instead, which lets several source records feed one row, or gives a row a key that is meaningful on its own:
+
+```surql
+CREATE purchase:1 SET customer = 'ana', total = 10;
+DEFINE TABLE spend AS SELECT customer AS id, total FROM purchase;
+
+CREATE purchase:2 SET customer = 'ben', total = 25;
+UPDATE purchase:1 SET total = 15;
+
+SELECT * FROM spend;
+```
+
+```surql title="Output"
+[
+	{ id: spend:ana, total: 15 },
+	{ id: spend:ben, total: 25 }
+]
+```
+
+The value becomes the key of the view row, so it can be a string, number, array, object or UUID. A write whose projected `id` changes moves the row to the new key, and a projected `id` of `NONE` fails the write.
+
+Before SurrealDB 4.0, only the initial fill used the projected `id`. Later writes keyed the row by the source record, so the same query left `spend:ana` at `10` beside rows keyed `spend:1` and `spend:2`, and an `id` that was not a record id failed the definition.
 
 ## Defining permissions
 
@@ -588,9 +631,9 @@ DEFINE TABLE post SCHEMALESS
 ;
 ```
 
-A table or field `PERMISSIONS` clause reads data with the authority of the schema that defines it, not with the caller's permissions. `$auth` and the record being checked are the caller's, but any other record the clause reads is read without checking the caller's permissions. This applies to following a record id such as `$auth.admin`, a subquery, a graph traversal, and a function that the clause calls. So a clause can test fields of the user's own record even when the user may not select it. A field's `VALUE`, `DEFAULT`, `ASSERT` and `COMPUTED` clauses, and a function called from a query, run with the caller's permissions instead.
+A table or field `PERMISSIONS` clause reads data with the authority of the schema that defines it, not with the caller's permissions. `$auth` and the record being checked are the caller's, but any other record the clause reads is read without checking the caller's permissions. This applies to following a record id such as `$auth.admin`, a subquery, `record::exists()` or `.exists()`, a graph traversal, and a function that the clause calls. So a clause can test fields of the user's own record even when the user may not select it. A field's `VALUE`, `DEFAULT`, `ASSERT` and `COMPUTED` clauses, and a function called from a query, run with the caller's permissions instead.
 
-`record::exists()` and `.exists()` are the exception: inside a permission clause they are checked against the caller's permissions, so they return `false` for a record the caller cannot select, and the clause denies access. To test whether such a record exists, follow its id instead, as in `lookup:[$auth, 'ok'].id != NONE`.
+In SurrealDB 3.3, `record::exists()` and `.exists()` inside a `FOR select` clause were checked against the caller's permissions, so they returned `false` for a record the caller could not select, and the clause denied access. From SurrealDB 4.0 they read the record in the same way as the other forms.
 
 Each write is checked only against its own clause: `FOR create`, `FOR update` or `FOR delete`. If that clause allows it, the record is written. The statement's result is then filtered by `FOR select`, so a record user who may create records in a table but not select them receives `[]`, although the record was written. In the same way, `UPDATE` and `DELETE` with a `WHERE` clause can match records that the caller cannot select. To return a user's own writes to them, add a narrow select rule such as `FOR select WHERE owner = $auth`.
 
@@ -613,16 +656,7 @@ Field permissions work the same way but default to `PERMISSIONS FULL` instead of
 
 ### Writes inside a permission clause
 
-A permission clause is evaluated with permissions bypassed, so a write inside one runs unchecked. Whether that is allowed depends on which clause it sits in.
-
-**A `FOR select` clause may never modify data.** A read must never trigger a write, so the write is blocked when the clause is evaluated. From 3.3.0 that is the only check: the definition is stored without complaint and the failure arrives the first time a read reaches the write, with `A PERMISSIONS clause cannot contain a statement that modifies data`.
-
-```surql
--- Accepted, but every read of `post` now fails
-DEFINE TABLE post PERMISSIONS FOR select WHERE (CREATE audit SET at = time::now()) OR true;
-```
-
-**`FOR create`, `FOR update`, and `FOR delete` clauses may modify data**, because they are evaluated during a write that is already taking place. This supports patterns such as audit logging from within the clause.
+A permission clause decides whether an operation is allowed, and must not write data itself, whether directly or through a custom function. This applies to every clause, `FOR create`, `FOR update` and `FOR delete` included. The definition is refused:
 
 ```surql
 DEFINE FUNCTION fn::audit($id: record) -> bool { CREATE audit SET record = $id, at = time::now(); RETURN true; };
@@ -631,12 +665,24 @@ DEFINE TABLE post PERMISSIONS
 	FOR create, update WHERE fn::audit($value.id) AND user = $auth.id;
 ```
 
-Nevertheless, [`DEFINE EVENT`](/docs/reference/query-language/statements/define/event) is the preferred option for this. An event runs [without permission checks](/docs/reference/query-language/statements/define/event#events-and-permissions), states the side effect where a reader expects to find it, and does not run on every access check.
+```surql title="Error output"
+'The PERMISSIONS clause must not have effects: it calls `fn::audit`, in whose body `CREATE` writes data'
+```
 
-The check runs where the write is reached, so it is exact however the write is arrived at - written into the clause directly, reached through a [custom function](/docs/reference/query-language/statements/define/function), or through `eval`, a script or a closure passed as data. Call depth and indirection make no difference to it.
+Use [`DEFINE EVENT`](/docs/reference/query-language/statements/define/event) for a write that should follow a change, such as an audit log. An event runs [without permission checks](/docs/reference/query-language/statements/define/event#events-and-permissions), so it can write to a table such as `audit` that the caller cannot access. It also states the side effect where a reader expects to find it, and does not run on every access check:
+
+```surql
+DEFINE TABLE post PERMISSIONS FOR create, update WHERE user = $auth.id;
+
+DEFINE EVENT audit ON post WHEN $event IN ['CREATE', 'UPDATE'] THEN {
+	CREATE audit SET record = $after.id, at = time::now();
+};
+```
+
+The full list of what a clause may not do is in [Clauses that must not have effects](/docs/reference/query-language/statements/define/field#clauses-that-must-not-have-effects).
 
 > [!NOTE]
-> The above behaviour changed in 3.3.0. On 3.2 and earlier a writing clause is refused outright when the table is defined, so a guard that 3.2 rejects is stored on 3.3 and fails the first time it is evaluated.
+> This behaviour changed in 4.0. In 3.3, a `FOR create`, `FOR update` or `FOR delete` clause could write, and a `FOR select` clause that wrote was stored and failed the first time a read reached the write. A permission clause stored by 3.3 that writes now fails with the error above each time it is evaluated, and writes nothing.
 
 ## Using `IF NOT EXISTS` clause
 
@@ -999,9 +1045,9 @@ CREATE ONLY user CONTENT {
 
 <Since v="v3.1.0" />
 
-`GRAPHQL_ALIAS` sets the name that the [GraphQL schema](/docs/learn/querying/graphql/overview) uses for a table, in place of the table name. The alias replaces the table name in every name the schema generates for the table, such as its query fields and its `create` mutation. It must be a valid GraphQL name, matching `[_A-Za-z][_0-9A-Za-z]*`, and any other value is rejected when the table is defined.
+`GRAPHQL_ALIAS` sets the name that the [GraphQL schema](/docs/learn/querying/graphql/overview) uses for a table, in place of the table name. The alias replaces the table name in the query fields, the mutation fields and the connection types, so the example below gives `member`, `members`, `members_aggregate`, `membersConnection` and `createMember`. The object type, the input types and the filter and order types keep the table's own name. It must be a valid GraphQL name, matching `[_A-Za-z][_0-9A-Za-z]*`, and any other value is rejected when the table is defined.
 
-`GRAPHQL_DEPRECATED` takes a reason, which the schema adds to the start of the description of the table's generated queries as `[Deprecated: reason]`.
+`GRAPHQL_DEPRECATED` takes a reason, which the schema adds to the start of the description of the fetch and list queries and of the mutations as `[Deprecated: reason]`. The aggregate and connection queries do not carry it.
 
 ```surql
 DEFINE TABLE person GRAPHQL_ALIAS "member" GRAPHQL_DEPRECATED "Use the account table instead";

@@ -1,0 +1,215 @@
+---
+position: 12
+title: DEFINE EXTENSION
+description: "The DEFINE EXTENSION statement loads a Surrealism extension into a database from a bucket or Silo, with its DIGEST, SIGNER or UNSIGNED, CAPABILITIES and PERMISSIONS, so that its functions can be called as ext::name::function()."
+---
+
+# `DEFINE EXTENSION` statement
+
+<Since v="v4.0.0" />
+
+A `DEFINE EXTENSION` statement loads a [Surrealism](/docs/learn/extensions/plugins/overview) extension, a WebAssembly package built from Rust, into the current database and gives it a name. Its functions are then called as `ext::name::function()`. Before SurrealDB 4.0, extensions were called modules and were defined with `DEFINE MODULE`, which still works as an alias. See [Defining a module before 4.0](#defining-a-module-before-40).
+
+The [`surreal ext install`](/docs/reference/cli/ext#ext-install) command checks an archive's signer and the capabilities it requests, asks for approval, and then runs this statement for you. Writing the statement by hand is useful in a schema file, or when the values are already known.
+
+## Requirements
+
+- The `surrealism` [experimental capability](/docs/learn/security/authorization/capabilities) must be enabled, and `files` as well to load an archive from a bucket, for example with `--allow-experimental files,surrealism`.
+- [You must select your namespace and database](/docs/reference/query-language/statements/use) before you can use the `DEFINE EXTENSION` statement.
+
+## Statement syntax
+
+<Tabs syncKey="define-module-version">
+  <TabItem label="SurrealDB 4.0 and later">
+
+```syntax title="SurrealQL Syntax"
+DEFINE EXTENSION [ OVERWRITE | IF NOT EXISTS ] ext::@name
+	FROM [ @file | silo::@organisation::@package<@version> ]
+	[ DIGEST @string ]
+	[ SIGNER @object | UNSIGNED ]
+	[ CAPABILITIES @object ]
+	[ PERMISSIONS [ NONE | FULL | WHERE @condition ] ]
+	[ COMMENT @string ]
+```
+
+  </TabItem>
+  <TabItem label="SurrealDB 3.3">
+
+```syntax title="SurrealQL Syntax"
+DEFINE MODULE [ OVERWRITE | IF NOT EXISTS ] mod::@name FROM @file UNSIGNED
+	[ COMMENT @string ]
+
+DEFINE MODULE [ OVERWRITE | IF NOT EXISTS ] silo::@organisation::@package::<@version> UNSIGNED
+	[ COMMENT @string ]
+```
+
+  </TabItem>
+  <TabItem label="Before SurrealDB 3.3">
+
+```syntax title="SurrealQL Syntax"
+DEFINE MODULE [ OVERWRITE | IF NOT EXISTS ] mod::@name AS @file
+	[ COMMENT @string ]
+```
+
+  </TabItem>
+</Tabs>
+
+Either `SIGNER` or `UNSIGNED` is required. A statement with neither fails with `DEFINE EXTENSION needs SIGNER {…} or UNSIGNED`.
+
+## Example usage
+
+An extension is built into a `.surli` archive with [`surreal ext build`](/docs/reference/cli/ext#ext-build), and the archive is placed in a [bucket](/docs/reference/query-language/statements/define/bucket) that the database can read. The extension below was built from these functions:
+
+```rust
+use surrealism::surrealism;
+
+#[surrealism(default)]
+fn hello() -> String {
+	format!("Hello from Surrealism!")
+}
+
+#[surrealism]
+fn greet(name: String) -> String {
+	format!("Hello, {name}!")
+}
+
+#[surrealism]
+fn add(a: i64, b: i64) -> i64 {
+	a + b
+}
+```
+
+With the archive in a bucket called `extensions`, define it and call its functions through the name given after `ext::`. The function marked `#[surrealism(default)]` is called by the name alone:
+
+```surql
+DEFINE EXTENSION ext::demo FROM f"extensions:/acme-demo-1.0.0.surli" UNSIGNED;
+
+ext::demo::greet('Ada');
+//- 'Hello, Ada!'
+
+ext::demo::add(2, 3);
+//- 5
+
+ext::demo();
+//- 'Hello from Surrealism!'
+```
+
+The name after `ext::` is chosen when the extension is defined, so one archive can be defined under several names, and two extensions can export functions with the same name.
+
+An extension function can be called from queries, functions, events and [analyzers](/docs/reference/query-language/statements/define/analyzer), but not from a `COMPUTED`, `VALUE`, `DEFAULT` or `ASSERT` clause or a `PERMISSIONS` clause, because the database cannot see what the function does. See [Clauses that must not have effects](/docs/reference/query-language/statements/define/field#clauses-that-must-not-have-effects).
+
+## `DIGEST`
+
+A `.surli` archive holds a `MANIFEST` file that lists every other file in it with its SHA-256 hash, and the archive's digest is the SHA-256 hash of that `MANIFEST`. The digest identifies the exact code, and [`surreal ext build`](/docs/reference/cli/ext#ext-build) prints it.
+
+When `DIGEST` is left out, the database computes it from the archive and stores it with the definition, so the definition pins the code that was there when it was defined. When `DIGEST` is given, the archive must match it:
+
+```surql
+DEFINE EXTENSION ext::demo FROM f"extensions:/acme-demo-1.0.0.surli"
+	DIGEST "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	UNSIGNED;
+```
+
+```surql title="Error output"
+"The archive's MANIFEST digest is sha256:7b36da7d8386c1561b7d61f83f39a3bf590e25b774d935d9f8252604e80134b5, but the definition's DIGEST is sha256:0000000000000000000000000000000000000000000000000000000000000000"
+```
+
+## `SIGNER` and `UNSIGNED`
+
+`SIGNER` names who must have signed the archive, and the database verifies the archive's signature against it when the extension is defined and before the code is loaded. An archive is signed with [`surreal ext sign`](/docs/reference/cli/ext#ext-sign), either with an SSH key or with Sigstore from a CI workflow.
+
+For an archive signed with an SSH key, the signer is the public key:
+
+```surql
+DEFINE EXTENSION ext::demo FROM f"extensions:/acme-demo-1.0.0.surli"
+	SIGNER { key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPhuVs9Jcx4/KCUWdMr/8Vv2BDOMj5v1qyDhCRlcDttN release@acme" };
+```
+
+For an archive signed through Sigstore, the signer object holds a `sigstore` object that names the trust anchors (`ca`, `log` and `tsa`), the certificate `issuer`, and the `identity` of the workflow that signed it, with the `repository_id` and `owner_id` that pin it to one repository. `surreal ext install` writes this object from the signature, so it is rarely written by hand.
+
+The definition is refused when the signature does not match the signer, and when the archive carries no signature at all:
+
+```surql title="Error output"
+"The extension's SIGNATURE does not prove its SIGNER: the signature was made with a different key"
+```
+
+```surql title="Error output"
+"The extension has a SIGNER, but its archive carries no SIGNATURE"
+```
+
+`UNSIGNED` loads the archive without checking a signature, whether it has one or not. Use it for an extension built and loaded within one team, where the bucket is the only route the code takes. `DIGEST` still pins the code in an unsigned definition.
+
+## `CAPABILITIES`
+
+An extension can reach nothing outside its own functions unless its definition grants it. A definition without `CAPABILITIES` stores `CAPABILITIES {}`, which grants nothing, whatever the archive's `package.toml` requests. The fields are:
+
+| Field | Value | Grants |
+| --- | --- | --- |
+| `net` | `true`, or an array of `host:port` strings | Outgoing network access, to any address or to the listed ones |
+| `functions` | An array of function names or patterns, such as `"http::get"` | Calls to SurrealQL functions |
+| `queries` | `bool` | Running arbitrary SurrealQL queries |
+| `scripting` | `bool` | Running embedded JavaScript |
+| `write` | `bool` | Functions that write data. Without it, a function that writes runs read-only |
+| `memory` | `int`, in bytes | A memory limit for each call |
+| `timeout` | `duration` | A time limit for each call |
+| `strict_timeout` | `bool` | `false` runs the extension without time checks, which takes effect only on a server started with [`SURREAL_SURREALISM_ALLOW_UNBOUNDED_EXECUTION`](/docs/reference/cli/db/environment-variables#surrealism-config) |
+
+```surql
+DEFINE EXTENSION ext::colour FROM f"extensions:/acme-colour-1.0.0.surli"
+	SIGNER { key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPhuVs9Jcx4/KCUWdMr/8Vv2BDOMj5v1qyDhCRlcDttN" }
+	CAPABILITIES { net: ["api.colour.io:443"], functions: ["http::get"] };
+```
+
+A capability granted here never exceeds the server's own: an extension granted `net: true` still cannot reach an address that the server's [capabilities](/docs/learn/security/authorization/capabilities) deny. In the same way, `memory` and `timeout` can only lower the server's [Surrealism limits](/docs/reference/cli/db/environment-variables#surrealism-config).
+
+The `net` grant also covers HTTP requests that an extension makes through the `wasi:http` interface, for example with a crate such as `waki`. Each request is checked against the grant: the host name must be allowed, the addresses it resolves to are filtered, and the connection goes to an address the grant admits. A name that resolves to a loopback or private address is refused unless the grant names that IP address. An extension granted no `net` can make no request.
+
+## Silo packages
+
+An extension can also be loaded from a package published to Silo, SurrealDB's extension registry. The package is fetched over HTTPS from `https://silo.surrealdb.com` and cached, so it does not need to be built locally or placed in a bucket. The server needs network access to that address. There is one Silo registry, so an archive served from anywhere else is defined from a bucket instead. Before SurrealDB 4.0, `SURREAL_SURREALISM_SILO_ENDPOINT` could point `silo::` at another address.
+
+```surql
+DEFINE EXTENSION ext::palette FROM silo::acme::palette<2.1.0> UNSIGNED;
+```
+
+From SurrealDB 4.0, a Silo package needs a name like any other extension, and a definition without one is refused with `An extension needs a name`.
+
+## Changing and removing an extension
+
+[`ALTER EXTENSION`](/docs/reference/query-language/statements/alter/overview) changes only the `COMMENT` and `PERMISSIONS` of a definition. To load a new version of the code, use `DEFINE EXTENSION OVERWRITE`, or [`surreal ext upgrade`](/docs/reference/cli/ext#ext-upgrade), which compares the new archive's signer and capabilities with the installed ones before it redefines the extension.
+
+```surql
+ALTER EXTENSION ext::demo COMMENT "Greeting helpers";
+REMOVE EXTENSION ext::demo;
+```
+
+`INFO FOR DB` lists the database's extensions under `extensions`, with the `DIGEST` and `CAPABILITIES` that the definition stores.
+
+## Defining a module before 4.0
+
+Extensions were called modules before SurrealDB 4.0. The earlier spellings still work in 4.0 and log a deprecation warning: `DEFINE MODULE`, `ALTER MODULE` and `REMOVE MODULE` define the same thing as `DEFINE EXTENSION`, `ALTER EXTENSION` and `REMOVE EXTENSION`, and a function can be called as `mod::name::function()` as well as `ext::name::function()`. `INFO FOR DB` and exports always write the `EXTENSION` form.
+
+A few things changed along with the name:
+
+- **A module defined on SurrealDB 3.x must be defined again.** Its definition has no `DIGEST` or signer, so 4.0 refuses to call it until it is defined again with `SIGNER` or `UNSIGNED`. `INFO FOR DB STRUCTURE` reports each such definition with a warning.
+- **Modules built for 3.x must be rebuilt**, because 4.0 uses a new extension ABI. See [Upgrading a module to 4.0](/docs/learn/extensions/guides/surrealism-attribute-reference#upgrading-a-module-to-40).
+- **An `ext::` call cannot be read by SurrealDB 3.x.** A field, event, function or permission whose stored text calls `ext::` stops working on a 3.x node. Before returning a database to 3.x, rewrite those calls as `mod::`.
+
+In SurrealDB 3.3, `FROM` replaced `AS` before the archive, and `UNSIGNED` became required:
+
+<Tabs syncKey="define-module-version">
+  <TabItem label="SurrealDB 3.3">
+
+```surql
+DEFINE MODULE mod::test FROM f"test:/demo.surli" UNSIGNED;
+```
+
+  </TabItem>
+  <TabItem label="Before SurrealDB 3.3">
+
+```surql
+DEFINE MODULE mod::test AS f"test:/demo.surli";
+```
+
+  </TabItem>
+</Tabs>

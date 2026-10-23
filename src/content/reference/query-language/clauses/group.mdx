@@ -93,6 +93,39 @@ FROM [
 ]
 ```
 
+Inside a grouped query, an aggregate function receives one value from each record in the group. `math::sum()`, `math::mean()` and the other numeric aggregates skip any value that is not a number, an array included. A group with no numbers therefore gives the result for no values: `0` for `math::sum()`, `Infinity` for `math::min()`, `-Infinity` for `math::max()`, `NaN` for `math::mean()`, `math::stddev()` and `math::variance()`, and `NONE` for `math::median()`. JSON shows `NaN` and the infinities as `null`.
+
+```surql
+CREATE player:1 SET team = 'red', scores = [1, 3];
+CREATE player:2 SET team = 'red', scores = [5, 7];
+CREATE player:3 SET team = 'blue', scores = [2, 2];
+
+-- Each scores value is an array, not a number, so it is skipped
+SELECT team, math::mean(scores) AS mean FROM player GROUP BY team;
+```
+
+```surql title="Output"
+[
+	{ mean: NaN, team: 'blue' },
+	{ mean: NaN, team: 'red' }
+]
+```
+
+An aggregate cannot take another aggregate as its argument, which fails with `Nested aggregate functions are not supported`. To aggregate a value that is first computed for each record, such as the mean of each record's array of scores, compute it in a subquery and aggregate the result:
+
+```surql
+SELECT team, math::mean(mean) AS mean
+FROM (SELECT team, math::mean(scores) AS mean FROM player)
+GROUP BY team;
+```
+
+```surql title="Output"
+[
+	{ mean: 2f, team: 'blue' },
+	{ mean: 4f, team: 'red' }
+]
+```
+
 ### Joining strings in a group
 
 [`array::join()`](/docs/reference/query-language/functions/database-functions/array#arrayjoin) is also an aggregate function, and joins the values of a field across the group into one string, like `GROUP_CONCAT` or `STRING_AGG` in SQL:
@@ -212,6 +245,9 @@ FROM person GROUP BY age;
 A collected value is an array, not a [set](/docs/reference/query-language/language-primitives/data-types/sets): it keeps duplicates, so two records named `'Alice'` in one group give `['Alice', 'Alice']`. Its order follows the record ids, which is why the example above gives its own ids rather than letting SurrealDB generate them. Use [`array::group()`](/docs/reference/query-language/functions/database-functions/array#arraygroup) where the unique values are what you want.
 
 Some expressions count as reading the record because the engine cannot see through them: a call to a user-defined function, whose body may reach the record through `$parent`; `type::field()` and the index functions behind `@@` and `<|...|>`, which are bound to the record; and any function that writes, whose number of effects depends on how often it runs.
+
+> [!IMPORTANT]
+> These rules apply from SurrealDB 4.0. In 3.3 and earlier, an expression that is not a group key or an aggregate is collected once per record whether or not it reads the record, so `4 + 3 AS constant` gives `[7, 7]` in the example above. `array::group()` also keeps duplicates in those versions, so it gives `['Alice', 'Alice']` for two records named `'Alice'`.
 
 > [!NOTE]
 > Standard SQL raises an error for the record-reading branch of rule 3, on the grounds that a projection would otherwise have more than one value to return. SurrealDB collects the values into an array instead, which keeps every value and stays deterministic.

@@ -1,7 +1,7 @@
 ---
 position: 1
 title: Transactions
-description: "How SurrealDB transactions work: the default per-statement scope, manual BEGIN, COMMIT and CANCEL, and the snapshot isolation guarantees that apply under concurrency."
+description: "How SurrealDB transactions work: the default per-statement scope, manual BEGIN, COMMIT and CANCEL, the snapshot isolation guarantees that apply under concurrency, and the serializable level that SurrealMX and SurrealDS offer."
 ---
 
 # Transactions
@@ -207,7 +207,7 @@ Order `d` needs three keyboards when one is left, so the loop stops there, and o
 
 ## Snapshot isolation
 
-Every SurrealDB transaction runs under **snapshot isolation**. When a transaction starts, it sees a consistent point-in-time view of the database. That snapshot stays stable for the lifetime of the transaction, so reads inside the transaction do not observe concurrent writes from other transactions until commit.
+Every SurrealDB transaction runs under **snapshot isolation** unless it asks for [serializable isolation](#serializable-isolation). When a transaction starts, it sees a consistent point-in-time view of the database. That snapshot stays stable for the lifetime of the transaction, so reads inside the transaction do not observe concurrent writes from other transactions until commit.
 
 SurrealDB does not offer weaker isolation levels. You cannot downgrade to read committed or read uncommitted.
 
@@ -215,7 +215,7 @@ On commit, the engine checks for **write conflicts**. If two concurrent transact
 
 Records that a transaction only reads are outside that check by default. The [`FOR UPDATE`](#locked-reads-with-for-update) clause brings them into it.
 
-These semantics apply across deployment models and storage backends: embedded and server, single-node and distributed, RocksDB, SurrealKV, SurrealMX, and browser IndexedDB. The [query layer](/docs/learn/data-models/architecture#query-layer) enforces the same isolation contract regardless of which engine persists the keys underneath.
+Snapshot isolation applies on every deployment model and storage backend: embedded and server, single-node and distributed, SurrealKV, SurrealMX, SurrealDS and TiKV. The [query layer](/docs/learn/data-models/architecture#query-layer) enforces the same contract whichever engine persists the keys underneath. Some engines also offer a stronger level, listed in [Isolation by storage engine](#isolation-by-storage-engine).
 
 ### What you get in practice
 
@@ -228,7 +228,7 @@ Snapshot isolation with conflict detection on commit protects against the anomal
 | Lost updates (same key) | Yes | Concurrent writes to the same key cannot both commit; one transaction must retry. |
 | Write skew | Opt in | Covered per record with [`FOR UPDATE`](#locked-reads-with-for-update); see [write skew](#write-skew) below. |
 
-In database terms, snapshot isolation sits between read committed and serialisable. It matches the default isolation level in MySQL (InnoDB `REPEATABLE READ`) and PostgreSQL's optional `REPEATABLE READ` level, with the important caveat that SurrealDB does not provide serialisable isolation. For the specific records a transaction names, [`FOR UPDATE`](#locked-reads-with-for-update) closes the remaining gap.
+In database terms, snapshot isolation sits between read committed and serialisable. It matches the default isolation level in MySQL (InnoDB `REPEATABLE READ`) and PostgreSQL's optional `REPEATABLE READ` level, For the specific records a transaction names, [`FOR UPDATE`](#locked-reads-with-for-update) closes the remaining gap on every engine, and on an engine that offers it, [serializable isolation](#serializable-isolation) closes it for the whole transaction.
 
 ### Compared with PostgreSQL `REPEATABLE READ`
 
@@ -240,10 +240,10 @@ PostgreSQL's `REPEATABLE READ` is snapshot isolation too, so the two protect aga
 | Competing writer | Blocks on a row lock until the first transaction resolves | Never blocks; proceeds and commits |
 | Conflict surfaces | At the conflicting statement, as `could not serialize access due to concurrent update` | At `COMMIT`, as a transaction conflict error |
 | `SELECT ... FOR UPDATE` | Takes a row lock, and raises straight away if the row moved since the snapshot | Registers the record, and raises at `COMMIT` if it moved |
-| Write skew | Needs explicit locking, or the `SERIALIZABLE` level | Needs [`FOR UPDATE`](#locked-reads-with-for-update) |
-| Blanket serialisable level | `SERIALIZABLE` covers predicate-based anomalies as well | No equivalent; `FOR UPDATE` covers named records only |
+| Write skew | Needs explicit locking, or the `SERIALIZABLE` level | Needs [`FOR UPDATE`](#locked-reads-with-for-update), or the `SERIALIZABLE` level |
+| Blanket serialisable level | `SERIALIZABLE` covers predicate-based anomalies as well | [`SERIALIZABLE`](#serializable-isolation) on SurrealMX and SurrealDS; `FOR UPDATE` covers named records only |
 
-Two consequences follow for application code. Conflicts arrive later in SurrealDB: a `FOR UPDATE` read never fails on account of a concurrent write, so retry logic wraps the whole transaction rather than guarding individual statements. And because a predicate cannot be registered, an invariant that depends on a set of records rather than on named ones has no direct equivalent of `SERIALIZABLE` to fall back on. Such an invariant needs a record that stands in for the set, such as a counter or a parent record that every participant reads for update.
+Two consequences follow for application code. Conflicts arrive later in SurrealDB: a `FOR UPDATE` read never fails on account of a concurrent write, so retry logic wraps the whole transaction rather than guarding individual statements. And because `FOR UPDATE` cannot register a predicate, an invariant that depends on a set of records rather than on named ones needs either [serializable isolation](#serializable-isolation), on an engine that offers it, or a record that stands in for the set, such as a counter or a parent record that every participant reads for update.
 
 ## Write conflicts and retries
 
@@ -301,6 +301,8 @@ Where write skew matters for your workload, read the records the rule depends on
 
 Writing every record the rule depends on has the same effect, because a write is conflict-checked already. That remains the natural choice where the transaction was going to update the record anyway, and conditional updates work on the same principle.
 
+Where the rule depends on a query rather than on named records, such as "no other booking exists for Monday", use [serializable isolation](#serializable-isolation) on an engine that offers it.
+
 ## Locked reads with `FOR UPDATE`
 
 <Since v="v3.3.0" />
@@ -340,13 +342,75 @@ Three further properties apply beyond the basic guarantee:
 > [!NOTE]
 > `FOR UPDATE` is used for a record the transaction reads but never writes. A record the transaction also writes is covered already by the write conflict check, so adding the clause there changes nothing.
 
+## Serializable isolation
+
+<Since v="v4.0.0" />
+
+A transaction started with `BEGIN ISOLATION LEVEL SERIALIZABLE` adds every record and range it reads to the commit-time conflict check, not only the records it writes. If another transaction wrote anything it read after its snapshot was taken, its `COMMIT` fails with a transaction conflict and the transaction can be retried. This rules out write skew, including the cases that depend on a query rather than on named records.
+
+The example below books a doctor for Monday only if no booking exists for that day. Under snapshot isolation, two of these transactions running at the same time both see no booking and both commit, which gives Monday two doctors. Under serializable isolation, the second `COMMIT` fails, because the first transaction created a record that the second one's `SELECT` read:
+
+```surql
+BEGIN ISOLATION LEVEL SERIALIZABLE;
+
+LET $booked = SELECT VALUE id FROM booking WHERE day = 'monday';
+IF $booked.is_empty() {
+    CREATE booking SET doctor = doctor:ana, day = 'monday';
+};
+
+COMMIT;
+```
+
+```surql title="Error output"
+"Transaction conflict: Read conflict, retry the transaction. This transaction can be retried"
+```
+
+Because every read is checked, a serializable transaction conflicts more often than a snapshot one under the same load. Use it for transactions whose correctness depends on what they read, and keep the rest at the default. A few further rules apply:
+
+- **Statements outside `BEGIN` always run at snapshot isolation.** Only a transaction started with `BEGIN`, or with the `begin` RPC method and its `isolation` option, can ask for the serializable level.
+- **A read-only transaction is unaffected.** It commits nothing, so there is nothing to check, and it reads one consistent snapshot at either level. `SERIALIZABLE` cannot be combined with a [`MAX STALENESS`](/docs/reference/query-language/statements/begin#reading-a-recent-snapshot-with-max-staleness) above zero.
+- **The level is never quietly lowered.** On an engine that does not offer it, the transaction fails with an error naming the levels the engine offers, instead of running at snapshot isolation.
+
+### Isolation by storage engine
+
+Every engine runs transactions at snapshot isolation by default. The table shows which also offer the serializable level, and which publish snapshots that a [`MAX STALENESS`](/docs/reference/query-language/statements/begin#reading-a-recent-snapshot-with-max-staleness) read can use:
+
+| Storage engine | Default | `SERIALIZABLE` | Published snapshots for `MAX STALENESS` |
+| --- | --- | --- | --- |
+| In-memory (SurrealMX) | `SNAPSHOT` | Yes | No |
+| SurrealDS | `SNAPSHOT` | Yes | Yes |
+| SurrealKV | `SNAPSHOT` | No | No |
+| TiKV | `SNAPSHOT` | No | No |
+
+On an engine without the serializable level, `BEGIN ISOLATION LEVEL SERIALIZABLE` fails with:
+
+```surql title="Error output"
+"The isolation level SERIALIZABLE is not available on this datastore; it offers SNAPSHOT"
+```
+
+On those engines, use [`FOR UPDATE`](#locked-reads-with-for-update) for the records a decision depends on.
+
+### Choosing between `FOR UPDATE` and `SERIALIZABLE`
+
+Both prevent write skew, and they differ in what they check, where they can be used, and how often they cause a retry:
+
+| | [`FOR UPDATE`](#locked-reads-with-for-update) | `SERIALIZABLE` |
+| --- | --- | --- |
+| What is checked at commit | The records the query names | Every record and range the transaction reads |
+| A decision based on a query, such as "no booking exists for Monday" | Not covered | Covered |
+| Storage engines | Every engine | SurrealMX and SurrealDS |
+| Where it can be used | Any statement, including a block, a function body and an event | Only a transaction started with `BEGIN` or the `begin` RPC method |
+| Retries under load | Only when another transaction writes a registered record | When another transaction writes anything the transaction read |
+
+Use `FOR UPDATE` when a decision rests on specific records, when the check has to run inside a function or a single statement, or when the engine does not offer the serializable level. Use `SERIALIZABLE` when a decision rests on the result of a query, and keep those transactions short, because a transaction that reads a large table conflicts with any write to it.
+
 ## ACID at a glance
 
 | Property | In SurrealDB |
 | --- | --- |
 | **Atomicity** | A transaction's statements commit together or roll back together. |
 | **Consistency** | Schema, permissions, and statement semantics apply on every commit; you define business invariants in SurrealQL and application code. |
-| **Isolation** | Snapshot isolation on all storage backends; write conflicts abort on commit, and [`FOR UPDATE`](#locked-reads-with-for-update) extends that check to records the transaction only reads. |
+| **Isolation** | Snapshot isolation on all storage backends, and [serializable isolation](#serializable-isolation) on request on SurrealMX and SurrealDS; write conflicts abort on commit, and [`FOR UPDATE`](#locked-reads-with-for-update) extends that check to records the transaction only reads. |
 | **Durability** | Committed data persists according to your storage engine and sync settings - see [File-backed storage](/docs/running/file-backed) and [Deployment models](/docs/manage/self-hosted/deployment-models). |
 
 Some features deliberately step outside the triggering transaction's ACID boundary. [`ASYNC` events](/docs/reference/query-language/statements/define/event#async-events), for example, run after commit in a separate transaction. Use them only when that trade-off is acceptable.

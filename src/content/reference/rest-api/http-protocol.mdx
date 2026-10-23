@@ -78,6 +78,18 @@ You can use the HTTP endpoints to perform the following actions:
             <td scope="row" data-label="Description">Signs-in as a root, namespace, database, or record user</td>
         </tr>
         <tr>
+            <td scope="row" data-label="Function"><a href="#signin-cookie"><code>POST /signin/cookie</code></a></td>
+            <td scope="row" data-label="Description">Signs in like <code>POST /signin</code>, and returns the token in an <code>HttpOnly</code> cookie (requires <code>--cookie-auth</code>)</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Function"><a href="#signup-cookie"><code>POST /signup/cookie</code></a></td>
+            <td scope="row" data-label="Description">Signs up like <code>POST /signup</code>, and returns the token in an <code>HttpOnly</code> cookie (requires <code>--cookie-auth</code>)</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Function"><a href="#signout"><code>POST /signout</code></a></td>
+            <td scope="row" data-label="Description">Clears the session cookie (requires <code>--cookie-auth</code>)</td>
+        </tr>
+        <tr>
             <td scope="row" data-label="Function"><a href="#get-table"><code>GET /key/:table</code></a></td>
             <td scope="row" data-label="Description">Selects all records in a table from the database</td>
         </tr>
@@ -175,6 +187,52 @@ curl -X POST -u "clerk:hunter123" \
 A namespace user needs only `Surreal-Auth-NS`. Without `Surreal-NS`, the same request authenticates but returns the error `Specify a namespace to use`.
 
 To avoid sending a password with every request, sign in once with [`POST /signin`](#signin) and send the token it returns as `Authorization: Bearer <token>`. A token already carries the namespace and database of its user.
+
+### Cookie authentication
+
+<Since v="v4.0.0" />
+
+A browser application can keep its access token in an `HttpOnly` cookie, which scripts on the page cannot read. The server issues and accepts the cookie only when it is started with `--cookie-auth` and an explicit `--allow-origin` list:
+
+```bash
+surreal start --cookie-auth --allow-origin https://app.example.com --user root --pass secret surrealkv://data
+```
+
+The server does not start with `--cookie-auth` alone, and reports `cookie authentication requires an explicit --allow-origin list`. A list that contains `*` is refused with `cookie authentication refuses a wildcard --allow-origin`.
+
+The application signs in through [`POST /signin/cookie`](#signin-cookie) or [`POST /signup/cookie`](#signup-cookie), which take the same body as `/signin` and `/signup`. The browser has to send credentials with the request so that it stores the cookie and sends it back:
+
+```js
+await fetch("https://db.example.com/signin/cookie", {
+	method: "POST",
+	credentials: "include",
+	headers: { Accept: "application/json" },
+	body: JSON.stringify({ ns: "main", db: "main", ac: "users", email: "tobie@example.com", pass: "secret" }),
+});
+```
+
+The response sets the `surreal_token` cookie and holds no token in its body:
+
+```text title="Response"
+HTTP/1.1 200 OK
+set-cookie: surreal_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9...; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=900
+access-control-allow-credentials: true
+access-control-allow-origin: https://app.example.com
+
+{"code":200,"details":"Authentication succeeded"}
+```
+
+The rules for the cookie are as follows:
+
+- **Origins.** The server reads the cookie only from a request whose `Origin` header exactly matches an entry in `--allow-origin`, or which sends `Sec-Fetch-Site: same-origin`. Another subdomain, scheme or port does not match. The same check applies to WebSocket connections on `/rpc` and `/sql`.
+- **A cookie that is not accepted.** A cookie from an origin that is not allowed is ignored, and the request runs as if it had no credentials. A cookie whose token fails verification, for example because it has expired, is also ignored, and the response clears it.
+- **`Authorization` first.** A request that sends an `Authorization` header is authenticated with that header, and the cookie is not read.
+- **Lifetime.** `Max-Age` is the time until the token or the session expires, whichever comes first. When neither the token nor the session expires, no cookie is issued, and the request fails with `A session cookie cannot be issued because the session has no expiry`. No refresh token is issued, so the application signs in again when the token expires. [`POST /signout`](#signout) clears the cookie.
+- **HTTPS.** The cookie is `Secure`, so a browser stores it only over HTTPS or on a loopback address such as `localhost`.
+- **Status codes.** Without `--cookie-auth`, `/signin/cookie`, `/signup/cookie` and `/signout` answer `404`. With it, a request to one of them from an origin that is not allowed, or with no `Origin` header, answers `403` with the message `The request origin is not allowed to use cookie authentication`.
+
+> [!NOTE]
+> The `surreal_token` cookie is removed from `$request.headers` in a [`DEFINE API`](/docs/reference/query-language/statements/define/api) handler. Other cookies in the request stay.
 
 ## Request size limits
 
@@ -444,6 +502,8 @@ curl -X POST -u "root:secret" \
 ## `POST /export` {#export}
 
 This HTTP RESTful endpoint exports all data for a specific Namespace and Database.
+
+The caller must be a system user with a role (`VIEWER`, `EDITOR` or `OWNER`) at the database level or above. A record user, and a token that holds no role, are refused with `403` and the message `IAM error: Not enough permissions to perform this action`.
 
 ### Headers
 
@@ -1042,6 +1102,67 @@ The above query defines a record access method called `account` that allows user
     "details": "Authentication succeeded",
     "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpYXQiOjE3MDY2MTA4MDMsIm5iZiI6MTcwNjYxMDgwMywiZXhwIjoxNzA2Njk3MjAzLCJpc3MiOiJTdXJyZWFsREIiLCJOUyI6InRlc3QiLCJEQiI6InRlc3QiLCJBQyI6Imh1bWFuIiwiSUQiOiJ1c2VyOjZsOTl1OWI0bzVoa3h0NnY3c3NzIn0.3jR8PHgS8iLefZDuPHBFcdUFNfuB3OBNqQtqxLVVzxAIxVj1RAkD5rCEZHH2QaPV-D2zNwYO5Fh_a8jD1l_cqQ"
 }
+```
+
+<br />
+
+## `POST /signin/cookie` {#signin-cookie}
+
+<Since v="v4.0.0" />
+
+This endpoint signs in in the same way as [`POST /signin`](#signin), and takes the same headers and data. Instead of returning the token in the response body, it sets it in the `surreal_token` cookie. The server provides the endpoint only when it is started with `--cookie-auth`. See [Cookie authentication](#cookie-authentication) for the cookie attributes and the origins that can use it.
+
+The endpoint shares its [authentication rate limit](/docs/reference/cli/db/environment-variables#authentication-rate-limiting-environment-variables) budget with `/signin`.
+
+### Example usage
+
+```bash title="Request"
+curl -i -X POST -H "Origin: https://app.example.com" -H "Accept: application/json" -d '{"user":"root","pass":"secret"}' https://db.example.com/signin/cookie
+```
+
+```text title="Response"
+HTTP/1.1 200 OK
+set-cookie: surreal_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9...; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=3600
+
+{"code":200,"details":"Authentication succeeded"}
+```
+
+## `POST /signup/cookie` {#signup-cookie}
+
+<Since v="v4.0.0" />
+
+This endpoint signs up a record user in the same way as [`POST /signup`](#signup), and takes the same headers and data. Instead of returning the token in the response body, it sets it in the `surreal_token` cookie. The server provides the endpoint only when it is started with `--cookie-auth`. See [Cookie authentication](#cookie-authentication).
+
+The endpoint shares its [authentication rate limit](/docs/reference/cli/db/environment-variables#authentication-rate-limiting-environment-variables) budget with `/signup`.
+
+### Example usage
+
+```bash title="Request"
+curl -i -X POST -H "Origin: https://app.example.com" -H "Accept: application/json" -d '{"ns":"main","db":"main","ac":"users","email":"tobie@example.com","pass":"secret"}' https://db.example.com/signup/cookie
+```
+
+```text title="Response"
+HTTP/1.1 200 OK
+set-cookie: surreal_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9...; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=900
+
+{"code":200,"details":"Authentication succeeded"}
+```
+
+## `POST /signout` {#signout}
+
+<Since v="v4.0.0" />
+
+This endpoint clears the `surreal_token` cookie that [`POST /signin/cookie`](#signin-cookie) or [`POST /signup/cookie`](#signup-cookie) set. The server provides the endpoint only when it is started with `--cookie-auth`, and the request has to come from an allowed origin. See [Cookie authentication](#cookie-authentication).
+
+### Example usage
+
+```bash title="Request"
+curl -i -X POST -H "Origin: https://app.example.com" https://db.example.com/signout
+```
+
+```text title="Response"
+HTTP/1.1 200 OK
+set-cookie: surreal_token=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0
 ```
 
 <br />
