@@ -217,6 +217,25 @@ milliseconds") over vague importance ("crucial for modern workflows"). Use
 tables when comparing options (codecs, deployment modes, auth methods). Link to
 related pages inline rather than duplicating full explanations.
 
+**Link once.** Link a term or a page at its first mention in a page's prose,
+and not again in the same section. A reader who followed the link, or chose not
+to, gains nothing from a second one, and a paragraph that repeats a link reads
+as a row of buttons. In October 2026, 88 of 1,128 pages linked the same target
+twice or more within one section of prose, 131 times in all.
+
+This is Wikipedia's rule against duplicate links, with one difference. A
+Wikipedia reader mostly starts at the top of an article, and ours often do not:
+a search result, the sidebar or an `#anchor` link puts a reader in the middle
+of a page. So a long page, around the 1,700 words of the 90th percentile and
+more, may link a term again at its first mention in a later `##` section that a
+reader could reach directly. A short page links it once.
+
+Tables and lists are exempt, because a reader scans them rather than reading
+them in order: a reference table can link every row, and a "See also" list
+links what it lists. Headings never hold a link. The renderer already makes
+each heading a link to its own anchor, so a link inside one is a link inside a
+link, which three headings had in October 2026.
+
 **Examples.** Runnable code with realistic data. SurrealQL reference pages often
 include inline test assertions and response blocks. SDK pages show imports,
 configuration, and the trade-off when an option changes behaviour. Tutorials
