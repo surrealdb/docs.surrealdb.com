@@ -1,0 +1,98 @@
+---
+position: 29
+title: api
+description: The .api() method for the SurrealDB Rust SDK invokes the endpoints defined with DEFINE API on the selected database.
+---
+
+# `api()`
+
+<Since v="v4.0.0" />
+
+Invokes the endpoints defined with [`DEFINE API`](/docs/reference/query-language/statements/define/api) on the selected namespace and database.
+
+```rust title="Method Syntax"
+db.api().get(path)
+db.api().post(path, body)
+db.api().invoke(method, path)
+```
+
+Each call runs `api::invoke($path, $request)` as an ordinary query, with the path and the request bound as variables. It works over every engine (WebSocket, HTTP, gRPC and embedded), and inside a transaction when it is made from [`Transaction::api()`](/docs/reference/rust/methods/begin).
+
+## Methods
+
+The handle that `.api()` returns has one method for each HTTP method that an endpoint can be defined for: `.get(path)`, `.post(path, body)`, `.put(path, body)`, `.patch(path, body)`, `.delete(path)` and `.trace(path)`. `.invoke(ApiMethod, path)` takes the method as a value. Two methods configure the handle itself:
+
+- `.prefix(prefix)` adds a path prefix to every call from the handle.
+- `.header(name, value)` adds a header to every call from the handle.
+
+A call can then be refined before it is awaited:
+
+- `.header(name, value)` adds a request header.
+- `.query(name, value)` adds a query parameter.
+- `.body(value)` sets the request body.
+- `.value::<R>()` returns only the decoded body, as described below.
+
+## Response
+
+Awaiting a call returns an `ApiResponse` whatever its status, including the `404` that the server answers with when no endpoint matches the path and method. It has three fields:
+
+- `status`: the HTTP status code, as a `u16`.
+- `headers`: the response headers, as a `BTreeMap<String, String>`. A header that the endpoint set more than once holds its values joined with `", "`.
+- `body`: the response body, or `Value::None` when the endpoint set none.
+
+`.is_success()` reports whether the status is in the `2xx` range, and `.body_as::<R>()` decodes the body as `R`.
+
+To receive only the body, call `.value::<R>()` before awaiting. It decodes the body as `R`, and fails with an error that names the method, path and status unless the status is in the `2xx` range.
+
+## Example usage
+
+```rust
+use surrealdb::engine::any::connect;
+use surrealdb::opt::auth::Root;
+use surrealdb::types::SurrealValue;
+
+#[derive(Debug, SurrealValue)]
+struct User {
+    name: String,
+}
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = connect("ws://localhost:8000").await?;
+    db.signin(Root {
+        username: "root".into(),
+        password: "secret".into(),
+    })
+    .await?;
+    db.use_ns("main").use_db("main").await?;
+
+    // The whole response: status, headers and body
+    let response = db.api().get("/users").await?;
+    println!("{} {:?}", response.status, response.body);
+
+    // Only the body, decoded; fails unless the status is 2xx
+    let users: Vec<User> = db.api().get("/users").value().await?;
+    dbg!(users);
+
+    // A body, a header and a query parameter
+    let created = db
+        .api()
+        .post("/users", User { name: "Tobie".into() })
+        .header("x-request-id", "42")
+        .query("notify", "true")
+        .await?;
+    dbg!(created.status);
+
+    // A prefix and a header shared by every call from one handle
+    let users = db.api().prefix("/users").header("x-tenant", "acme");
+    let one = users.get("1").await?;
+    dbg!(one.status);
+
+    Ok(())
+}
+```
+
+## See also
+
+* [`DEFINE API` statement](/docs/reference/query-language/statements/define/api)
+* [`api::invoke()` function](/docs/reference/query-language/functions/database-functions/api)

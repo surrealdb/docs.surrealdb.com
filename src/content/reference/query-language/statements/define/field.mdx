@@ -28,6 +28,7 @@ DEFINE FIELD [ OVERWRITE | IF NOT EXISTS ] @name ON [ TABLE ] @table
 			ON DELETE IGNORE |
 			ON DELETE UNSET | 
 			ON DELETE THEN @expression ]
+		[ MATERIALIZE INTO @table.@field [ WHERE @condition ] ]
 	]
 	[ DEFAULT [ALWAYS] @expression ]
   [ READONLY ]
@@ -107,13 +108,21 @@ value = "NONE"
 [[test.results]]
 value = "NONE"
 
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
 */
 
--- Define nested object property types
+-- Define nested object property types, after the object itself
+DEFINE FIELD emails ON TABLE user TYPE object;
 DEFINE FIELD emails.address ON TABLE user TYPE string;
 DEFINE FIELD emails.primary ON TABLE user TYPE bool;
 
--- Define individual fields on an array
+-- Define individual fields on an array, after the array itself
+DEFINE FIELD metadata ON person TYPE array;
 DEFINE FIELD metadata[0] ON person TYPE datetime;
 DEFINE FIELD metadata[1] ON person TYPE int;
 ```
@@ -121,7 +130,9 @@ DEFINE FIELD metadata[1] ON person TYPE int;
 Non-unicode fields can be defined and set using backticks where necessary. Be sure that any periods to indicate nested fields are not inside the backticks, as anything enclosed in backticks will be treated as a literal string.
 
 ```surql
+DEFINE FIELD name          ON user TYPE object;
 DEFINE FIELD name.first    ON user TYPE string;
+DEFINE FIELD `nómine`      ON user TYPE object;
 DEFINE FIELD `nómine`.prim ON user TYPE string;
 DEFINE FIELD `nómine.prim` ON user TYPE string;
 
@@ -154,6 +165,8 @@ As the output shows, the `.` enclosed inside backticks in the last field results
 ## Defining data types
 
 The `DEFINE FIELD` statement allows you to set the data type of a field. For a full list of supported data types, see [Data types](/docs/reference/query-language/language-primitives/data-types).
+
+From SurrealDB 4.0, a nested field can only be defined inside a field that is already defined and can hold fields, such as an `object`. Define the parent first, as in `DEFINE FIELD address ON person TYPE object;` before `DEFINE FIELD address.city ON person TYPE string;`. Otherwise the statement fails with an error such as ``Cannot define field `address.city`: the field `address` it is nested in is not defined. Define `address` first``, or, for a parent of another type such as `int`, `any` or no type, ``only an object holds a field``. Nested definitions that a datastore already holds from an earlier version are kept.
 
 When defining nested fields, if both the parent and the nested fields have types defined, those types must agree. Mismatching types are rejected to prevent impossible schema states.
 
@@ -224,6 +237,35 @@ value = "NONE"
 
 -- Set a field to have either the uuid or int type
 DEFINE FIELD user_id ON TABLE user TYPE uuid|int;
+```
+
+### Sized number types
+
+<Since v="v4.0.0" />
+
+A field can hold a number of a fixed width: `i8`, `u8`, `i16`, `u16`, `i32`, `u32` and `u64` for integers, and `f16` and `f32` for floating-point numbers. `i64` and `f64` are other names for `int` and `float`, and `INFO FOR TABLE` shows them as `int` and `float`. A value written to the field is converted to its type, and keeps that type when it is read back. A literal can name its type with a suffix, such as `255u8` or `1.5f16`.
+
+```surql
+DEFINE TABLE reading SCHEMAFULL;
+DEFINE FIELD sensor ON reading TYPE u16;
+DEFINE FIELD level ON reading TYPE f32;
+
+CREATE reading:1 SET sensor = 65535, level = 1.25;
+SELECT sensor, type::of(sensor) AS kind FROM reading:1;
+```
+
+```surql title="Output"
+[{ kind: 'u16', sensor: 65535u16 }]
+```
+
+A value is converted only when it fits the type exactly. An integer outside the range of the type, or a number with a fractional part for an integer type, is refused. A whole number written as a float or a decimal, such as `20.0`, is accepted by an integer type, and an `f16` or `f32` field rounds a float to the nearest value it can hold, unless the value is too large for it.
+
+```surql
+CREATE reading:2 SET sensor = 65536, level = 1;
+```
+
+```surql title="Error output"
+"Couldn't coerce value for field `sensor` of `reading:2`: Expected `u16` but found `65536`"
 ```
 
 ### Array type
@@ -1326,6 +1368,49 @@ DEFINE FIELD meta.thumbnail ON file TYPE option<record<storage_object>> REFERENC
 
 To keep a reference that belongs with nested data, define it as a root-level field, such as `DEFINE FIELD thumbnail ON file TYPE option<record<storage_object>> REFERENCE;`. A root-level `array<record<storage_object>>` field holds several references in the same way.
 
+### Keeping a list of references with `MATERIALIZE INTO`
+
+<Since v="v4.0.0" />
+
+A `<~` lookup finds the records that reference a record each time it is read. `MATERIALIZE INTO` stores that list instead, in a field of the referenced record, and keeps it up to date in the same transaction as each write to the referencing field. Reading the list is then a plain field read.
+
+```surql
+DEFINE TABLE author SCHEMAFULL;
+DEFINE FIELD name ON author TYPE string;
+DEFINE FIELD posts ON author TYPE array<record<post>> DEFAULT [] READONLY;
+
+DEFINE TABLE post SCHEMAFULL;
+DEFINE FIELD title ON post TYPE string;
+DEFINE FIELD author ON post TYPE record<author> REFERENCE ON DELETE CASCADE MATERIALIZE INTO author.posts;
+
+CREATE author:a, author:b SET name = 'x';
+CREATE post:3 SET author = author:a, title = 'c';
+CREATE post:1 SET author = author:a, title = 'a';
+CREATE post:2 SET author = author:b, title = 'b';
+UPDATE post:1 SET author = author:b;
+
+SELECT id, posts FROM author;
+```
+
+```surql title="Output"
+[
+	{ id: author:a, posts: [post:3] },
+	{ id: author:b, posts: [post:1, post:2] }
+]
+```
+
+The list holds each record once, in ascending order of record ID, which is the order a `<~` lookup returns. Creating a referencing record adds it to the list, changing the reference moves it from one list to the other, and deleting it removes it. With a field that holds an array of references, each element is handled in the same way. A `WHERE` condition, such as `MATERIALIZE INTO author.posts WHERE archived != true`, lists only the referencing records for which it is true, and a write that changes the result of the condition adds or removes the record. The condition must not have effects, in the same way as the [clauses that must not have effects](#clauses-that-must-not-have-effects).
+
+The destination field must already be defined on the referenced table, at the top level, as a `READONLY` field of type `array<record<...>>` of the referencing table with no length limit. It cannot be `id`, a `COMPUTED` field or the referencing field itself, and only one `MATERIALIZE INTO` clause can fill it. A statement that does not meet these rules is refused, for example:
+
+```surql title="Error output"
+'An error occurred: MATERIALIZE INTO author.plain requires field `plain` to be READONLY: the engine keeps its list'
+```
+
+Because the destination is `READONLY`, a statement that writes to it directly fails. While the clause fills it, the destination field cannot be redefined, altered or removed, and its table cannot be removed. Removing the clause, for example with `ALTER FIELD ... DROP REFERENCE`, leaves the lists in place as ordinary data.
+
+`DEFINE FIELD` fills the lists from the records that already exist, within the same statement. Updates to a list do not fire the [events](/docs/reference/query-language/statements/define/event) of the referenced table, but live queries and change feeds see them like any other write. An import restores the lists with the records.
+
 ## Defining a `TYPE` for the `id` field
 
 The `DEFINE FIELD` statement can be defined for the `id` field to specify the acceptable type of ID.
@@ -1382,6 +1467,28 @@ CREATE log:[user:one, "info", time::now()] SET message = "Database started";
 	}
 ]
 ```
+
+### Definitions inside the `id` field
+
+<Since v="v4.0.0" />
+
+An object or array ID can also be described with a definition for each of its parts, such as `id.parent` or `id[0]`, after `id` itself is defined. The `TYPE` of each such definition is checked against the matching part of the record ID when the record is created, and a record whose ID does not fit is refused with an error that names the definition:
+
+```surql
+DEFINE TABLE test SCHEMAFULL;
+DEFINE FIELD id ON test TYPE object;
+DEFINE FIELD id.id ON test TYPE string;
+DEFINE FIELD id.parent ON test TYPE record<accounts>;
+
+CREATE test:{ id: 'aaa', parent: accounts:0 };
+CREATE test:{ id: 1, parent: accounts:0 };
+```
+
+```surql title="Error output"
+"Couldn't coerce value for field `id.id` of `test:{ id: 1, parent: accounts:0 }`: Expected `string` but found `1`"
+```
+
+The record ID is checked and stored as it was written. An `ASSERT` on such a definition is checked in the same way, but a `VALUE`, `DEFAULT` or `PERMISSIONS` clause on it has no effect, because a record ID does not change after the record is created.
 
 ### Naming the components of an array id
 
@@ -1476,6 +1583,19 @@ DEFINE FIELD id ON reading TYPE [city: string, time: datetime];
 > [!WARNING]
 > A table whose `id` field names its components cannot be read by an earlier release. Define the names only when every node of the deployment runs SurrealDB 4.0 or later, because a node that runs an earlier release cannot load the table. Nothing is stored differently, so removing the names makes the table readable again.
 
+Removing the names, with `REMOVE FIELD id`, or with `ALTER FIELD` or `DEFINE FIELD OVERWRITE` and a type without names, is refused while the table holds records whose keys are stored in a different order from their record IDs. This happens with a `datetime` component, because a datetime in a key is compared to the whole second, so `d'2024-01-01T00:00:00.500Z'` is stored before `d'2024-01-01T00:00:00Z'`. Only the names let `ORDER BY id` return such records in the right order. Delete those records, or copy them into another table, before removing the names:
+
+```surql
+DEFINE FIELD id ON coarse TYPE [at: datetime];
+CREATE coarse SET at = d'2024-01-01T00:00:00Z';
+CREATE coarse SET at = d'2024-01-01T00:00:00.500Z';
+REMOVE FIELD id ON coarse;
+```
+
+```surql title="Error output"
+"Cannot remove the names from the record id of `coarse`: it holds coarse:[d'2024-01-01T00:00:00.500Z'] and coarse:[d'2024-01-01T00:00:00Z'], whose keys are stored in the opposite order to their record ids, which only the names account for. Delete those records, or copy them into a table with the record id you want, first"
+```
+
 ### `ASSERT` and `DEFAULT` on `id`
 
 <Since v="v3.2.0" />
@@ -1500,6 +1620,7 @@ The `COMPUTED`, `ASSERT`, `VALUE` and `DEFAULT` clauses of a field, and the `PER
 - calls `sequence::nextval()`, except in a `VALUE` or `DEFAULT` clause
 - waits with `SLEEP`
 - calls a JavaScript function, `eval::surql()` or an [extension](/docs/reference/query-language/statements/define/extension) function, whose effects cannot be known when the clause is defined
+- calls a closure whose body is not written in the clause, such as one held in a parameter, or passes one to a function or method such as `array::map()`. A closure written in the clause itself is checked like the rest of the clause, so `array::map([1, 2], |$v| $v * 2)` is allowed
 
 ```surql
 DEFINE FIELD view_count ON article COMPUTED (UPDATE stats:articles SET views += 1);

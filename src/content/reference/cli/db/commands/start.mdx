@@ -109,7 +109,7 @@ surreal db start [OPTIONS] [PATH]
             "name": "--cookie-auth",
             "env": "SURREAL_COOKIE_AUTH",
             "default": "false",
-            "description": "Issue the access token as an `HttpOnly` cookie through `/signin/cookie` and `/signup/cookie`, and accept the cookie from the origins in `--allow-origin`. Requires an `--allow-origin` list without `*`. See [Cookie authentication](/docs/reference/rest-api/http-protocol#cookie-authentication)."
+            "description": "From 4.0.0. Issue the access token as an `HttpOnly` cookie through `/signin/cookie` and `/signup/cookie`, and accept the cookie from the origins in `--allow-origin`. When the record access method has `WITH REFRESH`, the refresh token is issued as a second `HttpOnly` cookie, and `POST /refresh/cookie` rotates both. The cookies are `Secure`, so a browser stores them only over HTTPS or on a loopback address. Requires an `--allow-origin` list without `*`. See "Cookie authentication" in the HTTP protocol reference."
         },
         {
             "name": "--temporary-directory",
@@ -121,26 +121,26 @@ surreal db start [OPTIONS] [PATH]
             "name": "--allow-experimental",
             "value": "<TARGETS>",
             "env": "SURREAL_CAPS_ALLOW_EXPERIMENTAL",
-            "description": "Experimental capabilities to enable, as a comma-separated list. Possible values: `files`, `surrealism`. Takes several values, so use `--allow-experimental=files,surrealism` when a storage path follows it."
+            "description": "Experimental capabilities to enable, as a comma-separated list. Possible values: `files`, `surrealism`, `kvexport`. Takes several values, so use `--allow-experimental=files,surrealism` when a storage path follows it."
         },
         {
             "name": "--durable-sessions",
             "env": "SURREAL_DURABLE_SESSIONS",
-            "description": "Whether to persist client-attached HTTP RPC sessions in the datastore. Off by default."
+            "description": "Has no effect from 4.0.0, where every attached HTTP RPC session is stored in the datastore. The flag is still accepted, and logs a deprecation warning. Before 4.0.0 it turns on durable sessions, which are off by default."
         },
         {
             "name": "--durable-session-ttl",
             "value": "<DURABLE_SESSION_TTL>",
             "default": "24h",
             "env": "SURREAL_DURABLE_SESSION_TTL",
-            "description": "Idle lifetime of a persisted HTTP RPC session before it expires. Each use refreshes the expiry."
+            "description": "Idle lifetime of an attached HTTP RPC session before it expires. Each use refreshes the expiry."
         },
         {
             "name": "--durable-session-gc-interval",
             "value": "<DURABLE_SESSION_GC_INTERVAL>",
-            "default": "60s",
+            "default": "1h",
             "env": "SURREAL_DURABLE_SESSION_GC_INTERVAL",
-            "description": "Interval for purging expired durable HTTP RPC sessions. Set `0` to disable the sweep."
+            "description": "Interval for purging expired attached HTTP RPC sessions from the datastore. Set `0` to disable the sweep. The default is `60s` before 4.0.0."
         },
         {
             "name": "--log",
@@ -201,7 +201,7 @@ Arguments for persistent backends are a combination of the backend name, a `:` o
 - `surrealkv` for SurrealKV, the on-disk backend
 - `tikv` for TiKV
 
-SurrealDB 4.0 removed the `rocksdb` and `indxdb` backends. A path that names either fails with ``The `rocksdb://` scheme is no longer supported; use `surrealkv://` instead``, and starting the server with `surrealkv://` on a RocksDB data directory converts it. See [Moving a RocksDB database to SurrealKV](/docs/manage/self-hosted/deployment-models#moving-a-rocksdb-database-to-surrealkv).
+SurrealDB 4.0 removed the `rocksdb` and `indxdb` backends. The `rocksdb://` and `indxdb://` schemes are kept as deprecated spellings of `surrealkv://`: a path that names either is opened with SurrealKV, and the server logs a warning to use `surrealkv://` instead. Starting the server on a RocksDB data directory, with either scheme, converts it to SurrealKV. See [Moving a RocksDB database to SurrealKV](/docs/manage/self-hosted/deployment-models#moving-a-rocksdb-database-to-surrealkv).
 
 </TabItem>
 <TabItem label="Before SurrealDB 4.0">
@@ -498,6 +498,7 @@ surreal db start surrealkv:mydatabase.db --allow-experimental surrealism,files
 | --- | --- |
 | [DEFINE BUCKET](/docs/reference/query-language/statements/define/bucket) | `files` |
 | [DEFINE EXTENSION](/docs/reference/query-language/statements/define/extension) | `surrealism` |
+| The `POST /kvexport` HTTP route, which streams the stored keyspace to the root owner | `kvexport` |
 
 ## Identification headers
 
@@ -511,6 +512,25 @@ surreal db start --no-identification-headers
 
 <Since v="v3.2.2" />
 
+<Tabs syncKey="surrealkv-version">
+<TabItem label="SurrealDB 4.0 and later">
+
+Every client-attached session on the HTTP [`/rpc`](/docs/reference/rest-api/rpc-protocol) endpoint is stored in the datastore. A session survives a restart, and any node that shares the same storage can serve it, so a load-balanced deployment does not need sticky routing. Requests from several nodes on the same session can run at the same time: each request writes its changes back only if the stored session has not changed meanwhile, and otherwise merges them onto the newer copy.
+
+A session expires between one and one and a half times `--durable-session-ttl` (default `24h`) after its last request. An expired session is refused when it is loaded. A background task removes expired entries from the datastore (`--durable-session-gc-interval`, default `1h`; set `0` to disable the sweep).
+
+```bash
+surreal db start --durable-session-ttl 12h surrealkv://mydb
+```
+
+The `--durable-sessions` flag and `SURREAL_DURABLE_SESSIONS` are still accepted so that existing configurations keep starting, but have no effect, and the server logs a deprecation warning. Each node keeps at most [`SURREAL_HTTP_MAX_ATTACHED_SESSIONS`](/docs/reference/cli/db/environment-variables#http-server-config) sessions attached through it.
+
+> [!WARNING]
+> The stored session includes its authentication state and is stored **unencrypted** in the datastore.
+
+</TabItem>
+<TabItem label="Before SurrealDB 4.0">
+
 Client-attached sessions on the HTTP [`/rpc`](/docs/reference/rest-api/rpc-protocol) endpoint normally live only in the process memory of the node that created them. After a restart, or when a later request is routed to a different node, the client receives a session-not-found error.
 
 The `--durable-sessions` flag can be used to store those sessions in the datastore so they survive restarts and can be resumed on any node that shares the same storage. Each use refreshes a sliding idle TTL (`--durable-session-ttl`, default `24h`). A background task removes expired entries (`--durable-session-gc-interval`, default `60s`; set `0` to disable the sweep). Expired sessions are still dropped when loaded.
@@ -522,7 +542,10 @@ surreal db start --durable-sessions --durable-session-ttl 12h surrealkv://mydb
 > [!WARNING]
 > The durable copy includes the session's authentication state and is stored **unencrypted** in the datastore. Sticky routing is recommended so a given session is used on one node at a time. Concurrent use from multiple nodes is best-effort.
 
-WebSocket connections keep in-memory sessions only. This mode does not change WebSocket behaviour.
+</TabItem>
+</Tabs>
+
+WebSocket connections keep in-memory sessions only. Durable sessions do not change WebSocket behaviour.
 
 ## Further examples
 
@@ -652,25 +675,20 @@ Database:
           [env: SURREAL_TIKV_LOCK_CLEANUP_INTERVAL]
           [default: 60s]
 
-      --durable-sessions
-          Whether to persist client-attached HTTP RPC sessions in the datastore so they survive server restarts and can be resumed on any
-          cluster node. Intended for deployments that route a given session to one node at a time (sticky routing / one runtime per
-          session); a session used concurrently from multiple nodes is best-effort. The durable copy contains the session's authentication
-          state, stored unencrypted in the datastore
-
-          [env: SURREAL_DURABLE_SESSIONS]
-
       --durable-session-ttl <DURABLE_SESSION_TTL>
-          How long a persisted RPC session survives without being used; each use refreshes the expiry
+          How long an attached HTTP RPC session survives without being used: it expires between one and one and a half times this long after
+          its last request. Attached sessions are stored in the datastore, including their authentication state, so they survive restarts
+          and any node can serve them
 
           [env: SURREAL_DURABLE_SESSION_TTL]
           [default: 24h]
 
       --durable-session-gc-interval <DURABLE_SESSION_GC_INTERVAL>
-          The interval at which expired persisted RPC sessions are purged (0 to disable)
+          The interval at which expired attached HTTP RPC sessions are purged from the datastore (0 to disable). An expired session is
+          refused whether or not it has been purged
 
           [env: SURREAL_DURABLE_SESSION_GC_INTERVAL]
-          [default: 60s]
+          [default: 1h]
 
       --query-timeout <QUERY_TIMEOUT>
           The maximum duration that a set of statements can run for

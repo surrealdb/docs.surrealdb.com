@@ -10,11 +10,11 @@ priority: 1
 <Since v="v3.3.0" />
 
 > [!NOTE]
-> The name “Postgres protocol” describes the **transport** layer, not the query dialect. Support for ANSI SQL is not yet present.
+> The name “Postgres protocol” describes the **transport** layer, not the query dialect. A connection runs SurrealQL unless it selects another dialect. From SurrealDB 4.0, it can select the [PostgreSQL SQL dialect](#postgresql-sql-optional-dialect). Before 4.0, ANSI SQL is not supported.
 
 The Postgres wire protocol listener lets **any Postgres client** - `psql`, JDBC, `tokio-postgres`, Npgsql, and similar tools - connect to SurrealDB on a TCP port and run queries. The server speaks **Postgres protocol v3.0** (simple and extended query flows, prepared statements, interactive transactions, cancellation, optional TLS). 
 
-ANSI SQL is **not yet supported** over the Postgres wire protocol. Clients can currently send SurrealQL by default, or ISO GQL (Cypher Query Language) when the session dialect is chosen.
+Clients send SurrealQL by default. When the session dialect is chosen, they can send ISO GQL (Cypher Query Language), or from SurrealDB 4.0 the PostgreSQL dialect of SQL. Before SurrealDB 4.0, ANSI SQL is not supported over the Postgres wire protocol.
 
 This feature ships with builds that include the `postgres` server feature (enabled in the default feature set). It is opt-in at runtime: the listener starts only when you pass [`--postgres-bind`](/docs/reference/cli/db/commands/start) via the `surreal db start` command.
 
@@ -34,18 +34,25 @@ The following chart shows features currently available, along with those that ar
 
 | Included | Not yet included |
 | --- | --- |
-| Simple query protocol (`Q` messages) | ANSI SQL translation |
-| Extended query protocol (Parse / Bind / Execute / Describe / Sync) | `pg_catalog` emulation (needed for some GUIs such as DBeaver, and for the psqlODBC ODBC driver, which queries `pg_type` while it connects) |
-| Cleartext password auth (existing IAM path) | MD5 auth (legacy Postgres; not planned) |
-| Namespace/database via startup `database=ns/db` | `COPY` |
-| Session `USE` / `LET` persistence | `LIVE` queries over Postgres |
-| Interactive `BEGIN` / `COMMIT` / `ROLLBACK` | GQL inside an open interactive transaction |
-| Dialect switch: SurrealQL (default) or ISO GQL (Cypher Query Language) | Full static typing for every `prepare` shape |
+| Simple query protocol (`Q` messages) | MD5 auth (legacy Postgres; not planned) |
+| Extended query protocol (Parse / Bind / Execute / Describe / Sync) | `LIVE` queries over Postgres |
+| Cleartext password auth (existing IAM path) | GQL inside an open interactive transaction |
+| Namespace/database via startup `database=ns/db` | Full static typing for every `prepare` shape |
+| Session `USE` / `LET` persistence | Execution of SQL window functions (`OVER (...)`) |
+| Interactive `BEGIN` / `COMMIT` / `ROLLBACK` | `UPDATE ... FROM` and `DELETE ... USING` |
+| Dialect switch: SurrealQL (default) or ISO GQL (Cypher Query Language) | |
 | SCRAM-SHA-256 auth over SASL (when the user has SCRAM verifier material - see [Authentication](#authentication)) | |
 | Positional parameters (`$1` → `$_1` rewrite) | |
 | Typed result columns inferred from values | |
 | TLS via existing `--web-crt` / `--web-key` | |
 | Query cancellation (`CancelRequest`) | |
+| From 4.0: the PostgreSQL SQL dialect (`SET dialect = 'pgsql'`) | |
+| From 4.0, in the PostgreSQL dialect: `pg_catalog` and `information_schema` relations for clients that inspect the schema | |
+| From 4.0, in the PostgreSQL dialect: `COPY ... FROM STDIN` and `COPY ... TO STDOUT`, in text and CSV formats | |
+| From 4.0: `SAVEPOINT`, `SET LOCAL`, `SHOW` and `RESET` | |
+| From 4.0: a SurrealDB token sent as the password | |
+
+Before SurrealDB 4.0, ANSI SQL translation, `pg_catalog` emulation (needed for some GUIs such as DBeaver, and for the psqlODBC ODBC driver, which queries `pg_type` while it connects) and `COPY` are not available.
 
 ## Start the listener
 
@@ -103,15 +110,23 @@ Users defined with **`PASSHASH` only** have no SCRAM material (no plaintext was 
 
 Root credentials created via **`surreal db start --user` / `--pass`** work on the Postgres port the same way as other IAM users once SCRAM material exists for that account.
 
+### Tokens as passwords
+
+<Since v="v4.0.0" />
+
+A client can also send a token that SurrealDB issued, such as the token a [record user](/docs/reference/query-language/statements/define/access/record) receives from `signin`, as the password of a cleartext password exchange. The connection then runs as the user the token names, so table `PERMISSIONS` apply to a record user's queries. `SET ROLE` and the `request.jwt.claims` setting can only narrow the privileges of the session, and an attempt to widen them fails with **`42501`**.
+
 ### TLS
 
 SCRAM avoids sending the password in the clear during authentication, but **TLS** (`--web-crt` and `--web-key`) is still recommended in production to encrypt the whole session. The server logs a warning when Postgres is served in plaintext without TLS configured.
+
+Over TLS, the Postgres port advertises the `postgresql` application protocol (ALPN), which `psql` 17 and other clients built on libpq 17 or later offer, so they connect with `sslmode=require`. A client that offers only HTTP protocols, such as `h2` and `http/1.1`, is refused during the TLS handshake. Before SurrealDB 4.0, the port advertised the HTTP protocols of the web server, and a TLS connection from `psql` 17 or later failed with `tlsv1 alert no application protocol`.
 
 Failed auth returns **`28P01`** without user enumeration.
 
 ## Coming from Postgres and SQL
 
-The connection speaks **Postgres wire protocol**, but the query language is **SurrealQL** (with [ISO GQL (Cypher Query Language)](#iso-gql-cypher-query-language-optional-dialect) as an optional alternative). The server does **not** yet translate ANSI SQL. If you know Postgres or write SQL for BI tools every day, that background still helps (many SurrealQL queries look and behave like SQL) but you are learning **SurrealQL**, not sending Postgres queries verbatim.
+The connection speaks **Postgres wire protocol**, but the default query language is **SurrealQL** (with [ISO GQL (Cypher Query Language)](#iso-gql-cypher-query-language-optional-dialect) as an optional alternative). From SurrealDB 4.0, a connection can select the [PostgreSQL SQL dialect](#postgresql-sql-optional-dialect) to send PostgreSQL queries. Before 4.0, the server does **not** translate ANSI SQL. This section describes the default SurrealQL dialect. If you know Postgres or write SQL for BI tools every day, that background still helps (many SurrealQL queries look and behave like SQL) but you are learning **SurrealQL**, not sending Postgres queries verbatim.
 
 ### Try it with `psql`
 
@@ -168,8 +183,8 @@ Many BI products (Metabase, Superset, Grafana Postgres data sources, and similar
 | **Native / custom SQL** query editor | Yes | Write **SurrealQL** in the tool’s SQL box. This is the main BI path today. |
 | **`psql`-style exploration** | Yes | Ad hoc SELECT, GROUP BY, filters - good for learning SurrealQL. |
 | **Drag-and-drop chart builder** | Limited | Tools that auto-generate SQL expect ANSI SQL and often query `information_schema` or `pg_catalog`. |
-| **Schema browser / table picker** | No | [`pg_catalog` emulation](#included-features) is not yet available. |
-| **Paste arbitrary Postgres SQL** | No | No SQL-to-SurrealQL translation yet. Similar-looking SELECTs may work; Postgres-specific syntax will not. |
+| **Schema browser / table picker** | From 4.0, with the PostgreSQL dialect | The `pg_catalog` and `information_schema` relations that tools read are available in the [PostgreSQL dialect](#postgresql-sql-optional-dialect). Before 4.0, they are not available. |
+| **Paste arbitrary Postgres SQL** | From 4.0, with the PostgreSQL dialect | Select the [PostgreSQL dialect](#postgresql-sql-optional-dialect) for the connection. Before 4.0, there is no SQL-to-SurrealQL translation: similar-looking SELECTs may work, and Postgres-specific syntax will not. |
 
 Configure the Postgres data source with your SurrealDB host and `--postgres-bind` port, set database to `your_ns/your_db`, then open the tool’s **SQL** or **Native query** mode and paste SurrealQL.
 
@@ -185,6 +200,30 @@ SELECT * FROM person;
 ```
 
 `USE ns/db` and `LET` persist for the lifetime of the connection, as on other surfaces.
+
+### PostgreSQL SQL (optional dialect)
+
+<Since v="v4.0.0" />
+
+A connection can switch to the PostgreSQL dialect of SQL, so that queries written for PostgreSQL, and the SQL that drivers, ORMs and BI tools generate, run against SurrealDB tables. Select it at connect time with `options=-c dialect=pgsql`, or on an open connection with `SET dialect = 'pgsql'`. The names `postgres`, `postgresql` and `sql` select the same dialect, and `SET dialect = 'surrealql'` switches back.
+
+```bash
+psql "host=127.0.0.1 port=5432 user=root password=secret dbname=main/main options='-c dialect=pgsql'"
+```
+
+```sql
+CREATE TABLE person (id int PRIMARY KEY, name text, age int);
+INSERT INTO person (id, name, age) VALUES (1, 'Ada', 36), (2, 'Bob', 28);
+SELECT name, age FROM person WHERE age > 30 ORDER BY name;
+```
+
+The dialect is allowed by the same `postgres` route capability as the connection itself, and needs no experimental capability. Some points differ from SurrealQL:
+
+- **Record IDs are keys.** In a result, every record ID is sent as its key, as a SQL client expects a primary or foreign key to be: `person:1` is sent as `1`. The `id` column, a `WHERE id = 1` condition, joins on keys, and a write to a field defined as `record<T>` all use the key.
+- **SQL functions only.** Queries can call the PostgreSQL functions that SurrealDB implements, but no SurrealQL function, such as `http::get` or a `fn::` function.
+- **Schema inspection.** The `pg_catalog` and `information_schema` relations that clients and tools read to list tables and columns are available.
+- **Bulk load and export.** `COPY ... FROM STDIN` and `COPY ... TO STDOUT` move rows in the text and CSV formats.
+- **Not yet supported.** Window functions (`OVER (...)`) are parsed but not executed, and `UPDATE ... FROM` and `DELETE ... USING` are refused with **`0A000`** before they change anything.
 
 ### ISO GQL (Cypher Query Language, optional dialect)
 
@@ -244,7 +283,9 @@ Postgres positional parameters **`$1`, `$2`, …** are rewritten to SurrealQL **
 
 Standalone **`BEGIN`**, **`COMMIT`**, and **`ROLLBACK`** open an interactive transaction on the connection. Ready-for-query status bytes follow Postgres semantics (`I` idle, `T` in transaction, `E` failed transaction). After an error in a transaction block, further commands receive **`25P02`** until `COMMIT` or `ROLLBACK`.
 
-From SurrealDB 4.0, `BEGIN ISOLATION LEVEL` is applied to the transaction. `SERIALIZABLE` opens a [serializable transaction](/docs/learn/querying/concepts-and-guides/transactions#serializable-isolation) on the storage engines that offer one, and fails with **`0A000`** (`feature_not_supported`) on the others. `REPEATABLE READ`, `READ COMMITTED` and `READ UNCOMMITTED` all run at snapshot isolation, which is at least as strong as each of them.
+From SurrealDB 4.0, `BEGIN ISOLATION LEVEL` is applied to the transaction, and so is `BEGIN READ ONLY`. `SERIALIZABLE` opens a [serializable transaction](/docs/learn/querying/concepts-and-guides/transactions#serializable-isolation) on the storage engines that offer one, and fails with **`0A000`** (`feature_not_supported`) on the others. `REPEATABLE READ` runs at snapshot isolation, as it does in PostgreSQL. `READ COMMITTED` and `READ UNCOMMITTED` are refused with **`0A000`**, because a snapshot never sees commits made while the transaction runs, and the same applies when `default_transaction_isolation` is set to either of them. A plain `BEGIN` runs at snapshot isolation.
+
+In the PostgreSQL dialect, `SAVEPOINT`, `RELEASE SAVEPOINT` and `ROLLBACK TO SAVEPOINT` work inside a transaction block, and `SET LOCAL` settings are undone when the transaction or savepoint is rolled back.
 
 **Divergence from Postgres:** SurrealDB **auto-commits each top-level statement** outside an explicit `BEGIN` … `COMMIT` block. For all-or-nothing behaviour, wrap statements in an explicit transaction.
 
@@ -266,6 +307,7 @@ Authentication is described in [Authentication](#authentication). Resource limit
 | [`POST /gql`](/docs/reference/rest-api/http-protocol#gql) | HTTP | ISO GQL (Cypher Query Language) | `curl`, HTTP clients |
 | [RPC](/docs/reference/rest-api/rpc-protocol) | HTTP / WebSocket | SurrealQL (+ RPC methods) | Official SDKs |
 | **Postgres wire** | TCP (Postgres v3) | SurrealQL | `psql`, JDBC, `tokio-postgres`, … |
+| MySQL wire (from 4.0, [`--mysql-bind`](/docs/reference/cli/db/commands/start), in a binary built with the `mysql` feature) | TCP (MySQL protocol) | MySQL SQL | `mysql`, MySQL drivers |
 
 ## Related pages
 

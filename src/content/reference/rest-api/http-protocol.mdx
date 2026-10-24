@@ -86,8 +86,12 @@ You can use the HTTP endpoints to perform the following actions:
             <td scope="row" data-label="Description">Signs up like <code>POST /signup</code>, and returns the token in an <code>HttpOnly</code> cookie (requires <code>--cookie-auth</code>)</td>
         </tr>
         <tr>
+            <td scope="row" data-label="Function"><a href="#refresh-cookie"><code>POST /refresh/cookie</code></a></td>
+            <td scope="row" data-label="Description">Exchanges the refresh cookie for a new access cookie and refresh cookie (requires <code>--cookie-auth</code>)</td>
+        </tr>
+        <tr>
             <td scope="row" data-label="Function"><a href="#signout"><code>POST /signout</code></a></td>
-            <td scope="row" data-label="Description">Clears the session cookie (requires <code>--cookie-auth</code>)</td>
+            <td scope="row" data-label="Description">Revokes the refresh token and clears the session cookies (requires <code>--cookie-auth</code>)</td>
         </tr>
         <tr>
             <td scope="row" data-label="Function"><a href="#get-table"><code>GET /key/:table</code></a></td>
@@ -227,12 +231,13 @@ The rules for the cookie are as follows:
 - **Origins.** The server reads the cookie only from a request whose `Origin` header exactly matches an entry in `--allow-origin`, or which sends `Sec-Fetch-Site: same-origin`. Another subdomain, scheme or port does not match. The same check applies to WebSocket connections on `/rpc` and `/sql`.
 - **A cookie that is not accepted.** A cookie from an origin that is not allowed is ignored, and the request runs as if it had no credentials. A cookie whose token fails verification, for example because it has expired, is also ignored, and the response clears it.
 - **`Authorization` first.** A request that sends an `Authorization` header is authenticated with that header, and the cookie is not read.
-- **Lifetime.** `Max-Age` is the time until the token or the session expires, whichever comes first. When neither the token nor the session expires, no cookie is issued, and the request fails with `A session cookie cannot be issued because the session has no expiry`. No refresh token is issued, so the application signs in again when the token expires. [`POST /signout`](#signout) clears the cookie.
+- **Lifetime.** `Max-Age` is the time until the token or the session expires, whichever comes first. When neither the token nor the session expires, no cookie is issued, and the request fails with `A session cookie cannot be issued because the session has no expiry`. [`POST /signout`](#signout) clears the cookie.
+- **Refresh cookie.** When a record user signs in or signs up through a [record access method](/docs/reference/query-language/statements/define/access/record) defined `WITH REFRESH`, the response also sets a `surreal_refresh` cookie with the same attributes. Its `Max-Age` is the duration of the access method's refresh grant, and no refresh cookie is issued when the grant does not expire. [`POST /refresh/cookie`](#refresh-cookie) exchanges it for a new access cookie and a new refresh cookie, so the application does not have to sign in again when the access token expires. The server never authenticates a request with the refresh cookie itself. Without a refresh cookie, the application signs in again when the token expires.
 - **HTTPS.** The cookie is `Secure`, so a browser stores it only over HTTPS or on a loopback address such as `localhost`.
-- **Status codes.** Without `--cookie-auth`, `/signin/cookie`, `/signup/cookie` and `/signout` answer `404`. With it, a request to one of them from an origin that is not allowed, or with no `Origin` header, answers `403` with the message `The request origin is not allowed to use cookie authentication`.
+- **Status codes.** Without `--cookie-auth`, `/signin/cookie`, `/signup/cookie`, `/refresh/cookie` and `/signout` answer `404`. With it, a request to one of them from an origin that is not allowed, or with no `Origin` header, answers `403` with the message `The request origin is not allowed to use cookie authentication`.
 
 > [!NOTE]
-> The `surreal_token` cookie is removed from `$request.headers` in a [`DEFINE API`](/docs/reference/query-language/statements/define/api) handler. Other cookies in the request stay.
+> The `surreal_token` and `surreal_refresh` cookies are removed from `$request.headers` in a [`DEFINE API`](/docs/reference/query-language/statements/define/api) handler. Other cookies in the request stay.
 
 ## Request size limits
 
@@ -296,6 +301,25 @@ When the limit ends a request to `POST /sql` or `POST /gql`, the response is `50
 ```
 
 A `/graphql` request that runs out of time returns a GraphQL response whose error message reads `The GraphQL request was not executed because it exceeded the timeout: 5s`. A `POST /rpc` call returns an RPC error response with the message `The query was not executed because it exceeded the timeout: 5s`, and the `/sql` WebSocket sends the same message as text.
+
+<br />
+
+## Memory pressure
+
+<Since v="v3.3.5" />
+
+When the server is started with [`SURREAL_MEMORY_THRESHOLD`](/docs/reference/cli/db/environment-variables#limits-config) and its tracked memory is above that size, `POST /rpc` refuses a request before it reads the body. The response is `503 Service Unavailable` with a `Retry-After: 1` header, so load balancers and clients can retry it once memory is released:
+
+```json title="Response"
+{
+	"code": 503,
+	"details": "Service unavailable",
+	"description": "The server is under memory pressure and refused this request. Retry shortly.",
+	"information": "..."
+}
+```
+
+Before SurrealDB 3.3.5, the same refusal was answered with `400 Bad Request`.
 
 <br />
 
@@ -1148,11 +1172,37 @@ set-cookie: surreal_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9...; HttpOnly; Sec
 {"code":200,"details":"Authentication succeeded"}
 ```
 
+## `POST /refresh/cookie` {#refresh-cookie}
+
+<Since v="v4.0.0" />
+
+This endpoint exchanges the `surreal_refresh` cookie that [`POST /signin/cookie`](#signin-cookie) or [`POST /signup/cookie`](#signup-cookie) set for a new `surreal_token` cookie and a new `surreal_refresh` cookie. The request needs no body. The server provides the endpoint only when it is started with `--cookie-auth`, and the request has to come from an allowed origin. See [Cookie authentication](#cookie-authentication).
+
+A refresh token can be used once. If the cookie is missing, or its refresh token has expired, has been revoked or has already been used, the endpoint answers `401` and does not change any cookie. Because each refresh token can be used once, two refreshes sent at the same time, for example from two tabs, cannot both succeed, so an application should send one refresh at a time.
+
+The endpoint shares its [authentication rate limit](/docs/reference/cli/db/environment-variables#authentication-rate-limiting-environment-variables) budget with `/signin`.
+
+### Example usage
+
+```bash title="Request"
+curl -i -X POST -H "Origin: https://app.example.com" -H "Accept: application/json" -b "surreal_refresh=..." https://db.example.com/refresh/cookie
+```
+
+```text title="Response"
+HTTP/1.1 200 OK
+set-cookie: surreal_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9...; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=900
+set-cookie: surreal_refresh=...; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=2592000
+
+{"code":200,"details":"Authentication succeeded"}
+```
+
 ## `POST /signout` {#signout}
 
 <Since v="v4.0.0" />
 
-This endpoint clears the `surreal_token` cookie that [`POST /signin/cookie`](#signin-cookie) or [`POST /signup/cookie`](#signup-cookie) set. The server provides the endpoint only when it is started with `--cookie-auth`, and the request has to come from an allowed origin. See [Cookie authentication](#cookie-authentication).
+This endpoint clears the `surreal_token` and `surreal_refresh` cookies that [`POST /signin/cookie`](#signin-cookie), [`POST /signup/cookie`](#signup-cookie) or [`POST /refresh/cookie`](#refresh-cookie) set. When the request carries a refresh cookie whose refresh token is valid, the server also revokes that refresh token, so it cannot be used again. The cookies are cleared whether or not the revocation succeeds. The server provides the endpoint only when it is started with `--cookie-auth`, and the request has to come from an allowed origin. See [Cookie authentication](#cookie-authentication).
+
+The endpoint shares its [authentication rate limit](/docs/reference/cli/db/environment-variables#authentication-rate-limiting-environment-variables) budget with `/signin`.
 
 ### Example usage
 
@@ -1163,6 +1213,7 @@ curl -i -X POST -H "Origin: https://app.example.com" https://db.example.com/sign
 ```text title="Response"
 HTTP/1.1 200 OK
 set-cookie: surreal_token=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0
+set-cookie: surreal_refresh=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0
 ```
 
 <br />
