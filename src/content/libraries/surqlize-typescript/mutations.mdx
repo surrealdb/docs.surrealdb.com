@@ -1,0 +1,339 @@
+---
+position: 6
+title: Mutations
+description: Write data with Surqlize using create, insert, update, upsert and delete, choose between set, content, merge, replace and patch, use dotted keys and the += and -= operators, control what a write returns with return(), and see how each write method types its result.
+---
+
+# Mutations
+
+Surqlize has a query builder for each SurrealQL write statement: `create`, `insert`, `update`, `upsert` and `delete`. Creating graph edges with `relate` is covered in [edges and graph](/docs/libraries/surqlize-typescript/edges-and-graph).
+
+Like `select`, each one is an immutable builder that runs when you await it. A write resolves to an array unless you add `.only()`.
+
+The examples on this page use the tables below, with `db` created as described in [connections](/docs/libraries/surqlize-typescript/connections).
+
+```ts title="Example schema"
+import { orm, t, table } from "surqlize";
+
+const user = table("user", {
+    name: t.object({ first: t.string(), last: t.string() }),
+    email: t.string(),
+    age: t.number(),
+    role: t.union([t.literal("admin"), t.literal("moderator"), t.literal("member")]).default("member"),
+    tags: t.array(t.string()).default([]),
+    created: t.date().default(() => new Date()),
+    lastSeen: t.option(t.date()),
+});
+
+const post = table("post", {
+    title: t.string(),
+    content: t.string(),
+    author: t.record("user"),
+    tags: t.array(t.string()).default([]),
+    created: t.date().default(() => new Date()),
+});
+
+const pageview = table("pageview", {
+    count: t.number(),
+    lastViewed: t.date(),
+});
+
+const db = orm(surreal, user, post, pageview);
+```
+
+## How to write data
+
+The statements that write a record share the same methods for supplying data. They differ in what the data replaces and in how strictly the type checker treats missing fields.
+
+| Method | Required fields | Type of the argument |
+| ------ | --------------- | -------------------- |
+| `.content()` | Enforced on `create`, optional on `update` and `upsert` | The record |
+| `.set()` | Not enforced | A partial record, per field. The `+=` and `-=` operators work. |
+| `.merge()` | Not enforced | A partial record |
+| `.replace()` | Not enforced | A partial record |
+| `.patch()` | Not checked at all | JSON Patch operations, with the `path` as a plain string |
+
+On `create`, only `.content()` requires the full record. Its input type is every field of the table, except `id` and computed fields, and except the fields that can be left out: fields with a `.default()` and `option<...>` fields. The other methods mirror SurrealQL and leave the rest to the database. Use `.content()` when you want the compiler to enforce required fields.
+
+A query can use one of these methods only. Calling `.content()` after `.set()` throws an `OrmError`.
+
+With [runtime validation](/docs/libraries/surqlize-typescript/validation) turned on, `.patch()` is not checked, and the other methods are checked as described on that page.
+
+Without runtime validation, a `create()` that leaves out a required field still succeeds, and the record is stored as written. A later `select()` of that record throws a `TypeParseError`, because `select()` parses each record in full. Runtime validation rejects such a write before it is sent. See [what a write returns](#what-a-write-returns) for how each method types its result.
+
+## Create
+
+`create()` makes a new record with a generated id, or with the id you pass as the second argument. Fields with a `.default()` that you leave out are filled in, except by `.replace()` and `.patch()`. See [schema](/docs/libraries/surqlize-typescript/schema) for how defaults work.
+
+```ts title="Create records"
+import { RecordId } from "surrealdb";
+
+const [alice] = await db.create("user", "alice").content({
+    name: { first: "Alice", last: "Smith" },
+    email: "alice@example.com",
+    age: 30,
+});
+
+const hello = await db.create("post").only().content({
+    title: "Hello world",
+    content: "First post",
+    author: new RecordId("user", "alice"),
+});
+
+const [ada] = await db.create("user", "ada").set({
+    name: { first: "Ada", last: "Lovelace" },
+    email: "ada@example.com",
+    age: 36,
+});
+```
+
+Add `.only()` to get one object instead of an array.
+
+```ts title="Create a single object"
+const grace = await db.create("user", "grace").only().set({
+    name: { first: "Grace", last: "Hopper" },
+    email: "grace@example.com",
+    age: 85,
+});
+// grace: the user record, not an array
+```
+
+## Insert
+
+`insert()` writes one record or many in a single `INSERT` statement. Pass the data as an object or an array of objects, or use `.fields()` and `.values()` for the tuple form. The data argument is not type-checked at compile time, so turn on [runtime validation](/docs/libraries/surqlize-typescript/validation) to check it.
+
+```ts title="Insert records"
+await db.insert("user", {
+    name: { first: "Alice", last: "Jones" },
+    email: "alice.jones@example.com",
+    age: 30,
+});
+
+await db.insert("user", [
+    { name: { first: "Bob", last: "Jones" }, email: "bob@example.com", age: 25 },
+    { name: { first: "Charlie", last: "Brown" }, email: "charlie@example.com", age: 28 },
+]);
+
+await db
+    .insert("user")
+    .fields(["name", "email", "age"])
+    .values(
+        [{ first: "Dana", last: "White" }, "dana@example.com", 41],
+        [{ first: "Eve", last: "Black" }, "eve@example.com", 33],
+    );
+```
+
+### Handling conflicts
+
+When a record with the same id already exists, `insert()` rejects with the SDK's `AlreadyExistsError`. `.ignore()` skips the record without an error instead, and `.onDuplicate()` updates it. `.onDuplicate()` takes the same values as `.set()`, including the `+=` and `-=` operators. A query cannot use both.
+
+```ts title="Ignore or update duplicates"
+await db
+    .insert("user", {
+        id: "ada",
+        name: { first: "Ada", last: "Lovelace" },
+        email: "ada@example.com",
+        age: 36,
+    })
+    .ignore();
+
+await db
+    .insert("user", {
+        id: "ada",
+        name: { first: "Ada", last: "Lovelace" },
+        email: "ada@example.com",
+        age: 36,
+    })
+    .onDuplicate({
+        age: { "+=": 1 },
+        lastSeen: new Date(),
+    });
+```
+
+## Update
+
+`update()` changes one record, selected by id, or every record that matches a `where()`. Without either, it changes every record in the table. `update()` does not apply `.default()` values.
+
+```ts title="Update records"
+await db.update("user", "ada").set({ age: 37 });
+
+await db
+    .update("user")
+    .where((user) => user.age.lt(18))
+    .set({ role: "member" });
+
+await db.update("user", "ada").merge({ email: "ada@example.org" });
+```
+
+`.content()` replaces the whole record, and `.patch()` applies [JSON Patch](https://jsonpatch.com) operations. `.unset()` removes fields.
+
+```ts title="Content, patch and unset"
+await db.update("user", "ada").content({
+    name: { first: "Ada", last: "Lovelace" },
+    email: "ada@example.com",
+    age: 37,
+    role: "member",
+    tags: [],
+    created: new Date(),
+});
+
+await db.update("user", "ada").patch([
+    { op: "replace", path: "/age", value: 38 },
+    { op: "remove", path: "/lastSeen" },
+]);
+
+await db.update("user", "ada").set({ age: 39 }).unset(["lastSeen"]);
+```
+
+SurrealQL does not allow `SET` and `UNSET` in the same statement, so when `.unset()` follows `.set()`, Surqlize writes the unset fields as `field = NONE` inside the `SET` clause.
+
+### Operators
+
+The `+=` and `-=` operators change a value in the database, so you do not read it first. They work on numbers and arrays.
+
+```ts title="Increment and append"
+await db.update("user", "ada").set({
+    age: { "+=": 1 },
+    tags: { "+=": ["developer"] },
+});
+
+await db.update("user", "ada").set({
+    tags: { "-=": ["developer"] },
+});
+```
+
+### Dotted keys in set()
+
+`.set()` accepts dotted keys such as `"name.first"`. A dotted key changes one field of a nested object and leaves the other fields of that object as they are.
+
+```ts title="Dotted keys in set()"
+await db.update("user", "ada").set({ "name.first": "Augusta" });
+
+await db.create("user", "byron").set({
+    name: { first: "George", last: "Byron" },
+    email: "byron@example.com",
+    age: 36,
+});
+```
+
+On `create()` and `relate()`, the parent object must be set in full in the same call, as the `name` object is in the second query. A dotted key without its parent in the same call is a type error. At runtime, `.set()` throws an `OrmError` at the call, before anything is sent.
+
+On `update()` and `upsert()`, a dotted key is accepted even when the parent object is missing from the stored record. The query then stores a partial object. Reading the record back with the full schema throws a `TypeParseError`, so set the whole object to repair it.
+
+## Upsert
+
+`upsert()` creates the record if it does not exist and updates it if it does. It takes the same data methods and `where()` as `update()`, except that `where()` takes a callback only. Like `update()`, it does not apply `.default()` values.
+
+```ts title="Upsert records"
+await db.upsert("pageview", "homepage").set({
+    count: { "+=": 1 },
+    lastViewed: new Date(),
+});
+
+await db
+    .upsert("user")
+    .where((user) => user.email.eq("alice@example.com"))
+    .set({ lastSeen: new Date() });
+```
+
+When no record matches the `where()` condition, `upsert()` creates one.
+
+## Delete
+
+`delete()` removes a record by id, or every record that matches a `where()`. Chained `where()` calls are combined with `AND`, and `clearWhere()` removes them all. Without `.return()`, `delete()` resolves to an empty array, or to `undefined` with `.only()`. With `.return()`, it returns the deleted rows.
+
+```ts title="Delete records"
+await db.delete("user", "alice");
+
+await db.delete("user").where((user) => user.age.lt(13));
+```
+
+With `.only()` and `.return("before")`, `delete()` gives back the deleted record as a single object. The record is read as it was before the delete, so only `id` is guaranteed to be present, as described in [what a write returns](#what-a-write-returns).
+
+```ts title="Return the deleted record"
+const deleted = await db.delete("user", "grace").only().return("before");
+// deleted: the user record that was removed, with id always present
+```
+
+A projection reads the deleted record as `$before`. Its fields are typed from the projection, as with `select`.
+
+```ts title="Project the deleted record"
+const removed = await db
+    .delete(hello.id)
+    .return((post) => ({ title: post.title, author: post.author }));
+```
+
+## Choosing what a write returns
+
+`create`, `update`, `upsert` and `insert` return the record after the change by default. `delete` returns no rows by default: an empty array, or `undefined` with `.only()`. `.return()` takes a mode or a projection.
+
+| Argument | Result |
+| -------- | ------ |
+| `"after"` | The record after the change. This is the default for `create`, `update`, `upsert` and `insert`. On `delete()` it gives `undefined` for each deleted record, see below. |
+| `"before"` | The record before the change. Use it with `update`, `upsert` and `delete`. |
+| `"none"` | No rows: an empty array, or `undefined` with `.only()`. This is the default for `delete`. |
+| `"diff"` | On `create`, `update` and `upsert`, a list of JSON Patch operations describing the change. Surqlize does not parse it against the schema. |
+| A callback | A projection, as with [`select`](/docs/libraries/surqlize-typescript/querying#projections-with-return). |
+
+```ts title="Return modes"
+await db.update("user", "ada").set({ age: 38 }).return("none");
+
+const before = await db.update("user", "ada").set({ age: 39 }).return("before");
+
+const projected = await db
+    .update("user", "ada")
+    .set({ age: 40 })
+    .return((user) => ({ name: user.name, age: user.age }));
+```
+
+Every write builder also takes `.timeout()`, which adds the `TIMEOUT` clause that the server enforces. To limit how long the client waits, see [cancellation, timeouts and retries](/docs/libraries/surqlize-typescript/request-options).
+
+## What a write returns
+
+A write returns the fields it knows are present, and the result type follows what was written.
+
+| Write | Fields of the returned record |
+| ----- | ----------------------------- |
+| `create().content()` | Every field |
+| `create().set()` or `.merge()` | `id`, the fields written, fields with a `.default()`, and `option<...>` fields |
+| `create().replace()` | `id`, the fields written, and `option<...>` fields. Defaults are not filled in, so they are not typed as present. |
+| `create()` with no data | `id`, fields with a `.default()`, and `option<...>` fields |
+| `create().patch()` | `id`. Every other field is optional. |
+| `insert()` with data | Every field. The data is not type-checked, so a record that lacks a required field is stored, and reading the result throws a `TypeParseError` unless validation is on. |
+| `insert().onDuplicate()` | `id`. Every other field is optional, because a conflicting record is updated instead of inserted. |
+| `update()` or `upsert()` with `.set()` or `.merge()` | `id` and the fields written. Every other field is optional, because the stored record may hold it. |
+| `update()` or `upsert()` with `.content()` or `.replace()` | `id` and the fields written. The record is replaced, so no other field remains. |
+| `update()` or `upsert()` with `.patch()`, and `.return("before")` | `id`. Every other field is optional. |
+| `delete()` with `.return("before")` | `id`. Every other field is optional, because the stored record may be partial and the delete has already run. |
+| `delete()` with `.return("after")` | `undefined` for each deleted record, because nothing remains after the delete. Use `"before"` to read the deleted record. |
+| `delete()` with a projection | The fields of the projection. |
+| `relate()` with `.return("none")` | No rows: an empty array, or `undefined` with `.only()`. |
+| `relate()` with `.return("before")` | `undefined` for each edge, because a new edge has no before-state. With `.only()`, `undefined`. |
+| `relate()` with `.return("after")`, or with no `.return()` | The edge, typed as a `create()` record would be, with `in` and `out` present. See [edges and graph](/docs/libraries/surqlize-typescript/edges-and-graph). |
+
+A field whose value may be `undefined`, either an optional key or a value typed `T | undefined`, counts as not written, so it is typed as optional. A `.set()` that passes a field as `undefined` does not apply the `.default()` of that field, because the key was supplied.
+
+`.unset()` removes the unset fields from the result type. A `.return()` projection can read only the fields that the result is typed with. After `.onDuplicate()`, an insert may return a record that was updated instead of inserted, so only `id` is typed as present. A table [linked to a class](/docs/libraries/surqlize-typescript/schema) returns instances of its class.
+
+```ts title="Result of a partial write"
+const [babbage] = await db.create("user", "babbage").set({
+    name: { first: "Charles", last: "Babbage" },
+});
+// babbage: id, name, role, tags, created and lastSeen
+// email and age are not typed as present, because the write did not set them
+```
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Runtime validation"
+        description="Check written data against the schema before it is sent."
+        href="/docs/libraries/surqlize-typescript/validation"
+    />
+    <IconBox
+        title="Transactions and batches"
+        description="Apply several writes together."
+        href="/docs/libraries/surqlize-typescript/transactions"
+    />
+</Boxes>
