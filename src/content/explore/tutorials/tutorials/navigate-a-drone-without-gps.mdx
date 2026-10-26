@@ -24,11 +24,11 @@ The demo has three parts, and SurrealDB answers every question in each part with
 
 To compare a photo with the map, the drone does not compare pixels. An image model turns each picture into an embedding: a list of numbers that describes what the picture shows. Two pictures of the same fields, roads and woods give embeddings that point in nearly the same direction, even when the light, the season or the angle differs. A search for the nearest embeddings is therefore a search for the most similar pictures.
 
-On a real drone, the drone's software passes two kinds of value to the database, which runs on the drone itself (see [Run SurrealDB on the drone](#run-surrealdb-on-the-drone)): the embedding of each photo, and its positions and routes as geometry values. Every SurrealDB SDK has geometry types, so a client sends a point or a line as a geometry rather than as a plain object. In this tutorial the photos are already stored in the dataset, so each query reads them from there.
+On a real drone, the drone's software passes two kinds of value to the database, which runs on the drone itself (see [Run SurrealDB on the drone](#run-surrealdb-on-the-drone)): the embedding of each photo, and its positions and routes as geometry values. Every SurrealDB SDK has geometry types, so a client can send a point or a line as a geometry. Before SurrealDB 4.0, send them this way: a geometry operator such as `INSIDE` answers `false` for a plain GeoJSON object rather than raising an error. From 4.0, the operators read a GeoJSON object as the geometry it describes, so either form works. In this tutorial the photos are already stored in the dataset, so each query reads them from there.
 
 ## Requirements
 
-- SurrealDB 3.3 or later. The queries on this page were run on SurrealDB 3.3.4 and 4.0.
+- SurrealDB 3.3 or later. The queries on this page were run on SurrealDB 3.3.4 and 4.0. The `SPATIAL` index in step 3 needs SurrealDB 4.0.
 - The [Surreal CLI](/docs/reference/cli), to start a database and import the dataset.
 
 ## The area and the mission
@@ -193,6 +193,26 @@ The prior was 150 m from the true position each time.
 | Vector search with a prior | 62 m         | 99%          | 98%             |
 
 The tiles are 100 m apart, so a median error of 62 m is close to the best the grid allows.
+
+### Index the tile centres
+
+From SurrealDB 4.0, a `SPATIAL` index on `centre` lets the query answer its distance condition from the index:
+
+<!-- When the browser runs SurrealDB 4.0, add runnable='dataset="/datasets/drone-navigation/schengen.surql"' to this fence. -->
+
+```surql
+DEFINE INDEX tile_centre ON tile FIELDS centre SPATIAL;
+LET $photo = photo:4.embedding;
+LET $prior = photo:4.prior;
+SELECT id, centre, country, vector::distance::knn() AS dist FROM tile
+	WHERE geo::distance(centre, $prior) < 400
+	AND embedding <|3,100|> $photo
+	ORDER BY dist;
+```
+
+The query and its three results are the same as before. The difference is in how SurrealDB finds them. Without the index, the HNSW search checks the distance condition on each tile it visits. With the index, SurrealDB first reads from the index the tiles whose centre is within 400 m of the prior, which is 96 of the 6,962 tiles in the dataset, and the vector search ranks only those. Adding `EXPLAIN` to the query shows the `tile_centre` index scan feeding the `KnnScan` on `tile_embedding`.
+
+The index matters more as the map grows. A map ten times as wide holds a hundred times as many tiles, but the number within 400 m of the prior stays the same, so the work for each photo stays about the same too.
 
 ## 4. Find which country the drone is in
 
