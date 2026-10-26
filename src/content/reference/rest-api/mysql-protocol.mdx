@@ -1,0 +1,191 @@
+---
+position: 6
+title: MySQL wire protocol
+description: "Connect to SurrealDB with the mysql client and MySQL drivers, and run MySQL SQL, SurrealQL or other dialects over the MySQL wire protocol."
+---
+
+# MySQL wire protocol
+
+<Since v="v4.0.0" />
+
+The MySQL wire protocol listener lets a MySQL client, such as the `mysql` command-line client, JDBC through Connector/J, PyMySQL or another MySQL driver, connect to SurrealDB on a TCP port and run queries. A connection runs the MySQL dialect of SQL against SurrealDB tables by default, and can switch to SurrealQL, the [PostgreSQL dialect](/docs/reference/rest-api/postgres-protocol#postgresql-sql-optional-dialect) or ISO GQL. This page covers how to enable the listener, how to connect, and where the MySQL dialect differs from MySQL. The [Postgres wire protocol](/docs/reference/rest-api/postgres-protocol) page covers the equivalent listener for PostgreSQL clients.
+
+## Enable the listener
+
+The listener is part of the `mysql` build feature, which is not in the default feature set. The official binaries, installers and Docker images are built with the default features and do not include it. To use the MySQL wire protocol, build SurrealDB from source with the feature enabled:
+
+```bash
+cargo build --release --features mysql
+```
+
+A binary built with the feature starts the listener when you pass `--mysql-bind` to [`surreal db start`](/docs/reference/cli/db/commands/start). Bind a separate address from the HTTP server:
+
+```bash
+surreal db start --user root --pass secret \
+  --mysql-bind 127.0.0.1:3306 \
+  memory
+```
+
+The environment variable equivalent is `SURREAL_MYSQL_BIND`:
+
+<Tabs syncKey="shell">
+
+<TabItem label="Bash">
+```bash
+export SURREAL_MYSQL_BIND=127.0.0.1:3306
+surreal db start --user root --pass secret memory
+```
+</TabItem>
+
+<TabItem label="PowerShell">
+```powershell
+$env:SURREAL_MYSQL_BIND = "127.0.0.1:3306"
+surreal db start --user root --pass secret memory
+```
+</TabItem>
+</Tabs>
+
+A binary built without the feature exits at startup when `--mysql-bind` is given, with the error `The --mysql-bind option requires a binary built with the 'mysql' feature`.
+
+## Connect with `mysql`
+
+```bash
+mysql -h 127.0.0.1 -P 3306 -u root -psecret -D main/main
+```
+
+The database name selects the namespace and the database as `ns/db`, with a single slash, in the same way as `Surreal-NS` and `Surreal-DB` on HTTP. `USE db` switches to another database in the same namespace.
+
+The server announces itself as MySQL `8.0.35-SurrealDB`, and `SELECT VERSION()` and `SELECT @@version` both return that string.
+
+### Authentication
+
+A client signs in as the root user or as a [database user](/docs/reference/query-language/statements/define/user) with a password. The server accepts the `caching_sha2_password`, `mysql_native_password` and `mysql_clear_password` authentication methods. A sign-in that sends the password needs a TLS connection or a loopback address, such as `127.0.0.1`, and is refused with error `1045` `Authentication requires an encrypted (TLS) connection or loopback` otherwise.
+
+### TLS
+
+The listener uses the certificate and key that `--web-crt` and `--web-key` give the HTTP server. Without them, the listener serves plaintext connections and the server logs a warning. TLS is recommended for any connection that does not come from the same host.
+
+## Query languages
+
+A new connection runs the MySQL dialect. `SET dialect` switches the dialect of an open connection:
+
+| Statement | Dialect |
+| --- | --- |
+| `SET dialect = 'mysql'` (or `'sql'`) | MySQL SQL, the default |
+| `SET dialect = 'surrealql'` | [SurrealQL](/docs/reference/query-language) |
+| `SET dialect = 'pgsql'` (or `'postgres'`, `'postgresql'`) | The [PostgreSQL dialect](/docs/reference/rest-api/postgres-protocol#postgresql-sql-optional-dialect) |
+| `SET dialect = 'gql'` | [ISO GQL (Cypher Query Language)](/docs/learn/querying/gql/overview) |
+
+```sql
+CREATE TABLE person (id INT PRIMARY KEY, name TEXT, age INT);
+INSERT INTO person (id, name, age) VALUES (1, 'Ada', 36), (2, 'Bob', 28);
+SELECT name, age FROM person WHERE age > 30 ORDER BY name;
+
+SET dialect = 'surrealql';
+SELECT * FROM person;
+```
+
+In the MySQL and PostgreSQL dialects, every record ID in a result is sent as its key, as a SQL client expects a primary key to be: `person:1` is sent as `1`.
+
+## The MySQL dialect
+
+The MySQL dialect parses MySQL 8.0 and 8.4 syntax, and runs `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `CREATE TABLE`, `DROP TABLE`, `TRUNCATE` and the statements that drivers send while they connect. Prepared statements, statements sent several at a time, `START TRANSACTION`, `COMMIT`, `ROLLBACK`, `SAVEPOINT` and `SET autocommit` are supported. A statement that names a table in another database is refused.
+
+Many points behave as they do over the PostgreSQL dialect, which shares the same query planner. The [PostgreSQL dialect](/docs/reference/rest-api/postgres-protocol#postgresql-sql-optional-dialect) section describes these in more detail: tables that declare their columns, unqualified columns in a join, `t.*`, `LIKE` patterns, subqueries used as a value, and the limits on how deeply a `FROM` clause can nest. Over this listener, the failures that section describes are reported with the MySQL error numbers listed under [Error codes](#error-codes), and a `FROM` clause that nests too deeply fails with `1064`.
+
+### Transactions and DDL
+
+`START TRANSACTION` or `BEGIN` opens a transaction, and `SET autocommit = 0` makes each statement run in a transaction until `COMMIT`. As in MySQL, a DDL statement (`CREATE`, `ALTER`, `DROP`, `TRUNCATE` or `RENAME`) first commits the open transaction and then runs on its own, so a `ROLLBACK` does not take back a `CREATE TABLE`. This applies only in the MySQL dialect. After `SET dialect = 'pgsql'` or `SET dialect = 'surrealql'`, DDL statements run inside the open transaction, and a `ROLLBACK` takes them back.
+
+`CREATE TABLE` and `DROP TABLE` of several tables are each answered with one OK packet. If one part of the statement fails, nothing of the statement is kept, so `DROP TABLE a, missing` fails and keeps `a`.
+
+`TRUNCATE TABLE t` and `TRUNCATE t` answer with an OK packet that reports 0 affected rows, as a plain statement, as a prepared statement and inside a batch of statements.
+
+### System variables
+
+A `SELECT` of system variables, such as `SELECT @@version, @@sql_mode, @@autocommit`, answers one column for each variable, in the order asked, named by its alias or by the variable. A number is sent as an integer, and other values as text. `@@name`, `@@session.name`, `@@local.name` and `@@global.name` read the same value, in any letter case. A connection with no database chosen can run a `SELECT` of only system variables, which drivers send before they choose a database.
+
+The values are the fixed settings of the server, so a `SET` does not change what `@@name` reads. A name that MySQL 8.4 or 8.0.35 does not have fails with error `1193` `Unknown system variable`. A variable that MySQL has but this server does not model reads as `NULL`, and so do variables that describe the host, such as `@@datadir`, `@@hostname`, `@@port` and `@@version_compile_os`.
+
+### `SHOW` and `DESCRIBE`
+
+`SHOW` and `DESCRIBE` answer with MySQL 8.4's column names, order and types, with one row per table, field, indexed column or database:
+
+| Statement | Answers with |
+| --- | --- |
+| `SHOW TABLES` | The tables of the current database, in a `Tables_in_<db>` column |
+| `SHOW COLUMNS FROM t`, `SHOW FIELDS FROM t`, `DESCRIBE t`, `DESC t` | `Field`, `Type`, `Null`, `Key`, `Default` and `Extra`, one row per field |
+| `SHOW INDEX FROM t`, `SHOW KEYS FROM t` | MySQL's 15 columns, one row per indexed column |
+| `SHOW DATABASES` | The databases of the session's namespace, in a `Database` column |
+| `SHOW VARIABLES` | `Variable_name` and `Value`, for the variables this server models |
+| `SHOW ENGINES`, `SHOW COLLATION`, `SHOW CHARACTER SET` | MySQL's columns |
+| `SHOW STATUS`, `SHOW PROCESSLIST`, `SHOW WARNINGS`, `SHOW ERRORS` | MySQL's columns and no rows |
+
+Each `SHOW` reads under the session's own permissions, and needs a database to be chosen. `SHOW DATABASES` needs permission to view the namespace. A table that does not exist fails, and a `LIKE` pattern is limited to 512 characters. Some answers differ from MySQL:
+
+- Columns and indexes are listed by name, not in the order they were defined.
+- `SHOW CREATE TABLE` returns the SurrealQL definition, not MySQL DDL.
+- With `LIKE`, the first column of `SHOW TABLES` is named `Tables_in_<db>`, where MySQL adds the pattern to the name.
+- `Cardinality` in `SHOW INDEX` is `NULL`.
+- An instance that denies built-in functions refuses these statements.
+
+## Error codes
+
+A failed statement is answered with the error number and SQLSTATE that MySQL 8.4 gives for the same kind of failure, for plain and for prepared statements. Drivers use the number to decide what to do, so PyMySQL, for example, raises `IntegrityError` for a duplicate key. The message text is SurrealDB's own.
+
+| Number | SQLSTATE | Reported when |
+| --- | --- | --- |
+| `1062` | `23000` | A write conflicts with a `UNIQUE` index or a primary key. |
+| `1048` | `23000` | A write gives `NULL` to a field that requires a value. |
+| `1364` | `HY000` | A write leaves out a field that requires a value. |
+| `1366` | `HY000` | A write gives a field a value of another type. |
+| `1146` | `42S02` | The statement names a table that does not exist. |
+| `1054` | `42S22` | The statement names a column that does not exist. |
+| `1050` | `42S01` | `CREATE TABLE` names a table that already exists. |
+| `1305` | `42000` | The statement calls a function that does not exist. |
+| `1142` | `42000` | The user may not run the statement. |
+| `1193` | `HY000` | The statement names a system variable that does not exist. |
+| `3593` | `HY000` | A window function is used where it is not allowed, such as in `WHERE`. |
+| `1213` | `40001` | The transaction conflicts with another transaction. Retry it. |
+| `3024` | `HY000` | The statement exceeds its timeout. |
+| `1235` | `42000` | The statement uses a feature that SurrealDB does not support. |
+| `1644` | `45000` | `THROW` raises an error, or a subquery used as a value returns more than one row. |
+| `1064` | `42000` | The statement cannot be parsed. |
+| `1105` | `HY000` | Any other failure, where MySQL has no number for it. |
+
+The numbers can differ from MySQL's for the same statement:
+
+- Every refused value is `1366`, where MySQL gives `1292` for a value that is not a valid date.
+- SurrealDB refuses some values that MySQL converts, such as `'5'` or `true` for an `INT` column.
+- `1/0` written into an `INT` column is `1366`, where MySQL gives `1365`.
+
+## Not yet supported
+
+The MySQL dialect refuses or differs from MySQL in these places:
+
+- Some DDL statements, such as `CREATE INDEX`, are not yet supported and fail with `1105`.
+- A value too long for a `VARCHAR(n)` column, or out of range for an `INT` column, is accepted.
+- `TRUNCATE` does not restart an `AUTO_INCREMENT` counter. Records that the table's permissions do not let the user delete are kept, and the statement still answers OK.
+- `@@performance_schema` is `0`. `@@session.name` of a variable that is global only reads a value, where MySQL gives error `1238`.
+- `SET GLOBAL timestamp` is error `1235`, where MySQL gives `1228`.
+- A batch of several statements that names an unknown system variable fails as a whole before any statement runs.
+- In a batch of several statements, only the first statement keeps its column names. Unnamed or repeated columns of later statements are named `?column?1`, `?column?2`, and so on.
+- `LIKE ... ESCAPE` is refused, and `e` and `é` are not equal in a comparison.
+- A `?` parameter placeholder is accepted only in a prepared statement.
+
+## Capabilities and security
+
+Connections are gated like other query surfaces:
+
+- **The `mysql` route.** [`--deny-http mysql`](/docs/learn/security/authorization/capabilities#http-routes-and-rpc-methods) refuses every connection to the listener with error `1045`. The route also allows the MySQL and SurrealQL dialects on the listener.
+- **Other dialects.** `SET dialect = 'pgsql'` needs the `postgres` route, and `SET dialect = 'gql'` needs the `gql` route.
+- **Arbitrary queries.** [`--deny-arbitrary-query`](/docs/learn/security/authorization/capabilities#arbitrary-queries) applies to connections on this listener as it does on the other surfaces.
+
+The listener accepts at most 1,024 connections at a time and answers further connections with error `1040` `Too many connections`. A packet is limited to 64 MiB, the value of `@@max_allowed_packet`.
+
+## Related pages
+
+- [Postgres wire protocol](/docs/reference/rest-api/postgres-protocol): the equivalent listener for PostgreSQL clients, and the PostgreSQL dialect
+- [`surreal db start`](/docs/reference/cli/db/commands/start): CLI reference including `--mysql-bind`
+- [Capabilities](/docs/learn/security/authorization/capabilities): lock down arbitrary queries and routes
+- [Migrating from MySQL](/docs/build/migrating/from-other-databases/from-mysql): MySQL data types and their SurrealQL equivalents

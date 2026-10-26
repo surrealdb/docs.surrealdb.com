@@ -217,13 +217,33 @@ INSERT INTO person (id, name, age) VALUES (1, 'Ada', 36), (2, 'Bob', 28);
 SELECT name, age FROM person WHERE age > 30 ORDER BY name;
 ```
 
-The dialect is allowed by the same `postgres` route capability as the connection itself, and needs no experimental capability. Some points differ from SurrealQL:
+The dialect is allowed by the same `postgres` route capability as the connection itself, and needs no experimental capability. Some points differ from SurrealQL or from PostgreSQL:
 
 - **Record IDs are keys.** In a result, every record ID is sent as its key, as a SQL client expects a primary or foreign key to be: `person:1` is sent as `1`. The `id` column, a `WHERE id = 1` condition, joins on keys, and a write to a field defined as `record<T>` all use the key.
 - **SQL functions only.** Queries can call the PostgreSQL functions that SurrealDB implements, but no SurrealQL function, such as `http::get` or a `fn::` function.
 - **Schema inspection.** The `pg_catalog` and `information_schema` relations that clients and tools read to list tables and columns are available.
 - **Bulk load and export.** `COPY ... FROM STDIN` and `COPY ... TO STDOUT` move rows in the text and CSV formats.
-- **Not yet supported.** Window functions (`OVER (...)`) are parsed but not executed, and `UPDATE ... FROM` and `DELETE ... USING` are refused with **`0A000`** before they change anything.
+- **Declared columns.** A table that declares its columns, with `CREATE TABLE` or `DEFINE TABLE ... SCHEMAFULL`, is checked as PostgreSQL checks a table. A column that the table does not declare fails with **`42703`**, `SELECT *` returns the declared columns, with `NULL` for an optional column that a record does not hold, and drivers are told the declared types. `*` lists `id` first and then the other columns by name, not in the order they were declared. These checks apply to users who may view table definitions. For a record user, a column that the table does not declare reads as `NULL`, and `*` lists the fields that the records hold.
+- **Tables without declared columns.** A schemaless table has no fixed list of columns, so a column that none of its records hold reads as `NULL` instead of failing. In a join, a column named without its table is read from the first table of the join that has a value for it, and a name that two tables hold is not refused as ambiguous. Qualify the column with its table, as in `b.w`, to choose the table. `id` without a table is always the first table's `id`. In a `FROM` clause of more than 64 tables, a column named without its table fails with **`0A000`** and must be qualified.
+- **`t.*`.** `SELECT u.* FROM users u` returns what `SELECT *` returns, over a table or a derived table. In a join, `t.*` of a table whose columns are not declared fails with **`0A000`**.
+- **`LIKE` patterns.** A pattern is read the same way whether it is written in the query, bound as a parameter (`LIKE $1`) or read from a column. `\%` and `\_` match a literal `%` and `_`, and `%` and `_` also match a line break. A pattern that is not written in the query is converted with the `string::replace` and `string::concat` functions, so an instance that [restricts functions](/docs/learn/security/authorization/capabilities#functions) must allow those two. A pattern too long to compile fails with `LIKE pattern is too complex`.
+- **Subqueries used as a value.** A subquery used as a single value, as in `WHERE dept = (SELECT id FROM dept)`, fails when it returns more than one row, and fails when it selects more than one column. Add `ORDER BY ... LIMIT 1` or a narrower `WHERE` to choose one row. The error is reported under SQLSTATE **`P0001`**, not PostgreSQL's `21000`. `IN`, `= ANY` and `EXISTS` accept any number of rows.
+- **Schema changes are all or nothing.** `CREATE TABLE`, `DROP TABLE` of several tables and `ALTER TABLE` with several actions are each answered once. If one part fails, nothing of the statement is kept, so `DROP TABLE a, missing` fails and keeps `a`.
+- **Nesting limits.** A `FROM` clause that lists more than about 120 tables, nests a join in more than about 120 parentheses, or nests subqueries more than about 60 deep is refused with **`42601`** `parser recursion depth limit exceeded`.
+
+#### Not yet supported
+
+The PostgreSQL dialect refuses or differs from PostgreSQL in these places:
+
+- Window functions (`OVER (...)`) are parsed but not executed.
+- A write that uses a clause the dialect cannot run, such as `UPDATE ... FROM`, `DELETE ... USING`, or an `INSERT ... SELECT` that reads from a join or a subquery, is refused with **`0A000`** before it changes anything.
+- A column in the select list or in `HAVING` that is neither grouped nor aggregated is not refused, and in the select list it returns the values of its group as an array. An aggregate in `WHERE` is not refused either.
+- `LIKE ... ESCAPE` is refused. A trailing backslash in a pattern matches a backslash.
+- `ALL` and `ANY` comparisons over a subquery that has `GROUP BY`, `HAVING`, `LIMIT` or `OFFSET`, or is a set operation, are refused. `SELECT DISTINCT` or `UNION` inside a subquery used as a value can report more than one row where PostgreSQL reports one.
+- `t.*` inside a function call (`count(t.*)`, `row_to_json(t.*)`), in `RETURNING`, in `CREATE VIEW`, and beside another item in the query of an `INSERT` is refused.
+- `CREATE SCHEMA` and `ALTER TABLE ... RENAME COLUMN` answer with their command tag but change nothing. `DROP VIEW` answers with the tag `DROP TABLE`.
+- A value too long for a `VARCHAR(n)` column, or out of range for an `INT` column, is accepted.
+- An arithmetic expression over two fields with no declared type, such as `a + b`, is announced as `bigint`, so a result that is a float fails to encode.
 
 ### ISO GQL (Cypher Query Language, optional dialect)
 
@@ -270,11 +290,17 @@ Result shape follows Postgres tabular conventions:
 - **Scalars and non-object arrays** become a single **`value`** column.
 - SurrealDB types map to Postgres OIDs where possible (`bool`, `int8`, `float8`, `numeric`, `text`, `timestamptz`, `interval`, `uuid`, `bytea`, `jsonb`). Record IDs and similar values encode as **text**; nested structures encode as **jsonb**.
 
+In the [PostgreSQL dialect](#postgresql-sql-optional-dialect), results follow PostgreSQL more closely:
+
+- A command that returns no rows, such as `CREATE TABLE`, `DROP TABLE`, `TRUNCATE` or an `INSERT` without `RETURNING`, is answered with its command tag alone (`CREATE TABLE`, `INSERT 0 3`), as PostgreSQL does. A query string that holds no statement, such as `;` or only comments, is answered with an empty query response.
+- Each column of a `SELECT` keeps its own value, including columns that share a name, as in `SELECT a.k, b.k FROM a JOIN b ON a.k = b.k`, and columns with no name, as in `SELECT 1, 'a'`.
+- A result column is announced as a type that all its values have. `floor` and `ceil` take the type of their argument. `CASE`, `COALESCE`, `GREATEST` and `LEAST` take the widest number type among their alternatives, in PostgreSQL's order (`smallint`, `integer`, `bigint`, `numeric`, `real`, `double precision`), or `text` when the alternatives are not all numbers. A `NULL` alternative does not change the type, and a field with no declared type counts as `text`. The type can differ from PostgreSQL's: `floor(1.5)` is a float here and `numeric` in PostgreSQL, and a `CASE` over a number and a text answers text where PostgreSQL refuses it.
+
 ### Extended query protocol and prepared statements
 
 Drivers using **Parse / Bind / Execute** (extended protocol) get a hybrid typing model:
 
-- **Driver-prepared** statements (no eager execute) advertise a single **`jsonb`** column - SurrealDB has no static schema for arbitrary prepared SurrealQL.
+- **Driver-prepared** statements (no eager execute) advertise a single **`jsonb`** column - SurrealDB has no static schema for arbitrary prepared SurrealQL. In the [PostgreSQL dialect](#postgresql-sql-optional-dialect), a prepared `SELECT` over a table that declares its columns is described with those columns and their types.
 - **`prepare_typed` / portal describe** paths that execute eagerly return **true typed columns** matching the result.
 
 Postgres positional parameters **`$1`, `$2`, …** are rewritten to SurrealQL **`$_1`, `$_2`, …** (lexer-safe, comment-aware) and bound as **`_1`, `_2`, …** in the session.
@@ -288,6 +314,33 @@ From SurrealDB 4.0, `BEGIN ISOLATION LEVEL` is applied to the transaction, and s
 In the PostgreSQL dialect, `SAVEPOINT`, `RELEASE SAVEPOINT` and `ROLLBACK TO SAVEPOINT` work inside a transaction block, and `SET LOCAL` settings are undone when the transaction or savepoint is rolled back.
 
 **Divergence from Postgres:** SurrealDB **auto-commits each top-level statement** outside an explicit `BEGIN` … `COMMIT` block. For all-or-nothing behaviour, wrap statements in an explicit transaction.
+
+## Error codes
+
+A failed statement is reported with the SQLSTATE that PostgreSQL uses for the same kind of failure, over the simple and the extended query protocol. Drivers and ORMs use the SQLSTATE to decide what to do, for example to treat a duplicate key differently from a syntax error. The message text is SurrealDB's own.
+
+| SQLSTATE | Condition | Reported when |
+| --- | --- | --- |
+| `23505` | `unique_violation` | A write conflicts with a `UNIQUE` index or a primary key. |
+| `23502` | `not_null_violation` | A write gives `NULL`, or no value, to a field that requires one. |
+| `42804` | `datatype_mismatch` | A write gives a field a value of another type. SurrealDB refuses text for a number field, even `'5'`, where PostgreSQL reports `22P02` or accepts it. |
+| `42601` | `syntax_error` | The statement cannot be parsed, or exceeds a nesting limit. |
+| `42P01` | `undefined_table` | The statement names a table that does not exist, or a table qualifier missing from `FROM`. |
+| `42703` | `undefined_column` | The statement names a column that a table with declared columns does not have. |
+| `42702` | `ambiguous_column` | A column name could belong to more than one table. |
+| `42883` | `undefined_function` | The statement calls a function that does not exist, or with the wrong arguments. |
+| `42P10` | `invalid_column_reference` | A `GROUP BY` or `ORDER BY` position is not in the select list. |
+| `42803` | `grouping_error` | An aggregate is used in `GROUP BY`. |
+| `42P20` | `windowing_error` | A window function is used where it is not allowed, such as in `WHERE`. |
+| `42501` | `insufficient_privilege` | The user may not run the statement. |
+| `0A000` | `feature_not_supported` | The statement uses a feature that SurrealDB does not support. |
+| `25P02` | `in_failed_sql_transaction` | A command is sent after an error in a transaction block. |
+| `28P01` | `invalid_password` | Authentication fails. |
+| `40001` | `serialization_failure` | The transaction conflicts with another transaction. Retry it. |
+| `P0001` | `raise_exception` | `THROW` raises an error, or a subquery used as a value returns more than one row. |
+| `XX000` | `internal_error` | Any other failure. |
+
+The codes for a constraint or a value refused by a write apply in every dialect. The codes for a table, column, function or position that a statement names wrongly come from the [PostgreSQL dialect](#postgresql-sql-optional-dialect).
 
 ## Capabilities and security
 
@@ -307,11 +360,12 @@ Authentication is described in [Authentication](#authentication). Resource limit
 | [`POST /gql`](/docs/reference/rest-api/http-protocol#gql) | HTTP | ISO GQL (Cypher Query Language) | `curl`, HTTP clients |
 | [RPC](/docs/reference/rest-api/rpc-protocol) | HTTP / WebSocket | SurrealQL (+ RPC methods) | Official SDKs |
 | **Postgres wire** | TCP (Postgres v3) | SurrealQL | `psql`, JDBC, `tokio-postgres`, … |
-| MySQL wire (from 4.0, [`--mysql-bind`](/docs/reference/cli/db/commands/start), in a binary built with the `mysql` feature) | TCP (MySQL protocol) | MySQL SQL | `mysql`, MySQL drivers |
+| [MySQL wire](/docs/reference/rest-api/mysql-protocol) (from 4.0, in a binary built with the `mysql` feature) | TCP (MySQL protocol) | MySQL SQL | `mysql`, MySQL drivers |
 
 ## Related pages
 
 - [SurrealQL reference](/docs/reference/query-language): statements, types, and clauses
+- [MySQL wire protocol](/docs/reference/rest-api/mysql-protocol): the equivalent listener for MySQL clients, which can also select the PostgreSQL dialect
 - [GQL overview](/docs/learn/querying/gql/overview): ISO GQL (Cypher Query Language) concepts and wire surfaces
 - [GQL via HTTP](/docs/learn/querying/gql/via-http): enable GQL and run queries with `curl`
 - [`DEFINE USER`](/docs/reference/query-language/statements/define/user#scram-credentials-for-postgres-clients): SCRAM verifier material for Postgres clients

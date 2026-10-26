@@ -246,6 +246,8 @@ CREATE post:2 SET tags = ['b', 'c'];
 Database index `unique_tag` already contains 'b', with record `post:1`
 ```
 
+The uniqueness is between records. One record whose array holds the same element twice, such as `tags = ['d', 'd']`, does not conflict with itself, and the index holds that element once for it.
+
 To make the array as a whole unique instead, so that two records cannot have the same tags but may share some, end the field with [`...`](/docs/reference/query-language/language-primitives/idioms#flattening). The index then has one entry for the whole array:
 
 ```surql
@@ -572,8 +574,23 @@ SELECT id FROM book WHERE title @@ 'grey';
 
 Both indexes are used without naming them: the query planner chooses the index by the operator in the condition, so `WHERE title = 'The Grey Book'` uses `title_unique` and `WHERE title @@ 'grey'` uses `title_search`. [`WITH INDEX`](/docs/reference/query-language/statements/select#the-with-clause) is not needed here, and naming the index that cannot serve the operator, as in `WITH INDEX title_search` with `=`, makes the query scan the table instead.
 
-> [!WARNING]
-> Writing both kinds in one statement, as in `DEFINE INDEX title ON book FIELDS title UNIQUE FULLTEXT ANALYZER simple`, does not return an error, but only the last kind is kept. That index is full-text only and accepts duplicate titles. Check the stored definition with `INFO FOR TABLE`.
+A `DEFINE INDEX` takes at most one of `UNIQUE`, `COUNT`, `FULLTEXT`, `HNSW` and `DISKANN`. Writing two kinds in one statement is a parse error that points at the second kind, and the same kind written twice reports that it is given twice:
+
+```surql
+DEFINE INDEX title ON book FIELDS title UNIQUE FULLTEXT ANALYZER simple;
+```
+
+```text title="Error output"
+Parse error: Cannot combine FULLTEXT with UNIQUE
+ --> [1:48]
+  |
+1 | DEFINE INDEX title ON book FIELDS title UNIQUE FULLTEXT ANALYZER simple;
+  |                                                ^^^^^^^^ an index can only be one of UNIQUE, COUNT, FULLTEXT, HNSW or DISKANN
+ --> [1:41]
+  |
+1 | DEFINE INDEX title ON book FIELDS title UNIQUE FULLTEXT ANALYZER simple;
+  |                                         ^^^^^^ First given here
+```
 
 #### `FULLTEXT` vs. `SEARCH`
 
@@ -956,6 +973,25 @@ COMMIT;
 ```
 
 As the error says, define the index with `CONCURRENTLY`, or commit the definition before the statements that change the records. A `CONCURRENTLY` build starts after the transaction closes, so none of these rules applies to it. An index defined over a table with no records has nothing to build, and the transaction reads and writes it as usual. If the transaction is cancelled or fails, the definition is removed with it.
+
+The order matters in the other direction too. From SurrealDB 4.0, a `DEFINE INDEX` without `CONCURRENTLY` is refused when its transaction has already created, changed or deleted a record of the table, because the build cannot see those writes. The refusal comes before anything of the index is written, and the rest of the transaction fails with it:
+
+```surql
+BEGIN;
+CREATE user:one SET email = 'one@example.com';
+DEFINE INDEX email ON user FIELDS email UNIQUE;
+COMMIT;
+```
+
+```surql title="Error output"
+'Cannot define index `email` on `user`: this transaction has written records of `user`, which a build without CONCURRENTLY cannot see. Define the index CONCURRENTLY, or commit those writes first.'
+```
+
+The same applies to a block, a loop, a function and a transaction that a client holds open. Writes to other tables, reads of the table, a write that a rollback to a save point undid, and an `IF NOT EXISTS` definition of an index that already exists are not refused.
+
+While such a transaction is open, other sessions on the same node cannot write the table without the risk that the build misses the write. From SurrealDB 4.0, a write by another session to a record of the table waits until the defining transaction ends. If that transaction commits, the waiting write fails with a retryable transaction conflict, and its retry sees the new index. If it rolls back, the write continues. A write that has waited for 60 seconds fails with the same retryable conflict. Reads, writes to other tables, and the defining transaction's own writes do not wait. The same applies to a `DEFINE INDEX OVERWRITE` that replaces an index, even as a statement of its own, because it builds inside its own transaction.
+
+This wait is kept in the memory of the node that runs the definition. On a datastore that several nodes write, such as TiKV, a write through another node does not wait, and the index can miss it. On such a datastore, and on any table that other sessions write often, define the index as a statement of its own or with `CONCURRENTLY`, whose build starts only once the definition has committed.
 
 ## The `DEFER` clause
 
