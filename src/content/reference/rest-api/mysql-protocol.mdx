@@ -1,14 +1,15 @@
 ---
 position: 6
 title: MySQL wire protocol
-description: "Connect to SurrealDB with the mysql client and MySQL drivers, and run MySQL SQL, SurrealQL or other dialects over the MySQL wire protocol."
+description: "Connect with standard MySQL clients and drivers, and run MySQL SQL, SurrealQL or other dialects against SurrealDB tables over the MySQL wire protocol."
+priority: 1
 ---
 
 # MySQL wire protocol
 
 <Since v="v4.0.0" />
 
-The MySQL wire protocol listener lets a MySQL client, such as the `mysql` command-line client, JDBC through Connector/J, PyMySQL or another MySQL driver, connect to SurrealDB on a TCP port and run queries. A connection runs the MySQL dialect of SQL against SurrealDB tables by default, and can switch to SurrealQL, the [PostgreSQL dialect](/docs/reference/rest-api/postgres-protocol#postgresql-sql-optional-dialect) or ISO GQL. This page covers how to enable the listener, how to connect, and where the MySQL dialect differs from MySQL. The [Postgres wire protocol](/docs/reference/rest-api/postgres-protocol) page covers the equivalent listener for PostgreSQL clients.
+The MySQL wire protocol listener lets a MySQL client, such as the `mysql` command-line client, JDBC through Connector/J, or the Python, Go, Node.js and PHP drivers, connect to SurrealDB on a TCP port and run queries. A connection runs the MySQL dialect of SQL against SurrealDB tables by default, and can switch to SurrealQL, the [PostgreSQL dialect](/docs/reference/rest-api/postgres-protocol#postgresql-sql-optional-dialect) or ISO GQL. Queries written for MySQL 8.0 run against SurrealDB tables. This page covers how to enable the listener, how to connect, and where the MySQL dialect differs from MySQL. The [Postgres wire protocol](/docs/reference/rest-api/postgres-protocol) page covers the equivalent listener for PostgreSQL clients.
 
 ## Enable the listener
 
@@ -53,13 +54,13 @@ A binary built without the feature exits at startup when `--mysql-bind` is given
 mysql -h 127.0.0.1 -P 3306 -u root -psecret -D main/main
 ```
 
-The database name selects the namespace and the database as `ns/db`, with a single slash, in the same way as `Surreal-NS` and `Surreal-DB` on HTTP. `USE db` switches to another database in the same namespace.
+The database name selects the namespace and the database as `ns/db`, with a single slash, in the same way as `Surreal-NS` and `Surreal-DB` on HTTP. `USE ns/db` changes both on an open connection.
 
 The server announces itself as MySQL `8.0.35-SurrealDB`, and `SELECT VERSION()` and `SELECT @@version` both return that string.
 
 ### Authentication
 
-A client signs in as the root user or as a [database user](/docs/reference/query-language/statements/define/user) with a password. The server accepts the `caching_sha2_password`, `mysql_native_password` and `mysql_clear_password` authentication methods. A sign-in that sends the password needs a TLS connection or a loopback address, such as `127.0.0.1`, and is refused with error `1045` `Authentication requires an encrypted (TLS) connection or loopback` otherwise.
+A client signs in as a system user, such as the root user or a [database user](/docs/reference/query-language/statements/define/user) with a password. The server accepts the `caching_sha2_password`, `mysql_native_password` and `mysql_clear_password` authentication methods. `caching_sha2_password` is the default of MySQL 8 clients, `mysql_native_password` serves older clients and drivers, and `mysql_clear_password` sends the password as clear text. A sign-in that sends the password needs a TLS connection or a loopback address, such as `127.0.0.1`, and is refused with error `1045` `Authentication requires an encrypted (TLS) connection or loopback` otherwise.
 
 ### TLS
 
@@ -74,7 +75,7 @@ A new connection runs the MySQL dialect. `SET dialect` switches the dialect of a
 | `SET dialect = 'mysql'` (or `'sql'`) | MySQL SQL, the default |
 | `SET dialect = 'surrealql'` | [SurrealQL](/docs/reference/query-language) |
 | `SET dialect = 'pgsql'` (or `'postgres'`, `'postgresql'`) | The [PostgreSQL dialect](/docs/reference/rest-api/postgres-protocol#postgresql-sql-optional-dialect) |
-| `SET dialect = 'gql'` | [ISO GQL (Cypher Query Language)](/docs/learn/querying/gql/overview) |
+| `SET dialect = 'gql'` | [ISO GQL](/docs/learn/querying/gql/overview) |
 
 ```sql
 CREATE TABLE person (id INT PRIMARY KEY, name TEXT, age INT);
@@ -89,7 +90,7 @@ In the MySQL and PostgreSQL dialects, every record ID in a result is sent as its
 
 ## The MySQL dialect
 
-The MySQL dialect parses MySQL 8.0 and 8.4 syntax, and runs `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `CREATE TABLE`, `DROP TABLE`, `TRUNCATE` and the statements that drivers send while they connect. Prepared statements, statements sent several at a time, `START TRANSACTION`, `COMMIT`, `ROLLBACK`, `SAVEPOINT` and `SET autocommit` are supported. A statement that names a table in another database is refused.
+The MySQL dialect parses MySQL 8.0 and 8.4 syntax, and runs `SELECT` with joins, `WHERE`, `GROUP BY`, `HAVING`, `ORDER BY` and `LIMIT`, aggregate functions, non-recursive common table expressions (`WITH`), `INSERT` (including `INSERT ... ON DUPLICATE KEY UPDATE`), `UPDATE`, `DELETE`, `CREATE TABLE`, `DROP TABLE`, `TRUNCATE` and the statements that drivers send while they connect. Prepared statements, statements sent several at a time, `START TRANSACTION`, `COMMIT`, `ROLLBACK`, `SAVEPOINT` and `SET autocommit` are supported. A statement that names a table in another database is refused.
 
 Many points behave as they do over the PostgreSQL dialect, which shares the same query planner. The [PostgreSQL dialect](/docs/reference/rest-api/postgres-protocol#postgresql-sql-optional-dialect) section describes these in more detail: tables that declare their columns, unqualified columns in a join, `t.*`, `LIKE` patterns, subqueries used as a value, and the limits on how deeply a `FROM` clause can nest. Over this listener, the failures that section describes are reported with the MySQL error numbers listed under [Error codes](#error-codes), and a `FROM` clause that nests too deeply fails with `1064`.
 
@@ -163,7 +164,9 @@ The numbers can differ from MySQL's for the same statement:
 
 The MySQL dialect refuses or differs from MySQL in these places:
 
-- Some DDL statements, such as `CREATE INDEX`, are not yet supported and fail with `1105`.
+- Window functions (`OVER (...)`) and recursive common table expressions are refused with `1235`, before the statement changes any data.
+- `ALTER TABLE` and `LOAD DATA` are not supported yet.
+- `information_schema` does not list tables and columns yet. Use `SHOW TABLES` and `SHOW COLUMNS` instead.
 - A value too long for a `VARCHAR(n)` column, or out of range for an `INT` column, is accepted.
 - `TRUNCATE` does not restart an `AUTO_INCREMENT` counter. Records that the table's permissions do not let the user delete are kept, and the statement still answers OK.
 - `@@performance_schema` is `0`. `@@session.name` of a variable that is global only reads a value, where MySQL gives error `1238`.
@@ -178,14 +181,14 @@ The MySQL dialect refuses or differs from MySQL in these places:
 Connections are gated like other query surfaces:
 
 - **The `mysql` route.** [`--deny-http mysql`](/docs/learn/security/authorization/capabilities#http-routes-and-rpc-methods) refuses every connection to the listener with error `1045`. The route also allows the MySQL and SurrealQL dialects on the listener.
-- **Other dialects.** `SET dialect = 'pgsql'` needs the `postgres` route, and `SET dialect = 'gql'` needs the `gql` route.
+- **Other dialects.** `SET dialect = 'pgsql'` needs the `postgres` route, and `SET dialect = 'gql'` needs the `gql` route. When the server denies the route, the `SET dialect` statement fails, and a query in a dialect the user may not run fails with `1045`.
 - **Arbitrary queries.** [`--deny-arbitrary-query`](/docs/learn/security/authorization/capabilities#arbitrary-queries) applies to connections on this listener as it does on the other surfaces.
 
-The listener accepts at most 1,024 connections at a time and answers further connections with error `1040` `Too many connections`. A packet is limited to 64 MiB, the value of `@@max_allowed_packet`.
+The listener accepts at most 1,024 connections at a time and answers further connections with error `1040` `Too many connections`. A packet is limited to 64 MiB, the value of `@@max_allowed_packet`, and a larger packet is refused with error `1153`.
 
 ## Related pages
 
 - [Postgres wire protocol](/docs/reference/rest-api/postgres-protocol): the equivalent listener for PostgreSQL clients, and the PostgreSQL dialect
 - [`surreal db start`](/docs/reference/cli/db/commands/start): CLI reference including `--mysql-bind`
 - [Capabilities](/docs/learn/security/authorization/capabilities): lock down arbitrary queries and routes
-- [Migrating from MySQL](/docs/build/migrating/from-other-databases/from-mysql): MySQL data types and their SurrealQL equivalents
+- [Migrating from MySQL](/docs/build/migrating/from-other-databases/from-mysql): map MySQL types to SurrealQL, and import data with Surreal Sync
