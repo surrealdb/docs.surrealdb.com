@@ -51,6 +51,7 @@ The following chart shows features currently available, along with those that ar
 | From 4.0, in the PostgreSQL dialect: `COPY ... FROM STDIN` and `COPY ... TO STDOUT`, in text and CSV formats | |
 | From 4.0: `SAVEPOINT`, `SET LOCAL`, `SHOW` and `RESET` | |
 | From 4.0: a SurrealDB token sent as the password | |
+| From 4.0, in the PostgreSQL dialect: [pgvector](#pgvector) columns, distance operators and `hnsw` indexes | |
 
 Before SurrealDB 4.0, ANSI SQL translation, `pg_catalog` emulation (needed for some GUIs such as DBeaver, and for the psqlODBC ODBC driver, which queries `pg_type` while it connects) and `COPY` are not available.
 
@@ -247,6 +248,50 @@ The PostgreSQL dialect refuses or differs from PostgreSQL in these places:
 - A value too long for a `VARCHAR(n)` column, or out of range for an `INT` column, is accepted.
 - An arithmetic expression over two fields with no declared type, such as `a + b`, is announced as `bigint`, so a result that is a float fails to encode.
 
+### pgvector
+
+<Since v="v4.0.0" />
+
+The PostgreSQL dialect accepts the column type, distance operators and `hnsw` indexes of the [pgvector](https://github.com/pgvector/pgvector) extension, so an application written for pgvector can store embeddings in SurrealDB and search them by distance. The vectors are stored as SurrealDB arrays, and an `hnsw` index is a SurrealDB [HNSW index](/docs/reference/query-language/statements/define/indexes#hnsw-hierarchical-navigable-small-world), so SurrealQL queries can read and search the same data.
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE TABLE item (id int PRIMARY KEY, embedding vector(3));
+CREATE INDEX item_embedding ON item USING hnsw (embedding vector_l2_ops);
+INSERT INTO item (id, embedding) VALUES (1, '[1,2,3]'), (2, '[4,5,6]'), (3, '[1,0,0]');
+SELECT id FROM item ORDER BY embedding <-> '[1,2,3]' LIMIT 2;
+```
+
+`CREATE EXTENSION vector` is accepted and defines nothing, so a migration that runs it first does not fail. Any other extension fails with **`58P01`**.
+
+**Columns.** A `vector(n)` column is a field of type `array<float, n>`, and a column of that type defined in SurrealQL is a vector column as well. The dimensions are required: a `vector` column without `(n)` is refused with **`0A000`**, and a vector can have at most 16,000 dimensions. A value written to a vector column as text, as a parameter or as a cast is read as the text form `[1,2,3]`. `'[1,2,3]'::vector(3)` casts a string in a query. Drivers see the column as the `vector` type, in the text and binary formats, so the pgvector packages for psycopg, asyncpg and node-postgres find the type as they do on PostgreSQL.
+
+**Distances.** Each operator has a function of the same meaning:
+
+| Operator | Function | Distance |
+| --- | --- | --- |
+| `<->` | `l2_distance(a, b)` | Euclidean |
+| `<=>` | `cosine_distance(a, b)` | One minus the cosine similarity |
+| `<#>` | `vector_negative_inner_product(a, b)` | The negated inner product |
+| `<+>` | `l1_distance(a, b)` | Manhattan |
+
+`inner_product(a, b)` returns the inner product itself. A distance over `NULL` is `NULL`, and a distance between vectors of different dimensions fails with **`22000`**.
+
+**Indexes.** `CREATE INDEX ... USING hnsw (column opclass)` defines an HNSW index. The operator class chooses the distance that the index ranks by: `vector_l2_ops` (Euclidean), `vector_cosine_ops` (cosine), `vector_ip_ops` (inner product) or `vector_l1_ops` (Manhattan). `WITH (m = 16, ef_construction = 64)` sets the graph parameters, with pgvector's defaults and limits: `m` from 2 to 100, `ef_construction` from 4 to 1,000 and at least twice `m`. An index covers at most 2,000 dimensions.
+
+**Nearest-neighbour search.** `ORDER BY column <op> value LIMIT k`, with an optional `OFFSET`, over one table is a nearest-neighbour search. SurrealDB answers it from the HNSW index when the column has exactly one HNSW index and that index ranks by the same distance as the operator, and with an exact search of the table otherwise. Any other ordering by a distance sorts every row. `EXPLAIN SELECT` shows which plan a query uses: `KnnScan` for the index and `KnnTopK` for the exact search. A row whose vector is `NULL` is not returned by a nearest-neighbour search, because the index does not hold it.
+
+#### Not supported
+
+- The `halfvec`, `sparsevec` and `bit` types, binary quantisation and iterative index scans.
+- `ivfflat` indexes, and `hnsw` indexes that are partial, unique, over more than one column or over an expression. Each is refused with **`0A000`**.
+- `hnsw.ef_search`. `SET hnsw.ef_search` is accepted, but the index search always uses an `ef` of 40, or `k` when it is larger.
+- A bound limit, such as `LIMIT $1`. `k` must be written in the query for the index to be used, and with a bound limit the query sorts every row.
+- A distance operator or function in an `INSERT`, `UPDATE` or `DELETE`, which is refused with **`0A000`**. Use them in a `SELECT`.
+- `COPY ... FROM` and `INSERT ... SELECT` into a vector column, which do not convert text to a vector.
+- An index created earlier in the same request is not used by a later `SELECT` in that request, which searches exactly.
+- `DROP EXTENSION`, `vector_dims`, `vector_norm`, `l2_normalize`, arithmetic on vectors and `avg` over a vector column.
+
 ### ISO GQL (optional dialect)
 
 GQL is **not** the default and is **not** what most Postgres users expect from a “Postgres” port. It is available so the **same connection** can run [ISO GQL](/docs/learn/querying/gql/overview) when you opt in - the same engine as [`POST /gql`](/docs/reference/rest-api/http-protocol#gql), with results encoded as Postgres rows instead of JSON.
@@ -364,7 +409,7 @@ Authentication is described in [Authentication](#authentication). Resource limit
 | [`POST /gql`](/docs/reference/rest-api/http-protocol#gql) | HTTP | ISO GQL | `curl`, HTTP clients |
 | [RPC](/docs/reference/rest-api/rpc-protocol) | HTTP / WebSocket | SurrealQL (+ RPC methods) | Official SDKs |
 | **Postgres wire** | TCP (Postgres v3) | SurrealQL | `psql`, JDBC, `tokio-postgres`, … |
-| [MySQL wire](/docs/reference/rest-api/mysql-protocol) (from 4.0, in a binary built with the `mysql` feature) | TCP (MySQL protocol) | MySQL SQL | `mysql`, MySQL drivers |
+| [MySQL wire](/docs/reference/rest-api/mysql-protocol) (from 4.0) | TCP (MySQL protocol) | MySQL SQL | `mysql`, MySQL drivers |
 
 ## Related pages
 
