@@ -148,7 +148,7 @@ math::mean([299, -4611686018427387904, 299, 4611686018427387904]);
 149.5
 ```
 
-On `3.3` the same call returns `256f`. A [sequence](/docs/reference/query-language/statements/define/sequence) that reaches the end of the `int` range fails with `The sequence is exhausted: no value can be issued below i64::MAX`, and the largest value it issues is `9223372036854775806`.
+On `3.3` the same call returns `256f`. A [sequence](/docs/reference/query-language/statements/define/sequence) that reaches the end of the `int` range fails with `The sequence has no values left to issue: its values cannot exceed 9223372036854775806`, and the largest value it issues is `9223372036854775806`.
 
 In an aggregated view, `math::sum` over integers now stores an `int`, where it stored a `float`. `math::sum`, `math::min`, `math::max`, `math::mean`, `math::stddev` and `math::variance` skip a value that is not a number, including a missing one, as the view's `SELECT` does. On `3.3` such a write to the source table failed. A view defined on `3.3` keeps its `float` totals until it is defined again with `DEFINE TABLE OVERWRITE`.
 
@@ -162,6 +162,12 @@ A `DEFINE INDEX` or `REBUILD INDEX` without `CONCURRENTLY`, run as a statement o
 
 A statement inside `BEGIN ... COMMIT` commits or rolls back with the rest of its transaction. Its build still commits its entries first, so when the table already holds records, the rest of that transaction cannot read them. The transaction now reads the table instead of the new index, a `UNIQUE` duplicate of an existing value fails at the statement with the uniqueness error, and deleting a record the build indexed, or changing one of its indexed fields, is refused with ``Cannot change record `product:1`: index `sku` was defined by this transaction``. On `3.3`, a read through the new index left out the existing records, and the other two cases failed the `COMMIT` with a write conflict that every retry met again. Define the index `CONCURRENTLY`, or commit the definition before changing the records. See [Defining an index inside a transaction](/docs/reference/query-language/statements/define/indexes#defining-an-index-inside-a-transaction).
 
+Three more changes apply to the transactions around an index build:
+
+- A `DEFINE INDEX` without `CONCURRENTLY` is refused when its transaction has already created, changed or deleted a record of the table, with ``Cannot define index `email` on `user`: this transaction has written records of `user` ...``. On `3.3` the statement was accepted and the index left out those writes. Define the index `CONCURRENTLY`, or commit the writes first.
+- While a transaction that has built a new index inside itself is open, such as a `DEFINE INDEX` inside `BEGIN ... COMMIT` or a `DEFINE INDEX OVERWRITE` that replaces an index, writes to the table from other sessions on the same node wait for it, for at most 60 seconds, and fail with a retryable conflict if it commits. Retry those conflicts, and do not keep such a transaction open for longer than its build takes.
+- A build waits for up to 60 seconds for the write transactions that began before its index was defined or rebuilt. A transaction still open after that is refused at commit with a retryable conflict if it writes the table being indexed.
+
 ### An unchanged `DEFINE INDEX OVERWRITE` keeps its index
 
 A `DEFINE INDEX OVERWRITE` that gives a ready index the same table, fields, index type and parameters now keeps the index and its data and replaces only the definition, so a changed `COMMENT` applies without a build. `3.3` built the index again. An index that is building, has failed or was built in an earlier index format is still built again. For the same reason, an unchanged `OVERWRITE` no longer applies a changed analyzer to a full-text index: after `DEFINE ANALYZER OVERWRITE`, run [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild). See [Using `OVERWRITE` clause](/docs/reference/query-language/statements/define/indexes#using-overwrite-clause).
@@ -173,6 +179,10 @@ A `DEFINE INDEX OVERWRITE` that gives a ready index the same table, fields, inde
 ### Query parameters in HTTP `/sql` requests
 
 A parameter given in the query string of a `/sql` request is bound as the value its JSON encodes, so `?data={"a":1}` binds an object and `?limit=10` binds the number `10`. A value that is not valid JSON is still bound as a string. To pass a number or `true` as a string, quote it in JSON, as in `?code="10"`.
+
+### Slow query logs list only allowed parameters
+
+In `3.x`, a slow query log entry listed the value of every parameter the statement used, except those named in `--slow-log-param-deny`. In `4.0`, an entry lists a parameter's value only when `--slow-log-param-allow` (`SURREAL_SLOW_QUERY_LOG_PARAM_ALLOW`) names it and `--slow-log-param-deny` does not, so with no allow list an entry lists no values. To keep seeing values after the upgrade, name the parameters in `--slow-log-param-allow`. See [Logging](/docs/manage/observability/logging).
 
 ### Parameters that SurrealDB binds itself are protected
 
@@ -214,7 +224,7 @@ A range that starts past the end returns `[]`, and a negative bound still return
 
 ### A clause repeated in `DEFINE TABLE`
 
-`DEFINE TABLE` now takes each clause at most once. On `3.3`, a clause could be repeated any number of times and the last one was kept, so `DEFINE TABLE note COMMENT 'one' COMMENT 'two'` stored the comment `'two'`. On `4.0` the statement fails to parse with `Conflicting clause on this table definition`, and the error points at both clauses. Remove the repeats, keeping the clause that `3.3` used, which is the last one. The other `DEFINE` statements, such as `DEFINE FIELD`, `DEFINE INDEX` and `DEFINE FUNCTION`, are unchanged and still keep the last of a repeated clause.
+`DEFINE TABLE` now takes each clause at most once. On `3.3`, a clause could be repeated any number of times and the last one was kept, so `DEFINE TABLE note COMMENT 'one' COMMENT 'two'` stored the comment `'two'`. On `4.0` the statement fails to parse with `Conflicting clause on this table definition`, and the error points at both clauses. Remove the repeats, keeping the clause that `3.3` used, which is the last one. The other `DEFINE` statements, such as `DEFINE FIELD`, `DEFINE INDEX` and `DEFINE FUNCTION`, still keep the last of a repeated clause, except that a `DEFINE INDEX` now refuses a second index kind (see [One kind per `DEFINE INDEX`](#one-kind-per-define-index)).
 
 ### Rust SDK: a dropped transaction rolls back
 
@@ -223,6 +233,10 @@ A client-side [`Transaction`](/docs/reference/rust/concepts/transaction#using-a-
 ### Isolation levels over the PostgreSQL wire protocol
 
 A PostgreSQL client's `BEGIN ISOLATION LEVEL ...` is now applied rather than accepted and ignored. `SERIALIZABLE` opens a [serializable transaction](/docs/learn/querying/concepts-and-guides/transactions#serializable-isolation) on SurrealMX and SurrealDS, and fails with SQLSTATE `0A000` (`feature_not_supported`) on the other storage engines, where `3.3` ran the transaction at snapshot isolation. `REPEATABLE READ`, `READ COMMITTED` and `READ UNCOMMITTED` run at snapshot isolation, as before. A client or driver that sets `SERIALIZABLE` by default needs to request `REPEATABLE READ` instead on those engines.
+
+### Error codes over the PostgreSQL wire protocol
+
+A failed statement over the PostgreSQL wire protocol is now reported under the SQLSTATE that PostgreSQL uses for the same kind of failure. A write that conflicts with a `UNIQUE` index is `23505`, a `NULL` or missing value for a field that requires one is `23502`, and a value of the wrong type for a field is `42804`. On `3.3` these were reported under general codes such as `42601` (`syntax_error`) and `XX000` (`internal_error`). Code that matched those general codes to detect a duplicate key or a refused value needs to match the new codes. See [Error codes](/docs/reference/rest-api/postgres-protocol#error-codes) for the full list.
 
 ### Surrealism modules are now extensions
 
@@ -435,6 +449,10 @@ A `SPLIT` target must name a field as the `SELECT` returns it, under its alias w
 
 A KNN operator such as `<|5,COSINE|>` in the `WHERE` clause of an `UPDATE` or `DELETE` needs a vector index on the field. Without one, the statement fails with `A KNN operator in the WHERE of an UPDATE or DELETE needs a vector index on the field`, and an `UPSERT` with a KNN operator in its `WHERE` clause always fails. Select the records first, as in `UPDATE (SELECT id FROM doc WHERE embedding <|5,COSINE|> $q) SET seen = true`.
 
+### Statements that lose a write conflict run again
+
+A statement outside `BEGIN` and `COMMIT` that loses a write conflict is now run again by the server, up to 10 times within its timeout, instead of returning the conflict error straight away. A statement that did something outside the transaction, such as an `http::` request or a write to a file bucket, is not run again, and nor is a statement inside a transaction block. Application retry logic for single statements still works, and sees fewer conflicts. See [Write conflicts and retries](/docs/learn/querying/concepts-and-guides/transactions#write-conflicts-and-retries).
+
 ## Clients and SDKs
 
 ### CBOR text forms of datetimes, UUIDs and durations
@@ -452,6 +470,10 @@ Some SDK releases made before `4.0` send these tags: the Python SDK sends tag `0
 ### SDK version checks
 
 An SDK checks the server's version when it connects. The Rust SDK of `3.x`, and the SDKs built on it, refuse a `4.0` server with ``server version `4.0.0` does not match the range supported by the client``, and so do JavaScript SDK releases before `2.1`. Upgrade the SDK before the server. The `4.0` SDKs connect to `3.x` servers as well.
+
+### Sized numbers over the original CBOR protocol
+
+`4.0` adds [sized number types](/docs/reference/query-language/language-primitives/data-types/numbers#sized-numbers) such as `u8`, `i32` and `f32`. A client that uses the original CBOR protocol (`application/cbor`, or the `cbor` WebSocket subprotocol), which includes every `3.x` SDK, receives a sized number as an ordinary integer or float, and a `u64` above `9223372036854775807` as a decimal. A request on that protocol that holds one of the sized number tags `180` to `188` is refused. A client that has to keep the size uses [CBOR v2](/docs/reference/rest-api/cbor-protocol#sized-numbers-cbor-v2). Data written before the upgrade holds no sized numbers, so this matters only once a schema or a query uses the new types.
 
 ### HTTP RPC sessions are stored in the datastore
 
@@ -480,6 +502,7 @@ A session that a client attaches over HTTP RPC is always stored in the datastore
 - A KNN search over an HNSW index with a pre-filter no longer widens its search fourfold. It reads the new `SURREAL_KNN_PREFILTER_HNSW_EF_BOOST`, which defaults to `1`, and scores the matching records directly wherever that costs less than walking the graph. `SURREAL_KNN_PREFILTER_EF_BOOST` keeps its default of `4` and now applies to DiskANN only. A deployment that tuned HNSW searches with `SURREAL_KNN_PREFILTER_EF_BOOST` sets `SURREAL_KNN_PREFILTER_HNSW_EF_BOOST` instead, and `4` restores the previous width.
 - Memory-sized defaults, such as the SurrealKV block cache, follow the tightest memory limit of the cgroup the process runs in, including a systemd unit's `MemoryMax`. On `3.3`, only a limit at the root of the cgroup hierarchy was read, so a server capped by systemd sized its caches from the whole host's memory. A server in a container is unaffected. See [Storage backend environment variables](/docs/reference/cli/db/environment-variables#storage-backend-environment-variables).
 - `SURREAL_SURREALKV_GROUPED_COMMIT_TIMEOUT`, `SURREAL_SURREALKV_GROUPED_COMMIT_WAIT_THRESHOLD` and `SURREAL_SURREALKV_GROUPED_COMMIT_MAX_BATCH_SIZE`, and the same settings as parameters of a `surrealkv://` path, are removed, because SurrealKV groups the syncs of concurrent commits itself. A server started with one of them logs `The surrealkv_grouped_commit_timeout setting has no effect and is ignored`, naming the setting, and starts. With `sync=every` on the `surrealkv://` path, which is the default, a commit is now visible to other transactions only once it is synced to disk. See [SurrealKV environment variables](/docs/reference/cli/db/environment-variables#surrealkv-environment-variables).
+- On a datastore that several nodes write, such as TiKV, a node started with `--node-membership-refresh-interval` or `SURREAL_NODE_MEMBERSHIP_REFRESH_INTERVAL` above 10 seconds fails to start, because a node refuses its own write commits once its heartbeat is 30 seconds old. The default is 3 seconds, and a datastore that one node opens accepts any interval.
 - `SURREAL_FEATURE_LEVEL` switches a datastore to the 4.0 record format, as described in [The 4.0 record format](#the-40-record-format).
 
 `4.0` also adds settings that bound the memory a node and each query can use. They are listed in the [environment variables](/docs/reference/cli/db/environment-variables#limits-config) reference.

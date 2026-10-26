@@ -249,9 +249,23 @@ Two consequences follow for application code. Conflicts arrive later in SurrealD
 
 When a commit fails because another transaction wrote the same key first, SurrealDB returns a **transaction conflict** error. Your application, or your client's retry logic, should run the transaction again.
 
+From SurrealDB 4.0, a statement that runs in a transaction of its own, outside `BEGIN` and `COMMIT`, is run again by the server when it loses a write conflict. The server makes up to 10 attempts, with a short random wait between them, all within the statement's one timeout. Each attempt reads the data as it is when that attempt starts. The conflict error reaches the client only when every attempt fails or the timeout runs out. The server does not run a statement again when:
+
+- it is part of a `BEGIN` ... `COMMIT` block, where the conflict applies to the whole transaction and the client decides whether to run it again;
+- it did something outside the transaction, such as an `http::` request or a write to a file bucket, which a second attempt would repeat;
+- the outcome of its commit is unknown.
+
+The same applies to a [`FOR UPDATE`](#locked-reads-with-for-update) read inside a statement of its own. When another transaction writes the record between the read and the commit, the server runs the statement again, and the new attempt reads the new value, so the statement commits a result based on current data instead of returning the conflict. Inside `BEGIN` ... `COMMIT`, the same change makes `COMMIT` fail with a conflict that the client retries.
+
+So retry logic in an application is needed for transaction blocks, and for statements that still return a conflict after the server's attempts.
+
 This is normal under concurrent load, not a sign of data corruption. At scale, rising conflict rates show up in metrics such as `surrealdb_transaction_conflicts_total` - see [Observability](/docs/manage/observability/metrics) for monitoring guidance.
 
 Keep transactions short and touch the fewest keys necessary. Long-running transactions that overlap on hot keys see more conflicts.
+
+Defining or rebuilding an index can also cause a retryable conflict, because the build has to see every write to its table. Before it reads the table, a build waits for the write transactions that began before the index was defined or rebuilt, for up to 60 seconds. A transaction that is still open after that, such as one that a client holds open, is refused at commit if it writes the table being indexed, and its retry sees the new index. A transaction that writes only other tables commits as usual.
+
+One case makes a writer wait instead of failing at commit. While a transaction that has defined an index without `CONCURRENTLY` is open, such as a `DEFINE INDEX` inside `BEGIN ... COMMIT`, writes to that table from other sessions on the same node wait for it to end, for at most 60 seconds. See [Defining an index inside a transaction](/docs/reference/query-language/statements/define/indexes#defining-an-index-inside-a-transaction).
 
 ## Unique indexes under concurrent writes
 
