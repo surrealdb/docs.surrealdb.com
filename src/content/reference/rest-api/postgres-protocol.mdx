@@ -184,7 +184,7 @@ Many BI products (Metabase, Superset, Grafana Postgres data sources, and similar
 | **Native / custom SQL** query editor | Yes | Write **SurrealQL** in the tool’s SQL box. This is the main BI path today. |
 | **`psql`-style exploration** | Yes | Ad hoc SELECT, GROUP BY, filters - good for learning SurrealQL. |
 | **Drag-and-drop chart builder** | Limited | Tools that auto-generate SQL expect ANSI SQL and often query `information_schema` or `pg_catalog`. |
-| **Schema browser / table picker** | Limited | The `pg_catalog` and `information_schema` relations exist in the [PostgreSQL dialect](#postgresql-sql-optional-dialect), but they do not list your tables and columns yet, so a table picker shows no tables. Before 4.0, the relations are not available. |
+| **Schema browser / table picker** | From 4.0, with the PostgreSQL dialect | In the [PostgreSQL dialect](#postgresql-sql-optional-dialect), the `pg_catalog` and `information_schema` relations list the tables of the database and their declared columns, so a table picker shows them. Before 4.0, the relations are not available. |
 | **Paste arbitrary Postgres SQL** | From 4.0, with the PostgreSQL dialect | Select the [PostgreSQL dialect](#postgresql-sql-optional-dialect) for the connection. Before 4.0, there is no SQL-to-SurrealQL translation: similar-looking SELECTs may work, and Postgres-specific syntax will not. |
 
 Configure the Postgres data source with your SurrealDB host and `--postgres-bind` port, set database to `your_ns/your_db`, then open the tool’s **SQL** or **Native query** mode and paste SurrealQL.
@@ -221,8 +221,10 @@ SELECT name, age FROM person WHERE age > 30 ORDER BY name;
 The dialect is allowed by the same `postgres` route capability as the connection itself, and needs no experimental capability. Some points differ from SurrealQL or from PostgreSQL:
 
 - **Record IDs are keys.** In a result, every record ID is sent as its key, as a SQL client expects a primary or foreign key to be: `person:1` is sent as `1`. The `id` column, a `WHERE id = 1` condition, joins on keys, and a write to a field defined as `record<T>` all use the key.
-- **SQL functions only.** Queries can call the PostgreSQL functions that SurrealDB implements, but no SurrealQL function, such as `http::get` or a `fn::` function.
-- **Schema inspection.** The `pg_catalog` and `information_schema` relations exist, so clients that read them while they connect can connect. They do not list your tables and columns yet.
+- **SQL functions only.** Queries can call the PostgreSQL functions that SurrealDB implements, but no SurrealQL function, such as `http::get` or a `fn::` function. The implemented functions are tested against the answers that PostgreSQL 18 gives for the same arguments, and include the keyword forms such as `extract(year FROM d)`, `position('b' IN s)`, `substring(s FROM 2 FOR 3)` and `overlay`. An error that a function raises is reported with PostgreSQL's SQLSTATE, as listed under [Error codes](#error-codes).
+- **Schema inspection.** `information_schema.tables`, `information_schema.columns`, `pg_class`, `pg_attribute`, `pg_constraint`, `pg_index` and the other catalog relations that drivers, ORMs and schema browsers read list the tables of the database, in the schema `public`. A column is listed when the table declares it, so a table without declared columns lists only `id`.
+- **Sized number columns.** `smallint`, `integer`, `bigint`, `real` and `double precision` columns define fields of the [sized number](/docs/reference/query-language/language-primitives/data-types/numbers#sized-numbers) types `i16`, `i32`, `int`, `f32` and `float`, so an `int` column is an `i32` field and the catalog lists it as `integer` (`int4`). A value out of range for the column, such as `40000` for a `smallint`, is refused with **`42804`**. An `int` primary key makes the record ID key an `i32` as well.
+- **Foreign keys.** A `REFERENCES` clause or a `FOREIGN KEY` constraint, in `CREATE TABLE` or in `ALTER TABLE ... ADD FOREIGN KEY`, makes the column a [record link](/docs/reference/query-language/statements/define/field#defining-a-reference) to the other table. A write whose key names no record in that table fails with **`23503`**. `ALTER TABLE ... DROP CONSTRAINT` takes the names that `pg_constraint` lists, such as `note_person_id_fkey`.
 - **Bulk load and export.** `COPY ... FROM STDIN` and `COPY ... TO STDOUT` move rows in the text and CSV formats. Name the columns in `COPY ... FROM STDIN`, for example `COPY person (id, name) FROM STDIN`.
 - **Typed literals.** Write a typed value as a cast, such as `'2026-01-01'::date`. A plain string is not converted to a `date` column, and the `DATE '2026-01-01'` form does not parse.
 - **Declared columns.** A table that declares its columns, with `CREATE TABLE` or `DEFINE TABLE ... SCHEMAFULL`, is checked as PostgreSQL checks a table. A column that the table does not declare fails with **`42703`**, `SELECT *` returns the declared columns, with `NULL` for an optional column that a record does not hold, and drivers are told the declared types. `*` lists `id` first and then the other columns by name, not in the order they were declared. These checks apply to users who may view table definitions. For a record user, a column that the table does not declare reads as `NULL`, and `*` lists the fields that the records hold.
@@ -237,15 +239,17 @@ The dialect is allowed by the same `postgres` route capability as the connection
 
 The PostgreSQL dialect refuses or differs from PostgreSQL in these places:
 
-- Window functions (`OVER (...)`), recursive common table expressions, `FULL OUTER JOIN` and `generate_series` are refused with **`0A000`** (`feature_not_supported`). Non-recursive `WITH` queries work.
+- Window functions (`OVER (...)`), recursive common table expressions and `FULL OUTER JOIN` are refused with **`0A000`** (`feature_not_supported`). Non-recursive `WITH` queries work.
 - `LATERAL` and `CREATE FUNCTION` do not parse, and fail with **`42601`** (`syntax_error`).
 - A write that uses a clause the dialect cannot run, such as `UPDATE ... FROM`, `DELETE ... USING`, or an `INSERT ... SELECT` that reads from a join or a subquery, is refused with **`0A000`** before it changes anything.
+- Some functions, such as `substring`, `ltrim` and `concat`, and the `||` operator, are refused with **`0A000`** in an `INSERT`, `UPDATE` or `DELETE`, including in its `WHERE` clause. They work in a `SELECT`. Other functions, such as `upper`, work in both.
+- `generate_series` is not available and fails with **`XX000`**.
 - A column in the select list or in `HAVING` that is neither grouped nor aggregated is not refused, and in the select list it returns the values of its group as an array. An aggregate in `WHERE` is not refused either.
 - `LIKE ... ESCAPE` is refused. A trailing backslash in a pattern matches a backslash.
 - `ALL` and `ANY` comparisons over a subquery that has `GROUP BY`, `HAVING`, `LIMIT` or `OFFSET`, or is a set operation, are refused. `SELECT DISTINCT` or `UNION` inside a subquery used as a value can report more than one row where PostgreSQL reports one.
 - `t.*` inside a function call (`count(t.*)`, `row_to_json(t.*)`), in `RETURNING`, in `CREATE VIEW`, and beside another item in the query of an `INSERT` is refused.
 - `CREATE SCHEMA` and `ALTER TABLE ... RENAME COLUMN` answer with their command tag but change nothing. `DROP VIEW` answers with the tag `DROP TABLE`.
-- A value too long for a `VARCHAR(n)` column, or out of range for an `INT` column, is accepted.
+- A value too long for a `VARCHAR(n)` column is accepted.
 - An arithmetic expression over two fields with no declared type, such as `a + b`, is announced as `bigint`, so a result that is a float fails to encode.
 
 ### pgvector
@@ -264,7 +268,7 @@ SELECT id FROM item ORDER BY embedding <-> '[1,2,3]' LIMIT 2;
 
 `CREATE EXTENSION vector` is accepted and defines nothing, so a migration that runs it first does not fail. Any other extension fails with **`58P01`**.
 
-**Columns.** A `vector(n)` column is a field of type `array<float, n>`, and a column of that type defined in SurrealQL is a vector column as well. The dimensions are required: a `vector` column without `(n)` is refused with **`0A000`**, and a vector can have at most 16,000 dimensions. A value written to a vector column as text, as a parameter or as a cast is read as the text form `[1,2,3]`. `'[1,2,3]'::vector(3)` casts a string in a query. Drivers see the column as the `vector` type, in the text and binary formats, so the pgvector packages for psycopg, asyncpg and node-postgres find the type as they do on PostgreSQL.
+**Columns.** A `vector(n)` column is a field of type `array<float, n>`, and a column of that type defined in SurrealQL is a vector column as well. The dimensions are required: a `vector` column without `(n)` is refused with **`0A000`**, and a vector can have at most 16,000 dimensions. A value written to a vector column as text, as a parameter or as a cast is read as the text form `[1,2,3]`. `'[1,2,3]'::vector(3)` casts a string in a query. `INSERT ... SELECT` converts the text it selects into a vector column, and refuses a vector of the wrong dimensions with **`42804`**. A request that creates a table and then writes to a vector column of an existing table, such as `CREATE TABLE audit (...); INSERT INTO item ...`, reads the text as a vector as well. Drivers see the column as the `vector` type, in the text and binary formats, so the pgvector packages for psycopg, asyncpg and node-postgres find the type as they do on PostgreSQL.
 
 **Distances.** Each operator has a function of the same meaning:
 
@@ -288,7 +292,7 @@ SELECT id FROM item ORDER BY embedding <-> '[1,2,3]' LIMIT 2;
 - `hnsw.ef_search`. `SET hnsw.ef_search` is accepted, but the index search always uses an `ef` of 40, or `k` when it is larger.
 - A bound limit, such as `LIMIT $1`. `k` must be written in the query for the index to be used, and with a bound limit the query sorts every row.
 - A distance operator or function in an `INSERT`, `UPDATE` or `DELETE`, which is refused with **`0A000`**. Use them in a `SELECT`.
-- `COPY ... FROM` and `INSERT ... SELECT` into a vector column, which do not convert text to a vector.
+- `COPY ... FROM` into a vector column, which does not convert text to a vector.
 - An index created earlier in the same request is not used by a later `SELECT` in that request, which searches exactly.
 - `DROP EXTENSION`, `vector_dims`, `vector_norm`, `l2_normalize`, arithmetic on vectors and `avg` over a vector column.
 
@@ -372,8 +376,14 @@ A failed statement is reported with the SQLSTATE that PostgreSQL uses for the sa
 | --- | --- | --- |
 | `23505` | `unique_violation` | A write conflicts with a `UNIQUE` index or a primary key. |
 | `23502` | `not_null_violation` | A write gives `NULL`, or no value, to a field that requires one. |
+| `23503` | `foreign_key_violation` | A write names a key that the table of a foreign key does not hold. |
 | `42804` | `datatype_mismatch` | A write gives a field a value of another type. SurrealDB refuses text for a number field, even `'5'`, where PostgreSQL reports `22P02` or accepts it. |
+| `22011` | `substring_error` | `substring` is given a negative length. |
+| `22012` | `division_by_zero` | A number is divided by zero, with `/` or `%`. |
+| `2201E` | `invalid_argument_for_logarithm` | `ln` or `log` is given zero or a negative number. |
+| `22023` | `invalid_parameter_value` | A function is given an invalid argument, such as a field position of `0` for `split_part` or an unknown unit for `date_trunc`. |
 | `42601` | `syntax_error` | The statement cannot be parsed, or exceeds a nesting limit. |
+| `42704` | `undefined_object` | `ALTER TABLE ... DROP CONSTRAINT` names a constraint that does not exist. |
 | `42P01` | `undefined_table` | The statement names a table that does not exist, or a table qualifier missing from `FROM`. |
 | `42703` | `undefined_column` | The statement names a column that a table with declared columns does not have. |
 | `42702` | `ambiguous_column` | A column name could belong to more than one table. |

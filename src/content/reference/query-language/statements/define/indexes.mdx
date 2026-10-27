@@ -86,7 +86,7 @@ SELECT * FROM post WHERE tags CONTAINS 'a';
 SELECT * FROM post WHERE tags CONTAINSANY ['a', 'c'];
 ```
 
-An index declared as `FIELDS tags` is not used for `CONTAINS`, and the query scans the table instead. The field may still hold a string written before its type was declared, and `CONTAINS` on a string looks for a substring, which an element lookup cannot find. For the same reason, use `tags.*` only when every stored value of the field is an array: a string is indexed whole, so `CONTAINS` through a `tags.*` index does not find a substring inside it.
+An index declared as `FIELDS tags` is not used for `CONTAINS`, and the query scans the table instead. The field may still hold a string written before its type was declared, and `CONTAINS` on a string looks for a substring, which an element lookup cannot find. A `tags.*` index finds such a string for the plain form `tags CONTAINS 'a'`, as described in [Array-element composite indexes](#array-element-composite-indexes). The form `tags.* CONTAINS 'a'` takes each element of the field, and a string is indexed whole, so it does not find a substring inside a string.
 
 > [!WARNING]
 > Before SurrealDB 3.3.1, the query planner treated a `FIELDS tags` index on an array field as if each record held a single value, so a query could return different records with the index than without it. `count()` with `tags = 'a'` counted the records whose array held `'a'`, `tags = ['a', 'b']` returned nothing, a range such as `tags > 'a'` could return a record twice, and `ORDER BY tags` followed the order of the index entries. From 3.3.1 these return the same results as without the index on a field whose type is an array, such as `array<string>` or `option<array<string>>`, and the index does not need to be rebuilt. A field with no declared type, or a type that also allows a value that is not an array, keeps the earlier behaviour. So does a server started with [`SURREAL_PLANNER_STRATEGY`](/docs/reference/cli/db/environment-variables) set to `compute-only`.
@@ -361,7 +361,15 @@ LIMIT 10;
 
 `CONTAINSALL` / `ALLINSIDE` may still apply a residual filter above the union when intersection semantics require it. See [operators](/docs/reference/query-language/language-primitives/operators) and [`EXPLAIN`](/docs/reference/query-language/statements/explain) to confirm the planner choice.
 
-A containment condition uses an index on `tags.*` only when it takes each element of the field, as `tags.* CONTAINS 'x'`, `tags[*] CONTAINS 'x'` and `'x' INSIDE tags[*]` do. From SurrealDB 4.0, the plain form `tags CONTAINS 'x'` reads the table instead, because a record whose `tags` is a string, an object or a range can satisfy it without holding `'x'` as an element, and the index has no entry for such a record.
+A containment condition that takes each element of the field, as `tags.* CONTAINS 'x'`, `tags[*] CONTAINS 'x'` and `'x' INSIDE tags[*]` do, reads the index on `tags.*` directly. The plain form `tags CONTAINS 'x'`, and `'x' INSIDE tags`, `CONTAINSANY` and `CONTAINSALL`, can also match a record whose `tags` is not an array, such as a string that holds `'x'` as a substring. The index lists a record whose `tags` is a string, a range, another single value or missing under `NONE`, so from SurrealDB 4.0 the plain form reads the entries for `'x'`, `NONE` and `NULL` together, and checks the condition on each record it reads. `EXPLAIN` shows this as a `UnionIndexScan` with one branch for each value.
+
+The plain form reads the table instead in three cases:
+
+- Any record has stored an object or a record link in the field. The index stores such a value whole, so it has no entry that the condition can find.
+- The query has an `ORDER BY` that the index does not give, such as `ORDER BY` a field that is not the next field of the index, or a `LIMIT` with no `ORDER BY`. A table scan rejects most records without decoding them, so it costs less in these cases.
+- The index was built by a release before 4.0, which did not record the kinds of value it stored. [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild) records them.
+
+With `ORDER BY` on the next field of the index, as in `WHERE tags CONTAINS 'x' ORDER BY created DESC LIMIT 10`, the plan reads the three sets of entries in index order and stops at the limit.
 
 > [!NOTE]
 > From SurrealDB 4.0, a field declared as a [set](/docs/reference/query-language/language-primitives/data-types/sets#paths-and-indexes-over-sets) is indexed as a whole by `.*`, not element by element. `WHERE s CONTAINS 3` on a set field reads the records instead of using the index, and a `UNIQUE` index over `s.*` treats the whole set as the key.
