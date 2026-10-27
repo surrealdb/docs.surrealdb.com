@@ -72,6 +72,8 @@ SELECT * FROM user WHERE age IN 18..30;
 SELECT * FROM user WHERE string::starts_with(name, 'Ann');
 ```
 
+Only the function-call form is read as a prefix. The method form `name.starts_with('Ann')` returns the same records, but scans the table.
+
 #### Indexing an array field
 
 On a field that holds an array, a standard index has one entry for each element. A condition still compares the whole value, so with `tags = ['a', 'b']`, the condition `tags = 'a'` is false and `tags = ['a', 'b']` is true, with or without the index. To find the records whose array holds an element, use [`CONTAINS`](/docs/reference/query-language/language-primitives/operators#contains-or-) or `CONTAINSANY` and index the elements with `tags.*`:
@@ -87,6 +89,62 @@ An index declared as `FIELDS tags` is not used for `CONTAINS`, and the query sca
 
 > [!WARNING]
 > Before SurrealDB 3.3.1, the query planner treated a `FIELDS tags` index on an array field as if each record held a single value, so a query could return different records with the index than without it. `count()` with `tags = 'a'` counted the records whose array held `'a'`, `tags = ['a', 'b']` returned nothing, a range such as `tags > 'a'` could return a record twice, and `ORDER BY tags` followed the order of the index entries. From 3.3.1 these return the same results as without the index on a field whose type is an array, such as `array<string>` or `option<array<string>>`, and the index does not need to be rebuilt. A field with no declared type, or a type that also allows a value that is not an array, keeps the earlier behaviour. So does a server started with [`SURREAL_PLANNER_STRATEGY`](/docs/reference/cli/db/environment-variables) set to `compute-only`.
+
+#### Indexing a computed value
+
+The field path in `FIELDS` can end with one or more method calls. The index then stores the result of the methods for each record, and updates it when the record changes. This lets a query that filters on a transformed value, such as a lowercase name, use an index:
+
+```surql
+DEFINE INDEX product_kind ON product FIELDS kind.trim().lowercase();
+
+CREATE product:1 SET kind = ' Banana ';
+CREATE product:2 SET kind = 'apple';
+
+SELECT id FROM product WHERE kind.trim().lowercase() = 'banana';
+```
+
+```surql title="Output"
+[
+	{
+		id: product:1
+	}
+]
+```
+
+Adding [`EXPLAIN`](/docs/reference/query-language/clauses/explain) to the query shows that it reads the index. The `IndexScan` operator names `product_kind` and looks up the computed value `'banana'`:
+
+```surql
+SELECT id FROM product WHERE kind.trim().lowercase() = 'banana' EXPLAIN;
+```
+
+```surql title="Output"
+{
+	attributes: {
+		projections: 'id'
+	},
+	children: [
+		{
+			attributes: {
+				access: "= 'banana'",
+				direction: 'Forward',
+				index: 'product_kind',
+				predicate: "kind.trim().lowercase() = 'banana'"
+			},
+			context: 'Db',
+			operator: 'IndexScan'
+		}
+	],
+	context: 'Db',
+	operator: 'SelectProject'
+}
+```
+
+A query uses the index only when its condition repeats the expression as it is written in `FIELDS`. `WHERE kind = 'banana'` and the function-call form `WHERE string::lowercase(kind) = 'banana'` both scan the table, although the second one returns the same records, and their `EXPLAIN` output shows a `TableScan` instead. Comparisons and `IN` work on a computed value in the same way as on a stored one, and a [composite index](#composite-index) can mix the two, as in `FIELDS kind.lowercase(), price`.
+
+Two limits apply:
+
+- Only method calls on a field path are accepted. A function call such as `string::lowercase(kind)` or an operator such as `price * qty` fails when the index is defined. To index one of those, store the result in a field of its own with [`DEFINE FIELD ... VALUE`](/docs/reference/query-language/statements/define/field) and index that field.
+- Every record write runs the methods. A record where they cannot run fails, so with the index above, `CREATE product:3 SET kind = 5` and a record with no `kind` both return an error such as `There was a problem running the trim() function. no such method found for the none type`.
 
 ### Unique index
 
@@ -244,7 +302,7 @@ DEFINE FIELD tag_key ON post VALUE <string> tags.sort();
 DEFINE INDEX unique_tags ON post FIELDS tag_key UNIQUE;
 ```
 
-A `UNIQUE` index compares values exactly, so `'Bob'` and `'bob'` count as different. For a case-insensitive unique value, end the indexed field with a method call that normalises it, and the index stores the result:
+A `UNIQUE` index compares values exactly, so `'Bob'` and `'bob'` count as different. For a case-insensitive unique value, [index a computed value](#indexing-a-computed-value) that normalises it:
 
 ```surql
 DEFINE INDEX unique_name ON user FIELDS name.lowercase() UNIQUE;
@@ -257,9 +315,7 @@ CREATE user:2 SET name = 'bOB';
 Database index `unique_name` already contains 'bob', with record `user:1`
 ```
 
-A query uses this index when its condition repeats the same expression, such as `WHERE name.lowercase() = 'bob'`. A condition on `name` alone does not, and scans the table instead.
-
-The function-call form `string::lowercase(name)` is not accepted in `FIELDS`, and a record where `name` is `NONE` or not a string fails the write, because `lowercase()` cannot run on it. Alternatively, store the normalised value in a field of its own and index that field, which keeps the lowercase value visible in query results:
+A query uses this index for `WHERE name.lowercase() = 'bob'`, but not for a condition on `name` alone. Alternatively, store the normalised value in a field of its own and index that field, which keeps the lowercase value visible in query results:
 
 ```surql
 DEFINE FIELD name_key ON user VALUE name.lowercase();
@@ -548,6 +604,51 @@ Both indexes are used without naming them: the query planner chooses the index b
 
 > [!WARNING]
 > Writing both kinds in one statement, as in `DEFINE INDEX title ON book FIELDS title UNIQUE FULLTEXT ANALYZER simple`, does not return an error, but only the last kind is kept. That index is full-text only and accepts duplicate titles. Check the stored definition with `INFO FOR TABLE`.
+
+The `UNIQUE` index above compares titles exactly, while the search ignores case. To make the unique check match the same way as the search, store a key built with the analyzer itself, using [`search::analyze()`](/docs/reference/query-language/functions/database-functions/search#searchanalyze), and make the key unique. With the `ascii` filter, the key also ignores accents, which a [computed value](#indexing-a-computed-value) such as `nickname.lowercase()` does not:
+
+```surql
+DEFINE ANALYZER ascii_lcase TOKENIZERS blank FILTERS lowercase, ascii;
+DEFINE FIELD nickname ON user TYPE string;
+DEFINE FIELD nickname_key ON user VALUE search::analyze('ascii_lcase', nickname).join(' ');
+DEFINE INDEX nickname_unique ON user FIELDS nickname_key UNIQUE;
+DEFINE INDEX nickname_search ON user FIELDS nickname FULLTEXT ANALYZER ascii_lcase BM25;
+
+CREATE user:1 SET nickname = 'Zoë';
+CREATE user:2 SET nickname = 'ZOE';
+```
+
+```text title="Error output"
+Database index `nickname_unique` already contains 'zoe', with record `user:1`
+```
+
+`search::analyze()` returns the tokens as an array, and `.join(' ')` turns them into one string. The key is computed again on each write, so do not make the field `READONLY`, or a changed nickname keeps its old key. A lookup on the key uses the unique index:
+
+```surql
+SELECT id FROM user WHERE nickname_key = 'zoe' EXPLAIN;
+```
+
+```surql title="Output"
+{
+	attributes: {
+		projections: 'id'
+	},
+	children: [
+		{
+			attributes: {
+				access: "= 'zoe'",
+				direction: 'Forward',
+				index: 'nickname_unique',
+				predicate: "nickname_key = 'zoe'"
+			},
+			context: 'Db',
+			operator: 'IndexScan'
+		}
+	],
+	context: 'Db',
+	operator: 'SelectProject'
+}
+```
 
 #### `FULLTEXT` vs. `SEARCH`
 
