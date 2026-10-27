@@ -907,6 +907,26 @@ curl -s http://localhost:4321/docs/<path> \
 
 Any iframe without `query=` is a dead embed. To sweep for leaked attribute text, search the rendered page for `&quot; /&gt;` rather than `" />` - the page serves it entity-encoded, and grepping for the raw form finds nothing.
 
+### Runnable code blocks
+
+A SurrealQL fence can run where it stands. Add a `runnable` attribute to its info string, and the block gets a **Run Query** button that swaps it for an embedded Studio holding the same query, with **Close** to go back to the block. The attribute's value is a list of `key="value"` pairs that `@surrealdb/ui` passes to the embedded Studio, so it takes the same keys as `<SurrealistMini>`. The one most pages need is `dataset`, a path on datasets.surrealdb.com:
+
+````mdx
+```surql runnable='dataset="/datasets/drone-navigation/schengen.surql"'
+SELECT * FROM place;
+```
+````
+
+Put the whole value in single quotes and each pair's value in double quotes. The info string's parser reads `'…'` as one value, and `@surrealdb/ui` then splits the pairs inside it. A bare `runnable` with no value runs the query against an empty database. www.surrealdb.com uses the same attribute, so the syntax carries over between the two sites.
+
+Use a runnable block when the code is already part of the page's text, as in a tutorial step. It stays an ordinary block until a reader asks for it, so a `title="Output"` fence below still pairs with it, and the dataset downloads only on the first **Run Query**. Use `<SurrealistMini>` for an editor that should be open as soon as the page loads. Leave a block plain when running it against the dataset would fail, such as a listing of the `DEFINE` statements the dataset already contains.
+
+The button is rendered in the browser, so `curl` cannot see it. Count the buttons in the page from the browser console instead, and compare the number with the runnable fences in the source:
+
+```js
+[...document.querySelectorAll("button")].filter((b) => /Run Query/.test(b.innerText)).length;
+```
+
 ### `<Synopsis>`
 
 Write the usage lines as the block body:
