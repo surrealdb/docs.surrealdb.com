@@ -244,6 +244,34 @@ function databaseFunctionsOverviewRedirects(): Redirect[] {
         { source: from, destination: to, statusCode: 301 },
     ];
 }
+/** SurrealDB 4.0 renames Surrealism modules to extensions. */
+function extensionRedirects(): Redirect[] {
+    const moves: [string, string][] = [
+        [
+            "reference/query-language/statements/define/module",
+            "reference/query-language/statements/define/extension",
+        ],
+        ["reference/cli/db/commands/module", "reference/cli/ext"],
+        ["reference/cli/db/commands/extension", "reference/cli/ext"],
+        ["reference/cli/modules", "reference/cli/ext"],
+        [
+            "learn/extensions/guides/creating-custom-modules",
+            "learn/extensions/guides/creating-custom-extensions",
+        ],
+        [
+            "learn/extensions/guides/module-architecture",
+            "learn/extensions/guides/extension-architecture",
+        ],
+        ["explore/cli/modules", "explore/cli/extensions"],
+    ];
+
+    // Source without `/docs` (the www rewrite strips it); destination with `/docs`.
+    return moves.map(([from, to]) => ({
+        source: `/${from}`,
+        destination: `/docs/${to}`,
+        statusCode: 301,
+    }));
+}
 /**
  * The `surreal` launcher replaced the separate `surrealctl` and `surreal` tools,
  * and the two CLI sections became one.
@@ -1056,6 +1084,7 @@ const baseRedirects: Redirect[] = [
     ...runningFromSelfHostedRedirects(),
     ...databaseFunctionsOverviewRedirects(),
     ...surrealCliRedirects(),
+    ...extensionRedirects(),
     ...phpVersionedRedirects(),
     ...sdkReferenceRedirects(),
     ...sdkGettingStartedRedirects(),
