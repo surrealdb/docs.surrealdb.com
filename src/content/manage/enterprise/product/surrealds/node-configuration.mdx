@@ -1,0 +1,196 @@
+---
+position: 4
+title: Node configuration
+description: "Reference for running a SurrealDS node: the surrealds:// path and its options, the JSON node configuration file, the equivalent SURREALDS_* environment variables, the object store settings, TLS, zones, the admin endpoint and the commit log barrier."
+---
+
+# Node configuration
+
+<Since v="v4.0.0" />
+
+This page is the reference for configuring a [SurrealDS](/docs/manage/enterprise/product/surrealds) node that you run yourself. The [Kubernetes operator](/docs/manage/enterprise/product/surrealds/kubernetes-operator) writes this configuration for you. For a step-by-step setup, see [Run SurrealDS on your own machines](/docs/manage/enterprise/product/surrealds/own-machines).
+
+## The `surrealds://` path
+
+A node is a `surreal start` process whose datastore path starts with `surrealds://`:
+
+```bash
+surreal start --bind 0.0.0.0:8000 "surrealds://?config=/opt/surrealdb/etc/node.json"
+```
+
+The path has four forms:
+
+| Path | What it opens |
+| --- | --- |
+| `surrealds://?config=<file>` | A node described by a JSON configuration file. Use this form for a group. |
+| `surrealds://` | A node described by `SURREALDS_*` environment variables. `SURREALDS_NODE` or `SURREALDS_CONFIG_FILE` must be set. |
+| `surrealds://<directory>` | One node with no peers, that keeps its log in `<directory>/log` and its pages in `<directory>/objects`. It creates the database if the directory is empty. |
+| `surrealds://memory` | One node with no peers that keeps everything in memory. The data is lost when the process stops. |
+
+Put the path in quotes in a shell, because `?` and `&` are special characters.
+
+These options can follow the path, for example `surrealds://?config=/opt/surrealdb/etc/node.json&versioned=true`:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `versioned` | `false` | Keep a window of old versions, so that `SELECT ... VERSION` works. Without it, a statement that names a version is refused. |
+| `config` | - | The configuration file. |
+
+With a configuration file or environment variables, the node takes the rest of its settings from there. Options for a single node with no peers, such as `sync` and `create`, have no effect on a node that uses a configuration file.
+
+## Configuration sources
+
+Configure a node with a JSON file, or with environment variables. Do not use both: a node that names a file refuses to start if a configuration variable is also set.
+
+Each variable can be spelled `SURREALDS_<NAME>` or `SHALE_<NAME>`. If both are set, `SURREALDS_<NAME>` is used. An empty variable is an error, not a default.
+
+## Minimal configuration file
+
+A node of a three-node group needs at least this:
+
+```json title="node.json for node 1"
+{
+  "node": {
+    "scope": 1,
+    "node": 1,
+    "zone": "zone-a",
+    "storage": { "kind": "disk", "path": "/opt/surrealdb/data/log" },
+    "class": { "barrier": true, "cross_zone": true },
+    "create": true
+  },
+  "listen": "0.0.0.0:7400",
+  "admin": "0.0.0.0:7401",
+  "peers": [
+    { "node": 2, "zone": "zone-b", "host": "10.0.0.12", "port": 7400, "server_name": "shale-2", "cert": "/opt/surrealdb/tls/node-2.crt", "admin": "10.0.0.12:7401" },
+    { "node": 3, "zone": "zone-c", "host": "10.0.0.13", "port": 7400, "server_name": "shale-3", "cert": "/opt/surrealdb/tls/node-3.crt", "admin": "10.0.0.13:7401" }
+  ],
+  "tls": {
+    "cert": "/opt/surrealdb/tls/node-1.crt",
+    "key": "/opt/surrealdb/tls/node-1.key",
+    "ca": "/opt/surrealdb/tls/ca.crt"
+  },
+  "object": {
+    "kind": "s3",
+    "bucket": "surrealds",
+    "prefix": "production",
+    "endpoint": "https://s3.example.com",
+    "region": "us-east-1"
+  }
+}
+```
+
+The object store credentials are never in the file. Set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in the node's environment.
+
+## `node` fields
+
+| JSON field | Variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `scope` | `SURREALDS_SCOPE` | Required | The scope number. Use `1` on every node. |
+| `node` | `SURREALDS_NODE` | Required | This node's id: `1`, `2`, `3` and so on. Each node in a group has a different id, and an id never changes. |
+| `zone` | `SURREALDS_ZONE` | Required | This node's zone label. See [Zones](/docs/manage/enterprise/product/surrealds#zones). |
+| `storage` | `SURREALDS_LOG_PATH` | Required in a file | The commit log: `{"kind": "disk", "path": "<directory>"}`. The variable takes the directory. |
+| `log_sync` | `SURREALDS_LOG_SYNC` | `full` | The barrier for each log write: `full`, `datasync`, `fsync` or `none`. See [Commit log barrier](#commit-log-barrier). |
+| `class` | `SURREALDS_CLASS_BARRIER` and `SURREALDS_CLASS_CROSS_ZONE` | Not stated | The durability the group intends: `{"barrier": true, "cross_zone": true}` states a barriered log and a second copy in another zone. Set both variables or neither. |
+| `page_cache` | `SURREALDS_PAGE_CACHE_PATH` and `SURREALDS_PAGE_CACHE_BYTES` | In memory, 512 MiB | A cache of pages from the object store: `{"storage": {"kind": "disk", "path": "<directory>"}, "max_bytes": <bytes>}`. The directory must not be inside the log directory, or contain it. |
+| `object_sync` | `SURREALDS_OBJECT_SYNC_MS` | `{"interval_ms": 60000}` | How often the sequencer uploads to the object store. The Kubernetes operator uses `5000`. |
+| `create` | `SURREALDS_CREATE` | `false` | Whether this node may create the database when the object store prefix is empty. Set it on node 1 only. Without it, a node waits for the database to exist. |
+
+## Host fields
+
+| JSON field | Variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `listen` | `SURREALDS_LISTEN` | None | The UDP address for the peer connections, for example `0.0.0.0:7400`. |
+| `admin` | `SURREALDS_ADMIN` | None | The TCP address of the [admin endpoint](#admin-endpoint), for example `0.0.0.0:7401`. It cannot share an address and port with `listen`. |
+| `admin_token` | `SURREALDS_ADMIN_TOKEN` | None | A bearer token that every admin request must send. Without it, the admin endpoint is open to anyone who can reach it. |
+| `peers` | `SURREALDS_PEERS` | Empty | The other nodes of the group. See [Peers](#peers). |
+| `tls` | `SURREALDS_TLS_CERT`, `SURREALDS_TLS_KEY` and `SURREALDS_TLS_CA` | None | This node's certificate, private key and certificate authority, as file paths. Set all three or none. |
+| `object` | `SURREALDS_OBJECT_*` | Required | The object store. See [Object store](#object-store). |
+| `zone_policy` | `SURREALDS_ZONE_POLICY` | `mandate-two` | What the group does without a node in a second zone. See [Zone policy](#zone-policy). |
+| `memory_bytes` | `SURREALDS_MEMORY_BYTES` | The process's memory limit, or the machine's total memory | The memory the node sizes its caches and buffers from. SurrealDB runs in the same process, so you can give the node less than the machine has. |
+
+The other fields, such as the lease and timeout settings, have defaults that suit most groups. Do not change them unless SurrealDB support asks you to.
+
+## Peers
+
+Every node lists every other node of the group. A node does not list itself, and each id appears once.
+
+| Peer field | Meaning |
+| --- | --- |
+| `node` | The peer's node id. |
+| `zone` | The peer's zone label. It must match that peer's own `zone`. |
+| `host` | The peer's IP address or DNS name. A name is resolved again while the node runs. |
+| `port` | The peer's UDP peer port. |
+| `server_name` | The name in the peer's certificate: `shale-<id>`. |
+| `cert` | The path to the peer's certificate file on this machine. |
+| `admin` | Optional. The peer's admin address as `host:port`. |
+
+With `SURREALDS_PEERS`, write each peer as `node:zone:host:port:server_name:cert[:admin_port]` and separate peers with commas. This form cannot hold an IPv6 address.
+
+## TLS
+
+A node with peers must have TLS. It cannot be turned off.
+
+- All nodes of a group use certificates from one certificate authority.
+- The certificate of node `<id>` must carry the DNS name `shale-<id>`, and allow both server and client authentication.
+- The private key must be a PEM file in PKCS#8 format (`-----BEGIN PRIVATE KEY-----`).
+- Each node needs the certificate files of all its peers. A node trusts a peer by that peer's exact certificate, so a new certificate for a node changes its identity for the rest of the group.
+
+The certificate script in [Make the TLS certificates](/docs/manage/enterprise/product/surrealds/kubernetes-operator#2-make-the-tls-certificates) creates files in this format.
+
+## Object store
+
+| JSON field | Variable | Meaning |
+| --- | --- | --- |
+| `kind` | `SURREALDS_OBJECT_KIND` | `s3` or `azure`. |
+| `bucket` | `SURREALDS_OBJECT_BUCKET` | The S3 bucket. Required for `s3`. |
+| `prefix` | `SURREALDS_OBJECT_PREFIX` | The key prefix that holds this group's database. Required. |
+| `endpoint` | `SURREALDS_OBJECT_ENDPOINT` | The store's URL. Leave it out for Amazon S3. With an endpoint, the node uses path-style requests, and `http://` is allowed. |
+| `region` | `SURREALDS_OBJECT_REGION` | The region. |
+| `container`, `account` | `SURREALDS_OBJECT_CONTAINER`, `SURREALDS_OBJECT_ACCOUNT` | The Azure container and storage account, for `azure`. |
+
+All nodes of a group must use the same store, bucket and prefix. A prefix holds one database: use a new prefix for a new group, and never point two groups at the same prefix.
+
+The store must support conditional writes with the `If-Match` and `If-None-Match` request headers. Amazon S3, Cloudflare R2 and MinIO do. If the store does not compare `If-Match` correctly, the node's first write to the store fails. A store that compares unquoted `If-Match` values needs `"unquoted_if_match": true`.
+
+## Zone policy
+
+| Value | Without a node in a second zone |
+| --- | --- |
+| `mandate-two` | The group stops serving clients until a node in a second zone is running again. Every acknowledged write is on disks in two zones. |
+| `allow-one` | When no node in another zone is available, the group continues with one copy of the log and accepts writes. It returns to two zones when a node in another zone is available again. |
+
+Under both values, the acking witness is never in the same zone as the sequencer. Give each node a different zone label only where the machines do not share a failure, such as one power supply or one network switch.
+
+## Commit log barrier
+
+`log_sync` sets how each commit log write is made durable.
+
+| Value | Meaning |
+| --- | --- |
+| `full` | Default. Flushes the file and the disk's write cache. On macOS this is `F_FULLFSYNC`. |
+| `datasync` | Flushes the file data. On macOS this is also `F_FULLFSYNC`. |
+| `fsync` | Calls `fsync`. On macOS, `fsync` does not flush the disk's write cache, so do not use this value on macOS. |
+| `none` | No flush. The node refuses this value unless `accept_write_loss` is `true`, and acknowledged writes can be lost. |
+
+## Admin endpoint
+
+The admin endpoint listens on the `admin` address.
+
+| Route | Answers |
+| --- | --- |
+| `GET /live` | `200` while the node makes progress. `503` only when a restart is the only cure. |
+| `GET /ready` | `200` when this node accepts client requests. Otherwise a non-`200` status, with the reason in the body and in the `X-Shale-Reason` header. |
+| `GET /status` | A JSON document that describes the node. `role` is `sequencer`, `witness` or `recovering`. `owner` names the group's sequencer, `acker` names its acking witness, and `class.copies` is `two-zones` when writes go to two zones. |
+| `GET /metrics` | Node metrics in Prometheus format. |
+
+Allow the admin port only from the other nodes and from your monitoring hosts, or set `admin_token`.
+
+The SurrealDB server on port 8000 also answers `GET /health`, and its `GET /ready` includes the [licence state](/docs/manage/enterprise/product/licensing#what-happens-to-a-node).
+
+## Ports
+
+| Port | Protocol | Used by |
+| --- | --- | --- |
+| The `listen` port, for example 7400 | UDP | The other nodes. |
+| The `admin` port, for example 7401 | TCP | The other nodes, and your monitoring. |
+| The `--bind` port, 8000 by default | TCP | Clients. |

@@ -1,0 +1,404 @@
+---
+position: 3
+title: Your own machines
+description: "Run a SurrealDS group without Kubernetes, from scratch: plan the nodes and zones, make the certificates and node configuration files, install SurrealDB Enterprise as a launchd service on Apple Silicon Mac computers such as Mac Studio, or as a systemd service on Linux, start the group in order, and check it."
+---
+
+# Run SurrealDS on your own machines
+
+<Since v="v4.0.0" />
+
+This guide sets up a [SurrealDS](/docs/manage/enterprise/product/surrealds) group on machines that you manage yourself, without Kubernetes. Each machine runs one SurrealDB Enterprise process as a system service, and that process is one node of the group.
+
+The steps use three Apple Silicon Mac computers, such as Mac Studio, with macOS `launchd`. The configuration is the same on Linux, and [Run on Linux](#run-on-linux) shows the `systemd` unit to use there.
+
+When you finish, you will have a three-node group, each node in its own zone, that starts when its machine starts and that you can query with the Surreal CLI.
+
+## Plan the group
+
+Decide these values before you start, and write them down. Every step uses them.
+
+| Node id | Machine | IP address | Zone |
+| --- | --- | --- | --- |
+| 1 | `studio-1` | `10.0.0.11` | `zone-a` |
+| 2 | `studio-2` | `10.0.0.12` | `zone-b` |
+| 3 | `studio-3` | `10.0.0.13` | `zone-c` |
+
+- **Node ids** are `1`, `2` and `3`. An id belongs to one machine for the life of the group.
+- **IP addresses** must not change. Give each machine a fixed address, or a DHCP reservation.
+- **Zones** name failure domains. Give two machines different zones only when they do not share a power supply, a network switch or a room that can fail as one. If all machines share one failure domain, they can still form a group, but the group does not survive the failure of that domain. See [Zones](/docs/manage/enterprise/product/surrealds#zones).
+
+You also need:
+
+- **An object store bucket** that all three machines can reach, and an access key for it. Use a service such as Amazon S3 or Cloudflare R2, or an S3-compatible server that supports conditional writes on a separate machine. All three nodes read from it, so put it where the group can reach it while any one machine is down.
+- **A prefix** in that bucket for this group, such as `production`. A prefix holds one database.
+- **A licence key.** See [Licensing](/docs/manage/enterprise/product/licensing).
+- **Network access.** Each machine needs UDP port 7400 and TCP port 7401 open to the other machines, TCP port 8000 open to your clients, and outbound HTTPS to `api.keygen.sh` and to the object store.
+
+## 1. Prepare each Mac
+
+Do these steps on each of the three machines.
+
+### Install SurrealDB Enterprise
+
+> [!IMPORTANT]
+> A native macOS build of SurrealDB Enterprise for Apple Silicon is not yet published for download. [Contact SurrealDB](https://surrealdb.com/contact) to get it. The published Docker image runs Linux, and this guide does not use it on macOS, because the commit log must be flushed to the Mac's own disk.
+
+Install the binary as `/usr/local/bin/surreal`, and check its version:
+
+```bash
+sudo mkdir -p /usr/local/bin
+sudo install -m 0755 ./surreal /usr/local/bin/surreal
+surreal version
+```
+
+If you downloaded the binary with a web browser, macOS marks it as quarantined. Remove the mark so that the service can start it:
+
+```bash
+sudo xattr -d com.apple.quarantine /usr/local/bin/surreal
+```
+
+### Keep the Mac awake
+
+A node that sleeps stops answering its peers. Turn off sleep, and make the Mac start again after a power failure:
+
+```bash
+sudo pmset -a sleep 0 disksleep 0 autorestart 1
+```
+
+### Allow incoming connections
+
+If the macOS firewall is on, allow the SurrealDB binary to accept connections:
+
+```bash
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/local/bin/surreal
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /usr/local/bin/surreal
+```
+
+The macOS firewall allows or blocks an application, not a port. To allow the peer and admin ports only from the other machines, use a network firewall.
+
+### Create the directories
+
+```bash
+sudo mkdir -p /opt/surrealdb/bin /opt/surrealdb/etc /opt/surrealdb/tls /opt/surrealdb/data/log /opt/surrealdb/cache /opt/surrealdb/logs
+sudo chmod 700 /opt/surrealdb/etc /opt/surrealdb/tls /opt/surrealdb/data
+```
+
+| Directory | Holds |
+| --- | --- |
+| `/opt/surrealdb/etc` | The node configuration, the secrets file and the licence key. |
+| `/opt/surrealdb/tls` | The certificates. |
+| `/opt/surrealdb/data/log` | The commit log. |
+| `/opt/surrealdb/data` | The licence attestation cache. |
+| `/opt/surrealdb/cache` | A cache of pages from the object store. It can be deleted when the node is stopped. |
+| `/opt/surrealdb/logs` | The service's output. |
+
+Use the Mac's internal disk for `/opt/surrealdb/data`. The node flushes each commit to the disk with `F_FULLFSYNC`, which waits for the disk to store the data.
+
+## 2. Make the certificates
+
+Do this step once, on one machine or on your own computer.
+
+Nodes authenticate each other with mutual TLS. Save the certificate script from [Make the TLS certificates](/docs/manage/enterprise/product/surrealds/kubernetes-operator#2-make-the-tls-certificates) as `surrealds-certs.sh`, and run it for three nodes:
+
+```bash
+bash surrealds-certs.sh ./surrealds-tls 3
+```
+
+Copy `ca.crt` and every `node-<id>.crt` to `/opt/surrealdb/tls` on every machine. Copy each node's private key, `node-<id>.key`, only to that node's machine. For example, for node 2:
+
+```bash
+scp surrealds-tls/ca.crt surrealds-tls/node-*.crt surrealds-tls/node-2.key admin@10.0.0.12:/tmp/
+ssh admin@10.0.0.12 'sudo mv /tmp/ca.crt /tmp/node-*.crt /tmp/node-2.key /opt/surrealdb/tls/ && sudo chmod 600 /opt/surrealdb/tls/node-2.key'
+```
+
+Keep `ca.key` in a safe place, off the machines. You need it only to make certificates for nodes that you add later.
+
+## 3. Write the node configuration
+
+Do this step once, on the same computer as the certificates.
+
+Save this script as `surrealds-config.sh`, and change the values at the top to the values of your plan:
+
+```bash title="surrealds-config.sh"
+#!/usr/bin/env bash
+# Usage: surrealds-config.sh <output-directory>
+# Writes node-<id>.json for every node in NODES.
+set -euo pipefail
+out="$1"
+
+# One line per node: id, zone, IP address or DNS name.
+NODES="
+1 zone-a 10.0.0.11
+2 zone-b 10.0.0.12
+3 zone-c 10.0.0.13
+"
+PEER_PORT=7400
+ADMIN_PORT=7401
+BASE=/opt/surrealdb
+BUCKET=surrealds
+PREFIX=production
+ENDPOINT=https://s3.example.com   # leave empty for Amazon S3
+REGION=us-east-1
+CACHE_BYTES=$((64 * 1024 * 1024 * 1024))   # disk cache of object store pages: 64 GiB
+
+mkdir -p "$out"
+nodes=$(printf '%s\n' "$NODES" | awk 'NF == 3')
+endpoint=""
+[ -n "$ENDPOINT" ] && endpoint="\"endpoint\": \"$ENDPOINT\", "
+printf '%s\n' "$nodes" | while read -r id zone host; do
+  create=false
+  [ "$id" = 1 ] && create=true
+  peers=$(printf '%s\n' "$nodes" | while read -r pid pzone phost; do
+    [ "$pid" = "$id" ] && continue
+    printf '    {"node": %s, "zone": "%s", "host": "%s", "port": %s, "server_name": "shale-%s", "cert": "%s/tls/node-%s.crt", "admin": "%s:%s"},\n' \
+      "$pid" "$pzone" "$phost" "$PEER_PORT" "$pid" "$BASE" "$pid" "$phost" "$ADMIN_PORT"
+  done | sed '$ s/,$//')
+  cat > "$out/node-$id.json" <<EOF
+{
+  "node": {
+    "scope": 1,
+    "node": $id,
+    "zone": "$zone",
+    "storage": {"kind": "disk", "path": "$BASE/data/log"},
+    "log_sync": "full",
+    "page_cache": {"storage": {"kind": "disk", "path": "$BASE/cache"}, "max_bytes": $CACHE_BYTES},
+    "object_sync": {"interval_ms": 5000},
+    "class": {"barrier": true, "cross_zone": true},
+    "create": $create
+  },
+  "listen": "0.0.0.0:$PEER_PORT",
+  "admin": "0.0.0.0:$ADMIN_PORT",
+  "peers": [
+$peers
+  ],
+  "tls": {"cert": "$BASE/tls/node-$id.crt", "key": "$BASE/tls/node-$id.key", "ca": "$BASE/tls/ca.crt"},
+  "object": {"kind": "s3", "bucket": "$BUCKET", ${endpoint}"region": "$REGION", "prefix": "$PREFIX"},
+  "zone_policy": "mandate-two"
+}
+EOF
+  echo "Wrote $out/node-$id.json (zone $zone, create $create)"
+done
+```
+
+Run it, and copy each file to its machine as `/opt/surrealdb/etc/node.json`:
+
+```bash
+bash surrealds-config.sh ./surrealds-config
+scp surrealds-config/node-2.json admin@10.0.0.12:/tmp/node.json
+ssh admin@10.0.0.12 'sudo mv /tmp/node.json /opt/surrealdb/etc/node.json'
+```
+
+Only node 1 has `"create": true`. It creates the database in the empty prefix, and the other nodes join it. The fields are described in [Node configuration](/docs/manage/enterprise/product/surrealds/node-configuration).
+
+## 4. Store the secrets
+
+Do these steps on each machine.
+
+Write the licence key to a file:
+
+```bash
+printf '%s\n' '<your-licence-key>' | sudo tee /opt/surrealdb/etc/license.key > /dev/null
+sudo chmod 600 /opt/surrealdb/etc/license.key
+```
+
+Create `/opt/surrealdb/etc/surrealds.env` with the object store credentials, the root user and the other settings of the process. Use the same root user on every machine.
+
+```bash title="/opt/surrealdb/etc/surrealds.env"
+AWS_ACCESS_KEY_ID=<access-key-id>
+AWS_SECRET_ACCESS_KEY=<secret-access-key>
+SURREAL_USER=root
+SURREAL_PASS=<a-strong-password>
+SURREAL_LICENSE_KEY_FILE=/opt/surrealdb/etc/license.key
+SURREAL_LICENSE_STATE_PATH=/opt/surrealdb/data/license-state.json
+SURREAL_STARTUP_OPERATION_TIMEOUT=1200s
+SURREAL_LOG=info
+SURREAL_NO_BANNER=true
+```
+
+```bash
+sudo chmod 600 /opt/surrealdb/etc/surrealds.env
+```
+
+`SURREAL_STARTUP_OPERATION_TIMEOUT` lets SurrealDB wait while a node recovers its log at startup, which can take longer than the default of 60 seconds.
+
+## 5. Install the service
+
+Do these steps on each machine.
+
+Create a start script that reads the secrets file and starts the node. The secrets then stay out of the service definition and out of the process's command line.
+
+```bash title="/opt/surrealdb/bin/surrealds"
+#!/bin/sh
+set -a
+. /opt/surrealdb/etc/surrealds.env
+set +a
+exec /usr/local/bin/surreal start --bind 0.0.0.0:8000 "surrealds://?config=/opt/surrealdb/etc/node.json"
+```
+
+```bash
+sudo chmod 755 /opt/surrealdb/bin/surrealds
+```
+
+Create the `launchd` service definition:
+
+```xml title="/Library/LaunchDaemons/com.surrealdb.surrealds.plist"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.surrealdb.surrealds</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/surrealdb/bin/surrealds</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/opt/surrealdb/data</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ExitTimeOut</key>
+    <integer>45</integer>
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>65536</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/opt/surrealdb/logs/surrealds.log</string>
+    <key>StandardErrorPath</key>
+    <string>/opt/surrealdb/logs/surrealds.log</string>
+</dict>
+</plist>
+```
+
+```bash
+sudo chown root:wheel /Library/LaunchDaemons/com.surrealdb.surrealds.plist
+sudo chmod 644 /Library/LaunchDaemons/com.surrealdb.surrealds.plist
+```
+
+The service runs as `root`. When it stops, `launchd` sends `SIGTERM`, and the node finishes its work and hands over its role before it exits. `ExitTimeOut` gives it 45 seconds for this.
+
+## 6. Start the group
+
+Start the nodes in order the first time. The order decides the first roles: node 1 creates the database and becomes the sequencer, and the next node to join becomes its acking witness.
+
+1. On node 1, start the service, and wait until the node answers:
+
+   ```bash
+   sudo launchctl bootstrap system /Library/LaunchDaemons/com.surrealdb.surrealds.plist
+   curl -s http://127.0.0.1:7401/status
+   ```
+
+2. On node 2, start the service. Node 2 is in a different zone from node 1, so it becomes the acking witness.
+3. On node 3, start the service. Node 3 becomes a listener.
+
+On any node, check the group:
+
+```bash
+curl -s http://127.0.0.1:7401/status
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:7401/ready
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/health
+```
+
+In the `/status` document, `role` is this node's role, `owner` is the group's sequencer, `acker` is its acking witness, and `class.copies` is `two-zones` when writes go to two zones. `/ready` and `/health` return `200` when the node accepts clients.
+
+If a node does not start, read its output:
+
+```bash
+tail -n 100 /opt/surrealdb/logs/surrealds.log
+```
+
+## 7. Connect
+
+Connect to any node with the root user:
+
+```bash
+surreal sql -e ws://10.0.0.11:8000 -u root -p '<a-strong-password>' --ns test --db test
+```
+
+Every node accepts reads and writes. A node sends its commits to the sequencer for you. To spread clients over the nodes and to avoid a node that is down, put a TCP or HTTP load balancer in front of port 8000 that checks `GET /health` on each node.
+
+## Operate the group
+
+### Stop and start a node
+
+```bash
+sudo launchctl bootout system/com.surrealdb.surrealds
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.surrealdb.surrealds.plist
+```
+
+To restart a node in one step:
+
+```bash
+sudo launchctl kickstart -k system/com.surrealdb.surrealds
+```
+
+When the sequencer stops, another node takes its role after a few seconds. The group continues to serve clients while two nodes in two different zones are running. With fewer, it stops serving until a node in a second zone starts again.
+
+### Start a stopped group
+
+After all nodes have stopped, for example after a power failure, start all of them at the same time. Do not wait for one node to become ready before you start the next: each node waits for the others to recover. The service starts by itself when a machine starts.
+
+### Change the configuration
+
+A node reads `node.json` and `surrealds.env` once, at start. Change the file, then restart that node. Change one node at a time, and wait until it is ready before you change the next.
+
+### Upgrade SurrealDB Enterprise
+
+Replace `/usr/local/bin/surreal` on one machine, restart that node, and wait until `/ready` returns `200`. Then upgrade the next machine.
+
+### Replace the licence key
+
+Write the new key to `/opt/surrealdb/etc/license.key` on each machine, and restart the nodes one at a time.
+
+### Add a node
+
+1. Make a certificate for the new node with the certificate script and a higher node count. The script keeps the existing certificates.
+2. Copy the new node's certificate to every machine, and its private key to the new machine.
+3. Add the new node to `NODES` in `surrealds-config.sh`, run it again, and copy each new `node-<id>.json` to its machine.
+4. Prepare the new machine and start its service.
+5. Restart the existing nodes one at a time, in order of node id, so that they read the new peer list. Wait until each one is ready before you restart the next.
+
+### Back up the database
+
+The data is in the object store prefix and in the nodes' commit logs. Use your object store's versioning or replication to protect the prefix, and [export the database](/docs/reference/cli/db/commands/export) for logical backups.
+
+## Run on Linux
+
+On Linux, use the same directories, certificates, `node.json`, `surrealds.env` and start script, and replace the `launchd` service with a `systemd` unit:
+
+```ini title="/etc/systemd/system/surrealds.service"
+[Unit]
+Description=SurrealDB Enterprise SurrealDS node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/surrealdb/bin/surrealds
+WorkingDirectory=/opt/surrealdb/data
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=45
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now surrealds
+```
+
+On Linux, SurrealDB Enterprise is also published as the [`surrealdb/surrealdb-enterprise`](https://hub.docker.com/r/surrealdb/surrealdb-enterprise) image for `amd64` and `arm64`.
+
+## Related pages
+
+- **[Node configuration](/docs/manage/enterprise/product/surrealds/node-configuration):** Every field of `node.json`, the zone policy, and the admin endpoint.
+- **[Licensing](/docs/manage/enterprise/product/licensing):** How the licence is checked, and what happens when it cannot be.
+- **[Kubernetes operator](/docs/manage/enterprise/product/surrealds/kubernetes-operator):** Run the same group on Kubernetes.
