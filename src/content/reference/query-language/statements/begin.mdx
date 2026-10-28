@@ -17,14 +17,16 @@ Transactions run under snapshot isolation. Concurrent transactions do not block 
   <TabItem label="SurrealQL Syntax">
 
 ```syntax title="SurrealQL Syntax"
-BEGIN [ TRANSACTION ];
+BEGIN [ TRANSACTION ]
+	[ ISOLATION LEVEL [ SNAPSHOT | SERIALIZABLE ] ]
+	[ READ ONLY [ MAX STALENESS @duration [ STRICT ] ] ];
 ```
 
   </TabItem>
   <TabItem label="Railroad Diagram">
 
 
-<RailroadDiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"BEGIN"},{"type":"Optional","child":{"type":"Terminal","text":"TRANSACTION"}},{"type":"Terminal","text":";"}]}]}' />
+<RailroadDiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"BEGIN"},{"type":"Optional","child":{"type":"Terminal","text":"TRANSACTION"}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"ISOLATION LEVEL"},{"type":"Choice","index":0,"children":[{"type":"Terminal","text":"SNAPSHOT"},{"type":"Terminal","text":"SERIALIZABLE"}]}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"READ ONLY"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"MAX STALENESS"},{"type":"NonTerminal","text":"@duration"},{"type":"Optional","child":{"type":"Terminal","text":"STRICT"}}]}}]}},{"type":"Terminal","text":";"}]}]}' />
 
   </TabItem>
 </Tabs>
@@ -85,8 +87,9 @@ COMMIT TRANSACTION;
 While all transactions require a final `COMMIT` or `CANCEL` statement in order to run, an early return can take place via the following:
 
 * An error inside one of the statements inside the transaction,
-* A `THROW` statement to return early with an error,
-* A `RETURN` statement to return early. This is often used to customise the output of a transaction.
+* A `THROW` statement to return early with an error.
+
+A `RETURN` statement is often used to customise the output of a transaction. From SurrealDB 4.0, a `RETURN` placed directly inside the transaction does not end it: its value is one of the results, and the statements after it still run. To end part of a transaction early, put those statements in a block, where a `RETURN` ends the block. Before SurrealDB 4.0, a `RETURN` ended the transaction early.
 
 An example of the above:
 
@@ -131,3 +134,74 @@ COMMIT;
 { balance: 135905.16f, id: account:one }
 { balance: 90731.31f, id: account:two, wants_to_send_money: true }'
 ```
+
+## Read-only transactions
+
+<Since v="v4.0.0" />
+
+`BEGIN READ ONLY` starts a transaction that can only read. Any write inside it fails, and the whole transaction fails with it:
+
+```surql
+CREATE note:1;
+
+BEGIN READ ONLY;
+SELECT * FROM note;
+CREATE note:2;
+COMMIT;
+```
+
+```surql title="Error output"
+"Invalid statement: Cannot run CREATE on a read only transaction"
+```
+
+A read-only `BEGIN` returns a description of the snapshot it reads, where a plain `BEGIN` returns `NONE`. `age` is how far the snapshot is behind the current state, and `stale` is whether it is behind at all:
+
+```surql
+BEGIN READ ONLY;
+```
+
+```surql title="Output"
+{ age: 0ns, position: NONE, stale: false }
+```
+
+### Reading a recent snapshot with `MAX STALENESS`
+
+`MAX STALENESS` lets the transaction read from a snapshot that the datastore has already published, as long as the snapshot is no older than the duration given, instead of reading the current state. On a datastore that publishes snapshots, this lets reads that can accept slightly older data avoid the work of reading the latest state. The duration can be a literal or a parameter bound before the transaction:
+
+```surql
+BEGIN READ ONLY MAX STALENESS 5s;
+SELECT count() FROM order GROUP ALL;
+COMMIT;
+```
+
+SurrealDS publishes snapshots. A datastore that publishes none, which includes every storage engine of the open-source release, reads the current state, which meets every bound, so the same statement works everywhere. When no published snapshot is recent enough, the datastore reads the current state unless the server sets [`SURREAL_READ_SNAPSHOT_FALLBACK`](/docs/reference/cli/db/environment-variables#limits-config) otherwise. Add `STRICT` to make the transaction fail instead of reading the current state in that case. A duration above the server's [`SURREAL_READ_SNAPSHOT_MAX_STALENESS_SECS`](/docs/reference/cli/db/environment-variables#limits-config), one hour by default, fails the transaction, and `COMMIT` reports the error:
+
+```surql
+BEGIN READ ONLY MAX STALENESS 2h;
+COMMIT;
+```
+
+```surql title="Error output"
+"Cannot COMMIT: The requested MAX STALENESS of 7200s is above the maximum of 3600s this datastore allows"
+```
+
+Clients can start the same transaction without writing `BEGIN`: the `begin` RPC method takes a `read_only` option, and the HTTP `/sql` endpoint takes `read_only_max_staleness` and `read_only_strict`.
+
+## Isolation level
+
+<Since v="v4.0.0" />
+
+Transactions run under snapshot isolation by default, and `ISOLATION LEVEL SNAPSHOT` states this explicitly. `ISOLATION LEVEL SERIALIZABLE` asks for serializable isolation, which also prevents the anomalies that snapshot isolation allows, such as write skew, where two transactions each read what the other changes. The in-memory engine (SurrealMX) and SurrealDS offer serializable isolation, which they provide by adding every read of the transaction to its commit-time conflict check. SurrealKV and TiKV refuse it rather than running the transaction at a weaker level. See [Isolation by storage engine](/docs/learn/querying/concepts-and-guides/transactions#isolation-by-storage-engine) for the full table, and [Serializable isolation](/docs/learn/querying/concepts-and-guides/transactions#serializable-isolation) for an example of the write skew it prevents.
+
+```surql
+-- On the in-memory engine or SurrealDS
+BEGIN ISOLATION LEVEL SERIALIZABLE;
+```
+
+On another engine, the statements inside the transaction fail with an error that names the levels the datastore offers:
+
+```surql title="Error output"
+"The isolation level SERIALIZABLE is not available on this datastore; it offers SNAPSHOT"
+```
+
+The two clauses can be combined in either order, as in `BEGIN ISOLATION LEVEL SNAPSHOT READ ONLY`. Combining `SERIALIZABLE` with a `MAX STALENESS` above zero fails with `ISOLATION LEVEL SERIALIZABLE cannot be combined with a MAX STALENESS above zero`.

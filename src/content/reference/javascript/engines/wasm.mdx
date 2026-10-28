@@ -6,7 +6,22 @@ description: The SurrealDB SDK for JavaScript using the WebAssembly engine.
 
 # WebAssembly engine
 
-The `@surrealdb/wasm` package is a plugin for the [JavaScript SDK](/docs/reference/javascript/installation) that runs SurrealDB as an embedded database within a browser environment. It supports in-memory databases and persistent storage via IndexedDB, and can optionally run inside a Web Worker.
+The `@surrealdb/wasm` package is a plugin for the [JavaScript SDK](/docs/reference/javascript/installation) that runs SurrealDB as an embedded database within a browser environment, and can run inside a Web Worker.
+
+<Tabs syncKey="surrealkv-version">
+<TabItem label="SurrealDB 4.0 and later">
+
+The engine supports in-memory databases (`mem://`) and persistent storage (`surrealkv://`) with SurrealKV over the browser's Origin Private File System (OPFS).
+
+IndexedDB (`indxdb://`) was removed in SurrealDB 4.0. A `surrealkv://` database copies the data of an IndexedDB database with the same name the first time it is opened, as [Moving from IndexedDB](#moving-from-indexeddb) describes.
+
+</TabItem>
+<TabItem label="Before SurrealDB 4.0">
+
+The engine supports in-memory databases (`mem://`) and persistent storage via IndexedDB (`indxdb://`).
+
+</TabItem>
+</Tabs>
 
 > [!IMPORTANT]
 > This package works with ES modules (`import`), not CommonJS (`require`).
@@ -90,6 +105,49 @@ const db = new Surreal({
 
 await db.connect('mem://');
 ```
+
+## Persistent storage
+
+<Tabs syncKey="surrealkv-version">
+<TabItem label="SurrealDB 4.0 and later">
+
+A `surrealkv://name` endpoint keeps the database in the browser's Origin Private File System (OPFS), in a database called `name` that belongs to the origin of the page. It needs `@surrealdb/wasm-native` 4.0 or later. A `mem://` database keeps nothing after the page closes.
+
+The engine has to run in a dedicated web worker. SurrealKV needs the synchronous file handles of OPFS, and a browser provides those only in dedicated workers, so a `surrealkv://` database cannot be opened from the main thread of a page, from a shared worker or from a service worker. Register the engines with `createWasmWorkerEngines`, as [Running in a web worker](/docs/reference/javascript/concepts/embedded-engines#running-in-a-web-worker) shows. It starts the worker, loads the engine into it, and passes each query and its result between the page and the worker, so no worker code needs to be written and the rest of the application uses `db` as it would on the main thread. Then connect:
+
+```ts
+await db.connect('surrealkv://myapp');
+```
+
+The engine also accepts `indxdb://name` as a deprecated spelling of `surrealkv://name`, which opens the same OPFS database and also needs a dedicated worker. On the main thread of a page, a `surrealkv://` or `indxdb://` connection fails before the engine touches storage, with an error that says the database can be opened only from a dedicated worker.
+
+The page has a few more responsibilities:
+
+- **Ask for persistent storage.** Unless the origin has been granted persistent storage, the browser can delete its data when the disk is full. Only the page can ask for it, by calling `navigator.storage.persist()`.
+- **Open each database in one tab at a time.** SurrealKV takes an exclusive lock on the database. A second tab or worker that connects to the same name waits a few seconds, and then the connection fails with an error that says the database is open in another tab or worker. The engine does not retry, so the page decides what to do, for example by asking the user to close the other tab or by connecting again later. After a page reload without a close, the browser can take some seconds to release the lock, so the same error can appear for a short time.
+- **Close the connection when the application ends.** A page-unload handler cannot wait for an asynchronous close, so call `await db.close()` as early as the application knows it is ending. A database that was not closed is recovered the next time it is opened.
+
+Some limits apply in the browser. Chrome is the only browser that is tested. Encryption and checkpoints are not available. Durability in a browser is an ordering guarantee of the file handle's `flush()`, not a guarantee that data survives a power cut or an operating system crash. A worker has an address space of at most 4 GiB.
+
+</TabItem>
+<TabItem label="Before SurrealDB 4.0">
+
+An `indxdb://name` endpoint persists the database to IndexedDB, in a database called `name` that belongs to the origin of the page. SurrealDB serialises keys and values into a `Uint8Array` and uses IndexedDB as a binary key-value store. It works with `createWasmEngines` on the main thread of the page and with `createWasmWorkerEngines` in a web worker:
+
+```ts
+await db.connect('indxdb://myapp');
+```
+
+</TabItem>
+</Tabs>
+
+### Moving from IndexedDB
+
+<Since v="v4.0.0" />
+
+Before SurrealDB 4.0, a browser database persisted to IndexedDB with an `indxdb://name` endpoint. To move it, connect to `surrealkv://name` with the same name, from a dedicated worker. Each time a `surrealkv://name` database is opened, the engine first copies the data of an IndexedDB database called `name` into OPFS, unless a database called `name` already exists there.
+
+The copy is verified before the database opens. If the copy fails, the connection fails and the database is not opened. A copy that was interrupted is made again from IndexedDB at the next connection. IndexedDB is only read, so the old database is not changed or deleted. Remove it with `indexedDB.deleteDatabase('name')` after you have checked the copy.
 
 ## Learn more
 

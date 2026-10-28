@@ -6,7 +6,7 @@ description: "In SurrealDB, numbers can be one of three types - 64-bit integers,
 
 # Numbers
 
-In SurrealDB, numbers can be one of three types: 64-bit integers, 64-bit floating point numbers, or 128-bit decimal numbers.
+In SurrealDB, numbers can be one of three types: 64-bit integers, 64-bit floating point numbers, or 128-bit decimal numbers. From SurrealDB 4.0, a number can also be one of the [sized number](#sized-numbers) types, such as `u8` or `f32`.
 
 ## Integer numbers
 If a numeric value is specified without a decimal point and is within the range `-9223372036854775808` to `9223372036854775807` then the value will be parsed, stored, and treated as a 64-bit integer.
@@ -24,7 +24,7 @@ CREATE event SET year = 2022;
 ```
 
 ## Floating point numbers
-If a number value is specified with a decimal point, or is outside of the maximum range specified above, then the number will automatically be parsed, stored, and treated as a 64-bit floating point value. This ensures efficiency when performing mathematical calculations within SurrealDB.
+If a number value is specified with a decimal point, then the number will automatically be parsed, stored, and treated as a 64-bit floating point value. An integer outside the range specified above is a parse error (`Failed to parse number: number cannot fit within a 64bit signed integer`), so write it with an `f` or `dec` suffix, or with a [`u64`](#sized-numbers) suffix from SurrealDB 4.0. This ensures efficiency when performing mathematical calculations within SurrealDB.
 
 ```surql
 /**[test]
@@ -72,6 +72,24 @@ value = "3.8888888888888888dec"
 3.8888888888888888dec;
 ```
 
+A decimal holds up to 28 digits after the decimal point. A `dec` literal that needs more, in plain or exponent notation, is a parse error. Zeros after the last significant digit do not count, because the value is still exact, so `1.500000000000000000000000000000dec` gives `1.5dec`. A string cast with `<decimal>` is rounded to 28 places instead.
+
+```surql
+0.0000000000000000000000000000001dec;
+```
+
+```surql title="Error output"
+Parse error: Failed to parse decimal: Scale exceeds the maximum precision allowed: 31 > 28
+```
+
+```surql
+<decimal>"0.0000000000000000000000000000001";
+```
+
+```surql title="Output"
+0dec
+```
+
 ## Using a specific numeric type
 To use a specific type when specifying numeric values, you can cast the value to a specific numeric type or use the appropriate suffix.
 
@@ -90,6 +108,123 @@ CREATE event SET
 	horizon = <decimal> 31 + 3dec
 ;
 ```
+
+## Sized numbers
+
+<Since v="v4.0.0" />
+
+As well as `int`, `float` and `decimal`, a number can have a fixed size. A sized number keeps its size when it is stored and when it is used in a calculation, and a field of a sized type refuses a value that does not fit.
+
+| Type | Suffix | Range |
+| --- | --- | --- |
+| `i8` | `i8` | `-128` to `127` |
+| `u8` | `u8` | `0` to `255` |
+| `i16` | `i16` | `-32768` to `32767` |
+| `u16` | `u16` | `0` to `65535` |
+| `i32` | `i32` | `-2147483648` to `2147483647` |
+| `u32` | `u32` | `0` to `4294967295` |
+| `int` | `i64`, or none | `-9223372036854775808` to `9223372036854775807` |
+| `u64` | `u64` | `0` to `18446744073709551615` |
+| `f16` | `f16` | 16-bit floating point |
+| `f32` | `f32` | 32-bit floating point |
+| `float` | `f64` or `f` | 64-bit floating point |
+
+`i64` and `f64` are other names for `int` and `float`, so `42i64` is the same value as `42`. A sized integer suffix cannot follow a number with a decimal point or an exponent, and a literal that does not fit its type is a parse error.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "['u8', 'i16', 'u64', 'f32', 'int']"
+
+*/
+
+[type::of(255u8), type::of(-32768i16), type::of(18446744073709551615u64), type::of(1.5f32), type::of(42i64)];
+```
+
+```surql title="Output"
+['u8', 'i16', 'u64', 'f32', 'int']
+```
+
+A calculation on two numbers of the same type gives that type, and fails instead of wrapping when the result does not fit. A calculation on two different types gives the smallest type that holds both: `1u8 + 2i16` is `3i16`, a sized integer and a sized float give a float, and any number with a `decimal` gives a `decimal`.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "[3u8, 3i16, 300u16]"
+
+[[test.results]]
+error = "Cannot perform addition with '255u8' and '1u8'"
+
+*/
+
+[1u8 + 2u8, 1u8 + 2i16, 200u8 + 100u16];
+//- [3u8, 3i16, 300u16]
+
+255u8 + 1u8;
+//- "Cannot perform addition with '255u8' and '1u8'"
+```
+
+A number written without a suffix is always an `int`. Unlike in Rust, its type is not inferred from the other side of a calculation, so `1u8 + 1` adds a `u8` and an `int` and gives an `int`. To keep a calculation in a sized type, give each literal in it the suffix:
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "[2, 2u8, 2.5f]"
+
+[[test.results]]
+value = "['int', 'u8']"
+
+*/
+
+[1u8 + 1, 1u8 + 1u8, 1u8 + 1.5];
+//- [2, 2u8, 2.5f]
+
+[type::of(1u8 + 1), type::of(1u8 + 1u8)];
+//- ['int', 'u8']
+```
+
+A field of a sized type converts a number that fits exactly, and refuses a number that is out of range or has a fractional part. A cast such as `<u8>` and the functions `type::u8()` to `type::f32()` do the same, and `type::is_u8()` to `type::is_f32()` check for each type. A sized number is equal to a number of any other type with the same value, so `5u8 == 5` is `true`, and a `GROUP BY`, a set or a `UNIQUE` index treats the two as one value.
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: reading:1, level: 200u8 }]"
+
+[[test.results]]
+error = "Couldn't coerce value for field `level` of `reading:2`: Expected `u8` but found `256`"
+
+*/
+
+DEFINE FIELD level ON reading TYPE u8;
+CREATE reading:1 SET level = 200;
+CREATE reading:2 SET level = 256;
+```
+
+```surql title="Output"
+-------- Query 1 --------
+
+NONE
+
+-------- Query 2 --------
+
+[{ id: reading:1, level: 200u8 }]
+
+-------- Query 3 --------
+
+"Couldn't coerce value for field `level` of `reading:2`: Expected `u8` but found `256`"
+```
+
+> [!NOTE]
+> A record ID keeps the type of a number in an array or object key. `r:[5u8]` and `r:[5]` are two different records, so a lookup has to use the same type that the record was created with.
+
+A client keeps the size of a number only when it uses a protocol that carries it, such as CBOR version 2. The original CBOR protocol and JSON send a sized number as an ordinary integer or float.
 
 ## Numeric precision
 Different numeric types can be compared and used together in calculations.

@@ -71,10 +71,10 @@ WHERE id >= 12647931632
    AND id <= 19374837491;
 ```
 
-However, currently in SurrealDB this query will perform a scan to find the record, although this is not necessary and you don't need to index the id field when using SurrealDB. Instead the following query can be used to select the specific record without needing to perform any scan:
+In SurrealDB, both of these queries scan the whole table to find the records. The `id` field does not need an index, because the records can be selected directly by their record IDs without any scan:
 
 ```surql
--- Selecing indiviudal IDs
+-- Selecting individual IDs
 SELECT *
 FROM user:19374837491, user:12647931632;
 ```
@@ -84,6 +84,25 @@ FROM user:19374837491, user:12647931632;
 SELECT *
 FROM user:12647931632..=19374837491;
 ```
+
+From SurrealDB 4.0, a `WHERE id IN [user:19374837491, user:12647931632]` clause, with a literal array or a parameter that holds one, also reads only the listed records, and `EXPLAIN` shows a `RecordIdScan` instead of a `TableScan`. Record IDs of other tables, and records that do not exist, return nothing. Any other condition in the `WHERE` clause is still checked on each record that is read.
+
+### Querying parts of an array record ID
+
+<Since v="v4.0.0" />
+
+Data that is always read as "this item over this period", such as sensor readings or prices, is fastest with an [array record ID](/docs/reference/query-language/language-primitives/data-types/record-ids#array-based-record-ids) that puts the item first and the time second, because records are stored in ID order and one item's records sit next to each other. A record range reads only that stretch, but a `WHERE` clause on the positions, such as `WHERE id[0] = 'London'`, scans the whole table.
+
+Naming the parts of the ID in the type of the `id` field lets an ordinary `WHERE` clause read the same stretch. The names become read-only fields of the table, and a condition on them is planned as a range over the record IDs:
+
+```surql
+DEFINE FIELD id ON reading TYPE [city: string, time: datetime];
+CREATE reading SET city = 'London', time = d'2026-01-01T09:00:00Z', temp = 7;
+
+SELECT * FROM reading WHERE city = 'London' AND time >= d'2026-01-01T10:00:00Z' EXPLAIN;
+```
+
+The plan shows a `KeyRangeScan` with `key: "city = 'London'"` and `range: "time >= d'2026-01-01T10:00:00Z'"` where the positional form shows a `TableScan`. An `ORDER BY time DESC LIMIT 10` for one city also reads backwards from the end of that city's range and stops early, instead of reading and sorting every record in the table. See [Naming the components of an array id](/docs/reference/query-language/statements/define/field#naming-the-components-of-an-array-id) for the rules on component types and writes.
 
 ### Simplifying logic in `WHERE` clauses
 
@@ -424,7 +443,7 @@ Other log verbosity levels (such as `debug`, `trace`, or `full`) are only recomm
 The same applies for the SurrealDB Docker container, in which the `--log` argument should be omitted or specifically set to a log verbosity level that does not impact performance.
 
 ```sh
-docker run --rm --pull always -p 8000:8000 surrealdb/surrealdb:latest start --log info rocksdb://path/to/mydatabase
+docker run --rm --pull always -p 8000:8000 surrealdb/surrealdb:latest start --log info surrealkv:/path/to/mydatabase
 ```
 
 Read more about running SurrealDB as a [single-node server](/docs/running/file-backed) or [multi-node cluster](/docs/running/multi-node).
@@ -433,17 +452,19 @@ For performance comparisons between storage engines and deployment modes, see th
 
 To measure performance on your own hardware and data sizes, use [crud-bench](https://github.com/surrealdb/crud-bench), the open-source tool that SurrealDB uses to test its own performance. It runs create, read, update, scan and delete workloads with a configurable number of records and concurrent clients, against an embedded datastore, a local server in Docker, or a remote deployment, and can run the same workloads against other databases for comparison.
 
-Additionally, ensure that the `rocksdb` storage engine is used to store data.
+Additionally, use an on-disk storage engine to store data. From SurrealDB 4.0 that is SurrealKV (`surrealkv://`). Before 4.0, RocksDB (`rocksdb://`) was the recommended engine.
 
 ```sh
-surreal db start --log info rocksdb://path/to/mydatabase
+surreal db start --log info surrealkv://path/to/mydatabase
 ```
 
 #### CPU cores and concurrent queries
 
 The server runs queries on a pool of worker threads. By default the pool has one thread for each CPU core, with a minimum of four, and the [`SURREAL_RUNTIME_WORKER_THREADS`](/docs/reference/cli/db/environment-variables) environment variable sets a different number.
 
-Most of the work of one query runs on one thread, so one query at a time uses about one CPU core, however many cores the machine has. The server uses more cores when it receives more queries at the same time, from one connection or from many.
+Most of the work of one query runs on one thread, so one query at a time usually uses about one CPU core, however many cores the machine has. The server uses more cores when it receives more queries at the same time, from one connection or from many.
+
+From SurrealDB 4.0, one kind of query can use several cores on its own: a scan over many records whose `WHERE` conditions keep only a small share of them, such as a brute-force KNN search or a filter that matches one record in a hundred. The server splits such a scan into parts that worker threads read at the same time. A scan that keeps most of the records it reads stays on one thread, because reading the records takes most of its time. [`SURREAL_MORSEL_PLACES`](/docs/reference/cli/db/environment-variables) limits how many threads one query can take, and `SURREAL_MORSEL_SPLIT_PASS_PPM` sets the share of records below which a scan is split.
 
 Some consequences of this:
 
@@ -469,7 +490,7 @@ In addition, using the correct memory allocator can greatly improve the performa
 In your project's `Cargo.toml` file, ensure that the `allocator` feature is enabled on the `surrealdb` dependency:
 
 ```toml
-surrealdb = { version = "3", features = ["allocator", "kv-mem", "kv-surrealkv", "kv-rocksdb", "protocol-http", "protocol-ws", "rustls"] }
+surrealdb = { version = "3", features = ["allocator", "kv-mem", "kv-surrealkv", "protocol-http", "protocol-ws", "rustls"] }
 ```
 
 When running SurrealDB within your Rust code, ensure that the asynchronous runtime is configured correctly, making use of multiple threads, an increased stack size, and an optimised number of threads:

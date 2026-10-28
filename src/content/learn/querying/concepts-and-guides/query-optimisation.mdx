@@ -57,9 +57,11 @@ The conditions combine as follows:
 
 - `AND` intersects the bitmaps, starting from the index with the most selective condition.
 - `OR`, at the top level or inside an `AND`, can become a union when every branch has an index, so a record that matches several branches is fetched once.
-- `AND NOT` subtracts one bitmap from another. The subtracted condition must be a full-text `@@` match, or be on a field whose declared type cannot hold an array, such as `TYPE string` or `TYPE bool`. An array value has one index entry per element, so its bitmap would remove records the condition does not match.
+- `AND NOT` subtracts one bitmap from another. The subtracted condition must be a full-text `@@` match, or be on a field whose index has never stored an array. An array value has one index entry per element, so its bitmap would remove records the condition does not match.
 - A single-hop graph condition such as `->wrote->post CONTAINS post:one` becomes a bitmap of the records connected to that record, and is intersected with the index bitmaps. It needs at least one index-backed condition beside it.
-- A `count()` with `GROUP ALL` is the size of the final bitmap when every condition is represented exactly: an indexed field with a declared type that cannot hold an array, or a full-text `@@` match. The count then reads no records.
+- A `count()` with `GROUP ALL` is the size of the final bitmap when every condition is represented exactly: an indexed field whose index has never stored an array, or a full-text `@@` match. The count then reads no records.
+
+An index records whether it has stored an array from SurrealDB 4.0, so an index built by an earlier release qualifies only after [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild), and a statement that writes never qualifies, because its own writes could store the first array. In SurrealDB 3.3, a field qualifies when its declared type cannot hold an array, such as `TYPE string` or `TYPE bool`.
 
 ```surql
 DEFINE FIELD category ON article TYPE string;
@@ -90,3 +92,20 @@ The same bitmaps also [pre-filter vector searches](/docs/learn/data-models/vecto
 ## Fast table counts
 
 For `SELECT count() … GROUP ALL` over a whole table, a `COUNT` index maintains a running total instead of scanning every record each time. See the note under [`SELECT` - `COUNT` index](/docs/reference/query-language/statements/select#using-a-count-index-to-speed-up-count-in-group-all-queries).
+
+From SurrealDB 4.0, a count over an `IN` list, or over an `OR` of equalities on one indexed field, is answered from the index keys alone, without reading any record. Each value is counted once, so a value repeated in the list is not counted twice. In `EXPLAIN`, each value appears as an `IndexScan` with `keys_only: yes`:
+
+```surql
+DEFINE INDEX by_status ON ticket FIELDS status;
+FOR $i IN 0..300 {
+    CREATE ticket SET status = ['open', 'closed', 'waiting'][$i % 3];
+};
+
+SELECT count() FROM ticket WHERE status IN ['open', 'waiting'] GROUP ALL;
+```
+
+```surql title="Output"
+[{ count: 200 }]
+```
+
+A count over a query with `START` and `LIMIT`, such as `SELECT count() FROM (SELECT id FROM ticket WHERE status = 'open' LIMIT 1000) GROUP ALL`, stops reading index keys once it reaches the limit.

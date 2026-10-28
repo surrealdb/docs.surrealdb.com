@@ -1,0 +1,509 @@
+---
+position: 6
+title: 3.x to 4.0
+description: What to do when a 3.x deployment moves to 4.0, covering the one-way switch to the 4.0 record format, export and import changes, the removal of RocksDB and IndexedDB, the conversion of SurrealKV and RocksDB datastores, database compatibility levels and MIGRATE EXISTING ROWS, which HNSW, DiskANN and B-tree indexes to rebuild with REBUILD INDEX, and the behaviour changes in SurrealQL, the CBOR protocol, the SDKs, configuration and Surrealism modules.
+---
+
+# Upgrading from `3.x` to `4.0`
+
+`4.0` is a major release, but unlike the move from `2.x` to `3.x`, a `3.x` datastore opens on `4.0` without an export and import. The first `4.0` node to start applies a data migration automatically and switches the datastore to the 4.0 record format, and the rest of the upgrade consists of a few index rebuilds and behaviour changes that a deployment or an application may need to account for. The changes are described relative to `3.3`; from an earlier `3.x` release, read [3.2 to 3.3](/docs/build/migrating/from-old-surrealdb-versions/32-to-33) as well. This page describes each one briefly and links to the page that documents it in full. New features are listed in the [release notes](/releases), and the [upgrade overview](/docs/build/migrating/from-old-surrealdb-versions/overview) covers upgrades in general.
+
+SurrealDB 4.0 is in beta. `surreal upgrade` keeps a `3.x` database on its major line, so install the beta with [`surreal upgrade --beta`](/docs/reference/cli/db/commands/upgrade), or with one of the other ways in [Install the beta](/docs/running/installation/beta). Test it on a copy of the data first, because the upgrade described below is one-way.
+
+## Before you upgrade
+
+Take and verify a [`surreal db export`](/docs/reference/cli/db/commands/export) before the first `4.0` node starts against a `3.x` datastore. The data migration that `4.0` applies is one-way. Once a `4.0` node has opened the datastore, a `3.x` build refuses to start on it, on every storage engine. A datastore in the 4.0 record format gives a message that says the data is out of date, although it was written by a newer release:
+
+```text title="Error output"
+The data stored on disk is out-of-date with this version (Expected: 3, Actual: 4). Please follow the upgrade guides in the documentation, or use a clean storage directory if this is intended to be a new instance
+```
+
+A TiKV datastore that has not switched to the 4.0 record format gives `The data stored on disk was migrated by a newer version of SurrealDB` instead, with a list of the migrations it does not know, and a SurrealKV directory that `4.0` has converted is refused by SurrealKV itself with `Unsupported manifest format version: 2`.
+
+On a datastore that several nodes share, upgrade every node to the latest `3.3` release before the first `4.0` node starts. A `3.3` node that is already running keeps working beside `4.0` nodes, but a `3.3` node that restarts is refused, so a node cannot be moved back to `3.3` part way through the upgrade.
+
+The way back to `3.3` is to restore the export taken before the upgrade into a new datastore created by `3.3`, which builds every index again, or to start `3.3` on a copy of the data directory taken before the upgrade. Both lose what was written on `4.0`. For a RocksDB or SurrealKV datastore, converting the data ahead of time with `skv migrate` writes a new directory for `4.0` to start on, so that the original stays untouched and `3.3` can still start on it. See [Converting ahead of time with `skv`](/docs/manage/self-hosted/deployment-models#converting-ahead-of-time-with-skv).
+
+## The 4.0 record format
+
+`4.0` writes records and definitions in a new on-disk format. A `3.x` release cannot read it, which is why the upgrade is one-way. When the switch happens depends on the storage engine:
+
+- **In memory and SurrealKV.** Only one process writes to these datastores, so the first `4.0` start switches the datastore to the new format straight away. From then on, every record and definition it writes uses the new format.
+- **TiKV.** Several processes can write to this datastore at once, possibly of different releases, so it keeps writing the `3.x` format after the upgrade. Once every node runs `4.0`, start the nodes with `SURREAL_FEATURE_LEVEL=4.0` to switch it. The switch is refused, with a warning in the log, while any running node reports an older release.
+
+A new datastore of any kind starts in the new format. A datastore can hold records in both formats at once, and `4.0` reads both, so nothing is rewritten in bulk and the switch takes no time of its own.
+
+## Indexes to rebuild
+
+The upgrade does not rewrite any index, so an index keeps working after it. Some indexes give wrong results or answer more slowly until they are rebuilt. Rebuild them once every node in a cluster runs `4.0`. On TiKV, a rebuilt full-text, HNSW or DiskANN index takes the 4.0 index layout, and with it the faster searches described below, only after the datastore has switched to the 4.0 record format with `SURREAL_FEATURE_LEVEL=4.0`. See [The 4.0 record format](#the-40-record-format).
+
+| Index | Rebuild | What happens otherwise |
+| --- | --- | --- |
+| HNSW index defined with `DIST JACCARD` or `DIST PEARSON` | Required | The graph was built on the previous ordering of these metrics, so it does not serve nearest-first searches. See [Jaccard and Pearson ranking](#jaccard-and-pearson-ranking). |
+| HNSW or DiskANN index in which more than nine records hold an identical vector, built before `3.3.1` | Required | Records are missing from KNN results. |
+| HNSW or DiskANN index that serves KNN queries with a selective filter | Optional | Results are correct, but the query reads each record instead of scoring from the index, which is slower. |
+| HNSW or DiskANN index | Optional | Results are correct, but a KNN search reads each result's vector to find its records, an HNSW search scans the index's queue of pending updates even after compaction has emptied it, and a DiskANN search compares full vectors instead of 8-bit codes, which is slower. A rebuilt DiskANN index of `TYPE F32` or `TYPE F16` keeps one code byte for each dimension of each vector, which makes it about 12% larger for `F32` and 20% for `F16`. |
+| DiskANN index of `TYPE I8` or `TYPE U8` with a `DIMENSION` above 33025 | Remove and define again | The index fails when a query or a write opens it, and `DEFINE INDEX` now refuses it with `DISKANN TYPE I8 and U8 support DIMENSION up to 33025`. Remove it and define it again with a `DIMENSION` of at most 33025, or with `TYPE F16` or `TYPE F32`. |
+| Full-text index on a table in which a record was updated, keeping one of its terms, and later deleted | Required | The deleted record stays counted under that term, so BM25 treats the term as more common than it is and gives lower scores. The records that match are the same. |
+| Full-text index used for ranked queries, such as `ORDER BY search::score(1) DESC LIMIT 10` | Optional | Results are correct, but the query scores every matching record instead of skipping the ones that cannot enter the top results, which is slower. |
+| B-tree index whose queries order by, count over or take a range over its fields | Optional | Results are correct, but `ORDER BY ... LIMIT` sorts every matching record, an open range such as `WHERE time > $since` reads the table, and `count()` reads records instead of counting index entries. See [Index plans and stored arrays](#index-plans-and-stored-arrays). |
+| B-tree index whose values include datetimes | Optional | The index keeps the `3.x` order, in which a whole second sorts after the fractions within it, so `ORDER BY` and ranges over a datetime can return records out of order or leave some out. See [Datetimes in an index](#datetimes-in-an-index). |
+| HNSW or DiskANN index over a table with record ids that differ only in the kind of a number inside them, such as `pt:[1]` and `pt:[1dec]` | Required | The index treats such records as one, so a KNN search finds only one of them, and deleting one can remove the other's vector. |
+| B-tree index over two fields that both hold arrays, built before `3.3.1` | Required | The index holds only some combinations of the two arrays' elements, so a query that fixes both fields can miss a record, and a `UNIQUE` index can accept a duplicate. |
+| B-tree index that has held one decimal written two ways, such as `2.5dec` and a computed `2.50dec` | Required | An equality or a range read from the index returns fewer records than the same query `WITH NOINDEX`. Rebuilding a `UNIQUE` index fails if the table holds both forms of one value, so remove the duplicates first. |
+
+The statement for each is the same:
+
+```surql
+REBUILD INDEX idx_embedding ON document;
+```
+
+Run `REBUILD INDEX` as its own statement, not inside a transaction, for an index with many records. See [Rebuilding a large index](/docs/reference/query-language/statements/rebuild#rebuilding-a-large-index) and [When to rebuild after an upgrade](/docs/reference/query-language/statements/rebuild#when-to-rebuild-after-an-upgrade).
+
+## Clusters
+
+On a datastore that several nodes share, such as TiKV, upgrade every node before writes to a DiskANN index resume. Stop writes to DiskANN indexes, or stop the whole cluster, while the nodes are replaced. An earlier release can clear the state that tracks a `4.0` node's pending writes to the index, and those writes are then missing from KNN results. A datastore that one node opens alone (in memory or SurrealKV) needs nothing. Define or rebuild vector indexes only once every node runs `4.0`, as the table above says.
+
+Do not register a `LIVE` query on a `4.0` node until every node runs `4.0`. A `3.3` node cannot read the subscription that a `4.0` node stores, so every write to that table fails on the `3.3` nodes until they are upgraded or the live query is killed. Keep live query clients on the nodes that still run `3.3`, or connect them once the upgrade is complete.
+
+Two more steps apply only while nodes of different releases share a datastore. Finish upgrading every node before defining a field whose name is a reserved keyword and whose type is an array or a set, such as `` DEFINE FIELD `select` ON t TYPE array<string> ``, because a `3.3` node stores part of that definition where `4.0` does not read it. Do not run a node of a `3.3.0` pre-release alongside `4.0`.
+
+## Exports and imports
+
+- **`POST /import` reports a partial import.** An import commits each statement on its own and continues past a failure. The endpoint now answers `422` with the failures in the body when any statement failed, where it answered `200`. The embedded engines in the JavaScript and Node SDKs now return the first failure as well. `surreal db start --import-file` logs the failures and still starts.
+- **Access methods with a key are not restored.** An export writes `DEFINE ACCESS` with a placeholder in place of the signing key, and `DEFINE ACCESS` now refuses that placeholder, because replaying it created an access whose key anyone could read. Restoring a dump reports one failure for each such access, and the database comes back without them. Define them again with their real keys after the restore. An access verified by a JWKS URL has no key and is restored as before.
+- **A dump can change the target database's settings.** For a database with a `COMMENT`, `CHANGEFEED` or `STRICT` clause, the export starts with `DEFINE DATABASE OVERWRITE`, which replaces those clauses on the database the dump is restored into. That statement needs a namespace or root user, so a database user cannot restore such a dump.
+- **An export to standard output holds only the dump.** `surreal export -` now writes its log lines to standard error, so the output can be redirected to a file without `--log none`. An import drops a UTF-8 byte order mark at the start of a file, and refuses a UTF-16 file with an error that names the encoding, where it reported `Invalid token`. Windows PowerShell 5 saves redirected output as UTF-16, so export to a file with `surreal export <file>` there. See [`surreal db export`](/docs/reference/cli/db/commands/export).
+- **The Docker image's data directories belong to the container user.** In the `4.0` image, `/data` and `/logs` are owned by uid and gid `65532`, the user the image runs as, so a new named volume mounted at `/data` is writable without `user: root`. A bind mount keeps the ownership of the host directory.
+- **Table values in a `3.x` dump are lost.** A dump written by `3.x` writes a table value held in a record, such as the result of `type::table('user')`, as a bare name, which an import reads as a field and drops without an error. A `4.0` dump writes `type::table('user')`. After restoring a `3.x` dump, set such fields again.
+- **An import checks `DEFINE FIELD` as a query does.** A field whose `DEFAULT` cannot be converted to its `TYPE`, such as `TYPE set<string> DEFAULT {}`, is refused on import as well, where it was stored and then failed every later write to the table. Correct the definition in the dump, or define the field again after the restore.
+- **Dumps from earlier releases can exceed the write-key limit.** Where `SURREAL_TRANSACTION_MAX_WRITE_KEYS` is set, a dump written by an earlier release can contain statements that write more keys than the limit allows, because the earlier exporter did not count the keys of `REFERENCE` fields. Take new exports after the upgrade, or raise the limit while restoring an older one.
+
+## RocksDB and IndexedDB are removed
+
+`4.0` removes the RocksDB and IndexedDB storage engines. SurrealKV is the only on-disk engine, on a server, in an embedded SDK and in the browser. A server or an SDK that connects with `rocksdb://` or `indxdb://` still starts: the path is opened with SurrealKV, which converts the data it finds there, and a warning names the replacement:
+
+```text title="Log output"
+The `rocksdb` scheme is deprecated: the path is opened with SurrealKV, which migrates any existing data automatically. Use `surrealkv://` instead
+```
+
+- **A RocksDB datastore** is converted to SurrealKV the first time `4.0` opens it, with a `surrealkv://` path or the old `rocksdb://` one. A datastore that ran with versioning enabled keeps its versions, and answers `VERSION` queries for them when it is opened with `?versioned=true`. The conversion takes time in proportion to the data and room on the disk for a second copy, and the server does not answer `/health` or `surreal isready` until it finishes, so give a health probe enough time at the first start. The conversion is one-way, so take a copy of the data directory as well as the export described above: a `3.3` build started on the converted directory finds no RocksDB data there and starts with an empty database. To leave the original directory as `3.3` wrote it, convert it into a new directory with `skv migrate` before the first start instead. See [Moving a RocksDB database to SurrealKV](/docs/manage/self-hosted/deployment-models#moving-a-rocksdb-database-to-surrealkv).
+- **RocksDB settings are no longer read.** This covers the `SURREAL_ROCKSDB_*` and `SURREAL_DS_ROCKSDB_*` environment variables and the RocksDB parameters of a `rocksdb://` path. A server started with one of them logs a warning that names the settings it ignores. SurrealKV has its own, smaller set, listed under [SurrealKV environment variables](/docs/reference/cli/db/environment-variables#surrealkv-environment-variables).
+- **The Rust SDK** no longer has the `kv-rocksdb` and `kv-indxdb` features or the `RocksDb` and `IndxDb` engines. Use the `kv-surrealkv` feature and the `SurrealKv` engine.
+- **In the browser**, the [Wasm engine](/docs/reference/javascript/engines/wasm) connects with `surrealkv://name`, which keeps the database in the browser's Origin Private File System and runs in a dedicated worker. Data in an IndexedDB database of the same name is copied in the first time the database is opened, and the IndexedDB database is only read.
+
+## SurrealKV datastores
+
+`4.0` uses SurrealKV 1.0, which has a new on-disk format. A datastore written by SurrealKV on `3.3` or earlier is converted the first time a `4.0` node opens it, with its versions kept, and an earlier release cannot open it afterwards. Take a copy of the data directory as well as the export described above, or convert the datastore into a new directory with `skv migrate` before the first start, which leaves the original as `3.3` wrote it. See [Converting ahead of time with `skv`](/docs/manage/self-hosted/deployment-models#converting-ahead-of-time-with-skv).
+
+## Behaviour changes
+
+### Results without `ORDER BY`
+
+`4.0` can split a statement's scan into parts that run at the same time, so a statement without `ORDER BY` returns its records in no particular order. This applies to every storage engine, including a datastore in memory, but not to the Wasm engine in a browser, which runs each scan on one task. A `LIMIT` or `START` without `ORDER BY` returns some of the matching records, not the first ones by record id. On `3.x` such a query usually returned records in the order of their keys, and an application can have come to rely on that. Add `ORDER BY` wherever the order matters, for example `ORDER BY id` to get records in the order of their ids. With `ORDER BY`, the order is exact, ties included.
+
+The records a statement returns are otherwise the same, and so are counts, aggregates and the state that a write leaves behind. When several records make a statement fail, the error reported is the one from any of them, not necessarily the first by record id, and a failed write still commits nothing.
+
+### Comparing floats with decimals
+
+A float is now equal to a decimal only when the decimal is exactly the float's value. Most fractions have no exact binary representation, so `0.1f = 0.1dec` is now `false`, while `0.5f = 0.5dec` and `1f = 1dec` stay `true`:
+
+```surql
+[0.1f = 0.1dec, 0.5f = 0.5dec, 1f = 1dec];
+```
+
+```surql title="Output"
+[false, true, true]
+```
+
+A query that compares a decimal field with a float literal or parameter below `1` can stop matching records it matched on `3.3`. Compare with a decimal instead, such as `price = 0.1dec` or `price = <decimal> $amount`. The Rust SDK's `Number` and `Value` compare in the same way.
+
+### Decimal literals with more than 28 places
+
+A `dec` literal with a significant digit more than 28 places after the decimal point is now a parse error, where `3.3` rounded it to 28 places:
+
+```surql
+0.0000000000000000000000000000001dec;
+```
+
+```text title="Error output"
+Parse error: Failed to parse decimal: Scale exceeds the maximum precision allowed: 31 > 28
+```
+
+Zeros after the last significant digit do not count, so `1.500000000000000000000000000000dec` gives `1.5dec`. Shorten such literals to 28 places. A `<decimal>` cast from a string still rounds as before. See [Decimal numbers](/docs/reference/query-language/language-primitives/data-types/numbers#decimal-numbers).
+
+### Writes that create a table need permission to define it
+
+A `CREATE`, `UPSERT`, `INSERT` or `RELATE` on a table that does not exist yet defines the table, and from `4.0` a system user needs permission to run `DEFINE TABLE` for that. A database user with the `VIEWER` role now gets `IAM error: Not enough permissions to perform this action`, where `3.3` defined the table and refused only the write. Record users are not affected.
+
+### Integer sums and means
+
+`math::sum`, `math::product` and `math::spread` over integers raise an error when the result leaves the range of an `int`, such as `Cannot perform multiplication with '9223372036854775807' and '2'`, where they used to wrap around to a wrong value, and `math::mean` over integers adds them exactly before dividing, so its result no longer depends on the order of the values:
+
+```surql
+math::mean([299, -4611686018427387904, 299, 4611686018427387904]);
+```
+
+```surql title="Output"
+149.5
+```
+
+On `3.3` the same call returns `256f`. A [sequence](/docs/reference/query-language/statements/define/sequence) that reaches the end of the `int` range fails with `The sequence has no values left to issue: its values cannot exceed 9223372036854775806`, and the largest value it issues is `9223372036854775806`.
+
+In an aggregated view, `math::sum` over integers now stores an `int`, where it stored a `float`. `math::sum`, `math::min`, `math::max`, `math::mean`, `math::stddev` and `math::variance` skip a value that is not a number, including a missing one, as the view's `SELECT` does. On `3.3` such a write to the source table failed. A view defined on `3.3` keeps its `float` totals until it is defined again with `DEFINE TABLE OVERWRITE`.
+
+### A blocking `DEFINE INDEX` commits before its build
+
+A `DEFINE INDEX` or `REBUILD INDEX` without `CONCURRENTLY`, run as a statement of its own, now commits and then waits for its build, instead of holding one transaction open for the whole build. It still returns only once the index is ready, and queries use the index only from then. Three things change for such a statement:
+
+- Other sessions see the new index while it builds, in `INFO FOR TABLE`, and `INFO FOR INDEX` reports the build's progress.
+- A `DEFINE INDEX` whose build fails, such as on a `UNIQUE` violation, fails, and its definition is then removed in a second transaction. If the server stops before that removal, the index stays defined with its build in `Error`, which `REMOVE INDEX` or `REBUILD INDEX` clears. While a `UNIQUE` index is in `Error`, after this or after a failed `CONCURRENTLY` build, a write that adds a value to it is refused with ``Database index `ua` on table `u` failed to build, so it cannot enforce UNIQUE for this write`` until the index is rebuilt or removed. On `3.3` such writes were accepted without a uniqueness check.
+- The query timeout, the transaction timeout and cancelling the query stop the wait. A `DEFINE INDEX` stopped this way has its definition removed, and a `REBUILD INDEX` finishes its build in the background.
+
+A statement inside `BEGIN ... COMMIT` commits or rolls back with the rest of its transaction. Its build still commits its entries first, so when the table already holds records, the rest of that transaction cannot read them. The transaction now reads the table instead of the new index, a `UNIQUE` duplicate of an existing value fails at the statement with the uniqueness error, and deleting a record the build indexed, or changing one of its indexed fields, is refused with ``Cannot change record `product:1`: index `sku` was defined by this transaction``. On `3.3`, a read through the new index left out the existing records, and the other two cases failed the `COMMIT` with a write conflict that every retry met again. Define the index `CONCURRENTLY`, or commit the definition before changing the records. See [Defining an index inside a transaction](/docs/reference/query-language/statements/define/indexes#defining-an-index-inside-a-transaction).
+
+Three more changes apply to the transactions around an index build:
+
+- A `DEFINE INDEX` without `CONCURRENTLY` is refused when its transaction has already created, changed or deleted a record of the table, with ``Cannot define index `email` on `user`: this transaction has written records of `user` ...``. On `3.3` the statement was accepted and the index left out those writes. Define the index `CONCURRENTLY`, or commit the writes first.
+- While a transaction that has built a new index inside itself is open, such as a `DEFINE INDEX` inside `BEGIN ... COMMIT` or a `DEFINE INDEX OVERWRITE` that replaces an index, writes to the table from other sessions on the same node wait for it, for at most 60 seconds, and fail with a retryable conflict if it commits. Retry those conflicts, and do not keep such a transaction open for longer than its build takes.
+- A build waits for up to 60 seconds for the write transactions that began before its index was defined or rebuilt. A transaction still open after that is refused at commit with a retryable conflict if it writes the table being indexed.
+
+### An unchanged `DEFINE INDEX OVERWRITE` keeps its index
+
+A `DEFINE INDEX OVERWRITE` that gives a ready index the same table, fields, index type and parameters now keeps the index and its data and replaces only the definition, so a changed `COMMENT` applies without a build. `3.3` built the index again. An index that is building, has failed or was built in an earlier index format is still built again. For the same reason, an unchanged `OVERWRITE` no longer applies a changed analyzer to a full-text index: after `DEFINE ANALYZER OVERWRITE`, run [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild). See [Using `OVERWRITE` clause](/docs/reference/query-language/statements/define/indexes#using-overwrite-clause).
+
+### JSON Patch paths
+
+`UPDATE ... PATCH` reads each `path` as an RFC 6901 JSON Pointer. Only `/` separates the parts of a path, so a dot is an ordinary character in a key: `/x.y` now means the key `x.y`, where `3.3` read it as `y` inside `x`. Write a nested path with slashes, as in `/x/y`. A key that contains `/` or `~` is written with `~1` or `~0`, so `/a~1b` targets the key `a/b`.
+
+### Query parameters in HTTP `/sql` requests
+
+A parameter given in the query string of a `/sql` request is bound as the value its JSON encodes, so `?data={"a":1}` binds an object and `?limit=10` binds the number `10`. A value that is not valid JSON is still bound as a string. To pass a number or `true` as a string, quote it in JSON, as in `?code="10"`.
+
+### Slow query logs list only allowed parameters
+
+In `3.x`, a slow query log entry listed the value of every parameter the statement used, except those named in `--slow-log-param-deny`. In `4.0`, an entry lists a parameter's value only when `--slow-log-param-allow` (`SURREAL_SLOW_QUERY_LOG_PARAM_ALLOW`) names it and `--slow-log-param-deny` does not, so with no allow list an entry lists no values. To keep seeing values after the upgrade, name the parameters in `--slow-log-param-allow`. See [Logging](/docs/manage/observability/logging).
+
+### Parameters that SurrealDB binds itself are protected
+
+The names that SurrealDB binds itself inside a statement, clause, event or function can no longer be set by a `LET` written inside a block, such as the body of a `FOR` or an `IF`, a function or a closure: `$this`, `$self`, `$parent`, `$value`, `$input`, `$before`, `$after` and `$event`. Such a `LET` fails, and a `DEFINE FUNCTION` whose body holds one is refused:
+
+```surql
+FOR $item IN [1, 2] { LET $parent = $item; };
+```
+
+```surql title="Error output"
+"'parent' is a protected variable and cannot be set"
+```
+
+A `LET` that is a statement of its own, and a variable passed with a query, such as `?value=5` on an HTTP `/sql` request or `{ value: 5 }` from an SDK, still bind these names, because the binding that SurrealDB makes inside a clause or an event takes precedence. Rename the variables of such a `LET`, for example to `$data` or `$amount`, in queries, and check the functions and events that the datastore already holds as well.
+
+`$auth`, `$access`, `$token` and `$session` stay protected everywhere, and can now also no longer name a `FOR` variable, a closure parameter or a function argument.
+
+### Bearer tokens are checked against their grant
+
+A token issued by a [`BEARER`](/docs/reference/query-language/statements/define/access/bearer) access method is checked against its grant on every request, so [revoking the grant](/docs/reference/query-language/statements/access#revoke) refuses the token from the next request. A token from a database-level bearer signin can now be used for queries. Tokens issued before the upgrade are refused, and their holders have to sign in with the bearer key again.
+
+### `$auth.id` reads no record
+
+[`$auth.id`](/docs/reference/query-language/language-primitives/parameters#auth) gives the signed-in record user's record id from the session, without reading the record. It gives the id where the user cannot select their own record, and after the record is deleted, so a field defined with `VALUE $auth.id` now stores the id in both cases, where `3.3` stored nothing. Any other field, such as `$auth.name`, still reads the record and is `NONE` unless the user may select it. A condition such as `$auth.id != NONE` is now true for every record user, so it does not show that the record exists.
+
+### Array ranges past the end of an array
+
+An array range whose bound lies past the end of the array now stops at the last element, where it returned `NONE`, so a range used as an upper limit works on a short array:
+
+```surql
+[1, 2][0..10];
+```
+
+```surql title="Output"
+[1, 2]
+```
+
+A range that starts past the end returns `[]`, and a negative bound still returns `NONE`. The same applies to a range after a graph traversal, such as `->wrote->post[0..10]`.
+
+### A clause repeated in `DEFINE TABLE`
+
+`DEFINE TABLE` now takes each clause at most once. On `3.3`, a clause could be repeated any number of times and the last one was kept, so `DEFINE TABLE note COMMENT 'one' COMMENT 'two'` stored the comment `'two'`. On `4.0` the statement fails to parse with `Conflicting clause on this table definition`, and the error points at both clauses. Remove the repeats, keeping the clause that `3.3` used, which is the last one. The other `DEFINE` statements, such as `DEFINE FIELD`, `DEFINE INDEX` and `DEFINE FUNCTION`, still keep the last of a repeated clause, except that a `DEFINE INDEX` now refuses a second index kind (see [One kind per `DEFINE INDEX`](#one-kind-per-define-index)).
+
+### Rust SDK: a dropped transaction rolls back
+
+A client-side [`Transaction`](/docs/reference/rust/concepts/transaction#using-a-client-side-transaction) that is dropped without `commit()` or `cancel()` is now rolled back on a background task, where it used to stay open on the server until the connection closed.
+
+### Isolation levels over the PostgreSQL wire protocol
+
+A PostgreSQL client's `BEGIN ISOLATION LEVEL ...` is now applied rather than accepted and ignored. `SERIALIZABLE` opens a [serializable transaction](/docs/learn/querying/concepts-and-guides/transactions#serializable-isolation) on SurrealMX and SurrealDS, and fails with SQLSTATE `0A000` (`feature_not_supported`) on the other storage engines, where `3.3` ran the transaction at snapshot isolation. `REPEATABLE READ`, `READ COMMITTED` and `READ UNCOMMITTED` run at snapshot isolation, as before. A client or driver that sets `SERIALIZABLE` by default needs to request `REPEATABLE READ` instead on those engines.
+
+### Error codes over the PostgreSQL wire protocol
+
+A failed statement over the PostgreSQL wire protocol is now reported under the SQLSTATE that PostgreSQL uses for the same kind of failure. A write that conflicts with a `UNIQUE` index is `23505`, a `NULL` or missing value for a field that requires one is `23502`, and a value of the wrong type for a field is `42804`. On `3.3` these were reported under general codes such as `42601` (`syntax_error`) and `XX000` (`internal_error`). Code that matched those general codes to detect a duplicate key or a refused value needs to match the new codes. See [Error codes](/docs/reference/rest-api/postgres-protocol#error-codes) for the full list.
+
+### Surrealism modules are now extensions
+
+Surrealism modules are called extensions from `4.0`. `DEFINE EXTENSION`, `ALTER EXTENSION`, `REMOVE EXTENSION` and `ext::` calls replace `MODULE` and `mod::`, and the command-line tooling moves from `surreal db module` to its own component of the Surreal CLI, [`surreal ext`](/docs/reference/cli/ext). The old SurrealQL spellings still work and log a deprecation warning, `surreal db module` and `surreal db extension` only print where the commands have moved, and `INFO FOR DB` lists definitions under `extensions` in place of `modules`. Every existing module needs two changes:
+
+- **Rebuild it.** `4.0` refuses a `.surli` file built for `3.3` or earlier with `Unsupported ABI version: expected 4, got 2`. Database access moves to a `Transaction` parameter, `#[surrealism(writeable)]` is replaced by `Transaction<ReadWrite>`, the module key-value store is removed, and the project file becomes `package.toml`. See [Upgrading a module to 4.0](/docs/learn/extensions/guides/surrealism-attribute-reference#upgrading-a-module-to-40).
+- **Define it again.** A definition stored by `3.x` has no `DIGEST` or signer, so `4.0` refuses to call it until it is defined again with `SIGNER` or `UNSIGNED`. A new definition grants the extension no network access, function calls or writes unless its `CAPABILITIES` say so. See [`DEFINE EXTENSION`](/docs/reference/query-language/statements/define/extension).
+
+Each call now runs on a fresh instance, so an extension no longer keeps anything in memory between calls. A stored definition that calls `ext::` cannot be read by `3.x`, so rewrite those calls as `mod::` before returning a database to `3.x`.
+
+### Grouping
+
+A `GROUP BY` projection that is not a group key or an aggregate is no longer collected once per record when it does not read the record, so a constant expression gives one value. `array::group()` returns the unique values of a group, and [`array::min()` and `array::max()`](/docs/reference/query-language/functions/database-functions/array#arraymax) are new. The rules are in the [`GROUP BY` clause](/docs/reference/query-language/clauses/group).
+
+### `UPSERT` creates exactly one record
+
+An `UPSERT ... WHERE` with no record id decides whether to create a record from what the statement matched, not from what it returns. A matching statement with `RETURN NONE` no longer creates a second record. See the [`UPSERT` statement](/docs/reference/query-language/statements/upsert).
+
+### Live notifications from client transactions
+
+A transaction that a client opens and commits itself, such as one started with an SDK's `begin()` method, now sends its live query notifications when it commits, and sends none if it is cancelled. The same change is in `3.3.5`. See [`LIVE SELECT`](/docs/reference/query-language/statements/live-select).
+
+### Value nesting limit
+
+The limit of 256 levels now also applies to values that are built in memory and never stored, and to the levels of a `GeometryCollection`. A record stored by an earlier release can exceed the limit once its geometry levels are counted, and reading it then returns `The value is nested too deeply`. The same change is in `3.3.4`. See [Nesting depth](/docs/reference/query-language/language-primitives/data-types/values#nesting-depth).
+
+### Destructuring with `...`
+
+A `...` entry at the end of a destructuring pattern keeps every field that the other entries did not name. See [Keeping the other fields](/docs/reference/query-language/language-primitives/idioms#keeping-the-other-fields).
+
+### Jaccard and Pearson ranking
+
+[`vector::similarity::jaccard`](/docs/reference/query-language/functions/database-functions/vector#vectorsimilarityjaccard) is the weighted Jaccard similarity, the sum of the minimums divided by the sum of the maximums, instead of a comparison of the values as sets. The two forms agree for vectors that hold only `0` and `1`:
+
+```surql
+vector::similarity::jaccard([1, 1, 0, 0], [1, 0, 1, 0]);
+```
+
+```surql title="Output"
+0.3333333333333333f
+```
+
+On `3.3.1` the same call returns `1f`. A KNN search over an index with `DIST JACCARD` or `DIST PEARSON` ranks by the distance `1 - similarity`, so the nearest vector comes first. For the query vector `[1, 1, 1]`, an indexed vector `[1, 1, 1]` has distance `0f` on `4.0`, where `3.3.1` ranked it last.
+
+### Vector distances over floats
+
+The [`vector::distance::*`](/docs/reference/query-language/functions/database-functions/vector) functions, `vector::similarity::cosine`, `vector::similarity::jaccard`, `vector::dot` and brute-force KNN searches add up the elements of a float vector of eight or more elements in a different order. A result can differ from `3.3` in its last digits. Where the terms cancel, as in a dot product or a cosine similarity close to zero, the difference can be as large as the result, including its sign, and records at nearly equal distances can change places. Vectors of fewer than eight elements, and vectors of integers or decimals, give the same results as before.
+
+### Paths over sets
+
+A path such as `s.*` now applies to each element of a set, as it does for an array, and collects the results into a set. On `3.3.1`, `s.*` over a set gives `NONE`.
+
+```surql
+DEFINE FIELD s ON t TYPE set<int>;
+CREATE t:1 SET s = <set>[1, 2, 3];
+SELECT VALUE s.* FROM t;
+```
+
+```surql title="Output"
+[{1, 2, 3}]
+```
+
+A `UNIQUE` index over `s.*` on a set field treats the whole set as the key.
+
+### A record id on an undefined table
+
+A record id that names a table that is not defined now returns the error `The table 'missing' does not exist` wherever it is read, as `SELECT * FROM missing:1` already did. On `3.3.1`, the same record id inside an array, as in `SELECT * FROM [missing:1]`, returned `[]`, and in a `FETCH` clause or a `.*` position it returned `NONE`. A record that is missing from a table that is defined still reads as `NONE`.
+
+```surql
+SELECT * FROM [missing:1];
+```
+
+```surql title="Error output"
+"The table 'missing' does not exist"
+```
+
+### Nested arrays in `FROM`
+
+An array nested inside an array in `FROM` now gives its elements, as if they were written in the outer array. `SELECT VALUE $this FROM [[1, 2], [3]]` returns `[1, 2, 3]` on `4.0` and `[[1, 2], [3]]` on `3.3`. A record id in a nested array is read as a record, so `SELECT * FROM [[item:2]]` returns the record `item:2`, where `3.3` returned the array with the record id in it. See [More on using the `FROM` clause](/docs/reference/query-language/statements/select#more-on-using-the-from-clause).
+
+### `ONLY` with a missing record in an array
+
+`SELECT * FROM ONLY [item:404]`, where `item:404` does not exist, now returns `NONE`. On `3.3` it failed with `Expected a single result output when using the ONLY keyword`.
+
+### `INSERT IGNORE`
+
+`INSERT IGNORE` skips only a record whose id already exists and a record that conflicts with a unique index. Any other error, such as a value that fails its field type, now fails the statement. The same change is in `3.3.4`. See [Ignoring duplicates](/docs/reference/query-language/statements/insert#ignoring-duplicates).
+
+### `LET` inside `IF ... THEN ... END`
+
+A `LET` written as a branch of the older `IF ... THEN ... END` form is refused with `LET statements can only appear at the top level of a query or inside a block expression`. The brace form, `IF @condition { ... }`, takes a block and is unchanged.
+
+### Fields inside fields
+
+`DEFINE FIELD` refuses a nested field whose parent is not defined, with ``Cannot define field `a.b`: the field `a` it is nested in is not defined. Define `a` first``, and one whose parent cannot hold fields, such as a `string`, `any` or untyped field, with ``only an object holds a field``. Define the parent as an `object` first: `DEFINE FIELD address ON person TYPE object;` before `DEFINE FIELD address.city ON person TYPE string;`. Definitions that a datastore already holds are kept, and an import replays them as they are written. `REMOVE FIELD` on a field now removes the fields defined inside it as well.
+
+### KNN query vectors
+
+The query vector of a KNN search cannot read the record being scanned. A statement such as `SELECT * FROM doc WHERE embedding <|5,COSINE|> other_field` now fails with `The KNN query vector cannot depend on the record being scanned`. A vector held in a parameter, built by a function or read from another record works as before, including one bound by a `LET` in the same block.
+
+### `LET` inside a cancelled transaction
+
+A parameter set with `LET` inside a transaction is discarded when the transaction is cancelled or fails, as its writes are. After `LET $b = 0; BEGIN; LET $b = 2; CANCEL;`, `$b` is `0` again. A `LET` inside a transaction that commits keeps its value.
+
+### `RETURN` inside a transaction
+
+A `RETURN` placed directly between `BEGIN` and `COMMIT` no longer ends the transaction. Its value is one of the results, and the statements after it still run and commit with the rest. Before `4.0` they were skipped and had no result. The same applies to a `RETURN` inside an `IF` placed directly in the transaction, which used to end the whole transaction and now ends only the `IF`. A `RETURN` inside a block or a function still ends that block or function. To stop part of a transaction early, put those statements in a block, `BEGIN; { ...; RETURN $value; ... }; COMMIT;`, and to cancel the transaction instead, use [`THROW`](/docs/reference/query-language/statements/throw).
+
+### Effects in schema clauses
+
+A `COMPUTED`, `ASSERT`, `VALUE` or `DEFAULT` clause, and every `PERMISSIONS` clause, may no longer write data, change the schema, call `sequence::nextval()` or `SLEEP`, whether directly or through a custom function it calls. A `VALUE` or `DEFAULT` clause may still call `sequence::nextval()`, `rand::*()` and `time::now()`. A JavaScript function, `eval::surql()` or a module function is refused in all of these clauses, because its effects cannot be known when the clause is defined. The definition is refused with an error that names the clause and the effect:
+
+```surql
+DEFINE FIELD view_count ON article COMPUTED (UPDATE stats:articles SET views += 1);
+```
+
+```surql title="Error output"
+'The COMPUTED clause must not have effects: `UPDATE` writes data'
+```
+
+This includes the `FOR create`, `FOR update` and `FOR delete` clauses of a table, which `3.3` allowed to write. A definition that a datastore already holds is kept, and its clause fails with the same error each time it reaches the effect, writing nothing. Move a write such as an audit log into a [`DEFINE EVENT`](/docs/reference/query-language/statements/define/event), whose body may still write. See [Clauses that must not have effects](/docs/reference/query-language/statements/define/field#clauses-that-must-not-have-effects).
+
+### `CONTAINS` over an array-element index
+
+The plain form `tags CONTAINS 'red'` returns the same records as before, and also any record whose `tags` is a string containing `'red'`, which an index on `tags.*` used to leave out. To find those records, `4.0` reads the index entries for `'red'`, `NONE` and `NULL` together and checks the condition on each record. It reads the table instead when the field has stored an object or a record link, when the query has a `LIMIT` and no `ORDER BY`, or an `ORDER BY` that the index does not give, and when the index was built by `3.x`, so rebuild such an index with [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild) to use it for the plain form. A condition that takes each element of the field, such as `tags.* CONTAINS 'red'` or `'red' INSIDE tags[*]`, reads the index as before. See [Array-element composite indexes](/docs/reference/query-language/statements/define/indexes#array-element-composite-indexes).
+
+### Index plans and stored arrays
+
+An index stores an array once for each of its elements, so the planner can only take its order, its ranges and its counts as exact for a field that has never held an array. In `3.3` a declared type such as `TYPE int` was taken as proof of that, but `DEFINE FIELD` does not change records stored before it, so an older array could make a query return a record twice or match a condition it does not satisfy. In `4.0` a B-tree index records whether it has stored an array, and the planner relies on that record only. An index built by `3.3` recorded nothing and is planned as one that may hold arrays until it is rebuilt, which gives the same results more slowly. A statement that writes is always planned that way.
+
+### Datetimes in an index
+
+An index defined or rebuilt on `4.0` stores a datetime as a number of seconds and nanoseconds, so its entries are in time order. An index built by `3.x` keeps storing datetimes as text, in which `2026-08-28T09:00:00Z` sorts after `2026-08-28T09:00:00.152Z`, and answers exactly as it did on `3.x`. A datetime inside a record id keeps the text order on every release. Define or rebuild a B-tree index that may hold a datetime only once every node in a cluster runs `4.0`, because an earlier node writes entries that the new format cannot find.
+
+### Schema changes in a new datastore
+
+`4.0` gives each database a [compatibility level](/docs/reference/query-language/statements/define/database#compatibility-level). Every database in a datastore that `3.x` created stays at level 3, including the databases defined in it later, and behaves as it did on `3.x`, so nothing needs doing on upgrade. A new datastore starts its databases at level 4, where a `SCHEMAFULL` table that holds records refuses a field change its records might not satisfy unless the statement says what they become with [`MIGRATE EXISTING ROWS`](/docs/reference/query-language/statements/define/field#migrating-existing-records), and `REMOVE FIELD` deletes the field's stored values. A schema script that changes a field after records exist can therefore succeed in an upgraded production database and fail in a new test or development one. To use level 4 in an upgraded database, see [`ALTER DATABASE`](/docs/reference/query-language/statements/alter/database#compatibility).
+
+### Changing a table between `NORMAL` and `RELATION`
+
+`ALTER TABLE ... TYPE RELATION` and `DEFINE TABLE OVERWRITE ... TYPE RELATION` are refused while the table holds a record that is not an edge, and a change to `TYPE NORMAL` while it holds an edge. On `3.3` the change was accepted, and an export of the table then failed to import. `TYPE ANY` holds both kinds. See [Changing the table type](/docs/reference/query-language/statements/alter/table#changing-the-table-type).
+
+### Writes to an aggregated view
+
+An `UPDATE` or `DELETE` on an aggregated view whose `WHERE` clause on a group column matches no row now returns `[]`. It used to return the error that a view is read-only. A write that matches rows is still refused.
+
+### `GROUP ALL` views keep their record
+
+A view defined with `GROUP ALL` now holds its one record from the moment it is defined, with the aggregates of no records, so `count()` gives `0` over an empty source table. Deleting the last source record empties that record instead of deleting it. On `3.3` the view had no record until the first source record arrived, and lost it with the last one, so an event defined on such a view now gets `UPDATE` in `$event` where `3.3` gave `CREATE` or `DELETE`. See [Pre-computed table views](/docs/reference/query-language/statements/define/table#pre-computed-table-views).
+
+### Named record id components
+
+A table that names the components of its array record id cannot be read by an earlier release, so define the names only when every node runs `4.0` or later, and while nothing writes to the table. See [Naming the components of an array id](/docs/reference/query-language/statements/define/field#naming-the-components-of-an-array-id).
+
+### Full-text scores
+
+BM25 now weighs a term with `ln(1 + (N - n + 0.5) / (n + 0.5))`, so every match gets a score above zero. On `3.3`, a term found in half or more of the indexed documents weighed `0`, so on a small or uniform dataset `search::score()` often returned `0` for every match. Scores are higher in general on `4.0`, and the order of results can change where common terms carried no weight before. Check any query that compares a score against a fixed threshold. See [How common terms are weighted](/docs/learn/data-models/full-text-search/scoring-and-ranking#how-common-terms-are-weighted).
+
+### A record id read from a string
+
+A string read as a record id must be a record id as a whole. `type::record("user:john-doe")` and `<record> "user:john-doe"` now fail with ``Could not cast into `record` using input `'user:john-doe'` ``, where `3.3` silently stopped at the first character that cannot appear in an unescaped key and returned `user:john`. For the same reason, `string::is_record("user:john-doe")` returns `false`. Escape the key, as in ``type::record("user:`john-doe`")``, or pass the table and the key separately, as in `type::record("user", "john-doe")`. Both forms work on `3.3` as well.
+
+### Literal types convert their members
+
+A literal type such as `[int]` or `{ a: int }` now converts each member to its type, as `array<int>` already did. `LET $v: [int] = [1.0]` gives `[1]`, where `3.3` kept `[1f]` after checking that it could be converted.
+
+### Nested aggregates in `GROUP BY`
+
+An aggregate inside another aggregate is refused in a grouped query, with `Nested aggregate functions are not supported`. On `3.3`, `SELECT g, math::mean(math::mean(s)) AS m FROM nd GROUP BY g` averaged each record's array and then the group. Compute the inner value in a subquery and aggregate that, which works on both versions:
+
+```surql
+SELECT g, math::mean(m) AS m FROM (SELECT g, math::mean(s) AS m FROM nd) GROUP BY g;
+```
+
+See [Aggregate functions](/docs/reference/query-language/clauses/group#aggregate-functions).
+
+### `UPSERT` that creates a record checks the schema
+
+An `UPSERT` with a `WHERE` clause that matches nothing, and so creates a record, now reports a schema error such as a missing required field. On `3.3` it returned `[]` and wrote nothing, so the failure went unnoticed.
+
+### Full-text matches over value rows
+
+A `@@` condition on a row built from a value, such as an object or array in `FROM` or a parameter holding one, is judged on the row's own content. On `3.3`, such a row with an `id` naming a stored record could be judged on that record's full-text index entry instead, so `SELECT text FROM doc, [{ id: doc:1, text: 'unrelated' }] WHERE text @@ 'quick'` also returned the value row when `doc:1` contained `quick`. A statement that mixes a table with value rows now judges the value rows without the index.
+
+### Views keyed by a projected `id`
+
+A view whose projection sets `id`, such as `DEFINE TABLE spend AS SELECT customer AS id, total FROM purchase`, keys each row by that value on every write, so later writes update the same row. On `3.3`, only the initial fill used the projected `id`, later writes keyed the row by the source record, and an `id` that was not a record id failed the definition. See [Pre-computed table views](/docs/reference/query-language/statements/define/table#choosing-the-id-of-a-view-row).
+
+### Views that read their own table
+
+`4.0` keeps a view up to date when it reads another view, so a view whose `FROM` names its own table, such as `DEFINE TABLE s AS SELECT n + 1 AS n FROM src, s`, would update itself without end. A write to any table that such a view reads now fails with ``Cannot maintain the view `s`: it reads itself``. `3.3` accepted the definition. Define the view again with `DEFINE TABLE OVERWRITE` over the tables other than its own, or remove it.
+
+### Element definitions of union fields
+
+`3.x` stored a definition of the elements, such as `v.*`, beside a field whose type joins an `array` with an `object` or a literal array, such as `TYPE object | array<int>`, and then refused values that the field's type allows, such as `{ x: 'text' }`. `4.0` stores no such definition, but keeps one that a datastore already holds, because it cannot tell it apart from one written on purpose. Remove it with `REMOVE FIELD v.* ON <table>` where `INFO FOR TABLE` lists one that you did not define.
+
+### Records that hold a value other than an object
+
+A record's content is always an object. An `UPDATE ... PATCH` whose operation replaces the whole record with a value that is not an object, such as `[{ op: 'replace', path: '', value: 5 }]`, now fails with `Cannot use 5 in a CONTENT clause` and leaves the record unchanged, where `3.3` stored the value. A record that `3.3` stored this way can still be read, updated and deleted. Its fields read as `NONE`, and an `UPDATE ... SET` on it turns it into an object that holds the id and the fields set.
+
+### One kind per `DEFINE INDEX`
+
+A `DEFINE INDEX` takes at most one of `UNIQUE`, `COUNT`, `FULLTEXT`, `HNSW` and `DISKANN`. A second one is a parse error, such as `Cannot combine FULLTEXT with UNIQUE`, where `3.3` kept the last one and dropped the others without an error. A stored definition always has one kind, so exports are not affected. For a field that is both unique and searchable, define two indexes.
+
+### `SPLIT` names a field of the result
+
+A `SPLIT` target must name a field as the `SELECT` returns it, under its alias where it has one. `SELECT tags AS t FROM person SPLIT tags` now fails with ``Missing split idiom `"tags"` in statement selection``, where `3.3` split on the source field. Write `SPLIT t` instead.
+
+### KNN operators in `UPDATE` and `DELETE`
+
+A KNN operator such as `<|5,COSINE|>` in the `WHERE` clause of an `UPDATE` or `DELETE` needs a vector index on the field. Without one, the statement fails with `A KNN operator in the WHERE of an UPDATE or DELETE needs a vector index on the field`, and an `UPSERT` with a KNN operator in its `WHERE` clause always fails. Select the records first, as in `UPDATE (SELECT id FROM doc WHERE embedding <|5,COSINE|> $q) SET seen = true`.
+
+### Statements that lose a write conflict run again
+
+A statement outside `BEGIN` and `COMMIT` that loses a write conflict is now run again by the server, up to 10 times within its timeout, instead of returning the conflict error straight away. A statement that did something outside the transaction, such as an `http::` request or a write to a file bucket, is not run again, and nor is a statement inside a transaction block. Application retry logic for single statements still works, and sees fewer conflicts. See [Write conflicts and retries](/docs/learn/querying/concepts-and-guides/transactions#write-conflicts-and-retries).
+
+## Clients and SDKs
+
+### CBOR text forms of datetimes, UUIDs and durations
+
+The CBOR protocol no longer accepts tag `0` (a datetime as text), tag `9` (a UUID as text) or tag `13` (a duration as text). A client sends tag `12` (`[seconds, nanoseconds]`) for a datetime, tag `37` (16 bytes) for a UUID and tag `14` (`[seconds, nanoseconds]`) for a duration. A request that holds one of the old tags fails with a parse error that names the tag to send instead:
+
+```text title="Error output"
+CBOR tag 0 (a datetime as text) is not accepted: send tag 12 [seconds, nanos]
+```
+
+The decoder also refuses an integer outside the 64-bit signed range, which `3.3` wrapped round to another value, a map with the same key twice, and tag `6` (`NONE`) with a value other than `null`. The responses that SurrealDB sends are unchanged.
+
+Some SDK releases made before `4.0` send these tags: the Python SDK sends tag `0` for every datetime, the PHP SDK sends tag `9` for a UUID, and the Go SDK's `UUIDString` and `CustomDurationString` types send tags `9` and `13`. **Upgrade every SDK to a release that supports `4.0` before upgrading the server.** Every server since `1.5.0` reads tags `12`, `37` and `14`, so an upgraded SDK works against the `3.x` servers as well. See [CBOR protocol](/docs/reference/rest-api/cbor-protocol).
+
+### SDK version checks
+
+An SDK checks the server's version when it connects. The Rust SDK of `3.x`, and the SDKs built on it, refuse a `4.0` server with ``server version `4.0.0` does not match the range supported by the client``, and so do JavaScript SDK releases before `2.1`. Upgrade the SDK before the server. The `4.0` SDKs connect to `3.x` servers as well.
+
+### Sized numbers over the original CBOR protocol
+
+`4.0` adds [sized number types](/docs/reference/query-language/language-primitives/data-types/numbers#sized-numbers) such as `u8`, `i32` and `f32`. A client that uses the original CBOR protocol (`application/cbor`, or the `cbor` WebSocket subprotocol), which includes every `3.x` SDK, receives a sized number as an ordinary integer or float, and a `u64` above `9223372036854775807` as a decimal. A request on that protocol that holds one of the sized number tags `180` to `188` is refused. A client that has to keep the size uses [CBOR v2](/docs/reference/rest-api/cbor-protocol#sized-numbers-cbor-v2). Data written before the upgrade holds no sized numbers, so this matters only once a schema or a query uses the new types.
+
+### HTTP RPC sessions are stored in the datastore
+
+A session that a client attaches over HTTP RPC is always stored in the datastore, so it survives a restart and can be used on any node of a cluster. A session expires once it has not been used for between one and one and a half times `--durable-session-ttl` (24 hours by default), after which a request on it fails with `Session not found`. A client that keeps a session idle for longer than that attaches again. `--durable-sessions` and `SURREAL_DURABLE_SESSIONS` have no effect and log a deprecation warning, and `--durable-session-gc-interval` defaults to one hour.
+
+### Rust SDK
+
+- The `parse` feature is no longer a default feature. Enable it for `surrealdb::parse::value`.
+- `Surreal::<Db>::unstable_from_datastore` and the `engine::tasks` module need the new `unstable` feature. `Connect::aol` and `Connect::snapshot` take `surrealdb::opt::AolMode` and `surrealdb::opt::SnapshotMode`.
+- The `kv-rocksdb` and `kv-indxdb` features and the `RocksDb` and `IndxDb` engines are removed, as described in [RocksDB and IndexedDB are removed](#rocksdb-and-indexeddb-are-removed).
+- A TLS configuration given for a plain `grpc://` endpoint is refused instead of ignored.
+- `Capabilities::with_planner_strategy` has no effect.
+
+## Configuration
+
+- `SURREAL_MAX_CONCURRENT_TASKS` is removed, and `4.0` ignores it.
+- Statements that scan many records split the scan into parts that run in parallel, on a pool of workers with one place for each core beyond the statement's own. `SURREAL_MORSEL_PLACES` limits how many places one statement can hold (no limit by default, and `0` runs every statement on its own task), `SURREAL_MORSEL_OLTP_RESERVE` keeps places free for short statements (`1` by default), and `SURREAL_MORSEL_PLACE_QUANTUM` sets how long a worker keeps a place while another statement waits for one (`8` by default). Index builds and background index compaction use the same pool, so on a host with two cores or fewer they run on one task unless `SURREAL_MORSEL_OLTP_RESERVE` is set to `0`. `SURREAL_HNSW_BUILD_PARALLELISM` is now an upper limit on the width of an HNSW build, and the pool decides the width it actually gets.
+- A network target that starts with `*.`, such as `--allow-net "*.example.com"`, now matches every subdomain of that domain. On `3.3` it was read as an exact host name and matched nothing, so check such entries in `--allow-net` and `--deny-net`, and in the network capabilities of extensions: an allow rule that had no effect now allows, and a deny rule now denies. See [Network](/docs/learn/security/authorization/capabilities#network).
+- `SURREAL_SURREALISM_SILO_ENDPOINT` is no longer read. `silo::` packages always come from `https://silo.surrealdb.com`, and an archive served from anywhere else is defined from a bucket.
+- `gql` is no longer an experimental target. `3.3` accepted `--allow-experimental gql` and `SURREAL_CAPS_ALLOW_EXPERIMENTAL=gql` and ignored them, because GQL is on by default. `4.0` refuses the name with `invalid experimental target name`, and the server does not start, so remove `gql` from the list. In the Rust SDK, `ExperimentalFeature::Gql` is removed. See [Experimental capabilities](/docs/reference/cli/db/commands/start#experimental-capabilities).
+- `surreal sql` exits with status `1` when its input is piped and a statement fails or a line does not parse, where it always exited with `0`. A script that pipes queries into `surreal sql` and continues after a failure now stops at that point if it checks the exit status. An interactive session is unchanged.
+- `surreal start --import-file` runs the file in the default namespace and database, so a file without `USE` statements is imported, where `3.3` skipped it. A file that does not parse fails startup at once, where `3.3` retried it for the length of the startup timeout.
+- `surreal upgrade` no longer downloads anything, because the Surreal CLI installs and upgrades the database. It prints how to get the Surreal CLI and exits with an error. `surreal v2` is removed, and `--online-version-check` and `--no-banner` are accepted and ignored. `surreal --version` prints the version followed by the operating system and architecture, without the `SurrealDB command-line interface and server` prefix, so check scripts that match its output.
+- An HTTP request that the [memory threshold](/docs/reference/cli/db/environment-variables#limits-config) refuses is answered with `503 Service Unavailable` and `Retry-After: 1`, where `3.3.4` and earlier answered `400 Bad Request`. Clients and load balancers can retry it. The same change is in `3.3.5`.
+- `SURREAL_SURREALISM_MAX_POOL_SIZE` is removed, because each extension call runs on a fresh instance. `SURREAL_SURREALISM_MAX_CONCURRENT_INVOCATIONS` (64 by default) limits how many calls run at once instead. See [Surrealism config](/docs/reference/cli/db/environment-variables#surrealism-config).
+- `--planner-strategy` and `SURREAL_PLANNER_STRATEGY` are deprecated and have no effect, because queries run on a single execution engine. The three values `3.3` accepted (`best-effort`, `compute-only` and `all-read-only`) still start the server, with a warning, and any other value now stops it from starting, so remove the option from the configuration. One difference between `3.3`'s planners was a `RETURN` inside a block in a `WHERE` clause: the default planner took it as the result of the whole `SELECT`, and `compute-only` as the value of the condition for each record. `4.0` gives the `compute-only` result.
+- A KNN search over an HNSW index with a pre-filter no longer widens its search fourfold. It reads the new `SURREAL_KNN_PREFILTER_HNSW_EF_BOOST`, which defaults to `1`, and scores the matching records directly wherever that costs less than walking the graph. `SURREAL_KNN_PREFILTER_EF_BOOST` keeps its default of `4` and now applies to DiskANN only. A deployment that tuned HNSW searches with `SURREAL_KNN_PREFILTER_EF_BOOST` sets `SURREAL_KNN_PREFILTER_HNSW_EF_BOOST` instead, and `4` restores the previous width.
+- Memory-sized defaults, such as the SurrealKV block cache, follow the tightest memory limit of the cgroup the process runs in, including a systemd unit's `MemoryMax`. On `3.3`, only a limit at the root of the cgroup hierarchy was read, so a server capped by systemd sized its caches from the whole host's memory. A server in a container is unaffected. See [Storage backend environment variables](/docs/reference/cli/db/environment-variables#storage-backend-environment-variables).
+- `SURREAL_SURREALKV_GROUPED_COMMIT_TIMEOUT`, `SURREAL_SURREALKV_GROUPED_COMMIT_WAIT_THRESHOLD` and `SURREAL_SURREALKV_GROUPED_COMMIT_MAX_BATCH_SIZE`, and the same settings as parameters of a `surrealkv://` path, are removed, because SurrealKV groups the syncs of concurrent commits itself. A server started with one of them logs `The surrealkv_grouped_commit_timeout setting has no effect and is ignored`, naming the setting, and starts. With `sync=every` on the `surrealkv://` path, which is the default, a commit is now visible to other transactions only once it is synced to disk. See [SurrealKV environment variables](/docs/reference/cli/db/environment-variables#surrealkv-environment-variables).
+- On a datastore that several nodes write, such as TiKV, a node started with `--node-membership-refresh-interval` or `SURREAL_NODE_MEMBERSHIP_REFRESH_INTERVAL` above 10 seconds fails to start, because a node refuses its own write commits once its heartbeat is 30 seconds old. The default is 3 seconds, and a datastore that one node opens accepts any interval.
+- `SURREAL_FEATURE_LEVEL` switches a datastore to the 4.0 record format, as described in [The 4.0 record format](#the-40-record-format).
+
+`4.0` also adds settings that bound the memory a node and each query can use. They are listed in the [environment variables](/docs/reference/cli/db/environment-variables#limits-config) reference.

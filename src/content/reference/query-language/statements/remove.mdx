@@ -20,14 +20,14 @@ REMOVE [
   | ANALYZER  [ IF EXISTS ] @name
   | API       [ IF EXISTS ] @name
   | CONFIG    [ IF EXISTS ] [ GRAPHQL | API | DEFAULT ]
-  | DATABASE  [ IF EXISTS ] @name
+  | DATABASE  [ AND EXPUNGE ] [ IF EXISTS ] @name
   | EVENT     [ IF EXISTS ] @name ON [ TABLE ] @table
   | FIELD     [ IF EXISTS ] @name ON [ TABLE ] @table
   | FUNCTION  [ IF EXISTS ] @name
   | INDEX     [ IF EXISTS ] @name ON [ TABLE ] @table
-  | NAMESPACE [ IF EXISTS ] @name
+  | NAMESPACE [ AND EXPUNGE ] [ IF EXISTS ] @name
   | PARAM     [ IF EXISTS ] @name
-  | TABLE     [ IF EXISTS ] @name
+  | TABLE     [ AND EXPUNGE ] [ IF EXISTS ] @name
   | USER      [ IF EXISTS ] @name ON [ ROOT | NAMESPACE | DATABASE ]
 ]
 ```
@@ -238,37 +238,62 @@ While all `REMOVE` statements remove the definition for a resource, some resourc
 * REMOVE DATABASE: This effectively deletes the database by removing the index stores, deleting all definitions, and clearing the cache. Since SurrealDB 3.2.0, and 2.7.0 on the 2.x line, this definition removes the database from the catalog immediately. This is followed by physical deletion of the underlying keys which is deferred to a background reaper (tune with [`SURREAL_RECLAIM_INTERVAL`](/docs/reference/cli/db/environment-variables) and, on 3.x, [`SURREAL_RECLAIM_GRACE`](/docs/reference/cli/db/environment-variables)), allowing `REMOVE DATABASE` to return quickly even for large tenants. Recreating the same database name yields a fresh, empty database. On 2.x, recreating it while more than 10,000 keys of the old database remain fails until the reaper catches up, as described in [Reusing a removed name](/docs/build/migrating/from-old-surrealdb-versions/26-to-27#reusing-a-removed-name).
 * REMOVE NAMESPACE: Same deferred reclaim as `REMOVE DATABASE` since SurrealDB 3.2.0 and 2.7.0, in addition to performing a remove on each database inside the namespace.
 * REMOVE TABLE: Similar to the two previous statements but on a single table, and will fail if a table view depends on it. Removing a table will also send a [KILL](/docs/reference/query-language/statements/kill) notification for each live query defined on it.
-* REMOVE INDEX: This statement also removes the index store cache and index data. Since 3.2.0, it removes the index definition immediately and thereafter reclaims index data in the background in the same way as namespace and database removal. If you are considering removing an index but want to test the behaviour out first, use an [ALTER INDEX PREPARE REMOVE](/docs/reference/query-language/statements/alter/indexes/#prepare-remove-clause) statement. This will decommission the index, after which you can test out queries to see their behaviour as they would function after the index is removed. If acceptable then the index can then be removed, or the change can be reverted by [rebuilding the index](/docs/reference/query-language/statements/rebuild).
+* REMOVE INDEX: This statement also removes the index store cache and index data. Since 3.2.0, it removes the index definition immediately and thereafter reclaims index data in the background in the same way as namespace and database removal. If you are considering removing an index but want to test the behaviour out first, use an [ALTER INDEX PREPARE REMOVE](/docs/reference/query-language/statements/alter/indexes/#prepare-remove-clause) statement. This will decommission the index, after which you can test out queries to see their behaviour as they would function after the index is removed. If acceptable then the index can then be removed, or the change can be reverted by [rebuilding the index](/docs/reference/query-language/statements/rebuild). Standard, unique, spatial, full-text and vector indexes share one store of document IDs for each table, and `COUNT` indexes do not use it. From SurrealDB 4.0, when the removed index was the last one on the table to use that store, a `DEFINE INDEX` or `REBUILD INDEX` of an index that uses it on the same table, while that background reclaim is still running, finishes the reclaim first and then succeeds. Inside `BEGIN ... COMMIT` or a transaction that a client holds open, the statement fails instead with a retryable transaction conflict, and a retry succeeds once the reclaim is complete.
 
-Another `REMOVE` statement to note is `REMOVE FIELD`, as it does not remove any existing data. To remove the existing data, perform an `UPDATE` or `UPSERT` statement that uses `UNSET` on the field or sets the field's value to `NONE`.
-
-For a schemaless table, the existing data will remain present until unset.
-
-`REMOVE FIELD` also removes only the one definition. The definitions of fields nested inside it, such as `address.city` under `address`, stay in place, and each needs its own `REMOVE FIELD`.
+On a [versioned SurrealKV datastore](/docs/reference/query-language/statements/select#the-version-clause), a `REMOVE TABLE` deletes only the current version of the table's data, so a `SELECT ... VERSION` at a time before the removal still reads the records. `REMOVE TABLE AND EXPUNGE` also deletes every earlier version of the table's records, its reference keys and the reference caches that point at it, so such a query no longer finds the table. `AND EXPUNGE` comes directly after the keyword, before `IF EXISTS` and the name, and `REMOVE NAMESPACE` and `REMOVE DATABASE` accept it as well.
 
 ```surql
-DEFINE FIELD name ON person TYPE string;
-CREATE person:one SET name = "Billy";
-REMOVE FIELD name ON person;
-
-SELECT * FROM person; -- 'name' data is still there
-UPDATE person; -- Does nothing
-//- [{ id: person:one, name: 'Billy' }]
-UPDATE person SET name = NONE; -- Must unset to remove 'name' data
+REMOVE TABLE AND EXPUNGE article;
 ```
 
-For a schemafull table, read operations can be performed on a table that still contains data not defined in the schema. However, any updates will fail unless the field is unset to match the schema.
+Another `REMOVE` statement to note is `REMOVE FIELD`. It removes the definitions of the fields nested inside the field as well, at any depth, so `REMOVE FIELD address ON person` also removes the definition of `address.city`. This applies to every table and at every compatibility level. In SurrealDB 3.x, each nested definition stays until it is removed with its own `REMOVE FIELD`.
+
+On a `SCHEMAFULL` table in a database at [compatibility level](/docs/reference/query-language/statements/define/database#compatibility-level) 4, the default for databases created from SurrealDB 4.0, it also removes the field's stored values:
+
+> [!WARNING]
+> At level 4, the values are gone and defining the field again does not restore them. In SurrealDB 3.x, and in a database at level 3, `REMOVE FIELD` leaves the stored values untouched, so a field that is removed and then defined again still holds them. A schema script that relies on that loses data when it runs against a database at level 4. Check the level with `(INFO FOR DB).compatibility` before running such a script.
 
 ```surql
+-- In a database at compatibility level 4
 DEFINE TABLE person SCHEMAFULL;
 DEFINE FIELD name ON person TYPE string;
 CREATE person:one SET name = "Billy";
 REMOVE FIELD name ON person;
 
-SELECT * FROM person; -- 'name' data is still there
-UPDATE person; -- Found field 'name', but no such field exists for table 'person'
-DEFINE FIELD created_at ON person TYPE datetime; -- Define a new field
+SELECT * FROM person;
+```
 
--- Works because values matche schema: 'name' is set to NONE, 'created_at' has a datetime value
-UPDATE person SET name = NONE, created_at = time::now();
+```surql title="Output"
+[{ id: person:one }]
+```
+
+In every other case it removes only the definition, and the stored values stay until each record is updated. That covers a `SCHEMALESS` table at either level, and any table in a database at level 3, which is how SurrealDB 3.x behaves. To remove the existing data, perform an `UPDATE` or `UPSERT` statement that uses `UNSET` on the field or sets the field's value to `NONE`.
+
+```surql
+DEFINE FIELD name ON person TYPE string;
+CREATE person:one SET name = "Billy";
+REMOVE FIELD name ON person;
+
+-- 'name' data is still there
+SELECT * FROM person;
+-- Does nothing
+UPDATE person;
+-- Unsetting the field removes the 'name' data
+UPDATE person UNSET name;
+```
+
+At level 3, a `SCHEMAFULL` table can still be read while its records hold a field that is no longer defined, but an update to such a record fails until the field is unset:
+
+```surql
+-- In a database at compatibility level 3
+DEFINE TABLE person SCHEMAFULL;
+DEFINE FIELD name ON person TYPE string;
+CREATE person:one SET name = "Billy";
+REMOVE FIELD name ON person;
+
+UPDATE person;
+```
+
+```surql title="Error output"
+"Found field 'name', but no such field exists for table 'person'"
 ```

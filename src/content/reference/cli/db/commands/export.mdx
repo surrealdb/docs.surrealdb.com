@@ -95,7 +95,12 @@ By default an export contains everything in the database. These flags narrow it 
     options={[
         {
             "name": "--only",
-            "description": "Whether only specific resources should be exported. When provided, only the resources named by the flags below are exported."
+            "description": "Whether only specific resources should be exported. When provided, only the resources named by the flags below are exported. The database's own definition is the exception, and is still exported unless `--database-definition false` is given."
+        },
+        {
+            "name": "--database-definition",
+            "value": "[<DATABASE_DEFINITION>]",
+            "description": "From 3.3.1. Whether the database's own definition - its `STRICT` flag, `COMMENT` and `CHANGEFEED` - should be exported. Restoring it rewrites those clauses on the target database. Possible values: `true`, `false`. A `grpc://` endpoint cannot leave the definition out, and refuses an export that asks it to."
         },
         {
             "name": "--users",
@@ -105,7 +110,7 @@ By default an export contains everything in the database. These flags narrow it 
         {
             "name": "--accesses",
             "value": "[<ACCESSES>]",
-            "description": "Whether access methods (record or JWT) should be exported. Possible values: `true`, `false`. A signing key is never exported, so an access that has one has to be defined again after a restore. See [What a dump does not restore](/docs/manage/self-hosted/backups-and-recovery#what-a-dump-does-not-restore)."
+            "description": "Whether access methods (record or JWT) should be exported. Possible values: `true`, `false`. A signing key is never exported, so an access that has one has to be defined again after a restore. See "What a dump does not restore" in Backups and recovery."
         },
         {
             "name": "--params",
@@ -128,6 +133,11 @@ By default an export contains everything in the database. These flags narrow it 
             "description": "Whether tables should be exported, optionally providing a list of tables."
         },
         {
+            "name": "--tables-exclude",
+            "value": "<TABLES_EXCLUDE>",
+            "description": "A comma-separated list of tables to leave out of the export. Cannot be combined with `--tables`."
+        },
+        {
             "name": "--versions",
             "value": "[<VERSIONS>]",
             "description": "Refused from SurrealDB 3.3.1, because an export holds only the current state of each record. SurrealDB 3.0.0 to 3.3.0 accepted the flag and ignored it."
@@ -136,6 +146,31 @@ By default an export contains everything in the database. These flags narrow it 
             "name": "--records",
             "value": "[<RECORDS>]",
             "description": "Whether records should be exported. Possible values: `true`, `false`."
+        },
+        {
+            "name": "--apis",
+            "value": "[<APIS>]",
+            "description": "Whether API definitions should be exported. Possible values: `true`, `false`."
+        },
+        {
+            "name": "--buckets",
+            "value": "[<BUCKETS>]",
+            "description": "Whether bucket definitions should be exported. Possible values: `true`, `false`."
+        },
+        {
+            "name": "--modules",
+            "value": "[<MODULES>]",
+            "description": "Whether extension definitions (`DEFINE EXTENSION`) should be exported. Possible values: `true`, `false`."
+        },
+        {
+            "name": "--configs",
+            "value": "[<CONFIGS>]",
+            "description": "Whether config definitions should be exported. Possible values: `true`, `false`."
+        },
+        {
+            "name": "--sequences",
+            "value": "[<SEQUENCES>]",
+            "description": "From 3.3.1. Whether sequences should be exported. Each sequence is exported at the position it has reached, so a restored sequence does not issue a value again. Possible values: `true`, `false`."
         }
     ]}
 />
@@ -154,11 +189,17 @@ Using token-based authentication:
 surreal db export --endpoint http://localhost:8000 --token <token> --ns main --db main export.surql
 ```
 
-To write the export to standard output instead of a file, for example to pipe it into another command, use `-` as the file name and add `--log none`. Without it, the command writes its log line `INFO surrealdb::method::export: Exporting bytes` to standard output as well, ahead of the export, and importing the result fails with a parse error on that line.
+To write the export to standard output instead of a file, for example to pipe it into another command, use `-` as the file name. From SurrealDB 4.0 the command then writes its log lines to standard error, so standard output holds only the export.
 
 ```bash
-surreal db export --endpoint http://localhost:8000 --user root --pass secret --ns main --db main --log none - > export.surql
+surreal db export --endpoint http://localhost:8000 --user root --pass secret --ns main --db main - > export.surql
 ```
+
+Before SurrealDB 4.0, add `--log none` to the command above. Without it, the log line `INFO surrealdb::method::export: Exporting bytes` is written to standard output ahead of the export, and importing the result fails with a parse error on that line.
+
+From SurrealDB 4.0, an export over `http://` or `https://` that fails part-way through makes the command fail with an error. Before 4.0, such a failure could end the export early without an error, and leave a file that was cut short, so check the end of an export file taken with an earlier release before you rely on it.
+
+In Windows PowerShell 5, `>` saves the output as UTF-16, which `surreal import` refuses. Write the export to a file with `surreal export <file>` instead, or use PowerShell 7, which writes UTF-8.
 
 ## Choosing what to export
 
@@ -183,6 +224,12 @@ The **Use the CLI instead** section below the checkboxes shows the `surreal db e
 <img src="~/assets/img/image/studio/export-database-cli.png" alt="The same dialog with Use the CLI instead expanded, showing a surreal db export command with the endpoint, namespace, database and credentials, followed by --only and one flag for each selected resource, and the file name after a double hyphen." />
 
 If you select **Sequences**, add `--sequences` to the command yourself: Studio currently leaves that flag out of the command it shows.
+
+## Passwords and credentials in an export
+
+An export holds the password hash and SCRAM verifier of each database user only when the exporting user is allowed to edit the users of that database: an owner on the database, on its namespace or on the root, or any client of a server started with `--unauthenticated`. For any other user, each `DEFINE USER` statement in the export has `PASSHASH '[REDACTED]'` and `PASSSCRAM '[REDACTED]'` in place of the values. Export as an owner when the file has to restore the users' passwords.
+
+A bucket's `BACKEND` URL is exported with the credentials in it replaced by `[REDACTED]`, whoever runs the export. After an import, define the bucket again with its credentials, or give the server its credentials from the environment. See [`DEFINE BUCKET`](/docs/reference/query-language/statements/define/bucket#cloud-object-storage-backends).
 
 ## Using environment variables
 
@@ -220,47 +267,210 @@ Export an existing database as a SurrealQL script
 Usage: surreal export [OPTIONS] --namespace <NAMESPACE> --database <DATABASE> [FILE]
 
 Arguments:
-  [FILE]  Path to the SurrealQL file to export. Use dash - to write into stdout. [default: -]
+  [FILE]
+          Path to the SurrealQL file to export. Use dash - to write into stdout.
+
+          [default: -]
 
 Options:
-  -e, --endpoint <ENDPOINT>      Database endpoint to export from [default: http://localhost:8000]
-  -u, --username <USERNAME>      Database authentication username to use when connecting [env: SURREAL_USER=] [aliases: --user]
-  -p, --password <PASSWORD>      Database authentication password to use when connecting [env: SURREAL_PASS=] [aliases: --pass]
-  -t, --token <TOKEN>            Authentication token in JWT format to use when connecting [env: SURREAL_TOKEN=]
-      --auth-level <AUTH_LEVEL>  Level on which the authenticating user is defined [env: SURREAL_AUTH_LEVEL=] [default: root] [possible
-                                 values: root, namespace, ns, database, db]
-      --namespace <NAMESPACE>    The namespace selected for the operation [env: SURREAL_NAMESPACE=] [aliases: --ns]
-      --database <DATABASE>      The database selected for the operation [env: SURREAL_DATABASE=] [aliases: --db]
-      --only                     Whether only specific resources should be exported
-      --users [<USERS>]          Whether users should be exported [possible values: true, false]
-      --accesses [<ACCESSES>]    Whether access methods should be exported [possible values: true, false]
-      --params [<PARAMS>]        Whether params should be exported [possible values: true, false]
-      --functions [<FUNCTIONS>]  Whether functions should be exported [possible values: true, false]
-      --analyzers [<ANALYZERS>]  Whether analyzers should be exported [possible values: true, false]
-      --tables [<TABLES>]        Whether tables should be exported, optionally providing a list of tables
-      --versions [<VERSIONS>]    Whether versions should be exported [possible values: true, false]
-      --records [<RECORDS>]      Whether records should be exported [possible values: true, false]
-  -h, --help                     Print help
+  -e, --endpoint <ENDPOINT>
+          Database endpoint to export from
+
+          [default: http://localhost:8000]
+
+  -u, --username <USERNAME>
+          Database authentication username to use when connecting
+
+          [env: SURREAL_USER]
+          [alias: --user]
+
+  -p, --password <PASSWORD>
+          Database authentication password to use when connecting
+
+          [env: SURREAL_PASS]
+          [alias: --pass]
+
+  -t, --token <TOKEN>
+          Authentication token in JWT format to use when connecting
+
+          [env: SURREAL_TOKEN]
+
+      --auth-level <AUTH_LEVEL>
+          Level on which the authenticating user is defined
+
+          [env: SURREAL_AUTH_LEVEL]
+          [default: root]
+          [possible values: root, namespace, ns, database, db]
+
+      --namespace <NAMESPACE>
+          The namespace selected for the operation
+
+          [env: SURREAL_NAMESPACE]
+          [alias: --ns]
+
+      --database <DATABASE>
+          The database selected for the operation
+
+          [env: SURREAL_DATABASE]
+          [alias: --db]
+
+      --only
+          Whether only specific resources should be exported. Deselects every section the wire format can express leaving out, so that what
+          follows on the command line is all the dump carries. The database's own definition is the exception — gRPC has no field for
+          excluding it, so it rides along unless `--database-definition false` asks for it to be left out
+
+      --database-definition [<DATABASE_DEFINITION>]
+          Whether the database's own definition — its STRICT flag, COMMENT and CHANGEFEED — should be exported. Restoring it rewrites those
+          clauses on the target database. Not carried over gRPC, which has no field for the exclusion and refuses the export rather than
+          answering with the section anyway.
+
+          Not `--database`, which this command already takes for the database to export from.
+
+          [possible values: true, false]
+
+      --users [<USERS>]
+          Whether users should be exported
+
+          [possible values: true, false]
+
+      --accesses [<ACCESSES>]
+          Whether access methods should be exported
+
+          [possible values: true, false]
+
+      --params [<PARAMS>]
+          Whether params should be exported
+
+          [possible values: true, false]
+
+      --functions [<FUNCTIONS>]
+          Whether functions should be exported
+
+          [possible values: true, false]
+
+      --analyzers [<ANALYZERS>]
+          Whether analyzers should be exported
+
+          [possible values: true, false]
+
+      --tables [<TABLES>]
+          Whether tables should be exported, optionally providing a list of tables
+
+      --tables-exclude <TABLES_EXCLUDE>
+          Comma-separated list of tables to exclude from the export
+
+      --versions [<VERSIONS>]
+          Whether versions should be exported. Versioned export is not supported: a dump carries the current state of each record only, and
+          asking for versions fails the export rather than writing one without them
+
+          [possible values: true, false]
+
+      --records [<RECORDS>]
+          Whether records should be exported
+
+          [possible values: true, false]
+
+      --apis [<APIS>]
+          Whether apis should be exported
+
+          [possible values: true, false]
+
+      --buckets [<BUCKETS>]
+          Whether buckets should be exported
+
+          [possible values: true, false]
+
+      --modules [<MODULES>]
+          Whether modules should be exported
+
+          [possible values: true, false]
+
+      --configs [<CONFIGS>]
+          Whether configs should be exported
+
+          [possible values: true, false]
+
+      --sequences [<SEQUENCES>]
+          Whether sequences should be exported
+
+          [possible values: true, false]
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Logging:
-  -l, --log <LOG>                              The logging level for the command-line tool [env: SURREAL_LOG=] [default: info] [possible
-                                               values: none, full, error, warn, info, debug, trace]
-      --log-format <LOG_FORMAT>                The format for terminal log output [env: SURREAL_LOG_FORMAT=] [default: text] [possible
-                                               values: text, json]
-      --log-socket <LOG_SOCKET>                Send logs to the specified host:port [env: SURREAL_LOG_SOCKET=]
-      --log-file-level <LOG_FILE_LEVEL>        Override the logging level for file output [env: SURREAL_LOG_FILE_LEVEL=] [possible values:
-                                               none, full, error, warn, info, debug, trace]
-      --log-otel-level <LOG_OTEL_LEVEL>        Override the logging level for OpenTelemetry output [env: SURREAL_LOG_OTEL_LEVEL=] [possible
-                                               values: none, full, error, warn, info, debug, trace]
-      --log-socket-level <LOG_SOCKET_LEVEL>    Override the logging level for unix socket output [env: SURREAL_LOG_SOCKET_LEVEL=] [possible
-                                               values: none, full, error, warn, info, debug, trace]
-      --log-socket-format <LOG_SOCKET_FORMAT>  The format for socket output [env: SURREAL_LOG_SOCKET_FORMAT=] [default: text] [possible
-                                               values: text, json]
-      --log-file-enabled                       Whether to enable log file output [env: SURREAL_LOG_FILE_ENABLED=]
-      --log-file-path <LOG_FILE_PATH>          The directory where log files will be stored [env: SURREAL_LOG_FILE_PATH=] [default: logs]
-      --log-file-name <LOG_FILE_NAME>          The name of the log file [env: SURREAL_LOG_FILE_NAME=] [default: surrealdb.log]
-      --log-file-format <LOG_FILE_FORMAT>      The format for log file output [env: SURREAL_LOG_FILE_FORMAT=] [default: text] [possible
-                                               values: text, json]
-      --log-file-rotation <LOG_FILE_ROTATION>  The log file rotation interval [env: SURREAL_LOG_FILE_ROTATION=] [default: daily] [possible
-                                               values: daily, hourly, never]
+  -l, --log <LOG>
+          The logging level for the command-line tool
+
+          [env: SURREAL_LOG]
+          [default: info]
+          [possible values: none, full, error, warn, info, debug, trace]
+
+      --log-format <LOG_FORMAT>
+          The format for terminal log output
+
+          [env: SURREAL_LOG_FORMAT]
+          [default: text]
+          [possible values: text, json]
+
+      --log-socket <LOG_SOCKET>
+          Send logs to the specified host:port
+
+          [env: SURREAL_LOG_SOCKET]
+
+      --log-file-level <LOG_FILE_LEVEL>
+          Override the logging level for file output
+
+          [env: SURREAL_LOG_FILE_LEVEL]
+          [possible values: none, full, error, warn, info, debug, trace]
+
+      --log-otel-level <LOG_OTEL_LEVEL>
+          Override the logging level for OpenTelemetry output
+
+          [env: SURREAL_LOG_OTEL_LEVEL]
+          [possible values: none, full, error, warn, info, debug, trace]
+
+      --log-socket-level <LOG_SOCKET_LEVEL>
+          Override the logging level for unix socket output
+
+          [env: SURREAL_LOG_SOCKET_LEVEL]
+          [possible values: none, full, error, warn, info, debug, trace]
+
+      --log-socket-format <LOG_SOCKET_FORMAT>
+          The format for socket output
+
+          [env: SURREAL_LOG_SOCKET_FORMAT]
+          [default: text]
+          [possible values: text, json]
+
+      --log-file-enabled
+          Whether to enable log file output
+
+          [env: SURREAL_LOG_FILE_ENABLED]
+
+      --log-file-path <LOG_FILE_PATH>
+          The directory where log files will be stored
+
+          [env: SURREAL_LOG_FILE_PATH]
+          [default: logs]
+
+      --log-file-name <LOG_FILE_NAME>
+          The name of the log file
+
+          [env: SURREAL_LOG_FILE_NAME]
+          [default: surrealdb.log]
+
+      --log-file-format <LOG_FILE_FORMAT>
+          The format for log file output
+
+          [env: SURREAL_LOG_FILE_FORMAT]
+          [default: text]
+          [possible values: text, json]
+
+      --log-file-rotation <LOG_FILE_ROTATION>
+          The log file rotation interval
+
+          [env: SURREAL_LOG_FILE_ROTATION]
+          [default: daily]
+          [possible values: daily, hourly, never]
 ```

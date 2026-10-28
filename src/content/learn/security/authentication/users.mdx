@@ -367,7 +367,7 @@ The `$auth` parameter points to the record belonging to the current authenticate
 
 When the `$auth` parameter is set, you can access any of the fields of the record corresponding to the authenticated user (e.g. `$auth.name` or `$auth.email`) via that parameter.
 
-`$auth` itself is the user's record ID, such as `user:o57nbpz66v6a2l0l9kog`. Reading a field through it, including `$auth.id`, fetches the user record. In a query, a function, or a field's `VALUE`, `DEFAULT`, `ASSERT` or `COMPUTED` clause, this needs the user to be allowed to select that record. Table and field permission clauses, events and `DEFINE API` handlers read the record without checking the user's permissions, so `$auth.email` resolves there. In a query on a table with no permissions for record users, which includes a table created implicitly on the first write, `$auth.email` and `$auth.id` are `NONE`. Use `$auth` itself wherever the record ID is enough, and give the user table a `select` permission where the fields are needed:
+`$auth` itself is the user's record ID, such as `user:o57nbpz66v6a2l0l9kog`, and `$auth.id` gives the same record ID without reading the record, even after the record is deleted. Reading any other field through `$auth`, such as `$auth.email`, fetches the user record. In a query, a function, or a field's `VALUE`, `DEFAULT`, `ASSERT` or `COMPUTED` clause, this needs the user to be allowed to select that record. Table and field permission clauses, events and `DEFINE API` handlers read the record without checking the user's permissions, so `$auth.email` resolves there. In a query on a table with no permissions for record users, which includes a table created implicitly on the first write, `$auth.email` is `NONE`. Give the user table a `select` permission where the other fields are needed:
 
 ```surql
 DEFINE TABLE user SCHEMALESS
@@ -385,6 +385,15 @@ A record user who runs `CREATE post SET title = 'Hi'` gets a post whose `author`
 ### Expiration
 
 Authenticated sessions remain valid for a certain duration. This duration is `NONE` by default, meaning that sessions will not expire unless otherwise specified. This duration can be customised on both the `DEFINE USER` and `DEFINE ACCESS` statements to any specific value defining the maximum duration of an authenticated session associated with that user or access method. After the defined duration, the authenticated session will expire. For example, the `DEFINE USER example DURATION FOR SESSION 1d` clause will ensure that any authenticated sessions for the `example` user will expire after a day.
+
+How a session was established decides which durations apply to it:
+
+| Session established with | Expires |
+| --- | --- |
+| Credentials: `signin`, `signup`, or HTTP Basic authentication | After the session duration. The token that the sign-in returns does not shorten the session, so a connection that signed in keeps working after that token expires. |
+| A token: the RPC `authenticate` method, an HTTP `Authorization: Bearer` header, or a token sent as the password over the Postgres wire protocol | After the session duration or when the token expires, whichever comes first. |
+
+With no session duration, or with `FOR SESSION NONE`, a session established with credentials does not expire. One established with a token still ends when the token expires.
 
 Expired sessions can no longer be used to call authenticated methods and doing so will result in a specific error indicating that the session has expired. SurrealQL can be used to check the expiration of the active session by running `SELECT exp FROM $session`, which shows the Unix time when the session will expire or `NONE` in the case that the session does not expire.
 

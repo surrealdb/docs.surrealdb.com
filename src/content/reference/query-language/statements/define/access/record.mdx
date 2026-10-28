@@ -332,6 +332,8 @@ Unlike authentication tokens (i.e. JWT), refresh tokens (i.e. bearer keys) featu
 
 By default, refresh tokens will expire after 30 days. However, their duration can be configured using the `DURATION FOR GRANT` clause, which will accept any duration. If set to `NONE`, refresh tokens will never expire. It is strongly recommended to set some expiration for refresh tokens to minimize the potential impact of credential stealing attacks.
 
+When a refresh token is exchanged for a new token, the access method's `AUTHENTICATE` clause runs again, and the record it returns is the record of the new session. An access method without an `AUTHENTICATE` clause accepts a refresh token only while the record it was issued for still exists.
+
 Because refresh tokens can be used to indefinitely keep a user authenticated with SurrealDB as long as they are exchanged for a new fresh token before they expire, [special care](/docs/learn/security/best-practices/security-best-practices#token-storage) should be taken when storing and applications using them should be suitably protected from attacks.
 
 Like other bearer keys, all refresh tokens are stored in the datastore even after they are expired or revoked. This means that using refresh tokens will have a space cost in addition to the performance cost of retrieving and verifying them against the datastore. Refresh tokens are intended to be used only to obtain a new authentication token after the existing one expires and applications should only use them when necessary, such as after receiving a [token expiration error](/docs/learn/security/best-practices/troubleshooting#token-expired-error). For certain high volume applications, you may want to regularly [purge](/docs/reference/query-language/statements/access/#purge) expired refresh tokens to minimize the space used by inactive refresh tokens.
@@ -403,7 +405,7 @@ curl -X POST \
 
 In the context of `DEFINE ACCESS ... TYPE RECORD`, the authenticate clause can be used to change the record identifier returned by the `SIGNIN` and `SIGNUP` clauses or replace the identifier provided in the token when authenticating `WITH JWT`.
 
-This clause can also be used to log or stop authentication attempts from record users, as it is always executed across signin, signup and token authentication.
+This clause can also be used to log or stop authentication attempts from record users, as it is always executed across signin, signup, token authentication and the exchange of a refresh token.
 
 Unlike the [`PERMISSIONS`](/docs/reference/query-language/statements/define/table#defining-permissions) clause, the `AUTHENTICATE` clause is executed only at the time of authentication, resulting in increased performance for queries that only need to be validated at that point.
 
@@ -413,7 +415,7 @@ On the other hand, permissions queries are executed in every query and for each 
 
 Replacing the record identifier that will be used to establish the session is especially useful in scenarios where the token used to authenticate the session does not contain one. This is common when using an external authentication provider, which may only have knowledge of generic user identifiers such as an email address or UUID.
 
-In the below example, we check if the session may already be tied to an existing user by using the `$auth` reserved parameter, which contains the record identifier of the authenticated user. If we can select the `id` field from `$auth`, it means that the token already contained the `id` for a record that exists in the database. If that is not the case, we can check if the token contains a different claim that we can rely on to uniquely identify users. In this case we check for an email address. If the `email` claim is present in the token, we try to retrieve the user from the `user` table by their email address. If none of the queries return a record, the `AUTHENTICATE` clause will fail with a generic error. You can also choose to `THROW` a custom error as shown in the next example.
+In the below example, we check if the session may already be tied to an existing user by using the `$auth` reserved parameter, which contains the record identifier of the authenticated user. If `$auth` is set and `record::exists($auth)` returns `true`, the token already contained the `id` of a record that exists in the database. The clause reads the record without checking the user's permissions, so this works even when record users cannot select from the `user` table. Testing `$auth.id` is not enough, because it gives the record ID from the token whether or not the record exists. If the token has no `id`, or the record does not exist, we can check if the token contains a different claim that we can rely on to uniquely identify users. In this case we check for an email address. If the `email` claim is present in the token, we try to retrieve the user from the `user` table by their email address. If none of the queries return a record, the `AUTHENTICATE` clause will fail with a generic error. You can also choose to `THROW` a custom error as shown in the next example.
 
 ```surql
 /**[test]
@@ -426,8 +428,8 @@ value = "NONE"
 DEFINE ACCESS user ON DATABASE TYPE RECORD
     WITH JWT ALGORITHM HS512 KEY 'secret'
     AUTHENTICATE {
-        IF $auth.id {
-            RETURN $auth.id;
+        IF $auth AND record::exists($auth) {
+            RETURN $auth;
         } ELSE IF $token.email {
             RETURN SELECT * FROM user WHERE email = $token.email;
         };

@@ -65,11 +65,30 @@ Capability flags on [`surreal db start`](/docs/reference/cli/db/commands/start) 
 | How you connect | Configure capabilities on |
 | --- | --- |
 | Remote server (`ws://`, `http://`, …) | **`surreal db start`** (or server env vars) |
-| Embedded storage (`memory`, `rocksdb://…`, …) | **`surreal db sql`** |
+| Embedded storage (`memory`, `surrealkv://…`, …) | **`surreal db sql`** |
 
 When using a remote server, flags on `surreal db sql` do **not** enable or disable execution-time checks such as [`eval::*`](/docs/reference/query-language/functions/database-functions/eval), arbitrary-query gates, or experimental features. They can still affect **REPL line parsing** before a query is sent.
 
 See [Capabilities and remote connections](/docs/reference/cli/db/commands/sql#capabilities-and-remote-connections) for detail.
+
+## Capabilities in the startup log
+
+<Since v="v4.0.0" />
+
+The server logs the capabilities it starts with at the `info` level, in a line that begins `Server capabilities:`, so the default log output shows them. It also logs a warning at startup for each of these settings:
+
+| Setting | The warning begins |
+| --- | --- |
+| `--allow-all` | `You are allowing all capabilities by default (--allow-all).` |
+| Guest access, with `--allow-guests` | `Guest (anonymous) access is enabled` |
+| Scripting, with `--allow-scripting` | `Scripting is enabled` |
+| Network access to every target, with `--allow-net` and no target list, and no `--deny-net` | `Outbound network access is unrestricted (--allow-net)` |
+
+`--allow-all` allows guest access, scripting and network access too, so it logs all four warnings, except for a capability that is denied separately, as with `--allow-all --deny-net`. The server also logs a warning when it starts with [`--unauthenticated`](/docs/reference/cli/db/commands/start#unauthenticated-mode). The warnings change nothing about what the server allows.
+
+```text
+WARN surrealdb_server::dbs: ⚠️ You are allowing all capabilities by default (--allow-all). This is not recommended for production use.
+```
 
 ## List
 
@@ -111,7 +130,7 @@ List of options for allowing capabilities:
                 --allow-experimental
             </td>
             <td colspan="2" scope="row" data-label="Description">
-                Allow the usage of one or more experimental features. Possible values are `files` and `surrealism`, separated by a comma. See <a href="/docs/reference/cli/db/commands/start#experimental-capabilities">experimental capabilities</a> for which tag enables each feature. (The legacy tag <code>gql</code> is still accepted for compatibility but is unused from 3.3.0 - GQL is on by default.)
+                Allow the usage of one or more experimental features. Possible values are `files`, `surrealism` and `kvexport` (the <a href="/docs/reference/rest-api/http-protocol#kvexport">raw keyspace export</a> route), separated by a comma. See <a href="/docs/reference/cli/db/commands/start#experimental-capabilities">experimental capabilities</a> for which tag enables each feature. GQL is on by default and is not an experimental feature. From 4.0, the tag <code>gql</code> is refused as an invalid name, where 3.3 accepted it and ignored it.
             </td>
             <td scope="row" data-label="Default">
                 None
@@ -322,10 +341,10 @@ surreal db start --allow-funcs --deny-funcs "http","crypto::md5"
 surreal db start --allow-funcs "fn::shared_fn"
 ```
 
-A denied function is refused however a query calls it, including through method syntax. With `--deny-funcs string::len`, both `string::len('abcd')` and `'abcd'.len()` return the error `Function 'string::len' is not allowed to be executed`.
+A denied function is refused however a query calls it, including through method syntax. With `--deny-funcs string::len`, both `string::len('abcd')` and `'abcd'.len()` return the error `Function 'string::len' is not allowed to be executed`. From SurrealDB 4.0, this also applies to a call from an [embedded script](/docs/reference/query-language/scripting/surrealql-functions) through `surrealdb.functions`, such as `surrealdb.functions.string.len('abcd')`.
 
 > [!WARNING]
-> In SurrealDB 3.3.0, method syntax was able to call a denied function: `'abcd'.len()` returned `4` while `string::len('abcd')` was refused. SurrealDB 3.3.1 fixes this.
+> Before SurrealDB 3.3.1, method syntax was able to call some denied functions: `'abcd'.len()` returned `4` while `string::len('abcd')` was refused. SurrealDB 3.3.1 fixes this.
 
 ## Network
 
@@ -350,6 +369,18 @@ A target without a port, such as `internal.example.com`, allows or denies every 
 > [!WARNING]
 > An allow rule that names a host with a port, such as `internal.example.com:443`, currently refuses every request to that host. The host name is checked again without a port when it is resolved, and the rule does not match it, so the request fails with `There was an error processing a remote HTTP request: error sending request for url` rather than a capability error. Allow the host without a port. A port in an allow rule works only for a request whose URL names an IP address, such as `https://10.1.2.3:443`, and a deny rule with a port works in both cases.
 
+From SurrealDB 4.0, a target can name every subdomain of a domain with `*.` as its leftmost label. `*.example.com` matches `api.example.com` and `a.b.example.com`, but not `example.com` itself, so list both to include the domain. A wildcard never matches an IP address, and a deny rule with a wildcard wins over an allow rule in the same way as any other.
+
+```bash
+# Allow any subdomain of example.com
+surreal db start --allow-net "*.example.com"
+
+# Allow all network access except to one domain and its subdomains
+surreal db start --allow-net --deny-net "tracker.example","*.tracker.example"
+```
+
+A wildcard must be the whole leftmost label and be followed by at least two labels, so `*.com`, `a.*.example.com` and `*example.com` are refused when the server starts. Before 4.0, a target such as `*.example.com` was read as an exact host name, which matches nothing.
+
 SurrealDB resolves hostnames with DNS, then checks every resulting IP address against `--allow-net` and `--deny-net`. A hostname that resolves to an address listed in `--deny-net` is blocked.
 
 
@@ -368,7 +399,7 @@ Deny by default: list only the `--allow-net` targets you need, and keep addition
 
 ## Arbitrary queries
 
-The `--allow-arbitrary-query` and `--deny-arbitrary-query` allow database administrators to allow or deny arbitrary querying by either guest, record or system users, or a combination of those. This capability setting affects the following: [/sql endpoint](/docs/reference/rest-api/http-protocol#sql), [/key endpoints](/docs/reference/rest-api/http-protocol#get-table), [/graphql endpoint](/docs/reference/rest-api/http-protocol#graphql), [/gql endpoint](/docs/reference/rest-api/http-protocol#gql), the [Postgres wire protocol](/docs/reference/rest-api/postgres-protocol) listener, [RPC methods](/docs/reference/rest-api/rpc-protocol) `use`, `select`, `create`, `update`, `merge`, `patch`, `delete`, `relate`, `insert`, `insert_relation`, `query`, `gql`, and `graphql`, and the [`eval::*`](/docs/reference/query-language/functions/database-functions/eval) functions.
+The `--allow-arbitrary-query` and `--deny-arbitrary-query` allow database administrators to allow or deny arbitrary querying by either guest, record or system users, or a combination of those. This capability setting affects the following: [/sql endpoint](/docs/reference/rest-api/http-protocol#sql), [/key endpoints](/docs/reference/rest-api/http-protocol#get-table), [/graphql endpoint](/docs/reference/rest-api/http-protocol#graphql), [/gql endpoint](/docs/reference/rest-api/http-protocol#gql), the [Postgres wire protocol](/docs/reference/rest-api/postgres-protocol) listener, [RPC methods](/docs/reference/rest-api/rpc-protocol) `use`, `select`, `create`, `update`, `merge`, `patch`, `delete`, `relate`, `insert`, `insert_relation`, `query`, `gql`, and `graphql`, and the [`eval::*`](/docs/reference/query-language/functions/database-functions/eval) functions. From SurrealDB 4.0, it also affects the `surrealdb.query()` and `surrealdb.value()` functions inside an [embedded script](/docs/reference/query-language/scripting/built-in-functions), so a script that a record user runs through a defined function or a `DEFINE API` endpoint fails with `Function 'surrealdb.query' is not allowed to be executed` when arbitrary queries are denied for record users.
 
 Endpoints that do not accept arbitrary queries such as [`/version`](/docs/reference/rest-api/http-protocol#version) and [authentication endpoints](/docs/reference/rest-api/http-protocol#signin) are not affected.
 
@@ -422,14 +453,15 @@ A route name covers every method and path under it, so `key` covers all ten [`/k
 | `signup` | [`POST /signup`](/docs/reference/rest-api/http-protocol#signup) |
 | `key` | The [`/key`](/docs/reference/rest-api/http-protocol#get-table) table and record endpoints |
 | `sql` | [`POST /sql`](/docs/reference/rest-api/http-protocol#sql) |
-| `gql` | [`POST /gql`](/docs/reference/rest-api/http-protocol#gql), and the Postgres `gql` dialect |
+| `gql` | [`POST /gql`](/docs/reference/rest-api/http-protocol#gql), and the `gql` dialect on the Postgres and MySQL listeners |
 | `graphql` | [`POST /graphql`](/docs/reference/rest-api/http-protocol#graphql) |
 | `ml` | The [`/ml`](/docs/reference/rest-api/http-protocol#ml-import) import and export endpoints |
 | `api` | Endpoints defined with [`DEFINE API`](/docs/reference/query-language/statements/define/api) |
 | `mcp` | The [MCP server](/docs/reference/cli/db/commands/mcp) endpoint |
 | `rpc` | The HTTP [`/rpc`](/docs/reference/rest-api/rpc-protocol) endpoint |
 | `sync` | The internal sync endpoint |
-| `postgres` <Since v="v3.3.0" /> | The [Postgres wire protocol](/docs/reference/rest-api/postgres-protocol) listener |
+| `postgres` <Since v="v3.3.0" /> | The [Postgres wire protocol](/docs/reference/rest-api/postgres-protocol) listener, and the PostgreSQL dialect on the MySQL listener |
+| `mysql` <Since v="v4.0.0" /> | The [MySQL wire protocol](/docs/reference/rest-api/mysql-protocol) listener |
 
 `rpc` closes the HTTP `/rpc` endpoint as a whole. To leave it open and restrict what can be called through it, use the RPC method names below, which apply to the WebSocket and gRPC transports as well.
 
@@ -449,9 +481,25 @@ A route name covers every method and path under it, so `key` covers all ten [`/k
 
 Names are matched case-insensitively, so `--deny-rpc GraphQL` and `--deny-rpc graphql` are the same. `gql` and `graphql` are separate methods.
 
+### MCP tools
+
+<Since v="v4.0.0" />
+
+`--allow-mcp` and `--deny-mcp` allow or deny individual tools of the [built-in MCP server](/docs/build/ai-agents/mcp/embedded) that `surreal db start` serves at `/mcp`. They take tool names in the same way as the HTTP and RPC flags, and follow the same priority rules. Every tool is allowed by default.
+
+```bash
+# Leave the MCP server open, without its GraphQL tools
+surreal db start --deny-mcp graphql,gql
+
+# Allow only the tools that read
+surreal db start --deny-mcp --allow-mcp use,info,list,select
+```
+
+The tool names are `query`, `select`, `create`, `insert`, `upsert`, `update`, `delete`, `relate`, `info`, `list`, `use`, `run`, `gql` and `graphql`, matched case-insensitively. A call to a denied tool runs nothing, and the client receives a tool error that says the tool is denied by the server's capability configuration. The flags apply to tool calls only, and do not affect the server's resources and prompts. To close the MCP server as a whole, deny the `mcp` [HTTP route](#http-route-names) instead.
+
 ## GQL entry surfaces
 
-ISO GQL (Cypher Query Language) is on by default from **3.3.0**, and the GQL executor is reachable from four entry surfaces. Each has its own switch, so a deployment that serves no GQL closes each surface it exposes:
+ISO GQL is on by default from **3.3.0**, and the GQL executor is reachable from four entry surfaces. Each has its own switch, so a deployment that serves no GQL closes each surface it exposes:
 
 | Entry surface | Switch |
 | --- | --- |

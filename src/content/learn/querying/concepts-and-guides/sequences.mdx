@@ -76,13 +76,17 @@ Design with that rule in mind: sequences are for identity and ordering, not for 
 
 You can tune how big each reserved batch is, where counting starts, and how long the database should wait when acquiring a new batch. Larger batches mean fewer coordination trips; smaller batches mean less “wasted” headroom if a node stops. A timeout that is too tight can make allocation fail under pressure.
 
+A sequence issues values up to `9223372036854775806`. Once it reaches that value, `sequence::nextval()` fails with `The sequence has no values left to issue: its values cannot exceed 9223372036854775806` instead of returning a value that has wrapped around.
+
 ## A separate counter for each group
 
-A number that restarts for each group, such as a reference number for each article category, needs one counter for each value of the category field. A record ID can hold the category, so `counter:['news']` and `counter:['sport']` are two separate counters, and `UPSERT` creates each one the first time it is used. Putting the counter in a field's `DEFAULT` numbers every new record, including records from a bulk `INSERT`.
+A number that restarts for each group, such as a reference number for each article category, needs one sequence for each value of the category field. A `DEFAULT` clause can build the sequence name from the field, so every new record is numbered, including records from a bulk `INSERT`.
 
 ```surql
+DEFINE SEQUENCE article_news START 1;
+DEFINE SEQUENCE article_sport START 1;
 DEFINE FIELD reference ON article TYPE int READONLY
-    DEFAULT (UPSERT ONLY counter:[$this.category] SET val += 1 RETURN VALUE val);
+    DEFAULT sequence::nextval('article_' + $this.category);
 
 CREATE article SET category = 'news';
 CREATE article SET category = 'news';
@@ -99,7 +103,17 @@ SELECT category, reference FROM article ORDER BY category, reference;
 ]
 ```
 
-To use sequences instead, define one sequence for each category and build its name from the field, as in `DEFAULT sequence::nextval('article_' + $this.category)` with `DEFINE SEQUENCE article_news START 1`. A record whose category has no sequence fails with `The sequence 'article_weather' does not exist`, so define the sequence before the first record in a new category.
+A record whose category has no sequence fails with `The sequence 'article_weather' does not exist`, so define the sequence before the first record in a new category.
+
+A sequence can leave gaps, as described above. Where the numbers of a group must have no gaps, keep a counter record for each group instead, such as `counter:['news']`, and update it in the statement that creates the record. `UPSERT` creates each counter the first time it is used:
+
+```surql
+CREATE article SET
+    category = 'news',
+    reference = (UPSERT ONLY counter:['news'] SET val += 1 RETURN VALUE val);
+```
+
+From SurrealDB 4.0, this `UPSERT` cannot go in the field's `DEFAULT` clause, because a `DEFAULT` clause may not write data. See [Clauses that must not have effects](/docs/reference/query-language/statements/define/field#clauses-that-must-not-have-effects).
 
 ## Where to read more
 

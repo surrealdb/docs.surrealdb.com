@@ -1,0 +1,171 @@
+---
+position: 1
+title: Creating custom extensions
+description: "Step-by-step guide to scaffolding a Surrealism extension, exposing functions with attributes, configuring package.toml, building, signing and loading it into SurrealDB."
+---
+
+# Creating custom extensions
+
+This page walks you through the options available when building a [Surrealism](/docs/learn/extensions/plugins/overview) extension from scratch. Extensions were called modules before SurrealDB 4.0, and the commands below were `surreal db module` commands.
+
+## Prerequisites
+
+You need a recent [Rust toolchain](https://www.rust-lang.org/tools/install), the `wasm32-wasip2` target, and the [Surreal CLI](/docs/reference/cli) with its [`ext` component](/docs/reference/cli/ext), which runs as `surreal ext`. From SurrealDB 4.0, the database executable no longer builds extensions: `surreal db extension` and the other earlier spellings only print where the commands have moved.
+
+```sh
+rustup target add wasm32-wasip2
+```
+
+To run the extension, you also need a SurrealDB server, which you can install from the [installation guide](/docs/running/installation).
+
+## Scaffold a project
+
+The fastest way to start is `surreal ext init`:
+
+```sh
+surreal ext init
+```
+
+This creates the project scaffold (`Cargo.toml`, `package.toml`, `.cargo/config.toml` and `src/lib.rs`) ready for Surrealism builds.
+
+From SurrealDB 4.0, the `tokio_unstable` flag in `.cargo/config.toml` is commented out. Uncomment it only when a dependency needs Tokio's `net` feature, such as a Tokio-based HTTP client:
+
+```toml title=".cargo/config.toml"
+[build]
+rustflags = ["--cfg", "tokio_unstable"]
+```
+
+In SurrealDB 3.3 and earlier, the flag is always set.
+
+An HTTP client built on the `wasi:http` interface, such as `waki`, needs no Tokio flag. From SurrealDB 4.0 the host provides `wasi:http`, and each request is held to the extension's `net` grant. See [`CAPABILITIES`](/docs/reference/query-language/statements/define/extension#capabilities).
+
+To automatically set the name and organisation for a project, you can use the following flags:
+
+```sh
+surreal ext init --headless --org surrealdb --name my_surreal_module ./my_surreal_module
+```
+
+## Create a Rust project manually
+
+Create a new library crate for your extension:
+
+```sh
+cargo new --lib my_surreal_module
+cd my_surreal_module
+```
+
+Configure the library as a dynamic WASM library and add the Surrealism SDK plus any other crates you need to `Cargo.toml`, following versions recommended for your SurrealDB release:
+
+```toml
+[lib]
+crate-type = ["cdylib"]
+```
+
+For a full annotated example, follow the [quick tutorial](/docs/learn/extensions/plugins/quick-tutorial).
+
+## Configure `package.toml`
+
+Add a `package.toml` file at the crate root next to `Cargo.toml`. Before SurrealDB 4.0 the file was called `surrealism.toml`, which is still read when there is no `package.toml`. [`surreal ext config`](/docs/reference/cli/ext#ext-config) reads and changes the file from the command line.
+
+A minimal example:
+
+```toml
+target = "rust"
+abi = 4
+
+[package]
+organisation = "surrealdb"
+name = "demo"
+version = "1.0.0"
+
+[capabilities]
+allow_scripting = true
+allow_arbitrary_queries = true
+allow_write = false
+allow_functions = ["fn::test"]
+allow_net = ["127.0.0.1:8080"]
+```
+
+Optional attached filesystem:
+
+```toml
+[attach]
+fs = "fs"
+```
+
+The `[capabilities]` section is a request. It is shown when the extension is installed, and the extension receives only what its definition grants. See [`CAPABILITIES`](/docs/reference/query-language/statements/define/extension#capabilities).
+
+When `[attach] fs = "fs"` is present, the `fs/` folder in your project is packed into the archive as a read-only filesystem available to the extension at runtime.
+
+## Annotate exported functions
+
+Expose functions to SurrealQL by annotating them with `#[surrealism]`. Only functions you mark this way are included in the extension and callable from the database.
+
+```rust
+use surrealism::{surrealism, Transaction};
+
+#[surrealism]
+fn can_drive(age: i64) -> bool {
+    age >= 18
+}
+
+#[surrealism(comment = "Counts the records in a table")]
+async fn count_records(tx: Transaction, table: String) -> anyhow::Result<i64> {
+    tx.sql_with_vars("count(SELECT * FROM type::table($table))", [("table", table)]).await
+}
+```
+
+The `tx` parameter gives the function read-only access to the database inside the calling query's transaction. A function that needs to write takes `Transaction<ReadWrite>` instead. This form is available from SurrealDB 4.0; earlier versions use `#[surrealism(writeable)]` and the free function `surrealism::sql()`.
+
+For the full attribute reference (database access, `comment`, `init`, and namespaced Rust modules), see [Surrealism attribute reference](/docs/learn/extensions/guides/surrealism-attribute-reference).
+
+## Compile with `surreal ext build`
+
+From your project directory, compile to a `.surli` artefact with the Surreal CLI:
+
+```sh
+surreal ext build --out demo.surli .
+```
+
+For faster local iteration, use debug builds. This works in the same way as `cargo build --debug` in skipping optimisation passes to speed up compiling time in exchange for lower performance.
+
+```sh
+surreal ext build --debug --out demo.surli .
+```
+
+See the [`surreal ext` reference](/docs/reference/cli/ext#ext-build) for all flags.
+
+## Sign the archive
+
+<Since v="v4.0.0" />
+
+A signed archive lets whoever installs it check that it came from you. Name the signer in `package.toml`, build again so that the signer is part of the archive, then sign it. With an SSH key:
+
+```sh
+surreal ext config signer ssh ~/.ssh/release.pub
+surreal ext build --out demo.surli .
+surreal ext sign --key ~/.ssh/release demo.surli
+```
+
+For Sigstore keyless signing from CI, name the workflow instead, with `surreal ext config signer github --repo <owner/name> --workflow <file>`, and run `surreal ext sign demo.surli` in that workflow. An extension that you build and load yourself does not need a signature, and is defined as `UNSIGNED`.
+
+## Load into SurrealDB
+
+Place the `.surli` file in a [bucket](/docs/reference/query-language/statements/define/bucket) that the database can read, then define it with [`DEFINE EXTENSION`](/docs/reference/query-language/statements/define/extension), or install it with [`surreal ext install`](/docs/reference/cli/ext#ext-install), which checks the signer and asks which requested capabilities to grant.
+
+```surql
+DEFINE EXTENSION ext::demo FROM f"extensions:/demo.surli" UNSIGNED;
+```
+
+## Test your functions
+
+Connect with the CLI, [SurrealDB Studio](/docs/explore/studio), or an SDK and invoke your functions from SurrealQL. Confirm return values and error handling match what you expect.
+
+If something fails:
+
+- verify that experimental capabilities include `surrealism` (and `files` if using buckets/files);
+- verify the extension was rebuilt after source changes, and defined again with `DEFINE EXTENSION OVERWRITE`, since the definition pins the archive's digest;
+- verify that the definition grants the capabilities the function needs, such as `write` for a function that takes `Transaction<ReadWrite>`;
+- verify your SurrealDB build supports the Surrealism ABI your extension targets.
+
+For a high-level picture of how these steps fit together, see the [Surrealism overview](/docs/learn/extensions/plugins/overview).

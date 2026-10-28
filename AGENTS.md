@@ -300,6 +300,28 @@ stays beside the section it qualifies, however far down that section sits.
 Reordering breaks no links, because anchors come from heading text, but check
 each moved section for references to content that is no longer above it.
 
+**Version markers.** `<Since v="…" />` renders as a badge, and a badge reads as
+a label for the block it heads. It goes in one of three places only: on its own
+line directly under the heading of the section it dates, directly under the
+frontmatter when the whole page is new, or in a table cell, as in the
+environment variable tables. In October 2026, 34 badges sat mid-section or at
+the end of a sentence, where a reader cannot tell what they date.
+
+Where only part of a section is new, write the version into the sentence
+instead: "From SurrealDB 3.3, sort fields do not need to appear in the `SELECT`
+list." Where a sentence already gives the version ("From 3.3.0 a server started
+on it…", "…are new in SurrealDB 3.1"), it needs no badge as well. An inline
+mention such as "[`.expect()`](…) (from SurrealDB 3.1)" takes the same plain
+form, never a badge in brackets.
+
+**Version tabs.** Where `<Tabs>` holds one tab per version, the newest version
+comes first, because the first tab is the one shown and the newest release is
+what a reader downloads. "SurrealDB 3.1 and later" goes before "Before
+SurrealDB 3.1". In October 2026, 11 of 46 version tab groups put the older
+version first. Tabs that share a `syncKey` switch together by label, so reorder
+every group with that key at once, and check for prose that refers to a tab by
+position ("the first tab").
+
 **Spelled-out defaults.** A clause that only restates the default belongs on the
 page teaching that clause, and nowhere else. `DEFINE INDEX … HNSW DIMENSION 4
 DIST COSINE` and `DEFINE INDEX … HNSW DIMENSION 4 DIST COSINE TYPE F32 EFC 150

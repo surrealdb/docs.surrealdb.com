@@ -8,7 +8,7 @@ description: "SurrealDB makes working with GeoJSON easy, with support for Point,
 
 A `geometry` is a type based on the GeoJSON spec that is optimised for working with data pertaining to locations on Earth.
 
-SurrealDB supports GeoJSON, including `Point`, `LineString`, `Polygon`, `MultiPoint`, `MultiLineString`, `MultiPolygon`, and `Collection` values. SurrealQL automatically detects GeoJSON objects converting them into a single data type.
+SurrealDB supports GeoJSON, including `Point`, `LineString`, `Polygon`, `MultiPoint`, `MultiLineString`, `MultiPolygon`, and `Collection` values. SurrealQL converts a GeoJSON object written in a query into a `geometry`, and from SurrealDB 4.0 it also converts a GeoJSON object built at run time wherever only a `geometry` fits. See [Objects built at run time](#objects-built-at-run-time).
 
 <table>
 <thead>
@@ -70,6 +70,27 @@ This can be shown by calling the [`type::is_geometry()`](/docs/reference/query-l
 -- Carries a field beyond `type` and `coordinates`
 { type: "Point", coordinates: [-0.118092, 51.509865], unnecessary: "data" }.is_geometry();
 //- false
+```
+
+### Objects built at run time
+
+An object that is built at run time stays an object, such as one built from parameters, decoded from JSON with `encoding::json::decode()` or `http::get()`, or read from a field. From SurrealDB 4.0, such an object is converted to a `geometry` wherever only a `geometry` fits: a field of type `geometry`, an argument of a [`geo::`](/docs/reference/query-language/functions/database-functions/geo) function, a `<geometry>` cast, and an operand of the geometry operators `INSIDE`, `OUTSIDE`, `INTERSECTS`, `CONTAINS`, `CONTAINSALL` and `CONTAINSANY`, such as `$point INSIDE $area` for two objects decoded from JSON. On an object that is not a GeoJSON geometry, these operators keep their usual meaning, so `$area CONTAINS 'coordinates'` still checks for the key. The object must still be exactly a GeoJSON geometry, so an object with extra fields such as `bbox`, or a geometry of the wrong kind for a type such as `geometry<point>`, is refused.
+
+```surql
+LET $coords = [-0.118092, 51.509865];
+LET $point = { type: "Point", coordinates: $coords };
+[$point.is_geometry(), (<geometry> $point).is_geometry(), geo::distance($point, (0, 51.5))];
+```
+
+```surql title="Output"
+[false, true, 8246.78908673967f]
+```
+
+A type that can also hold the object as it is, such as `geometry | object`, keeps it as an object. Records that were stored before the field's type changed are not converted. A [`MIGRATE EXISTING ROWS`](/docs/reference/query-language/statements/define/field#migrating-existing-records) clause converts them:
+
+```surql
+ALTER FIELD location ON venue TYPE option<geometry>
+    MIGRATE EXISTING ROWS AS location_to_geometry USING <geometry> $value FALLBACK NONE;
 ```
 
 ## `Point`
@@ -299,7 +320,20 @@ FOR $city IN SELECT * FROM city {
 SELECT name, id, ->close_to->city AS neighbours FROM city;
 ```
 
+## Indexing geometries
+
+<Since v="v4.0.0" />
+
+A query that filters on a geometry field, such as `WHERE location INSIDE $area` or `WHERE geo::distance(location, $here) < 10000`, reads every record of the table unless the field has an index. A [`SPATIAL` index](/docs/reference/query-language/statements/define/indexes#spatial-index) answers these conditions from the index instead:
+
+```surql
+DEFINE INDEX city_location ON city FIELDS location SPATIAL;
+```
+
+The example above orders every city by distance to find its nearest neighbours. An ordering by distance does not use the index, so on a large table, add a radius to the `WHERE` clause to limit the records that are sorted.
+
 ## See also
 
 * [SurrealQL operators](/docs/reference/query-language/language-primitives/operators)
 * [geo functions](/docs/reference/query-language/functions/database-functions/geo)
+* [`SPATIAL` indexes](/docs/reference/query-language/statements/define/indexes#spatial-index)
