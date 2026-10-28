@@ -1,0 +1,90 @@
+---
+position: 13
+title: Raspberry Pi and small devices
+description: "Build a Rust application that uses the SurrealDB SDK for a Raspberry Pi or another device with little memory: client-only builds, embedded builds, and cross-compiling for arm64 Linux with cargo-zigbuild."
+---
+
+# Raspberry Pi and small devices
+
+This page covers building a Rust application that uses the SurrealDB SDK for a Raspberry Pi, or for any other device with little memory. How much a build needs depends on the SDK features it enables, so the first section explains what each kind of feature compiles, and the rest covers the two ways an application on the device can reach a database.
+
+## What the SDK compiles
+
+The SDK's features fall into two groups, and they compile very different amounts of code:
+
+| Features | What the build compiles | Building on a Raspberry Pi |
+| --- | --- | --- |
+| `protocol-ws` and `protocol-http`, including the default features | The SDK and a client for the protocol | Works |
+| Any `kv-*` feature, such as `kv-mem` or `kv-surrealkv` | The above, plus the whole database engine | Can run out of memory |
+
+From SurrealDB 3.3.0, a build with only the client features does not include the database engine, so it compiles far fewer crates and needs far less memory. Up to 3.2, every build of the SDK compiled the engine, whatever features it enabled.
+
+A `kv-*` feature [embeds the database](/docs/reference/rust/embedding) in the application, so the build has to compile the engine as well. The engine is compiled as one large crate, and compiling it can need more memory than a Raspberry Pi with 4 GB. When that happens, the build slows to a stop or the device runs out of memory.
+
+## Connect to a server
+
+An application that connects to a SurrealDB server only needs the client features, and builds on the Raspberry Pi itself. The default features include `protocol-ws`:
+
+```sh
+cargo add surrealdb
+cargo add tokio --features macros,rt-multi-thread
+```
+
+```rust
+use surrealdb::engine::remote::ws::Ws;
+use surrealdb::Surreal;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+    let db = Surreal::new::<Ws>("127.0.0.1:8000").await?;
+    db.use_ns("main").use_db("main").await?;
+    Ok(())
+}
+```
+
+The server can run on another machine, on [SurrealDB Cloud](/docs/manage/instances), or on the Raspberry Pi itself. The `surreal` binary is released for 64-bit Arm Linux, and the [install script](/docs/running/installation/linux) selects it on a Raspberry Pi with a 64-bit operating system, such as the 64-bit Raspberry Pi OS. A 32-bit operating system is not supported.
+
+## Embed the database by cross-compiling
+
+To embed the database, build the application on another machine and copy the binary to the Raspberry Pi. [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild) cross-compiles for Linux from macOS, Windows or another Linux machine, using the [Zig](https://ziglang.org) toolchain as the linker.
+
+1. Add the target for 64-bit Arm Linux and install cargo-zigbuild:
+
+```sh
+rustup target add aarch64-unknown-linux-gnu
+cargo install --locked cargo-zigbuild
+```
+
+2. Install Zig. The cargo-zigbuild README lists the ways to install it, including `pip install ziglang`.
+
+3. Use the `kv-surrealkv` feature for a database stored on disk, or `kv-mem` for one held in memory. [SurrealKV](/docs/running/file-backed#surrealkv) is written in Rust, so it needs nothing more to cross-compile. `kv-rocksdb` compiles RocksDB, a C++ library, for the target as well.
+
+```sh
+cargo add surrealdb --features kv-surrealkv
+```
+
+```rust
+use surrealdb::engine::local::SurrealKv;
+use surrealdb::Surreal;
+
+#[tokio::main]
+async fn main() -> surrealdb::Result<()> {
+      let db = Surreal::new::<SurrealKv>("data").await?;
+      db.use_ns("main").use_db("main").await?;
+      Ok(())
+}
+```
+
+4. Build for the target. The suffix after the target name is the version of the C library to link against. Use the version of the operating system on the Raspberry Pi, which `ldd --version` prints there. Raspberry Pi OS based on Debian 12 (Bookworm) has version 2.36:
+
+```sh
+cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.36
+```
+
+5. Copy the binary from `target/aarch64-unknown-linux-gnu/release/` to the Raspberry Pi and run it there. It needs no Rust toolchain on the device.
+
+A binary built with a newer version in the suffix than the device has can fail to start, with an error that a `GLIBC_2.xx` version was not found. Build it again with the device's version in the suffix.
+
+## Build an embedded database on the device
+
+Building with a `kv-*` feature on the Raspberry Pi itself is slow, and cross-compiling is the more reliable option. Limiting Cargo to one job at a time with `cargo build -j 1` only lowers the peak memory a little, because most of it is used by the engine crate on its own, and it makes the build take much longer. On a device with too little memory for that one crate, add swap space before building, or build on another machine as above.

@@ -1366,7 +1366,47 @@ DEFINE FIELD meta.thumbnail ON file TYPE option<record<storage_object>> REFERENC
 'Cannot use the `REFERENCE` keyword on nested field `meta.thumbnail`. Specify a referencing field at the root level instead.'
 ```
 
-To keep a reference that belongs with nested data, define it as a root-level field, such as `DEFINE FIELD thumbnail ON file TYPE option<record<storage_object>> REFERENCE;`. A root-level `array<record<storage_object>>` field holds several references in the same way.
+To keep a reference that belongs with nested data, define it as a root-level field, such as `DEFINE FIELD thumbnail ON file TYPE option<record<storage_object>> REFERENCE;`.
+
+Where the links sit inside an array of objects, a root-level array field can collect them with a `VALUE` clause. The clause runs on every write, so the array always holds the links that the nested objects hold, and the `REFERENCE` on it applies to each of them.
+
+```surql
+DEFINE TABLE storage_object SCHEMAFULL;
+DEFINE FIELD name ON storage_object TYPE string;
+DEFINE FIELD media ON storage_object COMPUTED <~media_item;
+
+DEFINE TABLE media_item SCHEMAFULL;
+DEFINE FIELD video ON media_item TYPE object;
+DEFINE FIELD video.captions ON media_item TYPE option<array<object>>;
+DEFINE FIELD video.captions.*.lang ON media_item TYPE string;
+DEFINE FIELD video.captions.*.object ON media_item TYPE record<storage_object>;
+-- Collects every video.captions.*.object, or an empty array when there are no captions
+DEFINE FIELD caption_objects ON media_item TYPE array<record<storage_object>>
+	VALUE video.captions.*.object ?? []
+	REFERENCE ON DELETE REJECT;
+
+CREATE storage_object:en SET name = 'captions-en.vtt';
+CREATE storage_object:fr SET name = 'captions-fr.vtt';
+CREATE media_item:intro SET video.captions = [
+	{ lang: 'en', object: storage_object:en },
+	{ lang: 'fr', object: storage_object:fr }
+];
+
+DELETE storage_object:fr;
+//- 'Cannot delete `storage_object:fr` as it is referenced by `media_item:intro` with an ON DELETE REJECT clause'
+
+storage_object:fr.media;
+//- [media_item:intro]
+```
+
+Removing the caption from the nested array removes the link from `caption_objects` as well, and the delete then succeeds:
+
+```surql
+UPDATE media_item:intro SET video.captions = video.captions.filter(|$c| $c.lang != 'fr');
+DELETE storage_object:fr;
+```
+
+`ON DELETE REJECT` and `ON DELETE CASCADE` work with this pattern. `ON DELETE UNSET` does not: it removes the link from `caption_objects`, but the `VALUE` clause runs again on that update and reads the link back from the nested object, so the record is deleted while `video.captions` still links to it.
 
 ### Keeping a list of references with `MATERIALIZE INTO`
 
