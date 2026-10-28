@@ -16,6 +16,8 @@ SurrealDS is part of the SurrealDB Enterprise binary. It is not a separate servi
 
 A SurrealDS group is a set of nodes that share one object store bucket. Each node has its own local disk for the commit log.
 
+<img src="~/assets/img/surrealdb/surrealds/architecture-light.png" darkSrc="~/assets/img/surrealdb/surrealds/architecture-dark.png" alt="Clients connect through a load balancer to three nodes in three zones. Each node runs SurrealDB on top of a SurrealDS node with a commit log and a page cache. The sequencer in zone A sends each commit to the acking witness in zone B, and streams the log to the listener in zone C. All nodes share one object store bucket that holds the manifest, the tree pages and the log segments." />
+
 | Component | What it does |
 | --- | --- |
 | **Commit log** | Each node writes committed transactions to a log on its own local disk. |
@@ -30,11 +32,31 @@ Each node has one of these roles. The group assigns the roles itself, and you do
 | **Acking witness** | Writes the same log to its own disk. It must be in a different zone from the sequencer. |
 | **Listener** | Follows the log and serves reads. A listener can take over a role when a node fails. |
 
-A transaction can run on any node. Its commit goes to the sequencer, and the client gets a success answer only after the commit is on disk on both the sequencer and the acking witness, which are in two different zones. Reads are served by the node that the client is connected to.
-
-Today one sequencer orders all writes in a group. More nodes add read capacity and more nodes that can take over a role when one fails.
-
 Transactions use snapshot isolation.
+
+### How a write commits
+
+A transaction can run on any node. Its commit goes to the sequencer, and the client gets a success answer only after the commit is on disk on both the sequencer and the acking witness, which are in two different zones. The object store is not on this path: the sequencer uploads the log and the pages later, in the background.
+
+<img src="~/assets/img/surrealdb/surrealds/write-path-light.png" darkSrc="~/assets/img/surrealdb/surrealds/write-path-dark.png" alt="Sequence of a write. The client sends a transaction to any node, which runs the queries and routes the commit to the sequencer in zone A. The sequencer appends the commit to its log, flushes it and replicates it to the acking witness in zone B, which appends, flushes and acknowledges. The sequencer then answers committed, and the node answers the client. Later, in the background, the sequencer uploads log segments, folds recent commits into tree pages and publishes a new manifest in the object store." />
+
+### How a read finds data
+
+Reads are served by the node that the client is connected to. The database is a tree of pages in the object store, and the tree includes all commits up to a log position called the watermark. A node reads newer commits from its own copy of the log, and combines the two to get the newest value for each key.
+
+<img src="~/assets/img/surrealdb/surrealds/read-path-light.png" darkSrc="~/assets/img/surrealdb/surrealds/read-path-dark.png" alt="A SELECT on any node combines two sources: recent commits from the node's commit log and its index, and the tree at the watermark. Tree pages are looked up in memory, then in the disk page cache, then in the object store." />
+
+Pages never change after they are written, so a node can keep them in memory and on its local disk without a risk of reading an old version.
+
+## How it scales
+
+Each part of the work scales in a different way:
+
+<img src="~/assets/img/surrealdb/surrealds/scaling-light.png" darkSrc="~/assets/img/surrealdb/surrealds/scaling-dark.png" alt="Three panels. Storage grows in the object store, because each node keeps only its commit log and a cache. Queries and reads grow with the number of nodes, because every node is a full SurrealDB server. Writes are ordered by one sequencer, which sends each commit to an acking witness in another zone." />
+
+- **Storage:** The data is in the object store, and each node keeps only its commit log and a cache. The database can grow without more nodes or larger disks.
+- **Queries and reads:** Every node is a full SurrealDB server that runs queries and serves reads from its own cache. Add nodes to add query and read capacity.
+- **Writes:** Today one sequencer orders all writes in a group. A commit costs a local disk flush on two nodes, not a request to the object store. More nodes do not add write capacity, but they add nodes that can take over a role when one fails.
 
 ## Zones
 
@@ -42,7 +64,9 @@ A zone is a label that you give each node to name its failure domain: a cloud av
 
 By default, the group acknowledges a write only when it is on disk in two zones. When a group has no running node in a second zone, it stops serving clients, and it serves again when a node in a second zone is running.
 
-For a group that accepts writes after it loses any one node, run three nodes, each in its own zone.
+For a group that accepts writes after it loses any one node, run three nodes, each in its own zone. When the zone of the sequencer fails, the nodes in the other two zones take over the sequencer and acking witness roles, and the group serves writes again within seconds.
+
+<img src="~/assets/img/surrealdb/surrealds/failover-light.png" darkSrc="~/assets/img/surrealdb/surrealds/failover-dark.png" alt="Before: node 1 in zone A is the sequencer, node 2 in zone B is the acking witness and node 3 in zone C is a listener. After zone A fails: node 1 is unavailable, node 2 is the sequencer and node 3 is the acking witness." />
 
 ## What a deployment needs
 
