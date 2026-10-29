@@ -1,0 +1,83 @@
+---
+position: 1
+title: "Who decides here?"
+description: "A civic authority graph in SurrealDB running in the browser as WebAssembly: pick an address in Paris or Grenoble, give your positions on recorded votes, and see which elected bodies decide each issue, how their members voted, and which elections matter most."
+---
+
+# Who decides here?
+
+This demo answers a question that is hard to answer from public records alone: for one address, which elected bodies decide an issue, how did their members vote on it, and which upcoming election could change that. It covers two French cities, Paris and Grenoble, and three issues: household waste, public transport and streets, and income tax. The page is in English and French.
+
+SurrealDB runs inside the page, compiled to WebAssembly, so every figure is computed in your browser by the same schema and functions shown below the results.
+
+<DemoEmbed title="Who decides here?" height={820} pages={[{ "label": "Who decides here?", "src": "/docs/showcase/who-decides/who-decides.html" }]} />
+
+## As you go through the demo, note the following
+
+- **Every stance comes from a recorded vote.** Each measure on the ballot is one vote in one body, with a link to its source. Statements, manifestos and party positions are not used.
+- **Authority is weighted by what each body controls.** A body's share of an issue comes from a `decides` edge with a weight and a `basis` that says what the body controls, such as the transport authority that sets fares. Open **Who decides** on an issue card to read each one.
+- **The headline counts only authority on record.** The large figure is the part of the authority whose votes are recorded that voted the way you would have. The bar also shows how much authority has no recorded vote on your measures, which is often most of it.
+- **Elections are ranked by what is at stake for you.** The first election is the one that puts the most authority held by members who voted against your positions on the ballot. A council that appoints members of another body, such as the transport authority, counts that body's authority as well.
+- **Large councils are shown by group.** A body with more than 12 members elected for your address is summarised as a tally of how each political group voted.
+- **Paris reads some votes from images.** The Conseil de Paris publishes each roll-call vote as printed images in its session summary, so those votes were read with OCR and loaded only when the counts matched the published totals. Most city decisions are taken by show of hands and record no names. Grenoble's votes all come from text, so it gives the most complete results.
+
+## How it is built
+
+The model is one schema file of about 300 lines. It names no country, city or issue, so each city is a data file, and the French text is a further file of `UPDATE` statements on text fields only.
+
+| Table             | Holds                                                                                  |
+| ----------------- | -------------------------------------------------------------------------------------- |
+| `place`           | A neighbourhood, commune, constituency, region or country, with an outline for the smallest. |
+| `within`          | A relation from a place to the place it lies in.                                        |
+| `body`            | A council, parliament, office or joint authority, with its number of seats.            |
+| `acts_for`        | A relation from a body to the places whose residents it decides for.                  |
+| `appoints`        | A relation from a body to another body whose members it chooses.                       |
+| `decides`         | A relation from a body to an issue, with a weight and its basis.                        |
+| `holds`           | A relation from an official to a body, with the place that elects the seat.            |
+| `member_of`       | A relation from an official to a political group.                                       |
+| `measure`         | One recorded vote, with its issue, body, date and result.                              |
+| `voted`           | A relation from an official or a group to a measure, with the position.                |
+| `election`        | A future election to a body, with its date and the place that votes in it.              |
+
+The page runs one query each time you move the address or change a position:
+
+```surql
+LET $home = (5.7262, 45.1892);
+LET $positions = [
+	{ measure: measure:smmag_2026_student_fares, position: 'for' },
+	{ measure: measure:an_2027_brackets, position: 'for' },
+];
+{
+	places: fn::places($home).map(|$p| { name: $p.name, kind: $p.kind }),
+	agreement: fn::agreement($home, $positions),
+	elections: fn::elections($home, $positions),
+	representatives: fn::representatives($home, $positions, 12),
+};
+```
+
+The functions are defined in the schema. `fn::places` finds the places that contain the point with `INSIDE`, then follows `within` to any depth with a recursive graph walk:
+
+```surql
+DEFINE FUNCTION fn::places($at: geometry<point>) -> array<record<place>> {
+	LET $smallest = SELECT VALUE id FROM place WHERE area != NONE AND $at INSIDE area;
+	$smallest.map(|$p| [$p].concat($p.{..+collect}(->within->place))).flatten().distinct()
+};
+```
+
+`fn::agreement` then finds the bodies that act for those places and decide each issue, divides each body's share between its members, and compares each member's votes with your positions. A member with no vote of their own takes their group's vote where only that was recorded. The panel **What SurrealDB does here** on the page lists the features this relies on, and **The whole schema** shows the full file.
+
+## Sources
+
+The data comes from public registers and minutes, collected in October 2026.
+
+- **Officials and seats:** the Répertoire national des élus, and Assemblée nationale open data for deputies and their groups.
+- **National votes:** Assemblée nationale open data for votes in the National Assembly, and HowTheyVote.eu for votes in the European Parliament.
+- **Grenoble votes:** the minutes of the Grenoble-Alpes Métropole council, which name every member's vote, the city council's lists of decisions, which give each group's vote, and the minutes of the SMMAG transport authority, which list the members present.
+- **Paris votes:** the roll-call annexes in the session summaries of the Conseil de Paris.
+- **Outlines:** geo.api.gouv.fr for communes, data.gouv.fr for parliamentary constituencies, and opendata.paris.fr for the Paris arrondissements.
+
+The weights on `decides` are editorial judgements, each with a stated basis, and election dates are the scheduled months. A dissolution or a decree can move an election.
+
+## Adapting it to another place
+
+Each city has two data files. One is written by hand and holds the bodies, the issues, the weights with their basis, the measures and the elections. The other is generated from registers and holds the outlines, officials, seats, groups and votes. To add a city, write both for that city. To add an issue, add an `issue` record, its `decides` edges and its measures. The schema and the functions stay as they are.
