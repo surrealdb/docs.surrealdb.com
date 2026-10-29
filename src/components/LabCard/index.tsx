@@ -8,9 +8,11 @@ import {
     pictoInboxSolid,
     pictoPlaySolid,
     pictoQuestionSolid,
+    pictoSurrealDBSolid,
     Spacer,
 } from "@surrealdb/ui";
 import placeholderAvatar from "~/assets/img/labs-authors/placeholder.png";
+import type { labCategories } from "~/utils/labs";
 import classes from "./style.module.scss";
 
 const AUTHOR_AVATARS = import.meta.glob<string>("../../assets/img/labs-authors/*.jpg", {
@@ -40,12 +42,13 @@ export interface LabCardProps {
     item: LabCardItem;
 }
 
-const CATEGORY_IMAGES: Record<string, string> = {
+const CATEGORY_IMAGES: Record<(typeof labCategories)[number], string> = {
     "Source code": pictoCurlyBracesSolid,
     Videos: pictoPlaySolid,
     Blogposts: pictoInboxSolid,
     Documentation: pictoFileSolid,
     "Learning resources": pictoQuestionSolid,
+    "Product resources": pictoSurrealDBSolid,
 };
 
 function getAuthorAvatarUrl(slug: string): string | undefined {
@@ -54,7 +57,7 @@ function getAuthorAvatarUrl(slug: string): string | undefined {
 }
 
 export function LabCard({ item }: LabCardProps) {
-    const categoryImage = CATEGORY_IMAGES[item.category];
+    const categoryImage = CATEGORY_IMAGES[item.category as keyof typeof CATEGORY_IMAGES];
 
     let authorName: string;
     let authorRole: string;
@@ -90,6 +93,7 @@ export function LabCard({ item }: LabCardProps) {
                 <Group
                     gap="sm"
                     wrap="nowrap"
+                    align="flex-start"
                 >
                     {categoryImage && (
                         <Image
@@ -109,9 +113,11 @@ export function LabCard({ item }: LabCardProps) {
                     </Text>
                     <Spacer />
                     {item.topics.length > 0 && (
+                        // Topics wrap onto further lines rather than
+                        // truncating, since an item can carry any number.
                         <Group
                             gap={4}
-                            wrap="nowrap"
+                            justify="flex-end"
                         >
                             {item.topics.map((topic) => (
                                 <Badge

@@ -144,31 +144,35 @@ bun run make:lab
 
 3. Follow the interactive prompts to provide:
    - Lab name (required)
+   - Description (recommended)
    - URL (optional) - Link to your project/repository
-   - Languages
+   - Category (required) - Choose from:
+     - Source code
+     - Videos
+     - Blogposts
+     - Documentation
+     - Learning resources
+     - Product resources
+   - Topics (optional) - Select one or more from:
+     - AI
+     - Cloud
+     - Data management
+     - Examples
+     - Financial services
+     - Libraries
+     - Security
+     - Templates
+     - Tooling
+     - Use cases
+   - Languages (optional) - Select any from:
      - Python
      - Rust
      - TypeScript
      - Go
      - Java
      - PHP
-     - SurrealQL   
-   - Category (required) - Choose from:
-     - Blogposts
-     - Code Repositories
-     - Videos
-     - Documentation
-     - Learning Resources
-   - Topics (optional) - Select one or more from:
-     - AI
-     - Cloud
-     - Data Management
-     - Examples
-     - Libraries
-     - Security
-     - Templates
-     - Tooling
-   - Author name (required)
+     - SurrealQL
+   - Author name (required) - Enter "surrealdb" for official content
    - Author role (required for community content)
 
 ### Manual creation
@@ -178,11 +182,14 @@ Alternatively, you can create a lab manually by creating a new Markdown file in 
 ```markdown
 ---
 title: "Your Lab Title"
+description: "A one-line summary of the lab"  # Recommended
 url: "https://your-project-url.com"  # Optional
 category: "Category Name"  # Must be one of the predefined categories
 topics:  # Optional
   - Topic1
   - Topic2
+languages:  # Optional
+  - TypeScript
 author:
   name: "Your Name"
   role: "Your Role"
@@ -203,17 +210,20 @@ Choose the most appropriate category for your lab:
 - **Videos**: Video content and tutorials
 - **Documentation**: Documentation and guides
 - **Learning resources**: Other form of learning resource
+- **Product resources**: Pages about SurrealDB products and their applications
 
 ### Topics
 Select relevant topics to help users find your content:
 - **AI**: Artificial Intelligence related content
 - **Cloud**: content related to cloud deployments and SurrealDB Cloud
-- **Data management"**: Data handling and management
+- **Data management**: Data handling and management
 - **Examples**: Practical examples and guides
+- **Financial services**: Content for banking, insurance, payments, and other financial sectors
 - **Libraries**: Client libraries and SDKs
 - **Security**: Security features and best practices
 - **Templates**: Reusable project starters, schemas, and boilerplates
 - **Tooling**: Developer tools, CLIs, integrations, plugins, and utilities
+- **Use cases**: How SurrealDB solves a specific problem or industry scenario
 
 ## Best practices
 
