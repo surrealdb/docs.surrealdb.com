@@ -112,6 +112,10 @@ Match this house style:
 - Synonym cycling for the same action (`start` / `begin` / `initiate` / `kick off`).
 - Stacked noun clusters longer than three nouns.
 - Em dashes used as decoration; stacked adjectives; rule-of-three padding.
+- Shapes that read as generated: runs of sentences with the same structure
+  ("A store keeps X. An index keeps Y. A graph keeps Z."), lists whose items
+  are all built the same way, and "X is not A. It is B." contrasts. State the
+  fact directly. See **Shapes that read as generated** in `AGENTS.md`.
 - Leaking internal codenames, sprint language, or “we currently hack around…”.
 - Copy that presumes the reader’s situation: imputed pain (“no glue code”, “no
   more plumbing”), imputed misconceptions (“not just a wrapper”, “nothing here

@@ -589,6 +589,32 @@ schema:`, `Save the statements above as schema.surql`). What fails is the bare
 imperative standing in for the explanation: `Measure it:` orders the reader
 around a page where the sentence should have said what the measurement shows.
 
+**Shapes that read as generated.** Three sentence shapes mark a draft as
+written by a model even when every word in it is correct. Each one is
+built for rhythm, and the rhythm is what a reader notices first.
+
+| Shape                                       | Avoid                                                                                                                           | Use                                                                                                                       |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| A run of sentences with the same structure  | `A document store keeps content. A vector index keeps embeddings. A graph keeps relationships. None of them keeps what an agent learnt.` | `Document stores, vector indexes and graphs each keep one kind of data, and none of them records what an agent learnt or when.` |
+| A list whose items all have the same build  | `A stale index, a missing permission, a dropped event: any one of them stops the pipeline.`                                     | `The pipeline stops if an index is stale, a permission is missing or an event is dropped.`                                |
+| `X is not A. It is B.`                      | `Time is not a metadata field. It is a dimension of the data.`                                                                  | `A record can hold different values at different times, and a query can ask for the value at any of them.`               |
+
+The third shape is the general form of the imputed misconception described
+under **Do not presume the reader's situation**. It fails even when nobody is
+being corrected, because the reader still has to take in the wrong idea
+before the sentence gives the right one. State the right one. `not` stays
+where it carries a fact: "fields are not part of this vocabulary and cannot
+be extended" says what the reader cannot do.
+
+The test for all three is whether the structure carries information. A
+table of six functions with one sentence each is a list doing its job, and
+`a document, a node in the graph and an entry in the vector index` names
+three real things. What fails is the shape repeated because it sounds
+finished: three parallel sentences, then a short one that sums them up.
+One instance in a section can be emphasis. Several in one paragraph, or the
+same contrast made twice on a page, read as generated, and readers who
+notice it start to doubt the facts around it as well.
+
 **No in-group asides.** "and nobody notices for a quarter", "each of these has
 bitten someone", "this saves you a page at 3 am" assume the reader shares a
 working life - fiscal quarters, an on-call rotation, a particular kind of
