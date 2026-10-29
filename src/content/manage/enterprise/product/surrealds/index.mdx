@@ -1,0 +1,91 @@
+---
+position: 1
+title: Overview
+description: "SurrealDS is the distributed storage engine in SurrealDB Enterprise: how a group of nodes stores data on local disks and in object storage, which node does what, what a deployment needs, and the two ways to run it."
+---
+
+# SurrealDS
+
+<Since v="v4.0.0" />
+
+SurrealDS is the distributed storage engine in SurrealDB Enterprise. It runs SurrealDB as a group of nodes that keep a commit log on local disks and keep the data in object storage, so that the database keeps serving when a node or a zone fails.
+
+SurrealDS is part of the SurrealDB Enterprise binary. It is not a separate service: each `surreal start` process that opens a `surrealds://` path is one SurrealDS node. Each node also serves SurrealQL to clients, so your application connects to the nodes as it connects to any SurrealDB server.
+
+## How it works
+
+A SurrealDS group is a set of nodes that share one object store bucket. Each node has its own local disk for the commit log.
+
+<img src="~/assets/img/surrealdb/surrealds/architecture-light.png" darkSrc="~/assets/img/surrealdb/surrealds/architecture-dark.png" alt="Clients connect through a load balancer to three nodes in three zones. Each node runs SurrealDB on top of a SurrealDS node with a commit log and a page cache. The sequencer in zone A sends each commit to the acking witness in zone B, and streams the log to the listener in zone C. All nodes share one object store bucket that holds the manifest, the tree pages and the log segments." />
+
+| Component | What it does |
+| --- | --- |
+| **Commit log** | Each node writes committed transactions to a log on its own local disk. |
+| **Object store** | An S3-compatible bucket or an Azure Blob Storage container holds the database pages. Nodes upload to it in the background, so it is not on the path of a commit. |
+| **Peer network** | Nodes connect to each other over QUIC on a UDP port, with mutual TLS. |
+
+Each node has one of these roles. The group assigns the roles itself, and you do not configure them.
+
+| Role | What it does |
+| --- | --- |
+| **Sequencer** | Puts every write in order, writes it to its log, and sends it to the acking witness. There is one sequencer in a group. |
+| **Acking witness** | Writes the same log to its own disk. It must be in a different zone from the sequencer. |
+| **Listener** | Follows the log and serves reads. A listener can take over a role when a node fails. |
+
+Transactions use snapshot isolation by default, and a transaction can ask for [serializable isolation](/docs/learn/querying/concepts-and-guides/transactions#serializable-isolation) instead.
+
+### How a write commits
+
+A transaction can run on any node. Its commit goes to the sequencer, and the client gets a success answer only after the commit is on disk on both the sequencer and the acking witness, which are in two different zones. The object store is not on this path: the sequencer uploads the log and the pages later, in the background.
+
+<img src="~/assets/img/surrealdb/surrealds/write-path-light.png" darkSrc="~/assets/img/surrealdb/surrealds/write-path-dark.png" alt="Sequence of a write. The client sends a transaction to any node, which runs the queries and routes the commit to the sequencer in zone A. The sequencer appends the commit to its log, flushes it and replicates it to the acking witness in zone B, which appends, flushes and acknowledges. The sequencer then answers committed, and the node answers the client. Later, in the background, the sequencer uploads log segments, folds recent commits into tree pages and publishes a new manifest in the object store." />
+
+### How a read finds data
+
+Reads are served by the node that the client is connected to. The database is a tree of pages in the object store, and the tree includes all commits up to a log position called the watermark. A node reads newer commits from its own copy of the log, and combines the two to get the newest value for each key.
+
+<img src="~/assets/img/surrealdb/surrealds/read-path-light.png" darkSrc="~/assets/img/surrealdb/surrealds/read-path-dark.png" alt="A SELECT on any node combines two sources: recent commits from the node's commit log and its index, and the tree at the watermark. Tree pages are looked up in memory, then in the disk page cache, then in the object store." />
+
+Pages never change after they are written, so a node can keep them in memory and on its local disk without a risk of reading an old version.
+
+## How it scales
+
+Each part of the work scales in a different way:
+
+<img src="~/assets/img/surrealdb/surrealds/scaling-light.png" darkSrc="~/assets/img/surrealdb/surrealds/scaling-dark.png" alt="Three panels. Storage grows in the object store, because each node keeps only its commit log and a cache. Queries and reads grow with the number of nodes, because every node is a full SurrealDB server. Writes are ordered by one sequencer, which sends each commit to an acking witness in another zone." />
+
+- **Storage:** The data is in the object store, and each node keeps only its commit log and a cache. The database can grow without more nodes or larger disks.
+- **Queries and reads:** Every node is a full SurrealDB server that runs queries and serves reads from its own cache. Add nodes to add query and read capacity.
+- **Writes:** Today one sequencer orders all writes in a group. A commit costs a local disk flush on two nodes, not a request to the object store. More nodes do not add write capacity, but they add nodes that can take over a role when one fails.
+
+## Zones
+
+A zone is a label that you give each node to name its failure domain: a cloud availability zone, a rack, a power circuit or a building. SurrealDS compares the labels only. It cannot check that two zones really fail independently, so give two nodes different labels only when they do not share a failure that would stop both.
+
+By default, the group acknowledges a write only when it is on disk in two zones. When a group has no running node in a second zone, it stops serving clients, and it serves again when a node in a second zone is running.
+
+For a group that accepts writes after it loses any one node, run three nodes, each in its own zone. When the zone of the sequencer fails, the nodes in the other two zones take over the sequencer and acking witness roles, and the group serves writes again within seconds.
+
+<img src="~/assets/img/surrealdb/surrealds/failover-light.png" darkSrc="~/assets/img/surrealdb/surrealds/failover-dark.png" alt="Before: node 1 in zone A is the sequencer, node 2 in zone B is the acking witness and node 3 in zone C is a listener. After zone A fails: node 1 is unavailable, node 2 is the sequencer and node 3 is the acking witness." />
+
+## What a deployment needs
+
+- **SurrealDB Enterprise 4.0.0 or later.** The image is [`surrealdb/surrealdb-enterprise`](https://hub.docker.com/r/surrealdb/surrealdb-enterprise).
+- **A licence key.** Each node needs one to start. See [Licensing](/docs/manage/enterprise/product/licensing).
+- **An object store.** An S3-compatible bucket that supports conditional writes (the `If-Match` and `If-None-Match` request headers), such as Amazon S3, Cloudflare R2 or MinIO, or an Azure Blob Storage container. All nodes in a group use the same bucket and prefix.
+- **A local disk on each node** for the commit log. Use a disk that keeps data after a power loss when the operating system reports a write as complete.
+- **A zone label for each node.** Use at least two zones, and three for a group of three nodes.
+- **TLS certificates for the nodes.** One certificate authority, and one certificate and private key for each node.
+- **Network access** between the nodes on the peer port (UDP) and the admin port (TCP), from clients to port 8000 (TCP), and from each node to `api.keygen.sh` on port 443 for the licence check.
+
+## Choose how to run it
+
+- **[Kubernetes operator](/docs/manage/enterprise/product/surrealds/kubernetes-operator):** The operator creates and runs the nodes, Services, certificates mounts and configuration from one `SurrealDS` resource. Use it on Kubernetes.
+- **[Your own machines](/docs/manage/enterprise/product/surrealds/own-machines):** Run `surreal start` on each machine yourself, with a configuration file and a service manager. Use it on physical servers or virtual machines without Kubernetes.
+- **[Node configuration](/docs/manage/enterprise/product/surrealds/node-configuration):** The reference for the node configuration file and the `surrealds://` path.
+
+## Current limits
+
+- **A group cannot return to one node.** A group that has had more than one node cannot be reopened as a single node.
+- **Version reads are off by default.** A `SELECT ... VERSION` statement is refused unless the node starts with `versioned=true`. See [Node configuration](/docs/manage/enterprise/product/surrealds/node-configuration#the-surrealds-path).
+- **Configuration is read at start.** A node reads its configuration once, so a change takes effect when the node restarts.

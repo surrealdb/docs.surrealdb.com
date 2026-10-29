@@ -1,0 +1,162 @@
+---
+position: 6
+title: Licensing
+description: "How to get a SurrealDB Enterprise licence key, where to put it for Docker, a binary on your own machines and the Kubernetes operator, what the node checks and when, and what happens when a licence expires or cannot be checked."
+---
+
+# Licensing
+
+<Since v="v3.3.0" />
+
+SurrealDB Enterprise, including every [SurrealDS](/docs/manage/enterprise/product/surrealds) node, needs a valid licence key to start. This page explains how to get a key, where to put it, and how a node behaves while it runs.
+
+A licence key is a secret. Anyone who has it can start nodes against your licence, so store it as you store a database password.
+
+## Get a licence
+
+SurrealDB issues each licence key. To request one, [contact SurrealDB](https://surrealdb.com/contact) or email [sales@surrealdb.com](mailto:sales@surrealdb.com). To issue a key, SurrealDB needs this information:
+
+| Information | Why it is needed |
+| --- | --- |
+| The number of nodes in the cluster | The licence limits how many nodes run at the same time. |
+| The number of CPU cores on each node | The licence can limit the cores on one node and the cores across the cluster. |
+| The term you need | Each licence has an expiry date. |
+
+One licence covers one cluster. If you run a second cluster, such as a staging cluster beside production, request a second licence for it.
+
+When the licence is issued, you receive a licence key as a single string. Keep it in your secret store and supply it to each node as the rest of this page describes.
+
+## Where to put the licence key
+
+Each node reads the key once when it starts, from one of two environment variables. Set exactly one of them.
+
+| Variable | Value |
+| --- | --- |
+| `SURREAL_LICENSE_KEY` | The licence key. |
+| `SURREAL_LICENSE_KEY_FILE` | The absolute path to a file that contains the key, such as a mounted secret. |
+| `SURREAL_LICENSE_STATE_PATH` | Optional. The absolute path of the attestation cache file. See [Starting while the licence service is unreachable](#starting-while-the-licence-service-is-unreachable). |
+
+The node refuses to start if both `SURREAL_LICENSE_KEY` and `SURREAL_LICENSE_KEY_FILE` are set, if the key file path is relative, or if the key file is unreadable or empty. Spaces and line breaks around the key are ignored. There is no command-line flag for the licence key.
+
+To change the key, update the variable or the file and restart the node. In a cluster, restart the nodes one at a time.
+
+### Docker
+
+The Enterprise image is [`surrealdb/surrealdb-enterprise`](https://hub.docker.com/r/surrealdb/surrealdb-enterprise). Pass the key from your shell, so that it does not appear in the command line:
+
+```bash
+export SURREAL_LICENSE_KEY='<your-licence-key>'
+docker run --rm -p 8000:8000 -e SURREAL_LICENSE_KEY surrealdb/surrealdb-enterprise:latest start --user root --pass secret
+```
+
+`-e SURREAL_LICENSE_KEY` without a value copies the variable from the shell that runs `docker`. See [Run with Docker](/docs/running/docker#running-surrealdb-enterprise).
+
+### A binary on your own machines
+
+Write the key to a file that only the service account can read, and point `SURREAL_LICENSE_KEY_FILE` at it:
+
+```bash
+sudo mkdir -p /etc/surrealdb
+printf '%s\n' '<your-licence-key>' | sudo tee /etc/surrealdb/license.key > /dev/null
+sudo chmod 600 /etc/surrealdb/license.key
+```
+
+Then set the variable in the service definition that starts the node:
+
+```ini title="systemd unit (Linux)"
+[Service]
+Environment=SURREAL_LICENSE_KEY_FILE=/etc/surrealdb/license.key
+Environment=SURREAL_LICENSE_STATE_PATH=/var/lib/surrealdb/license-state.json
+```
+
+```xml title="launchd property list (macOS)"
+<key>EnvironmentVariables</key>
+<dict>
+    <key>SURREAL_LICENSE_KEY_FILE</key>
+    <string>/etc/surrealdb/license.key</string>
+    <key>SURREAL_LICENSE_STATE_PATH</key>
+    <string>/var/lib/surrealdb/license-state.json</string>
+</dict>
+```
+
+The file must be readable by the user that the node runs as. [Run SurrealDS on your own machines](/docs/manage/enterprise/product/surrealds/own-machines) shows a complete service definition.
+
+### Kubernetes operator
+
+Store the key in a Kubernetes Secret in the namespace of the `SurrealDS` resource:
+
+```bash
+kubectl -n <namespace> create secret generic surrealdb-license --from-literal=key='<your-licence-key>'
+```
+
+Then pass it to the nodes through `spec.env`. The operator has no licence field of its own:
+
+```yaml
+spec:
+  env:
+    - name: SURREAL_LICENSE_KEY
+      valueFrom:
+        secretKeyRef:
+          name: surrealdb-license
+          key: key
+    - name: SURREAL_LICENSE_STATE_PATH
+      value: /var/lib/shale/license-state.json
+```
+
+The operator does not mount extra volumes into the node pods, so use `SURREAL_LICENSE_KEY` with a `secretKeyRef` rather than `SURREAL_LICENSE_KEY_FILE`. `/var/lib/shale` is the node's persistent volume, so the attestation cache survives a pod restart there. A change to the Secret does not restart the nodes, so restart them after you rotate the key. See [Deploy SurrealDS with the Kubernetes operator](/docs/manage/enterprise/product/surrealds/kubernetes-operator).
+
+## How a node checks its licence
+
+Each node checks its own licence. Nodes do not ask each other.
+
+- **At startup**, the node validates the key online against the licence service at `api.keygen.sh`, and checks the signature on the answer against a key built into the binary.
+- **While it runs**, the node validates again every 30 minutes, with up to 10% random variation, and sends a heartbeat every 15 minutes.
+- **Each node counts as one machine** against the licence's node limit. A SurrealDS node is identified by its scope and node number, so it keeps the same identity across restarts and machine moves. Any other node is identified by its host name.
+
+### Network access
+
+Each node needs outbound HTTPS (TCP port 443) to `api.keygen.sh`. The node connects to it directly, not through a SurrealDB service, and verifies its certificate against the operating system's trusted certificate authorities.
+
+There is no offline or air-gapped licence. A node that has never reached `api.keygen.sh` cannot start. To run where outbound internet access is not permitted, [contact SurrealDB](https://surrealdb.com/contact).
+
+### Starting while the licence service is unreachable
+
+With `SURREAL_LICENSE_STATE_PATH` set, the node stores the last signed answer from the licence service at that path. If the licence service is unreachable at a later start, the node verifies the stored answer again and starts from it, as long as the answer is less than 24 hours old.
+
+- **Put the file on persistent storage.** A file in a container's writable layer is lost when the container is recreated.
+- **Protect the file.** It contains the licence key in plain text. The node creates it with mode `0600`.
+- **Use an absolute, writable path.** A relative path, or a path that the node cannot write, stops the node from starting.
+
+Without the variable there is no cache, and every start needs `api.keygen.sh` to be reachable. A cache stops being used when the licence key changes, so the first start after a key rotation also needs `api.keygen.sh`. A machine clock more than one hour behind the time on the stored answer also prevents its use.
+
+## What happens to a node
+
+| Licence state | At startup | On a running node |
+| --- | --- | --- |
+| Valid | Starts. | Keeps serving. |
+| No key configured | Refuses to start. | - |
+| Expired | Refuses to start. There is no grace period after the expiry date. | Keeps serving and logs a warning. The next start is refused. |
+| Suspended, banned or not found | Refuses to start. | After two checks two minutes apart confirm it, `/ready` returns `503`. The process exits with status `3` no sooner than 24 hours later. |
+| Over the node or core limit | Refuses to start. | Keeps serving and logs a warning, or stops as for a suspended licence if the limit applies to this node. |
+| `api.keygen.sh` unreachable | Starts if the cache holds a valid answer less than 24 hours old. Refuses otherwise. | Keeps serving for 24 hours after the last verified answer. Then `/ready` returns `503`, and the process exits with status `3` no sooner than three hours later. |
+
+A refused start exits with status `1`. A key issued for a different environment is reported as not found.
+
+The 24-hour offline allowance is measured from the time on the licence service's last signed answer, so a restart during an outage continues it and does not start a new one. If the licence is reinstated, or `api.keygen.sh` becomes reachable again, before the node exits, the node returns to service without a restart.
+
+A `503` from `/ready` removes the node from a load balancer that checks readiness. Clients that connect to the node directly continue to be served until the process exits.
+
+> [!NOTE]
+> An attestation cached by v3.3.0-beta.4 is not accepted by v3.3.0 or later, so the first start after that upgrade needs `api.keygen.sh` to be reachable.
+
+## Monitor the licence
+
+Each node reports its licence state through the `surrealdb_license_*` gauges on `/metrics`. An anonymous scrape does not return them. See [Licence metrics](/docs/manage/observability/metrics#licence---surrealdblicense).
+
+Before the node is ready, its HTTP listener is not open, so a refused start shows only in the exit status and the log. The log message names the cause, for example a missing key or an expired licence.
+
+## Related pages
+
+- **[Enterprise Edition](/docs/manage/enterprise/product/database-enterprise):** What the licence enables.
+- **[SurrealDS](/docs/manage/enterprise/product/surrealds):** The distributed storage engine in SurrealDB Enterprise.
+- **[Run with Docker](/docs/running/docker#running-surrealdb-enterprise):** Start the Enterprise image with a licence key.
