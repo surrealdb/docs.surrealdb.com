@@ -9,7 +9,7 @@ description: "The DEFINE BUCKET statement defines a named file bucket backed by 
 <Since v="v3.0.0" />
 
 > [!NOTE]
-> The `DEFINE BUCKET` statement is experimental and subject to change. To enable it, either pass `--allow-experimental files` when [starting the database](/docs/reference/cli/db/commands/start) or set the `SURREAL_CAPS_ALLOW_EXPERIMENTAL` environment variable to `files`.
+> From 4.0, files are no longer experimental. `DEFINE BUCKET` with a memory or `file:` backend, or with no backend, works without `--allow-experimental files`. A `BACKEND` URL for a [cloud object storage backend](#cloud-object-storage-backends) still needs the flag. See [Cloud backends need an experimental capability](#cloud-backends-need-an-experimental-capability).
 
 The `DEFINE BUCKET` statement lets you create a bucket that can hold files.
 
@@ -95,11 +95,11 @@ The following command can be used to start running an instance in which a bucket
 
 ```bash
 # Unix
-SURREAL_BUCKET_FOLDER_ALLOWLIST="/" surreal db start --user root --pass secret --allow-experimental files
+SURREAL_BUCKET_FOLDER_ALLOWLIST="/" surreal db start --user root --pass secret
 
 # Windows (PowerShell)
 $env:SURREAL_BUCKET_FOLDER_ALLOWLIST = "/" 
-surreal db start --user root --pass secret --allow-experimental files
+surreal db start --user root --pass secret
 ```
 
 A file key must stay inside the bucket's folder. A key with a `.` or `..` segment, an empty segment such as `//`, or a trailing `/` is refused, and so is a key that leaves the folder through a symbolic link.
@@ -126,6 +126,27 @@ A bucket can keep its files in Amazon S3 or an S3-compatible service (such as Mi
 | `az://`, `azure://` | Azure Blob Storage |
 
 These backends exist in native builds of SurrealDB only. A WebAssembly build of the engine has the memory backend alone, so a cloud or `file:` URL fails there as an unsupported backend. The memory and file backends are unchanged.
+
+#### Cloud backends need an experimental capability
+
+<Since v="v4.0.0" />
+
+A cloud `BACKEND` URL makes the server connect to an outside service. The person who writes the statement chooses the endpoint and the credentials, and the server can also use its own cloud identity, such as an instance role. For this reason, a `DEFINE BUCKET` statement with an `s3://`, `s3+http://`, `s3+https://`, `gs://`, `gcs://`, `az://` or `azure://` URL is still experimental. The server must be started with `--allow-experimental files`, or with the `SURREAL_CAPS_ALLOW_EXPERIMENTAL` environment variable set to `files`. Without it, the statement fails:
+
+```surql
+DEFINE BUCKET invoices BACKEND "s3:/acme-invoices?region=eu-west-2";
+//- "Bucket backend `s3` is experimental: start the server with `--allow-experimental files` to use it, or configure it as the global bucket"
+```
+
+```bash
+surreal db start --user root --pass secret --allow-experimental files
+```
+
+The check applies to the bucket, not only to the statement. File operations on a bucket with a cloud `BACKEND` also fail when the server runs without the flag.
+
+The memory and `file:` backends do not need the flag. The `file:` backend is confined to the folders in `SURREAL_BUCKET_FOLDER_ALLOWLIST`.
+
+To keep files in cloud object storage without the flag, configure the storage as the [global bucket](#global-backend) instead. The operator sets the global bucket with the `SURREAL_GLOBAL_BUCKET` environment variable, and it can use any backend, including Amazon S3, Google Cloud Storage and Azure Blob Storage. This is the recommended way to use cloud storage.
 
 `DEFINE BUCKET` checks the URL when it runs, so a malformed URL or an unknown scheme is an error at that point. No request reaches the service until a file operation runs, so a wrong key or a missing bucket shows up there instead.
 
@@ -217,6 +238,34 @@ DEFINE BUCKET my_bucket;
 -- Writes to e.g. `my_global_bucket:/test_ns/test_db/my_bucket/my_book.txt`
 f"my_bucket:/my_book.txt".put("Once there were four children whose names were Peter, Susan, Edmund, and Lucy.");
 ```
+
+The global bucket does not need `--allow-experimental files`, whatever its backend. It is configured by the operator of the server, not by a SurrealQL statement.
+
+### Implied buckets
+
+<Since v="v4.0.0" />
+
+When a global bucket is configured, you do not have to define a bucket before you use it. A bucket name that the database has not defined resolves to an implied bucket on the global bucket. The implied bucket stores its files in the same place as `DEFINE BUCKET` with that name and no `BACKEND` clause.
+
+```surql
+-- No DEFINE BUCKET statement for `images`
+f"images:/notes.txt".put("Hello");
+<string>f"images:/notes.txt".get();
+```
+
+An implied bucket has these properties:
+
+* It is writable.
+* It has `PERMISSIONS NONE`. System users (root, namespace and database users) can use it. Record users are refused.
+* It does not appear in `INFO FOR DB`, and an export does not include a definition for it.
+
+A defined bucket always takes precedence over an implied bucket with the same name. To open a bucket to record users, define it with a `PERMISSIONS` clause:
+
+```surql
+DEFINE BUCKET images PERMISSIONS WHERE $auth.admin = true;
+```
+
+Without a global bucket, a bucket name that is not defined is an error, such as `bucket does not exist`.
 
 ## Setting permissions on buckets
 
