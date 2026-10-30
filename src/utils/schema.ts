@@ -82,7 +82,7 @@ export const labSchema = strictObject({
             avatar: string(),
         }),
     ),
-    topics: _enum(labTopics).array().max(2).default([]),
+    topics: _enum(labTopics).array().default([]),
     languages: _enum(labLanguages).array().optional(),
 });
 

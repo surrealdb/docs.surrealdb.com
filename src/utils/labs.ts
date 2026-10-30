@@ -4,6 +4,7 @@ export const labCategories = [
     "Blogposts",
     "Documentation",
     "Learning resources",
+    "Product resources",
 ] as const;
 
 export const labTopics = [
@@ -11,10 +12,12 @@ export const labTopics = [
     "Cloud",
     "Data management",
     "Examples",
+    "Financial services",
     "Libraries",
     "Security",
     "Templates",
     "Tooling",
+    "Use cases",
 ] as const;
 
 export const labLanguages = [
