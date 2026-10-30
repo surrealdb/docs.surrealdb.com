@@ -55,7 +55,7 @@ const COLUMNS: FooterColumn[] = [
             { label: "Blog", href: "/blog" },
             { label: "Case studies", href: "/casestudies" },
             { label: "Releases", href: "/releases" },
-            { label: "Roadmap", href: "/roadmap" },
+            { label: "Changelog", href: "/changelog" },
             { label: "Events and webinars", href: "/events" },
         ],
     },
