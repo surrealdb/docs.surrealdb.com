@@ -288,7 +288,7 @@ INFO FOR INDEX unique_name ON user;
 
 Once the build has finished, the status is `ready`, as in the first example.
 
-From SurrealDB 3.3, the `compacting` field is `true` while an HNSW or DISKANN index holds record updates that have not yet been merged into its graph. A KNN search reads those updates alongside the graph and computes their distances one by one, so after a large write, such as a bulk import, searches are slower until background index compaction has merged them and the field returns to `false`. Compaction runs after writes, and at least once in every interval set by the `--index-compaction-interval` option of `surreal db start`, which is 5 seconds by default. For every other kind of index the field is always `false`.
+From SurrealDB 3.3, the `compacting` field is `true` while an HNSW or DISKANN index holds record updates that have not yet been merged into its graph. A KNN search reads those updates alongside the graph and computes their distances one by one, so after a large write, such as a bulk import, searches are slower until background index compaction has merged them and the field returns to `false`. Compaction runs after writes, and at least once in every interval set by the `--index-compaction-interval` option of `surreal db start`, which is 5 seconds by default. In `3.3`, the field is always `false` for every other kind of index. From `4.0`, it also covers full-text and count indexes, as described in [Compaction fields](#compaction-fields).
 
 ```surql
 DEFINE INDEX idx_embedding ON document FIELDS embedding HNSW DIMENSION 2;
@@ -316,6 +316,46 @@ To wait until a vector index answers at its usual speed, check both fields:
 LET $info = (INFO FOR INDEX idx_embedding ON document).building;
 RETURN $info.status = 'ready' AND $info.compacting = false;
 ```
+
+#### Compaction fields
+
+<Since v="v4.0.0" />
+
+From SurrealDB 4.0, `compacting` also covers full-text and count indexes, which keep their recent writes apart in the same way until compaction merges them. The `building` object also has three fields that show where compaction of the index stands:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `queued` | `bool` | `true` when a compaction request for the index waits to be processed. A write to a count, full-text, HNSW or DiskANN index queues one. Other kinds of index always report `false`. |
+| `active` | `bool` | `true` while a compaction pass over the index runs on the node that answers the statement. |
+| `armed_shards` | `int` | For an HNSW or DiskANN index, how many of its 32 pending-write partitions hold writes that compaction has not merged. A KNN search checks these partitions for unmerged writes and skips the others. An HNSW index without the 4.0 index layout reports `0`, as do other kinds of index. An HNSW index built before `4.0` gets that layout when it is rebuilt with [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild); see [Indexes to rebuild](/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x#indexes-to-rebuild). |
+
+```surql
+DEFINE INDEX idx_embedding ON document FIELDS embedding HNSW DIMENSION 2;
+CREATE |document:2000| SET embedding = [rand::float(), rand::float()] RETURN NONE;
+(INFO FOR INDEX idx_embedding ON document).building;
+```
+
+```surql title="Possible output"
+{
+    active: false,
+    armed_shards: 32,
+    compacting: true,
+    initial: 0,
+    pending: 0,
+    queued: true,
+    status: 'ready',
+    updated: 0
+}
+```
+
+`active` describes only the node that runs the statement. In a cluster, one node compacts an index at a time, so `active` can be `false` on the node you ask while another node compacts the index. Use `queued` and `compacting` to see whether compaction work remains.
+
+Inside a transaction that has written to an HNSW or DiskANN index and not yet committed, `armed_shards` counts only the partitions that this transaction wrote to.
+
+> [!NOTE]
+> A script that compares the whole `building` object with a fixed value fails after an upgrade to 4.0, because the object has more fields. Compare only the fields that the script needs, as the example above that waits for a vector index does.
+
+To count compaction work across all indexes of a node, use the [index compaction metrics](/docs/manage/observability/metrics#index-compaction---surrealdbindex).
 
 ### Storage size
 
