@@ -23,7 +23,7 @@ import {
     Spacer,
 } from "@surrealdb/ui";
 import placeholderAvatar from "~/assets/img/labs-authors/placeholder.png";
-import type { labFormats } from "~/utils/labs";
+import { labAgeOpacity, type labFormats } from "~/utils/labs";
 import classes from "./style.module.scss";
 
 const AUTHOR_AVATARS = import.meta.glob<string>("../../assets/img/labs-authors/*.jpg", {
@@ -35,6 +35,8 @@ const AUTHOR_AVATARS = import.meta.glob<string>("../../assets/img/labs-authors/*
 export interface LabCardItem {
     slug: string;
     title: string;
+    /** `YYYY-MM-DD`; older labs fade, see `labAgeOpacity`. */
+    date: string;
     description?: string;
     url?: string;
     format: string;
@@ -92,6 +94,7 @@ export function LabCard({ item, onSelect, selected = false }: LabCardProps) {
     const card = (
         <Paper
             className={classes.root}
+            style={{ "--lab-age-opacity": labAgeOpacity(item.date) }}
             radius={0}
             p="lg"
             data-selected={selected || undefined}

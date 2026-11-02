@@ -219,14 +219,6 @@ export default function Page() {
                             SurrealDB Labs
                         </Title>
                         <Text
-                            fz="xl"
-                            mt="md"
-                            maw={832}
-                        >
-                            Explore official and community examples, tools, libraries, and
-                            integrations built around SurrealDB - all in one place.
-                        </Text>
-                        <Text
                             mt="sm"
                             maw={832}
                         >
