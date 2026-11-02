@@ -1,23 +1,28 @@
-export const labCategories = [
+/**
+ * Where a reader is on their journey with SurrealDB. Each lab has exactly one,
+ * in journey order, and the listing filters and groups by it.
+ */
+export const labStages = ["Explore", "Learn", "Prototype", "Build", "Operate"] as const;
+
+/** What kind of thing a lab is. Sets the card's icon and eyebrow. */
+export const labFormats = [
     "Source code",
-    "Videos",
-    "Blogposts",
+    "Video",
+    "Article",
     "Documentation",
-    "Learning resources",
-    "Product resources",
+    "Interactive demo",
 ] as const;
 
+/**
+ * What a lab is about. Subjects only: kinds of content (examples, templates,
+ * libraries) are expressed by `labStages` and `labFormats` instead.
+ */
 export const labTopics = [
     "AI",
     "Cloud",
     "Data management",
-    "Examples",
     "Financial services",
-    "Libraries",
     "Security",
-    "Templates",
-    "Tooling",
-    "Use cases",
 ] as const;
 
 export const labLanguages = [

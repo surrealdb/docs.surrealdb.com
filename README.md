@@ -146,24 +146,24 @@ bun run make:lab
    - Lab name (required)
    - Description (recommended)
    - URL (optional) - Link to your project/repository
-   - Category (required) - Choose from:
+   - Stage (required) - Choose from:
+     - Explore
+     - Learn
+     - Prototype
+     - Build
+     - Operate
+   - Format (required) - Choose from:
      - Source code
-     - Videos
-     - Blogposts
+     - Video
+     - Article
      - Documentation
-     - Learning resources
-     - Product resources
+     - Interactive demo
    - Topics (optional) - Select one or more from:
      - AI
      - Cloud
      - Data management
-     - Examples
      - Financial services
-     - Libraries
      - Security
-     - Templates
-     - Tooling
-     - Use cases
    - Languages (optional) - Select any from:
      - Python
      - Rust
@@ -184,7 +184,8 @@ Alternatively, you can create a lab manually by creating a new Markdown file in 
 title: "Your Lab Title"
 description: "A one-line summary of the lab"  # Recommended
 url: "https://your-project-url.com"  # Optional
-category: "Category Name"  # Must be one of the predefined categories
+stage: "Learn"  # One of the stages below
+format: "Video"  # One of the formats below
 topics:  # Optional
   - Topic1
   - Topic2
@@ -203,27 +204,29 @@ Your lab content here...
 
 ## Content guidelines
 
-### Categories
-Choose the most appropriate category for your lab:
-- **Blogposts**: Blog posts and written content
-- **Source code**: Code libraries and packages
-- **Videos**: Video content and tutorials
-- **Documentation**: Documentation and guides
-- **Learning resources**: Other form of learning resource
-- **Product resources**: Pages about SurrealDB products and their applications
+### Stages
+Choose the stage of the reader's journey that your lab serves best:
+- **Explore**: What SurrealDB is and why to use it - talks, overviews, comparisons, use cases and engineering deep dives
+- **Learn**: Content that teaches a concept - tutorials, courses and walkthroughs
+- **Prototype**: Templates, starter kits and example apps to fork for a proof of concept
+- **Build**: Libraries, SDKs, ORMs, integrations and developer tools for active development
+- **Operate**: Deployment, security, performance and monitoring in production
+
+### Formats
+Choose what kind of thing your lab is:
+- **Source code**: A repository, package or library
+- **Video**: A video or livestream
+- **Article**: A blog post or other written piece
+- **Documentation**: Reference documentation or a guide
+- **Interactive demo**: A page that readers can use, not only read
 
 ### Topics
 Select relevant topics to help users find your content:
 - **AI**: Artificial Intelligence related content
 - **Cloud**: content related to cloud deployments and SurrealDB Cloud
 - **Data management**: Data handling and management
-- **Examples**: Practical examples and guides
 - **Financial services**: Content for banking, insurance, payments, and other financial sectors
-- **Libraries**: Client libraries and SDKs
 - **Security**: Security features and best practices
-- **Templates**: Reusable project starters, schemas, and boilerplates
-- **Tooling**: Developer tools, CLIs, integrations, plugins, and utilities
-- **Use cases**: How SurrealDB solves a specific problem or industry scenario
 
 ## Best practices
 

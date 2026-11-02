@@ -1,14 +1,15 @@
 import { resolve } from "node:path";
 import { checkbox, input, select } from "@inquirer/prompts";
 import { slug } from "github-slugger";
-import { labCategories, labLanguages, labTopics } from "~/utils/labs";
+import { labFormats, labLanguages, labStages, labTopics } from "~/utils/labs";
 
 try {
     const config = {
         name: process.argv.slice(2).join(" "),
         description: "",
         url: "",
-        category: "",
+        stage: "",
+        format: "",
         topics: [] as string[],
         languages: [] as string[],
         authorName: "",
@@ -30,9 +31,14 @@ try {
         message: "URL (optional):",
     });
 
-    config.category = await select({
-        message: "Category:",
-        choices: labCategories,
+    config.stage = await select({
+        message: "Stage:",
+        choices: labStages,
+    });
+
+    config.format = await select({
+        message: "Format:",
+        choices: labFormats,
     });
 
     config.topics = await checkbox({
@@ -72,7 +78,8 @@ try {
         content += `url: ${config.url}\n`;
     }
 
-    content += `category: ${config.category}\n`;
+    content += `stage: ${config.stage}\n`;
+    content += `format: ${config.format}\n`;
 
     if (config.topics.length > 0) {
         content += "topics:\n";

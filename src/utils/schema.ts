@@ -10,7 +10,7 @@ import {
     string,
 } from "zod";
 import { SECTION_ICONS_NAMES } from "./icons";
-import { labCategories, labLanguages, labTopics } from "./labs";
+import { labFormats, labLanguages, labStages, labTopics } from "./labs";
 
 /**
  * The schema for a page in a content collection.
@@ -77,7 +77,8 @@ export const labSchema = strictObject({
     date: iso.date(),
     description: string().optional(),
     url: string().optional(),
-    category: _enum(labCategories),
+    stage: _enum(labStages),
+    format: _enum(labFormats),
     author: literal("surrealdb").or(
         object({
             name: string(),

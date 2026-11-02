@@ -1,11 +1,13 @@
 import { Box, type BoxProps, Checkbox, Stack } from "@mantine/core";
 import { SIDEBAR_INSET, SidebarPane, SidebarSectionHeading } from "~/components/Layout/sidebar";
-import { labLanguages, labTopics } from "~/utils/labs";
+import { labFormats, labLanguages, labStages, labTopics } from "~/utils/labs";
 import classes from "./style.module.scss";
 
 export interface FilterSidebarProps extends BoxProps {
-    authorFilter: string[];
-    setAuthorFilter: (v: string[]) => void;
+    stageFilter: string[];
+    setStageFilter: (v: string[]) => void;
+    formatFilter: string[];
+    setFormatFilter: (v: string[]) => void;
     languageFilter: string[];
     setLanguageFilter: (v: string[]) => void;
     topicFilter: string[];
@@ -16,7 +18,7 @@ interface FilterSectionProps {
     title: string;
     value: string[];
     onChange: (v: string[]) => void;
-    options: readonly string[] | { value: string; label: string }[];
+    options: readonly string[];
 }
 
 function FilterSection({ title, value, onChange, options }: FilterSectionProps) {
@@ -31,19 +33,14 @@ function FilterSection({ title, value, onChange, options }: FilterSectionProps) 
                     gap="sm"
                     px="sm"
                 >
-                    {options.map((option) => {
-                        const { value: optionValue, label } =
-                            typeof option === "string" ? { value: option, label: option } : option;
-
-                        return (
-                            <Checkbox
-                                key={optionValue}
-                                value={optionValue}
-                                label={label}
-                                classNames={{ input: classes.checkboxInput }}
-                            />
-                        );
-                    })}
+                    {options.map((option) => (
+                        <Checkbox
+                            key={option}
+                            value={option}
+                            label={option}
+                            classNames={{ input: classes.checkboxInput }}
+                        />
+                    ))}
                 </Stack>
             </Checkbox.Group>
         </Box>
@@ -56,8 +53,10 @@ function FilterSection({ title, value, onChange, options }: FilterSectionProps) 
  * read identically.
  */
 export function FilterSidebar({
-    authorFilter,
-    setAuthorFilter,
+    stageFilter,
+    setStageFilter,
+    formatFilter,
+    setFormatFilter,
     languageFilter,
     setLanguageFilter,
     topicFilter,
@@ -73,25 +72,28 @@ export function FilterSidebar({
                 px={SIDEBAR_INSET}
             >
                 <FilterSection
-                    title="Filters"
-                    value={authorFilter}
-                    onChange={setAuthorFilter}
-                    options={[
-                        { value: "official", label: "SurrealDB Official" },
-                        { value: "community", label: "Community" },
-                    ]}
+                    title="Stage"
+                    value={stageFilter}
+                    onChange={setStageFilter}
+                    options={labStages}
                 />
                 <FilterSection
-                    title="Languages"
-                    value={languageFilter}
-                    onChange={setLanguageFilter}
-                    options={labLanguages}
+                    title="Format"
+                    value={formatFilter}
+                    onChange={setFormatFilter}
+                    options={labFormats}
                 />
                 <FilterSection
                     title="Topics"
                     value={topicFilter}
                     onChange={setTopicFilter}
                     options={labTopics}
+                />
+                <FilterSection
+                    title="Languages"
+                    value={languageFilter}
+                    onChange={setLanguageFilter}
+                    options={labLanguages}
                 />
             </Stack>
         </SidebarPane>

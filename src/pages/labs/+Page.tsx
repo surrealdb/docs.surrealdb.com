@@ -17,33 +17,40 @@ import { useData } from "vike-react/useData";
 import { FilterSidebar } from "~/components/FilterSidebar";
 import { LabCard } from "~/components/LabCard";
 import { Shell, ShellContent, ShellDrawer } from "~/components/Layout/shell";
-import { labLanguages, labTopics } from "~/utils/labs";
+import { labFormats, labLanguages, labStages, labTopics } from "~/utils/labs";
 import type { LabsPageData } from "./+data";
 import classes from "./style.module.scss";
 
-type FilterGroup = "author" | "language" | "topic";
+type FilterGroup = "stage" | "format" | "language" | "topic";
 
-const FILTER_LOOKUP: Record<string, { group: FilterGroup; value: string }> = {
-    official: { group: "author", value: "official" },
-    community: { group: "author", value: "community" },
-};
+/** The `?filters=` key for a value, which can have spaces: "Source code" is `source-code`. */
+const filterKey = (value: string) => value.toLowerCase().replaceAll(" ", "-");
 
-for (const lang of labLanguages) {
-    FILTER_LOOKUP[lang.toLowerCase()] = { group: "language", value: lang };
-}
+const FILTER_LOOKUP: Record<string, { group: FilterGroup; value: string }> = {};
 
-for (const topic of labTopics) {
-    FILTER_LOOKUP[topic.toLowerCase()] = { group: "topic", value: topic };
+const FILTER_VALUES: [FilterGroup, readonly string[]][] = [
+    ["stage", labStages],
+    ["format", labFormats],
+    ["language", labLanguages],
+    ["topic", labTopics],
+];
+
+for (const [group, values] of FILTER_VALUES) {
+    for (const value of values) {
+        FILTER_LOOKUP[filterKey(value)] = { group, value };
+    }
 }
 
 function parseFiltersFromURL(): {
-    author: string[];
+    stage: string[];
+    format: string[];
     language: string[];
     topic: string[];
     items: string[];
 } {
     const result = {
-        author: [] as string[],
+        stage: [] as string[],
+        format: [] as string[],
         language: [] as string[],
         topic: [] as string[],
         items: [] as string[],
@@ -74,7 +81,8 @@ export default function Page() {
     const initial = useMemo(() => parseFiltersFromURL(), []);
 
     const [search, setSearch] = useState("");
-    const [authorFilter, setAuthorFilter] = useState<string[]>(initial.author);
+    const [stageFilter, setStageFilter] = useState<string[]>(initial.stage);
+    const [formatFilter, setFormatFilter] = useState<string[]>(initial.format);
     const [languageFilter, setLanguageFilter] = useState<string[]>(initial.language);
     const [topicFilter, setTopicFilter] = useState<string[]>(initial.topic);
     const [selected, setSelected] = useState<string[]>(initial.items);
@@ -87,11 +95,9 @@ export default function Page() {
         );
 
     useEffect(() => {
-        const all = [
-            ...authorFilter,
-            ...languageFilter.map((l) => l.toLowerCase()),
-            ...topicFilter.map((t) => t.toLowerCase()),
-        ];
+        const all = [...stageFilter, ...formatFilter, ...languageFilter, ...topicFilter].map(
+            filterKey,
+        );
 
         const url = new URL(window.location.href);
 
@@ -108,7 +114,7 @@ export default function Page() {
         }
 
         window.history.replaceState(null, "", url.toString());
-    }, [authorFilter, languageFilter, topicFilter, selected]);
+    }, [stageFilter, formatFilter, languageFilter, topicFilter, selected]);
 
     const filtered = useMemo(() => {
         return items.filter((item) => {
@@ -128,13 +134,12 @@ export default function Page() {
                 }
             }
 
-            if (authorFilter.length > 0) {
-                const isOfficial = item.author === "surrealdb";
-                const matchOfficial = authorFilter.includes("official") && isOfficial;
-                const matchCommunity = authorFilter.includes("community") && !isOfficial;
-                if (!matchOfficial && !matchCommunity) {
-                    return false;
-                }
+            if (stageFilter.length > 0 && !stageFilter.includes(item.stage)) {
+                return false;
+            }
+
+            if (formatFilter.length > 0 && !formatFilter.includes(item.format)) {
+                return false;
             }
 
             if (languageFilter.length > 0) {
@@ -152,11 +157,22 @@ export default function Page() {
 
             return true;
         });
-    }, [items, search, authorFilter, languageFilter, topicFilter, selected, selecting]);
+    }, [
+        items,
+        search,
+        stageFilter,
+        formatFilter,
+        languageFilter,
+        topicFilter,
+        selected,
+        selecting,
+    ]);
 
     const filterProps = {
-        authorFilter,
-        setAuthorFilter,
+        stageFilter,
+        setStageFilter,
+        formatFilter,
+        setFormatFilter,
         languageFilter,
         setLanguageFilter,
         topicFilter,
