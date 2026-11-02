@@ -1,0 +1,132 @@
+---
+position: 3
+title: Presigned URLs
+description: "Presigned URLs for SurrealDB buckets: file::presign_get and file::presign_put, the /bucket HTTP route, signing secret, expiry, size and content type limits, permissions and revocation."
+---
+
+# Presigned URLs
+
+<Since v="v4.0.0" />
+
+A presigned URL lets a client download or upload one file in a [bucket](/docs/learn/schema-management/files/buckets) with a plain HTTP request and no SurrealDB session. A browser can use one as the `src` of an `<img>` or `<video>` element, and an upload form or another service can send a file to one. This page covers how to set up a server for presigned URLs, how to create them, and how to limit and revoke them.
+
+SurrealDB stays in the path of every request: the URL points at the server's [`/bucket` HTTP route](/docs/reference/rest-api/http-protocol#bucket), which reads from or writes to the bucket's backend. This works the same for the memory, file and cloud object storage backends.
+
+## Set up the server
+
+Presigned URLs need a signing secret. Set `SURREAL_BUCKET_PRESIGN_SECRET` to a random value of at least 32 bytes when starting the server:
+
+```bash
+SURREAL_BUCKET_PRESIGN_SECRET="$(openssl rand -base64 48)" \
+  surreal start --user root --pass secret --allow-experimental files
+```
+
+Without the secret, or with a shorter one, the server does not create presigned URLs:
+
+```surql
+file::presign_get(f"images:/a.png");
+```
+
+```surql title="Error output"
+'Presigned URLs are unavailable: this node has no URL-signing secret. Set SURREAL_BUCKET_PRESIGN_SECRET to the same value of at least 32 bytes on every node'
+```
+
+In a cluster, every node needs the same secret, because a URL created on one node can arrive at another. Keep the secret out of the schema and out of version control, in the same way as any other credential.
+
+Four other environment variables control presigned URLs:
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `SURREAL_PUBLIC_ORIGIN` | none | The address at which clients reach the server, such as `https://db.example.com`. It becomes the `origin` of each URL. |
+| `SURREAL_BUCKET_PRESIGN_MAX_TTL` | `1h` | The longest time a URL can work. Values above `7d` are reduced to `7d`. |
+| `SURREAL_BUCKET_PRESIGN_MAX_SIZE` | 5 GiB | The largest upload a URL can allow. |
+| `SURREAL_HTTP_MAX_BUCKET_BODY_SIZE` | 5 GiB | The largest upload to the `/bucket` route, with or without a presigned URL. |
+
+The two maximums apply to every bucket, whatever its `PERMISSIONS` clause allows. A request for a longer lifetime or a larger size fails, and the error names the variable to change.
+
+## Create a URL
+
+[`file::presign_get`](/docs/reference/query-language/functions/database-functions/file#filepresign_get) creates a download URL, and [`file::presign_put`](/docs/reference/query-language/functions/database-functions/file#filepresign_put) creates an upload URL. Both take a file pointer and an optional object of options. The example below runs on a server with `SURREAL_PUBLIC_ORIGIN` set to `https://db.example.com`.
+
+```surql
+DEFINE BUCKET images BACKEND "memory";
+file::presign_put(f"images:/u/avatar.png", { expires: 5m, max_size: 1048576, content_type: "image/png" });
+```
+
+```surql title="Sample output"
+{
+	content_type: 'image/png',
+	expires: d'2026-11-02T03:32:25Z',
+	href: 'https://db.example.com/bucket/main/main/images/u/avatar.png?ct=image%2Fpng&exp=1793590345&max=1048576&sig=IXkhNu1N240L8MRQhs100Eih3B6YJPf0h9l1Nx4e6O4',
+	method: 'PUT',
+	origin: 'https://db.example.com',
+	path: '/bucket/main/main/images/u/avatar.png?ct=image%2Fpng&exp=1793590345&max=1048576&sig=IXkhNu1N240L8MRQhs100Eih3B6YJPf0h9l1Nx4e6O4'
+}
+```
+
+The application gives `href` to the client, which sends the file with the method in `method` before the time in `expires`:
+
+```bash
+curl -X PUT -H "Content-Type: image/png" --data-binary @avatar.png "https://db.example.com/bucket/main/main/images/u/avatar.png?ct=image%2Fpng&exp=...&max=1048576&sig=..."
+```
+
+`path` is always relative to the server. `origin` and `href` include the server's address only when `SURREAL_PUBLIC_ORIGIN` is set, so an application behind a proxy or a CDN can add its own address to `path` instead.
+
+The signature covers the method, the bucket, the key and every option in the query string. A change to any of them, such as a later `exp`, a larger `max`, a removed `max`, or a different key, makes the server refuse the request with `403`. A URL also works only in the namespace and database it was created in.
+
+### Options for an upload
+
+An upload URL holds the limits that the application chose when it created the URL:
+
+* `max_size` limits the size of the upload. The server counts the bytes as they arrive and stops a larger upload with `413`, without leaving a partial file.
+* `overwrite: false` makes the upload fail with `412` if the key already holds a file.
+* `content_type` sets the only `Content-Type` the upload can send. A URL created without it accepts an upload with no `Content-Type` header, or with `application/octet-stream`, and stores no type. The type is stored with the file and sent back when it is read.
+
+## Limit who can create URLs
+
+A bucket's `PERMISSIONS` clause decides who can create a URL, with the actions `presign_get` and `presign_put`. These are separate from `get` and `put`, because a URL is a different kind of access: it can be used by anyone who has it, after the session that created it has ended.
+
+For these actions the clause can read `$expires`, and for `presign_put` also `$max_size`, `$overwrite` and `$content_type`, so it can limit what each URL allows. The clause below allows only download URLs that expire within 15 minutes:
+
+```surql
+DEFINE BUCKET reports BACKEND "memory"
+  PERMISSIONS WHERE $action = "presign_get" AND $expires <= 15m;
+```
+
+When a record user asks for a longer URL, the function fails:
+
+```surql
+file::presign_get(f"reports:/q3.pdf", { expires: 30m });
+```
+
+```surql title="Error output"
+"You don't have permission to presign_get this file in the `reports` bucket"
+```
+
+A `READONLY` bucket creates download URLs, but never upload URLs. See [Permissions for presigned URLs](/docs/reference/query-language/statements/define/bucket#permissions-for-presigned-urls) for every variable and a longer example.
+
+## Revoke URLs
+
+The clause runs once, when the URL is created. A URL that has been created works for anyone who holds it until it expires. It keeps working after the session ends, after the user who created it is removed, and after the clause is changed. Three things stop it:
+
+* Its expiry. After it, a request answers `410 Gone`.
+* [`ALTER BUCKET ... REVOKE SIGNATURES`](/docs/reference/query-language/statements/alter/bucket#revoking-presigned-urls), which stops every URL issued for one bucket.
+* A new value for `SURREAL_BUCKET_PRESIGN_SECRET`, which stops every URL on the server.
+
+```surql
+ALTER BUCKET images REVOKE SIGNATURES;
+```
+
+> [!WARNING]
+> The signature is in the query string, so a URL can appear in browser history, in a `Referer` header and in the logs of a proxy between the client and the server. Keep `expires` as short as the use allows, and give upload URLs a `max_size`. The server does not write the query string to its own trace logs.
+
+## Content types and served files
+
+The `/bucket` route sends each file with the `Content-Type` stored with it, or `application/octet-stream` when it has none, and never guesses a type from the file name. Every response also sends `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`. A user who can upload a file chooses its type, and these headers stop an uploaded HTML or SVG file from running scripts with the cookies of the database's origin.
+
+A `file:` bucket cannot store a content type, so `file::presign_put` with `content_type` fails for one.
+
+## Limitations
+
+* A presigned upload is a single `PUT` request. Multipart and resumable uploads are not supported, and the `/bucket` route does not accept requests from Amazon S3 clients.
+* On a cloud object storage backend, `overwrite: false` checks for the file and then writes it, so two uploads that arrive at the same moment can both succeed.

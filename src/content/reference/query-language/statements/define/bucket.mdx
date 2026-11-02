@@ -102,6 +102,8 @@ $env:SURREAL_BUCKET_FOLDER_ALLOWLIST = "/"
 surreal db start --user root --pass secret --allow-experimental files
 ```
 
+A `file:` bucket cannot store a [content type](/docs/reference/query-language/functions/database-functions/file#content-types). From SurrealDB 4.0, a write that names one fails, rather than storing the file without it.
+
 A file key must stay inside the bucket's folder. A key with a `.` or `..` segment, an empty segment such as `//`, or a trailing `/` is refused, and so is a key that leaves the folder through a symbolic link.
 
 ```surql
@@ -247,7 +249,7 @@ INFO FOR DB;
 ```
 
 You can set permissions on buckets to control who can perform operations on the files stored in them using the `PERMISSIONS` clause. In the clause three additional variables are available:
-- `$action`: The action to be executed (`put`, `get`, `head`, `delete`, `copy`, `rename`, `exists`, `list`)
+- `$action`: The action to be executed (`put`, `get`, `head`, `delete`, `copy`, `rename`, `exists`, `list`, `presign_get`, `presign_put`)
 - `$file`: The [file pointer](/docs/reference/query-language/language-primitives/data-types/files) of the file to be accessed
 - `$target`: The target [file pointer](/docs/reference/query-language/language-primitives/data-types/files) in copy/rename operations
 
@@ -260,3 +262,40 @@ DEFINE BUCKET admin_bucket BACKEND "memory"
 A bucket's `PERMISSIONS` clause reads records without checking the caller's permissions, in the same way as a [table permission clause](/docs/reference/query-language/statements/define/table#defining-permissions). In the example above, `$auth.admin` resolves even when the record user may not select their own record.
 
 Record users and guests can never list the files in a bucket, whatever its `PERMISSIONS` clause allows. For them, [`file::list()`](/docs/reference/query-language/functions/database-functions/file) fails with an error such as ``"You don't have permission to list this file in the `my_bucket` bucket"``.
+
+### Permissions for presigned URLs
+
+<Since v="v4.0.0" />
+
+[`file::presign_get`](/docs/reference/query-language/functions/database-functions/file#filepresign_get) and [`file::presign_put`](/docs/reference/query-language/functions/database-functions/file#filepresign_put) check the clause with `$action` set to `presign_get` or `presign_put`, which are separate from `get` and `put`. A clause that allows `get` therefore does not allow a URL to be created. The clause runs once, when the URL is created, and not when the URL is used, so a URL keeps working until it expires even if the clause changes. See [Presigned URLs](/docs/learn/schema-management/files/presigned-urls).
+
+For these two actions, the clause can also read the options of the URL:
+
+| Variable | Action | Value |
+| --- | --- | --- |
+| `$expires` | `presign_get`, `presign_put` | How long the URL works, as a `duration` |
+| `$max_size` | `presign_put` | The largest upload the URL accepts, in bytes. It is always a number: a URL created without `max_size` has the server's maximum. |
+| `$overwrite` | `presign_put` | Whether the upload can replace an existing file |
+| `$content_type` | `presign_put` | The media type the upload must send, or `NONE` |
+
+The clause below lets each record user upload to and download from a folder named after their own record ID, through short-lived URLs only, with uploads of PNG and JPEG images up to 5 MiB that cannot replace an existing file.
+
+```surql
+DEFINE BUCKET avatars BACKEND "memory"
+  PERMISSIONS WHERE
+       ($action IN ["get", "put"] AND $file.key().starts_with("/u/" + <string>$auth.id + "/"))
+    OR ($action = "presign_get"
+        AND $file.key().starts_with("/u/" + <string>$auth.id + "/")
+        AND $expires <= 15m)
+    OR ($action = "presign_put"
+        AND $file.key().starts_with("/u/" + <string>$auth.id + "/")
+        AND $expires <= 5m
+        AND $max_size <= 5242880
+        AND $overwrite = false
+        AND $content_type IN ["image/png", "image/jpeg"]);
+```
+
+`$content_type IN [...]` is `false` when `$content_type` is `NONE`, so the clause above also refuses an upload URL that names no type.
+
+> [!WARNING]
+> A bucket with `PERMISSIONS FULL`, which is the default, allows any user who can run a query on the database to create presigned URLs for it. The server limits each URL to `SURREAL_BUCKET_PRESIGN_MAX_TTL` and `SURREAL_BUCKET_PRESIGN_MAX_SIZE`, but use a `PERMISSIONS` clause on any bucket that record users can reach. On a server started with `--allow-guests`, `PERMISSIONS FULL` also lets anyone read and write the bucket through the [`/bucket` HTTP route](/docs/reference/rest-api/http-protocol#bucket) without credentials.

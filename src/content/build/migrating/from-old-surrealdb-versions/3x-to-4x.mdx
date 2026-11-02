@@ -1,7 +1,7 @@
 ---
 position: 6
 title: 3.x to 4.0
-description: What to do when a 3.x deployment moves to 4.0, covering the one-way switch to the 4.0 record format, export and import changes, the removal of RocksDB and IndexedDB, the conversion of SurrealKV and RocksDB datastores, database compatibility levels and MIGRATE EXISTING ROWS, which HNSW, DiskANN and B-tree indexes to rebuild with REBUILD INDEX, and the behaviour changes in SurrealQL, the CBOR protocol, the SDKs, configuration and Surrealism modules.
+description: What to do when a 3.x deployment moves to 4.0, covering the one-way switch to the 4.0 record format, export and import changes, the removal of RocksDB, IndexedDB and SurrealML, the separate TiKV build, the conversion of SurrealKV and RocksDB datastores, database compatibility levels and MIGRATE EXISTING ROWS, which HNSW, DiskANN and B-tree indexes to rebuild with REBUILD INDEX, and the behaviour changes in SurrealQL, the CBOR protocol, the SDKs, configuration and Surrealism modules.
 ---
 
 # Upgrading from `3.x` to `4.0`
@@ -21,6 +21,8 @@ The data stored on disk is out-of-date with this version (Expected: 3, Actual: 4
 A TiKV datastore that has not switched to the 4.0 record format gives `The data stored on disk was migrated by a newer version of SurrealDB` instead, with a list of the migrations it does not know, and a SurrealKV directory that `4.0` has converted is refused by SurrealKV itself with `Unsupported manifest format version: 2`.
 
 On a datastore that several nodes share, upgrade every node to the latest `3.3` release before the first `4.0` node starts. A `3.3` node that is already running keeps working beside `4.0` nodes, but a `3.3` node that restarts is refused, so a node cannot be moved back to `3.3` part way through the upgrade.
+
+A datastore that holds a SurrealML model does not start on `4.0`, so remove its models on `3.x` before the upgrade, as described in [SurrealML is removed](#surrealml-is-removed). A TiKV deployment also needs the separate `surreal-tikv` build. See [TiKV runs from a separate build](#tikv-runs-from-a-separate-build).
 
 The way back to `3.3` is to restore the export taken before the upgrade into a new datastore created by `3.3`, which builds every index again, or to start `3.3` on a copy of the data directory taken before the upgrade. Both lose what was written on `4.0`. For a RocksDB or SurrealKV datastore, converting the data ahead of time with `skv migrate` writes a new directory for `4.0` to start on, so that the original stays untouched and `3.3` can still start on it. See [Converting ahead of time with `skv`](/docs/manage/self-hosted/deployment-models#converting-ahead-of-time-with-skv).
 
@@ -95,6 +97,42 @@ The `rocksdb` scheme is deprecated: the path is opened with SurrealKV, which mig
 ## SurrealKV datastores
 
 `4.0` uses SurrealKV 1.0, which has a new on-disk format. A datastore written by SurrealKV on `3.3` or earlier is converted the first time a `4.0` node opens it, with its versions kept, and an earlier release cannot open it afterwards. Take a copy of the data directory as well as the export described above, or convert the datastore into a new directory with `skv migrate` before the first start, which leaves the original as `3.3` wrote it. See [Converting ahead of time with `skv`](/docs/manage/self-hosted/deployment-models#converting-ahead-of-time-with-skv).
+
+## SurrealML is removed
+
+`4.0` removes SurrealML, the machine-learning model runtime. This removes the following:
+
+- `DEFINE MODEL`, which is refused when a query is planned.
+- The `ml::` functions. A call such as `ml::house_price<1.0.0>(...)` fails with `Problem with machine learning computation. Machine learning computation is not enabled.`
+- The `surreal db ml` command, the `/ml/import` and `/ml/export` HTTP endpoints, and the `SURREAL_HTTP_MAX_ML_BODY_SIZE` environment variable.
+- The `ml` route name. A server started with `ml` in `--allow-http` or `--deny-http` still starts, ignores the name, and prints a warning that the `ml` route target is retired. Remove it from those lists, and from `SURREAL_CAPS_ALLOW_HTTP` and `SURREAL_CAPS_DENY_HTTP`.
+- The Rust SDK's `export().ml()` and `import().ml()`. The import and export methods in other SDKs that move a model fail against a `4.0` server.
+
+A datastore that holds a model does not start on `4.0`. The server stops with an error that names the first model it finds:
+
+```text title="Error output"
+The database `shop/main` holds the model `house_price<1.0.0>`, which this build cannot open. Remove every DEFINE MODEL with an earlier release, then start this one again
+```
+
+Before the upgrade, remove every model while the datastore still runs on `3.x`. `INFO FOR DB` lists the models of a database under `models`, and `REMOVE MODEL` takes the name and the version together:
+
+```surql
+REMOVE MODEL ml::house_price<1.0.0>;
+```
+
+Repeat this in every database of every namespace that has a model. To keep a copy of a model, export its `.surml` file first with [`surreal ml export`](/docs/reference/cli/db/commands/ml) on `3.x`. To keep running inference in queries, call a model served outside the database through `http::post()`, or run it in a [Surrealism extension](/docs/learn/extensions/plugins/overview).
+
+## TiKV runs from a separate build
+
+In `4.0`, the `surreal` binary and the `surrealdb/surrealdb` container images do not include the TiKV storage engine, and a server started on a `tikv://` path stops with this error:
+
+```text title="Error output"
+There was a problem with the datastore: The `tikv://` scheme is not enabled in this build of SurrealDB. The TiKV storage backend is built from https://github.com/surrealdb/surrealdb-tikv
+```
+
+A deployment on TiKV runs `surreal-tikv`, a separate build of the server that opens the same data with the same `tikv://` path, the same `--tikv-gc-*` flags and the same `SURREAL_TIKV_*` environment variables.
+
+The Rust SDK no longer has the `kv-tikv` feature or the `TiKv` engine. Connect to a `surreal-tikv` server over `ws://` or `http://` instead.
 
 ## Behaviour changes
 
@@ -229,6 +267,10 @@ A range that starts past the end returns `[]`, and a negative bound still return
 ### Rust SDK: a dropped transaction rolls back
 
 A client-side [`Transaction`](/docs/reference/rust/concepts/transaction#using-a-client-side-transaction) that is dropped without `commit()` or `cancel()` is now rolled back on a background task, where it used to stay open on the server until the connection closed.
+
+### SurrealQL over the PostgreSQL wire protocol
+
+A connection to the [PostgreSQL wire protocol](/docs/reference/rest-api/postgres-protocol) listener now runs the PostgreSQL dialect of SQL, and can switch to ISO GQL. On `3.3` a connection ran SurrealQL unless it selected GQL. `SET dialect = 'surrealql'`, and the same name in a client's startup `options`, now fail with SQLSTATE `0A000` (`feature_not_supported`). A client that sent SurrealQL over this listener needs to send it over [HTTP](/docs/reference/rest-api/http-protocol), [RPC](/docs/reference/rest-api/rpc-protocol) or an SDK instead, or to rewrite its queries in PostgreSQL SQL.
 
 ### Isolation levels over the PostgreSQL wire protocol
 
@@ -452,6 +494,10 @@ A KNN operator such as `<|5,COSINE|>` in the `WHERE` clause of an `UPDATE` or `D
 ### Statements that lose a write conflict run again
 
 A statement outside `BEGIN` and `COMMIT` that loses a write conflict is now run again by the server, up to 10 times within its timeout, instead of returning the conflict error straight away. A statement that did something outside the transaction, such as an `http::` request or a write to a file bucket, is not run again, and nor is a statement inside a transaction block. Application retry logic for single statements still works, and sees fewer conflicts. See [Write conflicts and retries](/docs/learn/querying/concepts-and-guides/transactions#write-conflicts-and-retries).
+
+### `file::list` options on every backend
+
+The experimental `file::list` function now reads its options the same way on every bucket backend. On a `file:` bucket, a listing returns the files in every folder below the prefix, where `3.3` returned one folder level. On a `file:` bucket and a cloud object storage bucket, `prefix` matches the start of the key as a string, so `{ prefix: "/b" }` also returns `/b.txt` and `/bz.txt`, and a trailing `/` is kept. To list one folder level, add `delimiter: "/"`, which returns each folder below the prefix as `{ prefix: '/b/d/' }`. Each entry, and the result of `file::head`, also has an `etag` field. See [`file::list`](/docs/reference/query-language/functions/database-functions/file#filelist).
 
 ## Clients and SDKs
 

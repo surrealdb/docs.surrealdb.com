@@ -673,6 +673,87 @@ The slow-query counter is a Community-edition signal - it bumps for every statem
     </tbody>
 </table>
 
+### Index compaction - `surrealdb.index`
+
+<Edition value="community" /> <Since v="v4.0.0" />
+
+Count, full-text, HNSW and DISKANN indexes keep each write as a pending change, and a background compaction pass later merges the pending changes into the index. A query merges the changes that are still pending into what it reads. These families show both sides: whether compaction keeps up with writes, and how much pending data queries have to merge. They are labelled by index kind and never by index, so the number of series is fixed. They are not on the public allowlist, so only an authenticated scrape returns them.
+
+<table>
+    <thead>
+        <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Labels</th>
+            <th scope="col">Notes</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_index_compaction_pass_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>kind, trigger, outcome</code></td>
+            <td scope="row" data-label="Notes">One per compaction pass over one index.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_index_compaction_pass_duration_seconds</code></td>
+            <td scope="row" data-label="Type">histogram</td>
+            <td scope="row" data-label="Labels">same as above</td>
+            <td scope="row" data-label="Notes">The duration of each pass.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_index_compaction_plans_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>kind, mode</code></td>
+            <td scope="row" data-label="Notes">Committed plans that merged at least one pending change. A plan that merged none records nothing.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_index_compaction_plan_duration_seconds</code></td>
+            <td scope="row" data-label="Type">histogram</td>
+            <td scope="row" data-label="Labels">same as above</td>
+            <td scope="row" data-label="Notes">The duration of those plans.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_index_compaction_pending_keys_folded_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels">same as above</td>
+            <td scope="row" data-label="Notes">The pending changes those plans merged into their indexes.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_index_compaction_retries_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>kind, reason</code></td>
+            <td scope="row" data-label="Notes">Plans that had to be tried again.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_index_compaction_unqueued_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels"><code>kind, trigger</code></td>
+            <td scope="row" data-label="Notes">Passes that stopped with work remaining and could not queue a new compaction request for it. Alert on any increase.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_index_hnsw_cache_discards_total</code></td>
+            <td scope="row" data-label="Type">counter</td>
+            <td scope="row" data-label="Labels">-</td>
+            <td scope="row" data-label="Notes">HNSW compactions whose commit failed after they changed the graph in memory. The graph is discarded and loaded again from storage on its next use.</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Name"><code>surrealdb_index_pending_keys_read</code></td>
+            <td scope="row" data-label="Type">histogram</td>
+            <td scope="row" data-label="Labels"><code>kind</code></td>
+            <td scope="row" data-label="Notes">The pending changes that one query-time read merged. A read that merged none records no sample, so <code>_count</code> counts the reads that found a backlog, not every lookup. A BM25 full-text lookup makes up to two such reads. Buckets: <code>1, 4, 16, 64, 256, 512, 1024, 4096, 16384</code>.</td>
+        </tr>
+    </tbody>
+</table>
+
+- `kind` is `count`, `fulltext`, `hnsw` or `diskann`. A pass that ended before it read the index definition reports `-`.
+- `trigger` is `queue` for the background processing of queued compaction requests, or `after_commit` for the passes that a `DEFINE INDEX` or `REBUILD INDEX` without `CONCURRENTLY` runs before it returns.
+- `outcome` is `empty` (nothing was pending, or the index was removed), `short` (the pass merged everything it found), `budget` (the pass reached its work limit or lost its lease with work remaining, and queued the index again), `lost_race` (another compaction kept changing the same data, and the pass queued the index again), `fenced` (a running build owns the vector index, so the pass left the work to it), `not_visible` (the index definition is not yet visible on this node while a build owns it), `error` or `cancelled`.
+- `mode` is `folded` for count, full-text and DISKANN indexes, and `staged` or `in_place` for the two ways an HNSW batch is applied.
+- `reason` is `txn_conflict` (the write transaction conflicted at commit) or `lost_race` (another compaction merged part of the batch first).
+
+A sustained rate of `budget` passes, or a rising sum of `surrealdb_index_pending_keys_read`, means that compaction is not keeping up with writes and queries are merging the backlog. To see the state of one index, use [`INFO FOR INDEX`](/docs/reference/query-language/statements/info#index-information).
+
 ### Storage backend - `surrealdb.storage.<backend>`
 
 <Edition value="community" />
@@ -753,7 +834,7 @@ For cloud and multi-tenant deployments the recommendation is a three-tier whitel
 
 - **Tier 1 - Always public.** The allowlisted six above.
 - **Tier 2 - Customer-visible (per-tenant, via proxy filter).** A subset of labelled families exposed to customers showing their own usage. Every metric in this tier carries `namespace` and `database` labels and the cloud proxy MUST filter on those before responding to a customer request - there is no server-side mechanism today that restricts a labelled family to a single tenant. Strip the `user` label before exposing. Suggested subset: `surrealdb_statement_*`, `surrealdb_transaction_total`, `surrealdb_transaction_duration_seconds`, `surrealdb_transaction_conflicts_total`, `surrealdb_query_*`, `surrealdb_http_request_total`, `surrealdb_network_received_bytes_total`, `surrealdb_network_sent_bytes_total`, `surrealdb_live_query_active`, `surrealdb_slow_query_total`.
-- **Tier 3 - Operator-only.** Everything else: all pipeline self-metrics, `surrealdb_rpc_*` (full method dimension), `surrealdb_auth_*` (failure rates can be probed by an attacker), `surrealdb_graphql_*`, `surrealdb_mcp_*`, `surrealdb_storage_*`, `surrealdb_bucket_*`, `surrealdb_license_*`, the tracked-memory gauges (`surrealdb_process_memory_allocated_bytes`, `_requested_bytes`, `_reserved_bytes` and `_threshold_bytes`), `surrealdb_http_active_requests` (real-time concurrency snapshot), and the KV-layer `surrealdb_transaction_*` counters. Reach these over an internal sidecar or private network with root credentials.
+- **Tier 3 - Operator-only.** Everything else: all pipeline self-metrics, `surrealdb_rpc_*` (full method dimension), `surrealdb_auth_*` (failure rates can be probed by an attacker), `surrealdb_graphql_*`, `surrealdb_mcp_*`, `surrealdb_storage_*`, `surrealdb_bucket_*`, `surrealdb_index_*`, `surrealdb_license_*`, the tracked-memory gauges (`surrealdb_process_memory_allocated_bytes`, `_requested_bytes`, `_reserved_bytes` and `_threshold_bytes`), `surrealdb_http_active_requests` (real-time concurrency snapshot), and the KV-layer `surrealdb_transaction_*` counters. Reach these over an internal sidecar or private network with root credentials.
 
 ## Cardinality and sensitivity
 
@@ -775,6 +856,7 @@ A starter set for production:
 - `surrealdb_audit_queue_depth` sustained above ~50% of `SURREAL_AUDIT_QUEUE_CAPACITY` - sink is falling behind.
 - `surrealdb_process_memory_allocated_bytes / surrealdb_process_memory_threshold_bytes > 0.9 and surrealdb_process_memory_threshold_bytes > 0` sustained - tracked memory is close to the point where queries fail.
 - `increase(surrealdb_process_memory_refusals_total[5m]) > 0`, or `surrealdb_process_memory_guard_engaged_seconds > 30` - the memory threshold is refusing requests.
+- `increase(surrealdb_index_compaction_unqueued_total[5m]) > 0` - a compaction pass left work with no request queued to finish it.
 - `surrealdb_license_state{state="valid"} == 0` - an Enterprise node's licence is not currently verified as valid, so its next start may be refused. A `surrealdb_license_shutdown_at_seconds` series means an exit is scheduled.
 
 ## Migration from 3.0
