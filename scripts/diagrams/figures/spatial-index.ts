@@ -4,7 +4,14 @@
 
 import land from "../data/europe-land.json";
 import { circle, type Figure, line, MONO, path, rect, svg, type Theme, text } from "../lib";
+import type { Verified } from "../provenance";
 import { cellsInRange, leafId } from "../spatial-cells";
+
+export const verified: Verified = {
+    against:
+        "SurrealDB 4.0.0-beta.1 EXPLAIN output, decoded with surrealdb-private 0f7faf9edd surrealdb/idx/src/spatial.rs",
+    on: "2026-11-02",
+};
 
 const RANGES: [bigint, bigint][] = [
     [1655143231802834952n, 1655283969291190264n],

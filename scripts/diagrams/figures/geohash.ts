@@ -2,6 +2,13 @@
 // three events, two of which share the precision-4 cell 'v0gt'.
 
 import { circle, type Figure, MONO, rect, svg, type Theme, text } from "../lib";
+import type { Verified } from "../provenance";
+
+export const verified: Verified = {
+    against:
+        "SurrealDB 4.0.0-beta.1, running geo::hash::encode and geo::hash::decode on the page's points",
+    on: "2026-11-02",
+};
 
 const BASE32 = "0123456789bcdefghjkmnpqrstuvwxyz";
 

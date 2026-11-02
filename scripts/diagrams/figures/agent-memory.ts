@@ -16,6 +16,13 @@ import {
     type Theme,
     text,
 } from "../lib";
+import type { Verified } from "../provenance";
+
+export const verified: Verified = {
+    against:
+        "Agent Memory source (spectron origin/main 9e481bce) and the agent-memory pages' worked examples",
+    on: "2026-11-02",
+};
 
 type ChipState = "visible" | "hidden" | "plain" | "bad";
 

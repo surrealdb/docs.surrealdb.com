@@ -19,6 +19,13 @@ import {
     type Theme,
     text,
 } from "../lib";
+import type { Verified } from "../provenance";
+
+export const verified: Verified = {
+    against:
+        "SurrealDB 4.0.0-beta.1, and surrealkv, surrealmx, cloud-api and enterprise origin/main",
+    on: "2026-11-02",
+};
 
 type Kind = "plain" | "accent" | "bad" | "good" | "muted" | "panel";
 

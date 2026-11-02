@@ -14,6 +14,13 @@ import {
     type Theme,
     text,
 } from "../lib";
+import type { Verified } from "../provenance";
+
+export const verified: Verified = {
+    against:
+        "SurrealDB 4.0.0-beta.1, running each page's example; transactions interleaved over two RPC connections",
+    on: "2026-11-02",
+};
 
 // A horizontal lane with a label on the left
 function lane(s: string[], t: Theme, y: number, label: string, x0 = 360, x1 = 2300, sub?: string) {

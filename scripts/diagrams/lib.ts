@@ -3,6 +3,8 @@
 // SVG into the light and dark WebP pair that a page references with
 // `<img src="…light…" darkSrc="…" />`.
 
+import type { Verified } from "./provenance";
+
 export type Theme = {
     name: "light" | "dark";
     bg: string;
@@ -70,6 +72,9 @@ export type Figure = {
     width: number;
     height: number;
     draw: (t: Theme) => string;
+    // What this figure was checked against, when it differs from the
+    // `verified` that its figure file exports for all of its figures
+    verified?: Verified;
 };
 
 export const SANS = "-apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif";

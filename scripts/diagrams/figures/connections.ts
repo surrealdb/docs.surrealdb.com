@@ -5,6 +5,13 @@
 // HTTP engines of the Python, Rust, Java and .NET SDKs.
 
 import { arrow, type Figure, line, MONO, markers, rect, SANS, svg, type Theme, text } from "../lib";
+import type { Verified } from "../provenance";
+
+export const verified: Verified = {
+    against:
+        "SurrealDB 4.0.0-beta.1, surrealdb.js and surrealdb.go origin/main, and the Rust SDK HTTP engine in surrealdb-private 0f7faf9edd",
+    on: "2026-11-02",
+};
 
 type Kind = "plain" | "accent" | "bad" | "good" | "muted";
 
@@ -526,8 +533,14 @@ const reconnectJs = reconnectFigure({
     edges: [
         { from: 0, to: 1, label: "socket open" },
         { from: 1, to: 2, label: "socket drops" },
-        { from: 2, to: 3, label: "attempts used up", colour: "red" },
-        { from: 2, to: 1, label: "new socket, sessions restored", colour: "accent", bend: 150 },
+        { from: 2, to: 3, label: "attempts used up", colour: "red" as const },
+        {
+            from: 2,
+            to: 1,
+            label: "new socket, sessions restored",
+            colour: "accent" as const,
+            bend: 150,
+        },
     ].map((e) => ({ colour: "line" as const, ...e })),
     restored: [
         ["Namespace and database", "from connect() or use()"],

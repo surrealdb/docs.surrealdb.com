@@ -4,6 +4,13 @@
 // expressions such as `1 ?? 2 AND false` and `<string> 1..3`.
 
 import { arrow, type Figure, line, MONO, markers, rect, svg, type Theme, text } from "../lib";
+import type { Verified } from "../provenance";
+
+export const verified: Verified = {
+    against:
+        "SurrealDB 4.0.0-beta.1 and the binding powers in surrealdb-private 0f7faf9edd surrealdb/expr/src/expr/binding_power.rs",
+    on: "2026-11-02",
+};
 
 const LEVELS: [string, string][] = [
     ["Range", ".."],

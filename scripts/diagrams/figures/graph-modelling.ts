@@ -13,6 +13,13 @@ import {
     type Theme,
     text,
 } from "../lib";
+import type { Verified } from "../provenance";
+
+export const verified: Verified = {
+    against:
+        "the record-links page's schema and the PostgreSQL page's queries; the join figure's customers are illustrative",
+    on: "2026-11-02",
+};
 
 const at = (x: number, y: number, w = 260, h = 64): Node => ({ x, y, w, h });
 

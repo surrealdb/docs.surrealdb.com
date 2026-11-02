@@ -15,6 +15,12 @@ import {
     type Theme,
     text,
 } from "../lib";
+import type { Verified } from "../provenance";
+
+export const verified: Verified = {
+    against: "SurrealDB 4.0.0-beta.1, running each page's example",
+    on: "2026-11-02",
+};
 
 const at = (x: number, y: number, w = 220, h = 64): Node => ({ x, y, w, h });
 

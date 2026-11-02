@@ -3,6 +3,12 @@
 // the outputs of each page's examples on SurrealDB 4.0.
 
 import { circle, type Figure, line, MONO, path, rect, svg, type Theme, text } from "../lib";
+import type { Verified } from "../provenance";
+
+export const verified: Verified = {
+    against: "SurrealDB 4.0.0-beta.1, running each page's example",
+    on: "2026-11-02",
+};
 
 // [1, 40, 60, 10, 2, 901], the array every quartile example on the math page uses
 const DATA = [1, 2, 10, 40, 60, 901];

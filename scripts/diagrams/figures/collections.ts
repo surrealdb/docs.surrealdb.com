@@ -2,6 +2,12 @@
 // and set. Every result is the output of the page's example on SurrealDB 4.0.
 
 import { type Figure, MONO, rect, svg, type Theme, text } from "../lib";
+import type { Verified } from "../provenance";
+
+export const verified: Verified = {
+    against: "SurrealDB 4.0.0-beta.1, running each page's example",
+    on: "2026-11-02",
+};
 
 // [1, 2, 3, 4] against [3, 4, 5, 6], the inputs the array and set pages share
 const venn: Figure = {

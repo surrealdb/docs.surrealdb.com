@@ -2,6 +2,12 @@
 // reference/query-language/language-primitives/data-types/record-ids#record-ranges read.
 
 import { type Figure, MONO, markers, rect, svg, type Theme, text } from "../lib";
+import type { Verified } from "../provenance";
+
+export const verified: Verified = {
+    against: "the record-ids page's ranges and sort order; the timestamps are illustrative",
+    on: "2026-11-02",
+};
 
 const KEYS: [string, string][] = [
     ["Amsterdam", "08:02:51"],

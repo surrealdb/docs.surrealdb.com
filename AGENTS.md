@@ -987,6 +987,31 @@ Each row needs `name` and `description`; `short`, `value`, `type`, `default`,
 carries a column of em-dashes. Use `value` for CLI placeholders and `type` for
 SDK parameter types. Backtick spans inside `description` render as inline code.
 
+## Diagrams
+
+Explanatory diagrams are drawn in TypeScript, not by hand. Each one is a figure in `scripts/diagrams/figures/*.ts`, built from the shared theme and SVG helpers in `scripts/diagrams/lib.ts`, and `bun run diagrams:render [name]` turns it into a light and dark WebP pair in `src/assets/img/diagrams/`. A page shows a figure with the usual pair:
+
+```mdx
+<img src="~/assets/img/diagrams/light/NAME-light.webp" darkSrc="~/assets/img/diagrams/NAME.webp" alt="..." />
+```
+
+A figure draws the page's own example, with the values that example actually produces, so that the picture and the code beside it say the same thing. Run the example before drawing it: in November 2026 doing so found a `FOR UPDATE` example that did not prevent write skew, `MAXDEPTH` record counts that were nearly three times too high, and an operator precedence table that put `??` near the top instead of at the bottom. Where a figure cannot use real data, it says that its data is illustrative.
+
+The alt text states what the figure shows in full sentences. The raw `.md` endpoints serve only the alt text, so an agent reading one gets nothing else from the image.
+
+Skip minor integration pages, such as the AI framework and data tooling pages under `build/integrations/`. A figure there is costly to keep correct for the few readers it serves.
+
+### Keeping figures accurate
+
+Every figure file exports `verified`, which says what its figures were checked against and when: a release, a source commit, or the page's own example. A figure can override it with its own `verified`. `bun run diagrams:render` records each figure in `scripts/diagrams/manifest.json`, with a fingerprint of every page section that shows it, and also writes the same provenance into each WebP as XMP.
+
+`bun run diagrams:check` compares the sections as they are now with the fingerprints in the manifest, and lists every figure whose section has changed, every figure added to or removed from a page, and every figure with no `verified` record. The check cannot tell whether a figure is now wrong, only that the text it was drawn to match is different, so the next step is to look:
+
+- If the figure no longer matches, fix the figure file, update its `verified`, and render it again.
+- If it still matches, run `bun run diagrams:check --accept NAME` to record the current sections.
+
+When you edit a section that shows a figure, open the figure file before you finish. A change to the code a figure depends on, such as a SurrealDB default or an Agent Memory threshold, does not change any page, so the check cannot see it; the `verified` record says which release or source to check again after such a change.
+
 ## Data loading and rendering
 
 A doc page group's `+data.ts` is a single call:

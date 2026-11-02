@@ -14,6 +14,12 @@ import {
     type Theme,
     text,
 } from "../lib";
+import type { Verified } from "../provenance";
+
+export const verified: Verified = {
+    against: "the query-optimisation and vector-indexes pages",
+    on: "2026-11-02",
+};
 
 // Eight articles; doc IDs are 1-based, as the bitmaps hold them
 const CATEGORY = [1, 3, 4, 7];
@@ -21,6 +27,11 @@ const PUBLISHED = [2, 3, 5, 7, 8];
 
 const bitmaps: Figure = {
     name: "index-bitmaps",
+    verified: {
+        against:
+            "the query-optimisation page's AND, OR and AND NOT rules; the eight articles are illustrative",
+        on: "2026-11-02",
+    },
     width: 2200,
     height: 880,
     draw(t: Theme) {
@@ -196,6 +207,11 @@ const CANDIDATES = (() => {
 
 const hnsw: Figure = {
     name: "hnsw-layers",
+    verified: {
+        against:
+            "the HNSW parameters on the vector-indexes page; the graph is illustrative, and its search is the real greedy descent",
+        on: "2026-11-02",
+    },
     width: 2400,
     height: 1200,
     draw(t: Theme) {

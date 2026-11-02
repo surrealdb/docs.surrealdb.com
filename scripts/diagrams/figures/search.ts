@@ -15,6 +15,12 @@ import {
     type Theme,
     text,
 } from "../lib";
+import type { Verified } from "../provenance";
+
+export const verified: Verified = {
+    against: "SurrealDB 4.0.0-beta.1, running each page's example",
+    on: "2026-11-02",
+};
 
 // BM25 inverse document frequency before and from 4.0. Both depend on N and n
 // only through g = (n + 0.5) / (N + 1):

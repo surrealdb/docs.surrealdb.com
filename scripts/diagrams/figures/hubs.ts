@@ -2,6 +2,9 @@
 // agent setup and migrating. Each one maps the choices its page lists.
 
 import { arrow, type Figure, MONO, markers, rect, svg, type Theme, text } from "../lib";
+import type { Verified } from "../provenance";
+
+export const verified: Verified = { against: "the section pages they summarise", on: "2026-11-02" };
 
 const card = (
     s: string[],
