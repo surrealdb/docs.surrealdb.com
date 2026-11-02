@@ -1,6 +1,7 @@
 import {
     enum as _enum,
     boolean,
+    iso,
     literal,
     number,
     object,
@@ -72,6 +73,8 @@ export type PageSchema = output<typeof pageSchema>;
 
 export const labSchema = strictObject({
     title: string(),
+    /** Date the item was added, `YYYY-MM-DD`; the listing is newest first. */
+    date: iso.date(),
     description: string().optional(),
     url: string().optional(),
     category: _enum(labCategories),

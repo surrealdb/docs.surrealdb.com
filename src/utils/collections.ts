@@ -176,7 +176,11 @@ export function withIndexPointer(markdown: string): string {
  * Grouped by `labCategories` in its declared order, matching the page.
  */
 export function composeLabsMarkdown(): string {
-    const items = sortCollection(getCollection("labs-items"), "title", "asc");
+    const items = sortCollection(
+        sortCollection(getCollection("labs-items"), "title", "asc"),
+        "date",
+        "desc",
+    );
 
     const sections = labCategories.flatMap((category) => {
         const lines = items

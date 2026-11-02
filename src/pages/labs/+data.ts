@@ -1,7 +1,11 @@
 import { getCollection, sortCollection } from "vike-content-collection";
 
 export default function data() {
-    const entries = sortCollection(getCollection("labs-items"), "title", "asc");
+    const entries = sortCollection(
+        sortCollection(getCollection("labs-items"), "title", "asc"),
+        "date",
+        "desc",
+    );
 
     const items = entries.map((entry) => ({
         slug: entry.slug,

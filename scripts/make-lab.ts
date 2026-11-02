@@ -62,6 +62,7 @@ try {
     let content = "---\n";
 
     content += `title: "${config.name}"\n`;
+    content += `date: "${new Date().toISOString().slice(0, 10)}"\n`;
 
     if (config.description.trim() !== "") {
         content += `description: "${config.description}"\n`;
