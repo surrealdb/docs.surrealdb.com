@@ -887,7 +887,7 @@ const jwtIdp: Figure = {
                     anchor: "start",
                 }),
             );
-            lines.forEach((l, j) =>
+            lines.forEach((l, j) => {
                 s.push(
                     text(1310, y + 100 + j * 36, l, {
                         size: 23,
@@ -895,8 +895,8 @@ const jwtIdp: Figure = {
                         anchor: "start",
                         font: j || i ? MONO : SANS,
                     }),
-                ),
-            );
+                );
+            });
             if (i < steps.length - 1) s.push(arrow(1640, y + 184, 1640, y + 222, t.line, 4));
             if (fail) {
                 s.push(arrow(2004, y + 90, 2060, y + 90, t.red, 4));

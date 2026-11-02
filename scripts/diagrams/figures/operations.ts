@@ -1362,11 +1362,11 @@ const mcpTopologies: Figure = {
             colour: t.muted,
         });
         const clients = ["editor", "application", "Studio, CLI"];
-        clients.forEach((c, i) =>
+        clients.forEach((c, i) => {
             box(s, t, 1200, 200 + i * 170, 340, 120, c, {
                 sub: i === 0 ? "url and auth headers" : undefined,
-            }),
-        );
+            });
+        });
         box(s, t, 1800, 200, 520, 300, "surreal db start", {
             mono: true,
             kind: "accent",
@@ -1374,7 +1374,7 @@ const mcpTopologies: Figure = {
             sub2: "its users and permissions",
         });
         box(s, t, 1800, 560, 520, 140, "datastore", { sub: "SurrealKV or memory" });
-        clients.forEach((_c, i) =>
+        clients.forEach((_c, i) => {
             s.push(
                 arrow(
                     1540,
@@ -1384,8 +1384,8 @@ const mcpTopologies: Figure = {
                     i === 0 ? t.accent : t.line,
                     i === 0 ? 5 : 4,
                 ),
-            ),
-        );
+            );
+        });
         say(s, t, 1560, 236, "Bearer JWT or Basic", { size: 20, colour: t.accent, weight: 600 });
         s.push(arrow(2060, 500, 2060, 552, t.line, 4));
 

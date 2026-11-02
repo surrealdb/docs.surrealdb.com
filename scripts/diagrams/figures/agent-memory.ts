@@ -439,7 +439,7 @@ const grantPatterns: Figure = {
         ) => {
             s.push(rect(cx - 370, 60, 740, 760, { fill: t.panel, r: 22 }));
             s.push(text(cx, 125, title, { size: 28, fill: t.text, weight: 700 }));
-            sub.forEach((l, i) =>
+            sub.forEach((l, i) => {
                 s.push(
                     text(cx, 175 + i * 40, l, {
                         size: 25,
@@ -447,8 +447,8 @@ const grantPatterns: Figure = {
                         weight: 600,
                         font: MONO,
                     }),
-                ),
-            );
+                );
+            });
             const root = { x: cx, y: 340 };
             const kids = [
                 { k: "alice", x: cx - 235, y: 560 },
@@ -813,7 +813,9 @@ function stepBox(
     s.push(rect(cx - w / 2, cy - h / 2, w, h, { fill, stroke, r: 16 }));
     const top = cy - ((lines.length + 1) * 38) / 2 + 26;
     s.push(text(cx, top, title, { size: 28, fill: t.text, weight: 700 }));
-    lines.forEach((l, i) => s.push(text(cx, top + 44 + i * 36, l, { size: 23, fill: t.muted })));
+    lines.forEach((l, i) => {
+        s.push(text(cx, top + 44 + i * 36, l, { size: 23, fill: t.muted }));
+    });
 }
 
 // An exit pill naming the tier value a response reports
@@ -875,9 +877,9 @@ const tierRouter: Figure = {
             "fewer than k / 2 hits came back",
             "top fused score < 0.40 and best",
             "vector cosine < 0.80",
-        ].forEach((l, i) =>
-            s.push(text(1670, 578 + i * 34, l, { size: 23, fill: t.muted, anchor: "start" })),
-        );
+        ].forEach((l, i) => {
+            s.push(text(1670, 578 + i * 34, l, { size: 23, fill: t.muted, anchor: "start" }));
+        });
         s.push(arrow(1632, 595, 1532, 595, t.green, 4));
         s.push(text(1582, 580, "no", { size: 24, fill: t.green, weight: 600 }));
         exitPill(s, t, 1355, 595, "tier: hybrid");
@@ -911,9 +913,9 @@ const tierRouter: Figure = {
             "when the session already has prior turns",
             "when the call sets bypassCache: true",
             "when the read has a time or location filter",
-        ].forEach((l, i) =>
-            s.push(text(100, 785 + i * 44, `· ${l}`, { size: 24, fill: t.muted, anchor: "start" })),
-        );
+        ].forEach((l, i) => {
+            s.push(text(100, 785 + i * 44, `· ${l}`, { size: 24, fill: t.muted, anchor: "start" }));
+        });
         s.push(
             text(
                 60,
@@ -984,9 +986,9 @@ const writePath: Figure = {
             "uncertainties",
         ];
         s.push(text(1300, 560, "produces", { size: 22, fill: t.muted, weight: 600 }));
-        outs.forEach((o, i) =>
-            s.push(text(1300, 598 + i * 32, o, { size: 22, fill: t.text, font: MONO })),
-        );
+        outs.forEach((o, i) => {
+            s.push(text(1300, 598 + i * 32, o, { size: 22, fill: t.text, font: MONO }));
+        });
         // Reconciliation outcomes
         s.push(
             text(1840, 560, "for each extracted value", { size: 22, fill: t.muted, weight: 600 }),
@@ -996,12 +998,14 @@ const writePath: Figure = {
             "same scope, same provenance: supersede",
             "different provenance: uncertainty",
             "below the confidence floor: uncertainty",
-        ].forEach((o, i) => s.push(text(1840, 598 + i * 32, o, { size: 22, fill: t.text })));
+        ].forEach((o, i) => {
+            s.push(text(1840, 598 + i * 32, o, { size: 22, fill: t.text }));
+        });
         s.push(arrow(2090, 395, 2150, 395, t.line, 4));
         // Substrate
         s.push(rect(2160, 140, 220, 560, { fill: t.panel, stroke: t.line, r: 18 }));
         s.push(text(2270, 200, "SurrealDB", { size: 24, fill: t.muted, weight: 700 }));
-        ["graph", "vectors", "documents", "geometry", "decision_trace"].forEach((o, i) =>
+        ["graph", "vectors", "documents", "geometry", "decision_trace"].forEach((o, i) => {
             s.push(
                 text(2270, 280 + i * 80, o, {
                     size: i === 4 ? 21 : 25,
@@ -1009,8 +1013,8 @@ const writePath: Figure = {
                     weight: 600,
                     font: i === 4 ? MONO : undefined,
                 }),
-            ),
-        );
+            );
+        });
         s.push(
             text(
                 60,
@@ -1113,15 +1117,15 @@ const rrf: Figure = {
             620,
         );
         s.push(arrow(740, 380, 1010, 380, t.line, 4));
-        Object.entries(chunks).forEach(([id, label], i) =>
+        Object.entries(chunks).forEach(([id, label], i) => {
             s.push(
                 text(1720, 240 + i * 50, `${id}  ${label}`, {
                     size: 23,
                     fill: t.muted,
                     anchor: "start",
                 }),
-            ),
-        );
+            );
+        });
         s.push(text(1720, 190, "chunks", { size: 25, fill: t.text, weight: 700, anchor: "start" }));
         s.push(
             text(
@@ -1275,11 +1279,11 @@ const decay: Figure = {
                 }),
             );
             const words = sub.split(": ");
-            words.forEach((w, j) =>
+            words.forEach((w, j) => {
                 s.push(
                     text(lx + 80, y + 48 + j * 32, w, { size: 22, fill: t.muted, anchor: "start" }),
-                ),
-            );
+                );
+            });
         });
         s.push(line(lx, 640, lx + 60, 640, t.red, 4, "12 10"));
         s.push(
@@ -1531,9 +1535,9 @@ const forgetMatrix: Figure = {
         const LW = 560;
         const CW = 440;
         const RH = 120;
-        cols.forEach((c, i) =>
-            s.push(text(X0 + LW + i * CW + CW / 2, 90, c, { size: 26, fill: t.text, weight: 700 })),
-        );
+        cols.forEach((c, i) => {
+            s.push(text(X0 + LW + i * CW + CW / 2, 90, c, { size: 26, fill: t.text, weight: 700 }));
+        });
         rows.forEach(([name, sub, cells], r) => {
             const y = 130 + r * RH;
             s.push(
@@ -1780,7 +1784,7 @@ const mcpTools: Figure = {
             "each tool needs the verb its",
             "REST equivalent needs, such as",
             "memory:forget for forget",
-        ].forEach((l, i) =>
+        ].forEach((l, i) => {
             s.push(
                 text(1360, 322 + i * 46, l, {
                     size: 23,
@@ -1788,8 +1792,8 @@ const mcpTools: Figure = {
                     weight: i ? 400 : 600,
                     font: i ? undefined : MONO,
                 }),
-            ),
-        );
+            );
+        });
         s.push(arrow(982, 380, 1072, 380, t.line, 4));
         s.push(arrow(1648, 380, 1738, 380, t.line, 4));
         // Tools
