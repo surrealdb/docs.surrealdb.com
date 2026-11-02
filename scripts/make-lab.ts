@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { checkbox, input, select } from "@inquirer/prompts";
 import { slug } from "github-slugger";
-import { labCategories, labTopics } from "~/utils/labs";
+import { labCategories, labLanguages, labTopics } from "~/utils/labs";
 
 try {
     const config = {
@@ -10,6 +10,7 @@ try {
         url: "",
         category: "",
         topics: [] as string[],
+        languages: [] as string[],
         authorName: "",
         authorRole: "",
     };
@@ -37,6 +38,11 @@ try {
     config.topics = await checkbox({
         message: "Topics (optional):",
         choices: labTopics,
+    });
+
+    config.languages = await checkbox({
+        message: "Languages (optional):",
+        choices: labLanguages,
     });
 
     config.authorName = await input({
@@ -75,6 +81,14 @@ try {
         }
     } else {
         content += "topics: []\n";
+    }
+
+    if (config.languages.length > 0) {
+        content += "languages:\n";
+
+        for (const language of config.languages) {
+            content += `  - ${language}\n`;
+        }
     }
 
     if (isOfficial) {
