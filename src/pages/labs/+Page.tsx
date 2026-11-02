@@ -1,5 +1,16 @@
-import { ActionIcon, Anchor, Box, SimpleGrid, Text, TextInput, Title } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
+import {
+    ActionIcon,
+    Anchor,
+    Box,
+    Button,
+    Group,
+    SimpleGrid,
+    Switch,
+    Text,
+    TextInput,
+    Title,
+} from "@mantine/core";
+import { useClipboard, useDisclosure } from "@mantine/hooks";
 import { Icon, iconSearch, iconSidebar } from "@surrealdb/ui";
 import { useEffect, useMemo, useState } from "react";
 import { useData } from "vike-react/useData";
@@ -29,12 +40,20 @@ function parseFiltersFromURL(): {
     author: string[];
     language: string[];
     topic: string[];
+    items: string[];
 } {
-    const result = { author: [] as string[], language: [] as string[], topic: [] as string[] };
+    const result = {
+        author: [] as string[],
+        language: [] as string[],
+        topic: [] as string[],
+        items: [] as string[],
+    };
 
     if (typeof window === "undefined") return result;
 
     const params = new URLSearchParams(window.location.search);
+    result.items = params.get("items")?.split(",").filter(Boolean) ?? [];
+
     const raw = params.get("filters");
     if (!raw) return result;
 
@@ -58,6 +77,14 @@ export default function Page() {
     const [authorFilter, setAuthorFilter] = useState<string[]>(initial.author);
     const [languageFilter, setLanguageFilter] = useState<string[]>(initial.language);
     const [topicFilter, setTopicFilter] = useState<string[]>(initial.topic);
+    const [selected, setSelected] = useState<string[]>(initial.items);
+    const [selecting, setSelecting] = useState(false);
+    const clipboard = useClipboard();
+
+    const toggleSelected = (slug: string) =>
+        setSelected((prev) =>
+            prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug],
+        );
 
     useEffect(() => {
         const all = [
@@ -74,11 +101,23 @@ export default function Page() {
             url.searchParams.delete("filters");
         }
 
+        if (selected.length > 0) {
+            url.searchParams.set("items", selected.join(","));
+        } else {
+            url.searchParams.delete("items");
+        }
+
         window.history.replaceState(null, "", url.toString());
-    }, [authorFilter, languageFilter, topicFilter]);
+    }, [authorFilter, languageFilter, topicFilter, selected]);
 
     const filtered = useMemo(() => {
         return items.filter((item) => {
+            // A shared selection narrows the list to the picked labs, except
+            // while picking, when every lab has to stay reachable.
+            if (!selecting && selected.length > 0 && !selected.includes(item.slug)) {
+                return false;
+            }
+
             if (search) {
                 const q = search.toLowerCase();
                 const inTitle = item.title.toLowerCase().includes(q);
@@ -113,7 +152,7 @@ export default function Page() {
 
             return true;
         });
-    }, [items, search, authorFilter, languageFilter, topicFilter]);
+    }, [items, search, authorFilter, languageFilter, topicFilter, selected, selecting]);
 
     const filterProps = {
         authorFilter,
@@ -189,20 +228,46 @@ export default function Page() {
                             to contribute your own.
                         </Text>
 
-                        <TextInput
-                            placeholder="What are you looking for?"
-                            leftSection={
-                                <Icon
-                                    path={iconSearch}
-                                    size="sm"
-                                />
-                            }
-                            size="md"
+                        <Group
                             mt="xl"
-                            classNames={{ input: classes.searchInput }}
-                            value={search}
-                            onChange={(e) => setSearch(e.currentTarget.value)}
-                        />
+                            gap="md"
+                        >
+                            <TextInput
+                                flex={1}
+                                miw={240}
+                                placeholder="What are you looking for?"
+                                leftSection={
+                                    <Icon
+                                        path={iconSearch}
+                                        size="sm"
+                                    />
+                                }
+                                size="md"
+                                classNames={{ input: classes.searchInput }}
+                                value={search}
+                                onChange={(e) => setSearch(e.currentTarget.value)}
+                            />
+                            <Switch
+                                label="Select labs"
+                                checked={selecting}
+                                onChange={(e) => setSelecting(e.currentTarget.checked)}
+                            />
+                            {selected.length > 0 && (
+                                <Button
+                                    variant="subtle"
+                                    color="gray"
+                                    onClick={() => setSelected([])}
+                                >
+                                    Clear selection ({selected.length})
+                                </Button>
+                            )}
+                            <Button
+                                variant="light"
+                                onClick={() => clipboard.copy(window.location.href)}
+                            >
+                                {clipboard.copied ? "Link copied" : "Copy share link"}
+                            </Button>
+                        </Group>
 
                         {filtered.length > 0 ? (
                             <SimpleGrid
@@ -215,6 +280,10 @@ export default function Page() {
                                     <LabCard
                                         key={item.slug}
                                         item={item}
+                                        selected={selected.includes(item.slug)}
+                                        onSelect={
+                                            selecting ? () => toggleSelected(item.slug) : undefined
+                                        }
                                     />
                                 ))}
                             </SimpleGrid>

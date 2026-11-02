@@ -309,9 +309,11 @@ A unique index that applies to only some records, such as PostgreSQL's partial u
 
 Snapshot isolation does not prevent **write skew**. Write skew occurs when two transactions each read overlapping state, make independent decisions, and both commit even though their combined effect breaks an invariant.
 
-An everyday example is one in which two doctors each check a schedule, see that only one shift is booked, and both book themselves. Each transaction read a consistent snapshot, but together they overbooked the day.
+An everyday example is two doctors on call for the same night, where at least one of them must stay on call. Each checks that the other is still on call and then signs off. Each transaction read a consistent snapshot in which the other doctor was on call, but together they left nobody on call.
 
-Where write skew matters for your workload, read the records the rule depends on with [`SELECT ... FOR UPDATE`](#locked-reads-with-for-update). Each doctor's transaction then registers the `schedule` record it based its decision on, so whichever transaction commits second fails and retries against the booking the first one made.
+Where write skew matters for your workload, read the records the rule depends on with [`SELECT ... FOR UPDATE`](#locked-reads-with-for-update). Each doctor's transaction then registers the other doctor's record, which the other transaction writes, so whichever transaction commits second fails. Its retry sees that the other doctor has signed off, and stays on call:
+
+<img src="~/assets/img/diagrams/light/write-skew-light.webp" darkSrc="~/assets/img/diagrams/write-skew.webp" alt="Two timelines for the transactions of two on-call doctors, Ana and Ben. With snapshot isolation alone, each reads the other doctor's record, sets itself off call, and commits, so nobody is on call. With FOR UPDATE on the record each reads, Ana's transaction commits first, and Ben's COMMIT fails because Ana wrote doctor:ana, which he read FOR UPDATE. His retry sees that Ana is off call, so he stays on." />
 
 Writing every record the rule depends on has the same effect, because a write is conflict-checked already. That remains the natural choice where the transaction was going to update the record anyway, and conditional updates work on the same principle.
 
@@ -326,13 +328,13 @@ The [`FOR UPDATE`](/docs/reference/query-language/statements/select#the-for-upda
 ```surql
 BEGIN;
 
--- Register the schedule for commit-time conflict detection
-LET $schedule = SELECT * FROM ONLY schedule:monday FOR UPDATE;
+-- Register the other doctor's record for commit-time conflict detection
+LET $other = SELECT * FROM ONLY doctor:ben FOR UPDATE;
 
--- The decision below rests on a value that is read but never written,
+-- The decision below rests on a record that is read but never written,
 -- which is exactly the case FOR UPDATE covers
-IF $schedule.shifts_booked = 0 {
-    UPDATE booking SET doctor = $auth.id, day = "monday";
+IF $other.on_call {
+    UPDATE doctor:ana SET on_call = false;
 };
 
 COMMIT;
