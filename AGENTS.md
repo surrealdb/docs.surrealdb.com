@@ -7,12 +7,13 @@ vike-content-collection (Zod-validated markdown collections).
 ## Commands
 
 ```bash
-bun run dev   # start dev server
-bun run qa    # apply code quality formatting
-bun run qc    # check code quality
+bun run dev             # start dev server
+bun run qa              # apply code quality formatting
+bun run qc              # check code quality
+bun run diagrams:check  # list diagrams whose page sections have changed
 ```
 
-Always run `bun run qa` then `bun run qc` before finishing any task.
+Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate).
 
 ## References
 
@@ -1010,7 +1011,7 @@ Every figure file exports `verified`, which says what its figures were checked a
 - If the figure no longer matches, fix the figure file, update its `verified`, and render it again.
 - If it still matches, run `bun run diagrams:check --accept NAME` to record the current sections.
 
-When you edit a section that shows a figure, open the figure file before you finish. A change to the code a figure depends on, such as a SurrealDB default or an Agent Memory threshold, does not change any page, so the check cannot see it; the `verified` record says which release or source to check again after such a change.
+Run the check before finishing any task that changed content, as the commands at the top of this file say. Also run it after a release, alongside reading the `verified` records: a change to the code a figure depends on, such as a SurrealDB default or an Agent Memory threshold, does not change any page, so the check cannot see it, and the `verified` record says which release or source to check again.
 
 ## Data loading and rendering
 
