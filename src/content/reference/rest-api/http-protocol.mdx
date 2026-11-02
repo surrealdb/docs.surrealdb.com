@@ -239,6 +239,97 @@ The rules for the cookie are as follows:
 > [!NOTE]
 > The `surreal_token` and `surreal_refresh` cookies are removed from `$request.headers` in a [`DEFINE API`](/docs/reference/query-language/statements/define/api) handler. Other cookies in the request stay.
 
+## Scoped URLs {#scoped-urls}
+
+<Since v="v4.0.0" />
+
+The namespace, database and access method can be part of the URL path, in place of the `Surreal-NS` and `Surreal-DB` headers and the `ns`, `db` and `ac` fields of a signin or signup body. The request from [Authentication](#authentication) becomes:
+
+```bash
+curl -X POST -u "clerk:hunter123" \
+  -H "Surreal-Auth-NS: shop" -H "Surreal-Auth-DB: orders" \
+  -H "Accept: application/json" \
+  -d "SELECT * FROM item;" \
+  http://localhost:8000/ns/shop/db/orders/sql
+```
+
+> [!NOTE]
+> SurrealDB 4.x introduces a new, streamlined URL structure, which gives smoother and more predictable URLs and is the basis for upcoming functionality. The unscoped routes, headers and body fields stay supported.
+
+A scope goes in front of the endpoint path, and `ac` can follow any level, because an access method can be defined on the root, a namespace or a database:
+
+```text
+/ns/{ns}/{endpoint}
+/ns/{ns}/db/{db}/{endpoint}
+/ac/{ac}/{endpoint}
+/ns/{ns}/ac/{ac}/{endpoint}
+/ns/{ns}/db/{db}/ac/{ac}/{endpoint}
+```
+
+For example:
+
+```text
+POST /ns/shop/db/orders/sql
+GET  /ns/shop/db/orders/rpc                  (WebSocket upgrade)
+GET  /ns/shop/db/orders/key/person/tobie
+ANY  /ns/shop/db/orders/api/orders/42
+POST /ns/shop/db/orders/signin               (database user)
+POST /ns/shop/db/orders/ac/users/signup      (record access method)
+POST /ac/admins/signin                       (root access method)
+```
+
+Each segment is percent-decoded once, so the namespace `a/b` is sent as `/ns/a%2Fb/...`. An empty or malformed segment answers `404`.
+
+### Endpoints that take a scope
+
+| Endpoint | `ns` and `db` | `ac` |
+| --- | --- | --- |
+| `/sql`, `/rpc`, `/import`, `/export`, `/key`, `/ml`, `/gql`, `/graphql`, `/mcp`, `/api` | Yes | No |
+| `/signin`, `/signup`, `/signin/cookie`, `/signup/cookie` | Yes | Yes |
+| `/signout`, `/refresh/cookie`, `/health`, `/status`, `/ready`, `/version`, `/kvexport` | No | No |
+
+An endpoint under a scope it does not take answers `404`, rather than ignoring the scope. `/signout` and `/refresh/cookie` act on a credential the request already carries, which names its own namespace, database and access method.
+
+The scoped form of a [custom endpoint](#custom) is `/ns/{ns}/db/{db}/api/{endpoint}`, which reaches the same handler as `/api/{ns}/{db}/{endpoint}`. A scoped `/api` path without a database answers `404`.
+
+### Headers and credentials under a scope
+
+The path and the other sources have to agree. The path never overrides a header, and a header never overrides the path:
+
+| Path | Other source | Result |
+| --- | --- | --- |
+| `/ns/shop` | `Surreal-NS: shop` | Accepted |
+| `/ns/shop` | `Surreal-NS: other` | `400` |
+| `/ns/shop` | `Surreal-DB: orders` | Namespace `shop`, database `orders` |
+| `/ns/shop/db/orders` | Token for a user on `shop`/`orders` | Accepted |
+| `/ns/shop/db/orders` | Token for a user on `shop`/`other` | `401` |
+| `/ns/shop` | Basic authentication as a user on namespace `other` | `401` |
+| `/ns/shop` | Root credentials | Namespace `shop` |
+
+### Session pinning
+
+A request or connection with a namespace in its path runs on a session pinned to that scope. Nothing it runs can select another namespace or database:
+
+- A SurrealQL `USE`, or an RPC [`use`](/docs/reference/rest-api/rpc-protocol#use), that leaves the scope fails with an error such as `You don't have permission to change to the other namespace`. A scope without a database leaves the database open.
+- An RPC [`signin`](/docs/reference/rest-api/rpc-protocol#signin) or `signup` whose credentials name another namespace or database is refused.
+- An RPC [`reset`](/docs/reference/rest-api/rpc-protocol#reset) returns the session to the scope, not to no namespace and database.
+
+The pin belongs to the URL, not to stored state. The server applies it again on every request and connection.
+
+### Signing in under a scope
+
+[`/signin`](#signin) and [`/signup`](#signup) complete their body from the path. The following request signs in with `{"ns": "shop", "db": "orders", "ac": "users", "email": "tobie@example.com", "pass": "secret"}`:
+
+```bash
+curl -X POST -H "Accept: application/json" \
+  -d '{"email":"tobie@example.com","pass":"secret"}' \
+  http://localhost:8000/ns/shop/db/orders/ac/users/signin
+```
+
+The path fixes the level the credentials act at. A body field that repeats the path is accepted. A body field that names something else answers `400`, and so does a namespace or database the path leaves out: `/ac/admins/signin` always signs in with a root access method, and `/ns/shop/signin` always signs in at the namespace level. Without `ac` in the path, the body can name an access method at the path's level.
+
+Scoped and unscoped signin requests from one client draw on the same [authentication rate limit](/docs/reference/cli/db/environment-variables#authentication-rate-limiting-environment-variables).
+
 ## Request size limits
 
 Each endpoint caps the size of the request body it will accept. A request over the cap is rejected with `413 Payload Too Large`. The limits differ per endpoint because they are sized to the work each one does: `/sql` takes a query, `/import` takes a data file.
@@ -957,6 +1048,16 @@ curl -X POST -H "Accept: application/json" -d '{"ns":"main","user":"johndoe","pa
 	"details": "Authentication succeeded",
 	"token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
 }
+```
+
+### Example with a scoped URL
+
+<Since v="v4.0.0" />
+
+The namespace, database and access method can be part of the path instead of the body. See [Scoped URLs](#scoped-urls).
+
+```bash title="Request"
+curl -X POST -H "Accept: application/json" -d '{"user":"johndoe","pass":"123456"}' http://localhost:8000/ns/main/db/main/ac/users/signin
 ```
 
 ### Example usage via postman
@@ -2554,7 +2655,7 @@ curl -X GET \
 
 ## Custom endpoint at `/api/:ns/:db/:endpoint` {#custom}
 
-A custom endpoint can be set using a [`DEFINE API`](/docs/reference/query-language/statements/define/api) statement. The possible HTTP methods (GET, PUT, etc.) are set using the statement itself. The path begins with `/api`, continues with the namespace and database, and ends with a custom endpoint that can include both static and dynamic path segments.
+A custom endpoint can be set using a [`DEFINE API`](/docs/reference/query-language/statements/define/api) statement. The possible HTTP methods (GET, PUT, etc.) are set using the statement itself. The path begins with `/api`, continues with the namespace and database, and ends with a custom endpoint that can include both static and dynamic path segments. From SurrealDB 4.0, the same handler is also reached at the [scoped URL](#scoped-urls) `/ns/:ns/db/:db/api/:endpoint`.
 
 ### Headers
 
