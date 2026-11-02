@@ -1,4 +1,16 @@
-import { Anchor, Avatar, Badge, Box, Group, Image, Paper, Text, Title } from "@mantine/core";
+import {
+    Anchor,
+    Avatar,
+    Badge,
+    Box,
+    CheckboxIndicator,
+    Group,
+    Image,
+    Paper,
+    Text,
+    Title,
+    UnstyledButton,
+} from "@mantine/core";
 import {
     Icon,
     iconOpen,
@@ -8,9 +20,11 @@ import {
     pictoInboxSolid,
     pictoPlaySolid,
     pictoQuestionSolid,
+    pictoSurrealDBSolid,
     Spacer,
 } from "@surrealdb/ui";
 import placeholderAvatar from "~/assets/img/labs-authors/placeholder.png";
+import type { labCategories } from "~/utils/labs";
 import classes from "./style.module.scss";
 
 const AUTHOR_AVATARS = import.meta.glob<string>("../../assets/img/labs-authors/*.jpg", {
@@ -38,14 +52,18 @@ export interface LabCardItem {
 
 export interface LabCardProps {
     item: LabCardItem;
+    /** When set, the card toggles selection instead of opening its link. */
+    onSelect?: () => void;
+    selected?: boolean;
 }
 
-const CATEGORY_IMAGES: Record<string, string> = {
+const CATEGORY_IMAGES: Record<(typeof labCategories)[number], string> = {
     "Source code": pictoCurlyBracesSolid,
     Videos: pictoPlaySolid,
     Blogposts: pictoInboxSolid,
     Documentation: pictoFileSolid,
     "Learning resources": pictoQuestionSolid,
+    "Product resources": pictoSurrealDBSolid,
 };
 
 function getAuthorAvatarUrl(slug: string): string | undefined {
@@ -53,8 +71,8 @@ function getAuthorAvatarUrl(slug: string): string | undefined {
     return AUTHOR_AVATARS[key];
 }
 
-export function LabCard({ item }: LabCardProps) {
-    const categoryImage = CATEGORY_IMAGES[item.category];
+export function LabCard({ item, onSelect, selected = false }: LabCardProps) {
+    const categoryImage = CATEGORY_IMAGES[item.category as keyof typeof CATEGORY_IMAGES];
 
     let authorName: string;
     let authorRole: string;
@@ -73,6 +91,164 @@ export function LabCard({ item }: LabCardProps) {
     const isExternal = href.startsWith("http");
     const description = item.description?.trim();
 
+    const card = (
+        <Paper
+            className={classes.root}
+            radius={0}
+            p="lg"
+            data-selected={selected || undefined}
+        >
+            <Group
+                gap="sm"
+                wrap="nowrap"
+                align="flex-start"
+            >
+                {onSelect && (
+                    <CheckboxIndicator
+                        checked={selected}
+                        color="var(--docs-accent)"
+                    />
+                )}
+                {categoryImage && (
+                    <Image
+                        src={categoryImage}
+                        alt=""
+                        w={18}
+                    />
+                )}
+                {/* Same kicker treatment as the nav dropdowns' section
+                        labels, so the category reads as an eyebrow rather
+                        than competing with the title. */}
+                <Text
+                    className={classes.category}
+                    lineClamp={1}
+                >
+                    {item.category}
+                </Text>
+                <Spacer />
+                {item.topics.length > 0 && (
+                    // Topics wrap onto further lines rather than
+                    // truncating, since an item can carry any number.
+                    <Group
+                        gap={4}
+                        justify="flex-end"
+                    >
+                        {item.topics.map((topic) => (
+                            <Badge
+                                key={topic}
+                                variant="transparent"
+                                // The product accent, not Mantine violet: brand
+                                // pink on the Database docs in both themes.
+                                color="var(--docs-accent-text)"
+                                size="sm"
+                                // Transparent badges carry no fill, so the
+                                // built-in inset only breaks alignment with
+                                // the card's right padding edge.
+                                px={0}
+                            >
+                                {topic}
+                            </Badge>
+                        ))}
+                    </Group>
+                )}
+            </Group>
+
+            <Title
+                mt="md"
+                order={3}
+                fz="lg"
+                fw={500}
+                c="bright"
+                lineClamp={2}
+                lh={1.35}
+                className={classes.title}
+            >
+                {item.title}
+            </Title>
+
+            {description && (
+                <Text
+                    className={classes.description}
+                    fz="sm"
+                    lineClamp={2}
+                    opacity={0.8}
+                >
+                    {description}
+                </Text>
+            )}
+
+            <Spacer />
+
+            <Group
+                mt="md"
+                gap="sm"
+            >
+                {item.author === "surrealdb" ? (
+                    // Official entries carry the brand mark on the
+                    // product accent rather than initials.
+                    <Avatar
+                        size="sm"
+                        className={classes.officialAvatar}
+                    >
+                        <Icon
+                            path={iconSurreal}
+                            size={18}
+                        />
+                    </Avatar>
+                ) : (
+                    <Avatar
+                        src={avatarSrc}
+                        alt=""
+                        size="sm"
+                    />
+                )}
+                <Box>
+                    <Text
+                        fz="sm"
+                        fw={500}
+                        lh={1.3}
+                        lineClamp={1}
+                        c="bright"
+                    >
+                        {authorName}
+                    </Text>
+                    <Text
+                        fz="xs"
+                        lh={1.3}
+                        lineClamp={1}
+                        c="slate"
+                    >
+                        {authorRole}
+                    </Text>
+                </Box>
+                <Spacer />
+                {isExternal && (
+                    <Icon
+                        path={iconOpen}
+                        size="sm"
+                        className={classes.open}
+                        aria-hidden
+                    />
+                )}
+            </Group>
+        </Paper>
+    );
+
+    if (onSelect) {
+        return (
+            <UnstyledButton
+                className={classes.anchor}
+                onClick={onSelect}
+                aria-pressed={selected}
+                display="block"
+                w="100%"
+                h="100%"
+            >
+                {card}
+            </UnstyledButton>
+        );
+    }
+
     return (
         <Anchor
             href={href}
@@ -82,136 +258,7 @@ export function LabCard({ item }: LabCardProps) {
             className={classes.anchor}
             c="unset"
         >
-            <Paper
-                className={classes.root}
-                radius={0}
-                p="lg"
-            >
-                <Group
-                    gap="sm"
-                    wrap="nowrap"
-                >
-                    {categoryImage && (
-                        <Image
-                            src={categoryImage}
-                            alt=""
-                            w={18}
-                        />
-                    )}
-                    {/* Same kicker treatment as the nav dropdowns' section
-                        labels, so the category reads as an eyebrow rather
-                        than competing with the title. */}
-                    <Text
-                        className={classes.category}
-                        lineClamp={1}
-                    >
-                        {item.category}
-                    </Text>
-                    <Spacer />
-                    {item.topics.length > 0 && (
-                        <Group
-                            gap={4}
-                            wrap="nowrap"
-                        >
-                            {item.topics.map((topic) => (
-                                <Badge
-                                    key={topic}
-                                    variant="transparent"
-                                    // The product accent, not Mantine violet: brand
-                                    // pink on the Database docs in both themes.
-                                    color="var(--docs-accent-text)"
-                                    size="sm"
-                                    // Transparent badges carry no fill, so the
-                                    // built-in inset only breaks alignment with
-                                    // the card's right padding edge.
-                                    px={0}
-                                >
-                                    {topic}
-                                </Badge>
-                            ))}
-                        </Group>
-                    )}
-                </Group>
-
-                <Title
-                    mt="md"
-                    order={3}
-                    fz="lg"
-                    fw={500}
-                    c="bright"
-                    lineClamp={2}
-                    lh={1.35}
-                    className={classes.title}
-                >
-                    {item.title}
-                </Title>
-
-                {description && (
-                    <Text
-                        className={classes.description}
-                        fz="sm"
-                        lineClamp={2}
-                        opacity={0.8}
-                    >
-                        {description}
-                    </Text>
-                )}
-
-                <Spacer />
-
-                <Group
-                    mt="md"
-                    gap="sm"
-                >
-                    {item.author === "surrealdb" ? (
-                        // Official entries carry the brand mark on the
-                        // product accent rather than initials.
-                        <Avatar
-                            size="sm"
-                            className={classes.officialAvatar}
-                        >
-                            <Icon
-                                path={iconSurreal}
-                                size={18}
-                            />
-                        </Avatar>
-                    ) : (
-                        <Avatar
-                            src={avatarSrc}
-                            alt=""
-                            size="sm"
-                        />
-                    )}
-                    <Box>
-                        <Text
-                            fz="sm"
-                            fw={500}
-                            lh={1.3}
-                            lineClamp={1}
-                            c="bright"
-                        >
-                            {authorName}
-                        </Text>
-                        <Text
-                            fz="xs"
-                            lh={1.3}
-                            lineClamp={1}
-                            c="slate"
-                        >
-                            {authorRole}
-                        </Text>
-                    </Box>
-                    <Spacer />
-                    {isExternal && (
-                        <Icon
-                            path={iconOpen}
-                            size="sm"
-                            className={classes.open}
-                            aria-hidden
-                        />
-                    )}
-                </Group>
-            </Paper>
+            {card}
         </Anchor>
     );
 }
