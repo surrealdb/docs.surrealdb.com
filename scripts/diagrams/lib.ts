@@ -174,6 +174,67 @@ export function path(
     return `<path d="${d}" fill="${fill}"${st}${ds}/>`;
 }
 
+// A record drawn as a rounded box centred on (x, y), for graph figures
+export type Node = { x: number; y: number; w: number; h: number };
+
+export function node(
+    n: Node,
+    label: string,
+    t: Theme,
+    o: { state?: "normal" | "active" | "muted"; size?: number; sub?: string } = {},
+): string {
+    const { state = "normal", size = 28, sub } = o;
+    const fill = state === "active" ? t.accentBg : state === "muted" ? t.panel : t.card;
+    const stroke = state === "active" ? t.accent : undefined;
+    const colour = state === "muted" ? t.muted : t.text;
+    const parts = [
+        rect(n.x - n.w / 2, n.y - n.h / 2, n.w, n.h, { fill, stroke, r: 14 }),
+        text(n.x, n.y + (sub ? -4 : size * 0.36), label, {
+            size,
+            fill: colour,
+            weight: 600,
+            font: MONO,
+        }),
+    ];
+    if (sub) parts.push(text(n.x, n.y + size, sub, { size: size * 0.8, fill: t.muted }));
+    return parts.join("");
+}
+
+// The point where the line from a node's centre towards (tx, ty) leaves its box
+function boxEdge(n: Node, tx: number, ty: number, pad: number): [number, number] {
+    const dx = tx - n.x;
+    const dy = ty - n.y;
+    const sx = dx === 0 ? Number.POSITIVE_INFINITY : (n.w / 2 + pad) / Math.abs(dx);
+    const sy = dy === 0 ? Number.POSITIVE_INFINITY : (n.h / 2 + pad) / Math.abs(dy);
+    const s = Math.min(sx, sy);
+    return [n.x + dx * s, n.y + dy * s];
+}
+
+// An arrow from one node box to another, optionally with a label at its middle
+export function link(
+    a: Node,
+    b: Node,
+    color: string,
+    o: { width?: number; dash?: string; label?: string; labelColour?: string; halo?: string } = {},
+): string {
+    const { width = 4, dash, label, labelColour, halo } = o;
+    const [x1, y1] = boxEdge(a, b.x, b.y, 6);
+    const [x2, y2] = boxEdge(b, a.x, a.y, 10);
+    const parts = [arrow(x1, y1, x2, y2, color, width, dash)];
+    if (label) {
+        parts.push(
+            text((x1 + x2) / 2, (y1 + y2) / 2 + 9, label, {
+                size: 24,
+                fill: labelColour ?? color,
+                weight: 600,
+                font: MONO,
+                halo,
+            }),
+        );
+    }
+    return parts.join("");
+}
+
 export function svg(f: Figure, t: Theme, body: string): string {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${f.width}" height="${f.height}" viewBox="0 0 ${f.width} ${f.height}">${rect(0, 0, f.width, f.height, { fill: t.bg, r: 0 })}${body}</svg>`;
 }
