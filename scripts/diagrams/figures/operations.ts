@@ -926,9 +926,8 @@ const capPrecedence: Figure = {
 const rocksConversion: Figure = {
     name: "ops-rocksdb-conversion",
     verified: {
-        against:
-            "SurrealDB 4.0.0-beta.1, and surrealdb-private PR #2228 (liveness while converting)",
-        on: "2026-11-03",
+        against: "SurrealDB v4.0.0 source (surrealdb/kvs-surrealkv) and surrealkv 1.2.0",
+        on: "2026-11-04",
     },
     width: 2400,
     height: 1260,
@@ -1046,7 +1045,7 @@ const rocksConversion: Figure = {
             t,
             90,
             1122,
-            "The server listens while steps 1 to 4 run: /health and /status return 200, and /ready returns 503 with the progress.",
+            "Steps 1 to 4 run while the datastore opens, before the server listens: /health and /ready cannot be reached until they finish.",
             {
                 size: 24,
             },

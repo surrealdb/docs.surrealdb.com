@@ -1,7 +1,7 @@
 ---
 position: 6
 title: 3.x to 4.0
-description: What to do when a 3.x deployment moves to 4.0, covering the surreal upgrade-check pre-flight check on 3.3, the one-way switch to the 4.0 record format, export and import changes, the removal of RocksDB, IndexedDB and SurrealML, the separate TiKV build, the conversion of SurrealKV and RocksDB datastores, database compatibility levels and MIGRATE EXISTING ROWS, which HNSW, DiskANN and B-tree indexes to rebuild with REBUILD INDEX, and the behaviour changes in SurrealQL, the CBOR protocol, the SDKs, configuration and Surrealism modules.
+description: What to do when a 3.x deployment moves to 4.0, covering the one-way switch to the 4.0 record format, export and import changes, the removal of RocksDB, IndexedDB and SurrealML, the separate TiKV build, the conversion of SurrealKV and RocksDB datastores, database compatibility levels and MIGRATE EXISTING ROWS, which HNSW, DiskANN and B-tree indexes to rebuild with REBUILD INDEX, and the behaviour changes in SurrealQL, the CBOR protocol, the SDKs, configuration and Surrealism modules.
 ---
 
 # Upgrading from `3.x` to `4.0`
@@ -57,56 +57,6 @@ A datastore that holds a SurrealML model does not start on `4.0`, so remove its 
 
 The way back to `3.3` is to restore the export taken before the upgrade into a new datastore created by `3.3`, which builds every index again, or to start `3.3` on a copy of the data directory taken before the upgrade. Both lose what was written on `4.0`. For a RocksDB or SurrealKV datastore, converting the data ahead of time with `skv migrate` writes a new directory for `4.0` to start on, so that the original stays untouched and `3.3` can still start on it. See [Converting ahead of time with `skv`](/docs/manage/self-hosted/deployment-models#converting-ahead-of-time-with-skv).
 
-Run the upgrade check described in the next section before you take the export, so that the export holds the definitions as you corrected them.
-
-## Checking a datastore before the upgrade
-
-The latest `3.3` release can check a datastore for the stored definitions and records that `4.0` refuses, fails on or treats differently. Run the check while the datastore is still on `3.3`, because `3.3` is the last release on which a change is easy to make and the upgrade can still be cancelled. The check only reads, and never runs a stored definition, so it is safe to run against a production server.
-
-Run it with the [`surreal db upgrade-check`](/docs/reference/cli/db/commands/upgrade-check) command, from the `3.3` database component:
-
-```bash
-surreal +3 db upgrade-check --endpoint http://localhost:8000 --username root --password secret
-```
-
-The command exits with a non-zero status when it finds a blocking issue, so a deployment script can stop before the upgrade. The same check is available as the [`/upgrade-check`](/docs/reference/rest-api/http-protocol#upgrade-check) HTTP route and the [`upgrade_check`](/docs/reference/rest-api/rpc-protocol#upgrade_check) RPC method, which return the report as JSON or CBOR. Against a stopped datastore, give the command its path, such as `surrealkv://path/to/data`, and it opens the datastore itself.
-
-The check covers the scope of the user who runs it, so run it as a root user to cover every namespace. Records are read only with `--scan-records`, because two of the rules look at records rather than definitions. Each finding has a severity:
-
-- **`blocking`**: `4.0` refuses or fails on the definition or record, so change it before the upgrade.
-- **`warning`**: `4.0` keeps working, but gives different results or needs an action after the upgrade, such as `REBUILD INDEX`.
-- **`info`**: no action is needed.
-
-| Rule | Severity | What it finds |
-| --- | --- | --- |
-| `define-module` | blocking | A `DEFINE MODULE`. See [Surrealism modules are now extensions](#surrealism-modules-are-now-extensions). |
-| `view-reads-own-table` | blocking | A view whose `FROM` names its own table. See [Views that read their own table](#views-that-read-their-own-table). |
-| `let-system-name` | blocking | A `LET` of `$this`, `$self`, `$parent`, `$value`, `$input`, `$before`, `$after` or `$event` in a stored block, function or closure. See [Parameters that SurrealDB binds itself are protected](#parameters-that-surrealdb-binds-itself-are-protected). |
-| `reserved-name-binding` | blocking | `$auth`, `$access`, `$token` or `$session` as the name of a `FOR` variable, a closure parameter or a function argument. See [Parameters that SurrealDB binds itself are protected](#parameters-that-surrealdb-binds-itself-are-protected). |
-| `effect-in-schema-clause` | blocking | A `COMPUTED`, `ASSERT`, `VALUE`, `DEFAULT` or `PERMISSIONS` clause that writes, changes the schema, sleeps, runs JavaScript, `eval` or a module function, or calls `sequence::nextval()` outside `VALUE` and `DEFAULT`, directly or through a custom function. See [Effects in schema clauses](#effects-in-schema-clauses). |
-| `let-in-if-then` | blocking | A `LET` as a branch of `IF ... THEN ... END`. See [`LET` inside `IF ... THEN ... END`](#let-inside-if--then--end). |
-| `split-on-source-field` | blocking | A `SPLIT` on the source name of an aliased field. See [`SPLIT` names a field of the result](#split-names-a-field-of-the-result). |
-| `knn-in-write-where` | blocking | A KNN operator in the `WHERE` of an `UPDATE` or `DELETE` on a field without a vector index, or of an `UPSERT`. See [KNN operators in `UPDATE` and `DELETE`](#knn-operators-in-update-and-delete). |
-| `diskann-int-dimension` | blocking | A DiskANN index of `TYPE I8` or `TYPE U8` with a `DIMENSION` above 33025. See [Indexes to rebuild](#indexes-to-rebuild). |
-| `nested-field-without-object-parent` | warning | A nested field whose parent is undefined or cannot hold fields. `4.0` keeps the stored definition, but the schema script that created it fails on a new datastore. See [Fields inside fields](#fields-inside-fields). |
-| `element-field-on-union` | warning | A `.*` element definition beside a field whose type joins an array with an object or a literal array. See [Element definitions of union fields](#element-definitions-of-union-fields). |
-| `hnsw-jaccard-pearson` | warning | An HNSW index with `DIST JACCARD` or `DIST PEARSON`. See [Jaccard and Pearson ranking](#jaccard-and-pearson-ranking). |
-| `index-on-datetime` | warning | A B-tree index over a field that holds datetimes. See [Datetimes in an index](#datetimes-in-an-index). |
-| `index-on-decimal` | warning | A B-tree index over a field that holds decimals. See [Indexes to rebuild](#indexes-to-rebuild). |
-| `compound-array-index` | warning | An index over two fields that both hold arrays. Only one built before `3.3.1` needs a rebuild. See [Indexes to rebuild](#indexes-to-rebuild). |
-| `keyed-access` | warning | An access method verified with a key, which an export does not restore. See [Exports and imports](#exports-and-imports). |
-| `default-not-coercible` | warning | A `DEFAULT` that cannot be converted to the field's `TYPE`. See [Exports and imports](#exports-and-imports). |
-| `record-not-object` | warning | A record whose content is not an object. Needs `--scan-records`. See [Records that hold a value other than an object](#records-that-hold-a-value-other-than-an-object). |
-| `record-table-value` | warning | A record that holds a table value. Needs `--scan-records`. See [Exports and imports](#exports-and-imports). |
-| `vector-index-number-kind-ids` | warning | A vector index over records whose ids differ only in the kind of a number inside them. See [Indexes to rebuild](#indexes-to-rebuild). |
-| `storage-rocksdb` | warning | A RocksDB datastore. See [RocksDB and IndexedDB are removed](#rocksdb-and-indexeddb-are-removed). |
-| `storage-surrealkv` | info | A SurrealKV datastore. See [SurrealKV datastores](#surrealkv-datastores). |
-| `storage-tikv` | info | A TiKV datastore. See [The 4.0 record format](#the-40-record-format). |
-| `vector-index-rebuild` | info | An HNSW or DiskANN index, which answers faster after a rebuild. See [Indexes to rebuild](#indexes-to-rebuild). |
-| `fulltext-index-rebuild` | info | A full-text index, which answers faster after a rebuild. See [Indexes to rebuild](#indexes-to-rebuild). |
-
-The three storage rules appear only for a root user. The check cannot see the queries an application sends, the SDKs it uses or the schema scripts kept outside the datastore, so every report also lists notes on the [CBOR text forms](#cbor-text-forms-of-datetimes-uuids-and-durations), [SDK version checks](#sdk-version-checks), [schema script syntax](#a-clause-repeated-in-define-table) and the [behaviour changes](#behaviour-changes). Read those sections as well, because a `compatible` verdict covers the stored state only.
-
 ## The 4.0 record format
 
 `4.0` writes records and definitions in a new on-disk format. A `3.x` release cannot read it, which is why the upgrade is one-way. When the switch happens depends on the storage engine:
@@ -158,7 +108,7 @@ Two more steps apply only while nodes of different releases share a datastore. F
 - **A dump can change the target database's settings.** For a database with a `COMMENT`, `CHANGEFEED` or `STRICT` clause, the export starts with `DEFINE DATABASE OVERWRITE`, which replaces those clauses on the database the dump is restored into. That statement needs a namespace or root user, so a database user cannot restore such a dump.
 - **An export to standard output holds only the dump.** `surreal export -` now writes its log lines to standard error, so the output can be redirected to a file without `--log none`. An import drops a UTF-8 byte order mark at the start of a file, and refuses a UTF-16 file with an error that names the encoding, where it reported `Invalid token`. Windows PowerShell 5 saves redirected output as UTF-16, so export to a file with `surreal export <file>` there. See [`surreal db export`](/docs/reference/cli/db/commands/export).
 - **The Docker image's data directories belong to the container user.** In the `4.0` image, `/data` and `/logs` are owned by uid and gid `65532`, the user the image runs as, so a new named volume mounted at `/data` is writable without `user: root`. A bind mount keeps the ownership of the host directory.
-- **Table values in an older `3.x` dump are lost.** A dump written by `3.x` writes a table value held in a record, such as the result of `type::table('user')`, as a bare name, which an import reads as a field and drops without an error. A `4.0` dump writes `type::table('user')`, and so does a dump written by the latest `3.3` release, which also writes a file value with a key that the `f"bucket:/key"` form cannot hold as `type::file('bucket', '/key')`. Take the export before the upgrade with the latest `3.3` release, so that these values survive. After restoring a dump from an earlier release, set such fields again. The [upgrade check](#checking-a-datastore-before-the-upgrade) finds the records that hold a table value with `--scan-records`.
+- **Table values in a `3.x` dump are lost.** A dump written by `3.x` writes a table value held in a record, such as the result of `type::table('user')`, as a bare name, which an import reads as a field and drops without an error. A `4.0` dump writes `type::table('user')`. After restoring a `3.x` dump, set such fields again.
 - **An import checks `DEFINE FIELD` as a query does.** A field whose `DEFAULT` cannot be converted to its `TYPE`, such as `TYPE set<string> DEFAULT {}`, is refused on import as well, where it was stored and then failed every later write to the table. Correct the definition in the dump, or define the field again after the restore.
 - **Dumps from earlier releases can exceed the write-key limit.** Where `SURREAL_TRANSACTION_MAX_WRITE_KEYS` is set, a dump written by an earlier release can contain statements that write more keys than the limit allows, because the earlier exporter did not count the keys of `REFERENCE` fields. Take new exports after the upgrade, or raise the limit while restoring an older one.
 
@@ -170,26 +120,18 @@ Two more steps apply only while nodes of different releases share a datastore. F
 The `rocksdb` scheme is deprecated: the path is opened with SurrealKV, which migrates any existing data automatically. Use `surrealkv://` instead
 ```
 
-- **A RocksDB datastore** is converted to SurrealKV the first time `4.0` opens it, with a `surrealkv://` path or the old `rocksdb://` one. A datastore that ran with versioning enabled keeps its versions, and answers `VERSION` queries for them when it is opened with `?versioned=true`. The conversion takes time in proportion to the data and room on the disk for a second copy, as described in [Converting a RocksDB datastore](#converting-a-rocksdb-datastore) below. The conversion is one-way, so take a copy of the data directory as well as the export described above. The latest `3.3` release refuses to open a converted directory, with an error that says how to roll back, but an earlier `3.3` release finds no RocksDB data there and starts with an empty database. To leave the original directory as `3.3` wrote it, convert it into a new directory with `skv migrate` before the first start instead. See [Moving a RocksDB database to SurrealKV](/docs/manage/self-hosted/deployment-models#moving-a-rocksdb-database-to-surrealkv).
+- **A RocksDB datastore** is converted to SurrealKV the first time `4.0` opens it, with a `surrealkv://` path or the old `rocksdb://` one. A datastore that ran with versioning enabled keeps its versions, and answers `VERSION` queries for them when it is opened with `?versioned=true`. The conversion takes time in proportion to the data and room on the disk for a second copy, and the server does not answer `/health` until it finishes, as described in [Converting a RocksDB datastore](#converting-a-rocksdb-datastore) below. The conversion is one-way, so take a copy of the data directory as well as the export described above: a `3.3` build started on the converted directory finds no RocksDB data there and starts with an empty database. To leave the original directory as `3.3` wrote it, convert it into a new directory with `skv migrate` before the first start instead. See [Moving a RocksDB database to SurrealKV](/docs/manage/self-hosted/deployment-models#moving-a-rocksdb-database-to-surrealkv).
 - **RocksDB settings are no longer read.** This covers the `SURREAL_ROCKSDB_*` and `SURREAL_DS_ROCKSDB_*` environment variables and the RocksDB parameters of a `rocksdb://` path. A server started with one of them logs a warning that names the settings it ignores. SurrealKV has its own, smaller set, listed under [SurrealKV environment variables](/docs/reference/cli/db/environment-variables#surrealkv-environment-variables).
 - **The Rust SDK** no longer has the `kv-rocksdb` and `kv-indxdb` features or the `RocksDb` and `IndxDb` engines. Use the `kv-surrealkv` feature and the `SurrealKv` engine.
 - **In the browser**, the [Wasm engine](/docs/reference/javascript/engines/wasm) connects with `surrealkv://name`, which keeps the database in the browser's Origin Private File System and runs in a dedicated worker. Data in an IndexedDB database of the same name is copied in the first time the database is opened, and the IndexedDB database is only read.
 
 ### Converting a RocksDB datastore
 
-Before the conversion writes any file, the server checks that the file system has free space for about twice the RocksDB files: one for the SurrealKV copy, and one for the RocksDB files, which are kept in `_rocksdb_backup/`. If the space is not there, the server does not start, and the error gives the space needed and the amount missing. Nothing in the directory is changed:
+The conversion runs while the server starts, before it listens on its address, so `/health` and `surreal isready` get no answer until it finishes. Give a liveness probe enough time at the first start, because a probe that restarts the server part-way through makes the next start begin the conversion again. The conversion builds the SurrealKV copy beside the RocksDB files and then moves the RocksDB files into `_rocksdb_backup/`, so the disk needs room for both copies. The server logs a warning when the conversion starts:
 
-```text title="Error output"
-Refusing to convert the RocksDB datastore at /path/to/data to SurrealKV: the conversion needs 20.0 GiB free beside it (its 10.0 GiB of RocksDB files, and a SurrealKV copy about as large) but 12.5 GiB is available, 7.5 GiB short. Free that much space on this file system, or move the datastore, then start again. Nothing has been changed.
+```text title="Log output"
+The directory /path/to/data holds a RocksDB database, which is now being migrated to SurrealKV in place. This takes time proportional to its size, needs room for both copies, and the datastore is not ready until it finishes; the original files are kept in _rocksdb_backup/
 ```
-
-While the conversion runs, the server already listens on its address. `/health` and `/status` return `200`, so a liveness probe does not restart the server part-way through, and `/ready` returns `503` with the percentage complete and an estimate of the time left. Every other request returns `503`. A readiness probe on `/ready`, or `surreal db isready`, therefore waits for the conversion to finish. The server also logs the progress every 10 seconds:
-
-```text title="Sample output"
-Converting the RocksDB datastore to SurrealKV: staging, 2.5 GiB of 10.0 GiB converted (25%), 1m10s elapsed, about 3m30s remaining
-```
-
-See [While a RocksDB datastore converts](/docs/reference/rest-api/http-protocol#while-a-rocksdb-datastore-converts) for each response.
 
 If the server is stopped during the conversion, the next start either completes it or, if the SurrealKV copy was not yet in place, removes the partial copy and starts the conversion again from the beginning. No data is lost either way.
 
@@ -277,7 +219,7 @@ A `CREATE`, `UPSERT`, `INSERT` or `RELATE` on a table that does not exist yet de
 
 ### Integer sums and means
 
-`math::sum`, `math::product` and `math::spread` over integers raise an error when the result leaves the range of an `int`, such as `Failed to compute: "9223372036854775807 * 2", as the operation results in an arithmetic overflow.`, where they used to wrap around to a wrong value, and `math::mean` over integers adds them exactly before dividing, so its result no longer depends on the order of the values:
+`math::sum`, `math::product` and `math::spread` over integers raise an error when the result leaves the range of an `int`, such as `Cannot perform multiplication with '9223372036854775807' and '2'`, where they used to wrap around to a wrong value, and `math::mean` over integers adds them exactly before dividing, so its result no longer depends on the order of the values:
 
 ```surql
 math::mean([299, -4611686018427387904, 299, 4611686018427387904]);
@@ -290,36 +232,6 @@ math::mean([299, -4611686018427387904, 299, 4611686018427387904]);
 On `3.3` the same call returns `256f`. A [sequence](/docs/reference/query-language/statements/define/sequence) that reaches the end of the `int` range fails with `The sequence has no values left to issue: its values cannot exceed 9223372036854775806`, and the largest value it issues is `9223372036854775806`.
 
 In an aggregated view, `math::sum` over integers now stores an `int`, where it stored a `float`. `math::sum`, `math::min`, `math::max`, `math::mean`, `math::stddev` and `math::variance` skip a value that is not a number, including a missing one, as the view's `SELECT` does. On `3.3` such a write to the source table failed. A view defined on `3.3` keeps its `float` totals until it is defined again with `DEFINE TABLE OVERWRITE`.
-
-### Arithmetic overflow and division by zero
-
-An `int`, sized-integer or `decimal` operation whose result its type cannot hold now fails with an arithmetic error, and the message has changed. `9223372036854775807 + 1` fails with `Failed to compute: "9223372036854775807 + 1", as the operation results in an arithmetic overflow.`, where `3.3` reported `Cannot perform addition with '9223372036854775807' and '1'`. The same applies to `-`, `*`, `**`, negation and `math::pow`. A negative result of an unsigned type fails with a message of its own:
-
-```surql
-0u8 - 1u8;
-```
-
-```text title="Error output"
-Failed to compute: "0u8 - 1u8", as the operation results in a negative value.
-```
-
-Zero raised to a negative power is now a division by zero. `0 ** -1` fails with `Failed to compute: "0 ** -1", as the operation is a division by zero.`, where `3.3` reported `Cannot raise the value '0' with '-1'`. A division by zero with `/` still returns `NaN` or `Infinity`.
-
-In a grouped query, these errors fail the query, in the same way as the query without `GROUP`, while an operand of the wrong type, such as `1 + 'a'`, still reads as `NONE` in an aggregate. Over RPC the errors have the `Validation` kind. A client that matches the text of an overflow error must match the new text. See [Arithmetic errors](/docs/reference/query-language/language-primitives/operators#arithmetic-errors).
-
-### Negative decimals raised to a fractional power
-
-A negative `decimal` raised to an exponent that is not a whole number has a result only when the exponent, as a fraction in lowest terms, has an odd denominator, and the sign of the result follows the numerator. `(-32dec) ** 0.4dec` (`2/5`) is now about `4dec`, where `3.3` returned about `-4dec`. With an even denominator, as in `(-3dec) ** 1.5dec`, the power now fails with `Cannot raise the value '-3' with '1.5'`, where `3.3` returned a value with the sign of the base (about `-5.196dec`):
-
-```surql
-(-1dec) ** 0.4dec;
-//- 1dec
-
-(-1dec) ** 0.5dec;
-//- "Cannot raise the value '-1' with '0.5'"
-```
-
-On `3.3` both return `-1dec`.
 
 ### A blocking `DEFINE INDEX` commits before its build
 
@@ -397,9 +309,9 @@ An array range whose bound lies past the end of the array now stops at the last 
 
 A range that starts past the end returns `[]`, and a negative bound still returns `NONE`. The same applies to a range after a graph traversal, such as `->wrote->post[0..10]`.
 
-### `array::windows` with overlapping windows
+### Output size of `array::windows`
 
-`array::windows` now checks the output of overlapping windows against [`SURREAL_GENERATION_ALLOCATION_LIMIT`](/docs/reference/cli/db/environment-variables), because each element is copied into every window that holds it. A call such as `array::windows(array::repeat(1, 2000), 1000)` fails with `Output must not exceed 1048576 bytes` at the default limit, where `3.3` returned the windows. Windows that do not overlap are not checked. To reduce the output, pass a larger step as the new third argument, or raise the limit. See [`array::windows`](/docs/reference/query-language/functions/database-functions/array#arraywindows).
+`array::windows` now checks its output against [`SURREAL_GENERATION_ALLOCATION_LIMIT`](/docs/reference/cli/db/environment-variables), because each element is copied into every window that holds it. A call such as `array::windows(array::repeat(1, 2000), 1000)` fails with `Incorrect arguments for function array::windows(). Output must not exceed 1048576 bytes.` at the default limit, where `3.3` returned the windows. To allow a larger output, raise the limit. See [`array::windows`](/docs/reference/query-language/functions/database-functions/array#arraywindows).
 
 ### A clause repeated in `DEFINE TABLE`
 
@@ -425,7 +337,7 @@ A failed statement over the PostgreSQL wire protocol is now reported under the S
 
 Surrealism modules are called extensions from `4.0`. `DEFINE EXTENSION`, `ALTER EXTENSION`, `REMOVE EXTENSION` and `ext::` calls replace `MODULE` and `mod::`, and the command-line tooling moves from `surreal db module` to its own component of the Surreal CLI, [`surreal ext`](/docs/reference/cli/ext). The old SurrealQL spellings still work and log a deprecation warning, `surreal db module` and `surreal db extension` only print where the commands have moved, and `INFO FOR DB` lists definitions under `extensions` in place of `modules`. Every existing module needs two changes:
 
-- **Rebuild it.** `4.0` refuses a `.surli` file built for `3.3` or earlier with `Unsupported ABI version 2: this server runs ABI 4 to 5`. Database access moves to a `Transaction` parameter, `#[surrealism(writeable)]` is replaced by `Transaction<ReadWrite>`, the module key-value store is removed, and the project file becomes `package.toml`. See [Upgrading a module to 4.0](/docs/learn/extensions/guides/surrealism-attribute-reference#upgrading-a-module-to-40).
+- **Rebuild it.** `4.0` refuses a `.surli` file built for `3.3` or earlier with `Unsupported ABI version 2: this server runs ABI 4 to 5. Rebuild the extension with an SDK for one of them`. Database access moves to a `Transaction` parameter, `#[surrealism(writeable)]` is replaced by `Transaction<ReadWrite>`, the module key-value store is removed, and the project file becomes `package.toml`. See [Upgrading a module to 4.0](/docs/learn/extensions/guides/surrealism-attribute-reference#upgrading-a-module-to-40).
 - **Define it again.** A definition stored by `3.x` has no `DIGEST` or signer, so `4.0` refuses to call it until it is defined again with `SIGNER` or `UNSIGNED`. A new definition grants the extension no network access, function calls or writes unless its `CAPABILITIES` say so. See [`DEFINE EXTENSION`](/docs/reference/query-language/statements/define/extension).
 
 Each call now runs on a fresh instance, so an extension no longer keeps anything in memory between calls. A stored definition that calls `ext::` cannot be read by `3.x`, so rewrite those calls as `mod::` before returning a database to `3.x`.
@@ -438,23 +350,9 @@ A `GROUP BY` projection that is not a group key or an aggregate is no longer col
 
 An `UPSERT ... WHERE` with no record id decides whether to create a record from what the statement matched, not from what it returns. A matching statement with `RETURN NONE` no longer creates a second record. See the [`UPSERT` statement](/docs/reference/query-language/statements/upsert).
 
-### Count mocks and an `id` field `DEFAULT`
-
-A count mock such as `CREATE |person:3|` now takes the key of each record from the `DEFAULT` of the table's `id` field, and checks the field's `TYPE`, as `CREATE person` does. On `3.3` it ignored the `DEFAULT` and generated `rand::id()` keys. A fixed `DEFAULT` such as `'x'` now fails for a count above 1, because the second record already exists. `UPSERT |user:3|` against a `UNIQUE` index now updates the record that holds the value, as `UPSERT user` does, instead of failing. See [`CREATE`](/docs/reference/query-language/statements/create).
-
 ### Live notifications from client transactions
 
 A transaction that a client opens and commits itself, such as one started with an SDK's `begin()` method, now sends its live query notifications when it commits, and sends none if it is cancelled. The same change is in `3.3.5`. See [`LIVE SELECT`](/docs/reference/query-language/statements/live-select).
-
-### Client transactions never commit part of a statement
-
-A transaction that a client opens itself, with an SDK's `begin()` method or the RPC [`begin`](/docs/reference/rest-api/rpc-protocol#begin) method, no longer commits part of a statement:
-
-- A statement that fails after writing part of its change, such as a `CREATE` whose event throws an error, leaves the transaction unable to commit. The `commit` fails with `A statement failed after writing part of its change, so the transaction cannot commit`, and the transaction is discarded. On `3.3` the commit stored the part that the statement had written. A statement that fails before it writes anything, or one that cannot write, such as a `SELECT`, leaves the transaction able to commit as before.
-- A statement that may write and stops before it returns, such as one whose gRPC request deadline passes, refuses the commit in the same way.
-- A `commit` sent while another request on the same transaction is still running a statement that may write fails with `The transaction cannot commit while a statement that may write is still running on it, so it was cancelled`, and the transaction is rolled back once that statement ends. On `3.3` the commit stored whatever the statement had written by then.
-
-An application that cancels a transaction when one of its queries returns an error is unaffected. One that commits after an error needs to run the work again in a new transaction, and one that sends several queries on a transaction at the same time needs to wait for all of them to return before it commits. See [A statement that fails inside the transaction](/docs/reference/rest-api/rpc-protocol#a-statement-that-fails-inside-the-transaction).
 
 ### Value nesting limit
 
@@ -587,10 +485,6 @@ An index stores an array once for each of its elements, so the planner can only 
 
 An index defined or rebuilt on `4.0` stores a datetime as a number of seconds and nanoseconds, so its entries are in time order. An index built by `3.x` keeps storing datetimes as text, in which `2026-08-28T09:00:00Z` sorts after `2026-08-28T09:00:00.152Z`, and answers exactly as it did on `3.x`. A datetime inside a record id keeps the text order on every release. Define or rebuild a B-tree index that may hold a datetime only once every node in a cluster runs `4.0`, because an earlier node writes entries that the new format cannot find.
 
-### Function calls and computed index columns
-
-A condition written with a function call now uses an index on the matching method. `WHERE string::lowercase(kind) = 'banana'` uses an index on `kind.lowercase()`, and `kind.starts_with('app')` uses an index on `kind` as a prefix, where `3.3` scanned the table for both. `FIELDS string::lowercase(name)` in `DEFINE INDEX` is now accepted and stored as `name.lowercase()`. A column that reads the record and is neither a field path ending in method calls nor a matching function call now fails when the index is defined, with ``An index column must be a field path, optionally ending in method calls, such as `name.lowercase()`; to index `price * qty`, store it with DEFINE FIELD ... VALUE and index that field``. A column computed from a `COMPUTED` field is refused with `Computed fields cannot be indexed`, so an export that holds such an index does not import. See [Indexing a computed value](/docs/reference/query-language/statements/define/indexes#indexing-a-computed-value).
-
 ### Schema changes in a new datastore
 
 `4.0` gives each database a [compatibility level](/docs/reference/query-language/statements/define/database#compatibility-level). Every database in a datastore that `3.x` created stays at level 3, including the databases defined in it later, and behaves as it did on `3.x`, so nothing needs doing on upgrade. A new datastore starts its databases at level 4, where a `SCHEMAFULL` table that holds records refuses a field change its records might not satisfy unless the statement says what they become with [`MIGRATE EXISTING ROWS`](/docs/reference/query-language/statements/define/field#migrating-existing-records), and `REMOVE FIELD` deletes the field's stored values. A schema script that changes a field after records exist can therefore succeed in an upgraded production database and fail in a new test or development one. To use level 4 in an upgraded database, see [`ALTER DATABASE`](/docs/reference/query-language/statements/alter/database#compatibility).
@@ -675,11 +569,11 @@ A statement outside `BEGIN` and `COMMIT` that loses a write conflict is now run 
 
 ### `file::list` options on every backend
 
-The experimental `file::list` function now reads its options the same way on every bucket backend. On a `file:` bucket, a listing returns the files in every folder below the prefix, where `3.3` returned one folder level. On a `file:` bucket and a cloud object storage bucket, `prefix` matches the start of the key as a string, so `{ prefix: "/b" }` also returns `/b.txt` and `/bz.txt`, and a trailing `/` is kept. To list one folder level, add `delimiter: "/"`, which returns each folder below the prefix as `{ prefix: '/b/d/' }`. Each entry, and the result of `file::head`, also has an `etag` field. See [`file::list`](/docs/reference/query-language/functions/database-functions/file#filelist).
+The `file::list` function now reads its options the same way on every bucket backend. On a `file:` bucket, a listing returns the files in every folder below the prefix, where `3.3` returned one folder level. On a `file:` bucket and a cloud object storage bucket, `prefix` matches the start of the key as a string, so `{ prefix: "/b" }` also returns `/b.txt` and `/bz.txt`, and a trailing `/` is kept. To list one folder level, add `delimiter: "/"`, which returns each folder below the prefix as `{ prefix: '/b/d/' }`. Each entry, and the result of `file::head`, also has an `etag` field. See [`file::list`](/docs/reference/query-language/functions/database-functions/file#filelist).
 
 ### `DEFINE BUCKET` needs a `BACKEND`
 
-The experimental `DEFINE BUCKET` statement now needs a `BACKEND` clause. In `3.3`, a bucket without one used the global bucket under an automatic prefix. A `4.0` statement without it fails with `DEFINE BUCKET needs a BACKEND, such as BACKEND "global://" for the global bucket`, and `ALTER BUCKET ... DROP BACKEND` no longer parses. A bucket that `3.3` defined without a backend keeps its files, and `INFO FOR DB` shows its prefix as a `global://` path. Only a root user can give a bucket a `global://` backend. See [Global backend](/docs/reference/query-language/statements/define/bucket#global-backend).
+The `DEFINE BUCKET` statement now needs a `BACKEND` clause. In `3.3`, a bucket without one used the global bucket under an automatic prefix. A `4.0` statement without it fails with `DEFINE BUCKET needs a BACKEND, such as BACKEND "global://" for the global bucket`, and `ALTER BUCKET ... DROP BACKEND` no longer parses. A bucket that `3.3` defined without a backend keeps its files, and `INFO FOR DB` shows its prefix as a `global://` path. Only a root user can give a bucket a `global://` backend. See [Global backend](/docs/reference/query-language/statements/define/bucket#global-backend).
 
 ## Clients and SDKs
 
@@ -697,16 +591,16 @@ Some SDK releases made before `4.0` send these tags: the Python SDK sends tag `0
 
 ### SDK version checks
 
-An SDK checks the server's version when it connects. Releases of the `3.x` Rust SDK before the latest `3.3` release, and the SDKs built on them, refuse a `4.0` server with ``server version `4.0.0` does not match the range supported by the client``, and so do JavaScript SDK releases before `2.1`. The latest `3.3` release of the Rust SDK accepts a `4.x` server, including a pre-release such as `4.0.0-nightly`, and still refuses a `5.x` one. Upgrade the SDK before the server. The `4.0` SDKs connect to `3.x` servers as well.
+An SDK checks the server's version when it connects. The Rust SDK of `3.x`, and the SDKs built on it, refuse a `4.0` server with ``server version `4.0.0` does not match the range supported by the client``, and so do JavaScript SDK releases before `2.1`. Upgrade the SDK before the server. The `4.0` SDKs connect to `3.x` servers as well.
 
 ### Sized numbers over the original CBOR protocol
 
 `4.0` adds [sized number types](/docs/reference/query-language/language-primitives/data-types/numbers#sized-numbers) such as `u8`, `i32` and `f32`. A client that uses the original CBOR protocol (`application/cbor`, or the `cbor` WebSocket subprotocol), which includes every `3.x` SDK, receives a sized number as an ordinary integer or float, and a `u64` above `9223372036854775807` as a decimal. A request on that protocol that holds one of the sized number tags `180` to `188` is refused. A client that has to keep the size uses [CBOR v2](/docs/reference/rest-api/cbor-protocol#sized-numbers-cbor-v2). Data written before the upgrade holds no sized numbers, so this matters only once a schema or a query uses the new types.
 
-
 ### New types over the original CBOR protocol
 
 The new `date`, `time`, `timestamp`, `interval` and `bigdecimal` types have tags only in CBOR v2. A client that uses the original CBOR protocol receives a `date` or a `timestamp` as a datetime, a `time` as a duration, an `interval` as text, and a `bigdecimal` as a decimal or as text. CBOR v2 can also send a regex, which the original protocol still cannot. See [Dates, times, big decimals and regexes](/docs/reference/rest-api/cbor-protocol#dates-times-big-decimals-and-regexes-cbor-v2).
+
 ### HTTP RPC sessions are stored in the datastore
 
 A session that a client attaches over HTTP RPC is always stored in the datastore, so it survives a restart and can be used on any node of a cluster. A session expires once it has not been used for between one and one and a half times `--durable-session-ttl` (24 hours by default), after which a request on it fails with `Session not found`. A client that keeps a session idle for longer than that attaches again. `--durable-sessions` and `SURREAL_DURABLE_SESSIONS` have no effect and log a deprecation warning, and `--durable-session-gc-interval` defaults to one hour.
@@ -726,6 +620,7 @@ A session that a client attaches over HTTP RPC is always stored in the datastore
 - A network target that starts with `*.`, such as `--allow-net "*.example.com"`, now matches every subdomain of that domain. On `3.3` it was read as an exact host name and matched nothing, so check such entries in `--allow-net` and `--deny-net`, and in the network capabilities of extensions: an allow rule that had no effect now allows, and a deny rule now denies. See [Network](/docs/learn/security/authorization/capabilities#network).
 - `SURREAL_SURREALISM_SILO_ENDPOINT` is no longer read. `silo::` packages always come from `https://silo.surrealdb.com`, and an archive served from anywhere else is defined from a bucket.
 - `gql` is no longer an experimental target. `3.3` accepted `--allow-experimental gql` and `SURREAL_CAPS_ALLOW_EXPERIMENTAL=gql` and ignored them, because GQL is on by default. `4.0` refuses the name with `invalid experimental target name`, and the server does not start, so remove `gql` from the list. In the Rust SDK, `ExperimentalFeature::Gql` is removed. See [Experimental capabilities](/docs/reference/cli/db/commands/start#experimental-capabilities).
+- `files` is no longer an experimental target, because buckets and file values are stable. Buckets, file values such as `f"bucket:/key"`, `DEFINE BUCKET`, `ALTER BUCKET`, the `file::*` functions and the bucket HTTP routes work without a flag. `4.0` refuses `--allow-experimental files` and `SURREAL_CAPS_ALLOW_EXPERIMENTAL=files` with `invalid experimental target name`, and the server does not start, so remove `files` from the list. In the Rust SDK, `ExperimentalFeature::Files` is removed. See [Experimental capabilities](/docs/reference/cli/db/commands/start#experimental-capabilities).
 - `surreal sql` exits with status `1` when its input is piped and a statement fails or a line does not parse, where it always exited with `0`. A script that pipes queries into `surreal sql` and continues after a failure now stops at that point if it checks the exit status. An interactive session is unchanged.
 - `surreal start --import-file` runs the file in the default namespace and database, so a file without `USE` statements is imported, where `3.3` skipped it. A file that does not parse fails startup at once, where `3.3` retried it for the length of the startup timeout.
 - `surreal upgrade` no longer downloads anything, because the Surreal CLI installs and upgrades the database. It prints how to get the Surreal CLI and exits with an error. `surreal v2` is removed, and `--online-version-check` and `--no-banner` are accepted and ignored. `surreal --version` prints the version followed by the operating system and architecture, without the `SurrealDB command-line interface and server` prefix, so check scripts that match its output.
