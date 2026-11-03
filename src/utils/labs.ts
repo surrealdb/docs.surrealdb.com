@@ -11,6 +11,7 @@ export const labFormats = [
     "Article",
     "Documentation",
     "Interactive demo",
+    "Presentation",
 ] as const;
 
 /**
