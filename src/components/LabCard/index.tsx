@@ -19,6 +19,7 @@ import {
     pictoFileSolid,
     pictoInboxSolid,
     pictoPlaySolid,
+    pictoPresentationSolid,
     pictoSurrealDBSolid,
     Spacer,
 } from "@surrealdb/ui";
@@ -64,6 +65,7 @@ const FORMAT_IMAGES: Record<(typeof labFormats)[number], string> = {
     Article: pictoInboxSolid,
     Documentation: pictoFileSolid,
     "Interactive demo": pictoSurrealDBSolid,
+    Presentation: pictoPresentationSolid,
 };
 
 function getAuthorAvatarUrl(slug: string): string | undefined {
