@@ -12,7 +12,7 @@ import {
 } from "@mantine/core";
 import { useClipboard, useDisclosure } from "@mantine/hooks";
 import { Icon, iconSearch, iconSidebar } from "@surrealdb/ui";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useData } from "vike-react/useData";
 import { FilterSidebar } from "~/components/FilterSidebar";
 import { LabCard } from "~/components/LabCard";
@@ -89,10 +89,29 @@ export default function Page() {
     const [selecting, setSelecting] = useState(false);
     const clipboard = useClipboard();
 
-    const toggleSelected = (slug: string) =>
-        setSelected((prev) =>
-            prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug],
-        );
+    // Stable, so memoised cards skip re-rendering when only the selection changes elsewhere.
+    const toggleSelected = useCallback(
+        (slug: string) =>
+            setSelected((prev) =>
+                prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug],
+            ),
+        [],
+    );
+
+    // The input updates at once; the grid re-filters at low priority, so typing
+    // never waits on a few hundred cards rendering.
+    const deferredSearch = useDeferredValue(search);
+    const selectedSet = useMemo(() => new Set(selected), [selected]);
+    const searchText = useMemo(
+        () =>
+            new Map(
+                items.map((item) => [
+                    item.slug,
+                    `${item.title}\n${item.description ?? ""}`.toLowerCase(),
+                ]),
+            ),
+        [items],
+    );
 
     useEffect(() => {
         const all = [...stageFilter, ...formatFilter, ...languageFilter, ...topicFilter].map(
@@ -117,21 +136,17 @@ export default function Page() {
     }, [stageFilter, formatFilter, languageFilter, topicFilter, selected]);
 
     const filtered = useMemo(() => {
+        const q = deferredSearch.trim().toLowerCase();
+
         return items.filter((item) => {
             // A shared selection narrows the list to the picked labs, except
             // while picking, when every lab has to stay reachable.
-            if (!selecting && selected.length > 0 && !selected.includes(item.slug)) {
+            if (!selecting && selectedSet.size > 0 && !selectedSet.has(item.slug)) {
                 return false;
             }
 
-            if (search) {
-                const q = search.toLowerCase();
-                const inTitle = item.title.toLowerCase().includes(q);
-                const desc = item.description?.toLowerCase() ?? "";
-                const inDesc = desc.length > 0 && desc.includes(q);
-                if (!inTitle && !inDesc) {
-                    return false;
-                }
+            if (q && !searchText.get(item.slug)?.includes(q)) {
+                return false;
             }
 
             if (stageFilter.length > 0 && !stageFilter.includes(item.stage)) {
@@ -159,12 +174,13 @@ export default function Page() {
         });
     }, [
         items,
-        search,
+        searchText,
+        deferredSearch,
         stageFilter,
         formatFilter,
         languageFilter,
         topicFilter,
-        selected,
+        selectedSet,
         selecting,
     ]);
 
@@ -288,10 +304,8 @@ export default function Page() {
                                     <LabCard
                                         key={item.slug}
                                         item={item}
-                                        selected={selected.includes(item.slug)}
-                                        onSelect={
-                                            selecting ? () => toggleSelected(item.slug) : undefined
-                                        }
+                                        selected={selectedSet.has(item.slug)}
+                                        onSelect={selecting ? toggleSelected : undefined}
                                     />
                                 ))}
                             </SimpleGrid>

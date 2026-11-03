@@ -1,12 +1,12 @@
 ---
 position: 23
 title: RETURN
-description: "The RETURN statement can be used to return an implicit value or the result of a query, and to set the return value for a transaction, block or function."
+description: "The RETURN statement returns a value or the result of a query, and ends the statement, function, closure or per-record clause that it stands in."
 ---
 
 # `RETURN` statement
 
-The `RETURN` statement can be used to return an implicit value or the result of a query, and to set the return value for a transaction, block, or function.
+The `RETURN` statement returns a value or the result of a query. It also ends the context it stands in, such as a function body, so the code after it there does not run. This page covers the syntax, which constructs a `RETURN` ends, and how a `RETURN` behaves in a `LET`, in a clause and in a transaction.
 
 ## Statement syntax
 
@@ -96,9 +96,226 @@ SELECT * FROM person;
 (CREATE person).id;
 ```
 
-## Transaction return value
+## Ending a function or closure
 
-`RETURN` sets the value that a block or a function returns. Directly inside a transaction started with `BEGIN`, a `RETURN` is a statement like any other: its value is one of the results of the query, and the statements after it still run. This is the case from SurrealDB 4.0. Before 4.0, a `RETURN` ended the transaction early, and the statements after it did not run.
+A `RETURN` sets the value of a function or closure body and ends the body, so the statements after it do not run.
+
+```surql title="Function return value"
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[person:e71cnhnwdb6yuz8is8kq]"
+skip-record-id-key = true
+
+[[test.results]]
+value = "[{ firstname: 'Thanos', id: person:e71cnhnwdb6yuz8is8kq, lastname: 'Johnson' }]"
+skip-record-id-key = true
+
+*/
+
+DEFINE FUNCTION fn::person::create($firstname: string, $lastname: string) {
+	LET $person = CREATE person CONTENT {
+		firstname: $firstname,
+		lastname: $lastname,
+	};
+
+	-- The RETURN statement will set the return value of the custom function, and further queries will not be executed.
+	RETURN $person.id;
+
+    -- This query will never be executed
+    CREATE person SET firstname = "Stephen", lastname = "Strange";
+};
+
+fn::person::create("Thanos", "Johnson");
+SELECT * FROM person;
+```
+
+```surql title="Functions"
+DEFINE FUNCTION fn::round::up($num: number) -> number {
+    IF $num % 2 == 0 {
+        -- Ends the function
+        RETURN $num;
+    };
+
+    -- Only runs when the RETURN inside the IF did not run
+    RETURN $num + 1;
+};
+```
+
+A block or an `IF` inside the body does not stop a `RETURN`. The `RETURN` in the inner block below ends the whole function, so the second `RETURN` never runs:
+
+```surql
+DEFINE FUNCTION fn::test() -> int {
+    {
+        RETURN 1;
+    };
+    RETURN 2;
+};
+
+RETURN fn::test();
+```
+
+```surql title="Output"
+1
+```
+
+The same applies to a block that a `LET` binds inside a function. When `$x` is greater than `2`, the `RETURN` ends the function with `'big'`, and the `LET` binds nothing:
+
+```surql
+DEFINE FUNCTION fn::g($x: int) -> string {
+    LET $y = {
+        IF $x > 2 { RETURN 'big' };
+        'small'
+    };
+    RETURN 'after ' + $y;
+};
+
+RETURN [fn::g(1), fn::g(3)];
+```
+
+```surql title="Output"
+['after small', 'big']
+```
+
+A closure body works the same way:
+
+```surql
+[1, 2].map(|$x| {
+    IF $x > 1 { RETURN 'big' };
+    'small'
+});
+```
+
+```surql title="Output"
+['small', 'big']
+```
+
+## Which context a `RETURN` ends
+
+A `RETURN` sets the value of the context it stands in and ends that context. The following constructs are contexts:
+
+| Context | What the `RETURN` ends |
+| --- | --- |
+| A statement of a query or of a transaction | The statement, which gives the value as its result |
+| A function or closure body | The call, which returns the value |
+| A clause that a statement evaluates once for each record or value: `WHERE`, projections, `ORDER BY`, `GROUP BY` and `SPLIT` keys, `SET`, `CONTENT` and `MERGE` values, and the `RETURN` clause of a write | The evaluation for that one record or value |
+| Stored code: a field's `VALUE`, `DEFAULT` and `ASSERT` clauses, a permission, and an event | The evaluation for that one record |
+
+Every other construct passes a `RETURN` outwards to the nearest context around it. These include blocks, `IF` and `FOR`, parenthesised statements, operands, array and object elements, function arguments, the value of a `LET`, the `FROM` source, `LIMIT`, `START` and `TIMEOUT`, the target of a write, and the records that an `INSERT` writes.
+
+At the top level of a query, the nearest context is the statement itself. A `RETURN` inside an operand or a block therefore gives the result of the whole statement, and the expression around it does not finish:
+
+```surql
+RETURN 1 + (RETURN 2);
+//- 2
+
+RETURN [1, (RETURN 2), 3];
+//- 2
+
+RETURN { IF true { RETURN 5 }; 6 } + 1;
+//- 5
+```
+
+A `RETURN` only ends its own statement. The statements after it in the query still run, and their results are not changed.
+
+## `RETURN` in the value of a `LET`
+
+The value of a `LET` is not a context, so a `RETURN` inside it ends the `LET` statement. The statement gives the value of the `RETURN` as its result, and the `LET` binds nothing:
+
+```surql
+LET $x = { IF true { RETURN 1 }; 2 };
+//- 1
+
+RETURN $x;
+//- NONE
+```
+
+When the `RETURN` does not run, the `LET` binds the last value of the block as usual:
+
+```surql
+LET $x = { IF false { RETURN 1 }; 2 };
+//- NONE
+
+RETURN $x;
+//- 2
+```
+
+To choose the value that a `LET` binds, write an `IF` whose branches are values, with no `RETURN` in them:
+
+```surql
+LET $count = 150;
+LET $size = IF $count > 100 { 'large' } ELSE { 'small' };
+```
+
+Before SurrealDB 4.0, a `LET` bound the value of a `RETURN` inside its value.
+
+## `RETURN` in a clause
+
+A clause that a statement evaluates once for each record is a context of its own. A `RETURN` there gives the value for that record only, and the statement continues with the next record. In a `WHERE` clause, the `RETURN` decides whether the record matches:
+
+```surql
+SELECT VALUE id FROM [
+    { id: 1, a: 0 },
+    { id: 2, a: 1 },
+    { id: 3, a: 1.5 },
+    { id: 4, a: 2 },
+    { id: 5, a: 3 }
+] WHERE {
+    IF a > 2 { RETURN true };
+    IF a < 1 { RETURN true };
+    false
+};
+```
+
+```surql title="Output"
+[1, 5]
+```
+
+In a projection, the `RETURN` gives the value for the record:
+
+```surql
+SELECT VALUE {
+    IF a > 2 { RETURN 'big' };
+    'small'
+} FROM [{ a: 0 }, { a: 3 }];
+```
+
+```surql title="Output"
+['small', 'big']
+```
+
+In a `SET` clause, the `RETURN` gives the value of the field. The `+ 1` after it does not run, so `x` is `1`:
+
+```surql
+CREATE ts:1 SET x = (RETURN 1) + 1, y = 5;
+```
+
+```surql title="Output"
+[{ id: ts:1, x: 1, y: 5 }]
+```
+
+A clause that a statement evaluates only once, such as `FROM`, `LIMIT` or `START`, is not a context, and neither is the target of a write. A `RETURN` there ends the whole statement before it reads or writes any record. The `DELETE` below gives `person:5` as its result and deletes nothing:
+
+```surql
+CREATE person:1, person:5 RETURN NONE;
+//- []
+
+DELETE (RETURN person:5);
+//- person:5
+
+SELECT VALUE id FROM person:5;
+//- [person:5]
+
+SELECT * FROM (RETURN 7);
+//- 7
+```
+
+## `RETURN` inside a transaction
+
+Each statement between `BEGIN` and `COMMIT` is a context of its own. A `RETURN` placed directly inside a transaction therefore ends only its own statement: its value is one of the results of the query, and the statements after it still run. This is the case from SurrealDB 4.0. Before 4.0, a `RETURN` ended the transaction early, and the statements after it did not run.
 
 ```surql title="Transaction return value"
 /**[test]
@@ -144,65 +361,20 @@ RETURN $person.id;
 COMMIT TRANSACTION;
 ```
 
-## Return breaks execution
-
-`RETURN` ends the innermost function or block expression that it is in, so the statements after it there do not run. A `RETURN` inside an `IF` ends the function or block that holds the `IF`. A block written as a statement of its own inside a function body, such as `{ RETURN 1; };`, is a block expression, so a `RETURN` inside it ends only that block and the function carries on.
-
-```surql title="Function return value"
-/**[test]
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "[person:e71cnhnwdb6yuz8is8kq]"
-skip-record-id-key = true
-
-[[test.results]]
-value = "[{ firstname: 'Thanos', id: person:e71cnhnwdb6yuz8is8kq, lastname: 'Johnson' }]"
-skip-record-id-key = true
-
-*/
-
-DEFINE FUNCTION fn::person::create($firstname: string, $lastname: string) {
-	LET $person = CREATE person CONTENT {
-		firstname: $firstname,
-		lastname: $lastname,
-	};
-
-	-- The RETURN statement will set the return value of the custom function, and further queries will not be executed.
-	RETURN $person.id;
-
-    -- This query will never be executed
-    CREATE person SET firstname = "Stephen", lastname = "Strange";
-};
-
-fn::person::create("Thanos", "Johnson");
-SELECT * FROM person;
-```
-
-```surql title="Functions"
-DEFINE FUNCTION fn::round::up($num: number) -> number {
-    IF $num % 2 == 0 {
-        RETURN $num; -- Breaks execution for the function
-    };
-
-    -- This is only executed if the RETURN inside the IF statement did not break execution
-    RETURN $num + 1;
-};
-```
-
-A `RETURN` placed directly inside a transaction does not end the transaction. From SurrealDB 4.0, each of the statements below runs, and the two `RETURN` values are among the results. Before 4.0, the transaction ended at `RETURN 1`.
+Each of the statements below runs, and the two `RETURN` values are among the results:
 
 ```surql title="Transactions"
 BEGIN;
-RETURN 1; -- Is executed
-CREATE a; -- Is executed
-RETURN 2; -- Is executed
+-- Runs
+RETURN 1;
+-- Runs
+CREATE a;
+-- Runs
+RETURN 2;
 COMMIT;
 ```
 
-To end part of a transaction early, put those statements in a block. The `RETURN` ends the block, and the transaction carries on after it:
+A `RETURN` inside an `IF`, a block or the value of a `LET` that stands directly in the transaction also ends only that statement. To end part of a transaction early, put those statements in a block. The `RETURN` ends the block's statement, and the transaction carries on after it:
 
 ```surql title="Ending a block inside a transaction"
 BEGIN;
@@ -218,18 +390,4 @@ CREATE c:4;
 COMMIT;
 ```
 
-Lastly, outside a transaction or function, `RETURN` only ends the statement it is executed in. It does **not** prevent the top-level statements after it from being executed, nor does it adjust their output.
-
-```surql title="Statements"
-LET $id = 123;
-LET $id = {
-    IF $id {
-        RETURN type::record('table', $id);
-    };
-
-    RETURN table:rand();
-};
-
--- This still executes. The `RETURN` statement only broke until the block in the variable assignment.
-$id;
-```
+To cancel the whole transaction instead, use [`THROW`](/docs/reference/query-language/statements/throw).

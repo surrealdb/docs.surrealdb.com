@@ -18,7 +18,11 @@ import { labFormats, labLanguages, labStages, labTopics } from "./labs";
 export const pageSchema = strictObject({
     title: string().optional(),
     description: string().optional(),
-    position: number().optional(),
+    /**
+     * Sort order among siblings. A whole number: to fit a page between two
+     * others, move the later siblings up by one rather than using a fraction.
+     */
+    position: number().int().optional(),
     /**
      * How early this page is offered a description in `llms.txt`.
      *

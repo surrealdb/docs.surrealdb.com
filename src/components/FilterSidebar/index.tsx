@@ -1,4 +1,5 @@
 import { Box, type BoxProps, Checkbox, Stack } from "@mantine/core";
+import { memo } from "react";
 import { SIDEBAR_INSET, SidebarPane, SidebarSectionHeading } from "~/components/Layout/sidebar";
 import { labFormats, labLanguages, labStages, labTopics } from "~/utils/labs";
 import classes from "./style.module.scss";
@@ -52,7 +53,8 @@ function FilterSection({ title, value, onChange, options }: FilterSectionProps) 
  * tree and borrows its pane, insets and section headings, so the two rails
  * read identically.
  */
-export function FilterSidebar({
+// Memoised: its props are state arrays and setters, which stay the same while the search box changes.
+export const FilterSidebar = memo(function FilterSidebar({
     stageFilter,
     setStageFilter,
     formatFilter,
@@ -98,4 +100,4 @@ export function FilterSidebar({
             </Stack>
         </SidebarPane>
     );
-}
+});

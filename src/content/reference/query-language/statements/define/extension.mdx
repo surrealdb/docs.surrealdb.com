@@ -1,7 +1,7 @@
 ---
 position: 12
 title: DEFINE EXTENSION
-description: "The DEFINE EXTENSION statement loads a Surrealism extension into a database from a bucket or Silo, with its DIGEST, SIGNER or UNSIGNED, CAPABILITIES and PERMISSIONS, so that its functions can be called as ext::name::function()."
+description: "The DEFINE EXTENSION statement loads a Surrealism extension into a database from a bucket or Silo, with its DIGEST, SIGNER or UNSIGNED, CAPABILITIES, BINDINGS and PERMISSIONS, so that its functions can be called as ext::name::function()."
 ---
 
 # `DEFINE EXTENSION` statement
@@ -28,6 +28,7 @@ DEFINE EXTENSION [ OVERWRITE | IF NOT EXISTS ] ext::@name
 	[ DIGEST @string ]
 	[ SIGNER @object | UNSIGNED ]
 	[ CAPABILITIES @object ]
+	[ BINDINGS @object ]
 	[ PERMISSIONS [ NONE | FULL | WHERE @condition ] ]
 	[ COMMENT @string ]
 ```
@@ -54,7 +55,7 @@ DEFINE MODULE [ OVERWRITE | IF NOT EXISTS ] mod::@name AS @file
   </TabItem>
 </Tabs>
 
-Either `SIGNER` or `UNSIGNED` is required. A statement with neither fails with `DEFINE EXTENSION needs SIGNER {…} or UNSIGNED`.
+The clauses after `FROM` can appear in any order, and each one at most once. Either `SIGNER` or `UNSIGNED` is required. A statement with neither fails with `DEFINE EXTENSION needs SIGNER {…} or UNSIGNED`.
 
 ## Example usage
 
@@ -164,6 +165,85 @@ A capability granted here never exceeds the server's own: an extension granted `
 
 The `net` grant also covers HTTP requests that an extension makes through the `wasi:http` interface, for example with a crate such as `waki`. Each request is checked against the grant: the host name must be allowed, the addresses it resolves to are filtered, and the connection goes to an address the grant admits. A name that resolves to a loopback or private address is refused unless the grant names that IP address. An extension granted no `net` can make no request.
 
+## `BINDINGS`
+
+`BINDINGS` gives an extension values that it reads by name, such as an API key or a setting that differs from one database to another. The extension declares each name and its SurrealQL type under `[bindings]` in its `package.toml`, and the definition gives each name an expression:
+
+```toml title="package.toml"
+[bindings]
+api_key = { type = "string", description = "Mailgun API key", sensitive = true }
+author = "option<string>"
+```
+
+```surql
+DEFINE EXTENSION ext::mailer FROM f"extensions:/acme-mailer-1.2.0.surli" UNSIGNED
+	BINDINGS { api_key: (SELECT VALUE key FROM ONLY vault:mailgun), author: 'noreply@acme.com' };
+```
+
+A name in `[bindings]` takes the type alone, as `author` does, or a table with a `type`, a `description` that [`surreal ext install`](/docs/reference/cli/ext#ext-install) shows when it asks for the value, and `sensitive = true` for a value that should not be written into the definition as a literal. The extension reads a value with `surrealism::binding("api_key")`. See [Reading bindings](/docs/learn/extensions/guides/surrealism-attribute-reference#reading-bindings).
+
+### How a binding is evaluated
+
+The database evaluates a binding's expression the first time the extension reads that name during a call, and keeps the value for the rest of the call. An expression that the extension never reads is never evaluated. The evaluation has these rules:
+
+- **Permissions are off.** A binding can read a record that the caller cannot read, such as a key in a table defined with `PERMISSIONS NONE`. This is how a definition gives an extension a value without giving it to every user who calls the extension.
+- **The caller's level is capped at the definer's.** The definition records the level of the user who defined it. A binding runs at the caller's level or the definer's level, whichever is lower, so a binding in a definition made by a database owner cannot read the namespace, even when a root user calls the extension. A caller is never raised above its own level.
+- **The caller's parameters are not in scope.** A `LET` parameter or a request parameter of the caller is not visible to the expression, so a caller cannot change what the binding reads. `$auth`, `$session`, `$token` and `$access` are available.
+- **The value is converted to the declared type.** A value that cannot be converted fails the read.
+
+An error from a binding names the binding and the extension, for example ``The binding `api_key` of extension `mailer` failed to evaluate``. It never includes the value, or the error of the expression, because either could hold data that was read with permissions off. The extension receives this error and decides how to report it.
+
+### What `DEFINE EXTENSION` checks
+
+When the database reads the archive to define the extension, it compares `BINDINGS` with the archive's `[bindings]`. The statement is refused when `BINDINGS` gives a name that the package does not declare, or leaves out a name whose type is not `option<...>`:
+
+```surql title="Error output"
+"`BINDINGS` gives `other`, which the extension's package.toml does not declare under [bindings]"
+```
+
+```surql title="Error output"
+"The extension requires the binding `api_key` of kind `string`, which `BINDINGS` does not give"
+```
+
+A name of an `option<...>` type that the definition leaves out reads as `NONE`. A definition that gives a `DIGEST` while its archive cannot be read yet, as when an import restores the definition before the archive is in its bucket, is stored without this check. A required name that such a definition leaves out fails when the extension reads it.
+
+An archive whose extension reads no bindings is built for an earlier extension ABI, which takes no `BINDINGS`. Rebuild it with a current `surrealism` crate before you give it bindings:
+
+```surql title="Error output"
+"The extension is built for ABI 4, which cannot read bindings: rebuild it with a newer SDK to give it `BINDINGS`"
+```
+
+`BINDINGS` takes one object literal. A second `BINDINGS` clause, a name given twice, and a value that is not an object are parse errors.
+
+### Expressions that are refused
+
+Because every caller's call can evaluate a binding with permissions off, a binding must not have effects. `DEFINE EXTENSION` refuses an expression that writes data, writes to an external system such as `http::post`, advances state outside the transaction such as `sequence::nextval()`, blocks such as `sleep()`, or calls code whose effects the database cannot see, such as another extension:
+
+```surql
+DEFINE EXTENSION ext::mailer FROM f"extensions:/acme-mailer-1.2.0.surli" UNSIGNED
+	BINDINGS { api_key: type::string((CREATE ONLY leak:1).id) };
+```
+
+```surql title="Error output"
+"The BINDINGS clause must not have effects: `CREATE` writes data"
+```
+
+A read of an external system, such as `http::get`, is allowed. See [Clauses that must not have effects](/docs/reference/query-language/statements/define/field#clauses-that-must-not-have-effects) for the rules that schema clauses share.
+
+### Bindings in `INFO` and exports
+
+`INFO FOR DB` and an export show each binding as its expression, never as its value. `INFO FOR DB STRUCTURE` lists them under `bindings`, with each expression as a string:
+
+```surql
+(INFO FOR DB STRUCTURE).extensions[0].bindings;
+```
+
+```surql title="Output"
+{ api_key: '(SELECT VALUE key FROM ONLY vault:mailgun)', author: "'noreply@acme.com'" }
+```
+
+A value written as a literal, such as `'noreply@acme.com'`, is therefore visible to every user who can run `INFO FOR DB` and in every export. Bind a secret as an expression that reads it from a protected table, not as a literal. `surreal ext install` prints a warning when a name marked `sensitive` is given a literal.
+
 ## Silo packages
 
 An extension can also be loaded from a package published to Silo, SurrealDB's extension registry. The package is fetched over HTTPS from `https://silo.surrealdb.com` and cached, so it does not need to be built locally or placed in a bucket. The server needs network access to that address. There is one Silo registry, so an archive served from anywhere else is defined from a bucket instead. Before SurrealDB 4.0, `SURREAL_SURREALISM_SILO_ENDPOINT` could point `silo::` at another address.
@@ -176,14 +256,14 @@ From SurrealDB 4.0, a Silo package needs a name like any other extension, and a 
 
 ## Changing and removing an extension
 
-[`ALTER EXTENSION`](/docs/reference/query-language/statements/alter/overview) changes only the `COMMENT` and `PERMISSIONS` of a definition. To load a new version of the code, use `DEFINE EXTENSION OVERWRITE`, or [`surreal ext upgrade`](/docs/reference/cli/ext#ext-upgrade), which compares the new archive's signer and capabilities with the installed ones before it redefines the extension.
+[`ALTER EXTENSION`](/docs/reference/query-language/statements/alter/overview) changes only the `COMMENT` and `PERMISSIONS` of a definition. To load a new version of the code, or to change `CAPABILITIES` or `BINDINGS`, use `DEFINE EXTENSION OVERWRITE`, or [`surreal ext upgrade`](/docs/reference/cli/ext#ext-upgrade), which compares the new archive's signer and capabilities with the installed ones before it redefines the extension. `surreal ext upgrade --bind` changes a binding and keeps the others.
 
 ```surql
 ALTER EXTENSION ext::demo COMMENT "Greeting helpers";
 REMOVE EXTENSION ext::demo;
 ```
 
-`INFO FOR DB` lists the database's extensions under `extensions`, with the `DIGEST` and `CAPABILITIES` that the definition stores.
+`INFO FOR DB` lists the database's extensions under `extensions`, with the `DIGEST`, `CAPABILITIES` and `BINDINGS` that the definition stores.
 
 ## Defining a module before 4.0
 
