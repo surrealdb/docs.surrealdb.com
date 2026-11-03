@@ -140,7 +140,7 @@ export function Footer() {
                         lts="-0.01em"
                         maw={760}
                     >
-                        The context and memory layer for AI agents
+                        The database and memory for every agent
                     </Text>
                     <Text
                         c="slate"
