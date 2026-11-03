@@ -20,6 +20,7 @@ import type { LabSchema } from "./schema";
  * The empty-prefix `index` entry is the root catch-all and must remain last.
  */
 export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
+    { prefix: "libraries", id: "libraries" },
     { prefix: "build/ai-agents", id: "build/ai-agents" },
     { prefix: "build/embedding", id: "build/embedding" },
     { prefix: "build/integrations", id: "build/integrations" },

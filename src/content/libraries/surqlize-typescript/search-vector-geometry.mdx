@@ -1,0 +1,265 @@
+---
+position: 10
+title: Search, vector, and geometry
+description: Full-text matching with search() and numbered match references, vector similarity and distance functions, nearest-neighbour search with knn() and distanceKnn(), geo.distance on points, duration functions, and ordering by an expression in Surqlize.
+---
+
+# Search, vector, and geometry
+
+Surqlize has typed helpers for full-text matching, vector comparison and nearest-neighbour search, geographic points, and durations. They build on SurrealDB's functions and indexes. Create the indexes with `DEFINE ANALYZER` and `DEFINE INDEX` statements, then query them through the ORM.
+
+## Full-text matching
+
+The `.search()` method on a string field renders the `@@` match operator. SurrealDB uses a full-text index on that field to resolve it. See [full-text search](/docs/learn/data-models/full-text-search/overview) for the analyzers and indexes behind it.
+
+```surql title="Define an analyzer and full-text indexes"
+DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+DEFINE INDEX title_idx ON article FIELDS title FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
+DEFINE INDEX body_idx ON article FIELDS body FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
+```
+
+```ts title="Match against an indexed field"
+import { orm, t, table } from "surqlize";
+
+const article = table("article", {
+    title: t.string(),
+    body: t.string(),
+});
+
+const db = orm(surreal, article);
+
+const hits = await db
+    .select("article")
+    .where((article) => article.body.search("database"))
+    .return((article) => ({ title: article.title }));
+```
+
+```surql title="Generated SurrealQL"
+(SELECT VALUE { title: $this.title } FROM $_v0 WHERE body @@ $_v1)
+```
+
+`.search()` also works in an [object filter](/docs/libraries/surqlize-typescript/querying), as `{ body: { search: "database" } }`.
+
+### Match references, scores and highlights
+
+SurrealDB's `search::score()`, `search::highlight()` and `search::offsets()` read a match by a numbered reference, such as `@1@`. Pass the same number to `.search(value, N)` and to the `search` functions to tie them together. In the `search` functions, the field only supplies the query context, and `N` selects the match. Without a number, `.search(value)` renders `@@`, which the search functions cannot refer to.
+
+```ts title="Read the score and the highlighted text of a match"
+import { search } from "surqlize";
+
+const ranked = await db
+    .select("article")
+    .where((article) => article.body.search("database", 1))
+    .return((article) => ({
+        title: article.title,
+        score: search.score(article.body, 1),
+        marked: search.highlight(article.body, "<b>", "</b>", 1),
+    }));
+// marked is the field text, with each matched term wrapped in the <b> tags
+```
+
+The functions of the `search` family are:
+
+- **`search.score(field, N)`** returns the BM25 relevance of match `N` as a number.
+- **`search.highlight(field, prefix, suffix, N)`** returns the text of the field with each matched term wrapped in `prefix` and `suffix`.
+- **`search.offsets(field, N)`** returns the byte spans of match `N`, as an object of arrays of `{ s, e }` objects.
+- **`search.analyze(analyzer, value)`** returns the tokens an analyzer splits a value into. The analyzer name is an expression, so wrap it with `db.value("simple")`.
+
+The number is an integer from `0` to `255`. Any other value throws a `RangeError`. Use a separate number for each match that needs its own score:
+
+```ts title="Score two matches separately"
+import { and } from "surqlize";
+
+const both = await db
+    .select("article")
+    .where((article) =>
+        and(article.title.search("databases", 1), article.body.search("database", 2)),
+    )
+    .return((article) => ({
+        titleScore: search.score(article.title, 1),
+        bodyScore: search.score(article.body, 2),
+    }));
+```
+
+To order by a score, see [Ordering by an expression](#ordering-by-an-expression).
+
+## Vector similarity and distance
+
+The `vector` family has the SurrealDB vector functions. They take vectors, which are arrays of numbers, and are described in the [vector functions reference](/docs/reference/query-language/functions/database-functions/vector).
+
+| Group | Functions |
+| --- | --- |
+| Similarity | `similarityCosine`, `similarityJaccard`, `similarityPearson`, `similaritySpearman` |
+| Distance | `distanceEuclidean`, `distanceManhattan`, `distanceChebyshev`, `distanceHamming`, `distanceMahalanobis`, `distanceMinkowski` |
+| Arithmetic | `add`, `subtract`, `multiply`, `divide`, `cross`, `dot`, `angle`, `project` |
+| Single vector | `magnitude`, `normalize` |
+| Nearest neighbour | `distanceKnn` |
+
+Functions that take two vectors accept a plain array of numbers beside a field or another expression. Surqlize sends the array as a bound parameter.
+
+```ts title="Compare an embedding with a query vector"
+import { vector } from "surqlize";
+
+const document = table("document", {
+    title: t.string(),
+    embedding: t.array(t.number()),
+});
+
+const documents = orm(surreal, document);
+const queryVector = [0.12, 0.8, 0.31];
+
+const similar = await documents
+    .select("document")
+    .where((doc) => vector.similarityCosine(doc.embedding, queryVector).gt(0.8))
+    .return((doc) => ({
+        title: doc.title,
+        similarity: vector.similarityCosine(doc.embedding, queryVector),
+    }));
+```
+
+A call whose operands are all plain arrays has no field to take the query context from, so wrap one of them with `db.value()`, as in `vector.dot(db.value([1, 2, 3]), [4, 5, 6])`. The single-vector functions `magnitude` and `normalize` also take an expression, such as a field or a `db.value()`. `distanceMinkowski(a, b, p)` takes the order `p` as an expression too, as in `db.value(3)`.
+
+## Nearest-neighbour search
+
+The `.knn()` method on an `array<number>` field renders SurrealQL's nearest-neighbour operator, `<|k,...|>`. It is a condition, so it goes in `.where()`, and it combines with other conditions through `and()`. Calling it on a field of any other type is a compile-time error.
+
+`.knn(query, k, options)` takes the query vector, the number of neighbours `k`, and one of two options:
+
+- **`{ metric }`** is brute-force search over every record, with one of `"EUCLIDEAN"`, `"COSINE"`, `"MANHATTAN"` or `"CHEBYSHEV"`. It needs no index.
+- **`{ ef }`** searches through an index with the search width `ef`, which is the HNSW `ef` or the DiskANN `L` value. It uses an index on the field. Without one, the query returns every record, not just `k`.
+
+The query is a `number[]` or an expression of the same type. `k` and `ef` must be positive integers, and an unknown metric is rejected, each with an `OrmError` before the query is sent. `knn()` always takes one of the two options.
+
+```surql title="Define a vector index"
+DEFINE INDEX document_embedding ON document FIELDS embedding HNSW DIMENSION 3;
+```
+
+```ts title="Find the nearest records"
+// Brute force, nearest first
+const nearest = await documents
+    .select("document")
+    .where((doc) => doc.embedding.knn(queryVector, 5, { metric: "COSINE" }))
+    .orderBy((doc) => vector.distanceKnn(doc), "ASC");
+
+// Through the HNSW index
+const approximate = await documents
+    .select("document")
+    .where((doc) => doc.embedding.knn(queryVector, 5, { ef: 40 }));
+```
+
+`vector.distanceKnn(row)` gives the distance the operator computed for each record, and is only meaningful in a query that has a `knn()` condition. Use it in `.orderBy()`, or in `.return()` to read the distance.
+
+```ts title="Return the distance of each neighbour"
+const withDistance = await documents
+    .select("document")
+    .where((doc) => doc.embedding.knn(queryVector, 3, { metric: "EUCLIDEAN" }))
+    .return((doc) => ({
+        title: doc.title,
+        distance: vector.distanceKnn(doc),
+    }));
+```
+
+When `knn()` is combined with another condition through `and()`, the query can return fewer than `k` records.
+
+## Geometry points
+
+`t.point()` describes a native SurrealDB point, which the SDK represents as a `GeometryPoint`. Coordinates are ordered longitude first, then latitude. It is the only geometry type with a `t.*` builder.
+
+`geo.distance()` returns the distance in metres. Each argument can be a `GeometryPoint`, a `[longitude, latitude]` pair or an expression, as long as one of the two is an expression. A pair is converted in the query with `type::point`.
+
+```ts title="Find places near a point"
+import { GeometryPoint } from "surrealdb";
+import { geo, orm, table, t } from "surqlize";
+
+const place = table("place", {
+    name: t.string(),
+    location: t.point(),
+    coordinates: t.array([t.number(), t.number()]),
+});
+
+const places = orm(surreal, place);
+
+await places.create("place").set({
+    name: "Rome",
+    location: new GeometryPoint([12.5, 41.9]),
+    coordinates: [12.5, 41.9],
+});
+
+const center = new GeometryPoint([12.5, 41.95]);
+
+const nearby = await places
+    .select("place")
+    .where((place) => geo.distance(place.location, center).lt(10_000));
+
+const nearbyByCoordinates = await places
+    .select("place")
+    .where((place) => geo.distance(place.coordinates, [12.5, 41.95]).lt(10_000));
+```
+
+Use `t.point()` for a field that holds a point value. For raw coordinate data, use `t.array([t.number(), t.number()])`. The `type_.point(value)` function renders `type::point(value)` explicitly. The `geo` family also has `area`, `bearing` and `centroid`, which render `geo::area`, `geo::bearing` and `geo::centroid`, and `hashDecode`, `hashEncode` and `hashEncodeAccuracy`, which render `geo::hash::decode` and `geo::hash::encode`. Unlike `geo.distance()`, these take expressions only, so wrap a `GeometryPoint` literal with `db.value()`.
+
+## Durations
+
+`t.duration()` describes a SurrealDB duration, which the SDK represents as a `Duration`. The `duration` family has functions that extract a part of a duration as a number: `days()`, `hours()`, `mins()`, `secs()`, `millis()`, `micros()`, `nanos()`, `weeks()` and `years()`. It also has functions that build a duration from a number: `fromDays()`, `fromHours()`, `fromMins()`, `fromSecs()`, `fromMillis()`, `fromMicros()`, `fromNanos()` and `fromWeeks()`, and `duration.max(source)` for the largest duration SurrealDB can represent.
+
+```ts title="Read parts of a duration"
+import { Duration } from "surrealdb";
+import { duration, orm, table, t } from "surqlize";
+
+const task = table("task", {
+    title: t.string(),
+    timeout: t.duration(),
+});
+
+const tasks = orm(surreal, task);
+
+await tasks.create("task").set({ title: "Backup", timeout: new Duration("90m") });
+
+const timeouts = await tasks.select("task").return((task) => ({
+    title: task.title,
+    seconds: duration.secs(task.timeout),
+}));
+// timeouts[0].seconds is 5400
+```
+
+## Ordering by an expression
+
+`orderBy()` accepts a callback that returns any function call or operator, so a query can sort by a similarity, a distance or a score. A callback that returns a field path, such as `(user) => user.name`, sorts by that field. Any other expression is computed under an alias, `__order_N`, beside `*`, and the alias is removed with `OMIT`. The records come back with their own fields only.
+
+The examples below reuse the tables from the sections above.
+
+```ts title="Order by a computed value"
+// The records most similar to a vector
+const closest = await documents
+    .select("document")
+    .orderBy((doc) => vector.similarityCosine(doc.embedding, queryVector), "DESC")
+    .limit(3);
+
+// The places nearest to a point
+const byDistance = await places
+    .select("place")
+    .orderBy((place) => geo.distance(place.location, center), "ASC");
+
+// The best full-text matches first
+const bestFirst = await db
+    .select("article")
+    .where((article) => article.body.search("database", 1))
+    .orderBy((article) => search.score(article.body, 1), "DESC");
+```
+
+An expression sort cannot be combined with `.return()` or with `groupBy()`, and throws an `OrmError` when the query runs. Return the value in `.return()` and sort the results in your code, or sort by a field.
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Functions"
+        description="The other built-in functions."
+        href="/docs/libraries/surqlize-typescript/functions"
+    />
+    <IconBox
+        title="Schema"
+        description="Field types, including points and durations."
+        href="/docs/libraries/surqlize-typescript/schema"
+    />
+</Boxes>

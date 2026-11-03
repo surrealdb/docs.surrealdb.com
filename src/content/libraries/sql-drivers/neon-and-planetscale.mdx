@@ -1,0 +1,118 @@
+---
+position: 10
+title: SQL drivers Neon and PlanetScale entry points
+description: Move code written for @neondatabase/serverless or @planetscale/database to SurrealDB by changing the import to @surrealdb/pg/neon or @surrealdb/mysql/planetscale, and alias the vendor packages for Drizzle's serverless drivers.
+---
+
+# SQL drivers Neon and PlanetScale entry points
+
+Two entry points have the surface of popular serverless database clients. Code written for Neon or PlanetScale moves to SurrealDB when you change the import.
+
+## Neon
+
+`@surrealdb/pg/neon` has the surface of `@neondatabase/serverless`.
+
+```diff
+- import { neon, Pool, Client, neonConfig } from "@neondatabase/serverless";
++ import { neon, Pool, Client, neonConfig } from "@surrealdb/pg/neon";
+```
+
+```ts
+import { neon } from "@surrealdb/pg/neon";
+
+const sql = neon("postgres://root:secret@abc123.surrealdb.earth/app?ns=prod");
+
+const rows = await sql`SELECT * FROM person WHERE name = ${name}`;
+const one = await sql.query("SELECT * FROM person WHERE id = $1", [id], { fullResults: true });
+const [created, total] = await sql.transaction([
+    sql`INSERT INTO person (name) VALUES (${name}) RETURNING id`,
+    sql`SELECT count(*) AS n FROM person`,
+]);
+```
+
+- **Options.** `neon(connectionString, options)` takes `arrayMode`, `fullResults`, `authToken` (a string or a function), `fetchOptions`, `fetchFunction`, `isolationLevel`, `readOnly` and `deferrable`. Calling `sql(text, params)` as a plain function throws, as in Neon. Use `sql.query(text, params, options)`.
+- **Queries are lazy.** A query is sent once, when you await it or pass it to `sql.transaction`.
+- **Transactions.** `sql.transaction` is one atomic HTTP call. Each query in it must be one statement. `isolationLevel` and `readOnly` are sent with the call. `ReadUncommitted`, `ReadCommitted` and `RepeatableRead` run as `snapshot`, and `deferrable` is ignored.
+- **Connection string.** Neon has no namespaces, so the SurrealDB namespace comes from the `ns` (or `namespace`) parameter, and the path is the database. `sslmode` and similar parameters are ignored. TLS follows the host, and is off for loopback only.
+- **`neonConfig`.** The `fetchFunction`, `fetchEndpoint` and `webSocketConstructor` settings are honoured. The `fetchEndpoint` target must speak the RPC contract, not the `/sql` protocol of Neon. Settings that describe the wire protocol and proxies of Neon are accepted and ignored: `wsProxy`, `useSecureWebSocket`, `pipelineConnect`, `pipelineTLS`, `coalesceWrites`, `forceDisablePgSSL`, `disableSNI`, `fetchConnectionCache`, `poolQueryViaFetch`, `subtls` and `rootCerts`.
+- **Errors.** A failed statement throws `NeonDbError`, which carries the node-postgres fields such as `code`, `severity` and `position`.
+- **`Pool` and `Client`** are the [node-postgres layer](/docs/libraries/sql-drivers/orm-compatibility), and read their WebSocket class from `neonConfig.webSocketConstructor`.
+
+### Drizzle with neon-http and neon-serverless
+
+Drizzle's `neon-http` and `neon-serverless` drivers import `@neondatabase/serverless` by name. Point that name at this entry point in your bundler instead of installing Neon's package.
+
+```ts title="vite.config.ts"
+export default {
+    resolve: { alias: { "@neondatabase/serverless": "@surrealdb/pg/neon" } },
+};
+```
+
+The same alias works in esbuild, webpack, `tsconfig` paths and the `[alias]` table of `wrangler.toml`.
+
+```ts
+import { drizzle } from "drizzle-orm/neon-http";
+import { neon } from "@surrealdb/pg/neon";
+
+const db = drizzle(neon(connectionString));
+```
+
+`db.batch()` becomes one atomic call. As on Neon, `neon-http` refuses interactive transactions, and `neon-serverless` runs them over the WebSocket `Pool`.
+
+## PlanetScale
+
+`@surrealdb/mysql/planetscale` has the surface of `@planetscale/database`.
+
+```diff
+- import { Client, connect, cast, format } from "@planetscale/database";
++ import { Client, connect, cast, format } from "@surrealdb/mysql/planetscale";
+```
+
+```ts
+import { Client } from "@surrealdb/mysql/planetscale";
+
+const client = new Client({ url: "mysql://root:secret@abc123.surrealdb.earth/app?ns=prod" });
+
+const r = await client.execute("SELECT * FROM person WHERE name = ? AND age > ?", ["Tobie", 18]);
+const named = await client.execute("SELECT * FROM person WHERE age > :age", { age: 18 });
+const rows = await client.execute("SELECT id, name FROM person", [], { as: "array" });
+
+await client.transaction(async (tx) => {
+    await tx.execute("UPDATE account SET balance = balance - ? WHERE id = ?", [10, 1]);
+    await tx.execute("UPDATE account SET balance = balance + ? WHERE id = ?", [10, 2]);
+});
+```
+
+- **Config.** `url` or `host`, `username` and `password`, plus `fetch`, `format` and `cast` as in the PlanetScale driver. It also takes `namespace`, `database`, `transport`, `WebSocket`, `headers` and `timeout`. PlanetScale has no namespaces, so the SurrealDB namespace comes from the `ns` parameter of the URL or the `namespace` option, and the path is the database.
+- **Placeholders.** `execute(query, args, options)` takes `?` placeholders with an array and `:name` placeholders with an object. Arguments are bound as parameters on the instance, and are not interpolated. An array argument expands to a list, an empty one to `NULL`, and an object to JSON text.
+- **Client-side formatting.** The `format` option of `Config` switches to client-side rendering. The `format(query, values)` function is exported for that use.
+- **Row shape.** `as: "object"` (default) or `"array"`.
+- **Casting.** Every value reaches `cast` as text. The default `cast` returns numbers for integer and float types up to 32 bits and parses JSON. It leaves 64-bit integers, decimals and dates as text.
+- **Transactions.** `transaction(fn)` runs on a WebSocket session opened for the call. It commits when `fn` resolves, and rolls back when `fn` throws. A client configured with `transport: "http"` throws `UnsupportedOnTransportError`.
+- **Errors.** A failed statement throws `DatabaseError` with `body.message`, `body.code`, `status` 400, `errno` and `sqlState`. A reply that is not an RPC reply throws `UnknownError`.
+- **`refresh()`** resolves without a request, because HTTP calls keep no session.
+
+The contract carries the type and nullability of a column, but not its declared length, collation or flag bits. For that reason, the `columnLength`, `charset` and `flags` fields of a result field are derived from the column type.
+
+### Drizzle with planetscale-serverless
+
+Drizzle's `planetscale-serverless` driver checks `instanceof Client` against `@planetscale/database`. Alias that name to this entry point.
+
+```ts title="vite.config.ts"
+export default {
+    resolve: { alias: { "@planetscale/database": "@surrealdb/mysql/planetscale" } },
+};
+```
+
+```ts
+import { drizzle } from "drizzle-orm/planetscale-serverless";
+import { Client } from "@surrealdb/mysql/planetscale";
+
+const db = drizzle(new Client({ url: process.env.DATABASE_URL }));
+```
+
+Drizzle transactions and savepoints run on the WebSocket session.
+
+## Compatibility notes
+
+The repository lists, for every API of `@neondatabase/serverless` and `@planetscale/database`, whether the entry point supports it, supports it differently, or cannot. See [COMPATIBILITY.md](https://github.com/surrealdb/sql-drivers/blob/main/docs/COMPATIBILITY.md).
