@@ -43,7 +43,7 @@ http://localhost:8000/ns/main/db/main/rpc
 > [!NOTE]
 > SurrealDB 4.x introduces a new, streamlined URL structure, which gives smoother and more predictable URLs and is the basis for upcoming functionality. Connections to `/rpc` keep working as before.
 
-A connection on a scoped URL is pinned to that scope. A `use` that leaves it is refused, a `signin` or `signup` whose credentials name another namespace or database is refused, and [`reset`](#reset) returns the session to the scope. The full rules are on the HTTP page under [Scoped URLs](/docs/reference/rest-api/http-protocol#scoped-urls).
+The namespace and database in the URL are where the connection starts, in the same way as the `surreal-ns` and `surreal-db` headers. The server checks them when it authenticates the connection, and the credentials must belong to that namespace and database. After that, a [`use`](#use), a SurrealQL `USE`, or a `signin` or `signup` can select another namespace or database, and [`reset`](#reset) unsets both. The full rules are on the HTTP page under [Scoped URLs](/docs/reference/rest-api/http-protocol#scoped-urls).
 
 ## Supported methods
 
@@ -160,10 +160,6 @@ You can use the RPC protocol to perform the following actions:
         <tr>
             <td scope="row" data-label="Function"><a href="#update"><code>update [ thing, data ]</code></a></td>
             <td scope="row" data-label="Description">Modify either all records in a table or a single record with specified data if the record already exists</td>
-        </tr>
-        <tr>
-            <td scope="row" data-label="Function"><a href="#upgrade_check"><code>upgrade_check [ config ]</code></a></td>
-            <td scope="row" data-label="Description">On 3.3, reports what 4.0 refuses or changes in the datastore</td>
         </tr>
         <tr>
             <td scope="row" data-label="Function"><a href="#upsert"><code>upsert [ thing, data ]</code></a></td>
@@ -338,25 +334,6 @@ To run a request inside the transaction, add the `txn` field next to `method` an
 
 A request without `txn` runs outside the transaction. In the example above, `SELECT * FROM person` without `txn` returns an empty array until the commit, while the same query with `txn` returns `person:1`.
 
-### A statement that fails inside the transaction
-
-From SurrealDB 4.0, a transaction opened with `begin` never commits part of a statement. A statement that fails after it has written part of its change, such as a `CREATE` whose event throws an error after the record is stored, leaves the transaction unable to commit. So does a statement that may write and stops before it returns, such as one whose gRPC request deadline passes while it runs. A later `commit` returns an error, and the transaction is discarded with every change made in it:
-
-```json title="Response"
-{
-    "id": 3,
-    "error": {
-        "cause": null,
-        "code": -32003,
-        "details": { "kind": "NotExecuted" },
-        "kind": "Query",
-        "message": "A statement failed after writing part of its change, so the transaction cannot commit"
-    }
-}
-```
-
-To keep the other changes, run the work again in a new transaction. A statement that fails before it has written anything leaves the transaction able to commit, and so does a statement that cannot write, such as a `SELECT` or a `SLEEP`, however it ends. Requests can share a transaction, so a write that another request makes on it while a statement runs counts as that statement's write if the statement then fails.
-
 ## `commit` <label label="websocket only" /> {#commit}
 
 <Since v="v3.0.0" />
@@ -382,26 +359,7 @@ commit [ txn ]
 }
 ```
 
-A transaction id that is unknown or already finished returns `Transaction not found`. A `commit` is also refused when a statement in the transaction failed after writing part of its change, as described under [A statement that fails inside the transaction](#a-statement-that-fails-inside-the-transaction).
-
-### Committing while a request is still running
-
-Requests that carry the same `txn` can run at the same time. From SurrealDB 4.0, a `commit` that arrives while one of them is still running a statement that may write is refused, so that it cannot store part of that statement:
-
-```json title="Response"
-{
-    "id": 3,
-    "error": {
-        "cause": null,
-        "code": -32003,
-        "details": { "kind": "NotExecuted" },
-        "kind": "Query",
-        "message": "The transaction cannot commit while a statement that may write is still running on it, so it was cancelled"
-    }
-}
-```
-
-The refused `commit` cancels the transaction. The running statement fails at its next write with `Couldn't update a finished transaction`, and the transaction is rolled back once that statement ends, so none of its changes are stored. A statement that cannot write, such as a `SELECT`, does not hold back a `commit`. Wait for every request on the transaction to return before you send `commit`.
+A transaction id that is unknown or already finished returns `Transaction not found`.
 
 ## `cancel` <label label="websocket only" /> {#cancel}
 
@@ -427,8 +385,6 @@ cancel [ txn ]
     "result": null
 }
 ```
-
-A `cancel` sent while another request on the transaction is still running a statement that may write returns at once. That statement fails at its next write with `Couldn't update a finished transaction`, and the rollback runs once the statement ends. Until the statement reaches a write or ends, for example while it waits in a `sleep()`, the transaction stays open on the server.
 
 The `begin`, `commit` and `cancel` methods are not available over HTTP, because HTTP requests carry no connection to hold the transaction between them.
 
@@ -1548,16 +1504,18 @@ Each result carries the trace of its statement under a `trace` field. A statemen
   "id": 1,
   "result": [
       {
-          "status": "OK",
-          "time": "21.5µs",
           "result": null,
-          "trace": { "variables": { "x": 1 } }
+          "status": "OK",
+          "time": "189.625µs",
+          "trace": { "variables": { "x": 1 } },
+          "type": null
       },
       {
-          "status": "OK",
-          "time": "96.208µs",
           "result": [{ "friends": ["person:b"] }],
-          "trace": { "relations": [["person:a", "knows:ab", "person:b"]] }
+          "status": "OK",
+          "time": "2.2515ms",
+          "trace": { "relations": [["person:a", "knows:ab", "person:b"]] },
+          "type": null
       }
   ]
 }
@@ -1701,7 +1659,7 @@ query_stream [ sql, vars?, options? ]
     </tbody>
 </table>
 
-The request needs an `id`, because every frame carries it, and one without an `id` is refused. A second `query_stream` that reuses the `id` of a stream still running on the connection is refused with `A streaming query with this request id is already in progress`. A request that carries a `txn` runs inside that client transaction, and the client waits for the `end` frame before it sends `commit`. A `commit` that arrives while the stream is still running a statement that may write is refused and cancels the transaction, as described under [Committing while a request is still running](#committing-while-a-request-is-still-running). A failure before execution starts, such as a parse error or a denied capability, is answered with an ordinary error response and no frames.
+The request needs an `id`, because every frame carries it, and one without an `id` is refused. A second `query_stream` that reuses the `id` of a stream still running on the connection is refused with `A streaming query with this request id is already in progress`. A request that carries a `txn` runs inside that client transaction, and the client waits for the `end` frame before it sends `commit`, because a `commit` that arrives while the stream is running ends the transaction the stream is still using. A failure before execution starts, such as a parse error or a denied capability, is answered with an ordinary error response and no frames.
 
 ### Frames
 
@@ -1895,7 +1853,7 @@ relate [ in, relation, out, data? ]
 
 ## `reset`
 
-This method will reset all attributes for the current connection. It clears authentication (much like invalidate), unsets the selected NS/DB, unsets any defined connection params, and aborts any active live queries. On a [scoped connection](#scoped-connections), it returns to the namespace and database in the URL instead of unsetting them. On WebSocket connections it also cancels open client-managed transactions for the session being reset and frees their slots under [`SURREAL_MAX_TRANSACTIONS_PER_CONNECTION`](/docs/reference/cli/db/environment-variables#websocket-config) / [`SURREAL_MAX_TRANSACTIONS_PER_SESSION`](/docs/reference/cli/db/environment-variables#websocket-config).
+This method will reset all attributes for the current connection. It clears authentication (much like invalidate), unsets the selected NS/DB, unsets any defined connection params, and aborts any active live queries. On WebSocket connections it also cancels open client-managed transactions for the session being reset and frees their slots under [`SURREAL_MAX_TRANSACTIONS_PER_CONNECTION`](/docs/reference/cli/db/environment-variables#websocket-config) / [`SURREAL_MAX_TRANSACTIONS_PER_SESSION`](/docs/reference/cli/db/environment-variables#websocket-config).
 
 ```json title="Method Syntax"
 reset
@@ -2381,65 +2339,6 @@ update [ thing, data ]
 
 <br />
 
-## `upgrade_check` {#upgrade_check}
-
-This method is in the latest `3.3` release, and not in `4.0`. It checks the datastore for the stored definitions and records that `4.0` refuses, fails on or treats differently, within the scope of the session, and returns the same report as the [`/upgrade-check`](/docs/reference/rest-api/http-protocol#upgrade-check) HTTP route. It only reads, and is available over WebSocket and HTTP `/rpc`, but not over gRPC.
-
-The session needs the `VIEWER` role or higher, and a record user is refused. The method is allowed by default, and `--deny-rpc upgrade_check` turns it off. See [RPC method names](/docs/learn/security/authorization/capabilities#rpc-method-names).
-
-```json title="Method Syntax"
-upgrade_check [ config ]
-```
-
-### Parameters
-<table>
-    <thead>
-        <tr>
-            <th colspan="2" scope="col">Parameter</th>
-            <th colspan="2" scope="col">Description</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td colspan="2" scope="row" data-label="Function">
-                <code>config</code>
-                <label label="optional" />
-            </td>
-            <td colspan="2" scope="row" data-label="Description">
-                An object with any of the keys <code>namespace</code>, <code>database</code>, <code>scan_records</code>, <code>scan_total</code> and <code>scan_seconds</code>, as described for the <a href="/docs/reference/rest-api/http-protocol#upgrade-check-options">HTTP route</a>. Without it, the check reads every definition in the session's scope and no records.
-            </td>
-        </tr>
-    </tbody>
-</table>
-
-### Example usage
-```json title="Request"
-{
-    "id": 1,
-    "method": "upgrade_check",
-    "params": [{ "namespace": "shop", "scan_records": 100 }]
-}
-```
-
-The result is the report object, with the fields listed under [Response](/docs/reference/rest-api/http-protocol#upgrade-check-response):
-
-```json title="Response"
-{
-    "id": 1,
-    "result": {
-        "target": "4.0",
-        "verdict": "blocking",
-        "complete": true,
-        "severities": { "blocking": 1, "info": 0, "warning": 1 },
-        "counts": { "index-on-datetime": 1, "view-reads-own-table": 1 },
-        "findings": [ ... ],
-        "notes": [ ... ]
-    }
-}
-```
-
-<br />
-
 ## `upsert`
 
 ```json title="Method Syntax"
@@ -2546,7 +2445,7 @@ use [ ns, db ]
 
 For either the namespace or database, a string will change the value, `null` will unset the value, and `none` will cause the value to not be affected.
 
-On a [scoped connection](#scoped-connections), a `use` that leaves the scope fails with an error such as `You don't have permission to change to the other namespace`.
+On a [scoped connection](#scoped-connections), `use` can select a namespace or database other than the ones in the URL.
 
 ### Example usage
 

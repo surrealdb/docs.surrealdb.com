@@ -75,7 +75,7 @@ SELECT * FROM user WHERE age IN 18..30;
 SELECT * FROM user WHERE string::starts_with(name, 'Ann');
 ```
 
-From SurrealDB 4.0, the method form `name.starts_with('Ann')` is read as the same prefix. Before 4.0 it returned the same records, but scanned the table. An empty prefix, as in `name.starts_with('')`, matches every value and scans the table in either form. Neither form is read as a prefix when the session's [capabilities](/docs/learn/security/authorization/capabilities) deny `string::starts_with`, so the query evaluates the call and raises the denial.
+Only the function-call form is read as a prefix. The method form `name.starts_with('Ann')` returns the same records, but scans the table.
 
 #### Indexing an array field
 
@@ -131,7 +131,7 @@ SELECT id FROM product WHERE kind.trim().lowercase() = 'banana' EXPLAIN;
 				access: "= 'banana'",
 				direction: 'Forward',
 				index: 'product_kind',
-				predicate: "kind.trim().lowercase() = 'banana'"
+				table: 'product'
 			},
 			context: 'Db',
 			operator: 'IndexScan'
@@ -142,77 +142,11 @@ SELECT id FROM product WHERE kind.trim().lowercase() = 'banana' EXPLAIN;
 }
 ```
 
-A query uses the index when its condition computes the same value as the expression in `FIELDS`. `WHERE kind = 'banana'` scans the table. Comparisons, ranges, `IN`, `count()` and a prefix test with `starts_with()` work on a computed value in the same way as on a stored one, and a [composite index](#composite-index) can mix the two, as in `FIELDS kind.lowercase(), price`.
+A query uses the index only when its condition repeats the expression as it is written in `FIELDS`. `WHERE kind = 'banana'` and the function-call form `WHERE string::lowercase(kind) = 'banana'` both scan the table, although the second one returns the same records, and their `EXPLAIN` output shows a `TableScan` instead. Comparisons and `IN` work on a computed value in the same way as on a stored one, and a [composite index](#composite-index) can mix the two, as in `FIELDS kind.lowercase(), price`.
 
-From SurrealDB 4.0, the function-call form of a method is the same expression to the index. `WHERE string::lowercase(string::trim(kind)) = 'banana'` uses the index above, because nested calls match a chain of methods from the innermost call outwards. Before 4.0, this form returned the same records but scanned the table. In its plan, the `IndexScan` finds the records and a `Filter` above it evaluates the call for each of them:
+Only method calls on a field path are accepted. A function call such as `string::lowercase(kind)` or an operator such as `price * qty` fails when the index is defined. To index one of those, store the result in a field of its own with [`DEFINE FIELD ... VALUE`](/docs/reference/query-language/statements/define/field) and index that field.
 
-```surql
-EXPLAIN SELECT VALUE id FROM product WHERE string::lowercase(string::trim(kind)) = 'banana';
-```
-
-```surql title="Output"
-"ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: string::lowercase(string::trim(kind)) = 'banana']
-        IndexScan [ctx: Db] [table: product, index: product_kind, access: = 'banana', direction: Forward]
-"
-```
-
-A function call matches a method only where the two are the same operation:
-
-- The method has one implementation, and that implementation is the function. `string::len(kind)` does not match `kind.len()`, because `.len()` also works on arrays, sets, objects and bytes, and `string::slice()` does not match `.slice()` for the same reason. The functions that match include `string::lowercase`, `string::trim`, `string::replace` and other `string::`, `math::`, `time::` and `duration::` functions that take one type of value. The `array::`, `object::`, `record::` and `geo::` functions have no matching method for an index.
-- The call is on a single field. `string::lowercase(a.b)` does not match `a.b.lowercase()`, because the method form is applied to each element when `a` is an array.
-- The session is allowed to call the function. When the [capabilities](/docs/learn/security/authorization/capabilities) deny `string::lowercase`, a condition on `string::lowercase(kind)` scans the table and fails with `Function 'string::lowercase' is not allowed to be executed`, in the same way as the query does `WITH NOINDEX`.
-
-`FIELDS` accepts the function-call form too. The index stores it as the method form, which `INFO FOR TABLE` shows, so `FIELDS string::lowercase(name)` and `FIELDS name.lowercase()` define the same index. Before 4.0, a function call in `FIELDS` failed when the index was defined. Any argument after the field must be a literal value:
-
-```surql
-/**[test]
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = """{ by_email: 'DEFINE INDEX by_email ON person FIELDS email.trim().lowercase() UNIQUE', by_name: 'DEFINE INDEX by_name ON person FIELDS name.lowercase()', by_vowel: "DEFINE INDEX by_vowel ON person FIELDS name.replace('o', '0')" }"""
-
-*/
-
-DEFINE TABLE person SCHEMALESS;
-DEFINE INDEX by_name ON person FIELDS string::lowercase(name);
-DEFINE INDEX by_email ON person FIELDS string::lowercase(string::trim(email)) UNIQUE;
-DEFINE INDEX by_vowel ON person FIELDS string::replace(name, 'o', '0');
-(INFO FOR TABLE person).indexes;
-```
-
-```surql title="Output"
-{
-	by_email: 'DEFINE INDEX by_email ON person FIELDS email.trim().lowercase() UNIQUE',
-	by_name: 'DEFINE INDEX by_name ON person FIELDS name.lowercase()',
-	by_vowel: "DEFINE INDEX by_vowel ON person FIELDS name.replace('o', '0')"
-}
-```
-
-A column that reads the record must be a field path, optionally ending in method calls, or a function call that matches one. Any other expression fails when the index is defined, such as an operator or a function call with no matching method:
-
-```surql
-DEFINE INDEX total ON item FIELDS price * qty;
-```
-
-```text title="Error output"
-An index column must be a field path, optionally ending in method calls, such as `name.lowercase()`; to index `price * qty`, store it with DEFINE FIELD ... VALUE and index that field
-```
-
-As the error says, store such a value in a field of its own with [`DEFINE FIELD ... VALUE`](/docs/reference/query-language/statements/define/field) and index that field. A column computed from a `COMPUTED` field fails as well, because the computed field is not stored.
-
-On a `SCHEMAFULL` table, the field that a column reads must be defined. A column such as `kind.trim().lowercase()` on a field of type `string` or `option<string>` is accepted, while `missing.lowercase()` on a field that the table does not define fails with `The field 'missing.lowercase()' does not exist`.
+A column that ends in method calls is accepted on a `SCHEMALESS` table only. On a `SCHEMAFULL` table, defining such an index fails with an error such as `The field 'kind.lowercase()' does not exist`, even when the field `kind` is defined. On a `SCHEMAFULL` table, store the computed value with `DEFINE FIELD ... VALUE` and index that field instead.
 
 #### Computed values on an optional field
 
@@ -271,7 +205,7 @@ SELECT VALUE id FROM product WHERE kind.?.trim().lowercase() = NONE ORDER BY id;
 
 A `UNIQUE` index on such a column accepts any number of records without the field or with it set to `NULL`, and still refuses two records whose computed values are equal.
 
-Writing the optional part as `?.`, as in `kind?.trim().lowercase()`, is a parse error, which says that optional chaining is written `.?`.
+Writing the optional part as `?.`, as in `kind?.trim().lowercase()`, is a parse error.
 
 ### Unique index
 
@@ -465,7 +399,7 @@ CREATE user:2 SET name = 'bOB';
 Database index `unique_name` already contains 'bob', with record `user:1`
 ```
 
-A query uses this index for `WHERE name.lowercase() = 'bob'` or `WHERE string::lowercase(name) = 'bob'`, but not for a condition on `name` alone. Alternatively, store the normalised value in a field of its own and index that field, which keeps the lowercase value visible in query results:
+A query uses this index for `WHERE name.lowercase() = 'bob'`, but not for a condition on `name` alone. Alternatively, store the normalised value in a field of its own and index that field, which keeps the lowercase value visible in query results:
 
 ```surql
 DEFINE FIELD name_key ON user VALUE name.lowercase();
