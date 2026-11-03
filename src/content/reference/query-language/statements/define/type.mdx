@@ -1,0 +1,213 @@
+---
+position: 19
+title: DEFINE TYPE
+description: "The DEFINE TYPE statement declares a named type: a union of strings ordered by declaration, an object shape, or a refined scalar with ASSERT checks and a DEFAULT, used by fields, functions and casts."
+---
+
+# `DEFINE TYPE` statement
+
+<Since v="v4.0.0" />
+
+The `DEFINE TYPE` statement gives a type a name in the current database. A field, a function argument or return value, or a cast can then use that name in the same places as a built-in type such as `int` or `string`. A write is coerced to the type and checked against its `ASSERT` clauses. See [Named types](/docs/reference/query-language/language-primitives/data-types/named-types) for how a named type behaves in a query.
+
+## Requirements
+
+- You must be authenticated as a root owner or editor, namespace owner or editor, or database owner or editor before you can use the `DEFINE TYPE` statement.
+- [You must select your namespace and database](/docs/reference/query-language/statements/use) before you can use the `DEFINE TYPE` statement.
+
+## Statement syntax
+
+<Tabs syncKey="define-type-statement">
+  <TabItem label="SurrealQL Syntax">
+
+```syntax title="SurrealQL Syntax"
+DEFINE TYPE [ OVERWRITE | IF NOT EXISTS ] @name AS @type
+    [ [ CONSTRAINT @name ] ASSERT @expression ] ...
+    [ DEFAULT @expression ]
+    [ SQL TYPE POSTGRESQL @string ]
+    [ COMMENT @string ]
+    [ PERMISSIONS [ NONE | FULL | WHERE @condition ] ]
+```
+
+  </TabItem>
+  <TabItem label="Railroad Diagram">
+
+
+<RailroadDiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DEFINE"},{"type":"Terminal","text":"TYPE"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"OVERWRITE"},{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}]}},{"type":"NonTerminal","text":"@name"},{"type":"Terminal","text":"AS"},{"type":"NonTerminal","text":"@type"},{"type":"ZeroOrMore","child":{"type":"Sequence","children":[{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"CONSTRAINT"},{"type":"NonTerminal","text":"@name"}]}},{"type":"Terminal","text":"ASSERT"},{"type":"NonTerminal","text":"@expression"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"DEFAULT"},{"type":"NonTerminal","text":"@expression"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"SQL"},{"type":"Terminal","text":"TYPE"},{"type":"Terminal","text":"POSTGRESQL"},{"type":"NonTerminal","text":"@string"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"COMMENT"},{"type":"NonTerminal","text":"@string"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"PERMISSIONS"},{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"NONE"},{"type":"Terminal","text":"FULL"},{"type":"Sequence","children":[{"type":"Terminal","text":"WHERE"},{"type":"NonTerminal","text":"@condition"}]}]}]}}]}]}' />
+
+  </TabItem>
+</Tabs>
+
+The body after `AS` is a type, in one of three forms:
+
+| Body | Example | A value of the type |
+| --- | --- | --- |
+| A union of strings | `AS 'low' \| 'medium' \| 'high'` | Is one of the strings, and sorts in the order they are listed |
+| An object | `AS { street: string, city: string }` | Is an object with those fields |
+| Any other type | `AS int ASSERT $value > 0` | Is a value of that type that passes the checks |
+
+The body can name another type defined with `DEFINE TYPE`. It cannot name a type that does not exist yet, and it cannot lead back to the type being defined, either directly or through other types. A type cannot take the name of a built-in type such as `string`. `PERMISSIONS` defaults to `FULL`.
+
+## Union types
+
+A union of string literals defines a fixed list of values, from the lowest to the highest. A field of the type accepts only those values, and sorts and compares them in that order.
+
+```surql
+DEFINE TYPE priority AS 'low' | 'medium' | 'high' | 'urgent' COMMENT 'Ticket priority, lowest first';
+DEFINE FIELD priority ON ticket TYPE priority DEFAULT 'medium';
+
+(INFO FOR DB).types;
+```
+
+```surql title="Output"
+{
+	priority: "DEFINE TYPE priority AS 'low' | 'medium' | 'high' | 'urgent' COMMENT 'Ticket priority, lowest first' PERMISSIONS FULL"
+}
+```
+
+A value listed twice is kept once, in its first position:
+
+```surql
+DEFINE TYPE status AS 'open' | 'closed' | 'open';
+(INFO FOR DB).types.status;
+```
+
+```surql title="Output"
+"DEFINE TYPE status AS 'open' | 'closed' PERMISSIONS FULL"
+```
+
+[`ALTER TYPE`](/docs/reference/query-language/statements/alter/type) adds values to a union at any position and renames them. The [enum functions](/docs/reference/query-language/functions/database-functions/enum) read the values of a union in order.
+
+## Checks and defaults
+
+`ASSERT` takes an expression over `$value`, which holds the value after it has been coerced to the body. A write fails when a check returns `false`, and the checks run in the order they are written. `CONSTRAINT` names the check that follows it, and an error then reports the name instead of the expression.
+
+`DEFAULT` is the value that a field of the type takes when a write gives it no value. A `DEFAULT` on the field itself takes precedence over the type's `DEFAULT`.
+
+```surql
+DEFINE TYPE percent AS int
+    CONSTRAINT in_range ASSERT $value >= 0 AND $value <= 100
+    DEFAULT 50;
+
+DEFINE TABLE survey SCHEMAFULL;
+DEFINE FIELD score ON survey TYPE percent;
+
+CREATE survey:1;
+//- [{ id: survey:1, score: 50 }]
+
+CREATE survey:2 SET score = 140;
+//- "Couldn't coerce value for field `score` of `survey:2`: Expected `percent (constraint in_range failed)` but found `140`"
+```
+
+A type built on another type runs the checks of both, those of the inner type first:
+
+```surql
+DEFINE TYPE grade AS percent ASSERT $value % 10 = 0;
+
+<grade> 45;
+//- "Could not cast into `grade`: Expected `grade (ASSERT $value % 10 = 0 failed)` but found `45`"
+
+<grade> 120;
+//- "Could not cast into `grade`: Expected `percent (constraint in_range failed)` but found `120`"
+```
+
+## Object types
+
+An object body lists the fields of an object, in the same way as an object literal type on a field. A field or a cast of the type checks each object against it, and refuses an object with a missing field or an extra one.
+
+```surql
+DEFINE TYPE address AS { street: string, city: string, postcode: option<string> };
+DEFINE FIELD home ON person TYPE option<address>;
+
+CREATE person:1 SET home = { street: '1 Main St' };
+```
+
+```surql title="Error output"
+"Couldn't coerce value for field `home` of `person:1`: Expected `address ({ city: string, postcode: none | string, street: string })` but found `{ street: '1 Main St' }`"
+```
+
+## Using `IF NOT EXISTS` and `OVERWRITE`
+
+Defining a type that already exists fails. With `IF NOT EXISTS`, the statement leaves the existing type unchanged and succeeds. With `OVERWRITE`, it replaces the type.
+
+```surql
+-- Uses the priority type defined above
+DEFINE TYPE priority AS 'low' | 'high';
+//- "The type 'priority' already exists"
+
+DEFINE TYPE IF NOT EXISTS priority AS 'low' | 'high';
+enum::values('priority');
+//- ['low', 'medium', 'high', 'urgent']
+```
+
+`OVERWRITE` can change the body, the checks, the default, the comment and the permissions of a type that is in use. It does not check or rewrite stored records, so a record that the new definition refuses keeps its value, and its next write fails until the value is changed.
+
+The values of a union are the exception. `OVERWRITE` with a different list, or with the same values in another order, fails while a field or a function names the type. To add or rename a value while the type is in use, use [`ALTER TYPE`](/docs/reference/query-language/statements/alter/type).
+
+```surql
+DEFINE TYPE OVERWRITE priority AS 'low' | 'high';
+```
+
+```surql title="Error output"
+"Invalid statement: Cannot change the values of the type 'priority': the field 'priority' on the table 'ticket' has a type that names it"
+```
+
+Once no field or function names the type, `OVERWRITE` can set any list of values.
+
+## Errors when defining a type
+
+A type that names a type which does not exist, or that leads back to itself, is refused when it is defined. The same applies to a field or a function that names a missing type.
+
+```surql
+DEFINE TYPE node AS { next: option<node> };
+//- "Invalid statement: The type 'node' cannot be defined: its body leads back to itself through the type 'node'"
+
+DEFINE FIELD score ON survey TYPE missing;
+//- "Invalid statement: The field 'score' on the table 'survey' cannot be defined: the type 'missing' it names does not exist"
+```
+
+[`REMOVE TYPE`](/docs/reference/query-language/statements/remove) fails while a field, a function or another type names the type.
+
+## Listing types
+
+`INFO FOR DB` lists each type under the `types` key as its `DEFINE TYPE` statement. `INFO FOR DB STRUCTURE` lists each type as an object, with the `labels` of a union in order, and each check with the `name` it was given:
+
+```surql
+-- In a database that has only the percent and priority types
+(INFO FOR DB STRUCTURE).types;
+```
+
+```surql title="Output"
+[
+	{
+		asserts: [{ check: '$value >= 0 AND $value <= 100', name: 'in_range' }],
+		default: '50',
+		kind: 'int',
+		name: 'percent',
+		permissions: true
+	},
+	{
+		asserts: [],
+		comment: 'Ticket priority, lowest first',
+		kind: "'low' | 'medium' | 'high' | 'urgent'",
+		labels: ['low', 'medium', 'high', 'urgent'],
+		name: 'priority',
+		permissions: true
+	}
+]
+```
+
+## Declaring a PostgreSQL type
+
+`SQL TYPE POSTGRESQL` records the type that a client of the [PostgreSQL wire protocol](/docs/reference/rest-api/postgres-protocol) sees for the type. SurrealQL does not read it. A `CREATE DOMAIN` or a `CREATE TYPE` sent over that protocol defines a type with this clause set.
+
+```surql
+DEFINE TYPE price AS decimal ASSERT $value >= 0dec SQL TYPE POSTGRESQL 'numeric(10,2)';
+```
+
+## See also
+
+* [Named types](/docs/reference/query-language/language-primitives/data-types/named-types)
+* [`ALTER TYPE`](/docs/reference/query-language/statements/alter/type)
+* [`REMOVE TYPE`](/docs/reference/query-language/statements/remove)
+* [Enum functions](/docs/reference/query-language/functions/database-functions/enum)

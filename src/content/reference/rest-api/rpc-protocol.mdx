@@ -28,6 +28,23 @@ You can interact with session variables in the following ways:
     *   Variables passed via this parameter are defined *only* for the execution context of that specific method call. They temporarily override any session-wide variable with the same name for that request but do not permanently alter the session state. These variables are automatically discarded once the method execution completes.
 
 To use a session variable within a query or method, prefix its name with a dollar sign (`$`), for example, `$user_id`.
+
+## Scoped connections
+
+<Since v="v4.0.0" />
+
+The namespace and database can be part of the connection URL, so that a client sends no initial [`use`](#use):
+
+```text
+ws://localhost:8000/ns/main/db/main/rpc
+http://localhost:8000/ns/main/db/main/rpc
+```
+
+> [!NOTE]
+> SurrealDB 4.x introduces a new, streamlined URL structure, which gives smoother and more predictable URLs and is the basis for upcoming functionality. Connections to `/rpc` keep working as before.
+
+A connection on a scoped URL is pinned to that scope. A `use` that leaves it is refused, a `signin` or `signup` whose credentials name another namespace or database is refused, and [`reset`](#reset) returns the session to the scope. The full rules are on the HTTP page under [Scoped URLs](/docs/reference/rest-api/http-protocol#scoped-urls).
+
 ## Supported methods
 
 You can use the RPC protocol to perform the following actions:
@@ -85,15 +102,23 @@ You can use the RPC protocol to perform the following actions:
             <td scope="row" data-label="Description">Merge specified data into either all records in a table or a single record</td>
         </tr>
         <tr>
+            <td scope="row" data-label="Function"><a href="#mysql"><code>mysql [ statements, vars?, options? ]</code></a></td>
+            <td scope="row" data-label="Description">Run MySQL statements against SurrealDB tables</td>
+        </tr>
+        <tr>
             <td scope="row" data-label="Function"><a href="#patch"><code>patch [ thing, patches, diff ]</code></a></td>
             <td scope="row" data-label="Description">Patch either all records in a table or a single record with specified patches</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Function"><a href="#pgsql"><code>pgsql [ statements, vars?, options? ]</code></a></td>
+            <td scope="row" data-label="Description">Run PostgreSQL statements against SurrealDB tables</td>
         </tr>
         <tr>
             <td scope="row" data-label="Function"><a href="#ping"><code>ping</code></a></td>
             <td scope="row" data-label="Description">Sends a ping to the database</td>
         </tr>
         <tr>
-            <td scope="row" data-label="Function"><a href="#query"><code>query [ sql, vars ]</code></a></td>
+            <td scope="row" data-label="Function"><a href="#query"><code>query [ sql, vars?, options? ]</code></a></td>
             <td scope="row" data-label="Description">Execute a custom query with optional variables</td>
         </tr>
         <tr>
@@ -101,7 +126,7 @@ You can use the RPC protocol to perform the following actions:
             <td scope="row" data-label="Description">Stop a streaming query that is running on the same connection</td>
         </tr>
         <tr>
-            <td scope="row" data-label="Function"><a href="#query_stream"><code>query_stream [ sql, vars ]</code></a></td>
+            <td scope="row" data-label="Function"><a href="#query_stream"><code>query_stream [ sql, vars?, options? ]</code></a></td>
             <td scope="row" data-label="Description">Execute a custom query and receive its results as frames while it runs</td>
         </tr>
         <tr>
@@ -114,7 +139,7 @@ You can use the RPC protocol to perform the following actions:
         </tr>
         <tr>
             <td scope="row" data-label="Function"><a href="#run"><code>run [ func_name, version, args ]</code></a></td>
-            <td scope="row" data-label="Description">Execute built-in functions, custom functions, or machine learning models with optional arguments.</td>
+            <td scope="row" data-label="Description">Execute built-in functions or custom functions with optional arguments.</td>
         </tr>
         <tr>
             <td scope="row" data-label="Function"><a href="#select"><code>select [ thing ]</code></a></td>
@@ -135,6 +160,10 @@ You can use the RPC protocol to perform the following actions:
         <tr>
             <td scope="row" data-label="Function"><a href="#update"><code>update [ thing, data ]</code></a></td>
             <td scope="row" data-label="Description">Modify either all records in a table or a single record with specified data if the record already exists</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Function"><a href="#upgrade_check"><code>upgrade_check [ config ]</code></a></td>
+            <td scope="row" data-label="Description">On 3.3, reports what 4.0 refuses or changes in the datastore</td>
         </tr>
         <tr>
             <td scope="row" data-label="Function"><a href="#upsert"><code>upsert [ thing, data ]</code></a></td>
@@ -309,6 +338,25 @@ To run a request inside the transaction, add the `txn` field next to `method` an
 
 A request without `txn` runs outside the transaction. In the example above, `SELECT * FROM person` without `txn` returns an empty array until the commit, while the same query with `txn` returns `person:1`.
 
+### A statement that fails inside the transaction
+
+From SurrealDB 4.0, a transaction opened with `begin` never commits part of a statement. A statement that fails after it has written part of its change, such as a `CREATE` whose event throws an error after the record is stored, leaves the transaction unable to commit. So does a statement that may write and stops before it returns, such as one whose gRPC request deadline passes while it runs. A later `commit` returns an error, and the transaction is discarded with every change made in it:
+
+```json title="Response"
+{
+    "id": 3,
+    "error": {
+        "cause": null,
+        "code": -32003,
+        "details": { "kind": "NotExecuted" },
+        "kind": "Query",
+        "message": "A statement failed after writing part of its change, so the transaction cannot commit"
+    }
+}
+```
+
+To keep the other changes, run the work again in a new transaction. A statement that fails before it has written anything leaves the transaction able to commit, and so does a statement that cannot write, such as a `SELECT` or a `SLEEP`, however it ends. Requests can share a transaction, so a write that another request makes on it while a statement runs counts as that statement's write if the statement then fails.
+
 ## `commit` <label label="websocket only" /> {#commit}
 
 <Since v="v3.0.0" />
@@ -334,7 +382,26 @@ commit [ txn ]
 }
 ```
 
-A transaction id that is unknown or already finished returns `Transaction not found`.
+A transaction id that is unknown or already finished returns `Transaction not found`. A `commit` is also refused when a statement in the transaction failed after writing part of its change, as described under [A statement that fails inside the transaction](#a-statement-that-fails-inside-the-transaction).
+
+### Committing while a request is still running
+
+Requests that carry the same `txn` can run at the same time. From SurrealDB 4.0, a `commit` that arrives while one of them is still running a statement that may write is refused, so that it cannot store part of that statement:
+
+```json title="Response"
+{
+    "id": 3,
+    "error": {
+        "cause": null,
+        "code": -32003,
+        "details": { "kind": "NotExecuted" },
+        "kind": "Query",
+        "message": "The transaction cannot commit while a statement that may write is still running on it, so it was cancelled"
+    }
+}
+```
+
+The refused `commit` cancels the transaction. The running statement fails at its next write with `Couldn't update a finished transaction`, and the transaction is rolled back once that statement ends, so none of its changes are stored. A statement that cannot write, such as a `SELECT`, does not hold back a `commit`. Wait for every request on the transaction to return before you send `commit`.
 
 ## `cancel` <label label="websocket only" /> {#cancel}
 
@@ -360,6 +427,8 @@ cancel [ txn ]
     "result": null
 }
 ```
+
+A `cancel` sent while another request on the transaction is still running a statement that may write returns at once. That statement fails at its next write with `Couldn't update a finished transaction`, and the rollback runs once the statement ends. Until the statement reaches a write or ends, for example while it waits in a `sleep()`, the transaction stays open on the server.
 
 The `begin`, `commit` and `cancel` methods are not available over HTTP, because HTTP requests carry no connection to hold the transaction between them.
 
@@ -1097,6 +1166,37 @@ merge [ thing, data ]
 
 <br />
 
+## `mysql`
+
+<Since v="v4.0.0" />
+
+This method runs MySQL statements on the RPC session, in the [MySQL dialect](/docs/reference/rest-api/mysql-protocol#the-mysql-dialect) that the MySQL wire protocol listener uses. It takes the same parameters and options, and answers in the same form, as [`pgsql`](#pgsql), with these differences:
+
+- A positional `?` binds to the variable of its position, so the first `?` reads `_1`.
+- A column's `type` is `{ "name", "mysql_type" }`, where `mysql_type` is the MySQL protocol type code.
+- `command.tag` is the kind of statement, such as `SELECT`, `INSERT`, `REPLACE` or `CREATE TABLE`.
+- An `ERR` entry carries MySQL's SQLSTATE and its error number in `errno`, such as `1064` for a parse failure, `1146` for a missing table and `1062` for a duplicate key.
+- An entry whose whole text is `USE name` switches the session database within the session namespace, as the [`use`](#use) method does.
+- `START TRANSACTION` takes `READ ONLY`, `READ WRITE` and `WITH CONSISTENT SNAPSHOT`. A failing statement leaves the transaction `"active"`, because MySQL has no failed state.
+- `SET` statements are accepted and have no effect. User variables (`@a`) and SQL `PREPARE` statements, which the MySQL listener supports, are not available.
+- A column without an alias is named as in the PostgreSQL dialect, such as `count` for `COUNT(*)`, not by its expression text as the MySQL listener names it.
+
+The method is gated by the `mysql` RPC method name, the arbitrary query capability and the `mysql` HTTP route name.
+
+```json title="Request"
+{
+    "id": 1,
+    "method": "mysql",
+    "params": [
+        "SELECT name FROM person WHERE name = ?",
+        { "_1": "Tobie" },
+        { "rowMode": "array" }
+    ]
+}
+```
+
+<br />
+
 ## `patch`
 
 This method patches either all records in a table or a single record with specified patches.
@@ -1185,6 +1285,123 @@ patch [ thing, patches, diff ]
 
 <br />
 
+## `pgsql`
+
+<Since v="v4.0.0" />
+
+This method runs PostgreSQL statements on the RPC session, as [`query`](#query) runs SurrealQL. The statements are read in the [PostgreSQL dialect](/docs/reference/rest-api/postgres-protocol#postgresql-sql) that the Postgres wire protocol listener uses, and run against SurrealDB tables. The method answers with the column metadata, command tags, error codes and transaction status that a SQL client library needs, so a client modelled on node-postgres can run over WebSocket or HTTP instead of a TCP connection. [`mysql`](#mysql) is the same method for the MySQL dialect.
+
+```json title="Method syntax"
+pgsql [ statements, vars?, options? ]
+```
+
+### Parameters
+<table>
+    <thead>
+        <tr>
+            <th colspan="2" scope="col">Parameter</th>
+            <th colspan="2" scope="col">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td colspan="2" scope="row" data-label="Parameter">
+                <code>statements</code>
+                <label label="required" />
+            </td>
+            <td colspan="2" scope="row" data-label="Description">
+                A string, which can hold several statements separated by <code>;</code>, or a batch: an array of strings and <code>{ "text": string, "vars"?: object }</code> objects, run in order
+            </td>
+        </tr>
+        <tr>
+            <td colspan="2" scope="row" data-label="Parameter">
+                <code>vars</code>
+               <label label="optional" />
+            </td>
+            <td colspan="2" scope="row" data-label="Description">
+                An object of variables layered over the session's. The positional parameter <code>$1</code> binds to the variable <code>_1</code>, <code>$2</code> to <code>_2</code>, and so on. In a batch, an entry's own <code>vars</code> take precedence over these
+            </td>
+        </tr>
+        <tr>
+            <td colspan="2" scope="row" data-label="Parameter">
+                <code>options</code>
+               <label label="optional" />
+            </td>
+            <td colspan="2" scope="row" data-label="Description">
+                An object of the options in the table below
+            </td>
+        </tr>
+    </tbody>
+</table>
+
+| Option | Values | Meaning |
+| --- | --- | --- |
+| `describe` | boolean | Describe the last statement of each entry instead of running it. |
+| `rowMode` | `"object"` (default) or `"array"` | Send each row as an object keyed by column name, or as an array in column order. |
+| `valueMode` | `"native"` (default) or `"text"` | Send values as SurrealDB values, or every value as its text form, with `null` for SQL `NULL`. |
+| `atomic` | boolean, default `false` | Run every statement of the call in one transaction, which commits only if all of them succeed. |
+| `isolation` | `"snapshot"`, `"serializable"` or a SQL isolation level | The isolation level of an atomic call's transaction. |
+| `readOnly` | boolean, default `false` | Make an atomic call's transaction read-only, so that a write in it fails. |
+
+An unknown option or value fails the call with `invalid_params`. The session's namespace, database, authentication and variables apply, as they do for `query`, so a call runs with the permissions of the signed-in user.
+
+### Response
+
+A call that reaches the engine answers with one object. `statements` has one entry for each SQL statement, `params` is present only for a `describe` call, and `transaction.status` is `"idle"`, `"active"` or `"failed"`. An entry that ran has a `command` with the PostgreSQL command tag (`SELECT 1`, `INSERT 0 3`, `CREATE TABLE`) and the number of rows it read or wrote, a `columns` list with each column's name, PostgreSQL type and source table and column, and its `rows`. A record ID in a row is sent as its key, so `person:1` is sent as `1`.
+
+An `INSERT`, `UPDATE` or `DELETE` answers with a count and no rows, unless it has a `RETURNING` clause. Within one string, the first statement that fails stops the statements after it, which answer with an `ERR` entry. A failing batch entry does not stop the entries after it, so independent statements go in separate entries.
+
+A statement that fails answers with an `ERR` entry, while the call itself succeeds. Its `error` holds the `message` and the PostgreSQL `sqlstate`, such as `42601` for a parse failure, `42P01` for a missing table, `23505` for a duplicate key and `40001` for a transaction conflict that can be retried. A failure that is not about the statement text, such as a denied method or malformed parameters, fails the call as an RPC error.
+
+A parameter bound to a column is read as the column's type when it is sent as text, so a client that sends every parameter as text can write to integer, float, `numeric`, boolean, timestamp, `uuid` and `json` columns. Text that does not read as the column's type fails with `42804`. SQL `PREPARE` and `EXECUTE` statements are refused, so bind parameters with `vars` instead.
+
+### Transactions
+
+Over WebSocket, an entry whose whole text is `BEGIN` or `START TRANSACTION`, with optional `ISOLATION LEVEL` and `READ ONLY` modes, opens a transaction on the session. Later calls run inside it until an entry that is `COMMIT` or `ROLLBACK`. `REPEATABLE READ`, `READ COMMITTED` and `READ UNCOMMITTED` run at snapshot isolation, and `SERIALIZABLE` opens a serializable transaction. After a failing statement, the status is `"failed"` and later statements fail with `25P02` until the transaction ends. `SET TRANSACTION` and `SET SESSION CHARACTERISTICS AS TRANSACTION` choose the modes of the next transaction, or of every later one.
+
+An HTTP request holds no transaction between requests, so an entry that opens one fails. Use `atomic: true` instead, which works over both transports. In an atomic call, the statements after the first failure are not run, and the response reports `committed: false`.
+
+`SET`, `SHOW` and `RESET` act on session settings, which last for the session over WebSocket and for the request over HTTP. A setting has no effect on the engine. A running call over WebSocket is cancelled with [`query_cancel`](#query_cancel), given the call's request `id`.
+
+### Capabilities
+
+The method is gated by the `pgsql` [RPC method name](/docs/learn/security/authorization/capabilities#rpc-method-names), by the [arbitrary query](/docs/learn/security/authorization/capabilities#arbitrary-queries) capability as `query` is, and by the `postgres` [HTTP route name](/docs/learn/security/authorization/capabilities#http-route-names). A call that a capability denies fails with a `NotAllowed` error.
+
+### Example usage
+```json title="Request"
+{
+    "id": 1,
+    "method": "pgsql",
+    "params": [
+        "SELECT id, name FROM person WHERE name = $1",
+        { "_1": "Tobie" }
+    ]
+}
+```
+
+```json title="Response"
+{
+    "id": 1,
+    "result": {
+        "statements": [
+            {
+                "status": "OK",
+                "time": "412µs",
+                "command": { "tag": "SELECT 1", "rows_affected": 1, "last_insert_id": null, "warnings": 0 },
+                "columns": [
+                    { "name": "id", "type": { "name": "integer", "oid": 23 }, "nullable": null, "table": "person", "column": "id" },
+                    { "name": "name", "type": { "name": "text", "oid": 25 }, "nullable": null, "table": "person", "column": "name" }
+                ],
+                "rows": [ { "id": 1, "name": "Tobie" } ]
+            }
+        ],
+        "transaction": { "status": "idle" }
+    }
+}
+```
+
+<br />
+
 ## `ping`
 
 ```json title="Method Syntax"
@@ -1213,7 +1430,7 @@ ping
 This method sends a custom SurrealQL query.
 
 ```json title="Method Syntax"
-query [ sql, vars ]
+query [ sql, vars?, options? ]
 ```
 
 ### Parameters
@@ -1243,8 +1460,24 @@ query [ sql, vars ]
                 An object that maps variable names to the values the query uses
             </td>
         </tr>
+        <tr>
+            <td colspan="2" scope="row" data-label="Parameter">
+                <code>options</code>
+               <label label="optional" />
+            </td>
+            <td colspan="2" scope="row" data-label="Description">
+                An object of the options in the table below
+            </td>
+        </tr>
     </tbody>
 </table>
+
+| Option | Values | Meaning |
+| --- | --- | --- |
+| `read_only` | `true`, or an object with `max_staleness` and `strict` | Run the statements as one read-only block, as [`BEGIN READ ONLY`](/docs/reference/query-language/statements/begin#read-only-transactions) does. `max_staleness` is a duration and defaults to `0s`, the current state. |
+| `trace` | an array of trace kinds | Report the graph the statements walked, as described under [Tracing the graph a query walked](#tracing-the-graph-a-query-walked). |
+
+An unknown option is refused, so a misspelt option is never ignored.
 
 ### Example usage
 ```json title="Request"
@@ -1287,6 +1520,88 @@ query [ sql, vars ]
   ]
 }
 ```
+
+### Tracing the graph a query walked
+
+<Since v="v4.0.0" />
+
+A `query` or [`query_stream`](#query_stream) call can report the graph edges, references and record links that its statements read to produce their results, along with the parameters that a `LET` bound and the live queries that a `LIVE SELECT` started. A client such as a graph view uses this to draw the relationships a query followed, instead of guessing them from the record ids in the results. The `trace` option lists the kinds to report.
+
+In the example below, `person:a` is related to `person:b` through the edge `knows:ab`, and the call asks for relations and variables:
+
+```json title="Request"
+{
+    "id": 1,
+    "method": "query",
+    "params": [
+        "LET $x = 1; SELECT ->knows->person AS friends FROM person:a;",
+        {},
+        { "trace": ["relations", "variables"] }
+    ]
+}
+```
+
+Each result carries the trace of its statement under a `trace` field. A statement with nothing to report has no `trace` field.
+
+```json title="Response"
+{
+  "id": 1,
+  "result": [
+      {
+          "status": "OK",
+          "time": "21.5µs",
+          "result": null,
+          "trace": { "variables": { "x": 1 } }
+      },
+      {
+          "status": "OK",
+          "time": "96.208µs",
+          "result": [{ "friends": ["person:b"] }],
+          "trace": { "relations": [["person:a", "knows:ab", "person:b"]] }
+      }
+  ]
+}
+```
+
+The `trace` option takes these kinds:
+
+| Kind | Entry | Reported for |
+| --- | --- | --- |
+| `relations` | `[in, edge, out]` | Each graph edge that a `->` or `<-` lookup in the result read. An end that the session cannot read is `NONE`, which is `null` in JSON. |
+| `references` | `[referrer, referenced]` | Each reference that a `<~` lookup in the result read, with the record that holds the field first. |
+| `links` | `[record, field, target]` | Each record link that the result reads through, such as `author` in `author.name`. |
+| `variables` | an object of names and values | The parameter that a top-level `LET` bound, on the result of that `LET`. |
+| `subscriptions` | an array of live query ids | The live query that a `LIVE SELECT` started. |
+
+A trace reports only what leads to the result:
+
+- A lookup is reported only where its value is part of the result, and only for the edges that lead to the records it returned. An edge that a filter in the path removed, or a path that reaches no record, is not reported. A recursive lookup is reported at every depth.
+- A lookup or link in a condition, such as a `WHERE` clause, is not reported. A link that the result returns without reading through it, as in `SELECT author FROM post`, is not reported either.
+- A lookup or link that reaches the result through a function, an operator or an aggregate, such as `count(->knows)`, is not reported. The trace carries `"partial": true` instead. A `LIMIT` over a graph path in `FROM` also sets `partial`.
+- Edges that a `RELATE` writes are not reported, because its result already holds them, and nor are links that `FETCH` resolves.
+
+A trace holds only what the session can read. A record that its table permissions hide, an edge of a table that the session cannot select, and a link in a field that the session cannot read are not reported.
+
+Asking for a trace does not change the results. A kind that is not asked for is not recorded, and a call without the `trace` option records nothing. A statement that fails, or that a transaction rolls back, has no trace. The same entry can appear more than once, so a client keys entries by their record ids.
+
+A trace has size limits. A `LET` whose value is too large is reported by name with the value `NONE`, and a buffered `query` keeps at most about 1 MiB of relation, reference and link entries across all its statements. A trace that reached a limit lists the kinds it cut short in a `truncated` array.
+
+A kind that the server does not know is refused, so a client never reads an unsupported kind as an empty one:
+
+```json title="Response"
+{
+    "id": 1,
+    "error": {
+        "cause": null,
+        "code": -32603,
+        "details": { "kind": "InvalidParams" },
+        "kind": "Validation",
+        "message": "Unknown trace kind `records`"
+    }
+}
+```
+
+The `trace` option is not available over gRPC. A buffered `query` with a trace sends its results as ordinary values, not as [shaped results](#shaped-results).
 
 ## `query_cancel` <label label="websocket only" /> {#query_cancel}
 
@@ -1344,7 +1659,7 @@ The method returns `null` once the stream has been told to stop. The stream then
 This method runs a query in the same way as [`query`](#query), but answers with a sequence of frames sent while the query runs instead of one response at the end, so the first records reach the client before the last statement has finished. Only the WebSocket `/rpc` endpoint serves it, and HTTP `POST /rpc` reports `Method not found`. Neither the Rust nor the JavaScript SDK calls this method over WebSocket. The Rust SDK's [`.stream_items()`](/docs/reference/rust/methods/query#stream-items) streams incrementally on the embedded engines and over gRPC, and the JavaScript SDK's [streaming query responses](/docs/reference/javascript/concepts/executing-queries#streaming-query-responses) do so on the embedded Node.js and browser engines, which produce the same frames locally.
 
 ```json title="Method syntax"
-query_stream [ sql, vars ]
+query_stream [ sql, vars?, options? ]
 ```
 
 ### Parameters
@@ -1374,10 +1689,19 @@ query_stream [ sql, vars ]
                 An object that maps variable names to the values the query uses
             </td>
         </tr>
+        <tr>
+            <td colspan="2" scope="row" data-label="Parameter">
+                <code>options</code>
+               <label label="optional" />
+            </td>
+            <td colspan="2" scope="row" data-label="Description">
+                An object with the same options as <code>query</code>, <code>read_only</code> and <code>trace</code>
+            </td>
+        </tr>
     </tbody>
 </table>
 
-The request needs an `id`, because every frame carries it, and one without an `id` is refused. A second `query_stream` that reuses the `id` of a stream still running on the connection is refused with `A streaming query with this request id is already in progress`. A request that carries a `txn` runs inside that client transaction, and the client waits for the `end` frame before it sends `commit`, because a `commit` that arrives while the stream is running ends the transaction the stream is still using. A failure before execution starts, such as a parse error or a denied capability, is answered with an ordinary error response and no frames.
+The request needs an `id`, because every frame carries it, and one without an `id` is refused. A second `query_stream` that reuses the `id` of a stream still running on the connection is refused with `A streaming query with this request id is already in progress`. A request that carries a `txn` runs inside that client transaction, and the client waits for the `end` frame before it sends `commit`. A `commit` that arrives while the stream is still running a statement that may write is refused and cancels the transaction, as described under [Committing while a request is still running](#committing-while-a-request-is-still-running). A failure before execution starts, such as a parse error or a denied capability, is answered with an ordinary error response and no frames.
 
 ### Frames
 
@@ -1398,6 +1722,35 @@ Records are provisional until their statement's `finished` frame arrives:
 - An `end` error can also name `LIVE SELECT` subscriptions that were discarded because their session ended, since their statements had already finished and cannot be retracted.
 
 New frame types and fields can be added without changing `version`, so a client ignores a `stream` value or a field it does not recognise. Every `finished` frame carries `single`, because a statement that sent no `rows` or `value` frame has no other way to say whether its value is an empty list or a single value.
+
+### Trace
+
+<Since v="v4.0.0" />
+
+A request with the `trace` option, described under [Tracing the graph a query walked](#tracing-the-graph-a-query-walked), receives the trace of each statement inside the frames that the stream already sends, under a `trace` field. A trace never takes a frame of its own. It goes on the statement's next `rows` or `value` frame, or on its `finished` frame when no other frame follows.
+
+- A trace belongs to its statement, not to the records of the frame it arrives on, so a client collects it for each `index` across that statement's frames.
+- A trace is provisional in the same way as records. A `finished` frame with an `error` retracts every trace already sent for that statement.
+- The same entry can arrive in more than one frame.
+
+```json title="Request"
+{
+    "id": 1,
+    "method": "query_stream",
+    "params": [
+        "SELECT title, author.name, ->tagged->tag AS tags FROM post;",
+        {},
+        { "trace": ["relations", "links"] }
+    ]
+}
+```
+
+```json title="Response"
+{ "id": 1, "result": { "statements": 1, "stream": "begin", "version": 1 } }
+{ "id": 1, "result": { "index": 0, "stream": "rows", "trace": { "links": [["post:1", "author", "person:tobie"]], "relations": [["post:1", "tagged:a", "tag:rust"]] }, "values": [{ "author": { "name": "Tobie" }, "tags": ["tag:rust"], "title": "Hello" }] } }
+{ "id": 1, "result": { "index": 0, "single": false, "stream": "finished", "time": "188.25µs", "type": null } }
+{ "id": 1, "result": { "results": 1, "stream": "end", "time": "301.5µs" } }
+```
 
 ### Limits
 
@@ -1542,7 +1895,7 @@ relate [ in, relation, out, data? ]
 
 ## `reset`
 
-This method will reset all attributes for the current connection. It clears authentication (much like invalidate), unsets the selected NS/DB, unsets any defined connection params, and aborts any active live queries. On WebSocket connections it also cancels open client-managed transactions for the session being reset and frees their slots under [`SURREAL_MAX_TRANSACTIONS_PER_CONNECTION`](/docs/reference/cli/db/environment-variables#websocket-config) / [`SURREAL_MAX_TRANSACTIONS_PER_SESSION`](/docs/reference/cli/db/environment-variables#websocket-config).
+This method will reset all attributes for the current connection. It clears authentication (much like invalidate), unsets the selected NS/DB, unsets any defined connection params, and aborts any active live queries. On a [scoped connection](#scoped-connections), it returns to the namespace and database in the URL instead of unsetting them. On WebSocket connections it also cancels open client-managed transactions for the session being reset and frees their slots under [`SURREAL_MAX_TRANSACTIONS_PER_CONNECTION`](/docs/reference/cli/db/environment-variables#websocket-config) / [`SURREAL_MAX_TRANSACTIONS_PER_SESSION`](/docs/reference/cli/db/environment-variables#websocket-config).
 
 ```json title="Method Syntax"
 reset
@@ -1567,7 +1920,7 @@ reset
 
 ## `run`
 
-This method allows you to execute built-in functions, custom functions, or machine learning models with optional arguments.
+This method allows you to execute built-in functions or custom functions with optional arguments. SurrealDB 4.0 removed SurrealML, so a call to an `ml::` model fails.
 
 ```json title="Method Syntax"
 run [ func_name, version?, args? ]
@@ -1589,7 +1942,7 @@ run [ func_name, version?, args? ]
                 <label label="required" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
-                The name of the function or model to execute. Prefix with `fn::` for custom functions or `ml::` for machine learning models.
+                The name of the function to execute. Prefix with `fn::` for custom functions.
             </td>
         </tr>
         <tr>
@@ -1598,7 +1951,7 @@ run [ func_name, version?, args? ]
                <label label="optional" />
             </td>
             <td colspan="2" scope="row" data-label="Description">
-                The version of the function or model to execute.
+                The version of the function to execute.
             </td>
         </tr>
         <tr>
@@ -1647,27 +2000,6 @@ run [ func_name, version?, args? ]
     "result": 85
 }
 ```
-
-### Executing a machine learning model
-
-```json title="Request"
-{
-    "id": 1,
-    "method": "run",
-    "params": [ "ml::image_classifier", "v2.1", [ "image_data_base64" ] ]
-}
-```
-
-```json title="Response"
-{
-    "id": 1,
-    "result": "cat"
-}
-```
-
-> [!IMPORTANT]
-> When using a machine learning model (prefixed with `ml::`), the `version` parameter is **required**.
-
 
 <br />
 
@@ -2049,6 +2381,65 @@ update [ thing, data ]
 
 <br />
 
+## `upgrade_check` {#upgrade_check}
+
+This method is in the latest `3.3` release, and not in `4.0`. It checks the datastore for the stored definitions and records that `4.0` refuses, fails on or treats differently, within the scope of the session, and returns the same report as the [`/upgrade-check`](/docs/reference/rest-api/http-protocol#upgrade-check) HTTP route. It only reads, and is available over WebSocket and HTTP `/rpc`, but not over gRPC.
+
+The session needs the `VIEWER` role or higher, and a record user is refused. The method is allowed by default, and `--deny-rpc upgrade_check` turns it off. See [RPC method names](/docs/learn/security/authorization/capabilities#rpc-method-names).
+
+```json title="Method Syntax"
+upgrade_check [ config ]
+```
+
+### Parameters
+<table>
+    <thead>
+        <tr>
+            <th colspan="2" scope="col">Parameter</th>
+            <th colspan="2" scope="col">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td colspan="2" scope="row" data-label="Function">
+                <code>config</code>
+                <label label="optional" />
+            </td>
+            <td colspan="2" scope="row" data-label="Description">
+                An object with any of the keys <code>namespace</code>, <code>database</code>, <code>scan_records</code>, <code>scan_total</code> and <code>scan_seconds</code>, as described for the <a href="/docs/reference/rest-api/http-protocol#upgrade-check-options">HTTP route</a>. Without it, the check reads every definition in the session's scope and no records.
+            </td>
+        </tr>
+    </tbody>
+</table>
+
+### Example usage
+```json title="Request"
+{
+    "id": 1,
+    "method": "upgrade_check",
+    "params": [{ "namespace": "shop", "scan_records": 100 }]
+}
+```
+
+The result is the report object, with the fields listed under [Response](/docs/reference/rest-api/http-protocol#upgrade-check-response):
+
+```json title="Response"
+{
+    "id": 1,
+    "result": {
+        "target": "4.0",
+        "verdict": "blocking",
+        "complete": true,
+        "severities": { "blocking": 1, "info": 0, "warning": 1 },
+        "counts": { "index-on-datetime": 1, "view-reads-own-table": 1 },
+        "findings": [ ... ],
+        "notes": [ ... ]
+    }
+}
+```
+
+<br />
+
 ## `upsert`
 
 ```json title="Method Syntax"
@@ -2154,6 +2545,8 @@ use [ ns, db ]
 ### Accepted values
 
 For either the namespace or database, a string will change the value, `null` will unset the value, and `none` will cause the value to not be affected.
+
+On a [scoped connection](#scoped-connections), a `use` that leaves the scope fails with an error such as `You don't have permission to change to the other namespace`.
 
 ### Example usage
 

@@ -1,5 +1,5 @@
 ---
-position: 10
+position: 11
 title: File
 description: These functions can be used to work with files.
 ---
@@ -59,6 +59,14 @@ These functions can be used to work with files.
     <tr>
       <td scope="row" data-label="Function"><a href="#filelist"><code>file::list()</code></a></td>
       <td scope="row" data-label="Description">Returns a list of files inside a bucket</td>
+    </tr>
+    <tr>
+      <td scope="row" data-label="Function"><a href="#filepresign_get"><code>file::presign_get()</code></a></td>
+      <td scope="row" data-label="Description">Returns a signed URL that downloads a file without a session</td>
+    </tr>
+    <tr>
+      <td scope="row" data-label="Function"><a href="#filepresign_put"><code>file::presign_put()</code></a></td>
+      <td scope="row" data-label="Description">Returns a signed URL that uploads a file without a session</td>
     </tr>
     <tr>
       <td scope="row" data-label="Function"><a href="#fileput"><code>file::put()</code></a></td>
@@ -228,30 +236,32 @@ b"536F6D6520636F6E74656E74"
 The `file::head` function returns the metadata for a file.
 
 ```surql title="API DEFINITION"
-file::head() -> object
+file::head(file) -> option<object>
 ```
 
 If a file is found, the metadata will be returned as an object with the following fields:
 
-* `e_data` (`option<string>`): the unique identifier for the file.
-* `last_modified` (`datetime`)
-* `location` (`string`)
-* `size` (`int`)
-* `version` (`option<string>`)
+* `file` (`file`): the pointer to the file.
+* `size` (`int`): the file size in bytes.
+* `updated` (`datetime`): the last time a change was made to the file.
+* `etag` (`option<string>`): an identifier that changes when the file changes, from SurrealDB 4.0. On a `file:` bucket it is a weak identifier that starts with `W/`, because file modification times on disk do not have the same precision on every system.
+* `content_type` (`option<string>`): the media type stored with the file, present only when one was given to [`file::put`](#fileput). From SurrealDB 4.0.
 
 An example of this function and its output:
 
 ```surql
-f"my_bucket:/my_book.txt".head();
+DEFINE BUCKET my_bucket BACKEND "memory";
+f"my_bucket:/cover.png".put(<bytes>"PNG", { content_type: "image/png" });
+f"my_bucket:/cover.png".head();
 ```
 
-```surql title="Output"
+```surql title="Sample output"
 {
-	e_tag: '1',
-	key: 'my_book.txt',
-	last_modified: d'2025-03-26T06:29:18.988Z',
-	size: 78,
-	version: NONE
+	content_type: 'image/png',
+	etag: '"0"',
+	file: f"my_bucket:/cover.png",
+	size: 3,
+	updated: d'2026-11-02T10:15:04.221917Z'
 }
 ```
 
@@ -296,28 +306,16 @@ The counterpart to this function is `file::bucket`, which returns the bucket nam
 file::list(string, $list_options: option<object>) -> array<object>
 ```
 
-The `file::list` returns the metadata for the files inside a certain bucket. The output is an array of objects, each containing the following fields:
+The `file::list` function returns the metadata for the files inside a bucket, in key order. Each object in the output has the following fields:
 
 * `file`: the pointer to the file.
 * `size` (`int`): the file size in bytes.
 * `updated` (`datetime`): the last time a change was made to the file.
+* `etag` (`option<string>`): the same identifier that [`file::head`](#filehead) returns.
+
+A listing never contains `content_type`, because the listings of the cloud object storage services do not carry it. Use `file::head` to read the type of a file.
 
 ```surql
-/**[test]
-
-[[test.results]]
-value = "NONE"
-[[test.results]]
-value = "NONE"
-[[test.results]]
-value = "NONE"
-[[test.results]]
-value = "NONE"
-[[test.results]]
-value = "[{ file: f"my_bucket:/awesome_book", size: 19, updated: d'2025-10-07T01:13:20.226926Z' }, { file: f"my_bucket:/some_book", size: 39, updated: d'2025-10-07T01:13:20.227320Z' }]
-"
-*/
-
 DEFINE BUCKET my_bucket BACKEND "memory";
 
 f"my_bucket:/some_book".put("Once upon a time...");
@@ -326,117 +324,197 @@ f"my_bucket:/some_book".put("In a hole in the ground lived a Hobbit.");
 file::list("my_bucket");
 ```
 
-```surql title="Output"
+```surql title="Sample output"
 [
 	{
+		etag: '"1"',
 		file: f"my_bucket:/awesome_book",
 		size: 19,
-		updated: d'2025-04-08T03:28:20.530511Z'
+		updated: d'2026-11-02T03:27:10.360294Z'
 	},
 	{
+		etag: '"2"',
 		file: f"my_bucket:/some_book",
 		size: 39,
-		updated: d'2025-04-08T03:28:20.530704Z'
+		updated: d'2026-11-02T03:27:10.360458Z'
 	}
 ]
 ```
 
-To modify the output, a second argument can be passed in that contains a single object with up to three fields:
+A second argument holds options for the listing. It is an object with up to four fields:
 
-* `limit` (`int`): the maximum number of files to display.
-* `start` (`string`): displays files ordered after `start`.
-* `prefix` (`string`): displays files whose names begin with `prefix`.
+* `prefix` (`string`): returns only the files whose keys start with this string.
+* `delimiter` (`string`): groups the files below the prefix by folder. The only accepted value is `"/"`.
+* `start` (`string` or `file`): returns only the entries after this key. The entry for `start` itself is not returned.
+* `limit` (`int`): the maximum number of entries to return.
 
-Some examples of the function containing the second object and their responses:
+From SurrealDB 4.0, these options have the same meaning on every backend. Before 4.0, a `file:` bucket listed one folder level and matched `prefix` by whole folder names, and a cloud object storage bucket also matched `prefix` by whole folder names, while a `memory` bucket matched it as a string.
 
-```surql
-file::list("my_bucket", { limit: 1 });
-file::list("my_bucket", { limit: 0 });
-```
+### Prefixes
 
-```surql title="Output"
--------- Query --------
-[
-	{
-		file: f"my_bucket:/awesome_book",
-		size: 19,
-		updated: d'2025-04-15T05:35:40.913221Z'
-	}
-]
-
--------- Query --------
-[]
-```
+`prefix` is a plain string prefix, as in Amazon S3, so it does not have to end at a `/`. A trailing `/` is kept, which limits the listing to the contents of that folder. The examples below use a bucket with six files.
 
 ```surql
-file::list("my_bucket", { prefix: "some" });
-file::list("my_bucket", { prefix: "someBOOOEOEOK" });
+DEFINE BUCKET docs BACKEND "memory";
+FOR $key IN ["/a.txt", "/b.txt", "/b/c.txt", "/b/d/e.txt", "/bz.txt", "/u/tobie/x.png"] {
+	file::put(type::file("docs", $key), "x");
+};
+
+file::list("docs", { prefix: "/b" }).map(|$e| file::key($e.file));
+//- ['/b.txt', '/b/c.txt', '/b/d/e.txt', '/bz.txt']
+
+file::list("docs", { prefix: "/b/" }).map(|$e| file::key($e.file));
+//- ['/b/c.txt', '/b/d/e.txt']
 ```
 
-```surql title="Output"
--------- Query --------
-[
-	{
-		file: f"my_bucket:/some_book",
-		size: 39,
-		updated: d'2025-04-15T05:35:40.913554Z'
-	}
-]
+A prefix cannot contain a `.` or `..` segment, so a listing cannot reach outside the bucket.
 
--------- Query --------
-[]
-```
+### Folders
+
+Without `delimiter`, a listing is recursive and returns every file below the prefix. With `delimiter: "/"`, it returns the files directly below the prefix, and each folder below the prefix once, as an object with a single `prefix` field. A folder is reported only when it holds at least one file. The value of `prefix` can be passed to the next call to list that folder.
 
 ```surql
-file::list("my_bucket", { start: "a" });
-file::list("my_bucket", { start: "m" });
+file::list("docs", { delimiter: "/" });
 ```
 
-```surql title="Output"
--------- Query --------
+```surql title="Sample output"
 [
 	{
-		file: f"my_bucket:/awesome_book",
-		size: 19,
-		updated: d'2025-04-15T05:55:41.973869Z'
+		etag: '"0"',
+		file: f"docs:/a.txt",
+		size: 1,
+		updated: d'2026-11-02T03:27:17.784772Z'
 	},
 	{
-		file: f"my_bucket:/some_book",
-		size: 39,
-		updated: d'2025-04-15T05:55:41.974370Z'
-	}
-]
-
--------- Query --------
-[
+		etag: '"1"',
+		file: f"docs:/b.txt",
+		size: 1,
+		updated: d'2026-11-02T03:27:17.784783Z'
+	},
 	{
-		file: f"my_bucket:/some_book",
-		size: 39,
-		updated: d'2025-04-15T05:55:41.974370Z'
+		prefix: '/b/'
+	},
+	{
+		etag: '"4"',
+		file: f"docs:/bz.txt",
+		size: 1,
+		updated: d'2026-11-02T03:27:17.784788Z'
+	},
+	{
+		prefix: '/u/'
 	}
 ]
 ```
 
 ```surql
-file::list("my_bucket", { prefix: "some", start: "a", limit: 1 });
+file::list("docs", { prefix: "/b/", delimiter: "/" }).map(|$e| $e.prefix ?? file::key($e.file));
 ```
 
 ```surql title="Output"
-[
-	{
-		file: f"my_bucket:/some_book",
-		size: 39,
-		updated: d'2025-04-15T05:35:40.913554Z'
-	}
-]
+['/b/c.txt', '/b/d/']
 ```
+
+### Pages
+
+`start` and `limit` together return a listing one page at a time. The last entry of a page is the `start` of the next page, whether it is a file or a folder. `start` also accepts the `file` field of an entry without a change.
+
+```surql
+LET $keys = |$opts| file::list("docs", $opts).map(|$e| $e.prefix ?? file::key($e.file));
+
+$keys({ delimiter: "/", limit: 3 });
+//- ['/a.txt', '/b.txt', '/b/']
+
+$keys({ delimiter: "/", start: "/b/", limit: 3 });
+//- ['/bz.txt', '/u/']
+
+$keys({ start: file::list("docs", { limit: 2 })[1].file, limit: 2 });
+//- ['/b/c.txt', '/b/d/e.txt']
+```
+
+## `file::presign_get`
+
+<Since v="v4.0.0" />
+
+```surql title="API DEFINITION"
+file::presign_get(file, $options: option<object>) -> object
+```
+
+The `file::presign_get` function returns a signed URL that downloads a file over the [`/bucket` HTTP route](/docs/reference/rest-api/http-protocol#bucket) without a SurrealDB session, for example as the `src` of an `<img>` or `<video>` element. The server must have a signing secret in `SURREAL_BUCKET_PRESIGN_SECRET`; without one, the function fails. See [Presigned URLs](/docs/learn/schema-management/files/presigned-urls) for the setup and the security model.
+
+The optional second argument is an object with one field:
+
+* `expires` (`duration`): how long the URL works. The default is `15m`, the minimum is `1s`, and the maximum is the server's `SURREAL_BUCKET_PRESIGN_MAX_TTL`, which defaults to `1h`.
+
+Any other field is an error, so a misspelled option cannot give a URL more access than was requested. The function checks the bucket's `PERMISSIONS` clause with `$action` set to `presign_get`, and refuses for a bucket whose clause does not allow it.
+
+```surql
+DEFINE BUCKET images BACKEND "memory";
+file::presign_get(f"images:/cover.png", { expires: 10m });
+```
+
+```surql title="Sample output"
+{
+	content_type: NONE,
+	expires: d'2026-11-02T03:37:25Z',
+	href: '/bucket/main/main/images/cover.png?exp=1793590645&sig=C4DhgM0ZQJfHOn3b5s6venD2rDi23DUs867dO0bdNdw',
+	method: 'GET',
+	origin: NONE,
+	path: '/bucket/main/main/images/cover.png?exp=1793590645&sig=C4DhgM0ZQJfHOn3b5s6venD2rDi23DUs867dO0bdNdw'
+}
+```
+
+The returned object has these fields:
+
+* `path` (`string`): the path and query string of the URL. It is always relative.
+* `origin` (`option<string>`): the value of `SURREAL_PUBLIC_ORIGIN`, or `NONE` when the server does not have one.
+* `href` (`string`): `origin` followed by `path`, or `path` alone when there is no origin.
+* `method` (`string`): the HTTP method the URL accepts, `GET` here.
+* `expires` (`datetime`): the time after which the URL stops working.
+* `content_type` (`option<string>`): always `NONE` for a download URL.
+
+The method form `f"images:/cover.png".presign_get()` gives the same result.
+
+## `file::presign_put`
+
+<Since v="v4.0.0" />
+
+```surql title="API DEFINITION"
+file::presign_put(file, $options: option<object>) -> object
+```
+
+The `file::presign_put` function returns a signed URL that uploads a file with an HTTP `PUT` request to the [`/bucket` HTTP route](/docs/reference/rest-api/http-protocol#bucket), without a SurrealDB session. The result has the same fields as [`file::presign_get`](#filepresign_get), with `method` set to `PUT`.
+
+The optional second argument is an object with these fields:
+
+* `expires` (`duration`): how long the URL works, as for `file::presign_get`.
+* `max_size` (`int`): the largest upload in bytes that the URL accepts. The default and the maximum are the server's `SURREAL_BUCKET_PRESIGN_MAX_SIZE`, which defaults to 5 GiB.
+* `overwrite` (`bool`): whether the upload can replace an existing file. The default is `true`. With `false`, an upload to a key that holds a file fails with `412 Precondition Failed`.
+* `content_type` (`string`): the media type the upload must declare in its `Content-Type` header. A URL created without one accepts only an upload with no `Content-Type` header, or with `application/octet-stream`. A `file:` bucket cannot store a content type, so the function fails when this option is set for one.
+
+```surql
+DEFINE BUCKET images BACKEND "memory";
+file::presign_put(f"images:/u/avatar.png", { expires: 5m, max_size: 1048576, overwrite: false, content_type: "image/png" });
+```
+
+```surql title="Sample output"
+{
+	content_type: 'image/png',
+	expires: d'2026-11-02T03:32:25Z',
+	href: '/bucket/main/main/images/u/avatar.png?ct=image%2Fpng&exp=1793590345&max=1048576&ow=false&sig=qw4yuWl9McVCyST8AkIOiViB-Q50wvJcNA8e5npmdYk',
+	method: 'PUT',
+	origin: NONE,
+	path: '/bucket/main/main/images/u/avatar.png?ct=image%2Fpng&exp=1793590345&max=1048576&ow=false&sig=qw4yuWl9McVCyST8AkIOiViB-Q50wvJcNA8e5npmdYk'
+}
+```
+
+The function checks the bucket's `PERMISSIONS` clause with `$action` set to `presign_put`, and with the options bound as `$expires`, `$max_size`, `$overwrite` and `$content_type`, so the clause can limit what a URL allows. A `READONLY` bucket never returns an upload URL. See [Setting permissions on buckets](/docs/reference/query-language/statements/define/bucket#setting-permissions-on-buckets).
 
 ## `file::put`
 
 The `file::put` function adds data into a file, overwriting any existing data.
 
 ```surql title="API DEFINITION"
-file::put()
+file::put(file, value, $options: option<object>)
 ```
 
 An example of this function followed by `file::get()` to display the contents:
@@ -469,14 +547,37 @@ f"my_bucket:/my_book.txt".put("Or were there? I don't quite remember.");
 "Or were there? I don't quite remember."
 ```
 
+### Content types
+
+<Since v="v4.0.0" />
+
+The optional third argument is an object with a single field, `content_type`, which stores a media type with the file. [`file::head`](#filehead) returns it, and the [`/bucket` HTTP route](/docs/reference/rest-api/http-protocol#bucket) sends it as the `Content-Type` of the file.
+
+```surql
+DEFINE BUCKET images BACKEND "memory";
+
+file::put(f"images:/a.png", <bytes>"PNG", { content_type: "image/png" });
+file::head(f"images:/a.png").content_type;
+//- 'image/png'
+
+-- A type is never taken from the file name
+file::put(f"images:/b.png", <bytes>"PNG");
+file::head(f"images:/b.png").content_type;
+//- NONE
+```
+
+A write without `content_type` removes the type that the file had before. `application/octet-stream` is the same as no type. A value that is not a valid media type, or any other field in the object, is an error. A copy keeps the type, and a copy to another bucket fails if that bucket cannot store it.
+
+The memory backend and the cloud object storage backends store a content type. A `file:` bucket cannot, and `file::put` with `content_type` fails on one, rather than writing the file without its type.
+
 <br></br>
 
 ## `file::put_if_not_exists`
 
-The `file::put` function adds data into a file, unless a file of the same name already exists.
+The `file::put_if_not_exists` function adds data into a file, unless a file of the same name already exists. It takes the same `content_type` option as [`file::put`](#fileput).
 
 ```surql title="API DEFINITION"
-file::put_if_not_exists()
+file::put_if_not_exists(file, value, $options: option<object>)
 ```
 
 An example of this function followed by `file::get()` to display the contents:

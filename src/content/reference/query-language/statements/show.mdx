@@ -226,3 +226,75 @@ Versionstamps carry the following two guarantees:
 
 * Versionstamps monotonically increase.
 * Versionstamp format is universal across various backends.
+
+## `SHOW` as an expression
+
+<Since v="v4.0.0" />
+
+`SHOW CHANGES` returns an array, and can be used as a value wherever an expression can go: bound to a parameter, as the source of a `SELECT`, as the range of a `FOR` loop, or as the argument of a function. As an expression it goes in parentheses, because its own `LIMIT` could otherwise be read as the `LIMIT` of the statement around it. In the `SELECT` below, the first `LIMIT` belongs to `SHOW` and the second to `SELECT`:
+
+```surql
+DEFINE TABLE person CHANGEFEED 1h;
+CREATE person:one SET name = 'one';
+CREATE person:two SET name = 'two';
+
+array::len((SELECT changes FROM (SHOW CHANGES FOR TABLE person SINCE 0 LIMIT 2) LIMIT 1));
+//- 1
+
+FOR $change IN (SHOW CHANGES FOR TABLE person SINCE 0) {
+    CREATE seen SET stamp = $change.versionstamp;
+};
+```
+
+A `SHOW` needs no parentheses in three places, because no statement around it can take its `LIMIT`: at the start of a statement, as the value of `LET` or `RETURN`, and at the start of a statement inside a block, such as the body of a function. A `FETCH` after `RETURN SHOW ...` belongs to the `RETURN`.
+
+```surql
+LET $latest = SHOW CHANGES FOR TABLE person SINCE 0 LIMIT 1;
+$latest.len();
+//- 1
+
+DEFINE FUNCTION fn::latest() -> int {
+    LET $c = SHOW CHANGES FOR TABLE person SINCE 0 LIMIT 1;
+    $c.len()
+};
+```
+
+Inside parentheses, `SHOW` starts a statement only when `CHANGES` follows it, so a field named `show` can still be read as `(show)` or in a condition such as `WHERE (show = true)`.
+
+### Changes inside a transaction
+
+A `SHOW` used as an expression reads the changefeed as it was before the transaction it runs in, because the changes of a transaction are added to the changefeed when it commits. In a single statement, the write that the statement makes is not in the result. In a `BEGIN` and `COMMIT` block, a later statement does not see the changes of an earlier one:
+
+```surql
+DEFINE TABLE person CHANGEFEED 1h;
+CREATE person:one SET name = 'one';
+
+-- The DEFINE TABLE and the CREATE
+array::len((SHOW CHANGES FOR TABLE person SINCE 0));
+//- 2
+
+BEGIN;
+CREATE person:two SET name = 'two';
+-- Does not count person:two, which is not committed yet
+CREATE audit:explicit SET seen = array::len((SHOW CHANGES FOR TABLE person SINCE 0));
+//- [{ id: audit:explicit, seen: 2 }]
+COMMIT;
+
+-- After the commit, a new read sees the change
+array::len((SHOW CHANGES FOR TABLE person SINCE 0)) > 2;
+//- true
+```
+
+### `EXPLAIN` of a `SHOW`
+
+[`EXPLAIN`](/docs/reference/query-language/statements/explain) describes a `SHOW`, written with or without parentheses:
+
+```surql
+EXPLAIN SHOW CHANGES FOR TABLE person SINCE 0;
+```
+
+```text title="Output"
+Show [ctx: Db]
+```
+
+Inside a stored block, such as a function body, `EXPLAIN (SHOW ...)` and `EXPLAIN SHOW ...` are both kept as `EXPLAIN FORMAT TEXT (SHOW ...)`.
