@@ -23,6 +23,7 @@ import {
     pictoSurrealDBSolid,
     Spacer,
 } from "@surrealdb/ui";
+import { memo } from "react";
 import placeholderAvatar from "~/assets/img/labs-authors/placeholder.png";
 import { labAgeOpacity, type labFormats } from "~/utils/labs";
 import classes from "./style.module.scss";
@@ -54,8 +55,8 @@ export interface LabCardItem {
 
 export interface LabCardProps {
     item: LabCardItem;
-    /** When set, the card toggles selection instead of opening its link. */
-    onSelect?: () => void;
+    /** When set, the card toggles selection instead of opening its link. Called with the item's slug. */
+    onSelect?: (slug: string) => void;
     selected?: boolean;
 }
 
@@ -73,7 +74,8 @@ function getAuthorAvatarUrl(slug: string): string | undefined {
     return AUTHOR_AVATARS[key];
 }
 
-export function LabCard({ item, onSelect, selected = false }: LabCardProps) {
+// Memoised: the labs grid re-renders on every filter change, and most cards' props are unchanged.
+export const LabCard = memo(function LabCard({ item, onSelect, selected = false }: LabCardProps) {
     const formatImage = FORMAT_IMAGES[item.format as keyof typeof FORMAT_IMAGES];
 
     let authorName: string;
@@ -241,7 +243,7 @@ export function LabCard({ item, onSelect, selected = false }: LabCardProps) {
         return (
             <UnstyledButton
                 className={classes.anchor}
-                onClick={onSelect}
+                onClick={() => onSelect(item.slug)}
                 aria-pressed={selected}
                 display="block"
                 w="100%"
@@ -264,4 +266,4 @@ export function LabCard({ item, onSelect, selected = false }: LabCardProps) {
             {card}
         </Anchor>
     );
-}
+});
