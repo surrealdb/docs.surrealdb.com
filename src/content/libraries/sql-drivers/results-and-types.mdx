@@ -1,0 +1,87 @@
+---
+position: 6
+title: SQL drivers results and value types
+description: The result shape returned by @surrealdb/pg and @surrealdb/mysql, and how PostgreSQL and MySQL column types decode to JavaScript values, with options to override decoding.
+---
+
+# SQL drivers results and value types
+
+## The result
+
+`query`, `execute` and a transaction statement resolve to a result. A tagged template resolves to its `rows`.
+
+```ts
+interface Result<Row> {
+    rows: Row[];
+    columns: Column[]; // name, type name, type id, nullable, table, column
+    command: string; // PostgreSQL tag such as "SELECT 3"; MySQL statement kind
+    rowCount: number;
+    time: string; // server time for the statement
+    transaction: "idle" | "active" | "failed";
+    results: Result<Row>[]; // every statement of the call, in order
+}
+```
+
+`@surrealdb/mysql` adds `insertId` and `warnings`. In `@surrealdb/pg`, `columns[].oid` is a built-in PostgreSQL type id and `nullable` is `null`, because the PostgreSQL wire does not carry it. In `@surrealdb/mysql`, `nullable` comes from the `NOT NULL` flag of the column.
+
+`sql.describe(text)` returns the column metadata and the parameter types without running the statement.
+
+## Value types
+
+Values decode by the type of their column.
+
+<Tabs syncKey="sql-dialect">
+<TabItem label="PostgreSQL">
+| PostgreSQL type | JavaScript value |
+| --- | --- |
+| `bool` | `boolean` |
+| `int2`, `int4`, `float4`, `float8` | `number` |
+| `int8` | `number` within the safe range, `bigint` beyond it |
+| `numeric` | Exact decimal `string` |
+| `text`, `varchar`, `char`, `name`, `uuid` | `string` |
+| `bytea` | `Uint8Array` |
+| `date`, `timestamp`, `timestamptz` | `Date`. A `timestamp` without a zone is read as UTC. |
+| `time`, `timetz`, `interval` | `string` |
+| `json`, `jsonb` | Parsed value |
+| Arrays | Arrays of the element decoding |
+| `record` | `RecordId` with `table`, `key` and `toString()` |
+| `vector` | `Float32Array` |
+
+The `bigint` option sets `int8` handling: `"always"` returns `bigint` for every `int8`, and `"never"` returns `number`. The option `recordIds: "string"` keeps `table:key` text, and `vectors: "array"` keeps number arrays.
+</TabItem>
+<TabItem label="MySQL">
+| MySQL type | JavaScript value |
+| --- | --- |
+| `TINY`, `SHORT`, `LONG`, `INT24`, `YEAR` | `number` |
+| `LONGLONG` | `number` within the safe range, `string` beyond it |
+| `FLOAT`, `DOUBLE` | `number` |
+| `DECIMAL`, `NEWDECIMAL` | Exact decimal `string` |
+| `DATE`, `DATETIME`, `TIMESTAMP` | `Date`, read as local time. Zero dates stay as text. |
+| `JSON` | Parsed value |
+| `VECTOR` | `Float32Array` |
+| Everything else | `string` |
+
+The `bigint` option sets `LONGLONG` handling: `"string"` always returns text, and `"bigint"` always returns `bigint`. `dateStrings` returns date types as text, and `decimalNumbers` returns `DECIMAL` as numbers.
+
+> [!NOTE]
+> The MySQL value encoding is provisional until the instance documents it.
+</TabItem>
+</Tabs>
+
+## Override decoding
+
+Use `parse` to take over one type, or `cast` to see every value. `cast` runs last. In `@surrealdb/mysql`, only `cast` is available, with the options above for common cases.
+
+```ts
+const sql = connect({
+    url,
+    parse: { timestamptz: (raw) => raw }, // @surrealdb/pg only: keep ISO text
+    cast: (column, value) => (column.name === "secret" ? "[redacted]" : value),
+});
+```
+
+Both options also work as per-call options.
+
+## Record ids
+
+`RecordId.parse("person:tobie")` and `recordId("person:tobie")` build ids. A `RecordId` bound as a parameter is sent in its `table:key` form.

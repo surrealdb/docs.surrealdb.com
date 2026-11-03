@@ -350,6 +350,12 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         href: "/docs/libraries/surqlize-php",
                         description: "An object-relational mapper for SurrealDB in PHP.",
                     },
+                    {
+                        label: "SQL drivers for JavaScript",
+                        href: "/docs/libraries/sql-drivers",
+                        description:
+                            "PostgreSQL and MySQL dialect clients for edge and serverless runtimes.",
+                    },
                 ],
             },
         ],
