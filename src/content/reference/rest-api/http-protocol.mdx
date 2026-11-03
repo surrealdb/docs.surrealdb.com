@@ -70,6 +70,10 @@ You can use the HTTP endpoints to perform the following actions:
             <td scope="row" data-label="Description">Streams the datastore's entire keyspace from one snapshot (experimental)</td>
         </tr>
         <tr>
+            <td scope="row" data-label="Function"><a href="#upgrade-check"><code>GET /upgrade-check</code></a></td>
+            <td scope="row" data-label="Description">On 3.3, reports what 4.0 refuses or changes in the datastore</td>
+        </tr>
+        <tr>
             <td scope="row" data-label="Function"><a href="#signup"><code>POST /signup</code></a></td>
             <td scope="row" data-label="Description">Signs-up as a record user using a specific record access method</td>
         </tr>
@@ -428,7 +432,7 @@ DEFINE FIELD at ON event VALUE <datetime> $value;
 
 ## `GET /status` {#status}
 
-This HTTP RESTful endpoint checks whether the database web server is running, returning a 200 status code.
+This HTTP RESTful endpoint checks whether the database web server is running, returning a 200 status code. From 4.0.0 it also returns `200` while the server converts a RocksDB datastore at its first start. See [While a RocksDB datastore converts](#while-a-rocksdb-datastore-converts).
 
 ### Example usage
 
@@ -456,6 +460,8 @@ This HTTP RESTful endpoint checks whether the storage engine responds, by readin
 From SurrealDB 3.3.5, on a server started with [`SURREAL_MEMORY_THRESHOLD`](/docs/reference/cli/db/environment-variables#limits-config), `/health` also returns `503 Service Unavailable` once the memory threshold has refused every request without a break for `SURREAL_MEMORY_THRESHOLD_UNHEALTHY_AFTER` seconds, 60 by default. A process in that state does not release memory until it restarts, so a liveness probe on `/health` restarts it. A single moment below the threshold resets the count.
 
 `/health` stays reachable while the server is still starting up, so a `200` shows that the storage engine answers, not that startup has finished. [`GET /ready`](#ready) is the endpoint that reports whether it has.
+
+From 4.0.0, while the server converts a RocksDB datastore to SurrealKV at its first start, `/health` returns `200` with the body `alive` before the datastore is open, so that a liveness probe does not restart the server during the conversion. The capabilities are not read until the datastore opens, so this answer comes even when the `health` route is denied. See [While a RocksDB datastore converts](#while-a-rocksdb-datastore-converts).
 
 ```bash title="Request"
 curl -I http://localhost:8000/health
@@ -512,6 +518,29 @@ content-type: application/json
 ```
 
 A gated endpoint returns the same body with a `retry-after: 1` header, which `/ready` itself does not send.
+
+### While a RocksDB datastore converts
+
+`4.0` converts a RocksDB datastore to SurrealKV the first time it opens it, and the conversion can take a long time for a large datastore. From 4.0.0, the server starts listening on its address before it opens a RocksDB datastore, and answers these requests until the datastore is open:
+
+| Request | Status | Body |
+| --- | --- | --- |
+| `GET /health` | `200` | `alive` |
+| `GET /status` | `200` | Empty |
+| `GET /ready` | `503` | The percentage complete and an estimate of the time left |
+| Any other request | `503` | `The datastore is still opening; retry shortly` |
+
+```bash title="Request"
+curl http://localhost:8000/ready
+```
+
+```text title="Sample output"
+The datastore is still opening: 25% complete, about 30s remaining
+```
+
+Before the server has measured the conversion for the first time, the body is `The datastore is still opening; it is not ready yet`, and before it can estimate the time left, the body gives the percentage only. The server log has a line with the progress, the size converted and the time elapsed every 10 seconds. When the datastore is open, the server closes this listener and starts its own on the same address, so a request can be refused for up to about 5 seconds between the two. The ordinary startup that `/ready` reports then follows.
+
+A start that does not convert a RocksDB datastore is not affected. See [RocksDB and IndexedDB are removed](/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x#rocksdb-and-indexeddb-are-removed) for the conversion itself.
 
 <br />
 
@@ -895,6 +924,125 @@ curl -X POST \
         "latest_only": true
       }' \
   http://localhost:8000/kvexport
+```
+
+<br />
+
+## `GET /upgrade-check` and `POST /upgrade-check` {#upgrade-check}
+
+This endpoint is in the latest `3.3` release, and not in `4.0`, because the check has to run while the datastore can still go back to `3.3`. It checks the datastore for the stored definitions and records that `4.0` refuses, fails on or treats differently, and returns a report. It only reads, and never runs a stored definition. The [`surreal db upgrade-check`](/docs/reference/cli/db/commands/upgrade-check) command calls it, and the [`upgrade_check`](/docs/reference/rest-api/rpc-protocol#upgrade_check) RPC method returns the same report.
+
+The check covers the scope of the caller, who needs the `VIEWER` role or higher, the same permission as [`/export`](#export). A root user sees every namespace, a namespace user sees its own namespace, and a database user sees its own database. A request that names a namespace or database outside the caller's scope is refused. A record user, and an anonymous request, are refused with `403`. The storage engine appears in the report for a root user only.
+
+The route is allowed by default. `--deny-http upgrade-check` turns it off, and a request is then refused with `403`. See [HTTP route names](/docs/learn/security/authorization/capabilities#http-route-names).
+
+### Options {#upgrade-check-options}
+
+`GET` takes the options in the query string, and `POST` takes them as a JSON or CBOR object in the body, with the same keys. A `POST` body can hold at most 16 KiB. Every option is optional.
+
+| Option | Description |
+| --- | --- |
+| `namespace` | Check this namespace only. |
+| `database` | Check this database only. Needs a namespace, from the request or from the caller's level. |
+| `scan_records` | Also read up to this many records of each table, at most 1,000,000. Off by default. |
+| `scan_total` | The most records read across all tables. `100000` by default, and at most 10,000,000. |
+| `scan_seconds` | The longest time the record scan runs. `30` by default, and at most 600. |
+
+The report is JSON by default, and CBOR with `Accept: application/cbor`. A server with a [query timeout](#request-timeouts) stops a check that runs longer.
+
+### Response {#upgrade-check-response}
+
+| Field | Description |
+| --- | --- |
+| `target` | The release the check is for, `4.0`. |
+| `checked_by` | The version of the server that ran the check. |
+| `verdict` | `blocking` if any finding is blocking, `needs_changes` if any is a warning, and `compatible` otherwise. |
+| `complete` | `false` when a scope could not be read or a limit stopped the record scan. |
+| `namespaces`, `databases`, `definitions` | How many of each the check read. |
+| `records` | Whether the record scan ran, how many tables and records it read, and whether a limit stopped it (`truncated`). |
+| `severities` | The number of findings of each severity: `blocking`, `warning` and `info`. |
+| `counts` | The number of findings of each rule. |
+| `findings` | One object for each finding, with `rule`, `severity`, `namespace`, `database`, `table`, `kind`, `name`, `reason`, `effect`, `fix` and a `docs` link. |
+| `notes` | Changes that the stored state cannot show, which every report lists. |
+| `errors` | The scopes that could not be read. |
+
+A finding gives names, record IDs and a short reason. It never holds the text of a definition or the content of a record. The rules are listed under [Checking a datastore before the upgrade](/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x#checking-a-datastore-before-the-upgrade).
+
+### Example usage
+
+```bash title="Request"
+curl -u root:secret 'http://localhost:8000/upgrade-check?namespace=shop&scan_records=100'
+```
+
+```json title="Sample output"
+{
+	"checked_by": "3.3.6",
+	"complete": true,
+	"counts": {
+		"index-on-datetime": 1,
+		"view-reads-own-table": 1
+	},
+	"databases": 1,
+	"definitions": 5,
+	"errors": [],
+	"findings": [
+		{
+			"database": "main",
+			"docs": "https://surrealdb.com/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x#views-that-read-their-own-table",
+			"effect": "Every write to a table the view reads fails with `Cannot maintain the view: it reads itself`.",
+			"fix": "Define the view again with DEFINE TABLE OVERWRITE over the tables other than its own, or remove it.",
+			"kind": "table",
+			"name": "agg",
+			"namespace": "shop",
+			"reason": "view agg reads FROM its own table",
+			"rule": "view-reads-own-table",
+			"severity": "blocking",
+			"table": "agg"
+		},
+		{
+			"database": "main",
+			"docs": "https://surrealdb.com/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x#datetimes-in-an-index",
+			"effect": "An index built by 3.x keeps the text order of datetimes, in which a whole second sorts after its fractions, so ORDER BY and ranges over the field can return records out of order or leave some out.",
+			"fix": "Run REBUILD INDEX on this index once every node runs 4.0.",
+			"kind": "index",
+			"name": "ev_at",
+			"namespace": "shop",
+			"reason": "index keys at, which is typed datetime",
+			"rule": "index-on-datetime",
+			"severity": "warning",
+			"table": "ev"
+		}
+	],
+	"namespaces": 1,
+	"notes": [
+		{
+			"docs": "https://surrealdb.com/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x#cbor-text-forms-of-datetimes-uuids-and-durations",
+			"id": "cbor-text-tags",
+			"text": "4.0 refuses CBOR tags 0, 9 and 13 (datetimes, UUIDs and durations as text), which some SDK releases send. Upgrade every SDK to a release that supports 4.0 before upgrading the server."
+		}
+	],
+	"records": {
+		"enabled": true,
+		"records": 0,
+		"tables": 3,
+		"truncated": false
+	},
+	"severities": {
+		"blocking": 1,
+		"info": 0,
+		"warning": 1
+	},
+	"target": "4.0",
+	"verdict": "blocking"
+}
+```
+
+The `notes` array above is shortened to one of its four entries. The same request as a `POST`:
+
+```bash
+curl -u root:secret -X POST -H 'Content-Type: application/json' \
+  -d '{"namespace": "shop", "scan_records": 100}' \
+  http://localhost:8000/upgrade-check
 ```
 
 <br />

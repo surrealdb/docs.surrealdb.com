@@ -20,7 +20,8 @@ The `DEFINE BUCKET` statement lets you create a bucket that can hold files.
 
 ```syntax title="SurrealQL Syntax"
 DEFINE BUCKET [ OVERWRITE | IF NOT EXISTS ] @name
-  [ BACKEND @string ]
+  [ ON [ ROOT | NAMESPACE | DATABASE ] ]
+  BACKEND @string
   [ READONLY ]
   [ PERMISSIONS @expression ]
   [ COMMENT @string ]
@@ -30,7 +31,7 @@ DEFINE BUCKET [ OVERWRITE | IF NOT EXISTS ] @name
   <TabItem label="Railroad Diagram">
 
 
-<RailroadDiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DEFINE"},{"type":"Terminal","text":"BUCKET"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"OVERWRITE"},{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}]}},{"type":"NonTerminal","text":"@name"},{"type":"Optional","child":{"type":"NonTerminal","text":"@backend"}},{"type":"Optional","child":{"type":"Terminal","text":"PERMISSIONS"}},{"type":"NonTerminal","text":"@expression"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"COMMENT"},{"type":"NonTerminal","text":"@string"}]}}]}]}' />
+<RailroadDiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"DEFINE"},{"type":"Terminal","text":"BUCKET"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Terminal","text":"OVERWRITE"},{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}]}},{"type":"NonTerminal","text":"@name"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"ON"},{"type":"Choice","index":2,"children":[{"type":"Terminal","text":"ROOT"},{"type":"Terminal","text":"NAMESPACE"},{"type":"Terminal","text":"DATABASE"}]}]}},{"type":"Terminal","text":"BACKEND"},{"type":"NonTerminal","text":"@string"},{"type":"Optional","child":{"type":"Terminal","text":"READONLY"}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"PERMISSIONS"},{"type":"NonTerminal","text":"@expression"}]}},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"COMMENT"},{"type":"NonTerminal","text":"@string"}]}}]}]}' />
 
   </TabItem>
 </Tabs>
@@ -207,18 +208,43 @@ DEFINE BUCKET media BACKEND "az://acmemedia/uploads?prefix=surrealdb";
 
 ### Global backend
 
-A global backend can also be selected, allowing all namespaces and databases access to the same file storage.
+The global bucket is one store for the whole server, set with the [`SURREAL_GLOBAL_BUCKET`](/docs/reference/cli/db/environment-variables) environment variable, which accepts the same URLs as `BACKEND`. A bucket uses part of it through a `global://` backend followed by a path. The bucket serves the objects under that path, and SurrealDB adds no prefix of its own:
 
-If no backend is selected, the database will search for the environment variable `SURREAL_GLOBAL_BUCKET` and assign this as the global bucket. In this case, files will have a `namespace/database` prefix added (e.g. `my_global_bucket:/test_ns/test_db/somefile.txt`). A second `SURREAL_GLOBAL_BUCKET_ENFORCED` environment variable can also be used, which when set to `true` will enforce usage of the global bucket. `SURREAL_GLOBAL_BUCKET` accepts the same URLs as `BACKEND`, so the global bucket can also be one of the [cloud object storage backends](#cloud-object-storage-backends).
+```surql
+-- The whole global bucket
+DEFINE BUCKET everything BACKEND "global://";
 
-If a global backend is set, then a `DEFINE BUCKET` statement can be as short as `DEFINE BUCKET` plus its local name, as the rest of the logic is done via environment variables.
+-- Only the objects under /app/uploads in the global bucket
+DEFINE BUCKET uploads BACKEND "global://app/uploads";
+```
+
+Buckets whose paths overlap see the same objects. With the two buckets above, `f"uploads:/a.txt"` and `f"everything:/app/uploads/a.txt"` are the same file.
+
+The global bucket holds the files of every namespace and database, so only a root user can give a bucket a `global://` backend, on `DEFINE BUCKET` and on `ALTER BUCKET`. A namespace or database user gets the error ``Only a root user can give a bucket a `global://` backend``. A path that contains `.` or `..` as a segment, a backslash or a control character is refused.
+
+When `SURREAL_GLOBAL_BUCKET_ENFORCED` is `true`, `global://` is the only backend a bucket can have. Namespace and database users then cannot define buckets at all, so a root user defines them.
+
+#### Buckets defined without a backend
+
+Before SurrealDB 4.0, a `DEFINE BUCKET` statement could leave out `BACKEND`, and the bucket then used the global bucket under an automatic prefix. The prefix is made from the internal identifiers of the namespace and the database, which are numbers rather than their names, followed by the name of the bucket. From SurrealDB 4.0, `BACKEND` is required, and a statement without it fails:
 
 ```surql
 DEFINE BUCKET my_bucket;
-
--- Writes to e.g. `my_global_bucket:/test_ns/test_db/my_bucket/my_book.txt`
-f"my_bucket:/my_book.txt".put("Once there were four children whose names were Peter, Susan, Edmund, and Lucy.");
 ```
+
+```surql title="Error output"
+'DEFINE BUCKET needs a BACKEND, such as BACKEND "global://" for the global bucket'
+```
+
+A bucket that an earlier release defined this way keeps its files. SurrealDB serves it from the same prefix as before, and `INFO FOR DB` shows that prefix as an explicit `global://` path:
+
+```surql
+INFO FOR DB.buckets;
+```
+
+```surql title="Sample output"
+{ my_bucket: "DEFINE BUCKET my_bucket BACKEND 'global://1/0/my_bucket' PERMISSIONS FULL" }
+``` An [import](/docs/reference/cli/db/commands/import) of an older export that contains such a bucket also still works, and the bucket uses the prefix of the namespace and database it is imported into.
 
 ## Setting permissions on buckets
 
@@ -299,3 +325,40 @@ DEFINE BUCKET avatars BACKEND "memory"
 
 > [!WARNING]
 > A bucket with `PERMISSIONS FULL`, which is the default, allows any user who can run a query on the database to create presigned URLs for it. The server limits each URL to `SURREAL_BUCKET_PRESIGN_MAX_TTL` and `SURREAL_BUCKET_PRESIGN_MAX_SIZE`, but use a `PERMISSIONS` clause on any bucket that record users can reach. On a server started with `--allow-guests`, `PERMISSIONS FULL` also lets anyone read and write the bucket through the [`/bucket` HTTP route](/docs/reference/rest-api/http-protocol#bucket) without credentials.
+
+## Root and namespace buckets
+
+<Since v="v4.0.0" />
+
+A bucket belongs to a database unless the statement says otherwise. `ON ROOT` defines a bucket at the root, and `ON NAMESPACE` defines one in the namespace in use. `ON DATABASE` is the default and can be left out.
+
+A file pointer reaches the buckets at the level of the session that uses it: the database's buckets when a database is selected, otherwise the namespace's buckets when a namespace is selected, and otherwise the root's buckets. A file pointer cannot reach a bucket at another level, so a session with a database selected cannot use a root bucket, even when a bucket of the same name exists at the root.
+
+```surql
+-- In a root session with no namespace selected
+DEFINE BUCKET shared ON ROOT BACKEND "memory";
+f"shared:/a.txt".put("root");
+<string> f"shared:/a.txt".get();
+```
+
+```surql title="Output"
+'root'
+```
+
+`INFO FOR ROOT` and `INFO FOR NS` list the buckets of their level under `buckets`, in the same way as `INFO FOR DB`:
+
+```surql
+INFO FOR ROOT.buckets;
+```
+
+```surql title="Output"
+{ shared: "DEFINE BUCKET shared ON ROOT BACKEND 'memory' PERMISSIONS FULL" }
+```
+
+[`ALTER BUCKET`](/docs/reference/query-language/statements/alter/bucket) and [`REMOVE BUCKET`](/docs/reference/query-language/statements/remove) take the same `ON` clause, and without it they change or remove a database bucket.
+
+A root or namespace bucket follows these rules:
+
+- Guests and record users can never use a bucket above the database level, whatever its `PERMISSIONS` clause allows. A system user with a role at the bucket's level or above is judged by that role and the `PERMISSIONS` clause, as for a database bucket.
+- [Presigned URLs](#permissions-for-presigned-urls) can be created only for database buckets, because a signature belongs to one namespace and database.
+- A root bucket over the [global bucket](#global-backend), such as `DEFINE BUCKET cloud ON ROOT BACKEND "global://"`, gives a root session access to the whole global bucket.

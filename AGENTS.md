@@ -809,6 +809,10 @@ unrankable, and unguessable by an agent constructing a path.
 3. Ordering comes from `position` in frontmatter for pages and from
    `__category.json` for folders. Both default to `0` and ties fall back to
    filesystem order, so set `position` explicitly on anything you add or move.
+   A position is a whole number, and the schema refuses anything else. To place
+   a page between two others, add one to the position of every sibling after
+   it, `__category.json` folders included, instead of using a fraction such as
+   `5.5`.
 4. Never name a file after the folder it sits in. `authentication/authentication`
    says the same word twice in the URL and reads as a mistake; if the page is the
    folder's landing page it is `index`, and otherwise it is named after itself.
