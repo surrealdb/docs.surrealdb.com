@@ -38,7 +38,7 @@ export const labLanguages = [
 /** A lab keeps full opacity for its first year. */
 const FADE_START_DAYS = 365;
 /** By three years old a lab has faded to `FADE_MIN_OPACITY`, and stays there. */
-const FADE_END_DAYS = 3 * 365;
+const FADE_END_DAYS = 1.5 * 365;
 /** Faded cards stay readable: hover, focus and selection restore them fully. */
 const FADE_MIN_OPACITY = 0.5;
 
