@@ -245,6 +245,16 @@ const EDITION_LABELS: Record<string, string> = {
     enterprise: "Enterprise",
 };
 
+const VERDICT_LABELS: Record<string, string> = {
+    supported: "Supported",
+    partial: "Partial",
+    differs: "Differs",
+    refused: "Refused",
+    "not-supported": "Not supported",
+    "not-documented": "Not documented",
+    "not-applicable": "Not applicable",
+};
+
 export function flattenMdxComponents(markdown: string, sdkVersions: SdkVersionMap = {}): string {
     const { text, blocks } = maskCode(markdown);
     let out = text;
@@ -261,6 +271,14 @@ export function flattenMdxComponents(markdown: string, sdkVersions: SdkVersionMa
     out = out.replace(tag("Edition"), (_match, raw: string) => {
         const value = parseAttrs(raw).value;
         return value ? `_(${EDITION_LABELS[value] ?? value})_` : "";
+    });
+    // The chip stands on its own line above a cell's detail; in plain text it
+    // runs into the detail, so a full stop separates the two.
+    out = out.replace(tag("Verdict"), (match, raw: string, offset: number, input: string) => {
+        const value = parseAttrs(raw).value;
+        if (!value) return "";
+        const label = `**${VERDICT_LABELS[value] ?? value}**`;
+        return /^ +[^\s|]/.test(input.slice(offset + match.length)) ? `${label}.` : label;
     });
     out = out.replace(tag("Label"), (_match, raw: string) => {
         const value = parseAttrs(raw).label;
