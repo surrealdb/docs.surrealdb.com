@@ -1,0 +1,80 @@
+---
+position: 3
+title: SQL drivers connections
+description: Connect @surrealdb/pg or @surrealdb/mysql to SurrealDB with a connection string or options object, and configure authentication, transports, reconnection, timeouts and session settings.
+---
+
+# SQL drivers connections
+
+`connect()` takes a connection string or an options object and returns a client. Nothing is sent until the first query.
+
+## Connection strings
+
+| Form | Meaning |
+| --- | --- |
+| `surrealdb://user:pass@host/<namespace>/<database>` | Native form. The namespace and database are in the path. |
+| `surrealdb+http://`, `+https://`, `+ws://`, `+wss://` | Pins the scheme, and the transport for `+ws` and `+wss`. The port is kept. |
+| `postgres://user:pass@host/<database>?namespace=<ns>` | An existing PostgreSQL URL, in `@surrealdb/pg`. The path is the database and the port is ignored. |
+| `mysql://user:pass@host/<database>?namespace=<ns>` | An existing MySQL URL, in `@surrealdb/mysql`. The same rules apply. |
+
+Hosts other than loopback use TLS by default. The query parameters `namespace` (or `ns`), `database` (or `db`), `transport` and `timeout` are read from the string.
+
+## Options
+
+```ts
+import { connect } from "@surrealdb/pg";
+
+const sql = connect({
+    url: "surrealdb+wss://abc123.surrealdb.earth/prod/app",
+    auth: { username: "root", password: "secret" }, // or { token } or () => token
+    transport: "auto", // "http" | "ws"
+    timeout: 15_000, // default per-request timeout in milliseconds
+    reconnect: { attempts: 5 },
+    settings: { timezone: "UTC", application_name: "api" },
+    fetch, // injectable
+    WebSocket, // injectable
+});
+```
+
+`reconnect` takes `enabled`, `attempts`, `retryDelay`, `retryDelayMax`, `retryDelayMultiplier` and `retryDelayJitter`, and retries with exponential backoff and jitter.
+
+## Authentication
+
+Credentials take one of these forms:
+
+- `{ username, password }` for a system user.
+- `{ access, variables }` for record access.
+- `{ token }` for a token you already hold.
+- A function that returns any of the above, or a token string. The client calls it again when a token expires or the connection is re-established.
+
+How the client authenticates depends on the transport:
+
+- **HTTP.** A user and password are sent as HTTP Basic authentication on every call, which costs no extra round trip. With `authMode: "token"`, the client signs in once, caches the token until it nears expiry, and shares one in-flight sign-in between concurrent calls. A call that fails authentication in token mode is retried once with a fresh sign-in.
+- **WebSocket.** The client signs in when the connection opens, and again before the access token expires.
+
+## Transports
+
+With `transport: "auto"`, one-shot calls use HTTP, and calls that need a session open a WebSocket. Pin `"http"` or `"ws"` to force one. A client pinned to `"http"` throws `UnsupportedOnTransportError` for `begin` and `live`. See [transactions](/docs/libraries/sql-drivers/transactions).
+
+## Session settings
+
+Each entry of `settings` becomes a `SET` statement. For MySQL the statement has the form `SET name = 'value'`.
+
+Over a WebSocket, settings run once per connection, and a failing setting fails the first call on that connection. Over HTTP, the instance keeps settings for one request only, so the client prepends them to every call and removes their results from the reply. Result indexes always match your own statements.
+
+In `@surrealdb/pg`, `search_path` is a stored setting only. It never selects a namespace or database. To change the database, use the connection string, the `namespace` and `database` options, or `sql.withDatabase()`. In `@surrealdb/mysql`, `USE db` switches the session database inside the session namespace.
+
+## Timeouts and cancellation
+
+A `timeout` and a caller `signal` combine into one abort. Both work as client options and as per-call options. Over a WebSocket, an abort sends `query_cancel` for that request. Over HTTP, it aborts the request.
+
+```ts
+const controller = new AbortController();
+const rows = await sql.query("SELECT * FROM person", [], { signal: controller.signal, timeout: 5_000 });
+```
+
+## Close the client
+
+```ts
+await sql.close();
+```

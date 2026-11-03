@@ -1,0 +1,151 @@
+---
+position: 9
+title: SQL drivers ORM and driver compatibility
+description: Use node-postgres, mysql2, Drizzle, Kysely and Prisma on SurrealDB through @surrealdb/pg and @surrealdb/mysql, with setup code, supported features and known limits.
+---
+
+# SQL drivers ORM and driver compatibility
+
+Each package has a compatibility layer that imitates a driver. Existing ORMs and query builders then run on top of it, over HTTP and WebSocket.
+
+| Tool | Package | Entry point |
+| --- | --- | --- |
+| node-postgres `Client` and `Pool` | `@surrealdb/pg` | `Client`, `Pool` |
+| Drizzle `node-postgres` | `@surrealdb/pg` | `drizzle({ client: pool as never })` |
+| Kysely `PostgresDialect` | `@surrealdb/pg` | `new PostgresDialect({ pool })` |
+| Prisma `@prisma/adapter-pg` | `@surrealdb/pg` | `new pg.Pool({ connectionString, Client })` |
+| mysql2 promise API | `@surrealdb/mysql` | `createPool`, `createConnection` |
+| Drizzle `mysql2` | `@surrealdb/mysql` | `drizzle(pool as never, { mode: "default" })` |
+| Kysely `MysqlDialect` | `@surrealdb/mysql/callback` | `new MysqlDialect({ pool })` |
+| `@neondatabase/serverless` | `@surrealdb/pg/neon` | See [Neon and PlanetScale](/docs/libraries/sql-drivers/neon-and-planetscale) |
+| `@planetscale/database` | `@surrealdb/mysql/planetscale` | See [Neon and PlanetScale](/docs/libraries/sql-drivers/neon-and-planetscale) |
+
+The adapters' types name the classes of `pg` and `mysql2`, so pass the pool with `as never`, or cast it to the class the adapter asks for.
+
+## node-postgres
+
+`Client` and `Pool` follow the node-postgres surface that the adapters use.
+
+```ts
+import { Pool } from "@surrealdb/pg";
+
+const pool = new Pool({
+    connectionString: "postgres://root:secret@abc123.surrealdb.earth/app?namespace=prod",
+});
+
+const { rows, rowCount, command } = await pool.query("SELECT id, name FROM person WHERE name = $1", ["Tobie"]);
+
+const client = await pool.connect();
+try {
+    await client.query("BEGIN");
+    await client.query("UPDATE account SET balance = balance - 10 WHERE id = $1", ["x"]);
+    await client.query("COMMIT");
+} catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+} finally {
+    client.release();
+}
+await pool.end();
+```
+
+- **Result.** `{ command, rowCount, oid, rows, fields }`. `command` and `rowCount` come from the command tag, so `INSERT 0 5` gives `INSERT` and 5.
+- **Values.** Values use the text form of the dialect and go through `types.getTypeParser(oid)`, as in node-postgres. `int8` and `numeric` stay strings, and a `timestamp` without a zone is read as local time.
+- **`pool.query()`** runs over HTTP when the transport is `auto`, so a cold edge isolate needs no handshake. Clients from `pool.connect()` are WebSocket sessions. `release()` rolls back an open transaction before the client is reused.
+- **Pool options.** `max` (default 10), `idleTimeoutMillis` (default 10000), `Client` and `poolQueryViaHttp` (default `true`).
+- **Errors.** A failed statement raises `DatabaseError` with `code`, `severity`, `message` and `position`.
+
+## mysql2
+
+`createPool` and `createConnection` follow the `mysql2/promise` API. Every promise method resolves `[rows, fields]`, and a statement without rows resolves a `ResultSetHeader`.
+
+```ts
+import { createPool } from "@surrealdb/mysql";
+
+const pool = createPool({ uri: "mysql://root:secret@abc123.surrealdb.earth/app?namespace=prod" });
+
+const [rows] = await pool.query("SELECT id, name FROM person WHERE name = ?", ["Tobie"]);
+const [header] = await pool.execute("UPDATE person SET age = ? WHERE id = ?", [31, "tobie"]);
+console.log(header.affectedRows, header.insertId);
+```
+
+- **`query` and `execute`** both bind on the server, so there is no client-side interpolation. For `query` only, the conveniences of mysql2 remain: an array value expands to a list, an array of arrays expands to a list of lists, and `??` quotes an identifier.
+- **`typeCast(field, next)`** works as in mysql2.
+- **Pool.** `connectionLimit` defaults to 10. Pool `query` and `execute` run over HTTP when the transport is `auto`, and `getConnection()` returns a WebSocket session.
+- **Ignored options.** `supportBigNumbers`, `waitForConnections` and `multipleStatements` are accepted and have no effect. `BIGINT` is exact beyond the safe range by default, and a text can always hold several statements.
+- **Errors.** A failed statement raises `MysqlError`.
+
+## Drizzle
+
+<Tabs syncKey="sql-dialect">
+<TabItem label="PostgreSQL">
+```ts
+import { Pool } from "@surrealdb/pg";
+import { drizzle } from "drizzle-orm/node-postgres";
+
+const pool = new Pool({ connectionString });
+const db = drizzle({ client: pool as never });
+```
+
+Drizzle detects a pool by its constructor name, and the built package keeps it. Transactions pin one pooled connection and use savepoints for nesting. The migrator works.
+</TabItem>
+<TabItem label="MySQL">
+```ts
+import { createPool } from "@surrealdb/mysql";
+import { drizzle } from "drizzle-orm/mysql2";
+
+const pool = createPool({ uri });
+const db = drizzle(pool as never, { mode: "default" });
+```
+
+Selects, raw `all()`, the migrator and transactions work.
+</TabItem>
+</Tabs>
+
+## Kysely
+
+<Tabs syncKey="sql-dialect">
+<TabItem label="PostgreSQL">
+```ts
+import { Pool } from "@surrealdb/pg";
+import { Kysely, PostgresDialect } from "kysely";
+
+const db = new Kysely({
+    dialect: new PostgresDialect({ pool: new Pool({ connectionString }) as never }),
+});
+```
+</TabItem>
+<TabItem label="MySQL">
+Kysely's `MysqlDialect` uses the callback API, so import from `@surrealdb/mysql/callback`.
+
+```ts
+import { createPool } from "@surrealdb/mysql/callback";
+import { Kysely, MysqlDialect } from "kysely";
+
+const db = new Kysely({ dialect: new MysqlDialect({ pool: createPool({ uri }) as never }) });
+```
+</TabItem>
+</Tabs>
+
+## Prisma
+
+Prisma's `adapter-pg` needs a real `pg.Pool`. Install `pg`, and give it the `Client` of `@surrealdb/pg`.
+
+```ts
+import pg from "pg";
+import { Client } from "@surrealdb/pg";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "./generated/client";
+
+const pool = new pg.Pool({ connectionString, Client });
+const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
+```
+
+> [!NOTE]
+> Prisma rejects an unknown type id below 16384, so the instance must report built-in PostgreSQL type ids. The Prisma adapter has been verified against a contract simulator, and not yet against a server. Prisma's MySQL driver adapters have not been assessed.
+
+## Not provided
+
+- **PostgreSQL layer:** cursors, `COPY`, binary format, `LISTEN` and `NOTIFY`, and `pg-native`. Kysely streaming is therefore unavailable.
+- **MySQL layer:** streaming (`.stream()`), `LOAD DATA LOCAL`, `COM_CHANGE_USER`, SSL options (TLS follows the URL scheme), named placeholders in mysql2, and `nestTables`.
+- **Vendor adapters:** `@prisma/adapter-neon`, `@prisma/adapter-planetscale` and Kysely's PlanetScale dialect construct the vendor's own classes, so they are not supported.
