@@ -342,7 +342,6 @@ function sdkReferenceRedirects(): Redirect[] {
         ["languages/php/v1/methods", "reference/php/v1/methods", "prefix"],
         ["languages/php/v1/concepts", "reference/php/v1/concepts", "prefix"],
         ["languages/php/v1/installation", "reference/php/v1/installation", "exact"],
-        ["languages/php/libraries", "reference/php/libraries", "prefix"],
         ["languages/php/v2", "reference/php/v2", "exact"],
         ["languages/php/v2/migration", "reference/php/v2/migration", "exact"],
         ["languages/php/v2/concepts", "reference/php/v2/concepts", "prefix"],
@@ -394,7 +393,20 @@ function librariesRedirects(): Redirect[] {
     const trees: [string, string][] = [
         ["reference/javascript/libraries", "libraries/surqlize-typescript"],
     ];
-    const out: Redirect[] = [];
+    const out: Redirect[] = [
+        { source: "/reference/php/libraries", destination: "/reference/php", statusCode: 301 },
+        {
+            source: "/reference/php/libraries/:path*",
+            destination: "/reference/php",
+            statusCode: 301,
+        },
+        { source: "/languages/php/libraries", destination: "/reference/php", statusCode: 301 },
+        {
+            source: "/languages/php/libraries/:path*",
+            destination: "/reference/php",
+            statusCode: 301,
+        },
+    ];
 
     for (const [from, to] of trees) {
         out.push(
