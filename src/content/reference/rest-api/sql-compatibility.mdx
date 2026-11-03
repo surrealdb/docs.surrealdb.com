@@ -1,0 +1,166 @@
+---
+position: 7
+title: PostgreSQL and MySQL compatibility matrix
+description: "Feature-by-feature matrix of what the PostgreSQL and MySQL dialects run in SurrealDB 4: queries, writes, DDL, transactions, types, functions, catalogs, pgvector and error codes."
+---
+
+# PostgreSQL and MySQL compatibility matrix
+
+<Since v="v4.0.0" />
+
+This page compares, feature by feature, what SurrealDB 4 runs for PostgreSQL clients and for MySQL clients. Both listeners run a defined subset of their dialect through the same query planner as SurrealQL, over the same tables. A statement outside the subset is refused with the error code of the original database, before it changes any data. The [Postgres wire protocol](/docs/reference/rest-api/postgres-protocol) and [MySQL wire protocol](/docs/reference/rest-api/mysql-protocol) pages describe each listener in full, and each row below links back to them by name.
+
+The matrix applies to the PostgreSQL dialect (`SET dialect = 'pgsql'`) and to the MySQL dialect, the default of the MySQL listener. Over the Postgres listener, a connection runs SurrealQL until it selects the PostgreSQL dialect. The functions of the PostgreSQL dialect are tested against PostgreSQL 18, and the functions of the MySQL dialect against MySQL 8.4.
+
+## How to read the matrix
+
+Each cell starts with a verdict, followed by the detail:
+
+| Verdict | Meaning |
+| --- | --- |
+| **Supported** | The statement runs as it does in the original database, apart from the differences the cell lists. |
+| **Partial** | Some forms run and others are refused. The cell lists both. |
+| **Differs** | The statement runs, and the result or the behaviour is not the one the original database gives. |
+| **Refused** | The statement fails with the error code the cell names, before it changes any data. |
+| **Not supported** | The dialect does not run the statement. |
+| **Not documented** | The protocol pages do not cover the feature, so the matrix makes no claim about it. |
+| **Not applicable** | The original database has no such feature. |
+
+## Connecting
+
+| Feature | PostgreSQL | MySQL |
+| --- | --- | --- |
+| Protocol | **Supported**. Protocol v3.0 with the simple and extended query flows, prepared statements, interactive transactions, cancellation and optional TLS. Available since 3.3. | **Supported**. Plain and prepared statements, statements sent several at a time, and the statements that drivers send while they connect. New in 4.0. |
+| Enabling the listener | **Opt-in**. `--postgres-bind` or `SURREAL_POSTGRES_BIND`, on its own address. | **Opt-in**. `--mysql-bind` or `SURREAL_MYSQL_BIND`, on its own address. |
+| Default language | **SurrealQL**. Select the PostgreSQL dialect with `options=-c dialect=pgsql` at connect time, or with `SET dialect = 'pgsql'` on an open connection. | **MySQL SQL**. `SET dialect` switches to SurrealQL, the PostgreSQL dialect or ISO GQL. |
+| Namespace and database | **Supported**. The database name is `ns/db`, with a single slash. | **Supported**. The database name is `ns/db`, with a single slash, and `USE ns/db` changes both on an open connection. |
+| Authentication | **Supported**. `SCRAM-SHA-256` when the user has verifier material, otherwise a cleartext password. A SurrealDB token can be sent as the password. MD5 is not supported, and a failed sign-in returns `28P01`. | **Supported**. `caching_sha2_password`, `mysql_native_password` and `mysql_clear_password`. A sign-in that sends the password needs TLS or a loopback address, and over plaintext the `mysql` client needs `--default-auth=mysql_native_password`. |
+| TLS | **Supported**. The listener uses the certificate and key of the HTTP server, and advertises the `postgresql` ALPN protocol, so libpq 17 clients connect with `sslmode=require`. | **Supported**. The listener uses the certificate and key of the HTTP server. The default authentication method of MySQL 8 clients works over TLS. |
+| Record IDs in results | **Differs**. A record ID is sent as its key, as a SQL client expects a primary key to be: `person:1` is sent as `1`. | **Differs**. A record ID is sent as its key: `person:1` is sent as `1`. |
+
+## Queries
+
+| Feature | PostgreSQL | MySQL |
+| --- | --- | --- |
+| Joins | **Partial**. Joins run, including `LEFT JOIN`. `FULL OUTER JOIN` is refused with `0A000`, and `LATERAL` does not parse (`42601`). | **Supported**. `SELECT` with joins runs, with `WHERE`, `GROUP BY`, `HAVING`, `ORDER BY` and `LIMIT`. |
+| Aggregates and grouping | **Partial**. Aggregates, `GROUP BY` and `HAVING` run. A column that is neither grouped nor aggregated is not refused, and in the select list it returns the values of its group as an array. An aggregate in `WHERE` is not refused either. | **Supported**. Aggregate functions, `GROUP BY` and `HAVING` run. |
+| Common table expressions | **Partial**. Non-recursive `WITH` queries run. Recursive common table expressions are refused with `0A000`. | **Partial**. Non-recursive `WITH` queries run. Recursive common table expressions are refused with `1235`, before the statement changes any data. |
+| Window functions | **Refused**. `OVER (...)` is refused with `0A000`. A window function in `WHERE` is `42P20`. | **Refused**. `OVER (...)` is refused with `1235`. A window function in `WHERE` is `3593`. |
+| Subqueries as a value | **Partial**. A subquery used as a single value fails when it returns more than one row or selects more than one column, under `P0001` and not PostgreSQL's `21000`. `IN`, `= ANY` and `EXISTS` accept any number of rows. `ALL` and `ANY` over a subquery with `GROUP BY`, `HAVING`, `LIMIT`, `OFFSET` or a set operation are refused. | **Partial**. A subquery used as a single value fails when it returns more than one row, with `1644`. The dialect shares its planner with the PostgreSQL dialect, so the same limits apply. |
+| `LIKE` | **Partial**. Works in a `SELECT`, with `\%` and `\_` as literals, whether the pattern is written in the query, bound as a parameter or read from a column. `LIKE ... ESCAPE` is refused. | **Partial**. Works in a `SELECT`. `LIKE ... ESCAPE` is refused, and `e` and `é` are not equal in a comparison. |
+| Columns in a join | **Differs**. In a table with declared columns, an undeclared column fails with `42703`. In a schemaless table, a column named without its table is read from the first table that has a value for it, so qualify the column to choose the table. | **Differs**. The dialect shares its planner with the PostgreSQL dialect, so a column named without its table in a join of schemaless tables is read from the first table that has a value for it. |
+| `t.*` | **Partial**. `u.*` over a table or a derived table returns what `SELECT *` returns. In a join, `t.*` of a table with undeclared columns fails with `0A000`. Inside a function call, in `RETURNING`, in `CREATE VIEW` and beside another item in an `INSERT` query it is refused. | **Partial**. Behaves as it does over the PostgreSQL dialect, which shares the planner. |
+| Generated rows | **Partial**. `generate_series(start, stop)` in the select list returns one row per value, and includes its stop. In a `FROM` clause it is refused with `0A000`. | **Not documented**. |
+| Query nesting | **Refused**. A `FROM` clause of more than about 120 tables, joins nested in more than about 120 parentheses, or subqueries nested more than about 60 deep fail with `42601`. | **Refused**. A `FROM` clause that nests too deeply fails with `1064`. |
+| Parameters | **Supported**. `$1`, `$2` and so on, in the extended query protocol. | **Partial**. A `?` placeholder is accepted only in a prepared statement. |
+
+## Writes
+
+| Feature | PostgreSQL | MySQL |
+| --- | --- | --- |
+| `INSERT` | **Supported**. Multi-row `INSERT`, `ON CONFLICT` and `RETURNING` run. An `INSERT ... SELECT` that reads from a join or a subquery is refused with `0A000`. | **Supported**. Multi-row `INSERT` and `INSERT ... ON DUPLICATE KEY UPDATE` run. |
+| `UPDATE` and `DELETE` | **Partial**. `UPDATE` and `DELETE` run. `UPDATE ... FROM` and `DELETE ... USING` are refused with `0A000`. | **Supported**. `UPDATE` and `DELETE` run. |
+| `LIKE` and `\|\|` in a write | **Refused**. The `\|\|` and `LIKE` operators are refused with `0A000` in an `INSERT`, `UPDATE` or `DELETE`, including in its `WHERE` clause, so `DELETE FROM t WHERE name LIKE 'a%'` fails before it deletes anything. Functions such as `substring`, `ltrim`, `concat` and `extract` work. | **Refused**. `LIKE` is refused with `1235` in an `INSERT`, `UPDATE` or `DELETE`, including in its `WHERE` clause. Functions such as `SUBSTRING`, `LTRIM` and `CONCAT` work. |
+| `TRUNCATE` | **Supported**. Answered with its command tag. | **Partial**. Answers OK with 0 affected rows. It does not restart an `AUTO_INCREMENT` counter, and it keeps the records that the table's permissions do not let the user delete. |
+| Constraint violations | **Supported**. A `UNIQUE` or primary key conflict is `23505`, a missing value is `23502` and a missing foreign key target is `23503`. | **Supported**. A `UNIQUE` or primary key conflict is `1062`, `NULL` for a required field is `1048` and an omitted required field is `1364`. |
+| Value length | **Differs**. A value too long for a `VARCHAR(n)` column is accepted. | **Differs**. A value too long for a `VARCHAR(n)` column is accepted. |
+
+## Schema and DDL
+
+| Feature | PostgreSQL | MySQL |
+| --- | --- | --- |
+| `CREATE TABLE` and `DROP TABLE` | **Supported**. A statement for several tables is answered once. If one part fails, nothing of the statement is kept, so `DROP TABLE a, missing` fails and keeps `a`. | **Supported**. A statement for several tables is answered with one OK packet, and if one part fails nothing of the statement is kept. |
+| `ALTER TABLE` | **Partial**. `ALTER TABLE` with several actions runs, including `ADD FOREIGN KEY` and `DROP CONSTRAINT` with the names that `pg_constraint` lists. `RENAME COLUMN` answers with its command tag and changes nothing. | **Not supported**. |
+| Foreign keys | **Supported**. `REFERENCES` or `FOREIGN KEY` makes the column a record link to the other table. A write whose key names no record fails with `23503`. | **Not supported**. `CREATE TABLE` with a `FOREIGN KEY` constraint fails with `1105`. |
+| Indexes and keys | **Supported**. `CREATE INDEX` defines indexes, including `hnsw` indexes for pgvector. An `int` primary key makes the record ID key an `i32`. | **Supported**. `UNIQUE` indexes and primary keys are enforced. `SHOW INDEX` lists them with MySQL's 15 columns, and `Cardinality` is `NULL`. |
+| Views and other objects | **Partial**. `CREATE VIEW` works, and `DROP VIEW` answers with the tag `DROP TABLE`. `CREATE SCHEMA` answers with its command tag and changes nothing. `CREATE EXTENSION vector` is accepted and defines nothing, and any other extension fails with `58P01`. `CREATE FUNCTION` does not parse. | **Not documented**. |
+| DDL inside a transaction | **Supported**. DDL runs inside the open transaction, and `ROLLBACK` takes it back. | **Differs**. As in MySQL, `CREATE`, `ALTER`, `DROP`, `TRUNCATE` and `RENAME` first commit the open transaction and then run on their own, so `ROLLBACK` does not take back a `CREATE TABLE`. After `SET dialect = 'pgsql'` or `'surrealql'`, DDL runs inside the transaction. |
+| Declared columns | **Supported**. A table declared with `CREATE TABLE` or `DEFINE TABLE ... SCHEMAFULL` is checked as PostgreSQL checks a table. `SELECT *` lists `id` first and then the other columns by name, not in declaration order. | **Supported**. `CREATE TABLE` declares the columns. Columns and indexes are listed by name, not in the order they were defined. |
+
+## Transactions
+
+| Feature | PostgreSQL | MySQL |
+| --- | --- | --- |
+| Interactive transactions | **Supported**. `BEGIN`, `COMMIT` and `ROLLBACK`, with PostgreSQL's ready-for-query status bytes. After an error in a block, commands receive `25P02` until `COMMIT` or `ROLLBACK`. | **Supported**. `START TRANSACTION` or `BEGIN`, `COMMIT` and `ROLLBACK`. `SET autocommit = 0` makes each statement run in a transaction until `COMMIT`. |
+| Autocommit | **Differs**. Each top-level statement outside `BEGIN ... COMMIT` commits on its own. Wrap statements in a transaction for all-or-nothing behaviour. | **Supported**. Each statement commits on its own until `SET autocommit = 0`. |
+| Savepoints | **Supported**. `SAVEPOINT`, `RELEASE SAVEPOINT` and `ROLLBACK TO SAVEPOINT` work in a transaction block, and `SET LOCAL` settings are undone on rollback. | **Supported**. `SAVEPOINT` works in a transaction. |
+| Isolation levels | **Partial**. `SERIALIZABLE` opens a serializable transaction on the storage engines that offer one, and fails with `0A000` on the others. `REPEATABLE READ` and a plain `BEGIN` run at snapshot isolation. `READ COMMITTED` and `READ UNCOMMITTED` are refused with `0A000`. `BEGIN READ ONLY` is applied. | **Not documented**. |
+| Conflicts | **Supported**. A transaction that conflicts with another fails with `40001`. Retry it. | **Supported**. A transaction that conflicts with another fails with `1213`. Retry it. |
+
+## Types and values
+
+| Feature | PostgreSQL | MySQL |
+| --- | --- | --- |
+| Sized numbers | **Supported**. `smallint`, `integer`, `bigint`, `real` and `double precision` define fields of the types `i16`, `i32`, `int`, `f32` and `float`. The catalog lists an `int` column as `integer` (`int4`). | **Supported**. `TINYINT` is `i8`, `SMALLINT` is `i16`, `MEDIUMINT` and `INT` are `i32`, `BIGINT` is `int`, `INT UNSIGNED` is `u32`, `FLOAT` is `f32` and `DOUBLE` is `float`. |
+| Out-of-range and mistyped values | **Differs**. A value out of range, such as `40000` for a `smallint`, is refused with `42804`. SurrealDB refuses text for a number field, even `'5'`, where PostgreSQL accepts it or reports `22P02`. | **Differs**. A value out of range, such as `300` for a `TINYINT` or `-1` for an `INT UNSIGNED`, is refused with `1366`. SurrealDB refuses some values that MySQL converts, such as `'5'` or `true` for an `INT` column. |
+| Typed literals | **Partial**. Write a typed value as a cast, such as `'2026-01-01'::date`. The `DATE '2026-01-01'` form does not parse, and a plain string is not converted to a `date` column. | **Partial**. `DATE_ADD(d, INTERVAL 1 DAY)` and the other `INTERVAL` forms run. Compound interval units such as `DAY_HOUR` are refused with `1235`. |
+| Result column types | **Differs**. A result column is announced as a type that all its values have. `floor(1.5)` is a float here and `numeric` in PostgreSQL, and a `CASE` over a number and a text answers text where PostgreSQL refuses it. An arithmetic expression over two fields with no declared type is announced as `bigint`. | **Differs**. In a batch of several statements, only the first statement keeps its column names. Unnamed or repeated columns of later statements are named `?column?1`, `?column?2` and so on. |
+| Vectors | **Supported**. `vector(n)` columns, distance operators and `hnsw` indexes, as described under [pgvector](#pgvector). | **Not applicable**. |
+
+## Functions
+
+| Feature | PostgreSQL | MySQL |
+| --- | --- | --- |
+| Built-in functions | **Partial**. The implemented functions are tested against PostgreSQL 18, including the keyword forms `extract(year FROM d)`, `position('b' IN s)`, `substring(s FROM 2 FOR 3)` and `overlay`. A function that does not exist fails with `42883`. | **Partial**. The implemented functions are tested against MySQL 8.4, including `EXTRACT(YEAR FROM d)`, `POSITION('b' IN s)`, `SUBSTRING(s FROM 2 FOR 3)` and `INTERVAL` arithmetic. `LENGTH` counts bytes. A function that does not exist fails with `1305`. |
+| SurrealQL functions | **Not supported**. The PostgreSQL dialect calls SQL functions only, so `http::get` and `fn::` functions are unavailable. Switch the dialect to SurrealQL to call them. | **Not supported**. The MySQL dialect calls SQL functions only. Switch the dialect to SurrealQL to call SurrealQL functions. |
+| Date arithmetic | **Supported**. Date functions such as `date_trunc` run. An unknown unit fails with `22023`. | **Partial**. `TIMESTAMPDIFF` with the unit `MONTH`, and compound interval units such as `DAY_HOUR`, are refused with `1235`. |
+| Restricted functions | **Differs**. A `LIKE` pattern that is not written in the query uses `string::replace` and `string::concat`, so an instance that [restricts functions](/docs/learn/security/authorization/capabilities#functions) must allow those two. | **Differs**. An instance that denies built-in functions refuses the `SHOW` and `DESCRIBE` statements. |
+
+## Introspection
+
+| Feature | PostgreSQL | MySQL |
+| --- | --- | --- |
+| Catalog relations | **Supported**. `information_schema.tables`, `information_schema.columns`, `pg_class`, `pg_attribute`, `pg_constraint`, `pg_index` and the other catalog relations that drivers and ORMs read list the tables of the database, in the schema `public`. A table without declared columns lists only `id`. | **Differs**. `information_schema` lists the tables and declared columns in PostgreSQL's form: the tables are in the schema `public`, `data_type` holds PostgreSQL type names and `column_type` is `NULL`, so `WHERE table_schema = DATABASE()` finds none. |
+| `SHOW` and `DESCRIBE` | **Partial**. `SHOW` and `RESET` are supported. | **Supported**. `SHOW TABLES`, `COLUMNS`, `FIELDS`, `INDEX`, `KEYS`, `DATABASES`, `VARIABLES`, `ENGINES`, `COLLATION` and `CHARACTER SET`, and `DESCRIBE`, answer with the column names, order and types of MySQL 8.4. `SHOW STATUS`, `PROCESSLIST`, `WARNINGS` and `ERRORS` answer with MySQL's columns and no rows. |
+| `SHOW CREATE TABLE` | **Not documented**. | **Differs**. Returns the SurrealQL definition, not MySQL DDL. |
+| System variables | **Partial**. `SET`, `SET LOCAL` and `SHOW` work. `SET hnsw.ef_search` is accepted and has no effect. | **Partial**. `@@name`, `@@session.name`, `@@local.name` and `@@global.name` read the same fixed value, and a `SET` does not change it. A name that MySQL 8.4 or 8.0.35 does not have fails with `1193`. Variables that describe the host read `NULL`. |
+
+## Bulk load and migration
+
+| Feature | PostgreSQL | MySQL |
+| --- | --- | --- |
+| Bulk load and export | **Partial**. `COPY ... FROM STDIN` and `COPY ... TO STDOUT` run in the text and CSV formats. Name the columns in `COPY ... FROM STDIN`. `COPY ... FROM` into a vector column does not convert text to a vector. | **Not supported**. `LOAD DATA` is not supported yet. |
+| Import from another database | **Supported**. See [Migrating from PostgreSQL](/docs/build/migrating/from-other-databases/from-postgresql). | **Supported**. See [Migrating from MySQL](/docs/build/migrating/from-other-databases/from-mysql). |
+
+## pgvector
+
+The PostgreSQL dialect accepts the column type, the distance operators and the `hnsw` indexes of the [pgvector](https://github.com/pgvector/pgvector) extension. The MySQL dialect has no vector type. The [PostgreSQL protocol page](/docs/reference/rest-api/postgres-protocol#pgvector) describes each part in detail.
+
+| Feature | Verdict and detail |
+| --- | --- |
+| `vector(n)` columns | **Supported**. A field of type `array<float, n>`, up to 16,000 dimensions. A column without `(n)` is refused with `0A000`. Drivers see the `vector` type in the text and binary formats, so the pgvector packages for psycopg, asyncpg and node-postgres find it. |
+| Distances | **Supported**. `<->` is `l2_distance`, `<=>` is `cosine_distance`, `<#>` is `vector_negative_inner_product` and `<+>` is `l1_distance`. `inner_product` returns the inner product itself. Vectors of different dimensions fail with `22000`. |
+| `hnsw` indexes | **Supported**. `CREATE INDEX ... USING hnsw` with `vector_l2_ops`, `vector_cosine_ops`, `vector_ip_ops` or `vector_l1_ops`. `WITH (m, ef_construction)` takes pgvector's defaults and limits, and an index covers at most 2,000 dimensions. |
+| Nearest-neighbour search | **Supported**. `ORDER BY column <op> value LIMIT k` over one table is answered from the index when the column has exactly one index that ranks by the same distance, and by an exact search otherwise. |
+| `halfvec`, `sparsevec`, `bit`, `ivfflat` | **Not supported**. |
+| Other `hnsw` forms | **Refused**. Partial, unique, multi-column and expression indexes are refused with `0A000`. |
+| `hnsw.ef_search` | **Differs**. `SET hnsw.ef_search` is accepted, and the search uses an `ef` of 40, or `k` when it is larger. |
+| Bound limit | **Differs**. `LIMIT $1` sorts every row. Write `k` in the query to use the index. |
+| Distance in a write | **Refused**. A distance operator or function in an `INSERT`, `UPDATE` or `DELETE` is refused with `0A000`. |
+| Vector utilities | **Not supported**. `DROP EXTENSION`, `vector_dims`, `vector_norm`, `l2_normalize`, vector arithmetic and `avg` over a vector column. |
+
+## Refusal codes
+
+Features that a dialect does not run are refused with one code, so a client can tell a refusal from a syntax error:
+
+| Listener | Code | Reported when |
+| --- | --- | --- |
+| PostgreSQL | `0A000` (`feature_not_supported`) | The statement uses a feature that SurrealDB does not support, such as a window function, a recursive common table expression or `UPDATE ... FROM`. |
+| PostgreSQL | `42601` (`syntax_error`) | The statement does not parse, such as `LATERAL`, or exceeds a nesting limit. |
+| MySQL | `1235` | The statement uses a feature that SurrealDB does not support, such as a window function or a recursive common table expression. |
+| MySQL | `1064` | The statement does not parse, or a `FROM` clause nests too deeply. |
+
+The full list of codes is in [Error codes](/docs/reference/rest-api/postgres-protocol#error-codes) on the Postgres page and [Error codes](/docs/reference/rest-api/mysql-protocol#error-codes) on the MySQL page.
+
+## Limits and capabilities
+
+- The `postgres` and `mysql` routes are [capabilities](/docs/learn/security/authorization/capabilities). `--deny-http postgres` and `--deny-http mysql` refuse every connection to the matching listener, and `SET dialect = 'pgsql'` needs the `postgres` route.
+- `--deny-arbitrary-query` applies to both listeners, as it does to the other query surfaces.
+- The MySQL listener accepts at most 1,024 connections at a time and refuses further connections with error `1040`. A MySQL packet is limited to 64 MiB, and a larger packet is refused with error `1153`.
+
+## Related pages
+
+- [Postgres wire protocol](/docs/reference/rest-api/postgres-protocol): the PostgreSQL listener and dialect
+- [MySQL wire protocol](/docs/reference/rest-api/mysql-protocol): the MySQL listener and dialect
+- [Migrating from PostgreSQL](/docs/build/migrating/from-other-databases/from-postgresql) and [Migrating from MySQL](/docs/build/migrating/from-other-databases/from-mysql): move data and map types
+- [Capabilities](/docs/learn/security/authorization/capabilities): restrict routes, functions and arbitrary queries
