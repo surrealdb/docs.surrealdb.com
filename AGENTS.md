@@ -764,8 +764,9 @@ export const Content = defineCollection({
 - **`pageSchema`** - `title`, `description`, `position`, `icon`, `hidden`, all
   optional. It is a Zod `strictObject`, so an unknown frontmatter key is a build
   error. `icon` must be a member of `SECTION_ICONS_NAMES` (`src/utils/icons.ts`).
-- **`labSchema`** - `title`, `category` and `author` required; `description`,
-  `url`, `topics` (max 2) and `languages` optional.
+- **`labSchema`** - `title`, `date`, `stage` (journey: Explore to Operate),
+  `format` (what kind of thing it is) and `author` required; `description`,
+  `url`, `topics` and `languages` optional. The values live in `src/utils/labs.ts`.
 
 `type: "both"` means `__category.json` files are collection entries as well, and
 they are validated by the same `pageSchema`. A folder's `__category.json` carries
@@ -1046,7 +1047,7 @@ It returns `{ content, headings, navigation, contentPath, breadcrumbs, title, de
 renders `content` through `@surrealdb/ui`'s `MarkdownViewer` with `jsxMode="render"`
 and the components from `registerMarkdownComponents`.
 
-Labs listing: `sortCollection(getCollection("labs-items"), "title", "asc")`.
+Labs listing: `getLabItems()` in `src/utils/collections.ts`, which merges the `labs-items` collection with `src/data/labs-blog.json`, newest first.
 
 Markdown pipeline (`resolveMarkdown` in `src/utils/markdown.tsx`) returns
 `{ content, headings }`:
@@ -1127,6 +1128,10 @@ only after doing the same.
 - Lessons and posts are cached in `generated/related-sources`. Run with
   `RELATED_REFRESH=1` when regenerating for a commit, so the file reflects what
   is published.
+
+### Blog posts in Labs
+
+The Labs listing also shows the blog's `tutorials` and `engineering` posts. They come from `src/data/labs-blog.json`, which `bun run generate:labs-blog` writes from the public website API and which is committed, so the docs never call the API at runtime. Run it after posts are published. The list endpoint gives authors only as `people:` record IDs, which `src/data/labs-blog-authors.json` maps to the `name`, `role` and `avatar` a card shows. A post is credited to the first of its authors found there, and to SurrealDB when none is. A new author's posts credit SurrealDB until their ID is added, so check the regenerated diff for new IDs.
 
 ## Link graph
 

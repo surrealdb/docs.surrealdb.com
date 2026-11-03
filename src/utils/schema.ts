@@ -1,6 +1,7 @@
 import {
     enum as _enum,
     boolean,
+    iso,
     literal,
     number,
     object,
@@ -9,7 +10,7 @@ import {
     string,
 } from "zod";
 import { SECTION_ICONS_NAMES } from "./icons";
-import { labCategories, labLanguages, labTopics } from "./labs";
+import { labFormats, labLanguages, labStages, labTopics } from "./labs";
 
 /**
  * The schema for a page in a content collection.
@@ -72,9 +73,12 @@ export type PageSchema = output<typeof pageSchema>;
 
 export const labSchema = strictObject({
     title: string(),
+    /** Date the item was added, `YYYY-MM-DD`; the listing is newest first. */
+    date: iso.date(),
     description: string().optional(),
     url: string().optional(),
-    category: _enum(labCategories),
+    stage: _enum(labStages),
+    format: _enum(labFormats),
     author: literal("surrealdb").or(
         object({
             name: string(),

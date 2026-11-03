@@ -138,7 +138,7 @@ app.get("*", async (c, next) => {
         new RegExp(`^${BASE}`),
         "",
     );
-    // Labs is a React listing over `labs-items`, not a documentation
+    // Labs is a React listing over `getLabItems()`, not a documentation
     // collection, so the resolver below cannot see it. It is listed in
     // `llms.txt` all the same, and the index promises `.md` on any entry, so
     // it is answered here - by both entry points, like every other page.

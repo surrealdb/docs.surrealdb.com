@@ -19,12 +19,11 @@ import {
     pictoFileSolid,
     pictoInboxSolid,
     pictoPlaySolid,
-    pictoQuestionSolid,
     pictoSurrealDBSolid,
     Spacer,
 } from "@surrealdb/ui";
 import placeholderAvatar from "~/assets/img/labs-authors/placeholder.png";
-import type { labCategories } from "~/utils/labs";
+import { labAgeOpacity, type labFormats } from "~/utils/labs";
 import classes from "./style.module.scss";
 
 const AUTHOR_AVATARS = import.meta.glob<string>("../../assets/img/labs-authors/*.jpg", {
@@ -36,9 +35,11 @@ const AUTHOR_AVATARS = import.meta.glob<string>("../../assets/img/labs-authors/*
 export interface LabCardItem {
     slug: string;
     title: string;
+    /** `YYYY-MM-DD`; older labs fade, see `labAgeOpacity`. */
+    date: string;
     description?: string;
     url?: string;
-    category: string;
+    format: string;
     author:
         | "surrealdb"
         | {
@@ -57,13 +58,12 @@ export interface LabCardProps {
     selected?: boolean;
 }
 
-const CATEGORY_IMAGES: Record<(typeof labCategories)[number], string> = {
+const FORMAT_IMAGES: Record<(typeof labFormats)[number], string> = {
     "Source code": pictoCurlyBracesSolid,
-    Videos: pictoPlaySolid,
-    Blogposts: pictoInboxSolid,
+    Video: pictoPlaySolid,
+    Article: pictoInboxSolid,
     Documentation: pictoFileSolid,
-    "Learning resources": pictoQuestionSolid,
-    "Product resources": pictoSurrealDBSolid,
+    "Interactive demo": pictoSurrealDBSolid,
 };
 
 function getAuthorAvatarUrl(slug: string): string | undefined {
@@ -72,7 +72,7 @@ function getAuthorAvatarUrl(slug: string): string | undefined {
 }
 
 export function LabCard({ item, onSelect, selected = false }: LabCardProps) {
-    const categoryImage = CATEGORY_IMAGES[item.category as keyof typeof CATEGORY_IMAGES];
+    const formatImage = FORMAT_IMAGES[item.format as keyof typeof FORMAT_IMAGES];
 
     let authorName: string;
     let authorRole: string;
@@ -94,6 +94,7 @@ export function LabCard({ item, onSelect, selected = false }: LabCardProps) {
     const card = (
         <Paper
             className={classes.root}
+            style={{ "--lab-age-opacity": labAgeOpacity(item.date) }}
             radius={0}
             p="lg"
             data-selected={selected || undefined}
@@ -109,21 +110,21 @@ export function LabCard({ item, onSelect, selected = false }: LabCardProps) {
                         color="var(--docs-accent)"
                     />
                 )}
-                {categoryImage && (
+                {formatImage && (
                     <Image
-                        src={categoryImage}
+                        src={formatImage}
                         alt=""
                         w={18}
                     />
                 )}
                 {/* Same kicker treatment as the nav dropdowns' section
-                        labels, so the category reads as an eyebrow rather
+                        labels, so the format reads as an eyebrow rather
                         than competing with the title. */}
                 <Text
                     className={classes.category}
                     lineClamp={1}
                 >
-                    {item.category}
+                    {item.format}
                 </Text>
                 <Spacer />
                 {item.topics.length > 0 && (
