@@ -19,6 +19,7 @@ import { ShowcaseCard } from "~/components/ShowcaseCard";
 import { Since } from "~/components/Since";
 import { SurrealistMini } from "~/components/SurrealistMini";
 import { Synopsis } from "~/components/Synopsis";
+import { Verdict } from "~/components/Verdict";
 import { Version } from "~/components/Version";
 import { VersionBlock } from "~/components/VersionBlock";
 import { getIconScope } from "~/lib/icon-scope";
@@ -298,6 +299,7 @@ export function registerMarkdownComponents(): MarkdownComponents {
         // Wraps the kit's embed so it sits on the card surface; the iframe's
         // own background cannot be styled from here.
         SurrealistMini: { component: SurrealistMini, block: true },
+        Verdict: { component: Verdict },
         Version: { component: Version },
         VersionBlock: { component: VersionBlock, block: true },
     });
