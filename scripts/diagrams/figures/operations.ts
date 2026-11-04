@@ -576,6 +576,10 @@ const backupRetention: Figure = {
 
 const backupRestore: Figure = {
     name: "ops-backup-restore",
+    verified: {
+        against: "SurrealDB Studio 1.12.0 (studio-v1.12.0), the backups panel and the deploy page",
+        on: "2026-11-04",
+    },
     width: 2400,
     height: 800,
     draw(t: Theme) {
@@ -624,8 +628,8 @@ const backupRestore: Figure = {
             colour: t.accent,
         });
         say(s, t, 60, Y2 + 36, "new instance, new endpoint", { size: 22, colour: t.muted });
-        box(s, t, 1520, Y2 - 150, 520, 110, "Create from selected", {
-            sub: "opens the deploy flow",
+        box(s, t, 1520, Y2 - 150, 520, 110, "Create instance", {
+            sub: "opens the deploy page",
             kind: "accent",
         });
         say(s, t, 1520, Y2 + 70, "same region, storage at least the source's size,", {
