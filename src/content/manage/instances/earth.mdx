@@ -1,7 +1,7 @@
 ---
 position: 4
 title: SurrealDB Earth
-description: "What SurrealDB Earth is, how it runs SurrealDB on the Cloudflare network, how to deploy it with data residency, cells and a network policy, Earth Free and Earth Pro, and which features are not available on it yet."
+description: "What SurrealDB Earth is, how it runs SurrealDB on the Cloudflare network, how to deploy it with data residency, cells and a network policy, Earth Free and Earth Pro limits, how request units and active hours are measured and limited, how to move a database to Earth with export and import, and which features are not available on it yet."
 ---
 
 # SurrealDB Earth
@@ -50,14 +50,52 @@ Deploy an Earth instance from the deploy page in [SurrealDB Studio](https://stud
 
 ![The Earth cluster section of the deploy page in SurrealDB Studio. Data residency is set to European Union, beside Worldwide and United States. Preferred location is set to Automatic, with Western Europe and Eastern Europe as the other choices. The Cells slider is at 100, with marks at 1, 10, 50, 100, 500, 1,000 and 10,000, and a note that more than 100 cells are available on request. Below are the Network policy lists of allowed and denied addresses, and the Capabilities settings for guest access, RPC methods, HTTP endpoints, functions and arbitrary queries.](~/assets/img/surrealdb/manage/earth-deploy-cluster.webp)
 
-### Earth Free and Earth Pro
+## Plans and usage
 
 Every Earth instance in an organisation runs on the organisation's Earth plan.
 
-- **Earth Free** includes a monthly allowance of request units, active hours and storage. When the allowance is spent, the organisation's Earth instances pause until the next month, and Studio shows a paused instance as disabled.
+- **Earth Free** includes a monthly allowance of request units, active hours and storage. When the allowance is spent, the organisation's Earth instances pause until the next month, and Studio shows a paused instance as disabled. The data is kept.
 - **Earth Pro** is a monthly subscription for the organisation. Instances keep running after the allowance is spent, and the usage beyond it is billed.
 
 Upgrade to Earth Pro from the deploy page, or from the **SurrealDB Earth** section of the organisation's billing page, where an owner can also cancel it. A cancelled subscription stays active until the end of the month. See [Pricing](https://surrealdb.com/pricing) for the allowances and prices.
+
+The allowance belongs to the organisation, so all of its Earth instances use the same allowance. The plans also differ in these limits:
+
+| Limit | Earth Free | Earth Pro |
+| --- | --- | --- |
+| Earth instances in the organisation | 100 | No limit |
+| Clients connected to one instance at once | 100 | 10,000 |
+| Cells per instance | Up to 100 | Up to 100 |
+
+When an instance holds as many connections as its plan allows, it refuses a new connection.
+
+### What is measured
+
+Earth measures three things for each instance: request units, active hours and storage. The dashboard of an instance shows its request units and active hours for the current billing period. Network egress is not billed on either plan.
+
+**Request units** measure the work that requests do. A request is one HTTP request, or one WebSocket message that carries a query or another RPC method. A query of several statements is one request, and its request units add up the reads and writes of all its statements.
+
+- **Reads:** one unit for each started 16 KiB of a record or index entry that a request fetches by its key, including a check that finds nothing. A scan, such as a `SELECT` over a table or a range of an index, costs one unit for each started 16 KiB that it returns. Reads of table and field definitions cost nothing.
+- **Writes:** three units for each started 4 KiB of each record, index entry or graph edge that a committed transaction writes. A delete counts as one write. A transaction that fails or is cancelled writes nothing, so its writes cost nothing.
+- **Minimum:** a request that writes nothing costs at least one unit.
+- **HTTP:** a request over HTTP costs two units more than the same request over WebSocket.
+
+So a small record read by its ID costs about one unit, and the same record created costs about three units, plus three for each index entry that the write adds.
+
+**Active hours** measure how long the compute units of an instance run. They are added up over all the units, so one unit that runs for an hour and ten units that run for six minutes each are both one active hour. A unit counts from when it starts to serve the instance until it is stopped, a short time after its last request, so a few requests spread over an hour can keep a unit running for most of it. Active hours are not CPU time. An idle instance that has scaled to zero uses no active hours.
+
+**Storage** is the size of the instance's data, averaged over the month.
+
+### Control usage
+
+Earth Pro has no setting for a spending limit or for billing alerts yet. These settings limit what an instance can use:
+
+- **Cells** are the most compute units that an instance runs at once, so they also limit its active hours: an instance with 10 cells uses at most 10 active hours in an hour. Fewer cells mean lower peak cost, and less work that the instance can do at the same time.
+- **Capabilities** set the functions that queries can call and whether guests can connect. Deny a function that costs a lot to run, such as `crypto::argon2::generate()`, when the application does not need it. See [Capabilities](/docs/learn/security/authorization/capabilities).
+- **Permissions** on tables and fields limit what a record user can read and write. See [Table permissions](/docs/reference/query-language/statements/define/table#defining-permissions).
+- **A network policy** limits the addresses that can connect. See [Limit the addresses that can connect](#limit-the-addresses-that-can-connect).
+
+To keep an organisation's Earth usage within a fixed amount, stay on Earth Free, which pauses the instances at its allowance instead of billing more.
 
 ## Connect to an Earth instance
 
@@ -102,6 +140,39 @@ psql "host=sql.surrealdb.earth port=5432 user=app@<instance-id> dbname=main/main
 ```bash title="Connect with the mysql CLI"
 mysql -h sql.surrealdb.earth -P 3306 -u 'app@<instance-id>' -p --ssl-mode=REQUIRED main/main
 ```
+
+## Move a database to Earth
+
+Move a database from a self-hosted server, or from another instance, with [`surreal db export`](/docs/reference/cli/db/commands/export) and [`surreal db import`](/docs/reference/cli/db/commands/import). An export holds one database, so move a namespace one database at a time.
+
+Upgrade the source to SurrealDB 4.0 first, and export after the upgrade. Earth runs 4.0, so the export is then written by the version that imports it. See [3.x to 4.0](/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x) for the upgrade. Then export each database from the source:
+
+```bash title="Export a database from the source"
+surreal db export \
+  --endpoint https://<source-host> \
+  --user root --pass <password> \
+  --ns app --db production \
+  ./production.surql
+```
+
+Then import each file into the Earth instance, with the token from the instance's **Connect** menu in Studio:
+
+```bash title="Import a database into Earth"
+surreal db import \
+  --endpoint https://<instance-id>.surrealdb.earth \
+  --token <token> \
+  --ns app --db production \
+  ./production.surql
+```
+
+Use an `https://` endpoint for both commands. Export and import run over HTTP, and fail on a `wss://` endpoint.
+
+Earth defines the namespace and the database on the first request that uses them, so you do not need to create them first. After the import, define these again on the Earth instance:
+
+- **Definitions on the namespace**, such as users and access methods defined `ON NAMESPACE`. A database export does not hold them.
+- **Access methods with a signing key.** An export writes a placeholder in place of the key, and the import refuses it. See [Exports and imports](/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x#exports-and-imports).
+
+An import commits each statement as it runs, so a failure partway through keeps the statements before it. See [Import and export](/docs/manage/instances/import-and-export) for how to retry a partial import.
 
 ## Limit the addresses that can connect
 
