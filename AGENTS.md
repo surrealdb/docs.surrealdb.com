@@ -507,6 +507,46 @@ On a block that sets up its data first, the fence labels the **last** statement,
 the same convention `RETURN` follows: three `CREATE`s and then the `SELECT`
 whose result is shown is one fence pair, not four.
 
+**Long lines in code.** A code block shows about 70 characters on a
+1440-pixel laptop screen, about 98 on a 1920-pixel monitor and about 36 on a
+phone, and scrolls sideways past that. Write for 70. A longer line is not wrong
+in itself. The question is whether a reader can tell what the hidden part says
+without scrolling to it.
+
+- **Leave it** when the hidden part is predictable: the last words of an error
+  whose meaning is already clear (`…results in an arithmetic overflow`), more of
+  a pattern that has already started, or a length that is the point of the
+  example, such as an array of a thousand items.
+- **Make it visible** when the hidden part is what the example is there to
+  show: the last value of a sort order, the result a function returns, or the
+  one field that differs. In November 2026 the mixed-type sort on the dates and
+  times page put the interval, which most readers had never seen sorted, at
+  character 85 of its output.
+
+To make it visible, use the first of these that works:
+
+1. **Lay a value out over several lines.** SurrealQL ignores whitespace between
+   tokens, so an array or object in an `Output` fence can put one element per
+   line, indented with a tab, and it still reads back as the same value.
+2. **Lay the statement out over several lines**, with each argument or each
+   element on its own line, for the same reason. The one place a line break
+   changes the meaning is next to the `..` of a record range: before it, the
+   query returns `NONE` instead of the records, and after it, the query does
+   not parse. Break inside the bounds instead.
+3. **Shorten the example**: fewer elements, shorter strings, shorter names,
+   provided it still shows the point.
+
+A `//-` result stays on one line, because everything after the marker is the
+value. When one would hide what matters, move the result to an `Output` fence
+(possible when it belongs to the last statement), or shorten the input that the
+value or the error repeats back.
+
+Never mark a continued line with `\` or any other character. SurrealQL does not
+read it, so a copied example fails to run, and the `.md` endpoints serve it to
+agents as part of the value. The site does not wrap long lines either, because
+wrapping would turn a long array that shows its own length into a wall of
+lines, so the choice is made for each example instead.
+
 **Callouts.** Use `> [!NOTE]`, `> [!WARNING]`, and `> [!IMPORTANT]` for
 exceptions, security caveats, and breaking or easy-to-miss details.
 
