@@ -1,7 +1,7 @@
 ---
 position: 4
 title: SurrealDB Earth
-description: "What SurrealDB Earth is, how it runs SurrealDB on the Cloudflare network, how to deploy it with data residency, cells and a network policy, Earth Free and Earth Pro limits, how request units and active hours are measured and limited, how to move a database to Earth with export and import, and which features are not available on it yet."
+description: "What SurrealDB Earth is, how it runs SurrealDB on the Cloudflare network, how to deploy it with data residency, cells and a network policy, what a cell is and how to choose a cell count for performance and cost, Earth Free and Earth Pro limits, how request units and active hours are measured and limited, how to move a database to Earth with export and import, and which features are not available on it yet."
 ---
 
 # SurrealDB Earth
@@ -11,7 +11,7 @@ description: "What SurrealDB Earth is, how it runs SurrealDB on the Cloudflare n
 
 SurrealDB Earth is serverless SurrealDB that runs on the Cloudflare network.
 
-You get a full SurrealDB database with SurrealQL, transactions and live queries. You do not choose an instance type or a node count: Earth adds compute when traffic grows, up to the number of [cells](#deploy-an-earth-instance) you set, and scales to zero when the instance is idle.
+You get a full SurrealDB database with SurrealQL, transactions and live queries. You do not choose an instance type or a node count: Earth adds compute when traffic grows, up to the number of [cells](#cells) you set, and scales to zero when the instance is idle.
 
 Earth is a separate product from the [Start and Scale plans](/docs/manage/instances). Some SurrealDB features are not available on Earth yet. See [Features not available yet](#features-not-available-yet) before you move a workload to it.
 
@@ -28,7 +28,7 @@ Earth is a separate product from the [Start and Scale plans](/docs/manage/instan
 
 An Earth instance has three parts:
 
-- **Compute:** SurrealDB runs on the Cloudflare network, close to the clients that connect to it. Each client session is served by one compute unit. When the sessions on the current units fill them, Earth starts more units for the instance.
+- **Compute:** SurrealDB runs on the Cloudflare network, close to the clients that connect to it. Each client session is served by one unit of compute, called a [cell](#cells). When the sessions on the current cells fill them, Earth starts more cells for the instance.
 - **Commit order:** each instance has one commit log. Every transaction commits in one strict order, so a transaction sees a consistent snapshot of the data and conflicting writes fail at commit, as they do on any SurrealDB server.
 - **Storage:** the data of an instance is kept in Cloudflare object storage in one location. Earth writes a commit to durable storage before it acknowledges the commit.
 
@@ -37,7 +37,7 @@ These parts give the behaviour that follows:
 - **Single-location storage, queries from many locations.** The data lives in one place, and queries arrive through the Cloudflare location nearest to each client.
 - **Scale to zero.** After the last request, an idle instance stops using compute. The next request wakes it. The first request after an idle period can take longer than later requests.
 - **Fully transactional.** Explicit transactions (`BEGIN` and `COMMIT`) and single statements both commit in the instance's one commit order.
-- **Highly available.** No single compute unit holds data that only it can serve. If a unit fails, a new unit serves its sessions and reads the data from storage.
+- **Highly available.** No single cell holds data that only it can serve. If a cell fails, a new cell serves its sessions and reads the data from storage.
 
 ## Deploy an Earth instance
 
@@ -47,11 +47,54 @@ Deploy an Earth instance from the deploy page in [SurrealDB Studio](https://stud
 | --- | --- |
 | **Data residency** | Where the data may be stored: **Worldwide**, **European Union**, or **United States**, which keeps the data in FedRAMP-compliant data centres. It cannot be changed after the instance is created. |
 | **Preferred location** | Where Earth places storage and compute. **Automatic** places them near where requests to the instance come from. Each residency also offers fixed locations: Western and Eastern North America, Western and Eastern Europe, Asia-Pacific and Oceania for Worldwide, the two European locations for the European Union, and the two North American locations for the United States. |
-| **Cells** | The most compute units the instance can run across at once. More cells let the instance handle more concurrent work. Studio offers up to 100 cells, and a larger count is available on request. Cells are set when the instance is deployed. |
+| **Cells** | The most cells the instance can run at once. The default is 100, which Studio also offers as the most, and a larger count is available on request. Cells are set when the instance is deployed. See [Cells](#cells) for how to choose a count. |
 | **Network policy** | Optional. Which client addresses can connect. See [Limit the addresses that can connect](#limit-the-addresses-that-can-connect). |
 | **Capabilities** | What the instance permits at runtime, such as guest access and the functions it can use. See [Capabilities](/docs/learn/security/authorization/capabilities). They can be changed later. |
 
 ![The Earth cluster section of the deploy page in SurrealDB Studio. Data residency is set to European Union, beside Worldwide and United States. Preferred location is set to Automatic, with Western Europe and Eastern Europe as the other choices. The Cells slider is at 100, with marks at 1, 10, 50, 100, 500, 1,000 and 10,000, and a note that more than 100 cells are available on request. Below are the Network policy lists of allowed and denied addresses, and the Capabilities settings for guest access, RPC methods, HTTP endpoints, functions and arbitrary queries.](~/assets/img/surrealdb/manage/earth-deploy-cluster.webp)
+
+## Cells
+
+A cell is one unit of compute that runs part of an Earth instance. Each cell holds a share of the instance's client connections and runs their queries. The **Cells** setting is the most cells that the instance can run at once. It is a limit, not capacity that is reserved for the instance: an instance runs only the cells that its load needs, and you do not pay for the cells it does not use.
+
+### How Earth adds cells
+
+- An instance starts on one cell. Earth sends each new connection to a cell that has room for it.
+- A cell accepts new connections until it is busy or its memory is nearly full. Then it refuses new connections, and Earth starts one more cell for them. So Earth fills one cell before it starts the next.
+- A cell never refuses a message on a connection that it already holds. A connection stays on its cell until the connection closes.
+- A cell that gets no requests goes idle and stops using active hours. Its connections stay open while it is idle: a WebSocket connection that waits between messages costs almost nothing to hold.
+- When the instance runs as many cells as its limit and every cell is busy, Earth answers a new connection, or an HTTP request that is not part of a session, with HTTP status `503`. The client can send it again. See [Handle busy responses](#handle-busy-responses).
+
+### What cells change
+
+- **Concurrent work.** More cells let more clients send queries at the same time. A cell can serve about 1,000 small queries a second, such as reads of a record by its ID, before it stops taking new connections. Larger queries use more of a cell, so a cell serves fewer of them.
+- **Not the speed of one query.** One query runs on one cell. More cells do not make a single large query, such as a scan of a large table, run faster.
+- **Not the amount of data.** The data of an instance is kept in storage, not in its cells. An instance with 10 GiB of data does not need more cells than one with 1 GiB, if both get the same queries.
+- **Not the commit rate in the same way.** Every transaction commits in the instance's one commit order. More cells let more clients send writes at the same time, but the number of commits a second does not grow in proportion to the cells.
+- **Not the number of connections.** The plan sets the most clients that can connect to an instance at once. See [Plans and usage](#plans-and-usage).
+
+As a guide, find the queries a second that your clients send at peak and divide by about 1,000. For example, 1,000 WebSocket clients that each send one small query every two seconds send about 500 queries a second, which one cell can serve. If each of the same clients sends five queries a second, they send about 5,000 queries a second, and the instance runs on about five cells.
+
+### What cells cost
+
+You do not pay for cells. You pay for [request units, active hours and storage](#what-is-measured).
+
+- **Request units** are the same on any number of cells. A query costs the same request units on one cell or on fifty.
+- **Active hours** add up the time each cell is awake. Because Earth fills a cell before it starts the next, an instance runs only the cells that its load needs. A higher limit does not add active hours to a workload that fits on fewer cells.
+- **A lower limit sets a maximum on active hours.** An instance with 10 cells uses at most 10 active hours in an hour. When the load needs more cells than the limit, clients get busy responses instead of more cells. The peak cost is lower, but clients wait and send their requests again.
+
+### Choose a cell count
+
+| Workload | Cells |
+| --- | --- |
+| Production applications | 100, the default. The instance runs only the cells its load needs, so the default costs no more than a lower limit while the load is low |
+| Development, tests and prototypes | 1 to 10, to keep a load test or a bug that sends many queries from adding cells and active hours |
+| An instance with a fixed limit on active hours | The most active hours an hour that you accept. For example, 5 cells use at most 5 active hours in an hour |
+| More than about 100,000 small queries a second | More than 100 cells. [Contact SurrealDB](https://surrealdb.com/contact) to ask for a larger count |
+
+Earth Pro has no spending limit yet, so a lower cell count is one way to limit the peak cost of an instance on Earth Pro. On Earth Free, the monthly allowance already limits usage.
+
+Studio sets the cell count when the instance is deployed. Studio does not offer a way to change it on a running instance yet.
 
 ## Plans and usage
 
@@ -85,7 +128,7 @@ Earth measures three things for each instance: request units, active hours and s
 
 So a small record read by its ID costs about one unit, and the same record created costs about three units, plus three for each index entry that the write adds.
 
-**Active hours** measure how long the compute units of an instance run. They are added up over all the units, so one unit that runs for an hour and ten units that run for six minutes each are both one active hour. A unit counts from when it starts to serve the instance until it is stopped, a short time after its last request, so a few requests spread over an hour can keep a unit running for most of it. Active hours are not CPU time. An idle instance that has scaled to zero uses no active hours.
+**Active hours** measure how long the cells of an instance run. They are added up over all the cells, so one cell that runs for an hour and ten cells that run for six minutes each are both one active hour. A cell counts from when it starts to serve the instance until it is stopped, a short time after its last request, so a few requests spread over an hour can keep a cell running for most of it. Active hours are not CPU time. An idle instance that has scaled to zero uses no active hours.
 
 **Storage** is the size of the instance's data, averaged over the month.
 
@@ -93,7 +136,7 @@ So a small record read by its ID costs about one unit, and the same record creat
 
 Earth Pro has no setting for a spending limit or for billing alerts yet. These settings limit what an instance can use:
 
-- **Cells** are the most compute units that an instance runs at once, so they also limit its active hours: an instance with 10 cells uses at most 10 active hours in an hour. Fewer cells mean lower peak cost, and less work that the instance can do at the same time.
+- **Cells** are the most cells that an instance runs at once, so they also limit its active hours: an instance with 10 cells uses at most 10 active hours in an hour. Fewer cells mean lower peak cost, and less work that the instance can do at the same time. See [What cells cost](#what-cells-cost).
 - **Capabilities** set the functions that queries can call and whether guests can connect. Deny a function that costs a lot to run, such as `crypto::argon2::generate()`, when the application does not need it. See [Capabilities](/docs/learn/security/authorization/capabilities).
 - **Permissions** on tables and fields limit what a record user can read and write. See [Table permissions](/docs/reference/query-language/statements/define/table#defining-permissions).
 - **A network policy** limits the addresses that can connect. See [Limit the addresses that can connect](#limit-the-addresses-that-can-connect).
