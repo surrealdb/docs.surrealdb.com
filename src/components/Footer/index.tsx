@@ -45,6 +45,7 @@ const COLUMNS: FooterColumn[] = [
             { label: "SurrealQL", href: "/docs/reference/query-language" },
             { label: "SDKs", href: "/docs/reference/javascript" },
             { label: "Cloud", href: "/docs/manage/instances" },
+            { label: "Earth", href: "/docs/manage/instances/earth" },
             { label: "Labs", href: "/docs/labs" },
         ],
     },
