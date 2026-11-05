@@ -1,12 +1,14 @@
 ---
 position: 6
 title: surreal cloud instance
-description: Reference for surreal cloud instance - create, update, pause, resume, delete and watch instances, read status, endpoint, logs, metrics and usage, mint database tokens, open sql, import and export through surreal db, and manage capabilities and backups.
+description: Reference for surreal cloud instance - deploy SurrealDB Earth and dedicated instances, update, pause, resume, delete and watch instances, read status, endpoint, logs, metrics and usage, mint database tokens, open sql, import and export through surreal db, and manage capabilities, network policies and backups.
 ---
 
 # surreal cloud instance
 
 `surreal cloud instance` manages instances: the databases themselves. It is the largest group in the CLI, and covers provisioning, scaling, observability, credentials, capabilities and backups. Three of its commands, `sql`, `import` and `export`, run the database through the `surreal` launcher as [`surreal db sql`](/docs/reference/cli/db/commands/sql), [`surreal db import`](/docs/reference/cli/db/commands/import) and [`surreal db export`](/docs/reference/cli/db/commands/export).
+
+An instance is one of two kinds. A [SurrealDB Earth](/docs/manage/instances/earth) instance is serverless and runs on the Cloudflare network, and it is what [`deploy`](#instance-deploy) creates by default. A dedicated instance runs in one cloud region on the Start or Scale plan. Most commands work on both kinds; [Earth instances](#earth-instances) lists the ones that differ.
 
 This group declares the scopes `read:cloud` and `write:cloud-instances`. A personal access token is read-only here: the gateway refuses every non-GET Cloud route for one, so the commands that change an instance answer 403 and exit `4` regardless of the token's scopes. See [Authentication](/docs/reference/cli/cloud/authentication#what-a-personal-access-token-cannot-do).
 
@@ -19,8 +21,8 @@ surreal cloud instances <COMMAND> [OPTIONS]
 | --- | --- | --- |
 | [`list`](#instance-list) | List the instances in an organisation | `ls` |
 | [`get`](#instance-get) | Show one instance | |
-| [`create`](#instance-create) | Create an instance | |
-| [`update`](#instance-update) | Change an instance's type, size, or version | |
+| [`deploy`](#instance-deploy) | Deploy an instance, asking for anything not given | `create` |
+| [`update`](#instance-update) | Change an instance's name, type, size, or version | |
 | [`delete`](#instance-delete) | Delete an instance and everything in it | `rm` |
 | [`pause`](#instance-pause) | Pause a running instance | |
 | [`resume`](#instance-resume) | Resume a paused instance | |
@@ -38,10 +40,34 @@ surreal cloud instances <COMMAND> [OPTIONS]
 | [`estimate`](#instance-estimate) | Estimate what an instance would cost | |
 | [`capabilities get`](#instance-capabilities-get) | Show an instance's capability configuration | |
 | [`capabilities set`](#instance-capabilities-set) | Change an instance's capability configuration | |
+| [`network get`](#instance-network-get) | Show which addresses may connect to an Earth instance | |
+| [`network set`](#instance-network-set) | Change which addresses may connect to an Earth instance | |
 | [`backup list`](#instance-backup-list) | List the snapshots an instance can be restored from | `ls` |
 | [`backup create`](#instance-backup-create) | Take a backup of an instance now | |
 | [`backup policy get`](#instance-backup-policy-get) | Show the backup retention policy | |
 | [`backup policy set`](#instance-backup-policy-set) | Change the backup retention policy | |
+
+## Earth instances {#earth-instances}
+
+An Earth instance has no instance type, compute units, storage size, SurrealDB version choice, backups, metrics or logs, so the commands for those refuse one before sending a request:
+
+| Command | On an Earth instance |
+| --- | --- |
+| [`update`](#instance-update) | Only `--name` applies. `--type`, `--compute-units`, `--storage` and `--version` are refused |
+| [`backup`](#instance-backup-list) commands | Refused: Earth does not offer backups or snapshots |
+| [`metrics`](#instance-metrics) and [`logs`](#instance-logs) | Refused: Earth does not offer metrics or logs |
+| [`jwks`](#instance-jwks) | Refused: an Earth instance has no key set of its own |
+| [`estimate`](#instance-estimate) | Prices dedicated instance types only |
+
+The refusal names the instance and what it lacks, and exits `9`:
+
+```text
+`edge-api` is a SurrealDB Earth instance, which does not offer metrics or logs.
+```
+
+[`usage`](#instance-usage) reports what an Earth instance has consumed, in the meters that [Earth plans](/docs/manage/instances/earth#plans-and-usage) are measured in, and [`network get`](#instance-network-get) and [`network set`](#instance-network-set) manage its network policy.
+
+No `update` flag changes the number of cells. To change it, send the request to the Cloud API with [`surreal cloud api`](/docs/reference/cli/cloud/commands/misc#api), as [Choose a cell count](/docs/manage/instances/earth#choose-a-cell-count) shows.
 
 ## Naming an instance
 
@@ -127,21 +153,27 @@ surreal cloud instance get production --json | jq -r .state
 
 The detail view reports the id, slug, state, type, version, region, compute units, storage, access type, endpoint, private host when there is one, and the owning organisation. It adds the storage cool-off when storage cannot be changed yet, the storage backend and backup retention when the platform reports them, and the versions the instance can upgrade to.
 
-## surreal cloud instance create {#instance-create}
+For an Earth instance the view reports the id, state, region `earth`, data residency, preferred location, cells, network policy, version, endpoint and owning organisation instead, followed by the commands that go with it.
 
-Create an instance.
+## surreal cloud instance deploy {#instance-deploy}
+
+Deploy an instance, asking for anything not given. `create` is an alias.
 
 <Synopsis>
-surreal cloud instance create [OPTIONS] --type <SLUG> --region <SLUG> <NAME>
+surreal cloud instance deploy [OPTIONS] [NAME]
+surreal cloud instance create [OPTIONS] [NAME]
 </Synopsis>
+
+`--region` decides the kind of instance. With no `--region`, or `--region earth`, the command deploys a [SurrealDB Earth](/docs/manage/instances/earth) instance, which runs the platform's latest SurrealDB. With any other region it deploys a dedicated instance in that cloud region. Each kind has its own flags, and a flag that belongs to the other kind is refused.
+
+At a terminal the command asks for anything not given as a flag, starting from the same defaults as the deploy page in SurrealDB Studio. `--yes`, or a session that cannot prompt, takes every default without asking.
 
 <OptionsTable
     title="Arguments"
     options={[
         {
-            "name": "<NAME>",
-            "required": true,
-            "description": "A name for the instance. Between 1 and 30 characters, counted after trimming."
+            "name": "[NAME]",
+            "description": "A name for the instance. Between 1 and 30 characters, counted after trimming. Defaults to a generated name, such as `brave-falcon`."
         }
     ]}
 />
@@ -150,41 +182,10 @@ surreal cloud instance create [OPTIONS] --type <SLUG> --region <SLUG> <NAME>
     title="Options"
     options={[
         {
-            "name": "--type",
-            "value": "<SLUG>",
-            "required": true,
-            "description": "The instance type, by slug. See `surreal cloud catalog instance-types`. Must be one the organisation's plan offers."
-        },
-        {
             "name": "--region",
-            "value": "<SLUG>",
-            "required": true,
-            "description": "The region to deploy into, by slug. See `surreal cloud catalog regions`. Must be one the organisation's plan offers."
-        },
-        {
-            "name": "--version",
-            "value": "<VERSION>",
-            "description": "The SurrealDB version to run. Defaults to the platform's current one."
-        },
-        {
-            "name": "--compute-units",
-            "value": "<N>",
-            "description": "How many compute units to run, for the types that scale. Minimum 1."
-        },
-        {
-            "name": "--storage",
-            "value": "<GB>",
-            "description": "Storage to allocate, in gigabytes. Minimum 1."
-        },
-        {
-            "name": "--access-type",
-            "value": "<ACCESS>",
-            "description": "How the instance may be reached: `public`, `private` or `dual`."
-        },
-        {
-            "name": "--restore-from",
-            "value": "<INSTANCE/SNAPSHOT>",
-            "description": "Restore from a snapshot, as `<instance>/<snapshot>`."
+            "value": "<REGION>",
+            "default": "earth",
+            "description": "`earth` for a SurrealDB Earth instance, or a cloud region for a dedicated instance. See `surreal cloud catalog regions`."
         },
         {
             "name": "--wait",
@@ -203,39 +204,130 @@ surreal cloud instance create [OPTIONS] --type <SLUG> --region <SLUG> <NAME>
     ]}
 />
 
+<OptionsTable
+    title="SurrealDB Earth options"
+    options={[
+        {
+            "name": "--residency",
+            "value": "<RESIDENCY>",
+            "default": "world",
+            "description": "Where the data may be stored: `world`, `eu` or `us`. See `surreal cloud catalog residencies`. Cannot be changed later."
+        },
+        {
+            "name": "--location-hint",
+            "value": "<LOCATION>",
+            "description": "Where in its residency the instance prefers to run: `wnam`, `enam`, `weur`, `eeur`, `apac` or `oc`, as the residency allows. Defaults to automatic placement. Cannot be changed later."
+        },
+        {
+            "name": "--cells",
+            "value": "<N>",
+            "description": "The most [cells](/docs/manage/instances/earth#cells) the instance may run across, from the counts the deploy page offers. More cells take on more work at once."
+        },
+        {
+            "name": "--allow-ip",
+            "value": "<CIDRS>",
+            "description": "Admit only these IP addresses or CIDR blocks, comma-separated."
+        },
+        {
+            "name": "--deny-ip",
+            "value": "<CIDRS>",
+            "description": "Refuse these IP addresses or CIDR blocks, comma-separated."
+        },
+        {
+            "name": "--allow-guests, --deny-guests",
+            "description": "Allow or refuse unauthenticated guest access."
+        },
+        {
+            "name": "--allow-<LIST>, --deny-<LIST>",
+            "value": "<VALUES>",
+            "description": "Capability lists, comma-separated, for `experimental`, `arbitrary-query`, `eval-query`, `rpc`, `http` and `funcs`. They take the same values as [`capabilities set`](#instance-capabilities-set)."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Dedicated options"
+    options={[
+        {
+            "name": "--nodes",
+            "value": "<N>",
+            "description": "How many nodes the instance runs on: 1 for a single-node instance, 3 or more for a multi-node one."
+        },
+        {
+            "name": "--type",
+            "value": "<SLUG>",
+            "description": "The instance type, by slug, among those for the node count. See `surreal cloud catalog instance-types`. Must be one the organisation's plan offers."
+        },
+        {
+            "name": "--version",
+            "value": "<VERSION>",
+            "description": "The SurrealDB version to run. Defaults to the latest."
+        },
+        {
+            "name": "--storage",
+            "value": "<GB>",
+            "description": "Storage to allocate, in gigabytes, within the type's range."
+        },
+        {
+            "name": "--access-type",
+            "value": "<ACCESS>",
+            "description": "How the instance may be reached: `public`, `private` or `dual`."
+        },
+        {
+            "name": "--restore-from",
+            "value": "<INSTANCE/SNAPSHOT>",
+            "description": "Restore from a snapshot, as `<instance>/<snapshot>`."
+        }
+    ]}
+/>
+
 | `--access-type` value | Meaning |
 | --- | --- |
 | `public` | Reachable over the public internet. The API's own default |
 | `private` | Reachable over PrivateLink only. Needs PrivateLink on the organisation |
 | `dual` | Reachable both ways |
 
-```bash title="Create and wait for it to be ready"
-surreal cloud instance create api --type shared-1 --region aws-euw1
+```bash title="An Earth instance with the defaults"
+surreal cloud instance deploy edge-api --yes
 ```
 
-```bash title="A production instance with room to grow"
-surreal cloud instance create production \
-    --type production-2 \
+```bash title="An Earth instance that keeps its data in the EU"
+surreal cloud instance deploy edge-api \
+    --residency eu \
+    --location-hint weur \
+    --cells 10 \
+    --allow-ip 203.0.113.0/24
+```
+
+```bash title="A dedicated single-node instance"
+surreal cloud instance deploy api --region aws-euw1 --nodes 1 --type shared-1
+```
+
+```bash title="A dedicated multi-node instance"
+surreal cloud instance deploy production \
     --region aws-euw1 \
-    --compute-units 4 \
+    --nodes 3 \
+    --type production-2 \
     --storage 100
 ```
 
-```bash title="Clone from a snapshot"
-surreal cloud instance create staging \
-    --type shared-1 \
+```bash title="Clone a dedicated instance from a snapshot"
+surreal cloud instance deploy staging \
     --region aws-euw1 \
+    --type shared-1 \
     --restore-from production/rsnapshot-20260811-150405
 ```
 
-The command prints `Creating <name> (<slug>).` on stderr as soon as the API accepts the request. With the wait, it then reports progress and emits a fresh detail view of the ready instance. With `--no-wait` it emits the accepted request and hints at `surreal cloud instance watch <name>`.
+The command prints ``Deploying `<name>` (<place>).`` on stderr as soon as the API accepts the request, where the place is the slug of a dedicated instance or the region and residency of an Earth instance. With the wait, it then reports progress and emits a fresh detail view of the ready instance. With `--no-wait` it emits the accepted request and hints at `surreal cloud instance watch <name>`.
 
 The organisation comes from `--org` and the [precedence chain](/docs/reference/cli/cloud/global-flags#the-precedence-chain).
 
 **Refusals**, all exit `2` and all before any request:
 
 - A name outside 1 to 30 characters, with the length it counted.
-- `--compute-units` below 1 (`Compute units start at 1.`), or `--storage` below 1 (`Storage starts at 1 GB.`).
+- A flag for the other kind of instance, such as `--nodes` with `--region earth` or `--cells` with a cloud region.
+- A `--cells` count that is not on offer. The message lists the counts that are, and the count above which more cells are available on request.
+- `--storage` below 1 (`Storage starts at 1 GB.`).
 - A `--type` or `--region` that the organisation's plan does not offer. The message suggests the closest match and lists what is available. This check is skipped when the plan lists none.
 - A malformed `--restore-from`, which is split on the last `/`:
 
@@ -246,11 +338,11 @@ Run `surreal cloud instance status <instance>` to list the snapshots an instance
 ```
 
 > [!WARNING]
-> The create route accepts no idempotency key, so a retried create is a second instance and a second bill. `surreal cloud` does not retry it after a timeout or a `502`, because the request may already have been processed. It replays only a `429` or `401`, which the gateway answers before any handler runs. If a create times out, run [`instance list`](#instance-list) before running it again.
+> The create route accepts no idempotency key, so a retried create is a second instance and a second bill. `surreal cloud` does not retry it after a timeout or a `502`, because the request may already have been processed. It replays only a `429` or `401`, which the gateway answers before any handler runs. If a deploy times out, run [`instance list`](#instance-list) before running it again.
 
 ## surreal cloud instance update {#instance-update}
 
-Change an instance's type, size, or version.
+Change an instance's name, type, size, or version.
 
 <Synopsis>
 surreal cloud instance update [OPTIONS] [INSTANCE]
@@ -269,6 +361,11 @@ surreal cloud instance update [OPTIONS] [INSTANCE]
 <OptionsTable
     title="Options"
     options={[
+        {
+            "name": "--name",
+            "value": "<NAME>",
+            "description": "Rename the instance. SurrealDB Earth instances only."
+        },
         {
             "name": "--type",
             "value": "<SLUG>",
@@ -311,6 +408,8 @@ surreal cloud instance update [OPTIONS] [INSTANCE]
     ]}
 />
 
+A rename comes first. It restarts nothing, prints ``Renamed `<old>` to `<new>`.``, and with no other flag the command returns at once. The other flags apply to dedicated instances, and on an Earth instance the command refuses them before sending any request, so a rename is never half of a refused change.
+
 There is no single update route on the API - each field has its own - so one invocation is several requests. They are applied in a fixed order and stop at the first failure:
 
 1. `--type`
@@ -321,6 +420,10 @@ There is no single update route on the API - each field has its own - so one inv
 
 > [!IMPORTANT]
 > Every one of these restarts the instance. A single `instance update` that changes three fields restarts it once per field, in the order above.
+
+```bash title="Rename an Earth instance"
+surreal cloud instance update edge-api --name edge-api-eu
+```
 
 ```bash title="Scale up"
 surreal cloud instance update production --compute-units 8
@@ -343,7 +446,7 @@ With the wait, the command then waits for the instance to be ready again and emi
 - No flags at all:
 
 ```text
-Nothing to update. Pass at least one of --type, --compute-units, --storage, --version, or --access-type.
+Nothing to update. Pass at least one of --name, --type, --compute-units, --storage, --version, or --access-type.
 ```
 
 - `--compute-units` below 1 (`Compute units start at 1.`), or `--storage` below 1 (`Storage starts at 1 GB.`).
@@ -600,7 +703,7 @@ surreal cloud instance status production
 
 The answer is one composite document: a phase, then the snapshots the instance can be restored from. In plain mode the phase is written as `phase<tab><Phase>` before the table, so `grep ^phase` works the same way it does on [`instance get`](#instance-get). An instance with no restorable snapshots gets a note on stderr rather than an empty table with no explanation.
 
-Snapshot ids from here are what [`instance create --restore-from`](#instance-create) expects.
+Snapshot ids from here are what [`instance deploy --restore-from`](#instance-deploy) expects.
 
 ## surreal cloud instance endpoint {#instance-endpoint}
 
@@ -1069,6 +1172,26 @@ Accepts the [list presentation flags](/docs/reference/cli/cloud/output-and-exit-
 surreal cloud instance usage production
 ```
 
+For an Earth instance the table lists one meter per row instead, as `meter`, `quantity` and `unit`, for the billing period so far:
+
+```bash
+surreal cloud instance usage edge-api
+```
+
+```text title="Sample output"
+METER               QUANTITY  UNIT
+units               10,703    count
+active_seconds      2,589     seconds
+requests            3,683     count
+rows_read           27,564    count
+rows_written        3,588     count
+live_notifications  0         count
+connection_seconds  715       seconds
+storage_mb_minutes  140       mb_minutes
+```
+
+`units` is request units and `active_seconds` is active time, the two meters [Earth plans](/docs/manage/instances/earth#what-is-measured) are measured in. Under `--json` the meters are in the `earth` array of the usage document, beside `period_start` and `period_end`.
+
 For every instance in the organisation at once, use [`org usage`](/docs/reference/cli/cloud/commands/org#org-usage).
 
 ## surreal cloud instance estimate {#instance-estimate}
@@ -1080,6 +1203,8 @@ surreal cloud instance estimate [OPTIONS] --type <SLUG> --region <REGION>
 </Synopsis>
 
 This command takes no positional argument: it prices a hypothetical instance, so there is nothing to name.
+
+It prices dedicated instance types only. Earth is priced by its plan and its usage; see [Plans and usage](/docs/manage/instances/earth#plans-and-usage).
 
 <OptionsTable
     title="Options"
@@ -1304,6 +1429,98 @@ Flags that would change nothing produce a note and exit `0` without a write:
 `production` already has those capabilities. Nothing was changed.
 ```
 
+## surreal cloud instance network get {#instance-network-get}
+
+Show which addresses may connect to a SurrealDB Earth instance.
+
+<Synopsis>
+surreal cloud instance network get [OPTIONS] [INSTANCE]
+</Synopsis>
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id or name. Defaults to the resolved one."
+        }
+    ]}
+/>
+
+This command has no options of its own.
+
+```bash
+surreal cloud instance network get edge-api
+```
+
+```text title="Output"
+allow	any address
+deny	none
+```
+
+Under `--json` the policy is emitted as `{"allow": [...], "deny": [...]}`, each a list or `null` when there is none. A dedicated instance has no network policy, so the command refuses one and exits `9`. Its access is set with [`update --access-type`](#instance-update) instead.
+
+## surreal cloud instance network set {#instance-network-set}
+
+Change which addresses may connect to a SurrealDB Earth instance.
+
+<Synopsis>
+surreal cloud instance network set [OPTIONS] [INSTANCE]
+</Synopsis>
+
+A client is served when `--allow-ip` matches its address, or there is no allow list, and `--deny-ip` does not match it. A denied address stays denied even when the allow list also matches it. See [Limit the addresses that can connect](/docs/manage/instances/earth#limit-the-addresses-that-can-connect).
+
+<OptionsTable
+    title="Arguments"
+    options={[
+        {
+            "name": "[INSTANCE]",
+            "description": "The instance, by id or name. Defaults to the resolved one."
+        }
+    ]}
+/>
+
+<OptionsTable
+    title="Options"
+    options={[
+        {
+            "name": "--allow-ip",
+            "value": "<CIDRS>",
+            "description": "Admit only these IP addresses or CIDR blocks, comma-separated."
+        },
+        {
+            "name": "--deny-ip",
+            "value": "<CIDRS>",
+            "description": "Refuse these IP addresses or CIDR blocks, comma-separated."
+        },
+        {
+            "name": "--open",
+            "description": "Admit every address, clearing both lists."
+        },
+        {
+            "name": "--force",
+            "description": "Replace the policy without confirming."
+        }
+    ]}
+/>
+
+The policy is replaced whole, so the command works like [`capabilities set`](#instance-capabilities-set): it reads the current policy, replaces only the lists given, shows what would change, and asks before writing. A list flag replaces that list rather than adding to it, and a list that is not named is kept.
+
+```bash title="Admit one office network"
+surreal cloud instance network set edge-api --allow-ip 203.0.113.0/24
+```
+
+```bash title="Admit every address again"
+surreal cloud instance network set edge-api --open
+```
+
+On success the command prints ``Replaced the network policy on `<name>`.`` and the policy now in force. A policy that would not change prints a note and exits `0` without a write. No flags at all is a usage error, exit `2`:
+
+```text
+Nothing to set. Pass --allow-ip, --deny-ip, or --open.
+Run `surreal cloud instance network get` to see the current policy.
+```
+
 ## surreal cloud instance backup list {#instance-backup-list}
 
 List the snapshots an instance can be restored from.
@@ -1496,7 +1713,8 @@ A backup every 5 hours is not offered on this plan. Choose one of: 6, 12, 24.
 
 - [Long-running operations](/docs/reference/cli/cloud/long-running-operations) - `--wait`, `--no-wait`, polling and exit code `10`
 - [`org` commands](/docs/reference/cli/cloud/commands/org) - the organisation that owns these instances
-- [`catalog` commands](/docs/reference/cli/cloud/commands/catalog) - the type, region and version slugs `create` and `update` expect
+- [SurrealDB Earth](/docs/manage/instances/earth) - cells, residency, network policy and usage on Earth
+- [`catalog` commands](/docs/reference/cli/cloud/commands/catalog) - the region, residency, type and version slugs `deploy` and `update` expect
 - [The `surreal` launcher](/docs/reference/cli/launcher) - how `sql`, `import` and `export` reach the database component
 - [Overview](/docs/reference/cli/cloud) - the rest of the reference
 - [SurrealDB CLI](/docs/reference/cli/db) - the data plane: `surreal db sql`, `surreal db import`, `surreal db export`
