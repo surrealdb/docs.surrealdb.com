@@ -5,7 +5,7 @@ import type { Verified } from "../provenance";
 
 export const verified: Verified = {
     against:
-        "the Earth page's sizing example, and capacity_msgs_per_s 1,300 with admit_fraction 0.8 in config/limits.toml of surrealdb/earth (9a218d9)",
+        "the Earth page's sizing example; capacity_msgs_per_s 1,300 with admit_fraction 0.8 in config/limits.toml, and about 3 units a commit in docs/design/EXECUTOR-CPU.md, of surrealdb/earth (9a218d9)",
     on: "2026-11-05",
 };
 
@@ -76,9 +76,9 @@ const earthCells: Figure = {
             }),
         );
 
-        // Quiet: the page's example of 1,000 clients at one query every two seconds
+        // Quiet: the page's example of 1,000 clients that each read a record every two seconds
         const r1 = 150;
-        rowLabel(s, t, r1, "Quiet", ["1,000 clients, about 500", "queries a second"]);
+        rowLabel(s, t, r1, "Quiet", ["1,000 clients, about 500", "reads a second"]);
         cellRow(s, t, r1, [
             { load: 0.5, label: "about 500 a second" },
             null,
@@ -90,7 +90,7 @@ const earthCells: Figure = {
 
         // Peak: the same clients at five queries a second each
         const r2 = 410;
-        rowLabel(s, t, r2, "Busy", ["1,000 clients, about 5,000", "queries a second"]);
+        rowLabel(s, t, r2, "Busy", ["1,000 clients, about 5,000", "reads a second"]);
         const full: Cell = { load: 1, label: "full" };
         cellRow(s, t, r2, [full, full, full, full, full, { load: 0.08, label: "new connections" }]);
         const c6 = cellX(5) + CELL_W / 2;
@@ -145,7 +145,7 @@ const earthCells: Figure = {
             text(
                 80,
                 1220,
-                "Six cells stand for the Cells limit here; the default is 100. A cell takes about 1,000 small queries a second before it takes no new connections.",
+                "Six cells stand for the Cells limit here; the default is 100. A cell takes about 1,000 small reads a second, or about 200 small writes, before it takes no new connections.",
                 { size: 24, fill: t.muted, anchor: "start" },
             ),
         );
