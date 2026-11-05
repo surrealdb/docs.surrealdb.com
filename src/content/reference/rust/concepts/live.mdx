@@ -345,3 +345,36 @@ Delete from live ID 63853ee1-aa9b-4e04-a54a-3b900a3cbaaa:
 </TabItem>
 
 </Tabs>
+
+## Live queries in `tokio::select!`
+
+Reading a live query stream is cancel-safe, so `stream.next()` can be one branch of a `tokio::select!` without losing notifications. The stream holds its notifications in an unbounded channel until they are read. When another branch finishes first, the `next()` future is dropped before it takes a notification, and the notification stays in the channel for the next call.
+
+Three things are not cancel-safe in the same way:
+
+- **Creating the stream.** `.live().await` registers the live query on the server. Create the stream once, before the loop, and not inside a `select!` branch, where a cancelled call can leave a live query running on the server that no stream receives.
+- **Dropping the stream.** A dropped stream kills its live query. Keep the stream in a variable that lives as long as the loop, and poll it with `next()` there.
+- **Other requests.** A query, a write or any other request whose future is dropped is not undone. The server may or may not have run it.
+
+Notifications that are not read stay in the channel, so a loop that stops calling `next()` for a long time holds every notification that arrives meanwhile.
+
+The example below continues the one above. It reads notifications and prints a line every 10 seconds, which needs the `time` feature of `tokio` as well as `macros`.
+
+```rust
+use futures::StreamExt;
+use std::time::Duration;
+
+let mut sample_accounts = db.select(ACCOUNT).range("a"..="g").live().await?;
+let mut ticker = tokio::time::interval(Duration::from_secs(10));
+
+loop {
+    tokio::select! {
+        Some(result) = sample_accounts.next() => {
+            let notification = result?;
+            let account: Account = notification.data;
+            println!("{:?}: {account:?}", notification.action);
+        }
+        _ = ticker.tick() => println!("Still listening"),
+    }
+}
+```
