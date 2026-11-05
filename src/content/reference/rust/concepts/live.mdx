@@ -378,3 +378,22 @@ loop {
     }
 }
 ```
+
+### Requests whose future is dropped
+
+A request reaches the server when its future is first polled, so a future dropped after that point leaves the request run or not run, and the code cannot tell which. Some common cases are:
+
+- **A timeout around a write.** `tokio::time::timeout()` around `db.create("order")` can return after the server has committed the record, so a retry creates a second order. A retried `UPDATE account SET balance -= 10` takes the amount twice.
+- **A write that loses a `select!` race,** for example against a shutdown signal. The write may already have committed.
+- **A web handler whose client disconnects.** Axum drops the handler's future when the connection closes. A handler that sends two queries one after the other can leave the first applied and the second never sent.
+- **Session changes.** A dropped `signin()` or `use_ns()` may or may not have changed the session, so the next query can run as a different user or in a different namespace than the code expects.
+- **File writes.** A dropped `.put()` on a file may or may not have written it.
+
+These make a dropped request safe:
+
+- **Write in a way that can be repeated.** An `UPSERT` on a record ID that the client chooses, such as `UPSERT type::record('order', $order_id) CONTENT $order`, writes the same record again on a retry instead of a second one.
+- **Send related changes as one query** wrapped in `BEGIN` and `COMMIT`, so they apply together or not at all.
+- **Run a write that must finish on its own task** with `tokio::spawn()`. Dropping the outer future then drops only the `JoinHandle`, and the task runs to the end.
+
+An interactive [transaction](/docs/reference/rust/concepts/transaction) is the exception: from version 4.0 of the SDK, a `Transaction` dropped without `commit()` or `cancel()` is rolled back in the background.
+
