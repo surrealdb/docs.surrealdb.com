@@ -50,6 +50,55 @@ await db.use({
 const result = await db.query('SELECT * FROM user');
 ```
 
+## Cloudflare Workers
+
+A Worker cannot use a connection that another request opened. Cloudflare ties an I/O object, such as a WebSocket, to the request that created it, so a client kept in a global variable and shared between requests stops answering. Create the client inside the request handler, and close it when the response is sent.
+
+Read the endpoint and the credentials from `env` inside the handler as well. Cloudflare runs the module's global code when it deploys the Worker, before secrets are available.
+
+```typescript title="Connect for each request"
+import { Surreal } from 'surrealdb';
+
+export default {
+  async fetch(request, env, ctx) {
+    const db = new Surreal();
+
+    await db.connect(env.SURREAL_URL, {
+      namespace: 'app',
+      database: 'prod',
+      authentication: {
+        username: env.SURREAL_USER,
+        password: env.SURREAL_PASS,
+      },
+    });
+
+    try {
+      const [users] = await db.query('SELECT * FROM user').collect();
+      return Response.json(users);
+    } finally {
+      ctx.waitUntil(db.close());
+    }
+  },
+};
+```
+
+## Transactions over HTTP
+
+A transaction started with `beginTransaction()` keeps its state on the connection, so it needs a WebSocket connection. Over HTTP, the JavaScript SDK throws `UnsupportedFeatureError` for it.
+
+To run several queries atomically over HTTP, pass them to `db.transaction()`, from JavaScript SDK 2.1. The SDK wraps them in `BEGIN` and `COMMIT` and sends them as one request, so either all of their changes are applied or none are:
+
+```javascript title="An atomic transaction over HTTP"
+const [from, to] = await db.transaction([
+  'UPDATE ONLY account:alice SET balance -= 30',
+  'UPDATE ONLY account:bob SET balance += 30',
+]);
+```
+
+A query that fails, or a `THROW`, cancels every change in the list. The queries cannot contain `BEGIN`, `COMMIT`, `CANCEL`, or a `RETURN` followed by further statements.
+
+Use `beginTransaction()` over a WebSocket connection when the application needs the result of one query in the transaction to decide on the next one.
+
 ## Authentication patterns
 
 Authentication by password uses [secure salted and hashed passwords](/learn/book/chapter-15#a-bit-of-cryptography) that rely on algorithms that are compute-heavy and purposely take a few hundred milliseconds per attempt.
