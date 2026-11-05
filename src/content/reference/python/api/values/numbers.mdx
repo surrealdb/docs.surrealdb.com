@@ -1,0 +1,208 @@
+---
+position: 10
+title: Sized numbers and BigDecimal
+description: "Numbers in the Python SDK: I8, U8, I16, U16, I32, U32, U64, F16 and F32 for the SurrealDB 4.0 sized number types, SizedInt and SizedFloat, ranges and rounding, BigDecimal for bigdecimal, the signed 64-bit range of int, Decimal and the 28-digit decimal type, and what each becomes over cbor.2 and plain cbor."
+---
+
+# Sized numbers and `BigDecimal` {#numbers}
+
+SurrealDB stores a plain number as a 64-bit `int`, a 64-bit `float` or a `decimal`. SurrealDB 4.0 adds sized integers and floats, such as `u8` and `f32`, and `bigdecimal`, a decimal with no fixed limit on its digits. This page documents the Python classes for the SurrealDB 4.0 number types, and the limits of a plain `int` and a `Decimal`.
+
+```python title="Import"
+from surrealdb import (
+    F16, F32, I8, I16, I32, U8, U16, U32, U64,
+    BigDecimal, SizedFloat, SizedInt,
+)
+```
+
+**Source:** [sized.py](https://github.com/surrealdb/surrealdb.py/blob/main/src/surrealdb/data/types/sized.py), [big_decimal.py](https://github.com/surrealdb/surrealdb.py/blob/main/src/surrealdb/data/types/big_decimal.py)
+
+---
+
+## Plain numbers {#plain-numbers}
+
+| Python | SurrealDB | Read back as |
+|---|---|---|
+| `int` | `int` | `int` |
+| `float` | `float` | `float` |
+| `decimal.Decimal` | `decimal` | `Decimal` |
+
+SurrealDB stores an `int` as a signed 64-bit integer, from `-9223372036854775808` to `9223372036854775807`. The SDK raises `ValueError` for an `int` outside that range before anything is sent, because the server would store a different number. For a larger whole number, send a `Decimal`, or a [`U64`](#sized-numbers) up to `18446744073709551615`.
+
+A SurrealDB `decimal` holds up to 28 digits after the decimal point, and the server rounds a value with more. SurrealDB 3.0 and later also drop trailing zeros, so `Decimal("19.90")` reads back as `Decimal('19.9')`. The SDK sends a `Decimal` in plain notation, such as `0.0000001` rather than `1E-7`.
+
+```python
+from decimal import Decimal
+from surrealdb import Surreal
+
+with Surreal("ws://localhost:8000") as db:
+    db.signin({"username": "root", "password": "secret"})
+    db.use("surrealdb", "docs")
+
+    values = {"price": Decimal("19.90"), "rate": Decimal("1E-29")}
+    print(db.query("RETURN [$price, $rate]", values).first())
+```
+
+```python title="Output"
+[Decimal('19.9'), Decimal('0')]
+```
+
+The rate has 29 digits after the point, so the server rounds it to zero. For more digits, or to keep trailing zeros, use a [`BigDecimal`](#bigdecimal) with SurrealDB 4.0.
+
+---
+
+## Sized numbers {#sized-numbers}
+
+Each sized number class is a subclass of `int` or `float` for one SurrealDB 4.0 number type. It refuses a value outside the range of its type when it is made.
+
+| Class | SurrealDB type | Values |
+|---|---|---|
+| `I8` | `i8` | `-128` to `127` |
+| `U8` | `u8` | `0` to `255` |
+| `I16` | `i16` | `-32768` to `32767` |
+| `U16` | `u16` | `0` to `65535` |
+| `I32` | `i32` | `-2147483648` to `2147483647` |
+| `U32` | `u32` | `0` to `4294967295` |
+| `U64` | `u64` | `0` to `18446744073709551615` |
+| `F16` | `f16` | Half-precision floats, up to `65504` |
+| `F32` | `f32` | Single-precision floats |
+
+```python title="Syntax"
+I8(value=0)
+F32(value=0.0)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>value</code> <Label label="optional" /></td>
+            <td><code>int | float | str</code></td>
+            <td>The number, as for <code>int()</code> or <code>float()</code>. Defaults to <code>0</code>. An integer class also takes a <code>float</code> with no fraction, such as <code>2.0</code>.</td>
+        </tr>
+    </tbody>
+</table>
+
+An integer class raises `ValueError` for a value outside its range or a value with a fraction. Each integer class has `MIN` and `MAX` class attributes that give its range. `F16` and `F32` round the value to the nearest number of their width, as a cast to that width does, and raise `ValueError` for a finite value that is too large for the width.
+
+```python
+print(F32(1.1), F16(1.1))
+print(U8.MIN, U8.MAX)
+print(I8(5) == 5, type(I8(5) + 1).__name__)
+```
+
+```text title="Output"
+F32(1.100000023841858) F16(1.099609375)
+0 255
+True int
+```
+
+```python
+I8(200)
+```
+
+```text title="Error output"
+ValueError: 200 is outside the I8 range (-128 to 127); use a wider kind or a plain int
+```
+
+A sized number works anywhere a number does. `I8(5) == 5` is true, and arithmetic gives back a plain `int` or `float`, so compare `type()` to tell a sized number from a plain one. `SizedInt` and `SizedFloat` are the base classes, for `isinstance()` checks; construct one of the subclasses. `str()` gives the same text as `repr()`, such as `I8(5)`, so pass `int(value)` or `float(value)` to format the number alone.
+
+### Sending and reading sized numbers {#sized-conversion}
+
+Over `cbor.2`, which SurrealDB 4.0 servers speak, a sized number is sent as its own type and reads back as the same class. A field defined with a sized type also stores a plain `int` that fits as that type. Servers before 4.0 speak plain `cbor`, which has no sized types, so the SDK sends the nearest type that the server has.
+
+| Python | Over `cbor.2` (SurrealDB 4.0) | Over `cbor` (earlier servers) |
+|---|---|---|
+| `I8`, `U8`, `I16`, `U16`, `I32`, `U32` | Their own type, read back as the same class | `int`, read back as `int` |
+| `U64` | `u64`, read back as `U64` | `int`, or `decimal` above `9223372036854775807`, read back as `int` or `Decimal` |
+| `F16`, `F32` | Their own type, read back as the same class | `float`, read back as `float` |
+
+`db.wire_format` tells you which format a connection uses. This example needs SurrealDB 4.0:
+
+```python
+from surrealdb import F32, RecordID, Surreal
+
+with Surreal("ws://localhost:8000") as db:
+    db.signin({"username": "root", "password": "secret"})
+    db.use("surrealdb", "docs")
+
+    db.query("DEFINE FIELD age ON person TYPE u8").execute()
+    person = db.create(RecordID("person", "tobie"), {
+        "age": 30,
+        "score": F32(0.1),
+    })
+    print(person["age"], person["score"])
+```
+
+```text title="Output"
+U8(30) F32(0.10000000149011612)
+```
+
+---
+
+## `BigDecimal` {#bigdecimal}
+
+A `BigDecimal` is a `decimal.Decimal` that SurrealDB 4.0 stores as a `bigdecimal` rather than a `decimal`. A `bigdecimal` holds up to 131072 digits before the decimal point and 16383 after it, and keeps its scale as written, so `BigDecimal("1.50")` keeps its trailing zero.
+
+```python title="Syntax"
+BigDecimal(value="0", context=None)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>value</code> <Label label="optional" /></td>
+            <td><code>Decimal | int | float | str</code></td>
+            <td>The number, as for <code>Decimal()</code>. Defaults to <code>"0"</code>.</td>
+        </tr>
+        <tr>
+            <td><code>context</code> <Label label="optional" /></td>
+            <td><code>decimal.Context | None</code></td>
+            <td>The <code>decimal</code> context to build the value with.</td>
+        </tr>
+    </tbody>
+</table>
+
+The constructor raises `ValueError` for text that is not a number, for `NaN` or an infinity, and for a value with more digits than a `bigdecimal` holds.
+
+```python
+from surrealdb import BigDecimal
+
+price = BigDecimal("1.50")
+print(repr(price), price == BigDecimal("1.5"))
+print(repr(price * 2))
+```
+
+```text title="Output"
+BigDecimal('1.50') True
+Decimal('3.00')
+```
+
+A `BigDecimal` is a `Decimal` in every other way. Values that differ only in scale are equal, and arithmetic gives back a plain `Decimal`, rounded to the precision of the current `decimal` context: 28 significant digits by default. To calculate with larger numbers, raise `decimal.getcontext().prec`, and wrap the result in `BigDecimal` to send it as a `bigdecimal`.
+
+### Sending and reading big decimals {#bigdecimal-conversion}
+
+| Over `cbor.2` (SurrealDB 4.0) | Over `cbor` (earlier servers) |
+|---|---|
+| `bigdecimal` with its scale, read back as `BigDecimal` | `decimal` when the value fits one, read back as `Decimal`; otherwise its text as a `string`, read back as `str` |
+
+---
+
+## See also
+
+- [Python values](/docs/reference/python/api/values) for every value class
+- [Value types](/docs/reference/python/concepts/value-types) for how every value converts
+- [Numbers](/docs/reference/query-language/language-primitives/data-types/numbers) in SurrealQL, including sized numbers and big decimals

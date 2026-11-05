@@ -1,131 +1,138 @@
 ---
 position: 1
 title: Python types
-description: Type definitions and dataclasses used throughout the Python SDK.
+description: "Type aliases, dataclasses and constants in the Python SDK: the Value union, RecordIdValue, RecordIdType, Tokens, the BlockingSurrealConnection and AsyncSurrealConnection aliases, UrlScheme, ReconnectOptions, ApiResponse, ExportOptions, FileMetadata, MINIMUM_VERSION and MAXIMUM_VERSION, Features and Feature, and where StatementResult and the stream frames are documented."
 ---
 
 # Python types
 
-The SDK provides type definitions and dataclasses for type-safe development. This page documents the key types used throughout the SDK.
+This page lists the type aliases, dataclasses and constants that the Python SDK exports for annotating and configuring your code. They cover the `Value` union, the record ID unions, authentication tokens, connection aliases and options, request and response types, and the server versions that the SDK supports. The value classes, such as `RecordID` and `Duration`, have their own pages under [Python values](/docs/reference/python/api/values).
 
-**Source:** [types.py](https://github.com/surrealdb/surrealdb.py/blob/main/src/surrealdb/types.py), [models.py](https://github.com/surrealdb/surrealdb.py/blob/main/src/surrealdb/data/models.py), [url.py](https://github.com/surrealdb/surrealdb.py/blob/main/src/surrealdb/connections/url.py)
+**Source:** [types.py](https://github.com/surrealdb/surrealdb.py/blob/main/src/surrealdb/types.py), [features.py](https://github.com/surrealdb/surrealdb.py/blob/main/src/surrealdb/features.py), [url.py](https://github.com/surrealdb/surrealdb.py/blob/main/src/surrealdb/connections/url.py), [reconnect.py](https://github.com/surrealdb/surrealdb.py/blob/main/src/surrealdb/connections/reconnect.py)
 
 ## Value types
 
 ### `Value` {#value}
 
-Union type representing all possible values that can be sent to or returned from SurrealDB.
+`Value` is the union of every value that the SDK sends to SurrealDB or reads back. Methods use it to annotate record data, query variables and results.
 
-```python
+```python title="Type definition"
 Value = (
-    str | int | float | bool | None | bytes | UUID | Decimal
-    | Table | Range | RecordID | Duration | Datetime
+    str | int | float | bool | None | NullType
+    | bytes | UUID | Decimal
+    | Table | Range | RecordID | StringRecordId | File
+    | Duration | Datetime
+    | BigDecimal | PlainDate | PlainTime | Timestamp | Interval | Regex
+    | date | time
     | GeometryPoint | GeometryLine | GeometryPolygon
     | GeometryMultiPoint | GeometryMultiLine | GeometryMultiPolygon
     | GeometryCollection
+    | SurrealSet | set[Any] | frozenset[Any]
     | dict[str, "Value"] | list["Value"]
 )
 ```
 
-This type is recursive: dictionaries and lists can contain nested `Value` types. See the [Data types overview](/docs/reference/python/api/values/) for details on each SurrealDB-specific type.
+The union is recursive: a `dict` or a `list` can hold any `Value`. Some members are covered without being named. A `datetime.datetime`, and so a `PreciseDatetime`, is a subclass of `date`, and the sized numbers such as `U8` and `F32` are subclasses of `int` and `float`. A `set` or a `frozenset` is only sent: a set reads back as a `SurrealSet`. The SDK sends the SurrealDB 4.0 types, from `BigDecimal` to `time`, as their own types only over `cbor.2`. The [Value types](/docs/reference/python/concepts/value-types) page shows what each member becomes.
+
+---
+
+### `RecordIdValue` {#recordidvalue}
+
+`RecordIdValue` is the union of the ID types that SurrealDB accepts in a record ID. The `RecordID` constructor checks its ID against this union, so use it to annotate an ID that you build.
+
+```python title="Type definition"
+RecordIdValue = (
+    str | int | uuid.UUID
+    | list[Any] | tuple[Any, ...] | dict[str, Any]
+    | Range
+)
+```
+
+`RecordID.id` is typed as `Value` rather than `RecordIdValue`, because a record ID read from the server can hold any value the server sends.
 
 ---
 
 ### `RecordIdType` {#recordidtype}
 
-Type alias for values accepted as record or table references by CRUD methods.
+`RecordIdType` is the union that CRUD methods accept as a target. It is not exported from `surrealdb`; import it from `surrealdb.data.types.record_id`.
 
-```python
-RecordIdType = str | Table | RecordID
+```python title="Type definition"
+RecordIdType = str | RecordID | StringRecordId | Table
 ```
 
-When a `str` is passed, it is treated as a table name. Pass a [`RecordID`](/docs/reference/python/api/values/record-id) for specific record targeting, or a [`Table`](/docs/reference/python/api/values/table) for explicit table references.
+A `str` is always a table name, the same as a [`Table`](/docs/reference/python/api/values/table). Pass a [`RecordID`](/docs/reference/python/api/values/record-id) or a [`StringRecordId`](/docs/reference/python/api/values/record-id#stringrecordid) to target one record.
 
 ## Authentication types
 
 ### `Tokens` {#tokens}
 
-Frozen dataclass returned by `.signin()` and `.signup()`. Contains the access token and an optional refresh token.
+`Tokens` is the frozen dataclass that `signin()`, `signup()` and `refresh()` return. It holds the access token, and a refresh token when the access method is defined `WITH REFRESH`.
 
-```python
+```python title="Type definition"
 @dataclass(frozen=True)
 class Tokens:
     access: str | None = None
     refresh: str | None = None
 ```
 
-**Properties:**
+| Field | Type | Description |
+|---|---|---|
+| `access` | `str \| None` | The access token, a JWT. |
+| `refresh` | `str \| None` | The refresh token, or `None` when the access method has none. |
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `access` | `str \| None` | The JWT access token |
-| `refresh` | `str \| None` | The refresh token, if the access method was defined with `WITH REFRESH` |
-
-**Example:**
+`repr()` shows `'<redacted>'` in place of each token, so a `Tokens` value is safe to log. Pass the value itself to `refresh()`, `revoke()` or the `auth=` option of a connection, and its `access` token to `authenticate()`.
 
 ```python
 from surrealdb import Surreal
 
-db = Surreal("ws://localhost:8000")
-db.connect()
-db.use("main", "main")
-
-tokens = db.signin({"username": "root", "password": "secret"})
-print(tokens.access)
-print(tokens.refresh)
+with Surreal("ws://localhost:8000") as db:
+    tokens = db.signin({"username": "root", "password": "secret"})
+    print(tokens)
+    print(tokens.access is not None, tokens.refresh)
 ```
 
-## Data model types
-
-### `Patch` {#patch}
-
-Dataclass representing a JSON Patch operation per the [JSON Patch specification](https://jsonpatch.com/).
-
-```python
-@dataclass
-class Patch:
-    op: str
-    path: str
-    value: Any
+```text title="Output"
+Tokens(access='<redacted>', refresh=None)
+True None
 ```
-
-**Properties:**
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `op` | `str` | The patch operation: `"add"`, `"remove"`, `"replace"`, `"move"`, `"copy"`, or `"test"` |
-| `path` | `str` | The JSON pointer path |
-| `value` | `Any` | The value for the operation |
-
----
-
-### `QueryResponse` {#queryresponse}
-
-Frozen dataclass representing an HTTP query response.
-
-```python
-@dataclass(frozen=True)
-class QueryResponse:
-    time: str
-    status: str
-    result: list[dict[str, Any]]
-```
-
-**Properties:**
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `time` | `str` | The time the request was processed |
-| `status` | `str` | The status of the request |
-| `result` | `list[dict[str, Any]]` | The query results |
 
 ## Connection types
 
-### `UrlScheme` {#urlscheme}
+### `BlockingSurrealConnection` and `AsyncSurrealConnection` {#connection-aliases}
 
-Enum of supported connection URL schemes. The SDK uses this internally to select the appropriate connection class.
+These two type aliases describe the connection objects that `Surreal()` and `AsyncSurreal()` return. Those two names are factory functions, so they cannot annotate a variable or a parameter. Use these unions instead.
+
+```python title="Type definition"
+BlockingSurrealConnection = (
+    BlockingWsSurrealConnection
+    | BlockingHttpSurrealConnection
+    | BlockingEmbeddedSurrealConnection
+)
+AsyncSurrealConnection = (
+    AsyncWsSurrealConnection
+    | AsyncHttpSurrealConnection
+    | AsyncEmbeddedSurrealConnection
+)
+```
+
+Without the `embedded` extra, the embedded classes do not exist, and the unions at run time hold only the websocket and HTTP classes.
 
 ```python
+from surrealdb import AsyncSurreal, AsyncSurrealConnection
+
+async def open_connection(url: str) -> AsyncSurrealConnection:
+    db = AsyncSurreal(url)
+    await db.connect()
+    return db
+```
+
+---
+
+### `UrlScheme` {#urlscheme}
+
+`UrlScheme` is an enum of the URL schemes that `Surreal()` and `AsyncSurreal()` accept. The scheme of the URL decides the class of the connection.
+
+```python title="Type definition"
 class UrlScheme(Enum):
     HTTP = "http"
     HTTPS = "https"
@@ -135,18 +142,180 @@ class UrlScheme(Enum):
     FILE = "file"
     MEMORY = "memory"
     SURREALKV = "surrealkv"
+    SURREALKV_VERSIONED = "surrealkv+versioned"
 ```
 
-| Scheme | Connection type | Description |
-|--------|----------------|-------------|
-| `HTTP`, `HTTPS` | HTTP | Short-lived stateless connections |
-| `WS`, `WSS` | WebSocket | Long-lived stateful connections with full feature support |
-| `MEM`, `MEMORY` | Embedded | In-memory database |
-| `FILE` | Embedded | File-based persistent database |
-| `SURREALKV` | Embedded | SurrealKV persistent database |
+| Members | Connection | Description |
+|---|---|---|
+| `WS`, `WSS` | WebSocket | A long-lived connection with every feature, including live queries, sessions and transactions. |
+| `HTTP`, `HTTPS` | HTTP | A connection with no persistent socket. |
+| `MEM`, `MEMORY` | Embedded | An in-memory database. Needs the `embedded` extra. |
+| `FILE`, `SURREALKV` | Embedded | A database stored on disk. Needs the `embedded` extra. |
+| `SURREALKV_VERSIONED` | Embedded | A database stored on disk that keeps earlier versions of each record, for `SELECT ... VERSION`. Needs the `embedded` extra. |
+
+`memory` also works on its own, with no `://`. Any other scheme raises `UnsupportedEngineError`. See [URL schemes](/docs/reference/python/api/core/surreal#url-schemes) for the full forms of each URL.
+
+---
+
+### `ReconnectOptions` {#reconnectoptions}
+
+`ReconnectOptions` is a frozen dataclass that sets how a websocket connection reconnects after the socket drops. Pass it as the `reconnect=` option of `Surreal()` or `AsyncSurreal()`. `reconnect=True`, the default, uses `ReconnectOptions()`, and `reconnect=False` turns reconnecting off.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | `bool` | `True` | Whether to reconnect at all. |
+| `attempts` | `int` | `5` | The number of attempts before the connection gives up, or `-1` for no limit. |
+| `retry_delay` | `float` | `1.0` | The base wait, in seconds. |
+| `retry_delay_max` | `float` | `60.0` | The longest wait between attempts, in seconds. |
+| `retry_delay_multiplier` | `float` | `2.0` | The factor that each wait is multiplied by for the next attempt. |
+| `retry_delay_jitter` | `float` | `0.1` | The fraction of each wait, from `0` to `1`, by which the wait changes at random, so that many clients do not reconnect at the same moment. |
+
+The wait before attempt `n` is `retry_delay * retry_delay_multiplier ** n` seconds, up to `retry_delay_max`. An invalid value raises `TypeError` or `ValueError` when the options are made.
+
+```python
+from surrealdb import ReconnectOptions, Surreal
+
+db = Surreal(
+    "ws://localhost:8000",
+    reconnect=ReconnectOptions(attempts=-1, retry_delay_max=10.0),
+)
+```
+
+## Request and response types
+
+### `ApiResponse` {#apiresponse}
+
+`ApiResponse` is the frozen dataclass that [`api()`](/docs/reference/python/api/core/surreal#api) returns. It holds the answer of an endpoint defined with `DEFINE API`, which needs SurrealDB 3.0 or later.
+
+| Field or property | Type | Description |
+|---|---|---|
+| `status` | `int` | The HTTP status code. |
+| `body` | `Value` | The body of the response. Defaults to `None`. |
+| `headers` | `dict[str, str]` | The response headers. |
+| `ok` | `bool` | Property. Whether `status` is from 200 to 299. |
+
+```python
+from surrealdb import Surreal
+
+with Surreal("ws://localhost:8000") as db:
+    db.signin({"username": "root", "password": "secret"})
+    db.use("surrealdb", "docs")
+
+    db.query("""
+        DEFINE API OVERWRITE "/greet" FOR get THEN {
+            { status: 200, body: { hello: "world" } }
+        };
+    """).execute()
+
+    response = db.api("/greet")
+    print(response.ok, response.status, response.body)
+```
+
+```text title="Output"
+True 200 {'hello': 'world'}
+```
+
+---
+
+### `ExportOptions` {#exportoptions}
+
+`ExportOptions` is a frozen dataclass that chooses what `export()` and `export_to()` include. Every field defaults to `None`, which leaves the server's default.
+
+| Field | Type | Description |
+|---|---|---|
+| `users`, `accesses`, `params`, `functions`, `analyzers`, `records`, `sequences` | `bool \| None` | Whether to include each kind of definition or data. |
+| `tables` | `bool \| str \| list[str] \| dict \| None` | `True` or `False` for every table, a table name or a list of them, or `{"exclude": [...]}` for every table except those. |
+| `versions` | `bool \| None` | Whether to include earlier versions of records. SurrealDB 3.3.1 and later do not accept it, and the SDK raises `UnsupportedFeatureError`. |
+
+SurrealDB 2.0 takes no export options, so passing any raises `UnsupportedFeatureError`. See [Import and export](/docs/reference/python/concepts/import-and-export).
+
+```python
+from surrealdb import ExportOptions, RecordID, Surreal
+
+with Surreal("ws://localhost:8000") as db:
+    db.signin({"username": "root", "password": "secret"})
+    db.use("surrealdb", "docs")
+
+    db.create(RecordID("person", "tobie"), {"name": "Tobie"})
+    db.create(RecordID("post", 1), {"title": "Hello"})
+
+    dump = db.export(ExportOptions(tables=["person"]))
+    print("person:tobie" in dump, "post:1" in dump)
+```
+
+```text title="Output"
+True False
+```
+
+---
+
+### `FileMetadata` {#filemetadata}
+
+`FileMetadata` is a frozen dataclass with the fields `file`, `size` and `updated`, which describes one stored file. `db.files.head()` returns one, and `db.files.list()` returns a list of them. See [File](/docs/reference/python/api/values/file#filemetadata).
+
+> [!NOTE]
+> `surrealdb.data` still defines `Patch` and `QueryResponse`, but no SDK method takes or returns either, and the SDK cannot send a `Patch`. Pass JSON Patch operations to `.patch()` as dicts, such as `{"op": "replace", "path": "/age", "value": 37}`.
+
+## Server versions and features
+
+### `MINIMUM_VERSION` and `MAXIMUM_VERSION` {#supported-versions}
+
+These two constants give the range of SurrealDB versions that the SDK supports: from `MINIMUM_VERSION`, which is `"2.0.0"`, up to but not including `MAXIMUM_VERSION`, which is `"5.0.0"`. A remote connection asks the server for its version first, and refuses a server outside the range with `UnsupportedVersionError`. Pass `version_check=False` to connect anyway. A pre-release or nightly build counts as the release it leads to, so `5.0.0-alpha.1` is outside the range. Embedded connections are not checked.
+
+---
+
+### `Features` {#features}
+
+`Features` lists the features that need a newer server than `MINIMUM_VERSION`. Pass one to `db.is_feature_supported()` to ask before you use it. A method that needs a feature the server does not have raises `UnavailableFeatureError` before anything is sent.
+
+| Member | Needs SurrealDB |
+|---|---|
+| `Features.LIVE_QUERIES` | Every supported version |
+| `Features.SESSIONS` | 3.0.0 or later |
+| `Features.API` | 3.0.0 or later |
+| `Features.REFRESH_TOKENS` | 3.0.0 or later |
+| `Features.TRANSACTIONS` | 3.0.0 or later |
+| `Features.IMPORT_FAILURE_REPORTING` | 3.1.0 or later |
+| `Features.QUERY_STREAMING` | 3.3.0 or later |
+
+---
+
+### `Feature` {#feature}
+
+`Feature` is the frozen dataclass for one entry in `Features`.
+
+| Field or method | Type | Description |
+|---|---|---|
+| `name` | `str` | The name of the feature, which `str()` also gives. |
+| `since` | `str \| None` | The first version that has the feature, or `None` for every version. |
+| `until` | `str \| None` | The first version that no longer has the feature, or `None`. |
+| `supports(version)` | `bool` | Whether a server that reports `version` has the feature. |
+
+```python
+from surrealdb import Features
+
+sessions = Features.SESSIONS
+print(sessions, sessions.since)
+print(sessions.supports("2.7.0"), sessions.supports("3.3.5"))
+```
+
+```text title="Output"
+sessions 3.0.0
+False True
+```
+
+## Streaming types {#streaming}
+
+The streaming methods of a query builder give their own types, which are documented with the builders:
+
+| Type | Given by | Reference |
+|---|---|---|
+| `StatementResult` | `.statements()` | [Builders](/docs/reference/python/api/core/builders#statement-result) |
+| `ValueFrame`, `ErrorFrame`, `DoneFrame` | `.stream()` | [Builders](/docs/reference/python/api/core/builders#frames) |
+| `SyncRows`, `AsyncRows` | `.rows()` | [Builders](/docs/reference/python/api/core/builders#rows) |
 
 ## See also
 
-- [Data types](/docs/reference/python/api/values/) for the SurrealDB-specific type classes
-- [Errors](/docs/reference/python/api/errors/) for error classes and constants
-- [Surreal API reference](/docs/reference/python/api/core/surreal) for methods using these types
+- [Python values](/docs/reference/python/api/values) for the value classes
+- [Errors](/docs/reference/python/api/errors) for error classes and constants
+- [Surreal](/docs/reference/python/api/core/surreal) for the methods that use these types

@@ -1,0 +1,272 @@
+---
+position: 12
+title: Files
+description: "Store and read files in SurrealDB buckets with the Python SDK: File references, DEFINE BUCKET, the db.files helpers put, get, exists, head, list with prefix, limit and start, copy, rename and delete, FileMetadata, sessions and transactions, and version support."
+---
+
+# Files
+
+SurrealDB can store files in a bucket: in memory, in a folder on disk, or in object storage such as Amazon S3. This page shows how to define a bucket and how to write, read, list, copy, rename and delete its files with the `db.files` helpers of the Python SDK. It is for readers who already connect and run queries, as described in [Connecting to SurrealDB](/docs/reference/python/concepts/connecting-to-surrealdb).
+
+## API references
+
+<table>
+	<thead>
+		<tr>
+			<th scope="col">Class or property</th>
+			<th scope="col">Description</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<td scope="row" data-label="Class or property"><a href="/docs/reference/python/api/values/file"><code>File(bucket, key)</code></a></td>
+			<td scope="row" data-label="Description">A reference to a file in a bucket</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Class or property"><a href="/docs/reference/python/api/core/surreal#files"><code>db.files</code></a></td>
+			<td scope="row" data-label="Description">The helpers that write, read, list, copy, rename and delete files</td>
+		</tr>
+	</tbody>
+</table>
+
+## Requirements
+
+Buckets are stable in SurrealDB 4.0 and need no extra setting. On SurrealDB 3.x they are experimental, so start the server with `--allow-experimental files`, or with the `SURREAL_CAPS_ALLOW_EXPERIMENTAL` environment variable set to `files`, as described in [Experimental capabilities](/docs/reference/cli/db/commands/start#experimental-capabilities). SurrealDB 4.0 refuses that setting and does not start, so remove it when you upgrade. SurrealDB 2.x has no buckets.
+
+The embedded engine of SDK 3.0 runs SurrealDB 4.0, so files also work on `mem://`, `file://` and `surrealkv://` connections.
+
+## Files and buckets
+
+A [`File`](/docs/reference/python/api/values/file) is a reference to one file: a bucket name and a key. It holds no bytes and is not a Python file object. The key is a path inside the bucket, and the SDK adds a leading `/` when it has none, so `File("images", "photos/avatar.png")` and `File("images", "/photos/avatar.png")` are the same file.
+
+The contents of a file are plain `bytes`. You write them with `db.files.put()` and read them back with `db.files.get()`.
+
+## Defining a bucket
+
+A bucket must exist before you write to it. Define one with [`DEFINE BUCKET`](/docs/reference/query-language/statements/define/bucket):
+
+```python
+db.query('DEFINE BUCKET IF NOT EXISTS images BACKEND "memory"').execute()
+```
+
+A `memory` bucket loses its files when the server stops. For files that last, use a folder on disk or object storage, as described in [Buckets](/docs/learn/schema-management/files/buckets). A call on a bucket that does not exist raises `InternalError: The bucket 'images' does not exist`.
+
+## Writing and reading a file
+
+`put()` writes bytes to a file, and `get()` reads them back:
+
+<Tabs syncKey="python-sync-async">
+	<TabItem value="sync" label="Synchronous" default>
+		```python
+		from surrealdb import File, Surreal
+
+		with Surreal("ws://localhost:8000") as db:
+		    db.signin({"username": "root", "password": "secret"})
+		    db.use("surrealdb", "docs")
+		    db.query('DEFINE BUCKET IF NOT EXISTS images BACKEND "memory"').execute()
+
+		    readme = File("images", "/docs/readme.txt")
+		    db.files.put(readme, "Hello, SurrealDB".encode("utf-8"))
+
+		    content = db.files.get(readme)
+		    print(content.decode("utf-8"))
+		```
+	</TabItem>
+	<TabItem value="async" label="Asynchronous">
+		```python
+		from surrealdb import AsyncSurreal, File
+
+		async with AsyncSurreal("ws://localhost:8000") as db:
+		    await db.signin({"username": "root", "password": "secret"})
+		    await db.use("surrealdb", "docs")
+		    await db.query('DEFINE BUCKET IF NOT EXISTS images BACKEND "memory"')
+
+		    readme = File("images", "/docs/readme.txt")
+		    await db.files.put(readme, "Hello, SurrealDB".encode("utf-8"))
+
+		    content = await db.files.get(readme)
+		    print(content.decode("utf-8"))
+		```
+	</TabItem>
+</Tabs>
+
+The file holds the bytes that `put()` wrote:
+
+```text title="Output"
+Hello, SurrealDB
+```
+
+`put()` takes `bytes`, `bytearray` or `memoryview`, and replaces any file that already has the key. It refuses a `str` with `TypeError`, because `get()` returns `bytes` and a string would not come back as the same value. Encode text yourself, with the encoding you want. To store a file from disk, read its bytes first:
+
+```python
+with open("avatar.png", "rb") as handle:
+    db.files.put(File("images", "/avatars/tobie.png"), handle.read())
+```
+
+`get()` returns `None` for a file that does not exist.
+
+The examples in the rest of this page use an open connection, `db`, signed in and using the `surrealdb` namespace and the `docs` database. On an asynchronous connection, `db.files` has the same methods, and you `await` each call.
+
+## The files helpers
+
+`db.files` is available on every connection, on a session from `new_session()` and on a transaction. Every method except `list()` takes a `File`, and `list()` takes the name of a bucket:
+
+| Method | Returns | Description |
+| --- | --- | --- |
+| `put(file, content)` | `None` | Writes `content`, replacing any file with the same key |
+| `put_if_not_exists(file, content)` | `None` | Writes `content` only if no file has the key, and otherwise does nothing |
+| `get(file)` | `bytes` or `None` | The contents of the file, or `None` if it does not exist |
+| `exists(file)` | `bool` | Whether the file exists |
+| `head(file)` | `FileMetadata` or `None` | The size of the file and the time it last changed, or `None` if it does not exist |
+| `list(bucket, *, limit=None, prefix=None, start=None)` | `list[FileMetadata]` | The files in a bucket, ordered by key |
+| `copy(source, target)` | `None` | Copies a file to another key or bucket, replacing any file at the target |
+| `copy_if_not_exists(source, target)` | `None` | Copies a file only if no file has the target key |
+| `rename(file, key)` | `None` | Moves a file to a new key in the same bucket, replacing any file with that key |
+| `rename_if_not_exists(file, key)` | `None` | Moves a file only if no file has the new key |
+| `delete(file)` | `None` | Removes a file. Removing a file that does not exist is not an error. |
+
+## Checking a file
+
+`exists()` tells you whether a file exists, and `head()` returns a `FileMetadata` with its size and the time it last changed:
+
+```python
+meta = db.files.head(readme)
+print(meta.size, meta.updated)
+```
+
+```text title="Sample output"
+16 2026-11-04 16:31:31.176920+00:00
+```
+
+A `FileMetadata` has three fields: `file`, the `File` it describes, `size` in bytes, and `updated`, a [`PreciseDatetime`](/docs/reference/python/api/values/datetime) or `None`. It is exported from `surrealdb` for type annotations.
+
+## Listing files
+
+`list()` returns a `FileMetadata` for each file in a bucket, ordered by key. Its keyword arguments narrow the list on the server:
+
+| Argument | Description |
+| --- | --- |
+| `prefix` | Only keys that start with this text, such as `"/photos/"` |
+| `limit` | At most this many files. It must be a positive whole number. |
+| `start` | Only keys after this key. The file with the `start` key itself is not included. |
+
+```python
+for name in ("a", "b", "c", "d", "e"):
+    db.files.put(File("images", f"/photos/{name}.png"), b"png")
+
+page = db.files.list("images", prefix="/photos/", limit=2)
+print([entry.file.key for entry in page])
+```
+
+```text title="Output"
+['/photos/a.png', '/photos/b.png']
+```
+
+To read a long list in pages, pass the last key of each page as the `start` of the next:
+
+```python
+page = db.files.list("images", prefix="/photos/", limit=2)
+while page:
+    print([entry.file.key for entry in page])
+    page = db.files.list(
+        "images", prefix="/photos/", limit=2, start=page[-1].file.key
+    )
+```
+
+```text title="Output"
+['/photos/a.png', '/photos/b.png']
+['/photos/c.png', '/photos/d.png']
+['/photos/e.png']
+```
+
+`list()` raises for a bucket that does not exist, so an empty bucket and a misspelt bucket name give different results.
+
+## Copying, renaming and deleting
+
+`copy()` takes two `File` values, so it can copy a file to another bucket. `rename()` takes the new key as a `str` and moves the file within its bucket:
+
+```python
+db.query('DEFINE BUCKET IF NOT EXISTS archive BACKEND "memory"').execute()
+
+db.files.copy(File("images", "/photos/a.png"), File("archive", "/a.png"))
+db.files.rename(File("images", "/photos/b.png"), "/photos/old-b.png")
+db.files.delete(File("images", "/photos/c.png"))
+
+listing = db.files.list("images", prefix="/photos/")
+print([entry.file.key for entry in listing])
+```
+
+```text title="Output"
+['/photos/a.png', '/photos/d.png', '/photos/e.png', '/photos/old-b.png']
+```
+
+`copy()` and `rename()` replace a file that already has the target key. The `_if_not_exists` forms leave that file as it is and do nothing.
+
+## Storing a file in a record
+
+A `File` is a SurrealDB value, so a record can hold one in a field. Reading the record gives the `File` back, ready to pass to the helpers:
+
+```python
+from surrealdb import RecordID
+
+db.upsert(RecordID("person", "tobie"), {
+    "name": "Tobie",
+    "avatar": File("images", "/photos/a.png"),
+})
+
+person = db.select(RecordID("person", "tobie")).execute()
+print(person["avatar"], db.files.get(person["avatar"]))
+```
+
+```text title="Output"
+f"images:/photos/a.png" b'png'
+```
+
+## Files in transactions
+
+`db.files` on a transaction sends each call through the transaction, but the file is not part of it. A file write goes straight to the bucket: other connections see it at once, and it stays when the transaction is cancelled. A record written in the same transaction is rolled back as usual.
+
+```python
+avatar = File("images", "/avatars/jaime.png")
+
+with db.begin_transaction() as txn:
+    txn.files.put(avatar, b"png")
+    txn.create(RecordID("person", "jaime"), {"avatar": avatar})
+    txn.cancel()
+
+print(db.files.get(avatar))
+print(db.select(RecordID("person", "jaime")).execute())
+```
+
+```text title="Output"
+b'png'
+None
+```
+
+To keep a file and a record in step, write the file after the transaction commits, or delete the file when the transaction fails. [Transactions](/docs/reference/python/concepts/transactions) covers client-side transactions.
+
+## Files in your own queries
+
+SurrealQL writes a file as a literal, `f"images:/photos/a.png"`, but the literal accepts only letters, digits and the characters `_`, `-`, `.` and `/`, and has no way to escape anything else. A key with a space, an accent or an emoji cannot be written as a literal at all.
+
+The helpers bind the `File` as a query variable instead, which carries any key. Do the same in your own queries with the [file functions](/docs/reference/query-language/functions/database-functions/file), rather than putting `str(file)` into the query text. `str()` gives the literal form for display, and `is_literal_safe()` tells you whether that form would parse:
+
+```python
+photo = File("images", "/photos/summer party.png")
+db.files.put(photo, b"jpg")
+
+print(photo.is_literal_safe())
+print(db.query("RETURN file::exists($photo)", {"photo": photo}).first())
+```
+
+```text title="Output"
+False
+True
+```
+
+## Learn more
+
+- [File](/docs/reference/python/api/values/file) for the `File` type
+- [Buckets](/docs/learn/schema-management/files/buckets) for bucket backends, permissions and presigned URLs
+- [File functions](/docs/reference/query-language/functions/database-functions/file) for the `file::*` functions behind the helpers
+- [DEFINE BUCKET](/docs/reference/query-language/statements/define/bucket) for the statement syntax
