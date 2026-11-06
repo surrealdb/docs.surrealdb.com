@@ -1,0 +1,327 @@
+---
+position: 11
+title: Dates, times and intervals
+description: "PlainDate, PlainTime, Timestamp and Interval in the Python SDK for the SurrealDB 4.0 date, time, timestamp and interval types: constructors, parse(), infinity, conversion to and from datetime.date, datetime.time and datetime.datetime, comparison, and what each becomes over cbor.2 and plain cbor."
+---
+
+# Dates, times and intervals {#temporal}
+
+SurrealDB 4.0 adds four types for calendar and clock values that are not an instant in UTC: `date` for a calendar day, `time` for a time of day, `timestamp` for a date and a time of day with no time zone, and `interval` for a calendar period such as one month and two days. The Python SDK has a class for each: `PlainDate`, `PlainTime`, `Timestamp` and `Interval`. This page documents the four classes and how they convert. For an instant in time, use a [`datetime`](/docs/reference/python/api/values/datetime), and for a fixed length of time, a [`Duration`](/docs/reference/python/api/values/duration).
+
+```python title="Import"
+from surrealdb import Interval, PlainDate, PlainTime, Timestamp
+```
+
+**Source:** [temporal.py](https://github.com/surrealdb/surrealdb.py/blob/main/src/surrealdb/data/types/temporal.py)
+
+---
+
+## How the types convert {#conversion}
+
+Over `cbor.2`, which SurrealDB 4.0 servers speak, each class is sent as its own type and reads back as the same class. A `datetime.date` and a naive `datetime.time` are sent as a `date` and a `time` too, and read back as a `PlainDate` and a `PlainTime`. Servers before 4.0 speak plain `cbor` and have none of these types, so the SDK sends the nearest type that the server has.
+
+| Python | Over `cbor.2` (SurrealDB 4.0) | Over `cbor` (earlier servers) |
+|---|---|---|
+| `PlainDate`, `datetime.date` | `date`, read back as `PlainDate` | A `datetime` at midnight UTC, read back as `PreciseDatetime` |
+| `PlainTime`, naive `datetime.time` | `time`, read back as `PlainTime` | A `duration` since midnight, read back as `Duration` |
+| `Timestamp` | `timestamp`, read back as `Timestamp` | A `datetime`, with the wall-clock time read as UTC, read back as `PreciseDatetime` |
+| `Interval` | `interval`, read back as `Interval` | Its ISO 8601 text as a `string`, read back as `str` |
+
+A `datetime.datetime` is a subclass of `datetime.date`, but the SDK still sends it as a `datetime`. A `datetime.time` with a time zone raises `ValueError`, because a SurrealDB `time` has no zone. `db.wire_format` tells you which format a connection uses.
+
+```python
+import datetime as dt
+from surrealdb import PlainDate, RecordID, Surreal
+
+with Surreal("ws://localhost:8000") as db:
+    db.signin({"username": "root", "password": "secret"})
+    db.use("surrealdb", "docs")
+
+    db.create(RecordID("person", "tobie"), {
+        "birthday": PlainDate(1990, 5, 17),
+        "alarm": dt.time(7, 30),
+    })
+
+    person = db.select(RecordID("person", "tobie")).execute()
+    print(repr(person["birthday"]), repr(person["alarm"]))
+```
+
+```text title="Output with SurrealDB 4.0"
+PlainDate(1990, 5, 17) PlainTime(7, 30)
+```
+
+Against an earlier server, the same code stores a `datetime` and a `duration`, which read back as `PreciseDatetime(1990, 5, 17, 0, 0, tzinfo=datetime.timezone.utc)` and `Duration(elapsed=27000000000000)`. Over plain `cbor`, a date outside the years 1 to 9999, such as `PlainDate.INFINITY`, becomes a datetime that Python cannot read back, and reading it raises `UnexpectedResponseError`.
+
+---
+
+## `PlainDate` {#plaindate}
+
+A `PlainDate` is a calendar date with no time of day and no time zone, for the SurrealDB `date` type.
+
+```python title="Syntax"
+PlainDate(year, month, day)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>year</code> <Label label="required" /></td>
+            <td><code>int</code></td>
+            <td>The year, from <code>-262143</code> to <code>262142</code>.</td>
+        </tr>
+        <tr>
+            <td><code>month</code> <Label label="required" /></td>
+            <td><code>int</code></td>
+            <td>The month, from <code>1</code> to <code>12</code>.</td>
+        </tr>
+        <tr>
+            <td><code>day</code> <Label label="required" /></td>
+            <td><code>int</code></td>
+            <td>The day of the month.</td>
+        </tr>
+    </tbody>
+</table>
+
+A date that does not exist, such as 2023-02-29, raises `ValueError`, and an argument that is not an `int` raises `TypeError`. `PlainDate.INFINITY` and `PlainDate.NEG_INFINITY` are the last and first dates that SurrealDB holds. They print as `infinity` and `-infinity`, and they sort after and before every other date.
+
+| Property or method | Returns | Description |
+|---|---|---|
+| `year`, `month`, `day` | `int` | The parts of the date. |
+| `days` | `int` | The number of days since 1970-01-01, negative before it. |
+| `is_infinite` | `bool` | Whether the date is `INFINITY` or `NEG_INFINITY`. |
+| `to_date()` | `datetime.date` | The same date. Raises `ValueError` outside the years 1 to 9999, which includes the infinities. |
+| `PlainDate.from_date(value)` | `PlainDate` | The calendar date of a `datetime.date` or `datetime.datetime`. |
+| `PlainDate.parse(text)` | `PlainDate` | A date as SurrealDB prints one, such as `2024-02-29`, `+10000-01-01` or `infinity`. |
+| `PlainDate.from_days(days)` | `PlainDate` | The date `days` after 1970-01-01. |
+
+`str()` gives the date as SurrealDB prints it, with a sign before a year outside 0 to 9999. A `PlainDate` compares and sorts with other `PlainDate` values, and is never equal to a `datetime.date`, so convert one of the two before you compare them.
+
+```python
+import datetime as dt
+from surrealdb import PlainDate
+
+day = PlainDate(2024, 2, 29)
+print(day, day.days, day.to_date())
+print(PlainDate.parse("+10000-01-01").year)
+print(PlainDate.INFINITY, day < PlainDate.INFINITY)
+print(day == dt.date(2024, 2, 29), day.to_date() == dt.date(2024, 2, 29))
+```
+
+```text title="Output"
+2024-02-29 19782 2024-02-29
+10000
+infinity True
+False True
+```
+
+---
+
+## `PlainTime` {#plaintime}
+
+A `PlainTime` is a time of day with no date and no time zone, to the nanosecond, for the SurrealDB `time` type. It runs from 00:00:00 up to and including 24:00:00.
+
+```python title="Syntax"
+PlainTime(hour=0, minute=0, second=0, microsecond=0, nanosecond=0)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>hour</code> <Label label="optional" /></td>
+            <td><code>int</code></td>
+            <td>From <code>0</code> to <code>24</code>. Hour <code>24</code> is allowed only for 24:00:00.</td>
+        </tr>
+        <tr>
+            <td><code>minute</code>, <code>second</code> <Label label="optional" /></td>
+            <td><code>int</code></td>
+            <td>From <code>0</code> to <code>59</code>.</td>
+        </tr>
+        <tr>
+            <td><code>microsecond</code> <Label label="optional" /></td>
+            <td><code>int</code></td>
+            <td>From <code>0</code> to <code>999999</code>.</td>
+        </tr>
+        <tr>
+            <td><code>nanosecond</code> <Label label="optional" /></td>
+            <td><code>int</code></td>
+            <td>The nanoseconds after <code>microsecond</code>, from <code>0</code> to <code>999</code>.</td>
+        </tr>
+    </tbody>
+</table>
+
+| Property or method | Returns | Description |
+|---|---|---|
+| `hour`, `minute`, `second`, `microsecond`, `nanosecond` | `int` | The parts of the time. |
+| `nanoseconds` | `int` | The number of nanoseconds since midnight. |
+| `to_time()` | `datetime.time` | The same time without its `nanosecond`. Raises `ValueError` for 24:00:00, which `datetime.time` does not hold. |
+| `PlainTime.from_time(value)` | `PlainTime` | The time of a naive `datetime.time`. Raises `ValueError` for a time with a time zone. |
+| `PlainTime.parse(text)` | `PlainTime` | A time as SurrealDB prints one, such as `12:34:56.789` or `24:00:00`. |
+| `PlainTime.from_nanoseconds(nanoseconds)` | `PlainTime` | The time `nanoseconds` after midnight. |
+
+A `PlainTime` compares and sorts with other `PlainTime` values, and is never equal to a `datetime.time`.
+
+```python
+import datetime as dt
+from surrealdb import PlainTime
+
+alarm = PlainTime(7, 30)
+print(alarm, alarm.nanoseconds)
+print(PlainTime.parse("12:34:56.789000005").nanosecond)
+print(PlainTime(24), PlainTime.from_time(dt.time(9, 15)).to_time())
+```
+
+```text title="Output"
+07:30:00 27000000000000
+5
+24:00:00 09:15:00
+```
+
+---
+
+## `Timestamp` {#timestamp}
+
+A `Timestamp` is a date and a time of day with no time zone, to the nanosecond, for the SurrealDB `timestamp` type. A `timestamp` is a wall-clock reading, where a `datetime` is an instant in UTC. The SDK still sends a `datetime.datetime` as a `datetime`, so convert a naive one with `Timestamp.from_datetime()` to send it as a `timestamp`.
+
+```python title="Syntax"
+Timestamp(
+    year, month, day,
+    hour=0, minute=0, second=0, microsecond=0, nanosecond=0,
+)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>year</code>, <code>month</code>, <code>day</code> <Label label="required" /></td>
+            <td><code>int</code></td>
+            <td>The date, as for <a href="#plaindate"><code>PlainDate</code></a>.</td>
+        </tr>
+        <tr>
+            <td><code>hour</code> <Label label="optional" /></td>
+            <td><code>int</code></td>
+            <td>From <code>0</code> to <code>23</code>.</td>
+        </tr>
+        <tr>
+            <td><code>minute</code>, <code>second</code>, <code>microsecond</code>, <code>nanosecond</code> <Label label="optional" /></td>
+            <td><code>int</code></td>
+            <td>As for <a href="#plaintime"><code>PlainTime</code></a>.</td>
+        </tr>
+    </tbody>
+</table>
+
+`Timestamp.INFINITY` and `Timestamp.NEG_INFINITY` are the last and first instants that SurrealDB holds, and they print as `infinity` and `-infinity`.
+
+| Property or method | Returns | Description |
+|---|---|---|
+| `year`, `month`, `day`, `hour`, `minute`, `second`, `microsecond`, `nanosecond` | `int` | The parts of the timestamp. |
+| `seconds_and_nanos` | `tuple[int, int]` | The seconds since 1970-01-01T00:00:00, and the nanoseconds within the second. |
+| `is_infinite` | `bool` | Whether the timestamp is `INFINITY` or `NEG_INFINITY`. |
+| `to_datetime()` | `PreciseDatetime` | A naive datetime with the same wall-clock time, nanoseconds included. Raises `ValueError` outside the years 1 to 9999. |
+| `Timestamp.from_datetime(value)` | `Timestamp` | The wall-clock time of a naive `datetime`, with the nanoseconds of a `PreciseDatetime`. Raises `ValueError` for a datetime with a time zone. |
+| `Timestamp.parse(text)` | `Timestamp` | A timestamp as SurrealDB prints one, such as `2024-02-29T12:34:56.789`, or `infinity`. Text with a time zone raises `ValueError`. |
+
+A `Timestamp` compares and sorts with other `Timestamp` values, and is never equal to a `datetime`.
+
+```python
+import datetime as dt
+from surrealdb import Timestamp
+
+meeting = Timestamp(2024, 2, 29, 9, 30)
+print(meeting, repr(meeting.to_datetime()))
+
+wall_clock = dt.datetime(2024, 2, 29, 9, 30)
+print(Timestamp.from_datetime(wall_clock) == meeting)
+print(Timestamp.parse("2024-02-29 09:30:00.000000001").nanosecond)
+```
+
+```text title="Output"
+2024-02-29T09:30:00 PreciseDatetime(2024, 2, 29, 9, 30)
+True
+1
+```
+
+---
+
+## `Interval` {#interval}
+
+An `Interval` is a calendar period, for the SurrealDB `interval` type. An interval keeps its months, days and microseconds apart, each with its own sign, because neither a month nor a day has a fixed length on a calendar. Years go into the months, weeks into the days, and hours, minutes and seconds into the microseconds.
+
+```python title="Syntax"
+Interval(months=0, days=0, microseconds=0)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>months</code> <Label label="optional" /></td>
+            <td><code>int</code></td>
+            <td>The months, including twelve for each year. A signed 32-bit integer.</td>
+        </tr>
+        <tr>
+            <td><code>days</code> <Label label="optional" /></td>
+            <td><code>int</code></td>
+            <td>The days, including seven for each week. A signed 32-bit integer.</td>
+        </tr>
+        <tr>
+            <td><code>microseconds</code> <Label label="optional" /></td>
+            <td><code>int</code></td>
+            <td>The hours, minutes and seconds, in microseconds. A signed 64-bit integer.</td>
+        </tr>
+    </tbody>
+</table>
+
+The three parts are the `months`, `days` and `microseconds` properties, and `str()` gives the interval as ISO 8601 text, as SurrealDB prints it. An empty interval prints as `PT0S`.
+
+Two intervals are equal when they are equal as the server compares them: with a month counted as 30 days and a day as 24 hours, so `Interval(months=1) == Interval(days=30)` is true, although each keeps its parts as written. Compare the `(months, days, microseconds)` parts to tell such intervals apart. An `Interval` is hashable, but intervals have no order, so `<` raises `TypeError`.
+
+```python
+from surrealdb import Interval
+
+renewal = Interval(months=14, days=3, microseconds=14_706_500_000)
+print(renewal)
+print(Interval(months=1) == Interval(days=30))
+print(Interval(months=1).days, Interval(days=30).days)
+```
+
+```text title="Output"
+P1Y2M3DT4H5M6.5S
+True
+0 30
+```
+
+---
+
+## See also
+
+- [Python values](/docs/reference/python/api/values) for every value class
+- [Datetime](/docs/reference/python/api/values/datetime) for instants in UTC
+- [Duration](/docs/reference/python/api/values/duration) for fixed lengths of time
+- [Dates, times and intervals](/docs/reference/query-language/language-primitives/data-types/dates-and-times) in SurrealQL

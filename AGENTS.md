@@ -1149,6 +1149,18 @@ title per page is the floor, so at the current page count most of the ceiling is
 already spent before a description is written. If the file needs to get smaller,
 the lever is fewer pages or shorter URLs, not a shorter preamble.
 
+### Agent guides
+
+`https://surrealdb.com/llms/guides/<slug>` serves a documentation page as markdown
+under a short, stable address to hand a coding agent, such as
+`python-migration-2x-to-3x`. The map from slug to page is
+`src/utils/agent-guides.ts`, and the route in `src/pages/+server.ts` answers at
+`/docs/llms/guides/<slug>`. The address outside `/docs` needs a rewrite of
+`/llms/guides/*` to this project in the `vercel.ts` of www.surrealdb.com. With that
+rule in place, a new guide is a change to this repo alone. A slug is quoted in
+prompts and release notes: when its page moves, change the path in the map and keep
+the slug.
+
 ## Related lessons and posts
 
 A page can end with a box linking to SurrealDB University lessons and blog posts

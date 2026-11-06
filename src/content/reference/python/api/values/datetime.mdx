@@ -1,20 +1,153 @@
 ---
 position: 2
 title: Datetime
-description: Datetime wrapper for SurrealDB datetime values.
+description: "Datetimes in the Python SDK: datetime.datetime values sent as SurrealDB datetimes, naive values read as UTC, PreciseDatetime with nanosecond precision for every datetime read back, isoformat_with_nanoseconds(), the Datetime wrapper for ISO 8601 text, and the years that Python can read."
 ---
 
-# `Datetime` {#datetime}
+# Datetimes {#datetimes}
 
-A `Datetime` wraps an ISO 8601 datetime string for use with SurrealDB's `datetime` type. It preserves the original string representation through serialisation and deserialisation.
+The SurrealDB `datetime` type holds an instant in UTC, to the nanosecond. The Python SDK sends a `datetime.datetime` or a `Datetime` as a `datetime`, and reads every `datetime` back as a `PreciseDatetime`, a `datetime` subclass that keeps the nanoseconds. This page documents how datetimes convert and the two classes involved.
 
 ```python title="Import"
-from surrealdb import Datetime
+from surrealdb import Datetime, PreciseDatetime
+```
+
+**Source:** [datetime.py](https://github.com/surrealdb/surrealdb.py/blob/main/src/surrealdb/data/types/datetime.py)
+
+---
+
+## Sending and reading datetimes {#conversion}
+
+Send a `datetime.datetime`, with or without a time zone:
+
+- An aware `datetime` is converted to UTC.
+- A naive `datetime` is read as UTC, not as the local time of the machine, so the same code sends the same instant on every host.
+- Every `datetime` reads back as a `PreciseDatetime` in UTC.
+
+```python
+import datetime as dt
+from surrealdb import RecordID, Surreal
+
+with Surreal("ws://localhost:8000") as db:
+    db.signin({"username": "root", "password": "secret"})
+    db.use("surrealdb", "docs")
+
+    plus_two = dt.timezone(dt.timedelta(hours=2))
+    db.create(RecordID("post", 1), {
+        "published": dt.datetime(2025, 6, 1, 14, 0, tzinfo=plus_two),
+        "edited": dt.datetime(2025, 6, 1, 14, 0),
+    })
+
+    post = db.select(RecordID("post", 1)).execute()
+    print(repr(post["published"]))
+    print(repr(post["edited"]))
+```
+
+```text title="Output"
+PreciseDatetime(2025, 6, 1, 12, 0, tzinfo=datetime.timezone.utc)
+PreciseDatetime(2025, 6, 1, 14, 0, tzinfo=datetime.timezone.utc)
+```
+
+SurrealDB holds datetimes from the year -262143 to the year 262142, and Python's `datetime` holds the years 1 to 9999. Reading a datetime outside the years 1 to 9999 raises `UnexpectedResponseError`.
+
+For a date and time of day with no time zone, SurrealDB 4.0 has the `timestamp` type, and for a calendar date the `date` type. Both are on the [Dates, times and intervals](/docs/reference/python/api/values/temporal) page, together with how a `datetime.date` is sent.
+
+---
+
+## `PreciseDatetime` {#precisedatetime}
+
+`PreciseDatetime` is a `datetime.datetime` subclass that also holds the nanoseconds below one microsecond, which `datetime` cannot store. It is what every datetime from SurrealDB reads back as, so a value that is read and written back keeps all nine fractional digits. A `PreciseDatetime` is a `datetime` in every other way: `isinstance(value, datetime)` is true, it compares and sorts with plain `datetime` values, and `pickle` and `copy` keep its nanoseconds.
+
+```python title="Syntax"
+PreciseDatetime(
+    year, month, day,
+    hour=0, minute=0, second=0, microsecond=0,
+    tzinfo=None, *, nanosecond=0,
+)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>year</code>, <code>month</code>, <code>day</code>, <code>hour</code>, <code>minute</code>, <code>second</code>, <code>microsecond</code>, <code>tzinfo</code></td>
+            <td>as <code>datetime</code></td>
+            <td>The same arguments as <code>datetime.datetime</code>.</td>
+        </tr>
+        <tr>
+            <td><code>nanosecond</code> <Label label="optional" /></td>
+            <td><code>int</code></td>
+            <td>The nanoseconds after <code>microsecond</code>, from <code>0</code> to <code>999</code>. Keyword only. Defaults to <code>0</code>. A value outside that range raises <code>ValueError</code>.</td>
+        </tr>
+    </tbody>
+</table>
+
+### Properties
+
+| Property | Type | Description |
+|---|---|---|
+| `nanosecond` | `int` | The nanoseconds after `microsecond`, from `0` to `999`. |
+
+### Methods
+
+| Method | Returns | Description |
+|---|---|---|
+| `isoformat_with_nanoseconds()` | `str` | ISO 8601 text in UTC with nine fractional digits, such as `2024-02-29T12:00:00.123456789Z`. A naive value is read as UTC. |
+| `PreciseDatetime.from_seconds_and_nanos(seconds, nanoseconds)` | `PreciseDatetime` | Class method. The UTC instant `seconds` after the Unix epoch, plus `nanoseconds`. |
+
+`str()`, `isoformat()` and `repr()` come from `datetime`, so they show microseconds only. Arithmetic and `replace()` also come from `datetime`, and their results have `nanosecond` set to `0`. The nanoseconds survive storage and retrieval, but not calculation.
+
+```python
+import datetime as dt
+from surrealdb import Surreal
+
+with Surreal("ws://localhost:8000") as db:
+    db.signin({"username": "root", "password": "secret"})
+    db.use("surrealdb", "docs")
+
+    sql = "RETURN d'2024-02-29T12:00:00.123456789Z'"
+    stamp = db.query(sql).first()
+
+    print(stamp.microsecond, stamp.nanosecond)
+    print(stamp.isoformat_with_nanoseconds())
+    print((stamp + dt.timedelta(days=1)).nanosecond)
+```
+
+```text title="Output"
+123456 789
+2024-02-29T12:00:00.123456789Z
+0
+```
+
+To build one yourself, pass `nanosecond` as a keyword:
+
+```python
+import datetime as dt
+from surrealdb import PreciseDatetime
+
+stamp = PreciseDatetime(
+    2024, 2, 29, 12, 0, 0, 123456,
+    tzinfo=dt.timezone.utc,
+    nanosecond=789,
+)
+print(stamp.isoformat_with_nanoseconds())
+```
+
+```text title="Output"
+2024-02-29T12:00:00.123456789Z
 ```
 
 ---
 
-## Constructor {#constructor}
+## `Datetime` {#datetime}
+
+A `Datetime` holds ISO 8601 text to send as a SurrealDB `datetime`. Use it when a datetime already exists as text, or to send more than six fractional digits without building a `PreciseDatetime`. Reading never gives a `Datetime`: every datetime reads back as a `PreciseDatetime`.
 
 ```python title="Syntax"
 Datetime(dt)
@@ -32,55 +165,44 @@ Datetime(dt)
         <tr>
             <td><code>dt</code> <Label label="required" /></td>
             <td><code>str</code></td>
-            <td>An ISO 8601 datetime string.</td>
+            <td>An ISO 8601 datetime, such as <code>"2025-06-01T09:00:00Z"</code> or <code>"2025-06-01T14:00:00.123456789+02:00"</code>. Up to nine fractional digits are kept, and text with no zone is read as UTC.</td>
         </tr>
     </tbody>
 </table>
 
-### Examples
+The constructor does not check the text. The SDK parses it when the value is sent, and text that is not an ISO 8601 datetime raises `ValueError` at that point.
 
-```python
-dt = Datetime("2025-01-15T10:30:00Z")
-```
-
-```python
-dt = Datetime("2025-06-01T14:00:00.000+02:00")
-```
-
----
-
-## Properties {#properties}
-
-| Property | Type | Description |
+| Property or method | Type | Description |
 |---|---|---|
-| `dt` | `str` | The ISO 8601 datetime string. |
+| `dt` | `str` | The text, as given. |
+| `str(value)` | `str` | A SurrealQL datetime literal, such as `d"2025-06-01T09:00:00Z"`. |
+
+Two `Datetime` values are equal when their text is equal, so the same instant written in two ways gives two values that are not equal. A `Datetime` is hashable.
 
 ```python
-dt = Datetime("2025-01-15T10:30:00Z")
-print(dt.dt)  # "2025-01-15T10:30:00Z"
+from surrealdb import Datetime, Surreal
+
+launch = Datetime("2025-06-01T09:00:00.123456789Z")
+print(str(launch))
+
+with Surreal("ws://localhost:8000") as db:
+    db.signin({"username": "root", "password": "secret"})
+    db.use("surrealdb", "docs")
+
+    sql = "RETURN <string> $at"
+    print(db.query(sql, {"at": launch}).first())
 ```
 
----
-
-## Usage {#usage}
-
-```python
-from surrealdb import Surreal, RecordID, Datetime
-
-db = Surreal("ws://localhost:8000")
-db.connect()
-db.use("my_ns", "my_db")
-db.signin({"username": "root", "password": "secret"})
-
-db.create("events", {
-    "title": "Launch",
-    "scheduled_at": Datetime("2025-06-01T09:00:00Z"),
-})
+```text title="Output"
+d"2025-06-01T09:00:00.123456789Z"
+2025-06-01T09:00:00.123456789Z
 ```
 
 ---
 
 ## See also
 
-- [Data types](/docs/reference/python/api/values), All SDK data types
-- [Duration](/docs/reference/python/api/values/duration), Duration type with unit conversion
+- [Python values](/docs/reference/python/api/values) for every value class
+- [Duration](/docs/reference/python/api/values/duration) for lengths of time
+- [Dates, times and intervals](/docs/reference/python/api/values/temporal) for the SurrealDB 4.0 date, time and timestamp types
+- [Datetimes](/docs/reference/query-language/language-primitives/data-types/datetimes) in SurrealQL

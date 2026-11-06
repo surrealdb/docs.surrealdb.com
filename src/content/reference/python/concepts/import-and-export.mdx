@@ -1,0 +1,254 @@
+---
+position: 13
+title: Import and export
+description: Export a SurrealDB database as SurrealQL from the Python SDK with export() and export_to(), choose what an export includes with ExportOptions, import SurrealQL from a str, bytes or a file with import_(), handle failed statements with ImportFailedError, and the OPTION IMPORT requirement, permissions, timeouts and differences between SurrealDB versions.
+---
+
+# Import and export
+
+This page shows how to export a SurrealDB database as SurrealQL with the Python SDK, and how to import SurrealQL into a database. Use export and import to back up a database, to copy data between databases or servers, and to load a prepared dataset.
+
+## API references
+
+<table>
+	<thead>
+		<tr>
+			<th scope="col">Method</th>
+			<th scope="col">Description</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/python/api/core/surreal#export"><code>db.export(options?)</code></a></td>
+			<td scope="row" data-label="Description">Returns the selected database as SurrealQL text</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/python/api/core/surreal#export-to"><code>db.export_to(target, options?)</code></a></td>
+			<td scope="row" data-label="Description">Writes the export to a file, or to a file object opened in binary mode</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/python/api/core/surreal#import"><code>db.import_(data)</code></a></td>
+			<td scope="row" data-label="Description">Imports SurrealQL from a <code>str</code>, <code>bytes</code> or a file into the selected database</td>
+		</tr>
+	</tbody>
+</table>
+
+## How import and export work
+
+`export()`, `export_to()` and `import_()` work over WebSocket and HTTP connections. Each call sends an HTTP request to the [`/export` or `/import` endpoint](/docs/reference/rest-api/http-protocol#export) of the server, at the host and port of the connection. The request carries the sign-in, the namespace and the database of the connection's own session, so sign in and call `use()` first.
+
+An export needs a system user, such as a root, namespace or database user. A record user, or a connection that is not signed in, is refused with `HttpStatusError` and `status` 403. Sessions from `new_session()` do not have these methods.
+
+An embedded connection has no `/export` or `/import` endpoint, so the three methods raise `UnsupportedFeatureError` there. To load SurrealQL into an embedded database, run it through `query()`, as described in [Embedded databases](/docs/reference/python/concepts/embedded-databases#moving-on-disk-data-from-an-earlier-engine).
+
+## Exporting a database
+
+`export()` returns the selected database as one `str` of SurrealQL:
+
+<Tabs syncKey="python-sync-async">
+	<TabItem value="sync" label="Synchronous" default>
+		```python
+		from surrealdb import Surreal
+
+		with Surreal("ws://localhost:8000") as db:
+		    db.signin({"username": "root", "password": "secret"})
+		    db.use("surrealdb", "docs")
+
+		    dump = db.export()
+		    print(dump)
+		```
+	</TabItem>
+	<TabItem value="async" label="Asynchronous">
+		```python
+		from surrealdb import AsyncSurreal
+
+		async with AsyncSurreal("ws://localhost:8000") as db:
+		    await db.signin({"username": "root", "password": "secret"})
+		    await db.use("surrealdb", "docs")
+
+		    dump = await db.export()
+		    print(dump)
+		```
+	</TabItem>
+</Tabs>
+
+For a database that holds only the records `person:tobie` and `person:jaime`, the export is:
+
+```surql title="Output"
+-- ------------------------------
+-- OPTION
+-- ------------------------------
+
+OPTION IMPORT;
+
+-- ------------------------------
+-- TABLE: person
+-- ------------------------------
+
+DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE;
+
+
+
+
+-- ------------------------------
+-- TABLE DATA: person
+-- ------------------------------
+
+INSERT [ { id: person:jaime, name: 'Jaime' }, { id: person:tobie, name: 'Tobie' } ];
+
+```
+
+The whole export is held in memory. For a large database, write it to a file with [`export_to()`](#writing-an-export-to-a-file) instead.
+
+## Choosing what to export
+
+Pass `ExportOptions` to export part of a database. Each field is `None` by default, which leaves the choice to the server.
+
+| Field | What it includes |
+| --- | --- |
+| `users` | The system users of the database, defined with `DEFINE USER` |
+| `accesses` | The access methods, defined with `DEFINE ACCESS` |
+| `params` | The database parameters, defined with `DEFINE PARAM` |
+| `functions` | The functions, defined with `DEFINE FUNCTION` |
+| `analyzers` | The analysers, defined with `DEFINE ANALYZER` |
+| `sequences` | The sequences, defined with `DEFINE SEQUENCE` |
+| `tables` | `True` or `False` for every table, a table name or a list of table names, or `{"exclude": [...]}` for every table except the ones in the list |
+| `records` | The records of the exported tables |
+| `versions` | The earlier versions of each record, from a versioned datastore |
+
+```python
+from surrealdb import ExportOptions
+
+schema = db.export(ExportOptions(records=False))
+people = db.export(ExportOptions(tables=["person"]))
+no_posts = db.export(ExportOptions(tables={"exclude": ["post"]}))
+```
+
+`schema` holds the definitions of the database without its records, `people` holds only the `person` table, and `no_posts` holds every table except `post`.
+
+Some options depend on the server version:
+
+- SurrealDB 2.0 does not accept export options. `export()` with options raises `UnsupportedFeatureError` there, so call it without options.
+- SurrealDB 2.x servers refuse the `{"exclude": [...]}` form of `tables` with `HttpStatusError`.
+- From SurrealDB 3.3.1, an export holds only the current state of each record. `versions=True` raises `UnsupportedFeatureError` against those servers, before the SDK sends the request.
+
+## Writing an export to a file
+
+`export_to()` writes the export as it arrives, so it does not hold the whole export in memory. It takes the path of a file, as a `str` or a path-like object such as `pathlib.Path`:
+
+<Tabs syncKey="python-sync-async">
+	<TabItem value="sync" label="Synchronous" default>
+		```python
+		db.export_to("backup.surql")
+		```
+	</TabItem>
+	<TabItem value="async" label="Asynchronous">
+		```python
+		await db.export_to("backup.surql")
+		```
+	</TabItem>
+</Tabs>
+
+The SDK replaces a file at that path only when the whole export has arrived. If the export stops before the end, for example because the connection fails, an existing file at the path stays as it was.
+
+`export_to()` also takes a file object opened in binary mode, and `ExportOptions` as its second argument:
+
+```python
+import io
+
+from surrealdb import ExportOptions
+
+buffer = io.BytesIO()
+db.export_to(buffer, ExportOptions(records=False))
+```
+
+A file object opened in text mode raises `TypeError`, because the export arrives as bytes.
+
+## Importing SurrealQL
+
+`import_()` imports SurrealQL into the selected database. Its name ends in an underscore because `import` is a keyword in Python. It takes the SurrealQL as a `str` or as `bytes`, or the path of a file that holds it, as a `pathlib.Path` or another path-like object:
+
+<Tabs syncKey="python-sync-async">
+	<TabItem value="sync" label="Synchronous" default>
+		```python
+		import pathlib
+
+		db.import_(pathlib.Path("backup.surql"))
+		```
+	</TabItem>
+	<TabItem value="async" label="Asynchronous">
+		```python
+		import pathlib
+
+		await db.import_(pathlib.Path("backup.surql"))
+		```
+	</TabItem>
+</Tabs>
+
+The SDK sends a file as it reads it, so a large file is not held in memory.
+
+A `str` is always the SurrealQL itself, so `import_("backup.surql")` would send the name of the file as SurrealQL. To prevent that mistake, a `str` that names an existing file raises `ValueError`. Pass the path as `pathlib.Path("backup.surql")` to import the file.
+
+## The OPTION IMPORT statement
+
+SurrealDB 3.0 and later require an import to start with the statement `OPTION IMPORT;`. Every export starts with it, so the output of `export()` and `export_to()` can be imported as it is. For SurrealQL that you write yourself, put the statement first:
+
+```python
+db.import_(
+    "OPTION IMPORT;\n"
+    "CREATE person:lena CONTENT { name: 'Lena' };\n"
+)
+```
+
+Without it, SurrealDB 3.0 and later refuse the import with `HttpStatusError` and `status` 400. SurrealDB 2.x accepts an import without it.
+
+`OPTION IMPORT;` turns off events, live queries and the processing of fields for the rest of the import, so a statement writes its values as they are, without the type checks, assertions and defaults of `DEFINE FIELD`. To run statements with their usual effects, send them with `query()` instead.
+
+## Handling statements that fail
+
+A statement that fails does not stop the import: the server runs every statement, and applies the ones that succeed. If any statement failed, `import_()` raises `ImportFailedError` at the end. Its `failures` attribute holds a [`ServerError`](/docs/reference/python/api/errors/#servererror) for each statement that failed.
+
+The example below imports the backup from [Writing an export to a file](#writing-an-export-to-a-file) into the database that it came from, where the records already exist:
+
+```python
+import pathlib
+
+from surrealdb import ImportFailedError, Surreal
+
+with Surreal("ws://localhost:8000") as db:
+    db.signin({"username": "root", "password": "secret"})
+    db.use("surrealdb", "docs")
+
+    try:
+        db.import_(pathlib.Path("backup.surql"))
+    except ImportFailedError as error:
+        for failure in error.failures:
+            print(type(failure).__name__, failure)
+```
+
+```text title="Output"
+AlreadyExistsError Database record `person:jaime` already exists
+```
+
+Against SurrealDB 2.x, every failure is an `InternalError`, because the kinds of error need SurrealDB 3.0 or later.
+
+An export does not hold the key of an access method. It writes a placeholder in place of the key, and the server refuses the placeholder on import. An import therefore reports one failure for each access method that has a key, including every record access method. Define those access methods again after the import.
+
+## Timeouts
+
+`export()`, `export_to()` and `import_()` are not limited by the `timeout` option of the connection, because a transfer can take much longer than a single request. To set a limit, call them inside a `timeout()` block:
+
+```python
+with db.timeout(600):
+    db.export_to("backup.surql")
+```
+
+When the limit passes, the call raises `TransportTimeoutError`.
+
+## Learn more
+
+- [Surreal API reference](/docs/reference/python/api/core/surreal#export) for the parameters of `export()`, `export_to()` and `import_()`
+- [`surreal db export`](/docs/reference/cli/db/commands/export) and [`surreal db import`](/docs/reference/cli/db/commands/import) for the same operations from the command line
+- [HTTP protocol](/docs/reference/rest-api/http-protocol#import) for the `/import` and `/export` endpoints and their options
+- [Error handling](/docs/reference/python/concepts/error-handling) for `ImportFailedError` and the other errors
+- [Embedded databases](/docs/reference/python/concepts/embedded-databases) for loading SurrealQL without a server
