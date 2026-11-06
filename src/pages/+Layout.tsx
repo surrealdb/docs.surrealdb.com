@@ -3,8 +3,9 @@
 import { MantineProvider, mergeThemeOverrides, rem, v8CssVariablesResolver } from "@mantine/core";
 import { MANTINE_THEME } from "@surrealdb/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { PageFrame } from "~/components/Layout/frame";
+import { handOverDocumentLinks } from "~/utils/document-links";
 
 /**
  * The kit's theme with every type size one pixel larger, for the docs'
@@ -40,6 +41,10 @@ export default function Layout({ children }: { children: ReactNode }) {
                 },
             }),
     );
+
+    // Links to files and server routes, which the client router would render
+    // as a 404; see `~/utils/document-links`.
+    useEffect(() => handOverDocumentLinks(), []);
 
     return (
         <QueryClientProvider client={queryClient}>
