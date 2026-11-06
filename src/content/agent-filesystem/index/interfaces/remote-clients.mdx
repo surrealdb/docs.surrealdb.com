@@ -1,0 +1,426 @@
+---
+position: 14
+title: Remote clients and the gateway
+description: "Connect Agent Filesystem clients to a gateway over HTTP with SURREALFS_SERVER_URL and SURREALFS_TOKEN: the Rust program and library, address forms, and the Python and TypeScript clients."
+---
+
+# Remote clients and the gateway
+
+In remote mode, an Agent Filesystem client talks to a gateway over HTTP instead of connecting to SurrealDB. The gateway is a server that holds the database credentials. The client needs the address of the gateway and, when the gateway requires one, a bearer token, and it sends its SurrealQL statements to the `POST /api/rpc` endpoint of the gateway. This page explains how each client connects, which address forms and settings it accepts, and what does not work yet. The [Gateway server](/docs/agent-filesystem/interfaces/gateway-server) page covers the server side: how to run a gateway, its settings and its security properties.
+
+> [!NOTE]
+> Agent Filesystem is in beta. This page describes the `next` branch of the SurrealFS repository, and remote mode is new in it. The examples and results on this page come from running the programs against SurrealDB 3.2.3 and a gateway built from that branch.
+
+> [!WARNING]
+> Remote mode connects and runs the commands that this page lists in the Rust command-line program `surrealfs-rs` and in the Rust library. This page did not re-test the defects of the Rust implementation, which [Limits and caveats](/docs/agent-filesystem/operations/limits-and-caveats) lists. The Python and TypeScript clients send their requests to the gateway, but they cannot read its replies, so every reply looks empty to them. A read of a file that exists acts as if the file did not exist: a listing is empty, `exists` is false, `stat` raises a not-found error, and a read returns an empty value or raises one. See [The Python client](#the-python-client) and [The TypeScript client](#the-typescript-client).
+
+> [!WARNING]
+> The gateway runs the SurrealQL that a client sends, using the database credentials of the gateway. A client that holds the gateway token therefore has the database access of those credentials, and the caller name that it states is a label that the gateway does not verify. A gateway that starts without a token, or with a blank one, serves every request. See [What a token grants](#what-a-token-grants).
+
+## How remote mode works
+
+A client that connects directly opens its own connection to a SurrealDB server. A client in remote mode connects to a gateway, and the gateway connects to SurrealDB:
+
+| | Direct connection | Remote mode |
+| --- | --- | --- |
+| The client connects to | A SurrealDB server, over WebSocket or HTTP | A gateway, over HTTP |
+| The client needs | The URL of SurrealDB, a namespace, a database, and a user and password | The URL of the gateway, and a token when the gateway has one |
+| The namespace and database come from | The client | The gateway |
+| A client call sends | Queries to SurrealDB | Requests to `POST /api/rpc` |
+
+The statements are the same in both modes. In the Rust program, writing a file runs `RETURN fn::sfs_write($path, $content, $if_gen, true, $caller);`, and in remote mode the program sends that text and its variables to the gateway. The gateway runs the statements against its database and returns one result for each statement. [Agent Filesystem functions](/docs/agent-filesystem/reference/surrealql-functions) lists the functions.
+
+A client call can send more than one request, and the requests are independent of each other. In tests, `surrealfs-rs write` sent two requests, `RETURN fn::sfs_stat($path);` and then the write, and `cat`, `ls`, `cp`, `mv`, `rm`, `mkdir`, `history` and `grep` sent one request each.
+
+The gateway also analyses a file after some writes, which [Content analysis](/docs/agent-filesystem/concepts/understanding-pipeline#what-the-gateway-does-after-a-write) describes. On `POST /api/rpc`, it does so only for a request whose statement text contains `fn::sfs_write`, `fn::sfs_edit` or `fn::sfs_append` and whose variables include a string named `path`. `surrealfs-rs write` sends such a request, and so do the Rust library methods `write_text`, `append_text` and `edit_text` for a file that is not a collaborative document. In tests, a file that `surrealfs-rs write` wrote through a gateway had a `meta.simhash` field, and a file that it wrote directly did not. A file that `surrealfs-rs cp` copied through the gateway, and a file that a statement wrote with the path as a literal instead of the `$path` variable, had no `meta.simhash` field.
+
+Three environment variables configure remote mode:
+
+| Variable | Read by | Meaning |
+| --- | --- | --- |
+| `SURREALFS_SERVER_URL` | `surrealfs-rs`, and the Python helpers `connect()` and `connected()` | The address of the gateway. A client uses remote mode when the value is not blank |
+| `SURREALFS_TOKEN` | The same clients | The bearer token that the client sends to the gateway |
+| `SURREALFS_SERVER_TOKEN` | The gateway | The bearer token that the gateway accepts |
+
+## Start a gateway for the examples
+
+The examples on this page use a gateway that `surrealfs-rs serve gateway` starts. The [Gateway server](/docs/agent-filesystem/interfaces/gateway-server#start-the-gateway) page describes this command, the separate `surrealfs-server` program and every setting. You need a SurrealDB 3.x server and `surrealfs-rs`. The [Rust program](/docs/agent-filesystem/interfaces/command-line#the-rust-program) section of the command-line reference installs `surrealfs-rs`.
+
+1. Start SurrealDB in a terminal. The server keeps its data in memory and listens on `127.0.0.1:8000`:
+
+    ```bash
+    surreal start --user root --pass secret memory
+    ```
+
+2. Open a second terminal. Point `surrealfs-rs` at the database and define the schema, because `serve gateway` does not define it:
+
+    ```bash
+    export SURREALDB_URL=ws://localhost:8000/rpc
+    export SURREALDB_NS=agents
+    export SURREALDB_DB=remote
+    export SURREALDB_USER=root
+    export SURREALDB_PASS=secret
+    surrealfs-rs init
+    ```
+
+    ```text title="Output"
+    SurrealFS schema successfully initialized.
+    ```
+
+3. Choose a token and start the gateway in the same terminal. The value `tok-4d9f7c21` is an example, so use a long random value in practice, such as the output of `openssl rand -hex 32`:
+
+    ```bash
+    export SURREALFS_SERVER_TOKEN=tok-4d9f7c21
+    surrealfs-rs serve gateway --addr 127.0.0.1:8787
+    ```
+
+    The command runs in the foreground and prints nothing while it runs.
+
+4. In a third terminal, check that the gateway answers. The `/api/health` route needs no token:
+
+    ```bash
+    curl http://127.0.0.1:8787/api/health
+    ```
+
+    ```json title="Output"
+    {"chat_enabled":false,"embeddings_enabled":false,"status":"ok","version":"0.2.0"}
+    ```
+
+> [!NOTE]
+> `surrealfs-rs serve gateway` also reads `SURREALFS_SERVER_URL`, because every `surrealfs-rs` command that connects does. With the variable set, the gateway connects to the other gateway and forwards every statement to it. Start a gateway from a shell where `SURREALFS_SERVER_URL` is not set when it should connect to SurrealDB.
+
+## Connect the command-line program
+
+The `surrealfs-rs` program uses remote mode when `SURREALFS_SERVER_URL` is not blank, or when its `--url` value starts with `sfs://`, `sfs+http://` or `sfs+https://`. The steps below use the variable, run in a new terminal that sets no `SURREALDB_*` variables, and use the gateway from the previous section. The `--caller` option names the user that the program acts as:
+
+```bash
+export SURREALFS_SERVER_URL=http://127.0.0.1:8787
+export SURREALFS_TOKEN=tok-4d9f7c21
+surrealfs-rs --caller alice write /notes/plan.md "# Launch plan"
+```
+
+```text title="Output"
+Wrote 13 bytes to /notes/plan.md
+```
+
+```bash
+surrealfs-rs --caller alice cat /notes/plan.md
+```
+
+```text title="Output"
+# Launch plan
+```
+
+```bash
+surrealfs-rs ls /notes
+```
+
+```text title="Output"
+FILE       13 bytes  /notes/plan.md
+```
+
+The `cat` command prints the content of the file without a trailing newline, so a shell prompt can follow the text on the same line. The record is in the database that the gateway uses, and a query against SurrealDB shows it:
+
+```bash
+curl -s -u root:secret -H "Accept: application/json" \
+  -H "Surreal-NS: agents" -H "Surreal-DB: remote" \
+  http://localhost:8000/sql \
+  -d 'SELECT path, owner FROM file WHERE path = "/notes/plan.md";'
+```
+
+```json title="Sample output"
+[{"result":[{"owner":"alice","path":"/notes/plan.md"}],"status":"OK","time":"380.875µs","type":null}]
+```
+
+### Settings
+
+In remote mode, the program reads these settings:
+
+| Setting | Effect |
+| --- | --- |
+| `SURREALFS_SERVER_URL` | Selects remote mode and gives the address. A blank value, such as an empty string or spaces, is ignored, and the program connects directly. [Address forms](#address-forms) lists the accepted forms |
+| `SURREALFS_TOKEN` | The bearer token. When it is not set, the program sends the value of `--pass` or `SURREALDB_PASS`, which is `root` when neither is set. A variable that is set to an empty string counts as set, so the program sends an empty token and does not fall back to `--pass`. The Python helpers treat a blank value as no token |
+| `--caller` or `SURREALFS_CALLER` | The caller name. When it is not set, the program uses the value of `--user` or `SURREALDB_USER`, which is `root` when neither is set |
+| `--url` or `SURREALDB_URL` | Not used while `SURREALFS_SERVER_URL` is set. Without that variable, a value that starts with `sfs://`, `sfs+http://` or `sfs+https://` also selects remote mode. A value that starts with `http://` or `https://` selects a direct HTTP connection to SurrealDB, not the gateway |
+| `--ns` and `--db` | Not used. The gateway chooses the namespace and the database |
+
+With an `sfs` value in `--url`, the program reads the token from `--pass` or `SURREALDB_PASS` and does not read `SURREALFS_TOKEN`. In tests, `surrealfs-rs --url sfs://127.0.0.1:8787 --pass tok-4d9f7c21 ls /notes` listed the folder, and the same command without `--pass` failed with `Invalid authentication credentials`, because the default password `root` was sent as the token. A `--user` option names the caller on this path as well.
+
+> [!WARNING]
+> A shell that exports `SURREALDB_PASS` for direct connections and also sets `SURREALFS_SERVER_URL`, but not `SURREALFS_TOKEN`, sends the database password to the gateway as the bearer token. In a test with `SURREALDB_PASS=hunter123`, the request carried the header `Authorization: Bearer hunter123`. The same happens with an `sfs` value in `--url`, where the password is the token by design. Set `SURREALFS_TOKEN` whenever you set `SURREALFS_SERVER_URL`.
+
+Every command that connects uses the gateway, including `init`, which defines the schema in the database of the gateway. These commands ran through a gateway and succeeded: `init`, `mkdir`, `write`, `cat`, `ls -r`, `cp`, `mv`, `rm`, `grep`, `history`, `restore`, `lock acquire`, `lock list`, `lock release`, `du`, `chunk`, `crdt enable` and `credential list`. The other commands were not tried in remote mode.
+
+The `status` command prints the values of `--url`, `--ns` and `--db` in its `Endpoint`, `Namespace` and `Database` lines, even though remote mode does not use them, so those lines do not describe the gateway. Its `Root exists` line comes from the gateway.
+
+### Identity
+
+The name that the program sends as the caller becomes the owner of the files that it creates. In tests, `--caller alice` made `alice` the owner of a new file, `--user bob` without `--caller` made `bob` the owner, and `SURREALFS_CALLER=frank` made `frank` the owner. With none of these set, the owner is `root`.
+
+The gateway does not check the name. Any client that holds the token can send any caller name, including `root`. [Permissions](/docs/agent-filesystem/security/permissions#how-identity-is-established) describes how each client establishes an identity.
+
+## What a token grants
+
+The `POST /api/rpc` endpoint runs SurrealQL from the client with the database credentials of the gateway, so a client that holds the gateway token can run any statement that those credentials allow. These results come from tests with the gateway token:
+
+- A plain `SELECT` returned the content of a file that belongs to `alice` and has the mode `0600`, in a request that named `bob` as the caller.
+- A call to `fn::sfs_read` with the same caller name was refused with `sfs:denied`, so the checks that the schema functions make apply only to statements that call them.
+- The command `surrealfs-rs credential list` through the gateway listed the stored credentials.
+
+Remote mode removes the need to hand each client a database password. It does not make a token less powerful than that password. Treat `SURREALFS_SERVER_TOKEN` as a database credential, and give it only to clients that you would trust with the database. The gateway speaks plain HTTP, so a token also crosses the network in clear text unless a proxy adds TLS. [Security](/docs/agent-filesystem/interfaces/gateway-server#security) lists the properties of the gateway, and [Identity and authentication](/docs/agent-filesystem/interfaces/gateway-server#identity-and-authentication) shows which header each request needs.
+
+### A token for one user
+
+A client can hold the token of a stored credential of the kind `bearer` instead of the gateway token. The first argument after the kind is the token, the secret is ignored, and the last argument is the user. Any client that holds the gateway token can run the command, because it runs through the gateway. [Protocol credentials](/docs/agent-filesystem/security/credentials#manage-credentials) describes the command:
+
+```bash
+surrealfs-rs credential create bearer alice-agent-token-91c "" alice
+```
+
+```text title="Output"
+Created credential alice-agent-token-91c (bearer) for alice
+```
+
+A statement that uses `$caller` without binding it then runs as `alice`, whatever caller name the request body states. That identity is a default and not a restriction. The client commands bind `$caller` themselves, and a client that sends `caller` in `vars` replaces the default. The `surrealfs-rs` program binds `$caller` to `root` when no [identity setting](#identity) names another user, so it acts as `alice` only when it is given `--caller alice` or an equivalent. These results come from tests with the token of `alice`:
+
+- A call to `fn::sfs_read` for a file that `bob` owns with the mode `0600` was refused, because the default caller was `alice`.
+- A plain `SELECT` of the content of the same file returned it.
+- A `write` with `--caller bob` created a file that `bob` owned.
+- A `write` with no `--caller` created a file that `root` owned.
+- The command `credential list` listed every stored `bearer` credential, including the one of `bob`. For this kind, the identifier column shows the token itself, so a client that holds one `bearer` token can read the others.
+
+A token of this kind changes only the default caller name for statements that do not bind `$caller`. It does not limit what a client can do.
+
+## Address forms
+
+The Rust program, the Python client and the TypeScript client accept these forms of the gateway address. Each of them adds `/api/rpc` to the base address. The Rust column applies to `SURREALFS_SERVER_URL` and to the `connect_remote` function. A `--url` value or a `ConnectOptions.url` value reaches the gateway only with one of the `sfs` prefixes, as [The Rust library](#the-rust-library) explains:
+
+| Address | Rust | Python | TypeScript |
+| --- | --- | --- | --- |
+| `http://host:port` | HTTP | HTTP | HTTP |
+| `https://host` | HTTPS | HTTPS | HTTPS |
+| `sfs://host:port` | HTTP | HTTP | HTTP |
+| `sfs+http://host:port` | HTTP | HTTP | HTTP |
+| `sfs+https://host` | HTTPS | HTTPS | HTTPS |
+| `host:port` with no scheme | HTTPS | HTTPS | No scheme is added, and `fetch` decides what the address means |
+| A trailing slash | Removed | Removed | Removed |
+| An address that already ends in `/api/rpc` | Accepted | Accepted | The path is added twice |
+
+The scheme `sfs://` means plain HTTP. Use `sfs+https://` or `https://` when the connection crosses a network that you do not control.
+
+The TypeScript client passes an address with no scheme to `fetch` as written, so the result depends on the runtime. In Bun, the client worked with `localhost:28787` and failed with `fetch() URL is invalid` for `127.0.0.1:28787`. The `fetch` function of Node rejected both forms of address, with `unknown scheme` for the first and `Invalid URL` for the second. Use a full URL with the TypeScript client.
+
+The gateway that `surrealfs-rs serve gateway` and `surrealfs-server` start speaks only HTTP and does not terminate TLS. An `https://` address needs a proxy in front of that gateway that does. The repository also builds the gateway as a Cloudflare Worker, which [Deployment](/docs/agent-filesystem/operations/deployment#run-as-a-cloudflare-worker) describes, and this page did not run that build or test a client against it. The Rust client is built with TLS support, but this page did not test it against a TLS endpoint. In a test, `surrealfs-rs` was still waiting after two minutes when it used a bare host name, which it treats as `https://`, against the plain HTTP gateway.
+
+## The Rust library
+
+The `surrealfs-core` crate selects the connection from the prefix of `ConnectOptions.url`. A URL that starts with `sfs://`, `sfs+http://` or `sfs+https://` selects `connect_remote`, and the library sends its statements to the gateway at `/api/rpc`. The [Rust library](/docs/agent-filesystem/interfaces/rust-library#connection-options) page lists every prefix and every `ConnectOptions` field. For a gateway connection, `pass` is the bearer token, and `None` sends no `Authorization` header. The caller is `caller`, or `user` when `caller` is `None`. The fields `ns` and `db` are not used.
+
+An `http://` or `https://` URL selects SurrealDB, not the gateway, so a library user who has a gateway URL needs one of the `sfs` prefixes. In a test, `SurrealFs::connect` with the `http://` URL of a gateway, no user and the token as `pass` failed with `Unexpected RPC response envelope`, because the gateway answered the `/rpc` path with a description of its surfaces.
+
+The next program depends on the `surrealfs-core` crate from the repository. Use the `Cargo.toml` from [Install](/docs/agent-filesystem/interfaces/rust-library#install) on the Rust library page with any package name. The program writes a file through the gateway from the previous sections, reads it back and lists its folder:
+
+```rust title="src/main.rs"
+use surrealfs_core::{ConnectOptions, SurrealFs};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let fs = SurrealFs::connect(ConnectOptions {
+        url: "sfs://127.0.0.1:8787".into(),
+        user: None,
+        pass: Some("tok-4d9f7c21".into()),
+        ns: String::new(),
+        db: String::new(),
+        caller: Some("alice".into()),
+    })
+    .await?;
+
+    fs.write_text("/rust/demo.md", "# Written from Rust", None).await?;
+    println!("{}", fs.read_text("/rust/demo.md").await?);
+    for entry in fs.ls("/rust").await? {
+        println!("{} {} bytes, owner {}", entry.path, entry.size, entry.owner.as_deref().unwrap_or("-"));
+    }
+    println!("caller: {:?}", fs.caller());
+    Ok(())
+}
+```
+
+```text title="Output"
+# Written from Rust
+/rust/demo.md 19 bytes, owner alice
+caller: Some("alice")
+```
+
+When the gateway requires a token and `pass` is `None`, the same program fails with `Database("Authentication required")`.
+
+The `connect_remote(server_url, token, caller)` function is the direct form of the `sfs` branch. It is not `async`, and it returns a `Result` that holds the `SurrealFs` value without sending a request, so a wrong address or token appears at the first call.
+
+## The Python client
+
+The `SurrealFs.from_server` class method builds a `SurrealFs` object that sends its statements to a gateway:
+
+<Synopsis label="Signature">
+SurrealFs.from_server(url: str, *, user: str, token: str | None = None, table: str = "file") -> SurrealFs
+</Synopsis>
+
+<OptionsTable
+    title="Parameters"
+    options={[
+        { "name": "url", "type": "str", "description": "The address of the gateway, in one of the forms of the address table on this page. A name with no scheme is treated as HTTPS." },
+        { "name": "user", "type": "str", "required": true, "description": "The name that the object acts as. It is sent as the caller name. The value `root` switches off the permission checks of the Python library, as it does for a direct connection." },
+        { "name": "token", "type": "str | None", "default": "None", "description": "The bearer token. `None` sends no `Authorization` header." },
+        { "name": "table", "type": "str", "default": "\"file\"", "description": "The name of the file table, as in the constructor." }
+    ]}
+/>
+
+The `surrealfs` package is not on PyPI, and the [Install](/docs/agent-filesystem/interfaces/python-sdk#install) section of the Python SDK page gives the install command. The client uses the `httpx` package, which a core install of `surrealfs` does not include. The `agent-memory` extra installs it, as does the `claude` extra, so `pip install "surrealfs[agent-memory] @ git+https://github.com/surrealdb/surrealfs.git@next"` gives the client what it needs. Without `httpx`, `from_server` succeeds and the first call raises `ModuleNotFoundError: No module named 'httpx'`. Each call opens its own HTTP connection with a timeout of 30 seconds, and `close()` does nothing.
+
+> [!WARNING]
+> In this release, the Python client reads every reply of the gateway as empty. The gateway answers `{"result": [...]}`, and the client reads a field named `results`, which does not exist, so each call sees no statements and no error. A call that reads therefore returns an empty value or raises `NotFound`. A call that writes finds no folder to write into, so it sends a `CREATE` statement for the missing parent folder. The database rejects that statement, because the payload sets `parent` to null and the field accepts a record or no value. The client cannot see the rejection, so it raises `PermissionDenied`. In the calls that were tried, nothing was written. Do not use `from_server` until a later release corrects it.
+
+This script connects to the gateway from the previous sections, which holds `/notes/plan.md`:
+
+```python title="remote_check.py"
+import asyncio
+
+from surrealfs import SurrealFs
+
+
+async def main():
+    fs = SurrealFs.from_server("http://127.0.0.1:8787", user="alice", token="tok-4d9f7c21")
+    print("ls:", await fs.ls("/"))
+    try:
+        print("read:", await fs.read_text("/notes/plan.md"))
+    except Exception as exc:
+        print("read error:", type(exc).__name__, exc)
+
+
+asyncio.run(main())
+```
+
+```text title="Output in this release"
+ls: []
+read error: NotFound No such file or directory: /notes/plan.md
+```
+
+The other calls that were tried behaved as follows:
+
+| Call | Result |
+| --- | --- |
+| `ls`, `exists` and `stat` of an existing file | Return `[]`, return `False` and raise `NotFound` |
+| `write_text` to a path in an existing folder or in a new one | Raises `PermissionDenied`, and nothing is written. It sends three lookups and then the `CREATE` statement for the parent folder |
+| `append_text`, `edit` and `rm` of an existing file | Raise `NotFound`, and the file is unchanged |
+| `mkdir` of a path with two or more segments, without `parents=True` | Raises `NotFound`, because the client does not see the first folder of the path |
+| `mkdir` of a top-level path, or with `parents=True` | Raises `PermissionDenied`, and nothing is created |
+| `apply_schema(fs.db)` | Returns without an error, and the gateway defines the schema |
+| A missing token | Raises `QueryError` with `Database error: Authentication required` |
+| A wrong token | Raises `QueryError` with `Database error: Invalid authentication credentials` |
+
+### Environment variables in the Python tools
+
+When `SURREALFS_SERVER_URL` is not blank, the helpers `connect()` and `connected()` in `surrealfs.integrations._connect` return the remote client instead of a database connection. The client sends `SURREALFS_TOKEN` as the token, or no token when the value is blank. It ignores `SURREALDB_URL` and `SURREALDB_PASS`, but `SURREALDB_AUTH_LEVEL` and `SURREALDB_USER` still decide which user it acts as. The helper `agent_user()` returns that user:
+
+| Setting | User that the client acts as |
+| --- | --- |
+| `SURREALDB_AUTH_LEVEL=record` | The value of `SURREALDB_USER`, which is `root` when it is not set. `SURREALFS_AGENT_USER` is not used |
+| Any other valid level, or none | The value of `SURREALFS_AGENT_USER`, with each run of characters other than letters, digits, `_` and `-` replaced by `-`, or the name of the operating-system account when the variable is not set |
+
+A user that is `root` makes the helper raise a `RuntimeError` instead of connecting, and a `SURREALDB_AUTH_LEVEL` other than `root`, `namespace`, `database` or `record` raises a `ValueError`.
+
+The `surrealfs` command, the [MCP server](/docs/agent-filesystem/interfaces/mcp-server) and the [Hermes plugins](/docs/agent-filesystem/interfaces/hermes) call these helpers, with the exceptions below. They have the same problem as the client, because they use it. In tests with a gateway that held files, with `SURREALFS_SERVER_URL` set:
+
+- `surrealfs status` printed `Total Files: 0`. Its `Server`, `Namespace`, `Database` and `Auth Level` lines come from the `SURREALDB_*` settings or their defaults, so they do not describe the gateway.
+- `surrealfs history` printed `No history found` for a file that has versions, `surrealfs grep` printed nothing for a word that a file contains, and `surrealfs restore` of generation 1 of that file ended with a `NotFound` error.
+- `surrealfs users list` ended with `Failed: list index out of range`. The `schema apply` and `lock` subcommands also use the remote client.
+- `surrealfs init` does not use it. The command opens a WebSocket connection to `SURREALDB_URL`, and `SURREALFS_SERVER_URL` has no effect on it.
+- The MCP server `surrealfs-mcp` refuses to start while `SURREALDB_URL` is not set, even though it does not use the value when `SURREALFS_SERVER_URL` is set. With `SURREALDB_URL` set to any value, `surrealfs-mcp --selftest` connected through the gateway, reported 31 tools and acted as the user from `agent_user()`. Its `server` and `database` lines show the `SURREALDB_*` values, which are not the gateway, and it listed an empty filesystem.
+
+The Hermes plugins call `connected()` in the code. They were not run for this page. Unset `SURREALFS_SERVER_URL` in a shell where these Python tools should connect to SurrealDB directly.
+
+## The TypeScript client
+
+The `SurrealFs.connectServer` static method builds a `SurrealFs` object that sends its statements to a gateway:
+
+<Synopsis label="Signature">
+SurrealFs.connectServer(options: SurrealFsServerOptions): SurrealFs
+</Synopsis>
+
+<OptionsTable
+    title="Options"
+    options={[
+        { "name": "url", "type": "string", "required": true, "description": "The address of the gateway, in one of the forms of the address table on this page. The client adds no scheme, so use a full URL." },
+        { "name": "token", "type": "string", "description": "The bearer token. When it is absent, the client sends no `Authorization` header." },
+        { "name": "user", "type": "string", "default": "\"root\"", "description": "The caller name. The client sends it in the body and in the `X-SurrealFS-User` header." },
+        { "name": "branch", "type": "string", "default": "\"main\"", "description": "The workspace branch that `writeText` writes to. The value `main` writes to the files themselves. The other write methods ignore it." }
+    ]}
+/>
+
+The method is synchronous and opens no connection. The `live` call that `watch` makes throws `SurrealFsError` with the message `Live queries require a direct WebSocket connection; use polling with connectServer`, so `watch` does not work in this mode.
+
+> [!WARNING]
+> In this release, the TypeScript client reads every reply of the gateway as empty, for the reason that applies to the Python client: it reads a field named `results`, and the gateway sends `result`. A read returns an empty value. The write that was tried changed the gateway and returned an empty entry. Do not use `connectServer` until a later release corrects it.
+
+The script below connects to the gateway from the previous sections. Save it as `remote-check.ts` in the `packages/sdk-ts` folder of a clone of the SurrealFS repository, so that it finds the dependencies that `bun install` installs there, and run it from that folder with `bun run remote-check.ts`. The [Install](/docs/agent-filesystem/interfaces/typescript-sdk#install) section of the TypeScript SDK page describes the clone and the install:
+
+```ts title="remote-check.ts"
+import { SurrealFs } from "./src/index.ts";
+
+const fs = SurrealFs.connectServer({
+  url: "http://127.0.0.1:8787",
+  token: "tok-4d9f7c21",
+  user: "alice",
+});
+
+console.log("ls:", JSON.stringify(await fs.ls("/")));
+console.log("exists:", await fs.exists("/notes/plan.md"));
+console.log("read:", JSON.stringify(await fs.readText("/notes/plan.md")));
+```
+
+```text title="Output in this release"
+ls: []
+exists: false
+read: ""
+```
+
+The other calls that were tried behaved as follows:
+
+| Call | Result |
+| --- | --- |
+| `stat` of an existing file | Throws `NotFoundError` |
+| `writeText` | Writes the file on the gateway, owned by the `user` option, and resolves with an entry whose `path` is `""` and whose `size` is `0` |
+| `watch` | Throws `SurrealFsError`, as described above |
+| A missing token | Throws `SurrealFsError` with `Authentication required` |
+| A wrong token | Throws `SurrealFsError` with `Invalid authentication credentials` |
+
+## What each client sends
+
+Each client sends a `POST` to `/api/rpc` with a JSON body of the form `{"sql": ..., "vars": ..., "caller": ...}`. The gateway answers with `{"result": [...]}`, which holds one object with a `status` and a `result` for each statement. [SQL RPC](/docs/agent-filesystem/interfaces/rest-api#sql-rpc) describes the endpoint in full. The clients differ in the headers that they add:
+
+| Client | `Authorization` header | Caller header | Caller in the body |
+| --- | --- | --- | --- |
+| `surrealfs-rs` and the Rust library | `Bearer` and the token, when there is one | `X-SurrealFS-Caller` | Yes |
+| Python | `Bearer` and the token, when there is one | `X-SurrealFS-Caller` | Yes |
+| TypeScript | `Bearer` and the token, when there is one | `X-SurrealFS-User` | Yes |
+
+The gateway reads `X-SurrealFS-User` and ignores `X-SurrealFS-Caller`. All three clients also state the caller in the body, and the gateway uses that value when the request acts as `root`, so the header that the Rust and Python clients send changes nothing. A gateway that has a token answers a request without a valid token with `401`, and the clients report the `error` text of the reply, as the tables of the Python and TypeScript clients show.
+
+## Limits
+
+- **Python and TypeScript:** Remote mode does not work in either client in this release. [The Python client](#the-python-client) and [The TypeScript client](#the-typescript-client) describe what each one does.
+- **No TLS:** The gateway that `surrealfs-rs serve gateway` and `surrealfs-server` start serves plain HTTP. A token, the files and the statements all cross the network as written unless a proxy adds TLS. This page did not run the Cloudflare Worker build of the gateway.
+- **A token is full access:** The gateway token grants the access of the database credentials of the gateway, and the caller name is not verified. [What a token grants](#what-a-token-grants) describes the effect.
+- **No timeout in the Rust client:** A gateway that accepts a connection and never answers leaves a `surrealfs-rs` command waiting. The Python client stops after 30 seconds, and the TypeScript client sets no timeout.
+- **Independent requests:** The gateway closes the connection after every reply, and no client keeps a session. A client call can send more than one request, for example `surrealfs-rs write`, which sends two. The TypeScript client cannot watch for changes.
+- **Not atomic:** A request that holds several statements runs them one after another, and an error in one does not undo the others.
+- **Beta:** The names of the environment variables, the endpoint and the constructors may change between releases.
+
+## See also
+
+- [Gateway server](/docs/agent-filesystem/interfaces/gateway-server) explains how to run the gateway, its settings, its security properties and its known issues.
+- [Gateway REST API](/docs/agent-filesystem/interfaces/rest-api) describes the routes of the gateway, including `/api/rpc`.
+- [Command-line reference](/docs/agent-filesystem/interfaces/command-line) lists the `surrealfs-rs` commands and settings for a direct connection.
+- [Permissions](/docs/agent-filesystem/security/permissions) explains how each client establishes the identity that it acts as.
+- [Protocol credentials](/docs/agent-filesystem/security/credentials) covers the `bearer` credential kind and the other kinds of stored credential.
+- [Rust library](/docs/agent-filesystem/interfaces/rust-library) lists the `ConnectOptions` fields, `connect_remote` and the other methods of the `surrealfs-core` crate.
+- [Python SDK](/docs/agent-filesystem/interfaces/python-sdk) and [TypeScript SDK](/docs/agent-filesystem/interfaces/typescript-sdk) describe the clients for a direct connection.
+- [Limits and caveats](/docs/agent-filesystem/operations/limits-and-caveats) lists what is ready, what works with limits and what is not available.

@@ -1,0 +1,310 @@
+---
+position: 1
+title: Command-line quickstart
+description: "Install the surrealfs-rs command-line tool, initialise a database, then write, read, search, version, copy and import files from a shell."
+---
+
+This quickstart installs `surrealfs-rs`, the native command-line tool for Agent Filesystem, and uses it to initialise a database, write and read files, search them and work with their versions. When you finish, you will have files in SurrealDB that you created and managed from a shell.
+
+Two command-line programs work with an Agent Filesystem database. `surrealfs-rs` is a Rust program with commands for files, versions, leases, workspaces, import and export. The Python package installs a separate `surrealfs` command for the schema, users, leases, history, onboarding and starting the MCP server. The [command-line reference](/docs/agent-filesystem/interfaces/command-line) covers both.
+
+> [!NOTE]
+> Agent Filesystem is in beta. The API, schema and command-line interface may change in breaking ways between releases. No prebuilt binary or crates.io package exists yet, so you build `surrealfs-rs` from the `next` branch of the [SurrealFS repository](https://github.com/surrealdb/surrealfs) with Cargo. The tool prints its name as `surrealfs` in its version output, but the command is `surrealfs-rs`.
+
+## Requirements
+
+- **A Rust toolchain that provides `cargo`, version 1.90 or later.** One of the dependencies of the tool declares 1.90 as its minimum Rust version, and the steps were tested with Rust 1.99.0.
+- **A C compiler.** The build compiles C code that belongs to some of its dependencies, so it needs a compiler such as `cc`, which the Xcode command-line tools and the `build-essential` package provide.
+- **Git.** Cargo clones the repository to build the tool.
+- **A SurrealDB 3.x server.** The steps were tested against SurrealDB 3.2.3, and earlier 3.x releases were not tested. See [installing SurrealDB](/docs/running/installation) if the `surreal` command is not available.
+- **A macOS or Linux shell.** The commands on this page were run in one.
+
+## 1. Start SurrealDB
+
+Start a server that keeps its data in memory:
+
+```bash
+surreal start --user root --pass secret memory
+```
+
+The server runs in the foreground, so leave it running and open a second terminal for the remaining steps. It listens on `127.0.0.1:8000` and loses its data when the process stops.
+
+## 2. Install the command
+
+Build and install the tool from GitHub:
+
+```bash
+cargo install --locked --git https://github.com/surrealdb/surrealfs --branch next surrealfs-cli
+```
+
+Cargo downloads the repository and compiles about 300 crates in release mode. The build took between one and two and a quarter minutes on Apple Silicon laptops. Cargo installs two executables into its bin directory, which is `~/.cargo/bin` unless you changed it, so make sure that directory is on your `PATH`. Confirm the install:
+
+```bash
+surrealfs-rs --version
+```
+
+```text title="Output"
+surrealfs 0.2.0
+```
+
+> [!WARNING]
+> The second executable, `git-remote-surrealfs`, is a Git remote helper that does not store anything in this release. `git push` to a `surrealfs://` remote reports success and discards the data. Use `surrealfs-rs import-git`, described below, to bring a repository into Agent Filesystem.
+
+## 3. Connect to the database
+
+`surrealfs-rs` reads its connection settings from options or environment variables. Set them once for the shell session:
+
+```bash
+export SURREALDB_URL=ws://localhost:8000/rpc
+export SURREALDB_NS=agents
+export SURREALDB_DB=cli
+export SURREALDB_USER=root
+export SURREALDB_PASS=secret
+```
+
+| Option | Environment variable | Default |
+| --- | --- | --- |
+| `--url` | `SURREALDB_URL` | `ws://127.0.0.1:8000/rpc` |
+| `--ns` | `SURREALDB_NS` | `surrealfs` |
+| `--db` | `SURREALDB_DB` | `surrealfs` |
+| `--user` | `SURREALDB_USER` | `root` |
+| `--pass` | `SURREALDB_PASS` | `root` |
+| `--caller` | `SURREALFS_CALLER` | none, so the tool uses the value of `--user` |
+
+Put the options before the subcommand, as in `surrealfs-rs --caller alice ls /`. Every command opens a new connection, signs in as a root user with `--user` and `--pass`, and selects the namespace and database. A namespace or database user cannot connect with the tool, over a `ws://` URL or over an `http://` one. Use the Python library, or the MCP server with `SURREALDB_AUTH_LEVEL`, for those users.
+
+A URL that starts with `http://` or `https://` selects an HTTP client, which sends each command as a request to the `/rpc` endpoint of the server. A URL that starts with `ws://` or `wss://` selects a WebSocket client.
+
+> [!WARNING]
+> The WebSocket client connects over plain `ws://`, even when the URL starts with `wss://`. The password of the root user then crosses the network unencrypted, and the client cannot connect to a server that accepts only TLS connections. The HTTP client sends the user and password with every request, so an `http://` URL is as exposed as a `ws://` one. Use `ws://` and `http://` URLs only against a server on the same machine or on a private network. An `https://` URL selects the HTTP client, which is built with TLS support, and that connection was not tested for this page.
+
+> [!IMPORTANT]
+> The Python package reads different variables: `SURREALDB_NAMESPACE` and `SURREALDB_DATABASE`, with `demo` as the default database. Pointing both tools at one server without setting the variables of each tool gives two different filesystems.
+
+> [!WARNING]
+> The command-line tool signs in as a system user, and `--caller` is a name that you assert. It becomes the owner of the files that the tool creates and the holder of leases. It is not recorded as the author of a version, which is always the owner of the file. The `cat` and `chunk` commands check `--caller` against the mode of the file and the private `/home/<user>` folders. The `grep`, `ls`, `write`, `rm`, `mv` and `restore` commands do not check it, and the other commands were not checked for this page. With `--caller bob`, the tool overwrites a file that `alice` set to mode `0600`, writes into and removes files in `/home/alice`, and `grep` prints lines from files that `cat` refuses to read. Treat every command as acting with full access, and use the Python library with [record access](/docs/agent-filesystem/security/record-access) where the database has to enforce permissions.
+
+## 4. Initialise the database
+
+`init` defines the schema in the namespace and database that you selected. The command always defines the record-access tables as well, and it is safe to run again.
+
+```bash
+surrealfs-rs init
+```
+
+```text title="Output"
+SurrealFS schema successfully initialized.
+```
+
+Every other command fails with an error such as `Function 'fn::sfs_write' not found` until the schema exists. Check the connection with `status`:
+
+```bash
+surrealfs-rs status
+```
+
+```text title="Output"
+SurrealFS Status: OK
+  Endpoint: ws://localhost:8000/rpc
+  Namespace: agents
+  Database: cli
+  Root exists: true
+```
+
+`status` reports `OK` whenever it can connect, even before `init`. The `Root exists` line is the one that shows whether the schema is in place.
+
+## 5. Write, read and search files
+
+The `write` command takes the content as an argument, creates missing parent folders and replaces an existing file:
+
+```bash
+surrealfs-rs write /notes/standup.md "Ship the refactor on Friday."
+surrealfs-rs write /notes/launch-plan.md "The launch date is 15 October."
+```
+
+```text title="Output"
+Wrote 28 bytes to /notes/standup.md
+Wrote 30 bytes to /notes/launch-plan.md
+```
+
+List a folder and read a file:
+
+```bash
+surrealfs-rs ls /notes
+```
+
+```text title="Output"
+FILE       30 bytes  /notes/launch-plan.md
+FILE       28 bytes  /notes/standup.md
+```
+
+```bash
+surrealfs-rs cat /notes/standup.md
+```
+
+```text title="Output"
+Ship the refactor on Friday.
+```
+
+`ls` prints one level, sorted by path, with `DIR` or `FILE`, the size and the path. For text files the size counts characters, although the label says `bytes`, so text with non-ASCII characters shows a smaller number than its length in UTF-8 bytes. The `Wrote` message counts the same way. `cat` prints the text of a file and adds no trailing newline.
+
+Search the text of the files with `grep`:
+
+```bash
+surrealfs-rs grep launch /notes
+```
+
+```text title="Output"
+/notes/launch-plan.md:1: The launch date is 15 October.
+```
+
+`grep` takes a pattern and an optional path, and prints `path:line: text` for each matching line, with the leading and trailing spaces of the line removed. By default the pattern is literal, case-sensitive text. The `-r` flag, which `--help` describes as `--recursive`, makes the pattern a regular expression instead, and the command searches every file below the path in both cases:
+
+```bash
+surrealfs-rs grep -r "launch.*October" /notes
+```
+
+```text title="Output"
+/notes/launch-plan.md:1: The launch date is 15 October.
+```
+
+The path is a string prefix, so `/doc` also matches `/docs/notes.md`. The command reads at most 1,000 text files from the database before it applies the path, so it can miss matches in a larger database. It has no ranked full-text or semantic search. Those are available from the [Python library](/docs/agent-filesystem/quickstarts/python) and the [MCP server](/docs/agent-filesystem/interfaces/mcp-server).
+
+## 6. Work with versions
+
+Every file has a generation number that increases when its content changes. Replace the standup note, then list its history:
+
+```bash
+surrealfs-rs write /notes/standup.md "Shipped the refactor on Friday."
+surrealfs-rs history /notes/standup.md
+```
+
+```text title="Output"
+Wrote 31 bytes to /notes/standup.md
+gen 1   | op write  | author root       | size     28 | /notes/standup.md
+```
+
+`history` lists snapshots of earlier states, newest first, and stops at 20 unless you pass `--limit`. After the write above the file is at generation 2, and the list holds only generation 1. A snapshot is also written when the mode, the name or the parent folder of a file changes and when the file is removed. The author is `root` because `root` owns the file: the tool creates files that are owned by `--caller`, or by `--user` when `--caller` is not set.
+
+Restore generation 1:
+
+```bash
+surrealfs-rs restore /notes/standup.md 1
+surrealfs-rs cat /notes/standup.md
+```
+
+```text title="Output"
+Restored /notes/standup.md to generation 3
+Ship the refactor on Friday.
+```
+
+A restore writes the old content as a new generation, so the file moves from generation 2 to generation 3 and the history keeps both earlier states.
+
+## 7. Copy, move and remove files
+
+Folders and files are organised with `mkdir`, `cp`, `mv` and `rm`:
+
+```bash
+surrealfs-rs mkdir -p /notes/archive
+surrealfs-rs cp /notes/launch-plan.md /notes/archive/launch-plan-v1.md
+surrealfs-rs mv /notes/archive/launch-plan-v1.md /notes/archive/launch-plan-draft.md
+```
+
+```text title="Output"
+Created directory /notes/archive
+Copied /notes/launch-plan.md -> /notes/archive/launch-plan-v1.md
+Moved /notes/archive/launch-plan-v1.md -> /notes/archive/launch-plan-draft.md
+```
+
+Removing a folder that has contents needs `-r`:
+
+```bash
+surrealfs-rs rm /notes/archive
+```
+
+```text title="Error output"
+Error: Directory not empty: An error occurred: sfs:not_empty
+```
+
+```bash
+surrealfs-rs rm -r /notes/archive
+```
+
+```text title="Output"
+Removed /notes/archive
+```
+
+> [!WARNING]
+> Recursive `rm` removes the target folder and its direct children only. Anything nested deeper stays in the database as orphaned records. Remove deeply nested trees from the bottom up.
+
+## 8. Import a Git repository
+
+`import-git` copies the working tree of a Git repository into a folder, and records the commit metadata. The command records the 50 most recent commits unless you pass `--max-commits`, needs `git` on the `PATH` to read them, and copies the files that are on disk, tracked or not. Without `git` on the `PATH`, the import still succeeds and records no commits. The command skips `.git`, `node_modules`, `target`, `dist`, `build`, virtual environments, `__pycache__` and a few other generated paths, and it applies the entries of the `.gitignore` file at the root of the repository. That reader understands plain names, folder paths and `*suffix` patterns only. Create a small repository and import it:
+
+```bash
+git init --quiet --initial-branch main demo-repo
+cd demo-repo
+printf '# Demo\nA small project.\n' > README.md
+git add README.md
+git -c user.name=Demo -c user.email=demo@example.com commit --quiet --message "Add a readme"
+cd ..
+surrealfs-rs import-git ./demo-repo /imports/demo
+```
+
+```text title="Output"
+Imported 1 files and 1 commits to /imports/demo
+```
+
+```bash
+surrealfs-rs ls /imports/demo
+```
+
+```text title="Output"
+FILE       24 bytes  /imports/demo/README.md
+```
+
+The import reads the working tree and the commit list. It does not map the history of each file to file versions.
+
+## Errors and exit status
+
+Errors from the database go to standard error as `Error: <kind>: <detail>`, and the command exits with status 1. The detail ends with the code that the database raised. A mistake in the command line itself, such as an option that the subcommand does not accept, prints a usage message and exits with status 2.
+
+```bash
+surrealfs-rs cat /notes/missing.md
+```
+
+```text title="Error output"
+Error: Not found: An error occurred: sfs:not_found
+```
+
+| Message | Meaning |
+| --- | --- |
+| `Not found` with `sfs:not_found` | The path does not exist |
+| `Not found: Function 'fn::sfs_read' not found` | The schema is missing, so run `surrealfs-rs init` |
+| `Directory not empty` with `sfs:not_empty` | `rm` needs `-r` for a folder with contents |
+| `Permission denied` with `sfs:denied` | A `--caller` that cannot read the file |
+| `Legal hold active` with `sfs:legal_hold` | The file is under a legal hold, which `legal-hold <PATH> -a true` sets, and cannot be removed |
+
+## Limits to know about
+
+- **Mounting.** `surrealfs-rs mount` appears in `--help`, but it does not attach a filesystem in this release. It creates an empty directory and prints that a control plane is active. Use `export`, `import` and `import-git` to move files in and out.
+- **Modes.** `chmod` reads a bare number as decimal, so `chmod /notes/standup.md 600` sets mode `0o1130`. Write the mode with a leading zero, as in `0600`.
+- **Listing.** `ls` accepts `-r` and ignores it, so it always lists a single level.
+- **Uploads.** Files stored with `upload` read back as empty folders: `ls` shows `DIR` and `cat` prints nothing. Use `write` for files.
+- **Copying folders.** `cp -r` creates the destination folder and prints a success message, but it copies none of the contents. Copy the files one at a time.
+- **Moving.** `mv` replaces an existing destination without a warning, whereas the Python library refuses to overwrite an existing path.
+- **Ownership.** With the default settings, the tool creates files owned by `root` with mode `0o644`, and folders with mode `0o755`. The Python library creates files with `0o666` and folders with `0o777`. A Python `SurrealFs` object for another user, such as `alice`, receives `PermissionDenied` when it writes into a folder that this tool created, so create shared folders from Python or run the Python library as `ROOT`.
+
+## Clean up
+
+Stop the server with `Ctrl+C`. The server keeps its data in memory, so the `cli` database is gone after it stops. Remove the variables that step 3 exported, so that other SurrealDB tools started from the same shell do not pick them up:
+
+```bash
+unset SURREALDB_URL SURREALDB_NS SURREALDB_DB SURREALDB_USER SURREALDB_PASS SURREALFS_CALLER
+```
+
+## Next steps
+
+- [Command-line reference](/docs/agent-filesystem/interfaces/command-line) lists every command and option.
+- [Python quickstart](/docs/agent-filesystem/quickstarts/python) covers search, permissions and record access.
+- [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) explains generations and snapshots.
+- [Limits and caveats](/docs/agent-filesystem/operations/limits-and-caveats) collects the known gaps of this release.

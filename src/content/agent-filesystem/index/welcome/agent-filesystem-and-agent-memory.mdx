@@ -1,0 +1,128 @@
+---
+position: 1
+title: Agent Filesystem and Agent Memory
+description: "How Agent Filesystem and SurrealDB Agent Memory differ, when to use each, and how the MCP server combines them."
+---
+
+# Agent Filesystem and Agent Memory
+
+Agent Filesystem and SurrealDB Agent Memory both give an agent memory that outlasts its context window. They differ in who decides what is stored: with Agent Filesystem the agent writes files, and with Agent Memory a service extracts typed knowledge from conversations and documents. This page compares the two, says when to use each, and describes how the Agent Filesystem MCP server can send its files to Agent Memory and recall them.
+
+## The two approaches
+
+Agent Filesystem keeps what an agent writes. The agent chooses the path, the format and the content, and the content is stored as written: a Markdown note stays a Markdown note. Files have a version history, and several agents can work on the same files.
+
+[Agent Memory](/docs/agent-memory/welcome/what-is-surrealdb-agent-memory) keeps what a pipeline extracts. It reads conversation turns and uploaded documents, extracts entities, attributes and relations with a language model, reconciles them with what it already holds, and stores them with provenance and validity periods in one knowledge graph. The agent asks questions, and Agent Memory ranks the facts and passages that answer them.
+
+## Comparison
+
+| Aspect | Agent Filesystem | Agent Memory |
+| --- | --- | --- |
+| What is stored | Files and folders in any format, text or binary | Typed entities, attributes and relations, plus the documents and conversation text they came from |
+| Who decides what to keep | The agent or person that writes the file | The extraction pipeline, which uses a language model |
+| Unit of retrieval | A file, identified by its path | A fact, a passage or an entity |
+| How content changes | A write replaces the content and keeps the previous state as a version | A new fact supersedes an old one, and the old one stays queryable with its validity period |
+| Search | BM25 full-text search, vector search with embeddings that you supply, a fused hybrid ranking, `grep` and glob patterns | One fused ranking over BM25, vectors and graph hops, with a response cache and an escalation tier |
+| Models | None for storing files or for full-text search. Semantic search needs an embedding function that you supply | A language model extracts facts, and an embedding model embeds text, both on the service side |
+| Several agents | Agents share one tree and coordinate through the Python library with the `generation` check, leases and workspaces | Contexts isolate data, and scopes decide which agents see which facts |
+| Where it runs | A SurrealDB 3.x server, and the library or MCP server in the agent's environment | The Agent Memory service in front of SurrealDB, for example a Context on SurrealDB Cloud |
+| Interfaces | Python and TypeScript libraries, a command-line tool, an MCP server, pydantic-ai and Hermes integrations, SurrealQL | REST API, SDKs, an MCP server and a command-line tool |
+
+## When to use which
+
+Use Agent Filesystem when:
+
+- The agent produces documents that other agents and people read or edit, such as plans, reports, runbooks, code and data files.
+- Content must come back exactly as written, at a path that other tools and people can open.
+- Several agents share working documents, and each writer can pass the `generation` that it read, so that a write based on a stale copy fails. The check is practical in the Python library. Over the tools, only `append_file`, `restore` and `undelete` print the generation that they leave, so an agent that has just called `write_file` does not know which value to pass.
+- The data should be readable with SurrealQL as ordinary records.
+
+Use Agent Memory when:
+
+- Facts must be extracted from conversations and documents without the agent writing them down.
+- A later statement should supersede an earlier one, and the earlier one should keep its history.
+- Questions span many sources, for example "what do we know about this supplier?".
+- Each fact needs its provenance, its validity period and a trust level.
+
+Use both when an agent writes curated notes as files and the notes should be searchable together with conversations and documents. The next section describes the integration that connects them.
+
+## How the two combine
+
+The Agent Filesystem MCP server can connect to an Agent Memory Context, which is one isolated store of memory with its own database, host and API keys. When it does, it uploads the text files that agents write to the Context, and it adds a `brain_recall` tool that asks the Context a question. The integration is part of the MCP server, and the Claude plugin runs the same server. The Python library has no equivalent.
+
+> [!NOTE]
+> The integration is optional and off by default. Without a Context id and an API key, the MCP server is a filesystem server only and does not offer `brain_recall`.
+>
+> The upload and recall requests on this page were checked against a stand-in service that records what the server sends, and not against a Context, so the integration is listed as not verified in [Limits and caveats](/docs/agent-filesystem/operations/limits-and-caveats#clients-and-integrations). Where this page describes what Agent Memory does with an upload, the description follows the Agent Memory documentation.
+
+### What the server uploads
+
+After a `write_file`, `edit` or `touch` call succeeds, the server reads the file back as the acting user and uploads it to the Context as a document, through the [document upload](/docs/agent-memory/ingest/authoritative/uploading-documents) endpoint. Agent Memory then processes it like any other uploaded document. The upload carries this metadata:
+
+| Metadata | Value |
+| --- | --- |
+| `title` | The file path, for example `/brain/atlas/risks.md` |
+| `scopes` | One scope, `brain` unless `AGENT_MEMORY_SCOPE` names another |
+| `labels` | `path=` followed by the file path, and `dir=` followed by the parent folder |
+
+These rules apply to the upload:
+
+- A file that is empty or holds only whitespace is not uploaded.
+- Only `write_file`, `edit` and `touch` upload anything. No other tool does, including `append_file`, `write_bytes`, `cp`, `mv`, `rm`, `chmod`, `restore`, `undelete` and `merge_workspace`. Moving or removing a file therefore does not remove its document from Agent Memory, and a later recall can name a path that no longer exists.
+- Agent Memory identifies a document by a hash of its bytes, and the documentation says that a repeated upload returns the existing document. Unchanged content therefore creates nothing, and two files with identical content are filed once, so a hit for that content can name the path of the first upload and not the second.
+- A changed file becomes a second document, so the earlier version stays stored. Agent Memory leaves near-duplicate passages out of a recall by default, and `brain_recall` does not ask for them, so after a small edit a recall can return one of the two versions and not both.
+- The server sends the content type that Python's `mimetypes` module guesses from the file extension, and `text/plain` when it has no guess. The guess can depend on the machine, because the module also reads the operating system's tables. Agent Memory accepts `text/plain`, `text/markdown`, `text/csv`, `application/json`, `text/html` and `application/pdf` as text formats. In the checks behind this page, `.yaml`, `.toml` and `.surql` gave `text/plain`, but `.ts` gave `video/mp2t` and `.rs` gave `application/rls-services+xml`, and Agent Memory may reject a file with such a type or process it as the wrong kind of content. Use `.md`, `.txt`, `.json`, `.csv` or `.html` for files that Agent Memory should read.
+- When the Context rejects an upload because the scope is not registered, the server registers the scope and uploads again.
+- When an upload fails, the filesystem write has already happened and stays. The tool result then ends with a line of the form `(brain sync failed for <path>: <error>)`.
+
+> [!WARNING]
+> By default `SURREALFS_MIRROR_ROOT` is `/`, so the server uploads every text file written through it, including files in private `/home/<user>` folders, and `chmod` does not exclude a file. Who can read the uploaded documents depends on the Agent Memory scope, which is a slash path such as `brain` that tags a document, and on the keys that have access to it. Set `SURREALFS_MIRROR_ROOT` to a subtree such as `/brain` to limit what is uploaded.
+
+### Configuration
+
+The integration reads these environment variables. It is enabled when both the Context id and the API key are set. Put them in the MCP server's configuration file, `~/.config/surrealfs/env`, or in the `env` block of the client's server entry, because a client usually does not pass a shell's variables to the server that it starts. Run `surrealfs-mcp --selftest` to see whether Agent Memory is configured. The [MCP server](/docs/agent-filesystem/interfaces/mcp-server#optional-agent-memory) page describes both.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AGENT_MEMORY_CONTEXT_ID` | None | The Context to upload to and recall from. |
+| `AGENT_MEMORY_API_KEY` | None | The API key of the Context. |
+| `AGENT_MEMORY_URL` | A built-in host | The full URL of the Context's host, for example `https://<context-host>`. Set it to the host that SurrealDB Studio shows for your Context. |
+| `AGENT_MEMORY_SCOPE` | `brain` | The scope that uploads are filed under and that `brain_recall` searches. |
+| `SURREALFS_MIRROR_ROOT` | `/` | Only files at or below this path are uploaded. |
+
+The integration needs the `agent-memory` extra of the Python package, which installs the `httpx` library, together with the `mcp` extra. The Claude plugin installs both. The [MCP server](/docs/agent-filesystem/interfaces/mcp-server) page covers installation.
+
+> [!NOTE]
+> The Agent Memory pages describe the same three values as `SPECTRON_URL`, `SPECTRON_CONTEXT_ID` and `SPECTRON_API_KEY`, and the Agent Memory SDK examples use `AGENT_MEMORY_ENDPOINT` and `AGENT_MEMORY_CONTEXT`. The Agent Filesystem MCP server reads only the names in the table above. The [Hosted quickstart](/docs/agent-memory/quickstarts/hosted#step-1---create-a-context-and-api-key-surrealdb-studio) shows where SurrealDB Studio lists the host, the Context id and an API key, and [Create your first context](/docs/agent-memory/quickstarts/surrealdb-cloud#create-your-first-context) walks through creating the Context.
+
+### Recall first, then open the file
+
+Agent Memory knows every version that was uploaded, together with the entities and relations it extracted, but the file in Agent Filesystem holds the current content. The `brain_recall` tool is meant to be used in that order: ask Agent Memory which files matter, then read those files.
+
+1. Call `brain_recall` with a question rather than a keyword, for example `what is blocking the launch review?`. The server sends the question to the Context as a hybrid query that is limited to the scope, and it returns 8 hits unless `k` says otherwise.
+2. Read the label of each hit. A hit is printed as `source · where · score`, followed by its text, which is cut to 500 characters, so `cat` is needed for the full text. For a hit from an uploaded file, `where` is the file path, or the document id when the lookup of the title fails. For an entity, `where` is the entity type and name, such as `Vendor/Acme Signing`.
+3. Open the files that the hits name with `cat`, and report the current state from the file. A hit can come from an earlier version of the file.
+4. When `cat` reports that a file does not exist, the file was moved or removed after it was uploaded. Use the hit as history, and use `search` or `ls` to find where the content went.
+5. When a hit names no path, treat it as knowledge that Agent Memory extracted and that no file states. Writing it down in a file makes it part of the filesystem.
+
+```text title="Sample output"
+Recalled from agent memory:
+chunk · /brain/atlas/risks.md · 0.81
+    The vendor certificate expires in November, and the launch review depends on its renewal.
+entity · Vendor/Acme Signing · 0.00
+    Acme Signing
+```
+
+A hit that has no score is printed with `0.00`. When the request to the Context fails, the tool returns `Error: could not reach agent memory` followed by the cause, and when the integration is not configured it returns a message that names the two variables to set.
+
+The Claude plugin ships a `brain-memory` skill that applies these steps, and it is useful only while `brain_recall` is available. See [Claude plugin](/docs/agent-filesystem/interfaces/claude-plugin).
+
+### Using the products without the integration
+
+The integration is a convenience of the MCP server. An application can also write files with the Python library and send selected files to Agent Memory itself, through the document upload endpoint of the [REST API](/docs/agent-memory/reference/rest-api) or an Agent Memory SDK, and it can record conversation turns separately. The two products keep separate data. Agent Filesystem stores its tables in the database that you point it at, and each Agent Memory Context has its own namespace and database.
+
+## Where to go next
+
+- [Agent Filesystem architecture](/docs/agent-filesystem/welcome/architecture) shows where each part runs.
+- [Recalling memories](/docs/agent-memory/retrieve/recall) describes the query that `brain_recall` sends.
+- [Contexts and scope](/docs/agent-memory/mental-model/contexts-and-scope) explains scopes and what a key can read.

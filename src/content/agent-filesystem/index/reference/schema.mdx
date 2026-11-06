@@ -1,0 +1,937 @@
+---
+position: 1
+title: Schema reference
+description: "Every table, field, index, analyser and event in the Agent Filesystem schema, grouped by subsystem, with which code writes each table and what record users may do."
+---
+
+Agent Filesystem keeps its data in SurrealDB tables that the schema files define. This page lists every table, field, index, analyser and event in that schema, grouped by the part of the product that uses them. For each table it says which code writes it and what a record user may do with it.
+
+The schema consists of `surrealfs/schema/file.surql`, which is always applied, and `surrealfs/schema/record_auth.surql`, which is optional. The [SurrealQL function reference](/docs/agent-filesystem/reference/surrealql-functions) describes the 76 functions that the first file also defines, and the [data model](/docs/agent-filesystem/concepts/data-model) page describes the `file` table in prose.
+
+> [!NOTE]
+> Agent Filesystem is in beta. This page describes version 0.2.0 of the SurrealFS repository, run on SurrealDB 3.2.3. Several tables are defined before any shipped code uses them, and each table entry says so under **Written by**.
+
+| Kind | Count in `file.surql` |
+| --- | --- |
+| Tables | 32 |
+| Indexes | 40 |
+| Analysers | 6 |
+| Events | 4 |
+| Functions | 76 |
+
+The optional `record_auth.surql` adds one table, `user`, and four access methods. The counts match the output of `INFO FOR DB` and `INFO FOR TABLE` on a database where the schema has been applied.
+
+## Apply and inspect the schema
+
+Apply the schema to a database on a SurrealDB 3.x server with the Python package:
+
+```bash
+python -m surrealfs.schema --url ws://localhost:8000/rpc --username root --password secret --namespace surrealfs --database demo
+```
+
+The command needs a running SurrealDB server and the `surrealfs` Python package, which is installed from the repository. The [function reference](/docs/agent-filesystem/reference/surrealql-functions#install-the-functions) shows both steps. Each option falls back to an environment variable, which is `SURREALDB_URL`, `SURREALDB_USER`, `SURREALDB_PASS`, `SURREALDB_NAMESPACE` or `SURREALDB_DATABASE`, and then to a default: `ws://localhost:8000/rpc`, the user `root` with the password `root`, the namespace `surrealfs` and the database `demo`. Add `--record-auth` to apply `record_auth.surql` as well, and `--print` to print the statements without connecting. The Rust command `surrealfs-rs init` applies both files. The statements use `OVERWRITE` or `IF NOT EXISTS`, so you can apply them repeatedly.
+
+The schema needs a SurrealDB 3.x server, because it uses computed fields and full-text indexes. Applying it again replaces tables, fields, events and functions with the packaged definitions. It does not replace the six analysers or eight of the 40 indexes, because those use `IF NOT EXISTS`. The eight indexes are `idx_hnsw_file_embedding`, `idx_file_content`, `idx_text_de`, `idx_text_fr`, `idx_text_es`, `idx_text_cjk`, `idx_text_code` and `idx_section_hnsw`. To change one of them, remove it, for example with `REMOVE INDEX idx_file_content ON file;`, and define your version before you apply the schema again, because applying the schema defines a missing one from the packaged definition.
+
+The vector length of 1536 is fixed in this release. Besides the HNSW indexes, the `embedding` fields of `file_section` and `file_chunk` have the type `array<float, 1536>`, and the schema defines those fields with `OVERWRITE`, so applying the schema again undoes a change to them. Use embeddings of 1536 numbers.
+
+The examples on this page create their own data with `fn::sfs_*` calls, and some outputs, such as record counts, assume that nothing else exists. Run each section on a database that has only the schema applied, for example by applying the schema to a new database.
+
+To inspect a database that has the schema, use the standard statements:
+
+```surql
+INFO FOR DB;
+INFO FOR TABLE file;
+```
+
+> [!NOTE]
+> The TypeScript package embeds an older copy of the schema in `packages/sdk-ts/src/schema_sql.ts`, with 1,405 lines against 2,425 in `file.surql`. It defines 15 of the 32 tables, 44 of the 76 functions, 3 of the 4 events and 1 of the 6 analysers. The missing tables are `blob`, `credential`, `entity`, `file_row`, `folder_digest`, `git_commit`, `group_member`, `mentions`, `quota`, `sfs_job`, `share`, `symbol`, `upload`, `usage`, `user_group`, `webhook` and `webhook_delivery`. The missing event is `evt_file_jobs`. Apply the schema from the Python package or the Rust command line instead.
+
+## How to read the table entries
+
+Each table entry has a **Written by** line and a **Record access** line. The first names the code that fills the table, and the second states in words what a record user may do. Three situations recur under **Written by**:
+
+- A table that a function or event fills during normal use, such as `file_version`.
+- A table that only one client fills on request, such as `symbol`, which `surrealfs-rs symbols --index` fills.
+- A table that no shipped code fills, such as `folder_digest`. You can write to it yourself, but nothing in the product does.
+
+Every table has a `PERMISSIONS` clause. The clauses apply only to record users, which are users that sign in through the `account` access method described under [Record authentication](#record-authentication). A root, namespace or database user bypasses them. See [Record access](/docs/agent-filesystem/security/record-access) for the model.
+
+## The file table
+
+Every file and every folder is one record in this table. A record's place in the tree is its `parent` link, and its path is computed from the chain of parents. A folder is a record whose `file`, `content` and `symlink` fields are all empty. The [data model](/docs/agent-filesystem/concepts/data-model) page explains the record in prose.
+
+**Written by:** every write path: the Python, Rust and TypeScript clients and the functions in the [SurrealQL function reference](/docs/agent-filesystem/reference/surrealql-functions).
+
+**Record access:** the permission rules for record users are listed under [Permissions for record users](#permissions-for-record-users).
+
+### Fields
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `owner` | `string` | `'root'` | The user that owns the record. A record user cannot change it and no function changes it, so there is no `chown`. A system credential can change it with a direct `UPDATE`. |
+| `group` | `option<string>` | `NONE` | An optional group name. Set by `fn::sfs_chgrp`. The Python client does not consult it. |
+| `mode` | `int` | `438` | The Unix permission bits as a decimal integer. 438 is octal 666, and 493 is octal 755. |
+| `filename` | `string` | required | One path segment. The schema does not validate the name, but the functions split paths on `/`. Names are case-sensitive. |
+| `parent` | `option<record<file>>` | `NONE` | The containing folder, or `NONE` for a top-level record. |
+| `parent_key` | `string` | set by a field rule | A stored copy of `parent` as a string, with `'root'` for a top-level record. A unique index skips records that have a `NONE` field, so this copy lets `child_unique` cover the top level. It is recomputed on every write. |
+| `generation` | `int` | set by a field rule | Starts at 1 and rises by 1 when a write changes the content hash. `chmod`, `mv`, `chgrp` and `meta` updates do not change it. The field rule recomputes it, so a statement cannot set it directly. Under record authentication it does not rise: the counter keeps the value that it had. |
+| `path` | `string` | computed | The parent's path, then `/`, then `filename`. It is never stored, so renaming a folder changes the path of every descendant with one update. It cannot be indexed. |
+| `is_folder` | `bool` | computed | `true` when `file`, `content` and `symlink` are all `NONE`. An empty text file keeps `content = ''` so that it stays a file. A file committed through the chunked upload has all three empty and reports `true`. |
+| `gate` | `option<string>` | computed | Who can traverse down to this record: `NONE` when every ancestor folder lets everyone enter, otherwise the users or groups that can pass all the closed ancestors. See `fn::sfs_gate`. |
+| `file` | `option<bytes>` | `NONE` | The bytes of a binary file. |
+| `content` | `option<string>` | `NONE` | The text of a text file. The full-text index covers this field. |
+| `symlink` | `option<file>` | `NONE` | Typed with the SurrealDB `file` pointer type, not as a link to another record. No shipped code creates or follows a symlink, so treat the field as unused. |
+| `content_type` | `string` | required | A media type. The field has no default, so a `CREATE` without it fails. Folders use `inode/directory`. |
+| `meta` | `option<object>` | `NONE` | Free-form metadata. The Python client stores the frontmatter of a Markdown file here. Other features use the keys `legal_hold`, `summary`, `simhash`, `encrypted`, `encryption_algo`, `nonce` and `key_id`. |
+| `crdt` | `bool` | `false` | `true` for a collaborative document. `enable_crdt` sets it, and nothing turns it off. |
+| `hash` | `string` | `''` | The MD5 of the text, or of the unpadded base64 text of the bytes. The `evt_file_hash` event sets it after the content changes. The record that the Python client returns from a write can carry the earlier hash, because the event runs after the statement. The hash is a change marker, not a security measure. A record user cannot write it. A system credential can, and the stored value then stays until the content changes again. |
+| `size` | `option<int>` | `NONE` | Set only when a chunked upload is committed. Functions that report a size otherwise count the characters of `content` or the bytes of `file`. |
+| `language` | `option<string>` | `NONE` | Chooses which of the `text_*` fields receives the text. No shipped code writes it, so the language fields stay empty until you set it. |
+| `encoding` | `option<string>` | `'utf-8'` | Never written by shipped code, so it stays `utf-8`. |
+| `is_generated` | `bool` | `false` | Never written by shipped code. |
+| `digest` | `option<string>` | `NONE` | Never written by shipped code. |
+| `created_at` | `datetime` | `time::now()`, read-only | Set when the record is created. |
+| `updated_at` | `datetime` | `time::now()` on every write | Set on every write, including a rewrite with identical content and the hash event's own update. |
+| `deleted_at` | `option<datetime>` | `NONE` | Unused. A delete removes the record. |
+| `embedding` | `option<array<float>>` | `NONE` | The vector of the whole text. The index `idx_hnsw_file_embedding` requires exactly 1536 numbers. Only a system credential or the `indexer` access can write it. |
+| `embedded_at` | `option<datetime>` | `NONE` | When the vector was written. Informational. |
+| `embedded_hash` | `option<string>` | `NONE` | The MD5 of the text that the vector came from. The vector is stale when this differs from the MD5 of the current text. |
+| `indexer_version` | `option<string>` | `NONE` | The name of the embedder that produced the vector, for example `openai:text-embedding-3-small`. |
+| `text_de` | `option<string>` | set by a field rule | Receives `content` when `language` is `de`. Covered by `idx_text_de`. |
+| `text_fr` | `option<string>` | set by a field rule | Receives `content` when `language` is `fr`. Covered by `idx_text_fr`. |
+| `text_es` | `option<string>` | set by a field rule | Receives `content` when `language` is `es`. Covered by `idx_text_es`. |
+| `text_cjk` | `option<string>` | set by a field rule | Receives `content` when `language` is `ja`, `zh` or `ko`. Covered by `idx_text_cjk`. |
+| `text_code` | `option<string>` | set by a field rule | Receives `content` when `language` is one of the code languages listed below. Covered by `idx_text_code`. |
+
+### Indexes
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `child_unique` | `parent_key, filename` | `UNIQUE` | Makes a name unique in a folder, and serves every lookup of the children of a folder. The order of the fields matters: the reverse order forces a table scan. |
+| `idx_file_content` | `content` | `FULLTEXT ANALYZER fts_simple BM25(1.2,0.75)` | Full-text index for `fn::sfs_search_text`. |
+| `idx_hnsw_file_embedding` | `embedding` | `HNSW DIMENSION 1536 DIST COSINE TYPE F32 EFC 150 M 12 M0 24` | Vector index for `fn::sfs_search_semantic`. |
+| `idx_text_cjk` | `text_cjk` | `FULLTEXT ANALYZER sfs_cjk BM25(1.2,0.75)` | Per-language index for `text_cjk`. No function queries it. |
+| `idx_text_code` | `text_code` | `FULLTEXT ANALYZER sfs_code BM25(1.2,0.75)` | Per-language index for `text_code`. No function queries it. |
+| `idx_text_de` | `text_de` | `FULLTEXT ANALYZER sfs_de BM25(1.2,0.75)` | Per-language index for `text_de`. No function queries it. |
+| `idx_text_es` | `text_es` | `FULLTEXT ANALYZER sfs_es BM25(1.2,0.75)` | Per-language index for `text_es`. No function queries it. |
+| `idx_text_fr` | `text_fr` | `FULLTEXT ANALYZER sfs_fr BM25(1.2,0.75)` | Per-language index for `text_fr`. No function queries it. |
+
+The Kind column shows each index in the form that `INFO FOR TABLE` reports, without the `LM` value that the output also carries. `EFC 150`, `M 12` and `M0 24` are the defaults of an HNSW index, and `BM25(1.2,0.75)` is the default of `BM25`. Only `idx_hnsw_file_embedding` writes the HNSW values out in `file.surql`. The other HNSW indexes, on `file_chunk` and `file_section`, and the `idx_text_*` indexes leave them out and receive the same values.
+
+### Language fields
+
+The `text_*` fields receive a copy of `content` for the languages in the table below. Each has its own full-text index and analyser. No shipped code sets `language`, so the fields are empty until you set it, and no function queries these indexes. Query them with the `@@` operator.
+
+| Field | Receives `content` when `language` is | Analyser | Index |
+| --- | --- | --- | --- |
+| `text_de` | `de` | `sfs_de` | `idx_text_de` |
+| `text_fr` | `fr` | `sfs_fr` | `idx_text_fr` |
+| `text_es` | `es` | `sfs_es` | `idx_text_es` |
+| `text_cjk` | `ja`, `zh` or `ko` | `sfs_cjk` | `idx_text_cjk` |
+| `text_code` | `code`, `python`, `rust`, `typescript`, `javascript`, `go`, `c`, `cpp`, `html`, `css`, `json`, `yaml`, `toml`, `sql`, `surrealql` or `shell` | `sfs_code` | `idx_text_code` |
+
+```surql
+fn::sfs_write('/handbuch/konfiguration.txt', 'Die Konfigurationen der Systeme sind wichtig.', NONE, NONE, 'alice').path;
+//- '/handbuch/konfiguration.txt'
+
+fn::sfs_write('/handbuch/notes.txt', 'Configuration notes for the systems.', NONE, NONE, 'alice').path;
+//- '/handbuch/notes.txt'
+
+-- The default full-text search stems with English rules, so the German plural is not matched
+fn::sfs_search_text('Konfiguration', 5, 'any', 'alice').map(|$h| $h.path);
+//- []
+
+-- Set the language of the file. Nothing in the repository does this automatically
+UPDATE fn::sfs_resolve('/handbuch/konfiguration.txt') SET language = 'de' RETURN NONE;
+SELECT VALUE path FROM file WHERE text_de @@ 'Konfiguration';
+//- ['/handbuch/konfiguration.txt']
+
+SELECT VALUE path FROM file WHERE text_de != NONE;
+//- ['/handbuch/konfiguration.txt']
+```
+
+### Computed fields
+
+`path`, `is_folder` and `gate` are computed when a record is read, and the database never stores them. A rename or a move of a folder is one update to `filename` or `parent`, and the paths of all descendants follow.
+
+```surql
+fn::sfs_write('/projects/launch/plan.md', 'Launch plan', NONE, NONE, 'alice').path;
+//- '/projects/launch/plan.md'
+
+-- Renaming a folder is one update. The path of everything below it follows
+fn::sfs_mv('/projects/launch', '/projects/q4-launch', 'alice').path;
+//- '/projects/q4-launch'
+
+SELECT VALUE path FROM file WHERE filename = 'plan.md';
+//- ['/projects/q4-launch/plan.md']
+
+SELECT path, is_folder FROM file WHERE filename IN ['q4-launch', 'plan.md'] ORDER BY path;
+//- [{ is_folder: true, path: '/projects/q4-launch' }, { is_folder: false, path: '/projects/q4-launch/plan.md' }]
+```
+
+### Generation and hash
+
+The `hash` field is the MD5 of the text, or of the base64 text of the bytes without padding. The `evt_file_hash` event sets it after the content changes. The `generation` field starts at 1 and increases by 1 when the new content hashes differently from the stored `hash`, so identical content, `chmod`, `mv`, `chgrp` and `meta` updates leave it alone. A record user cannot write either field. A system credential can write `hash`, which then keeps that value until the content changes again, but the field rule recomputes `generation`, so a statement cannot set it directly.
+
+```surql
+fn::sfs_write('/notes/a.md', 'one', NONE, NONE, 'alice').generation;
+//- 1
+
+-- Identical content does not change the generation
+fn::sfs_write('/notes/a.md', 'one', NONE, NONE, 'alice').generation;
+//- 1
+
+fn::sfs_write('/notes/a.md', 'two', NONE, NONE, 'alice').generation;
+//- 2
+
+-- A mode change does not change the generation
+fn::sfs_chmod('/notes/a.md', 384);
+//- true
+
+fn::sfs_stat('/notes/a.md').{ generation, hash, mode };
+//- { generation: 2, hash: 'b8a9f715dbb64fd5c56e7783c6820a61', mode: 384 }
+
+crypto::md5('two');
+//- 'b8a9f715dbb64fd5c56e7783c6820a61'
+```
+
+> [!WARNING]
+> Under record authentication the database does not keep the value that it computes for `generation`, because the field has `PERMISSIONS FOR update WHERE false`. The counter keeps the value that it had, which is 1 for a file that a record user created, so `$if_generation` cannot detect a conflicting write.
+
+### Folder nesting depth
+
+The `gate` field refers to its parent's `gate`, so every level of folder depth adds work to each read and write of a record. Down to about four levels the time hardly changes. Beyond that, each extra level makes a write take roughly three times as long, and a read takes somewhat less than that. Keep trees shallow. The [data model](/docs/agent-filesystem/concepts/data-model#folder-depth) page has measurements.
+
+### Events
+
+All four events are defined on the `file` table, and they run for every client and every credential.
+
+| Event | Fires when | What it does |
+| --- | --- | --- |
+| `evt_file_move` | A record is updated and `parent` or `filename` changed. | For a session with `$auth` set, which means a record user, throws `sfs:denied: rename needs w+x on both folders` unless the user can add and remove entries in both the old and the new folder. It does nothing for a system credential. |
+| `evt_file_hash` | The event is not a delete, and `content` or `file` changed. | Updates `hash` to the MD5 of the text, the MD5 of the base64 text of the bytes, or `''`. |
+| `evt_file_jobs` | The same condition as `evt_file_hash`. | When the hash is not empty, creates or resets three `sfs_job` records for the file, with the kinds `detect`, `chunk` and `symbols`, the status `pending` and 0 attempts. |
+| `evt_file_version` | A record is deleted, or updated with a change to `generation`, `content`, `file`, `parent`, `filename` or `mode`. | Creates a `file_version` record with the state before the change. See [`file_version`](#file_version). |
+
+### Permissions for record users
+
+These clauses apply to a record user. The record's owner is `owner`, the digit that applies is chosen as described for [`fn::sfs_bits_grp`](/docs/agent-filesystem/reference/surrealql-functions#permission-predicates), and a closed folder above a record hides it through `gate`.
+
+| Operation | A record user may |
+| --- | --- |
+| Read | Read a record when the gate lets the user through and the applicable digit, with the group digit for a member of the record's `group`, has the read bit. The `indexer` access can read every record. |
+| Create | Create a record that has the user's own name as `owner`, in a folder where the user has write and entry permission, and not in a way that breaks the `/home` rules. A record directly under `/` has no folder, so the folder test passes for every record user. |
+| Update | Change a record when the gate lets the user through and the user has either the write bit on the record or write and entry permission on its folder. The `indexer` access can always update. The field rules below then limit which fields change. |
+| Delete | Delete a record from a folder where the user has write and entry permission, when the record has no children, has no legal hold of its own and does not break the `/home` rules. For a record directly under `/` the folder test passes for every record user. |
+
+| Field | Who may update it |
+| --- | --- |
+| `owner`, `generation`, `hash` | Nobody. |
+| `group` | The owner, or `root`. |
+| `mode` | The owner. |
+| `file`, `content`, `symlink`, `content_type`, `meta`, `crdt`, `size` | A user with the write bit on the record, without group rules. |
+| `language`, `encoding`, `is_generated`, `digest` | A user with the write bit on the record, or the `indexer` access. |
+| `embedding`, `embedded_at`, `embedded_hash`, `indexer_version` | The `indexer` access. |
+
+A member of a record's group can read the record and create and rename entries in the folder, but cannot change its content, because the field rules ignore groups.
+
+> [!WARNING]
+> A record directly under `/` has no parent folder, and [`fn::sfs_can_enter`](/docs/agent-filesystem/reference/surrealql-functions#permission-predicates) returns `true` when the folder is `NONE`. The folder test therefore passes for every record user at the top level. Any record user can create a top-level record, can rename or move any top-level record that the user can read, and can delete any such record that has no children, whoever owns it. A move can also leave the owner unable to reach the file, because the `gate` of a file follows its folder. Only records below a folder that withholds write and entry permission from other users are protected by the folder rules, so files that need that protection belong inside a home folder such as `/home/alice`.
+
+> [!WARNING]
+> The delete rule reads only the `meta.legal_hold` flag of the record itself. A hold on a folder makes `fn::sfs_rm` refuse to delete the files inside it, but a direct `DELETE` of one of those files by a record user succeeds. A user with the write bit on a record, including a user who does not own it, can set or clear its hold with `fn::sfs_set_legal_hold`, because the `meta` field accepts that user's update.
+
+A refused field update is reverted without an error, and a refused delete deletes nothing, so the statement succeeds and the record stays as it was. A client has to read the record back to confirm a change.
+
+### The `/home` seed
+
+The last statements of `file.surql` create the folder `/home`, with the record id `file:home`, the owner `root`, the mode 511 and the content type `inode/directory`. An update first takes back a `/home` that someone else created, and an `INSERT IGNORE` creates it when it is missing, so applying the schema twice is safe. The rules for `/home` say that only `root` owns it and that a record directly under it must be named after its creator.
+
+## Search analysers
+
+An analyser turns text into the terms that a full-text index stores. The schema defines six. They use `IF NOT EXISTS`, so applying the schema again does not change an analyser that exists.
+
+| Analyser | Tokenizers | Filters | Used by |
+| --- | --- | --- | --- |
+| `fts_simple` | `blank`, `class`, `camel`, `punct` | `snowball(english)` | `idx_file_content`, and the query side of `fn::sfs_search_text` |
+| `sfs_de` | `blank`, `class` | `lowercase`, `snowball(german)` | `idx_text_de` |
+| `sfs_fr` | `blank`, `class` | `lowercase`, `snowball(french)` | `idx_text_fr` |
+| `sfs_es` | `blank`, `class` | `lowercase`, `snowball(spanish)` | `idx_text_es` |
+| `sfs_cjk` | `blank` | `ngram(1,2)` | `idx_text_cjk` |
+| `sfs_code` | `class`, `camel` | `lowercase` | `idx_text_code` |
+
+The `fts_simple` analyser keeps punctuation as terms, does not remove stop words and stems every language with the English rules. See [Search](/docs/agent-filesystem/concepts/search).
+
+## Content storage
+
+Four tables support the chunked upload that `surrealfs-rs upload` uses, and a fifth, `quota`, is defined for limits that no code enforces. A file committed through the upload has no `content` and no `file` bytes, so it reports `is_folder: true`. See [Content storage](/docs/agent-filesystem/concepts/content-storage) and the warning in the [chunked uploads](/docs/agent-filesystem/reference/surrealql-functions#chunked-uploads) section of the function reference.
+
+### `file_chunk`
+
+`file_chunk` holds the manifest of a file that was stored through the chunked upload, with one record for each chunk.
+
+**Written by:** `fn::sfs_upload_commit`, which fills `file`, `offset`, `length` and `blob`. No code writes the other fields.
+
+**Record access:** a record user can read a chunk record when the file is readable. Only the `indexer` access or a system credential can write it.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `file` | `record<file>` | required | The file that the chunk belongs to. |
+| `chunk_index` | `option<int>` | `NONE` | Never written. |
+| `byte_offset` | `option<int>` | `NONE` | Never written. |
+| `byte_length` | `option<int>` | `NONE` | Never written. |
+| `text` | `option<string>` | `NONE` | Never written. |
+| `embedding` | `option<array<float, 1536>>` | `NONE` | Never written. The index `idx_hnsw_chunk_embedding` covers it. |
+| `hash` | `option<string>` | `NONE` | Never written. |
+| `offset` | `option<int>` | `NONE` | The byte offset of the chunk in the file. |
+| `length` | `option<int>` | `NONE` | The length of the chunk in bytes. |
+| `blob` | `option<record<blob>>` | `NONE` | The `blob` record that holds the chunk. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_chunk_file_order` | `file, chunk_index` | standard | Lists the chunks of a file in order. No code fills `chunk_index`. |
+| `idx_chunk_offset` | `file, offset` | standard | Finds the chunks that cover a byte range. |
+| `idx_hnsw_chunk_embedding` | `embedding` | `HNSW DIMENSION 1536 DIST COSINE TYPE F32 EFC 150 M 12 M0 24` | Covers a field that no code writes. |
+
+### `blob`
+
+Each `blob` record is one stored chunk. The record id is the chunk id that the client chose. The Rust client uses `b3:` followed by a BLAKE3 hash. The bytes are stored inside the record. There is no external object store.
+
+**Written by:** `fn::sfs_upload_chunk` creates the record, and `fn::sfs_upload_commit` increases `refs`. Nothing decreases `refs`.
+
+**Record access:** every record user can read, create, update and delete these records, so a record user can read the bytes of another user's chunks.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `size` | `int` | required | The size of the chunk before compression. |
+| `stored` | `int` | required | The size of the stored bytes. |
+| `codec` | `string` | required | `none` or `zstd`, as the client reports it. The schema does not validate it. |
+| `tier` | `string` | required | Always `inline`. |
+| `bytes` | `option<bytes>` | `NONE` | The chunk data. |
+| `location` | `option<string>` | `NONE` | Never written. |
+| `refs` | `int` | `0` | The number of times that committed files refer to the chunk. It only grows. |
+| `scope` | `string` | required | The user that uploaded the chunk. Deduplication applies within a scope. |
+| `created_at` | `datetime` | `time::now()` | When the chunk was stored. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_blob_scope` | `scope` | standard | Finds the blobs of one scope, which `fn::sfs_upload_begin` lists. |
+
+### `upload`
+
+An `upload` record is an upload session. `fn::sfs_upload_begin` creates it and `fn::sfs_upload_commit` deletes it.
+
+**Written by:** `fn::sfs_upload_begin` and `fn::sfs_upload_chunk`. The `expires_at` field is not checked, and nothing deletes expired sessions.
+
+**Record access:** every record user can read, create, update and delete these records.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `path` | `string` | required | The path that the commit will create or replace. |
+| `caller` | `string` | required | The identity that began the upload. |
+| `scope` | `string` | required | The deduplication scope. It equals the identity. |
+| `size` | `int` | required | The size of the whole file in bytes. |
+| `chunk_ids` | `array<string>` | required | The chunk ids, in file order. |
+| `received_chunks` | `array<string>` | `[]` | The chunk ids that have arrived. |
+| `created_at` | `datetime` | `time::now()` | When the upload began. |
+| `expires_at` | `datetime` | `time::now() + 1d` | One day after creation. |
+
+### `usage`
+
+`usage` holds the disk usage of each scope and path, and `fn::sfs_du` reads it.
+
+**Written by:** `fn::sfs_upload_commit` only. Ordinary writes, deletes and moves do not touch it, and `stored_bytes` equals `logical_bytes`.
+
+**Record access:** every record user can read, create, update and delete these records.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `scope` | `string` | required | The user whose upload is counted. |
+| `path` | `string` | required | The path of the committed file. |
+| `files` | `int` | `0` | 1 for each committed file. |
+| `logical_bytes` | `int` | `0` | The size of the file. |
+| `stored_bytes` | `int` | `0` | The same as `logical_bytes`. Compression and deduplication are not reflected. |
+| `updated_at` | `datetime` | `time::now()` | When the record last changed. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_usage_scope_path` | `scope, path` | `UNIQUE` | Allows one usage record for each scope and path. |
+
+### `quota`
+
+`quota` is intended to hold the limits for a scope. No code reads this table, so no limit is enforced.
+
+**Written by:** nothing. A record exists only if you create it.
+
+**Record access:** every record user can read, create, update and delete these records.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `scope` | `string` | required | The user the limit is for. |
+| `max_bytes` | `int` | required | The byte limit. Not enforced. |
+| `max_files` | `option<int>` | `NONE` | The file limit. Not enforced. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_quota_scope` | `scope` | `UNIQUE` | Allows one quota for each scope. |
+
+## Versions
+
+### `file_version`
+
+`file_version` holds a snapshot of the state that a file had before a change. The `evt_file_version` event writes it when the text, bytes, mode, name or parent changes, and when the file is deleted. After a write, the snapshot holds the earlier text. A `chmod` or a rename changes no text, so its snapshot holds the live text together with the earlier mode, owner and gate, and the current generation and text then appear in this table too. History is keyed by path.
+
+**Written by:** the `evt_file_version` event only.
+
+**Record access:** a record user can read a snapshot when the owner, mode and gate stored in the snapshot allow it, so a later `chmod` does not make earlier snapshots private. The snapshot that a `chmod` creates carries the earlier mode and the live text. A user who could read a file before it was made private can therefore still read its current text through [`fn::sfs_history`](/docs/agent-filesystem/reference/surrealql-functions#fnsfs_history) and [`fn::sfs_version_content`](/docs/agent-filesystem/reference/surrealql-functions#fnsfs_version_content). Nobody can write the table directly.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `file` | `record<file>` | required | The file that the snapshot belongs to. |
+| `generation` | `int` | required | The generation that the file had before the change. A `chmod` or `rename` snapshot has the current generation, and a `chmod` snapshot and the next `write` snapshot can share a generation. |
+| `path` | `option<string>` | `NONE` | The path at the time of the event. For a rename, the new path. |
+| `content` | `option<string>` | `NONE` | The text before the change. |
+| `file_bytes` | `option<bytes>` | `NONE` | The bytes before the change. |
+| `content_type` | `string` | required | The content type before the change. |
+| `hash` | `string` | required | The hash before the change. |
+| `author` | `string` | required | `fn::sfs_me()` when there is one, otherwise the owner of the file. Under a system credential the author is therefore the owner, not the writer. |
+| `owner` | `string` | required | The owner before the change. |
+| `mode` | `int` | required | The mode before the change. |
+| `gate` | `option<string>` | `NONE` | The gate of the parent at the time of the event. |
+| `op` | `string` | required | `delete` for a delete. Otherwise `chmod` when the mode changed, `rename` when the name or parent changed, and `write` in every other case. |
+| `size` | `int` | required | The characters of the text, or the bytes, or 0 for a folder. |
+| `created_at` | `datetime` | required | When the snapshot was taken. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_version_file_gen` | `file, generation` | standard | Finds the snapshots of a file by generation. |
+| `idx_version_path` | `path` | standard | Serves `fn::sfs_history`. |
+
+## Search and understanding
+
+These tables hold the derived data that search and code intelligence use. Of them, only `file_section` is filled by the Python client, and most of the others are filled only by explicit Rust commands. See [Sections and chunking](/docs/agent-filesystem/concepts/sections-and-chunking) and [Understanding pipeline](/docs/agent-filesystem/concepts/understanding-pipeline).
+
+### `file_section`
+
+`file_section` holds the sections of text files, each with its own embedding, for `fn::sfs_search_sections`. A section is the text under a Markdown heading, a top-level Python function or class, or a window of 50 lines that overlaps the next window by 10. A short file is one section.
+
+**Written by:** the Python client's `reindex_embeddings`, which runs as `root` and needs an embedder that you supply. Neither the Python client nor the `surrealfs-rs` command writes sections when a file is written, and deleting a file leaves its sections behind.
+
+**Record access:** a record user can read a section when the parent file is readable. Only the `indexer` access or a system credential can write it.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `file_id` | `record<file>` | required | The file that the section belongs to. |
+| `section_idx` | `int` | required | The position of the section in the file, from 0. |
+| `heading` | `string` | required | As the Python client writes it. For Markdown, the heading path joined with ` > `, `Overview` for text before the first heading, and an empty string for a file that has no headings. For Python, `def name` or `class name`, `Imports & Module Docs` for the text before the first definition, and `Module` for a file with no top-level definition. For other text of 30 lines or fewer, the file name or `Document`. Otherwise a label such as `Lines 1-50`. |
+| `line_start` | `int` | required | The first line, from 1. |
+| `line_end` | `int` | required | The last line, inclusive. |
+| `content` | `string` | required | The text of the section. |
+| `embedding` | `option<array<float, 1536>>` | `NONE` | The vector of the section. It must have 1536 numbers. |
+| `source_hash` | `string` | required | The MD5 of the section text. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_section_hnsw` | `embedding` | `HNSW DIMENSION 1536 DIST COSINE TYPE F32 EFC 150 M 12 M0 24` | Vector index for `fn::sfs_search_sections`. |
+| `idx_section_unique` | `file_id, section_idx` | `UNIQUE` | Allows one section for each position in a file. |
+
+### `sfs_job`
+
+`sfs_job` is a queue of jobs for the understanding pipeline. The `evt_file_jobs` event adds three jobs for each file: `detect`, `chunk` and `symbols`. The record id is an array of the file's id as a string and the job kind, so writing a file again resets the same three records.
+
+**Written by:** `evt_file_jobs` creates and resets jobs, and `fn::sfs_job_claim` and `fn::sfs_job_complete` update them. Neither the Python client nor the Rust command-line client processes a job, so jobs stay `pending` unless a worker or `surrealfs-rs jobs` claims them.
+
+**Record access:** only the `indexer` and `projector` accesses can read or write jobs. System credentials bypass the rule.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `file_id` | `record<file>` | required | The file that the job is for. |
+| `kind` | `string` | required | `detect`, `chunk` or `symbols`. |
+| `source_hash` | `string` | required | The MD5 of the content when the job was queued. |
+| `status` | `string` | `'pending'` | `pending`, `processing`, `completed` or `failed`. |
+| `attempts` | `int` | `0` | How many times a worker has claimed the job. |
+| `error` | `option<string>` | `NONE` | The message of a failed job. A reset does not clear it. |
+| `locked_by` | `option<string>` | `NONE` | The worker that holds the lease. |
+| `locked_until` | `option<datetime>` | `NONE` | When the lease expires. `fn::sfs_job_claim` sets it to 60 seconds ahead. |
+| `created_at` | `datetime` | `time::now()` | When the job was first queued. |
+| `updated_at` | `datetime` | `time::now()` on every write | When the job last changed. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_job_status` | `status, locked_until` | standard | Serves `fn::sfs_job_claim`. |
+
+### `symbol`
+
+`symbol` holds the named definitions in source files, and `fn::sfs_symbols` and `fn::sfs_definition` read them.
+
+**Written by:** the Rust client, with `surrealfs-rs symbols --index`, which extracts symbols from Rust, Python, TypeScript, JavaScript and Go files with regular expressions. A symbol is a snapshot that a rewrite of the file does not refresh, and deleting the file leaves it behind.
+
+**Record access:** a record user can read a symbol when the file is readable. Only the `indexer` access or a system credential can write it.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `file_id` | `record<file>` | required | The file that contains the definition. |
+| `name` | `string` | required | The identifier. |
+| `qualified` | `string` | required | The file stem and the name, joined with `.` or, for Rust, `::`. A method is not qualified by its class. |
+| `kind` | `string` | required | `function`, `method`, `class`, `struct`, `enum`, `trait`, `interface` or `type`, depending on the language. |
+| `language` | `string` | required | The language that the extractor used. |
+| `signature` | `option<string>` | set by a field rule | The text of the defining line. A `null` value is stored as `NONE`. |
+| `doc` | `option<string>` | set by a field rule | The comment or docstring directly above or below the definition. A `null` value is stored as `NONE`. |
+| `line_start` | `int` | required | The first line of the definition, from 1. |
+| `line_end` | `int` | required | The last line, as the extractor estimates it. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_symbol_file` | `file_id` | standard | Finds the symbols of a file. |
+| `idx_symbol_name` | `name` | standard | Finds symbols by `name`, for `fn::sfs_definition`. |
+| `idx_symbol_qualified` | `qualified` | standard | Finds symbols by `qualified`, for `fn::sfs_definition`. |
+
+### `folder_digest`
+
+`folder_digest` is intended to hold a cached summary of a folder for `fn::sfs_digest`.
+
+**Written by:** nothing. A record exists only if you create it. When one exists, `fn::sfs_digest` returns its `summary` and ignores the other fields.
+
+**Record access:** a record user can read a digest when the folder is readable. Only the `indexer` access or a system credential can write it.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `folder_id` | `record<file>` | required | The folder that the digest describes. |
+| `path` | `string` | required | The path of the folder. |
+| `merkle_hash` | `string` | required | Never computed by any code, and not read by any function. |
+| `summary` | `string` | required | The text that `fn::sfs_digest` returns as `summary`. |
+| `notable_files` | `array<string>` | `[]` | Not read by any function. |
+| `private_count` | `int` | `0` | Not read by any function. |
+| `updated_at` | `datetime` | `time::now()` on every write | When the record last changed. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_folder_digest_folder` | `folder_id` | `UNIQUE` | Allows one digest for each folder. |
+| `idx_folder_digest_path` | `path` | `UNIQUE` | Allows one digest for each path. |
+
+### `entity`
+
+An `entity` record is a named thing that files mention: a person, system, company, ticket or tag. The schema comment lists the kinds `person`, `company`, `system`, `project`, `ticket` and `tag`, and does not enforce them.
+
+**Written by:** the Rust client's `record_entities` library call. Neither the Python client nor a `surrealfs-rs` command records entities, so the table is empty unless an integrator fills it.
+
+**Record access:** a record user can read an entity when some file mentions it. Because the rule tests the `mentions` links without filtering them, a record user can see the name of an entity that only a private file mentions.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | `string` | required | The name as it appears in the text, for example `SEC-1042`. |
+| `kind` | `string` | required | A free string. The schema comment lists the kinds named above. |
+| `created_at` | `datetime` | `time::now()` | When the entity was first recorded. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_entity_name_kind` | `name, kind` | `UNIQUE` | Allows one entity for each name and kind. |
+
+### `mentions`
+
+A `mentions` record links a file to an entity that it mentions, and has only `id`, `in` and `out`.
+
+**Written by:** the Rust client's `record_entities` library call. Deleting the file deletes its links.
+
+**Record access:** a record user can read a link when the file is readable. The `indexer` access, a system credential or a user who can write the file can create or delete it.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `in` | `record<file>` | required | The file. |
+| `out` | `record<entity>` | required | The entity. |
+
+### `file_row`
+
+`file_row` holds one record for each row of a CSV or TSV file that was loaded for `fn::sfs_query_table`. The load takes at most 1,000 rows by default, and the `--max-rows` option of `surrealfs-rs table-load` changes the limit.
+
+**Written by:** the Rust client, with `surrealfs-rs table-load`. The records are a snapshot of the file at load time.
+
+**Record access:** a record user can read a record when the file is readable, and can write it when the file is writable.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `file_id` | `record<file>` | required | The file that the data came from. |
+| `sheet` | `option<string>` | `NONE` | Never written. |
+| `row_idx` | `int` | required | The position of the row in the file, from 0. |
+| `data` | `object` | required | An object with one value for each header. Values are typed as integers, floats, booleans or strings. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_file_row_pos` | `file_id, row_idx` | `UNIQUE` | Allows one record for each row position of a file. |
+
+## Links
+
+Five tables with the same definition record typed links between files. Each is a relation table from `file` to `file`, and has only the fields `in` and `out` beside its `id`. A record user can read a link when both files are readable, and can create or delete it when the source file is writable. See [Links and entities](/docs/agent-filesystem/concepts/links-and-entities).
+
+| Table | Meaning | Written by |
+| --- | --- | --- |
+| `references` | The source refers to the target. | `fn::sfs_relate` |
+| `supersedes` | The source replaces the target. No component prefers the newer file. | `fn::sfs_relate` |
+| `derives_from` | The source was derived from the target. | `fn::sfs_relate` |
+| `implements` | The source implements the target. | `fn::sfs_relate` |
+| `links_to` | Created from the Markdown links and wikilinks of a text file by the Python client. Each write of the source adds new links, so duplicates accumulate, and a link that is removed from the text stays. | `fn::sfs_relate`, and the Python client's `write_text` and `edit` |
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `in` | `record<file>` | The source file. |
+| `out` | `record<file>` | The target file. |
+
+## Concurrency and collaboration
+
+See [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases), [Workspaces](/docs/agent-filesystem/concepts/workspaces) and [Collaborative editing](/docs/agent-filesystem/concepts/collaborative-editing).
+
+### `file_lock`
+
+A `file_lock` record is an advisory lease on a file. A file has at most one lease, and nothing enforces it.
+
+**Written by:** `fn::sfs_acquire_lock` and `fn::sfs_release_lock`. An expired record stays until someone replaces or deletes it, and deleting a leased file leaves the record behind.
+
+**Record access:** a record user can read a lease when the file is readable. A user can create a lease for themselves on a file that they can write, and can update or delete their own lease or any expired one.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `file` | `record<file>` | required | The leased file. |
+| `path` | `string` | required | The path that the holder passed. It is not updated when the file moves. |
+| `holder` | `string` | required | The identity that holds the lease. |
+| `reason` | `string` | required | A note for other agents. |
+| `expires_at` | `datetime` | required | When the lease ends, on the server clock. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_lock_file` | `file` | `UNIQUE` | One lease per file. |
+
+### `workspace`
+
+A workspace is a named branch of the file tree that belongs to one owner. The `workspace` record holds the name and owner, and `file_branch` records hold the files.
+
+**Written by:** `fn::sfs_fork_workspace`. `fn::sfs_merge_workspace` and `fn::sfs_discard_workspace` delete it. Nothing sets `is_public`. The table's read rule, `list_workspaces` in the Python client and `listWorkspaces` in the TypeScript SDK do consult it.
+
+**Record access:** a record user can read a workspace that the user owns or that is public, and can change only their own.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | `string` | required | The name that the owner chose. Unique for each owner. |
+| `owner` | `string` | required | The identity that owns the workspace. |
+| `is_public` | `bool` | `false` | Never set by shipped code. |
+| `created_at` | `datetime` | `time::now()` | When the workspace was forked. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_workspace_owner_name` | `owner, name` | `UNIQUE` | Makes a workspace name unique for each owner. |
+
+### `file_branch`
+
+A `file_branch` record describes one file in a workspace: the file that it was forked from, the generation at the fork and the workspace's copy.
+
+**Written by:** `fn::sfs_fork_workspace` creates the records, and the `write_workspace_text` method of the Python client and the `writeWorkspaceText` method of the TypeScript SDK point `current_file` at a copy under `/.workspaces`.
+
+**Record access:** a record user can read a record when the base file is readable, and can change it when the user owns the workspace.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `workspace` | `record<workspace>` | required | The workspace. |
+| `base_file` | `record<file>` | required | The file on the main tree. |
+| `path` | `string` | required | The path at the time of the fork. |
+| `branched_at` | `datetime` | `time::now()` | When the fork happened. |
+| `base_gen` | `int` | `1` | The generation of `base_file` at the fork. A merge fails when the file's generation differs. |
+| `current_file` | `option<record<file>>` | `NONE` | The file that holds the workspace's text. It starts as `base_file`. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_branch_ws_path` | `workspace, path` | `UNIQUE` | Allows one record for each path in a workspace. |
+
+### `file_crdt`
+
+`file_crdt` is intended to hold the state of each peer in collaborative editing. No code reads or writes it.
+
+**Written by:** nothing.
+
+**Record access:** a record user can read a record when the file is readable, and can change a record that has their name in `peer_owner`.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `file_id` | `record<file>` | required | The document. |
+| `peer_id` | `string` | required | The peer. |
+| `peer_owner` | `string` | required | The identity that owns the peer. |
+| `state_vec` | `bytes` | required | The state vector of the peer. |
+| `clock` | `int` | required | The logical clock of the peer. |
+| `updated_at` | `datetime` | `time::now()` on every write | When the record last changed. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_file_crdt` | `file_id, peer_id` | `UNIQUE` | Allows one record for each peer of a document. |
+
+### `file_crdt_update`
+
+`file_crdt_update` is the append-only log of a collaborative document, and each record holds one binary Yjs update.
+
+**Written by:** the Python, Rust and TypeScript clients, when they write to a file whose `crdt` field is `true`.
+
+**Record access:** a record user can read an update when the file is readable. A user can create an update with their own name as `author` on a file that they can write. Nobody can update or delete an update.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `file_id` | `record<file>` | required | The document. |
+| `seq` | `int` | required | The position in the log. The unique index rejects a second update with the same position, which is how two writers collide. |
+| `update_bytes` | `bytes` | required | The Yjs update. |
+| `author` | `string` | required | The identity that the client passed. |
+| `base_gen` | `int` | required | The generation of the file when the writer loaded the document. Nothing reads it. |
+| `created_at` | `datetime` | `time::now()` on every write | When the update was logged. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_crdt_seq` | `file_id, seq` | `UNIQUE` | Rejects a second update with the same position in the log of a document. |
+
+### `file_crdt_snapshot`
+
+`file_crdt_snapshot` holds a full state of a collaborative document that replaces the first updates of its log. A document has at most one snapshot.
+
+**Written by:** `compact_crdt` and `enable_crdt` in the clients. Compaction is manual.
+
+**Record access:** a record user can read a snapshot when the file is readable, and can write one as its author. A record user cannot delete the older update records, so compaction by a record user does not reclaim space.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `file_id` | `record<file>` | required | The document. |
+| `upto` | `int` | required | The sequence number of the last update that the snapshot includes. |
+| `state` | `bytes` | required | The full Yjs state. |
+| `author` | `string` | required | The identity that wrote the snapshot. |
+| `created_at` | `datetime` | `time::now()` on every write | When the snapshot was written. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_crdt_snap` | `file_id` | `UNIQUE` | Allows one snapshot for each document. |
+
+## Groups and sharing
+
+See [Groups and sharing](/docs/agent-filesystem/security/groups-and-sharing) and [Credentials](/docs/agent-filesystem/security/credentials).
+
+### `user_group`
+
+`user_group` holds the names of groups. A file's `group` field refers to a name here by convention, and nothing checks it.
+
+**Written by:** `fn::sfs_create_group`, and `fn::sfs_add_group_member` when the group is missing.
+
+**Record access:** every record user can read the table. Record users cannot write it.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | `string` | required | The group name. Unique. |
+| `description` | `option<string>` | `NONE` | A free description. |
+| `created_at` | `datetime` | `time::now()` | When the group was created. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_user_group_name` | `name` | `UNIQUE` | Makes a group name unique. |
+
+### `group_member`
+
+`group_member` records the membership of a group as a pair of strings, and neither string is checked against another table.
+
+**Written by:** `fn::sfs_add_group_member` and `fn::sfs_remove_group_member`.
+
+**Record access:** every record user can read the table. Record users cannot write it.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `group_name` | `string` | required | The group name. |
+| `user_id` | `string` | required | A user name. |
+| `added_at` | `datetime` | `time::now()` | When the user was added. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_group_member_uniq` | `group_name, user_id` | `UNIQUE` | Allows a user to join a group once. |
+| `idx_group_member_user` | `user_id` | standard | Finds the groups of a user, for `fn::sfs_get_user_groups`. |
+
+### `share`
+
+A `share` record holds a token for a path. In this release nothing turns a token into file access.
+
+**Written by:** `fn::sfs_create_share` and `fn::sfs_revoke_share`.
+
+**Record access:** every record user can read the table, including the tokens. A user can create, update and delete the shares that they created.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `path` | `string` | required | The shared path. |
+| `mode` | `string` | `'ro'` | `ro` or `append` according to the schema comment. Not validated, and nothing interprets it. |
+| `token` | `string` | required | 32 random alphanumeric characters. |
+| `created_by` | `string` | required | The identity that created the share. |
+| `expires_at` | `option<datetime>` | `NONE` | `NONE` for a share that does not expire. |
+| `revoked` | `bool` | `false` | `true` after `fn::sfs_revoke_share`. |
+| `created_at` | `datetime` | `time::now()` | When the share was created. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_share_token` | `token` | `UNIQUE` | Makes a token unique, and serves `fn::sfs_resolve_share`. |
+
+### `credential`
+
+A `credential` record holds a credential for the protocol servers: WebDAV, S3, SSH, Slack, Teams or bearer tokens. See [Credentials](/docs/agent-filesystem/security/credentials).
+
+**Written by:** the Rust client, with `surrealfs-rs credential create`.
+
+**Record access:** no record user can read or write the table. The rule tests for an access method named `admin`, which the schema does not define.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `kind` | `string` | required | One of `webdav`, `s3`, `ssh`, `slack`, `teams` and `bearer`. |
+| `identifier` | `string` | required | The user name, access key, key fingerprint or token, depending on the kind. |
+| `secret_hash` | `option<string>` | `NONE` | Despite the name, the Rust command line stores the value that it is given without hashing it. The protocol servers accept a plaintext match or an unsalted SHA-256 digest, and a missing value matches any secret. |
+| `user_id` | `string` | required | The identity that the credential stands for. |
+| `enabled` | `bool` | `true` | `false` after a revoke. A disabled credential does not resolve. |
+| `created_at` | `datetime` | `time::now()`, read-only | When the credential was created. |
+| `meta` | `option<object>` | `NONE` | Free-form data. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_credential_lookup` | `kind, identifier` | `UNIQUE` | Allows one credential for each kind and identifier, and serves `fn::sfs_resolve_credential`. |
+
+## Operations
+
+### `webhook`
+
+A `webhook` record registers an outbound HTTP call for file events. See [Webhooks](/docs/agent-filesystem/operations/webhooks).
+
+**Written by:** the Rust client, with `surrealfs-rs webhook create`. Nothing in the repository emits an event, so a registered webhook never fires until a host application calls the dispatcher.
+
+**Record access:** a record user can read and write the webhooks that the user owns.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `owner` | `string` | `fn::sfs_me()` | The identity that registered the webhook. The default is `fn::sfs_me()`. |
+| `path_pattern` | `string` | required | A glob for the paths that the webhook covers. |
+| `events` | `array<string>` | required | Event names, as free strings. `*` matches every event. |
+| `url` | `string` | required | The address that receives the call. Any address is accepted. |
+| `secret` | `string` | required | The key for the HMAC-SHA256 signature of the body. It is stored in plain text. |
+| `active` | `bool` | `true` | `true` when the webhook is created. No command changes it. |
+| `created_at` | `datetime` | `time::now()` | When the webhook was registered. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_webhook_owner` | `owner` | standard | Finds the webhooks of an owner. |
+
+### `webhook_delivery`
+
+A `webhook_delivery` record logs one outbound call.
+
+**Written by:** the Rust webhook dispatcher.
+
+**Record access:** a record user can read the deliveries of their own webhooks. Record users cannot write the table.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `webhook_id` | `record<webhook>` | required | The webhook that was called. |
+| `owner` | `string` | required | The owner of the webhook. |
+| `event` | `string` | required | The event name that triggered the call. |
+| `path` | `string` | required | The path that the event concerned. |
+| `status_code` | `option<int>` | `NONE` | The HTTP status, when there was a response. |
+| `success` | `bool` | required | `true` for a successful response. |
+| `error` | `option<string>` | `NONE` | The error text of a failed delivery. |
+| `attempts` | `int` | `1` | The number of attempts for this delivery. |
+| `delivered_at` | `datetime` | `time::now()` | When the delivery finished. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_delivery_webhook` | `webhook_id` | standard | Finds the deliveries of a webhook. |
+
+### `git_commit`
+
+A `git_commit` record holds the metadata of a commit from an imported Git repository.
+
+**Written by:** the Rust client, with `surrealfs-rs import-git`.
+
+**Record access:** every record user can read the table. Only the `indexer` access or a system credential can write it.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `sha` | `string` | required | The commit hash. |
+| `author_name` | `string` | required | The name of the commit author. |
+| `author_email` | `string` | required | The email address of the commit author. |
+| `timestamp` | `string` | required | A string, as Git reports it. |
+| `message` | `string` | required | The commit message. |
+| `target_root` | `string` | required | The folder that the repository was imported into. |
+| `created_at` | `datetime` | `time::now()`, read-only | When the commit was recorded. |
+
+| Index | Fields | Kind | Purpose |
+| --- | --- | --- | --- |
+| `idx_git_commit_sha` | `sha` | standard | Finds a commit by its hash. |
+
+## Record authentication
+
+`record_auth.surql` is optional. Without it the permission clauses above do nothing for the clients that Agent Filesystem ships, because they sign in with a system credential. With it, a user can sign in as a record user, and the database enforces the rules itself. Provision users with `python -m surrealfs.users add name --password hunter123`, which also creates the user's private home folder. The command takes its connection settings only from the `SURREALDB_*` environment variables, and the [function reference](/docs/agent-filesystem/reference/surrealql-functions#calling-the-functions-as-a-record-user) shows the full sequence. See [Record access](/docs/agent-filesystem/security/record-access).
+
+### `user`
+
+The record id is the user name, for example `user:alice`, so `fn::sfs_me()` reads the name from `$auth` without fetching a record, and the name is unique by construction.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `password` | `string` | required | An Argon2 hash, which `surrealfs.users` creates with `crypto::argon2::generate`. |
+| `created_at` | `datetime` | `time::now()`, read-only | When the user was created. |
+
+A record user can read only their own record, which includes the password hash. Nobody can create, change or delete a `user` record through a record session. There is no sign-up, so an administrator with a system credential creates every user.
+
+### Access methods
+
+| Access | Signs in | Duration |
+| --- | --- | --- |
+| `account` | A user that exists, whose name is not `root`, `indexer`, `projector` or `compactor`, and whose password matches. | Token 15 minutes, session 12 hours |
+| `indexer` | The user named `indexer` only. | The same |
+| `projector` | The user named `projector` only. | The same |
+| `compactor` | The user named `compactor` only. | The same |
+
+The `account` access is the one that the Python clients use. The `indexer` access has extra rights: it can read every `file` record, it can update records that the field rules allow without passing the gate, and it is the only access that can write the embedding fields and most of the derived tables. The `projector` access appears only in the rule for `sfs_job`, and nothing else uses the `compactor` access. The shipped Python surfaces cannot sign in through the three special accesses.
+
+## Tables that clients create without a definition
+
+Some clients write to tables that the schema does not define, so SurrealDB creates them as schemaless tables without permissions. A record user cannot read or write them.
+
+| Table | Created by |
+| --- | --- |
+| `agent_mailbox` | The Rust client's table-based mailbox. |
+| `file_mailbox` | The TypeScript SDK's table-based mailbox. |
+
+The two names differ, so a Rust sender and a TypeScript worker do not see each other's messages. The Python and TypeScript file-based mailboxes use ordinary files under `/agents` instead. See [Mailboxes](/docs/agent-filesystem/concepts/mailboxes).
+
+## What happens when a file is deleted
+
+A delete removes the `file` record and the link records that touch it. Other tables that point at the file by a record link are not cleaned up.
+
+| Table | After a delete |
+| --- | --- |
+| `file_version` | A snapshot with the operation `delete` is added. |
+| `references`, `supersedes`, `derives_from`, `implements`, `links_to`, `mentions` | The links that touch the file are deleted. |
+| `file_section`, `symbol`, `file_row`, `sfs_job`, `entity` | The records remain. Those that point at the file now point at a record that does not exist, and a section or a symbol in that state can make a search or a lookup fail. |
+| `file_lock` | The record remains until it is replaced or deleted. |
+| `file_chunk`, `blob`, `usage` | The records remain, and `refs` is not decreased. |
+| `file_crdt_update`, `file_crdt_snapshot` | The records remain. |
+
+```surql
+fn::sfs_write('/notes/a.md', 'one', NONE, NONE, 'alice').path;
+//- '/notes/a.md'
+
+SELECT count() AS jobs FROM sfs_job GROUP ALL;
+//- [{ jobs: 3 }]
+
+fn::sfs_rm('/notes/a.md', false, 'alice');
+//- true
+
+-- The jobs of the deleted file remain
+SELECT count() AS jobs FROM sfs_job GROUP ALL;
+//- [{ jobs: 3 }]
+
+-- A snapshot with the operation delete records the removal
+SELECT op, path FROM file_version;
+//- [{ op: 'delete', path: '/notes/a.md' }]
+```
+
+Deleting a folder with [`fn::sfs_rm`](/docs/agent-filesystem/reference/surrealql-functions#fnsfs_rm) removes the folder and its direct children only. Records deeper in the tree stay in the `file` table, and they are no longer reachable by path.
+
+## See also
+
+- [Data model](/docs/agent-filesystem/concepts/data-model) describes the `file` table in prose.
+- [SurrealQL function reference](/docs/agent-filesystem/reference/surrealql-functions) describes the functions that read and write these tables.
+- [Permissions](/docs/agent-filesystem/security/permissions) and [Record access](/docs/agent-filesystem/security/record-access) describe how the permission rules work.
+- [Limits and caveats](/docs/agent-filesystem/operations/limits-and-caveats) lists the known limits of this release.

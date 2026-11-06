@@ -1,0 +1,661 @@
+---
+position: 6
+title: Command-line reference
+description: "Reference for the surrealfs and surrealfs-rs programs: install, connection settings, every subcommand and flag, and the commands that do not work yet."
+---
+
+# Command-line reference
+
+Agent Filesystem has two command-line programs: `surrealfs`, written in Python, and `surrealfs-rs`, written in Rust. Both work on the same `file` table in a SurrealDB database, so a file written by one program can be read by the other. This page lists how to install and connect each program, and every subcommand, argument and flag. For a first run, follow the [command-line quickstart](/docs/agent-filesystem/quickstarts/command-line).
+
+> [!NOTE]
+> Agent Filesystem is in beta, and the command-line interface may change in breaking ways between releases. This page describes the `next` branch of the SurrealFS repository. Where a command behaves differently from what its name suggests, the difference is stated next to the command, and [Commands that do not work yet](#commands-that-do-not-work-yet) lists the commands that do not yet do what their names say.
+
+## Choose a program
+
+The two programs have different commands, different settings and different defaults, so they are not interchangeable.
+
+| | `surrealfs` | `surrealfs-rs` |
+| --- | --- | --- |
+| Written in | Python | Rust |
+| Installed with | `pip`, from the repository | `cargo install`, from the repository |
+| Top-level subcommands | 9 | 48 |
+| File operations (`ls`, `cat`, `write`, `rm` and so on) | None. Use the [Python SDK](/docs/agent-filesystem/interfaces/python-sdk), the [MCP server](/docs/agent-filesystem/interfaces/mcp-server) or `surrealfs-rs` | Yes |
+| Commands | `status`, `schema`, `users`, `lock`, `history`, `restore`, `grep`, `init`, `mcp` | Files, versions, workspaces, leases, permissions, sharing, archives, backups, encryption, git import and servers |
+| Signs in as | A root, namespace, database or record user, chosen with `SURREALDB_AUTH_LEVEL` | A root user only |
+| Acts as | A named user: `SURREALFS_AGENT_USER`, the record user, or the operating system account. Never `root` | The `--caller` name. When it is not set, most commands use the `--user` name, and `fork`, `diff`, `merge`, `lock` and `mount` use `root` |
+| Permission checks | Enforced by `grep` and `restore`. `history` and `lock acquire` do not check access | Only the commands that read the content of a file check the caller. The commands that write, move, remove or list files do not |
+| Defines the schema | On connect for `status`, `schema apply`, `lock`, `history`, `restore` and `grep`, except under record access and in remote mode | Only when you run `surrealfs-rs init` |
+| Namespace setting | `SURREALDB_NAMESPACE`, default `surrealfs` | `--ns` or `SURREALDB_NS`, default `surrealfs` |
+| Database setting | `SURREALDB_DATABASE`, default `demo` | `--db` or `SURREALDB_DB`, default `surrealfs` |
+
+Both programs print `surrealfs 0.2.0` for `--version`. With no settings, the two programs use different databases in the same namespace: `demo` for `surrealfs` and `surrealfs` for `surrealfs-rs`. Set the namespace and database explicitly for both programs when they should share one database.
+
+> [!WARNING]
+> `surrealfs-rs` signs in as a root user and treats `--caller` as a label, so most of its commands do not check permissions. Use the [Python SDK](/docs/agent-filesystem/interfaces/python-sdk) or the `surrealfs` program where permissions matter. See [Permissions](/docs/agent-filesystem/security/permissions).
+
+In this release only the commands that read the content of a file check the caller against the file's mode. They are `cat`, `chunk`, `detect`, `symbols -i`, `table-load`, `decrypt`, `export` and `backup`, and each refuses a file that the caller may not read with `Permission denied`. The command `digest` counts only the files that the caller may read and reports the others as `private_unsummarised`. The commands that list, search, copy, write, move, restore or remove a file, and `chmod` and `lock acquire`, do not check permissions.
+
+With `--caller bob`, `cat` refuses a file with mode `0600` that belongs to `alice`. The commands `ls`, `grep`, `history`, `cp`, `write`, `restore`, `chmod`, `mv`, `rm` and `lock acquire` all succeed on it, and `cp` gives `bob` a copy that he can read. The commands also list and search `alice`'s `/home` folder.
+
+## Install
+
+### The Python program
+
+The Python program is the `surrealfs` package. As of version 0.2.0 the package is not published on PyPI, so `pip install surrealfs` finds nothing. Install it from the repository, which needs `git` on the `PATH`. A virtual environment keeps the install apart from other projects, because the package pins the beta SDK `surrealdb==3.0.0b8` exactly. Python distributions that mark the system Python as externally managed (PEP 668) refuse `pip install` outside a virtual environment.
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install "surrealfs @ git+https://github.com/surrealdb/surrealfs.git@next"
+```
+
+The package declares Python 3.11 or later as its requirement, and the sample output on this page comes from Python 3.12. It installs two commands: `surrealfs` and `surrealfs-mcp`.
+
+The `mcp` subcommand and `surrealfs-mcp` need the `mcp` extra, which you name in brackets after the package. The extra installs the MCP library and `python-dotenv`, which reads the configuration file. See the [MCP server](/docs/agent-filesystem/interfaces/mcp-server). For example:
+
+```bash
+pip install "surrealfs[mcp] @ git+https://github.com/surrealdb/surrealfs.git@next"
+```
+
+Without the extra, `surrealfs mcp` stops with `No module named 'mcp'` once a configuration exists. Before that, it prints `no configuration found` and the file that it looked for. The [Python SDK](/docs/agent-filesystem/interfaces/python-sdk#install) page lists the other extras. The file browser is not a Python command: the Rust gateway serves it, as described in [File browser](/docs/agent-filesystem/interfaces/file-browser).
+
+### The Rust program
+
+The Rust program is built from the same repository, and no prebuilt binary is published. It needs a Rust toolchain, Git and a C compiler, which the `aws-lc-sys` dependency uses to build its C code. The program was built with Rust 1.99.0. The repository sets no minimum version, but the locked dependencies need Rust 1.95 or later. In a test, Rust 1.94 and Rust 1.90 failed to compile the dependencies `yrs` and `surrealdb-common`, and Rust 1.95 passed `cargo check`. Cargo can build and install the program directly from the repository:
+
+```bash
+cargo install --locked --git https://github.com/surrealdb/surrealfs --branch next surrealfs-cli
+```
+
+Cargo installs two executables, `surrealfs-rs` and `git-remote-surrealfs`, into `~/.cargo/bin`, so make sure that directory is on your `PATH`. The program `git-remote-surrealfs` is a Git remote helper that is not functional: it acknowledges a push and stores nothing, as [Git import](/docs/agent-filesystem/interfaces/git#the-git-remote-helper) explains. The [command-line quickstart](/docs/agent-filesystem/quickstarts/command-line) walks through this step.
+
+To build from a checkout instead, build the `surrealfs-cli` package. The binaries are written to `target/debug`.
+
+```bash
+git clone --branch next https://github.com/surrealdb/surrealfs.git
+cd surrealfs
+cargo build -p surrealfs-cli
+```
+
+`cargo build --workspace` builds every crate, including `surrealfs-server`, the program that serves the [file browser](/docs/agent-filesystem/interfaces/file-browser). On Rust 1.99.0 the whole workspace builds with `--locked`.
+
+The examples on this page assume that `surrealfs-rs` is on the `PATH`.
+
+## Connect to a database
+
+Both programs connect to a SurrealDB server over a WebSocket by default, and `surrealfs-rs` can also connect over HTTP, as [Settings for `surrealfs-rs`](#settings-for-surrealfs-rs) describes. The examples on this page use a local server with an in-memory database:
+
+```bash
+surreal start --allow-all -u root -p secret --bind 127.0.0.1:8000 memory
+```
+
+### Settings for `surrealfs`
+
+The Python program reads its settings from environment variables. Only `surrealfs init` also accepts flags for these connection settings.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SURREALDB_URL` | `ws://localhost:8000/rpc` | The WebSocket endpoint of the server |
+| `SURREALDB_NAMESPACE` | `surrealfs` | The namespace that holds the files |
+| `SURREALDB_DATABASE` | `demo` | The database that holds the files |
+| `SURREALDB_AUTH_LEVEL` | `root` | How to sign in: `root`, `namespace`, `database` or `record` |
+| `SURREALDB_USER` | `root` | The user name to sign in with. Under record access it is also the identity the program acts as |
+| `SURREALDB_PASS` | `root` | The password |
+| `SURREALFS_AGENT_USER` | The operating system account name | The identity the program acts as when the auth level is not `record`. The value `root` is refused |
+| `SURREALFS_SERVER_URL` | None | The address of a gateway. When it is set, every command except `init` sends its statements to the gateway at `/api/rpc` and does not connect to SurrealDB, sign in or define the schema |
+| `SURREALFS_TOKEN` | None | The bearer token for that gateway |
+
+In this release, the commands cannot read the replies of the gateway in that mode, so `history` and `grep` report no data for files that exist. See [Remote clients and the gateway](/docs/agent-filesystem/interfaces/remote-clients). The `surrealfs` command does not read a `.env` file. One subcommand does load a configuration file, and only when `python-dotenv` is installed, which the `mcp` extra provides. The `surrealfs mcp` subcommand loads the file named by `SURREALFS_ENV_FILE`, or else `$XDG_CONFIG_HOME/surrealfs/env`, or else `~/.config/surrealfs/env`. The `surrealfs init` subcommand always writes `~/.config/surrealfs/env` and replaces the file when it exists. The other commands see the values in such a file only when you load them into the environment:
+
+```bash
+set -a
+. ~/.config/surrealfs/env
+set +a
+```
+
+> [!WARNING]
+> The commands `status`, `schema apply`, `lock`, `history`, `restore` and `grep` define the Agent Filesystem schema when they connect to SurrealDB directly, once per process, unless `SURREALDB_AUTH_LEVEL` is `record`. The statements use `DEFINE ... OVERWRITE`, so they replace existing definitions of the same names, and they create the `/home` folder when it is missing. When `SURREALDB_URL` is not set, the program connects to `ws://localhost:8000/rpc` as `root` with the password `root` and does this to namespace `surrealfs`, database `demo`. Set `SURREALDB_URL` before the first command.
+
+A typical session for a local server:
+
+```bash
+export SURREALDB_URL=ws://127.0.0.1:8000/rpc
+export SURREALDB_NAMESPACE=surrealfs
+export SURREALDB_DATABASE=demo
+export SURREALDB_AUTH_LEVEL=root
+export SURREALDB_USER=root
+export SURREALDB_PASS=secret
+export SURREALFS_AGENT_USER=agent-1
+```
+
+With `SURREALDB_AUTH_LEVEL` unset, sign-in uses root credentials but `surrealfs status` prints `Auth Level: record`. Set the variable explicitly so the line is accurate.
+
+The `record` level signs in with the `account` record access method, which exists only after `surrealfs schema apply --record-auth`. See [Record access](/docs/agent-filesystem/security/record-access).
+
+### Settings for `surrealfs-rs`
+
+The Rust program takes global options. They go before the subcommand, as in `surrealfs-rs --ns docs ls /`. A global option placed after the subcommand is rejected.
+
+<OptionsTable
+    title="Global options"
+    options={[
+        { "name": "--url", "value": "<URL>", "env": "SURREALDB_URL", "default": "ws://127.0.0.1:8000/rpc", "description": "The endpoint of the server. A `ws://` URL opens a WebSocket connection, and the program also accepts `http://`, `https://` and `sfs://` URLs, see below." },
+        { "name": "--ns", "value": "<NS>", "env": "SURREALDB_NS", "default": "surrealfs", "description": "The namespace that holds the files." },
+        { "name": "--db", "value": "<DB>", "env": "SURREALDB_DB", "default": "surrealfs", "description": "The database that holds the files." },
+        { "name": "--user", "value": "<USER>", "env": "SURREALDB_USER", "default": "root", "description": "The root user name to sign in with." },
+        { "name": "--pass", "value": "<PASS>", "env": "SURREALDB_PASS", "default": "root", "description": "The password. A value passed as an argument is visible to other local users in the process list, so prefer the environment variable." },
+        { "name": "--caller", "value": "<CALLER>", "env": "SURREALFS_CALLER", "description": "The name recorded as the owner of new text files and as the holder of leases. Binary files that `encrypt` and `import-git` write, and those that arrive over WebDAV and S3, are owned by `root` whatever the value, and `upload` records the caller as the owner. When it is not set, most commands use the `--user` name, and `fork`, `diff`, `merge`, `lock` and `mount` use `root` instead." },
+        { "name": "--help", "short": "-h", "description": "Print help for the program or a subcommand." },
+        { "name": "--version", "short": "-V", "description": "Print the version." }
+    ]}
+/>
+
+The program signs in as a root user with `--user` and `--pass`, selects the namespace and database, and opens a new connection for every command. The `--caller` name is not authenticated: any value is accepted.
+
+The program chooses the connection from the prefix of the URL. It removes a `ws://` or `wss://` prefix and opens a plain WebSocket connection, so a `wss://` URL does not work, and a server that requires TLS fails with `Database error: WebSocket error: WebSocket protocol error: httparse error: invalid HTTP version`. The Python program does use TLS for a `wss://` URL.
+
+An `http://` or `https://` URL makes the program send each statement to the `/rpc` endpoint of SurrealDB over HTTP. The `http://` form was tested, and the `https://` form was not tested against a server that uses TLS. An `sfs://`, `sfs+http://` or `sfs+https://` URL selects a gateway, see below.
+
+The program does not define the schema when it connects. Against an empty database, a file command fails with `Function 'fn::sfs_...' not found`, where the function depends on the command: `fn::sfs_ls` for `ls`, `fn::sfs_write` for `write` and `fn::sfs_mkdir` for `mkdir`. The commands `grep` and `lock list` report that the table `file` or `file_lock` does not exist, and `status` prints `Root exists: false`. Run `surrealfs-rs init` once for each database.
+
+When `SURREALFS_SERVER_URL` is set, the program does not connect to SurrealDB. It sends each query to the `/api/rpc` endpoint of the gateway at that address, with `SURREALFS_TOKEN` as the bearer token, or the `--pass` value when that variable is unset, and with `--caller`, else `--user`, as the acting user. The commands `ls`, `cat` and `write` work that way. See [Remote clients and the gateway](/docs/agent-filesystem/interfaces/remote-clients).
+
+## A session with both programs
+
+The commands below use `surrealfs-rs` to create files, because it holds the file operations, and then use the Python program to read the same database. Both programs point at namespace `surrealfs` and database `demo` here, and the examples later on this page reuse the files that this session creates.
+
+```bash
+export SURREALDB_URL=ws://127.0.0.1:8000/rpc
+export SURREALDB_PASS=secret
+export SURREALDB_NS=surrealfs SURREALDB_NAMESPACE=surrealfs
+export SURREALDB_DB=demo SURREALDB_DATABASE=demo
+export SURREALDB_AUTH_LEVEL=root SURREALFS_AGENT_USER=agent-1
+
+surrealfs-rs init
+surrealfs-rs --caller agent-1 write /notes/plan.md "# Launch plan"
+surrealfs-rs --caller agent-1 write /notes/plan.md "# Launch plan
+- ship the CLI"
+surrealfs-rs --caller agent-1 write /notes/plan.md "# Launch plan
+- ship the CLI
+- publish the docs"
+surrealfs-rs --caller agent-1 write /notes/todo.txt "Write the docs
+Review the docs"
+surrealfs-rs ls /notes
+```
+
+```text title="Output"
+SurrealFS schema successfully initialized.
+Wrote 13 bytes to /notes/plan.md
+Wrote 28 bytes to /notes/plan.md
+Wrote 47 bytes to /notes/plan.md
+Wrote 30 bytes to /notes/todo.txt
+FILE       47 bytes  /notes/plan.md
+FILE       30 bytes  /notes/todo.txt
+```
+
+The history of a file lists earlier generations only, newest first, so after three writes it lists generations 2 and 1 (see [Versions and history](/docs/agent-filesystem/concepts/versions-and-history)). Restoring generation 1 writes its content again as a new generation:
+
+```bash
+surrealfs history /notes/plan.md
+surrealfs grep ship
+surrealfs restore /notes/plan.md 1
+surrealfs-rs cat /notes/plan.md
+```
+
+```text title="Sample output"
+History for /notes/plan.md:
+GEN   OP       AUTHOR          CREATED AT                SIZE/REASON
+---------------------------------------------------------------------------
+2     write    agent-1         2026-10-14 22:53:06       
+1     write    agent-1         2026-10-14 22:53:06       
+/notes/plan.md:2:- ship the CLI
+Restored /notes/plan.md to generation 4
+# Launch plan
+```
+
+The restored file is the first version, so it no longer contains the line `- ship the CLI`. The restore reports generation 4 because the live file was at generation 3 when it ran.
+
+## The `surrealfs` commands
+
+<Synopsis>
+surrealfs [-h] [-v] <COMMAND>
+</Synopsis>
+
+Run with no command, the program prints its help and exits with status 0.
+
+### `status`
+
+<Synopsis>
+surrealfs status
+</Synopsis>
+
+The command connects, signs in and prints the version and the server URL with the connection latency. It also prints the namespace, the database, the auth level with the identity the program acts as, the number of file records (folders included) and the number of active leases. When the connection or sign-in fails, it prints `Error connecting to SurrealDB (<url>): <error>` on standard error and exits with status 1.
+
+```bash
+surrealfs status
+```
+
+```text title="Sample output"
+SurrealFS v0.2.0
+----------------------------------------
+Server:       ws://127.0.0.1:8000/rpc (55.4ms latency)
+Namespace:    surrealfs
+Database:     demo
+Auth Level:   root (identity: agent-1)
+Total Files:  4
+Active Leases:0
+```
+
+### `schema apply`
+
+<Synopsis>
+surrealfs schema apply [--record-auth]
+</Synopsis>
+
+The command defines the `file` table and the functions, indexes and events around it. It is safe to repeat. With `--record-auth` it also defines the `user` table and the `account` record access method, so SurrealDB itself enforces the file permissions for record users. See [Record access](/docs/agent-filesystem/security/record-access).
+
+```bash
+surrealfs schema apply --record-auth
+```
+
+```text title="Output"
+Applying SurrealFS schema (record_auth=True)...
+Schema applied successfully.
+```
+
+The module form `python -m surrealfs.schema` also accepts `--url`, `--username`, `--password`, `--namespace` and `--database`, and `--print` prints the statements without connecting to a server.
+
+### `users`
+
+<Synopsis>
+surrealfs users add [--password <PASSWORD> | --generate] <NAME>
+surrealfs users list
+</Synopsis>
+
+The command manages the users that sign in with record access. Run it with a system credential, for example the root user, after `surrealfs schema apply --record-auth`.
+
+<OptionsTable
+    title="users add"
+    options={[
+        { "name": "<NAME>", "required": true, "description": "The user name. It becomes the record id and the name of the home folder. A name that is not a single path segment is rewritten, so `Bad Name!` becomes `Bad-Name`. The name `root` is refused." },
+        { "name": "--password", "value": "<PASSWORD>", "env": "SURREALFS_NEW_PASSWORD", "description": "The password. When it is omitted and `--generate` is not set, the command prompts for one." },
+        { "name": "--generate", "description": "Generates a 32-character password and prints it once." }
+    ]}
+/>
+
+The command stores the password hashed with Argon2, creates the user, and creates the folder `/home/<NAME>` with mode `0700`, which only that user can read.
+
+```bash
+surrealfs users add alice --generate
+surrealfs users add bob --password hunter123
+surrealfs users list
+```
+
+```text title="Sample output"
+Created user alice with home /home/alice (0700)
+Password: <generated-password>
+Sign in with SURREALDB_AUTH_LEVEL=record SURREALDB_USER=alice SURREALDB_PASS=...
+Created user bob with home /home/bob (0700)
+Sign in with SURREALDB_AUTH_LEVEL=record SURREALDB_USER=bob SURREALDB_PASS=...
+alice
+bob
+```
+
+The `users` command has no `del` subcommand, so it cannot delete a user. When it refuses a name it prints `Failed: 'root' is the bypass identity, not a record user` and still exits with status 0.
+
+### `lock`
+
+<Synopsis>
+surrealfs lock acquire [--ttl <SECONDS>] [--reason <TEXT>] <PATH>
+surrealfs lock release <PATH>
+surrealfs lock list
+</Synopsis>
+
+The `lock` command manages advisory leases, which are records that tell other agents a file is in use. The database does not block writes to a leased file. See [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases).
+
+<OptionsTable
+    title="lock acquire"
+    options={[
+        { "name": "<PATH>", "required": true, "description": "The file to lease. The file must exist." },
+        { "name": "--ttl", "value": "<SECONDS>", "default": 60, "description": "How long the lease lasts." },
+        { "name": "--reason", "value": "<TEXT>", "default": "advisory lease", "description": "A note stored with the lease." }
+    ]}
+/>
+
+```bash
+surrealfs lock acquire /notes/plan.md --ttl 300 --reason "editing the plan"
+surrealfs lock list
+surrealfs lock release /notes/plan.md
+```
+
+```text title="Sample output"
+Acquired lease on /notes/plan.md for 300s: {'expires_at': PreciseDatetime(2026, 10, 14, 22, 45, 2, 642997, tzinfo=datetime.timezone.utc), 'file': RecordID(table_name=file, record_id='r7qo14tnuehfszye39bx'), 'holder': 'agent-1', 'id': RecordID(table_name=file_lock, record_id='5g96hss2xhish79p3w2u'), 'path': '/notes/plan.md', 'reason': 'editing the plan'}
+PATH                           HOLDER          EXPIRES AT                REASON
+--------------------------------------------------------------------------------
+/notes/plan.md                 agent-1         2026-10-14 22:45:02.642997+00:00 editing the plan
+Released lease on /notes/plan.md
+```
+
+When no lease is active, `lock list` prints `No active leases.`. A lease on a path that does not exist ends in a Python traceback that finishes with `surrealfs.errors.NotFound`. The command does not check read access, so a user can take a lease on a file that the user cannot read.
+
+### `history`
+
+<Synopsis>
+surrealfs history [--limit <N>] <PATH>
+</Synopsis>
+
+The command lists the earlier versions of a file, newest first, as generation, operation, author and creation time. The current generation is not in the list. The `--limit` flag caps the number of versions and defaults to 20. When the file has no versions the command prints `No history found for <PATH>`. The last column is headed `SIZE/REASON` and shows the reason stored with the version, which is empty for ordinary writes. The command does not check read access, so it lists the generation, operation and author of versions of a file that the acting user cannot read.
+
+### `restore`
+
+<Synopsis>
+surrealfs restore <PATH> <GENERATION>
+</Synopsis>
+
+The command writes the content of an earlier generation as a new generation. It does not rewind the file, so the history keeps every state. The command prints `Restored <PATH> to generation <N>`, where `<N>` is the new generation.
+
+### `grep`
+
+<Synopsis>
+surrealfs grep [--path <PREFIX>] [--glob <GLOB>] [--limit <N>] [-r] [-i] <PATTERN>
+</Synopsis>
+
+The command searches the text of files line by line and prints `path:line:text` for each match. It prints nothing and exits with status 0 when nothing matches.
+
+<OptionsTable
+    title="grep"
+    options={[
+        { "name": "<PATTERN>", "required": true, "description": "The text to find, or a regular expression with `--regex`." },
+        { "name": "--path", "value": "<PREFIX>", "description": "Search only paths that start with this prefix." },
+        { "name": "--glob", "value": "<GLOB>", "description": "Search only files that match this glob, for example `*.md`." },
+        { "name": "--limit", "value": "<N>", "default": 100, "description": "The maximum number of matches." },
+        { "name": "--regex", "short": "-r", "description": "Treat the pattern as a regular expression. In this program `-r` means regex and not recursive." },
+        { "name": "--ignore-case", "short": "-i", "description": "Match without regard to case." }
+    ]}
+/>
+
+```bash
+surrealfs grep "Write|Review" --regex --path /notes --glob "*.txt"
+```
+
+```text title="Sample output"
+/notes/todo.txt:1:Write the docs
+/notes/todo.txt:2:Review the docs
+```
+
+This command searches by exact text. For ranked full-text and semantic search, use the search functions described in [File search](/docs/agent-filesystem/concepts/search).
+
+### `init`
+
+<Synopsis>
+surrealfs init [OPTIONS]
+</Synopsis>
+
+The command prepares a database for record access in one step. It signs in with a system credential, applies the schema with record access and creates one record user. It then writes a configuration file that `surrealfs mcp` reads, so the MCP server can connect without extra settings.
+
+<OptionsTable
+    title="init"
+    options={[
+        { "name": "--url", "value": "<URL>", "description": "The WebSocket endpoint. Falls back to `SURREALDB_URL`, then to `ws://localhost:8000/rpc`." },
+        { "name": "--username", "value": "<USERNAME>", "description": "The system user to sign in with. Falls back to `SURREALDB_USER`, then to `root`." },
+        { "name": "--password", "value": "<PASSWORD>", "description": "The system password. Falls back to `SURREALDB_PASS`, then to `root`." },
+        { "name": "--namespace", "value": "<NAMESPACE>", "description": "Falls back to `SURREALDB_NAMESPACE`, then to `surrealfs`." },
+        { "name": "--database", "value": "<DATABASE>", "description": "Falls back to `SURREALDB_DATABASE`, then to `demo`." },
+        { "name": "--account", "value": "<ACCOUNT>", "default": "admin", "description": "The name of the record user to create." },
+        { "name": "--account-pass", "value": "<PASSWORD>", "default": "surrealfs-secret", "description": "The password of the record user." }
+    ]}
+/>
+
+```bash
+surrealfs init --password secret --account agent-1 --account-pass hunter123
+```
+
+```text title="Sample output"
+Initializing SurrealFS...
+Target: ws://127.0.0.1:8000/rpc (NS: surrealfs, DB: demo)
+Applying schema with record auth enabled...
+Creating record user 'agent-1'...
+Created user 'agent-1'.
+Wrote record-auth configuration to /home/user/.config/surrealfs/env
+SurrealFS initialized successfully.
+```
+
+> [!WARNING]
+> The file `~/.config/surrealfs/env` holds the record user's password in plain text. It is created with mode `0600`. When you pass no `--account-pass`, the password is the fixed default `surrealfs-secret`, so always pass `--account-pass` outside a local test. When the user cannot be created, for example because the name exists, the command prints `User provisioning: <error>` and carries on to write the file.
+
+### `mcp`
+
+<Synopsis>
+surrealfs mcp
+</Synopsis>
+
+The command runs the MCP server over standard input and output. It takes no flags, and it needs the `mcp` extra. The command is the same program as `surrealfs-mcp`, except that the subcommand always exits with status 0, also when the server could not start. A script that needs the status can run `surrealfs-mcp`, which exits with status 2 when the configuration is missing. See the [MCP server](/docs/agent-filesystem/interfaces/mcp-server).
+
+The `surrealfs` command has no subcommand that computes embeddings or serves the file browser. The repository still refers to both at this commit. The README names the `surrealfs-browser` command, the `surrealfs[browser]` extra and a `just embed` recipe, and `docker-compose.yml` starts services with `surrealfs browser` and `surrealfs embed`. None of them exists: `surrealfs browser` stops with `invalid choice: 'browser'` and lists the nine subcommands in this section. The [file browser](/docs/agent-filesystem/interfaces/file-browser) page describes the Rust gateway that serves the web page, and [File search](/docs/agent-filesystem/concepts/search) describes how embeddings are stored.
+
+## The `surrealfs-rs` commands
+
+<Synopsis>
+surrealfs-rs [OPTIONS] <COMMAND>
+</Synopsis>
+
+Commands are grouped by task below. Paths are Agent Filesystem paths such as `/docs/plan.md`, not paths on your computer, except where a command names a local file. Most commands print one line. The commands that return structured data print JSON.
+
+The Rust program creates text files with mode `0644` and folders with mode `0755`, owned by the caller. A file whose content is not valid UTF-8 is created with mode `0666`. It is owned by `root`, whatever the caller is, when `encrypt` or `import-git` writes it and when a binary body arrives over [WebDAV or S3](/docs/agent-filesystem/interfaces/network-servers). The command `upload` also creates its binary file with mode `0666`, and it records the caller as the owner. The Python library creates files with `0666` and folders with `0777`.
+
+### Set up and check
+
+| Command | Behaviour |
+| --- | --- |
+| `init` | Defines the schema in the selected namespace and database. It applies the file schema and the record access schema, so unlike `surrealfs schema apply` it always includes record access. It is safe to repeat, and prints `SurrealFS schema successfully initialized.` |
+| `status` | Prints `SurrealFS Status: OK` with the endpoint, namespace, database and `Root exists: true` or `false`. It fails only when it cannot connect, so it prints `OK` and `Root exists: false` for a database whose schema was never defined. |
+
+### Files and folders
+
+| Command | Arguments and flags | Behaviour |
+| --- | --- | --- |
+| `ls` | `[PATH]` (default `/`), `-r` | Lists the entries directly inside a folder as `DIR` or `FILE`, a size in bytes and a path. The `-r` flag is accepted and ignored. A file path prints nothing, and a missing path fails with `Not found`. |
+| `cat` | `<PATH>` | Prints the text of a file, with no newline added. It fails for a file that is not valid text, such as an encrypted file, and prints nothing for a file stored with `upload`. |
+| `write` | `<PATH> <CONTENT>` | Creates or replaces a text file with the content given on the command line. It creates missing parent folders, and prints `Wrote <N> bytes to <PATH>`. Writing to a folder path fails with `Is a directory`. |
+| `mkdir` | `<PATH>`, `-p` | Creates a folder together with any missing parents. The `-p` flag has no effect, because parents are always created. Running it on an existing path succeeds and changes nothing. |
+| `rm` | `<PATH>`, `-r` | Removes a file or an empty folder. A folder with contents fails with `Directory not empty` unless you pass `-r`. A path under legal hold is refused. See the warning below. |
+| `mv` | `<SRC> <DST>` | Moves or renames a file or folder and creates missing parents of the destination. An existing destination is replaced without a prompt. |
+| `cp` | `<SRC> <DST>`, `-r` | Copies a file, with its content and mode, to a new file at generation 1. Copying onto an existing file fails with a database error about the `child_unique` index. A folder needs `-r`, and then only an empty folder is created at the destination. |
+| `grep` | `<PATTERN> [PATH]`, `-r` (`--recursive`) | Prints `path:line: text` for each matching line. The `-r` flag selects regular expressions. See below. |
+
+> [!WARNING]
+> In this release, `rm -r` removes a folder and the entries directly inside it. Records at a deeper level stay in the database, no longer reachable through their old paths. After `rm -r /t`, a file at `/t/a/b/c/f.txt` is not listed under `/t`, and `cat` reports `Not found`, but its record remains. The remaining records get paths worked out from the folders that are left, so `grep` still finds the file, under a path such as `/b/c/f.txt` that never existed, and `stats` still counts it. A WebDAV `DELETE` of a folder has the same effect. Remove nested folders level by level when the contents must go.
+
+`cp -r` on a folder copies none of its contents. Copy the files individually or use [`export` and `import`](#storage-and-transfer) to move a tree.
+
+The `write` command takes the content as a literal argument. It has no option that reads standard input or a local file, so the arguments `-` and `@notes.txt` are stored as the text `-` and `@notes.txt`, and a call without content fails with a usage error. To put a local text file in the filesystem, pass its content as in `write /notes.txt "$(cat notes.txt)"`, which drops trailing newlines, or use `import` with an archive, a WebDAV `PUT` or `import-git`.
+
+Without `-r`, the `grep` command matches the pattern as plain, case-sensitive text. With `-r`, which is short for `--recursive` but does not mean recursive, it treats the pattern as a regular expression, and an invalid expression fails with `regex parse error`. The `PATH` argument is a string prefix, so `/doc` also matches `/docs/notes.md`. The program asks the database for 1,000 text files, in no guaranteed order, and applies the path prefix to those files, so a search can miss matches in a database that holds more than 1,000 text files.
+
+```bash
+surrealfs-rs grep -r 'Write|Review' /notes
+```
+
+```text title="Output"
+/notes/todo.txt:1: Write the docs
+/notes/todo.txt:2: Review the docs
+```
+
+### Versions
+
+| Command | Arguments and flags | Behaviour |
+| --- | --- | --- |
+| `history` | `<PATH>`, `-l <LIMIT>` (default 20) | Prints one line for each earlier generation, newest first, with the generation, the operation, the author, the size and the path. The current generation is not listed. The author is the file's owner, so under a root sign-in it shows the owner and not necessarily the caller that wrote the version. |
+| `restore` | `<PATH> <VERSION>` | Writes the content of generation `VERSION` as a new generation, and prints `Restored <PATH> to generation <N>` with the new number. |
+
+### Workspaces
+
+Workspaces are branches of the tree that agents can change and then merge. See [Workspaces](/docs/agent-filesystem/concepts/workspaces).
+
+| Command | Arguments | Behaviour |
+| --- | --- | --- |
+| `fork` | `<SRC> <DST>` | Creates the workspace `DST` from the workspace `SRC`. Both are workspace names and not paths. The base tree is the workspace `main`, so the usual form is `fork main exp1`. `fork / exp1` fails with `source workspace not found`. |
+| `diff` | `<BRANCH>` | Prints `UNCHANGED`, `MODIFIED` or `CONFLICT`, then the path, for each file in the workspace. |
+| `merge` | `<SRC> <DST>` | Merges the workspace `SRC` into `DST` and prints `Merge result:` with a JSON object such as `{"into":"main","merged":"exp1","status":"ok"}`. |
+
+The Rust program has no command to write into a workspace. Use the Python or TypeScript library for that.
+
+### Leases and collaborative editing
+
+| Command | Arguments and flags | Behaviour |
+| --- | --- | --- |
+| `lock acquire` | `<PATH>`, `-t <TTL>` (default 60), `-r <REASON>` (default `cli`) | Takes an advisory lease for the `--caller` name, or `root`, and prints when it expires. The same holder can acquire again, which replaces the TTL and the reason, so it can also shorten the lease. Another holder fails with `sfs:locked`. The file must exist. |
+| `lock release` | `<PATH>` | Releases the lease held by the caller. |
+| `lock list` | None | Prints each active lease as `holder`, `reason`, `path` and expiry. |
+| `crdt enable` | `<PATH>` | Turns on collaborative editing for a file. |
+| `crdt compact` | `<PATH>` | Folds the stored edit log of a collaborative file into one snapshot. |
+
+A lease does not stop other callers from writing. A second caller that holds no lease can still `write` to a leased path. See [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases) and [Collaborative editing](/docs/agent-filesystem/concepts/collaborative-editing).
+
+### Permissions and sharing
+
+Permissions, groups, credentials and legal holds are explained in the [security](/docs/agent-filesystem/security/permissions) pages. The commands are listed here for completeness.
+
+| Command | Arguments and flags | Behaviour |
+| --- | --- | --- |
+| `chmod` | `<PATH> <MODE>` | Sets the mode. A mode that starts with `0` or `0o` is octal, and any other number is decimal. `chmod f 644` sets decimal 644, which is `1204` in octal, so write `0644`. The command prints the new mode in octal. |
+| `chgrp` | `<PATH> [GROUP]` | Sets the group of a file. Leave out `GROUP` to clear it. |
+| `group create` | `<NAME>`, `-d <DESCRIPTION>` | Creates a group. |
+| `group add`, `group remove` | `<GROUP> <USER>` | Adds a user to a group, or removes one. |
+| `group list` | None | Lists groups with their descriptions. |
+| `group members` | `<GROUP>` | Lists the members of a group with the time each was added. |
+| `legal-hold` | `<PATH>`, `-a <true or false>` | With `-a`, sets or clears the legal hold. Without it, prints `Legal hold on <PATH>: true` or `false`. A file under hold cannot be removed. A hold does not stop `mv`, and it does not stop `write`: a write to a file under hold succeeds. |
+| `credential create` | `<KIND> <IDENTIFIER> <SECRET> <USER_ID>` | Creates a credential for the [WebDAV and S3 servers](/docs/agent-filesystem/interfaces/network-servers). The valid kinds are `webdav`, `s3`, `ssh`, `slack`, `teams` and `bearer`. When a credential with the same kind and identifier exists, the command changes nothing, not the user, the secret or the `enabled` flag, and it still prints `Created credential`. To change a credential, update its record with SurrealQL, or use a new identifier. See [Protocol credentials](/docs/agent-filesystem/security/credentials). |
+| `credential revoke` | `<KIND> <IDENTIFIER>` | Disables a credential. It stays in the list with `enabled=false`. |
+| `credential list` | `-u <USER_ID>` | Lists credentials as kind, identifier, user and `enabled`. The `-u` flag filters by kind, not by user: `-u webdav` lists the `webdav` credentials and `-u alice` lists nothing. |
+
+> [!WARNING]
+> The secret of a credential is stored as given, in plain text, in a field named `secret_hash`, and the program never hashes it. The servers accept a password that equals the stored value or whose hexadecimal SHA-256 digest equals it, so you can store the unsalted digest of a password yourself and clients then send the password. The digest is accepted as a password too, so storing it does not protect against anyone who can read the `credential` table. Record users cannot read that table, but any root, namespace or database user can. An unsupported kind such as `bogus` is reported as created, but nothing is stored, because the command does not check the result of its statement.
+
+### Content analysis
+
+| Command | Arguments and flags | Behaviour |
+| --- | --- | --- |
+| `chunk` | `<PATH>` | Prints the sections of a file as JSON, each with `section_idx`, `heading`, `line_start`, `line_end`, `content` and `source_hash`. Markdown splits along headings, and the heading of a section reads like `Guide > Install`. Other text of 30 lines or fewer is one section, and longer text splits into windows of 50 lines with 10 lines of overlap. See [Sections and chunking](/docs/agent-filesystem/concepts/sections-and-chunking). |
+| `detect` | `<PATH>` | Prints the content type, language and encoding that the program infers from the file, as JSON with `content_type`, `language`, `encoding` and `is_generated`. |
+| `symbols` | `<PATH>`, `-i` | Prints the code symbols of a file as JSON. Symbols exist only after they are indexed, so the first run prints `[]` and you pass `-i` to index and then print. |
+| `definition` | `<NAME>` | Looks up an indexed symbol by name or qualified name, and prints its path, kind, signature and line range. |
+| `digest` | `[PATH]` (default `/`) | Prints a JSON summary of a folder with its notable files and subfolders. The `summary` is a generated sentence such as `Folder /src containing 1 items.` and the file summaries are `null`. |
+| `table-load` | `<PATH>`, `-m <MAX_ROWS>` (default 1000) | Parses a CSV or TSV file that is stored in the filesystem and saves one record in the `file_row` table for each line after the header, up to the maximum. |
+| `table-query` | `<PATH>`, `-l <LIMIT>` (default 50) | Prints the loaded records of a tabular file as JSON, each with `row_idx`, `sheet` and `data`, where `data` holds the fields. |
+
+The language detection and the symbol indexer work from the file extension. The symbol indexer uses line-based patterns, and the example below uses a Python file.
+
+```bash
+surrealfs-rs write /src/greeter.py 'class Greeter:
+    def hello(self, name):
+        return f"Hello, {name}"
+
+def main():
+    print(Greeter().hello("agent"))
+'
+surrealfs-rs symbols -i /src/greeter.py
+surrealfs-rs definition Greeter
+```
+
+```text title="Sample output"
+Wrote 123 bytes to /src/greeter.py
+Indexed 3 symbols in '/src/greeter.py'
+[
+  {
+    "id": "symbol:n6btqa6hhunkofdqklue",
+    "file_id": "file:qfpdlsfldjmjgtopgucj",
+    "path": null,
+    "name": "Greeter",
+    "qualified": "greeter.Greeter",
+    "kind": "class",
+    "language": "python",
+    "signature": "class Greeter:",
+    "line_start": 1,
+    "line_end": 4
+  },
+  ...
+]
+[
+  {
+    "id": "symbol:n6btqa6hhunkofdqklue",
+    "file_id": "file:qfpdlsfldjmjgtopgucj",
+    "path": "/src/greeter.py",
+    "name": "Greeter",
+    "qualified": "greeter.Greeter",
+    "kind": "class",
+    "language": "python",
+    "signature": "class Greeter:",
+    "line_start": 1,
+    "line_end": 4
+  }
+]
+```
+
+### Storage and transfer
+
+| Command | Arguments and flags | Behaviour |
+| --- | --- | --- |
+| `export` | `<PATH> <OUTPUT_FILE>`, `-f <FORMAT>` (default `targz`) | Writes the entries below `PATH` to an archive on your computer, and prints the archive size. The formats are `tar`, `zip` and `targz`. Any other value produces a `targz` archive. |
+| `import` | `<ARCHIVE_FILE> <TARGET_PATH>`, `-f <FORMAT>` (default `targz`) | Reads an archive from your computer into `TARGET_PATH`, and prints the number of files and folders imported. |
+| `backup` | `<PATH> <BACKUP_DIR>` | Writes the tree below `PATH` to a directory of content-addressed blobs and a `manifest.json`. See [Backup and restore](/docs/agent-filesystem/operations/backup-and-restore). |
+| `restore-backup` | `<BACKUP_DIR> <TARGET_PREFIX>`, `-a <TIME>` | Restores a backup under `TARGET_PREFIX`. The `-a` flag takes an RFC 3339 time and skips files created after it. It does not restore older content. |
+| `encrypt` | `<PATH> <INPUT_FILE> <KEY_HEX>`, `-k <KEY_ID>` | Encrypts a local file with AES-256-GCM and stores the ciphertext at `PATH`. The key is 64 hexadecimal characters. See [Encryption, legal hold and audit](/docs/agent-filesystem/security/encryption-and-legal-hold). |
+| `decrypt` | `<PATH> <KEY_HEX>`, `-o <OUTPUT_FILE>` | Decrypts a stored file. Without `-o` it prints the plaintext. |
+| `du` | `[PATH]` (default `/`) | Prints the file count and the logical and stored sizes of files stored with `upload`. It reports `files: 0` for files written with `write`. |
+| `gc` | `-m <MAX_AGE_SECS>` (default 86400) | Deletes the stored chunks, the `blob` records of the `upload` path, that no file references and that were created before the age, and prints how many it deleted. |
+| `stats` | `-p` | Prints counts as JSON: files, directories, bytes, chunks, deduplication ratio, shares, webhooks, groups and legal holds. With `-p` it prints the same figures in the Prometheus text format, for example `surrealfs_files_total 4`. |
+| `import-git` | `<REPO_PATH> <TARGET_PATH>`, `-m <MAX_COMMITS>` | Copies the working tree of a git repository and records its commits. See [Git import](/docs/agent-filesystem/interfaces/git). |
+| `serve gateway` | `-a <ADDR>` (default `127.0.0.1:8787`), `--static-dir <DIR>` (default `surrealfs/browser/static`, when it exists) | Starts the gateway that serves the file browser, a REST and SurrealQL API, an MCP endpoint, WebDAV and S3. It does not apply the schema, so run `init` first, and it prints nothing while it runs. See [Gateway server](/docs/agent-filesystem/interfaces/gateway-server#the-serve-gateway-command). |
+| `serve webdav` | `-a <ADDR>` (default `127.0.0.1:8080`), `-p <PREFIX>` (default `/`) | Starts a WebDAV server. See [WebDAV and S3 servers](/docs/agent-filesystem/interfaces/network-servers). |
+| `serve s3` | `-a <ADDR>` (default `127.0.0.1:9000`) | Starts an S3-style server. See [WebDAV and S3 servers](/docs/agent-filesystem/interfaces/network-servers). |
+
+> [!WARNING]
+> A key that you pass to `encrypt` or `decrypt` as an argument is visible in the process list and in your shell history. The program does not manage keys, and a file encrypted with a key can be read back only with the same key.
+
+> [!WARNING]
+> `export` and `backup` skip the content of files stored with `upload`. They carry such a file as an empty folder, so a tree that contains uploaded files does not round-trip.
+
+The export below takes a folder out of the database and brings it back under a new path:
+
+```bash
+surrealfs-rs export /notes ./notes.tar.gz
+surrealfs-rs import ./notes.tar.gz /restored
+surrealfs-rs ls /restored
+```
+
+```text title="Sample output"
+Exported /notes (154 bytes) to ./notes.tar.gz
+Imported 2 files, 0 dirs (43 bytes) into /restored
+FILE       13 bytes  /restored/plan.md
+FILE       30 bytes  /restored/todo.txt
+```
+
+## Commands that do not work yet
+
+The following commands exist in the program and appear in `--help`, but they do less than their names say in this release. Each one is listed with what it does.
+
+| Command | What it does in this release |
+| --- | --- |
+| `mount <MOUNTPOINT>`, with `-b <BRANCH>` (default `main`) and `--nfs` | Creates the directory when it is missing and prints `Mounting SurrealFS on '<dir>' (branch: 'main', caller: 'root')` and `Control plane active at '<dir>/.surrealfs'`. It mounts nothing: afterwards the directory is empty and is absent from the output of `mount`. With `--nfs` it prints a `sudo mount -t nfs ...` command for an NFS server that does not exist. |
+| `serve nfs`, with `-a <ADDR>` and `-m <MOUNT_POINT>` | Prints a line such as `NFS server configured on 127.0.0.1:2049` and exits with status 0. Nothing listens on the port. |
+| `serve sftp`, with `-a <ADDR>` | Prints `SFTP subsystem configured on 127.0.0.1:2222` and exits with status 0. Nothing listens on the port. |
+| `entities <PATH>` | Lists the entities that were extracted from a file, and prints `[]` when none were. Only the [gateway](/docs/agent-filesystem/interfaces/gateway-server) extracts entities, after it writes a file or when it receives `POST /api/index` with the path of a file, so the command prints `[]` for a file that `surrealfs-rs`, the Python library or another client wrote. The extraction is rule-based: it finds `#tags`, ticket identifiers such as `ACME-123`, `@mentions` and 15 fixed system and company names such as `aws` and `postgres`. An `@mention` also matches the domain part of an email address. |
+| `near-dups <PATH_OR_TEXT>`, with `-t <THRESHOLD>` (default 0.85) | Compares the SimHash fingerprint of a file or of some text with the fingerprints that are stored, and prints `[]` when no stored fingerprint is close enough. Only the gateway records a fingerprint, after it writes a file or when it receives `POST /api/index` with the path of a file, so a file that `surrealfs-rs` or the Python library wrote is never a match. |
+| `pack <QUESTION>`, with `-b <BUDGET>` (default 4000) and `-s <SCOPE>` | Prints `# Context for: <question>` and a block for each matching file, but each block is empty. |
+| `jobs claim`, with `-w <WORKER>` (default `cli-worker`) and `-l <LIMIT>` (default 10), and `jobs complete <JOB_ID>`, with `-e <ERROR>` | Writing a file adds `detect`, `chunk` and `symbols` jobs to a queue, and `jobs claim` returns them and marks them `processing`. No scheduled worker runs them in this release, so they stay in the queue until you complete them with `jobs complete`. The `-e` flag marks the job `failed` and stores the message. The gateway claims and runs the `symbols` jobs when it receives `POST /api/index` without a `path`, but it does not mark them completed, so they stay `processing` and are claimed again after 60 seconds. See [Gateway server](/docs/agent-filesystem/interfaces/gateway-server#indexing-after-a-write). |
+| `webhook create <PATTERN> <EVENTS> <URL> <SECRET>`, `webhook list`, `webhook delete <ID>` | Stores, lists and deletes webhook records. Nothing sends a request when a file changes. |
+| `share create <PATH>`, with `-m <MODE>` (default `r`) and `-e <EXPIRES_IN_SECS>`, `share revoke <TOKEN>`, `share resolve <TOKEN>`, `share list` | Creates, revokes, resolves and lists share tokens. No server accepts a token yet. |
+| `upload <LOCAL_PATH> <REMOTE_PATH>` | Stores a local file in content-addressed chunks, but the stored file then reads as a folder. See the warning below. |
+
+> [!WARNING]
+> After `upload`, the remote path is listed by `ls` as `DIR`, `cat` prints nothing, and a WebDAV `GET` returns an HTML folder index, and a WebDAV `PROPFIND` lists it as a collection. `export` and `backup` carry it as an empty folder, and the program has no command that downloads it. `du` and `gc` do count it. Avoid `upload` for files whose content you need to read back.
+
+## See also
+
+- [Command-line quickstart](/docs/agent-filesystem/quickstarts/command-line) for a first run.
+- [WebDAV and S3 servers](/docs/agent-filesystem/interfaces/network-servers) for `serve webdav` and `serve s3`.
+- [Git import](/docs/agent-filesystem/interfaces/git) for `import-git`.
+- [File browser](/docs/agent-filesystem/interfaces/file-browser) for the web page and the gateway that serves it, which `serve gateway` starts.
+- [Configuration](/docs/agent-filesystem/operations/configuration) for the full list of settings.

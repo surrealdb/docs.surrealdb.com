@@ -1,0 +1,543 @@
+---
+position: 3
+title: File search
+description: "Full-text, vector and hybrid search over Agent Filesystem files: BM25 ranking, grep, embeddings, permission filtering and the SurrealQL search functions."
+---
+
+# File search
+
+Agent Filesystem searches the text in files in four ways. **Full-text search** ranks files by the words they contain. **Vector search** ranks them by how close an embedding of each file is to an embedding of the query. **Hybrid search** fuses those two rankings. **Grep** matches literal text or a regular expression line by line and does not rank. A fifth method, section search, applies vector search to the parts of a file and is described in [Sections and chunking](/docs/agent-filesystem/concepts/sections-and-chunking).
+
+In the Python library, each of these searches runs as a SurrealQL function inside SurrealDB, and the function returns only the files that the caller may read. Under a system credential the caller is the identity that the client passes, so only a record user is held to the filter by the database itself. See [Permission filtering](#permission-filtering). The `surrealfs-rs grep` command is a separate implementation that applies no permission filter, as the [Grep](#grep) section describes.
+
+Full-text search needs no setup, because SurrealDB indexes the content of a file when the file is written. Vector and hybrid search need embeddings, which the caller supplies and a process with root access writes.
+
+> [!NOTE]
+> Agent Filesystem is in beta. The API, schema and command-line interface may change in breaking ways between releases. This page describes version 0.2.0 of [SurrealFS](https://github.com/surrealdb/surrealfs), the open source project behind Agent Filesystem, built from the `next` branch of its repository, and each limitation that applies is listed where it matters.
+
+The examples on this page use the Python library, so they need a running SurrealDB server and the `surrealfs` package. The [Python quickstart](/docs/agent-filesystem/quickstarts/python) shows how to start a local server with `surreal start --user root --pass secret memory` and how to install the package. The examples share the connection and the twelve files below, and later snippets reuse `alice`, `bob` and `root`. They use top-level `await`, so run them in `python -m asyncio` or wrap them in an `async` function. The outputs assume that the namespace `agents` and the database `search` hold no other files, because BM25 scores, ranks and counts change when other files are present.
+
+The `surql` blocks run in Surrealist or in `surreal sql --endpoint ws://localhost:8000 --user root --pass secret --ns agents --db search`. The shell takes piped input one line at a time, so join a multi-line statement into one line before you pipe it.
+
+```python title="Connect and write the example files"
+from surrealdb import AsyncSurreal
+from surrealfs import ROOT, SurrealFs, apply_schema
+
+db = AsyncSurreal("ws://localhost:8000/rpc")
+await db.signin({"username": "root", "password": "secret"})
+await db.use("agents", "search")
+await apply_schema(db)
+
+alice = SurrealFs(db, user="alice")
+bob = SurrealFs(db, user="bob")
+root = SurrealFs(db, user=ROOT)
+
+notes = {
+    "/notes/billing-migration.md": "# Billing migration\n\nThe invoice service moves to the new payment provider in March. A rollback restores the old provider credentials.\n",
+    "/notes/oncall-handbook.md": "# On-call handbook\n\nPage the secondary after fifteen minutes. Rollback steps live in the deploy runbook.\n",
+    "/notes/deploy-runbook.md": "# Deploy runbook\n\nRun the smoke tests before every deploy. To trigger a rollback after a failed release, redeploy the previous tag.\n",
+    "/notes/onboarding.md": "# Onboarding checklist\n\nRequest a laptop, set up the VPN and read the handbook.\n",
+    "/notes/style-guide.md": "# Writing style guide\n\nUse British spelling and keep sentences short.\n",
+    "/notes/q3-planning.md": "# Q3 planning\n\nThe priorities are search quality and the new dashboard.\n",
+    "/notes/retro-august.md": "# August retrospective\n\nThe team liked the quieter release week.\n",
+    "/notes/vendor-list.md": "# Vendors\n\nPayment provider, email provider and the status page host.\n",
+    "/notes/holiday-calendar.md": "# Holiday calendar\n\nThe office closes on the last Friday of December.\n",
+    "/notes/api-conventions.md": "# API conventions\n\nUse snake_case for field names and ISO 8601 for dates.\n",
+    "/notes/retro-september.md": "# September retrospective\n\nThe team wants smaller releases and clearer owners.\n",
+    "/code/pool.py": "class AsyncConnectionPool:\n    def get_user_name(self):\n        return 'x'\n",
+}
+for path, text in notes.items():
+    await alice.write_text(path, text)
+```
+
+The search methods and the SurrealQL functions behind them are the following:
+
+| Method | Ranks by | Needs | Python library | SurrealQL function |
+| --- | --- | --- | --- | --- |
+| Full-text | Relevance score (BM25) of the query words | Nothing | `search_text` | `fn::sfs_search_text` |
+| Vector | Cosine distance between embeddings | An embedding function and a process that stores the vectors | `search_semantic` | `fn::sfs_search_semantic` |
+| Hybrid | Reciprocal rank fusion of the two | Nothing for the full-text arm, and embeddings for the vector arm | `search` | `fn::sfs_hybrid_search` |
+| Grep | Nothing, because results are not ranked | Nothing | `grep` | `fn::sfs_grep` |
+| Section search | Cosine distance over sections of files | An embedding function and a process that stores the vectors | `search_sections` | `fn::sfs_search_sections` |
+
+Section search is covered in [Sections and chunking](/docs/agent-filesystem/concepts/sections-and-chunking).
+
+> [!NOTE]
+> Search is implemented in the Python library and in the SurrealQL functions that the library calls, so the tools built on the library (the [MCP server](/docs/agent-filesystem/interfaces/mcp-server), [Hermes](/docs/agent-filesystem/interfaces/hermes), pydantic-ai and the JSON tools) search too. The `surrealfs-rs` command has `grep` and no other search command. The `search` method of the Rust library sends no identity, which the database refuses under a system credential. The `search` method of the TypeScript SDK passes its arguments in the wrong order. Neither method works against the schema in this release. The Rust method `search_hybrid` sends the caller as the identity and works, and the gateway's `/api/search` endpoint uses it. A client in any language can call the SurrealQL functions directly, as described in [From SurrealQL](#from-surrealql).
+
+## Full-text search
+
+The `content` field of every text file has a full-text index, `idx_file_content`. It uses the analyser `fts_simple` and BM25 ranking with `k1` set to 1.2 and `b` set to 0.75. BM25 is the ranking function of the index: it gives a file a higher score when it contains a query word more often, when the word is rare across the indexed files, and when the file is short. A file is searchable as soon as `write_text` returns. A file that is stored as bytes, for example with `write_bytes`, has no `content`, so full-text search does not find it.
+
+```python
+hits = await alice.search_text("rollback")
+for hit in hits:
+    print(f"{hit.score:.4f}  {hit.path}")
+```
+
+```text title="Output"
+1.0404  /notes/oncall-handbook.md
+0.9655  /notes/billing-migration.md
+0.9213  /notes/deploy-runbook.md
+```
+
+`search_text` returns a list of `SearchHit` objects, best first. Each has `entry` (the `FileEntry` of the file, including its content), `score` (the BM25 score), `snippet` and a `path` property. The `limit` argument defaults to 20, and a blank query returns an empty list without calling the database.
+
+SurrealDB returns the whole file, and the Python library cuts the snippet from it. The snippet is a window of 160 characters that starts about a third of the window before the first query word, with `...` where the text is clipped. Common words such as `the` do not decide where the window sits, although they still match.
+
+```python
+print(hits[0].snippet)
+```
+
+```text title="Output"
+...handbook
+
+Page the secondary after fifteen minutes. Rollback steps live in the deploy runbook.
+```
+
+### How words are matched
+
+The analyser `fts_simple` splits text with four tokenisers (`blank`, `class`, `camel` and `punct`) and then applies the English Snowball stemmer, which also converts words to lower case. The `search::analyze` function shows the tokens that the index and the query both use:
+
+```surql
+search::analyze('fts_simple', 'Rollback steps for AsyncConnectionPool, v2.1');
+```
+
+```surql title="Output"
+['rollback', 'step', 'for', 'async', 'connect', 'pool', ',', 'v', '2', '.', '1']
+```
+
+These rules follow from the analyser:
+
+- **Case and word endings are ignored.** A query for `releases` matches `release`, and `Rollback` matches `rollback`.
+- **Camel case is split.** A query for `connection` finds `AsyncConnectionPool`.
+- **Punctuation marks are tokens.** The comma and the full stop in the output above are tokens of their own, and so is an underscore: `snake_case` gives `snake`, `_` and `case`. A query can therefore match on punctuation alone.
+- **There are no stop words.** A word such as `the` is an ordinary term and is indexed.
+- **Non-English text is analysed as English.** A query for `Konfiguration` does not find `Konfigurationen`, because the English stemmer does not reduce the German word.
+- **A run of Chinese, Japanese or Korean characters without spaces is one token.** A query for `系统` does not find `数据库系统设计与实现`, and only the whole run does.
+
+For other languages, see [Language-specific indexes](#language-specific-indexes).
+
+### Match modes
+
+By default a file matches when it contains **any** word of the query. The default is wide on purpose: an agent that searches before it writes should not read an empty result as proof that nothing exists, and BM25 ranks the files that match the distinctive words first. Pass `match="all"` to require every word:
+
+```python
+for hit in await alice.search_text("deploy rollback"):
+    print(f"{hit.score:.4f}  {hit.path}")
+
+print("--")
+for hit in await alice.search_text("deploy rollback", match="all"):
+    print(f"{hit.score:.4f}  {hit.path}")
+```
+
+```text title="Output"
+2.6041  /notes/deploy-runbook.md
+2.4187  /notes/oncall-handbook.md
+0.9655  /notes/billing-migration.md
+--
+2.6041  /notes/deploy-runbook.md
+2.4187  /notes/oncall-handbook.md
+```
+
+Only the exact string `"all"` selects the all-words mode. Any other value, including `"ALL"`, behaves as `"any"`. In `search`, `match` applies to the full-text arm only. With `match="all"`, the database analyses the query, takes the distinct tokens, and keeps the files whose own tokens include every one of them.
+
+Because punctuation marks are tokens, a query that ends in a full stop matches every file that contains one:
+
+```python
+hits = await alice.search_text("rollback.")
+print(len(hits), [round(hit.score, 2) for hit in hits])
+```
+
+```text title="Output"
+11 [1.04, 0.97, 0.92, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+```
+
+The three files that contain the word rank first, and the other eight files rank behind them because they contain a full stop. With `match="all"`, a punctuation mark in the query is required to appear in the file, so `terse replies?` finds a file only if the file contains a question mark. Leave punctuation out of a query unless the punctuation is the subject.
+
+### Ranking
+
+The score is the BM25 score from the full-text index, and files are ordered by score, highest first. Files with equal scores are ordered by path. SurrealDB computes the inverse document frequency of BM25 without smoothing and clamps a negative value to zero. A word that appears in more than about half of the indexed files therefore scores `0.0` in every file, and the path order decides the result:
+
+```python
+hits = await alice.search_text("the")
+print(len(hits), {hit.score for hit in hits})
+```
+
+```text title="Output"
+9 {0.0}
+```
+
+Nine of the twelve files contain `the`, so every hit scores zero. The example files are numerous enough for most words to appear in a minority of them. In a corpus of two or three files, nearly every word appears in more than half of the files and most scores are zero, so the scores of a very small corpus carry little information.
+
+The statistics cover every indexed file, including files that the caller cannot read. A score therefore reflects how common the query words are across the whole filesystem and not only across the files in the result.
+
+### From an agent
+
+The tool registry exposes full-text search as the `search` tool, which the MCP server, the Hermes plugin, pydantic-ai and the JSON tools share. The tool takes two arguments:
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `query` | string | The words to look for. It must not be empty. |
+| `limit` | integer | The maximum number of results, from 1 to 100. The default is 20. |
+
+The tool always matches on any word, because it has no `match` argument. It prints the path of each hit, followed by the snippet on an indented line, and it replies `Nothing matches '<query>'` when there are no hits. The following call uses the JSON tool dispatcher:
+
+```python
+from surrealfs.integrations.json_tools import call_tool
+from surrealfs.tools import ToolContext
+
+context = ToolContext(fs=alice)
+print(await call_tool(context, "search", {"query": "rollback", "limit": 2}))
+```
+
+```text title="Output"
+/notes/oncall-handbook.md
+    ...handbook
+
+Page the secondary after fifteen minutes. Rollback steps live in the deploy runbook.
+/notes/billing-migration.md
+    ...ervice moves to the new payment provider in March. A rollback restores the old provider credentials.
+```
+
+The tool uses vector search as well when semantic search is turned on, as described in [Vector search in agent tools](#vector-search-in-agent-tools).
+
+### From SurrealQL
+
+The functions behind the Python methods are ordinary SurrealQL functions, so any client that can send a query can search. The signature of the full-text function is:
+
+<Synopsis label="Signature">
+fn::sfs_search_text($q: string, $k: option<int>, $match: option<string>, $me: option<string>)
+</Synopsis>
+
+| Parameter | Description |
+| --- | --- |
+| `$q` | The query. |
+| `$k` | The maximum number of records. It defaults to 20. A value of 0 returns no records, and a negative value raises an error. |
+| `$match` | `'all'` requires every word. Any other value, including `NONE`, matches on any word. |
+| `$me` | The identity to search as. It is required under a system credential and ignored for a record user. See [Permission filtering](#permission-filtering). |
+
+```surql
+SELECT path, score FROM fn::sfs_search_text('deploy rollback', 5, 'all', 'alice');
+```
+
+```surql title="Output"
+[
+    { path: '/notes/deploy-runbook.md', score: 2.604142427444458f },
+    { path: '/notes/oncall-handbook.md', score: 2.41872239112854f }
+]
+```
+
+Each record carries `id`, `filename`, `path`, `content_type`, `is_folder`, `owner`, `mode`, `gate`, `hash`, `generation`, `created_at`, `updated_at`, `size`, `score` and the whole `content`. The function does not return snippets, so a caller that is not the Python library cuts its own. The bytes of a file are never returned.
+
+## Grep
+
+`grep` matches text exactly instead of ranking by words. It is the right tool when the query is an identifier, an error message or a pattern, and not a description:
+
+<Synopsis label="Signature">
+grep(pattern, *, path_prefix=None, glob=None, limit=100, is_regex=False, case_sensitive=True) -> list[GrepMatch]
+</Synopsis>
+
+```python
+matches = await alice.grep("rollback", path_prefix="/notes")
+for match in sorted(matches, key=lambda m: m.path):
+    print(f"{match.path}:{match.line_number}: {match.line}")
+```
+
+```text title="Output"
+/notes/billing-migration.md:3: The invoice service moves to the new payment provider in March. A rollback restores the old provider credentials.
+/notes/deploy-runbook.md:3: Run the smoke tests before every deploy. To trigger a rollback after a failed release, redeploy the previous tag.
+```
+
+The file `/notes/oncall-handbook.md` does not appear, because it contains `Rollback` with a capital letter and the match is case-sensitive by default. A literal pattern is escaped, so characters such as `.` and `(` match themselves. Pass `case_sensitive=False` to ignore case, `is_regex=True` to treat the pattern as a regular expression, and `glob` to filter paths:
+
+```python
+matches = await alice.grep("rollback", case_sensitive=False, glob="*.md")
+for match in sorted(matches, key=lambda m: m.path):
+    print(f"{match.path}:{match.line_number}")
+
+print("--")
+for match in await alice.grep(r"def \w+\(self\)", is_regex=True, glob="*.py"):
+    print(f"{match.path}:{match.line_number}: {match.line}")
+```
+
+```text title="Output"
+/notes/billing-migration.md:3
+/notes/deploy-runbook.md:3
+/notes/oncall-handbook.md:3
+--
+/code/pool.py:2:     def get_user_name(self):
+```
+
+Some details of how `grep` works:
+
+- **`limit` counts matching lines.** The default is 100 lines. The results are not ranked, and their order is not defined, so the examples above sort the matches by path.
+- **`path_prefix` is a string prefix.** A prefix of `/src` or `/src/` also matches files under `/src2`. A `glob` without a leading `/` is applied to the full path as `/**/<glob>`.
+- **The matching runs twice.** `fn::sfs_grep` selects every readable file whose content matches the pattern, with no limit, and sends the whole content of each file to the client. The library then matches line by line and applies `limit`, `glob` and the line numbers. A regular expression has to be valid for both SurrealDB and Python.
+- **The `grep` tool** takes `pattern`, `path`, `glob`, `limit` (from 1 to 1,000, default 100), `is_regex` and `case_sensitive`, and prints `path:line:text` for each match.
+
+> [!WARNING]
+> Under the `ROOT` identity, `grep` does not see files that another user owns when the mode does not give read access to others, such as `0600` or `0640`. `search_text` does see them. Use `search_text` when an administrator needs every file.
+
+The `surrealfs-rs grep PATTERN [PATH]` command is a separate implementation. It reads at most the first 1,000 files, applies no permission filter, and treats `-r` as "the pattern is a regular expression" and not as "recursive". The Python program has its own `surrealfs grep` command, which calls the library's `grep` and so applies permissions for the user that it acts as. See [grep](/docs/agent-filesystem/interfaces/command-line#grep) in the command-line reference.
+
+## Vector search
+
+Vector search finds files by meaning: a query such as `how do I get paid` can find a file about invoices that shares no word with it. It compares an embedding of the query with an embedding of each file. The search functions never call an embedding model. You supply the function that creates embeddings, and a process that runs as root stores the vectors.
+
+The `file` table has an `embedding` field with an HNSW index, `idx_hnsw_file_embedding`, which uses cosine distance and a dimension of 1,536 with the parameters `EFC 150`, `M 12` and `M0 24`. The dimension is fixed by the index definition. A vector of any other size is rejected, for example with `Incorrect vector dimension (768). Expected a vector of 1536 dimension.`
+
+### Provide an embedding function
+
+An embedding function is an `async` function that takes a string and returns a sequence of 1,536 floats. The package does not include one, so you supply a function that calls the embedding model of your choice and returns vectors of that size. The examples on this page use a stand-in function so that they run without a key or a model. The stand-in gives the words in one group the same direction and adds a small component for every other word. It has no real understanding of language and is only suitable for trying the calls:
+
+```python title="Stand-in embedding function"
+import hashlib
+import math
+import re
+
+CONCEPTS = [
+    {"rollback", "revert", "undo", "restore"},
+    {"deploy", "release", "ship", "redeploy"},
+    {"invoice", "billing", "payment"},
+]
+
+async def embed(text: str) -> list[float]:
+    vector = [0.0] * 1536
+    for word in re.findall(r"[a-z]+", text.lower()):
+        for index, group in enumerate(CONCEPTS):
+            if word in group:
+                vector[index] += 1.0
+        vector[16 + int(hashlib.md5(word.encode()).hexdigest(), 16) % 1520] += 0.05
+    norm = math.sqrt(sum(x * x for x in vector)) or 1.0
+    return [x / norm for x in vector]
+```
+
+### Store embeddings
+
+Nothing stores an embedding when a file is written. `reindex_embeddings` does, and only a caller that acts as `ROOT` may run it, because it reads every text file. Any other user receives `PermissionDenied: Permission denied: only root may reindex embeddings`.
+
+<Synopsis label="Signature">
+reindex_embeddings(embed, *, version, batch=32) -> int
+</Synopsis>
+
+The method embeds every text file that has no embedding, whose content changed since it was embedded, or whose `indexer_version` differs from `version`. Files with empty content are skipped. It returns the number of files that it embedded. The `batch` argument is the number of files that one query reads, and files are embedded one at a time. The method also splits each file into sections and embeds them, as described in [Sections and chunking](/docs/agent-filesystem/concepts/sections-and-chunking). Change `version` when you change the model, so that every file is embedded again. A pass with a different `version` string embeds every file again, so two processes that use different strings embed every file each time that they alternate.
+
+The whole content of a file is the input of one `embed` call, so a provider's input-length limit applies to the whole file. If `embed` raises for a file, the exception leaves `reindex_embeddings` and ends the pass. The files that were embedded before it keep their vectors. The failing file still has none, so the next pass reads it again and stops at it again, and the files that the query returns after it stay without vectors until it succeeds. Handle an input-length limit inside your `embed` function, for example by truncating the text.
+
+```python
+print(await root.reindex_embeddings(embed, version="stand-in-1"))
+```
+
+```text title="Output"
+12
+```
+
+### Search by vector
+
+`search_semantic` takes a vector and returns the nearest files. The score is a cosine **distance**, so a lower number is closer, unlike the scores of full-text and hybrid search:
+
+```python
+vector = await embed("undo a bad release")
+for hit in await alice.search_semantic(vector, k=3):
+    print(f"{hit.score:.4f}  {hit.path}")
+```
+
+```text title="Output"
+0.0135  /notes/oncall-handbook.md
+0.1451  /notes/deploy-runbook.md
+0.3024  /notes/retro-august.md
+```
+
+The on-call handbook is the nearest file although it shares no word with the query. The `k` argument defaults to 10 in Python and must be positive. The SQL function, `fn::sfs_search_semantic($qvec, $k, $me)`, defaults to 20 and returns the distance in a field named `distance`. Only files that have an embedding take part.
+
+The index reads a pool of 80 nearest candidates for each query, and the function applies the permission filter and then the limit. A query can therefore return at most 80 files, and fewer when the caller cannot read some of the nearest candidates.
+
+## Hybrid search
+
+Hybrid search runs the full-text arm and the vector arm and merges their rankings with reciprocal rank fusion (RRF). A BM25 score and a cosine distance are not comparable numbers, so RRF uses only each file's position in each list. The fused score of a file is the sum, over the arms that returned it, of `1 / (60 + rank)`, where `rank` starts at 1. The constant 60 is fixed, and the default limit is 20.
+
+```python
+for hit in await alice.search("undo a bad release", vector=vector, limit=5):
+    print(f"{hit.score:.6f}  {hit.path}")
+```
+
+```text title="Output"
+0.032522  /notes/deploy-runbook.md
+0.032002  /notes/retro-august.md
+0.031258  /notes/retro-september.md
+0.031010  /notes/billing-migration.md
+0.016393  /notes/oncall-handbook.md
+```
+
+The deploy runbook ranks first because both arms return it: it is first in the full-text arm and second in the vector arm, so its score is 1/61 + 1/62. The on-call handbook is in the vector arm only, as its first result, so its score is 1/61. The August and September retrospectives and the billing note are returned by both arms, so each outranks the on-call handbook, which only the vector arm returns, although it is first in that arm.
+
+The `search` method takes the query, an optional `vector`, `limit` and `match`, and `score` is the fused score. With no `vector` it is the full-text arm alone, still fused, and the scores are `1/61`, `1/62` and so on:
+
+```python
+for hit in await alice.search("rollback", limit=3):
+    print(f"{hit.score:.6f}  {hit.path}")
+```
+
+```text title="Output"
+0.016393  /notes/oncall-handbook.md
+0.016129  /notes/billing-migration.md
+0.015873  /notes/deploy-runbook.md
+```
+
+The SurrealQL function is `fn::sfs_hybrid_search($q, $qvec, $k, $match, $me)`. A file that both arms return carries `score`, `distance` and `rrf_score`. A file that only the vector arm returns has `distance` and `rrf_score` and no `score`. A blank query with a vector runs the vector arm alone.
+
+## Keep embeddings current
+
+A second pass of `reindex_embeddings` with the same `version` embeds nothing, because no file has changed:
+
+```python
+print(await root.reindex_embeddings(embed, version="stand-in-1"))
+```
+
+```text title="Output"
+0
+```
+
+A file is stale when its content changes. Full-text search sees the new content immediately, and vector search keeps the old embedding until the next pass. The example below rewrites a file and measures its distance to the query before and after a pass:
+
+```python
+async def distance(path):
+    hits = await alice.search_semantic(vector, k=12)
+    return next((round(hit.score, 4) for hit in hits if hit.path == path), None)
+
+print("before", await distance("/notes/retro-august.md"))
+await alice.write_text("/notes/retro-august.md", "# August retrospective\n\nThe team asked for a longer lunch break.\n")
+print("text arm", [hit.path for hit in await alice.search_text("lunch")])
+print("after write", await distance("/notes/retro-august.md"))
+await root.reindex_embeddings(embed, version="stand-in-1")
+print("after reindex", await distance("/notes/retro-august.md"))
+```
+
+```text title="Output"
+before 0.3024
+text arm ['/notes/retro-august.md']
+after write 0.3024
+after reindex 0.9888
+```
+
+The package does not include an indexer. A process that keeps embeddings current calls `reindex_embeddings` on a schedule, and a pass that finds nothing to do embeds nothing, so a polling loop is enough:
+
+```python
+import asyncio
+
+async def keep_embeddings_current(root, embed, *, version, interval=30.0):
+    while True:
+        count = await root.reindex_embeddings(embed, version=version)
+        if count:
+            print(f"embedded {count} file(s)")
+        await asyncio.sleep(interval)
+```
+
+An exception from `embed` or from the database leaves the loop, so a loop that has to outlive a failure catches the exception around the call. A pass reads every stale text file and embeds each one in turn, so the interval sets how long a new or changed file stays without a current vector.
+
+> [!WARNING]
+> A vector that you write yourself with `UPDATE file SET embedding = ...` is replaced by the next pass, unless you set `embedded_hash` to `crypto::md5(content)` and `indexer_version` to match. Both fields stay empty after a direct write, and the pass treats a file with no `embedded_hash` as stale.
+
+## Vector search in agent tools
+
+The `search` tool uses full-text search alone until semantic search is turned on. Turning it on requires an embedding function and does not change the tool's arguments:
+
+| Surface | How to turn on semantic search |
+| --- | --- |
+| pydantic-ai and JSON tools | Pass `semantic=True` where the tools are created, and give the `ToolContext` an `embed` function. Without an `embed` function the tool falls back to full-text search and does not raise an error. |
+| MCP server, Hermes tool plugin, Hermes memory provider | Not available. Setting `SURREALFS_SEMANTIC` to `1`, `true` or `yes` selects the semantic variant of the tool, but these surfaces create no embedding function, so `search` returns the full-text results. |
+
+Turning on semantic search does not create any vectors. The vector arm returns nothing until files have embeddings, so the `search` tool returns the full-text results only until `reindex_embeddings` has run. See [Keep embeddings current](#keep-embeddings-current).
+
+## Permission filtering
+
+Every search function filters its results by what the caller may read, inside the database. A file is hidden from a caller who lacks read permission on it, and a file inside a folder that the caller cannot enter is hidden as well, whatever the file's own mode says. The Python library creates a folder directly under `/home` with mode `0o700`, so the folder `/home/alice` in the next example is private to `alice`. See [Home directories](/docs/agent-filesystem/security/permissions#home-directories):
+
+```python
+await alice.write_text("/home/alice/rollback-draft.md", "# Draft\n\nPrivate rollback notes for the billing team.\n")
+for name, files in (("alice", alice), ("bob", bob), ("root", root)):
+    print(name, [hit.path for hit in await files.search_text("rollback")])
+```
+
+```text title="Output"
+alice ['/home/alice/rollback-draft.md', '/notes/oncall-handbook.md', '/notes/billing-migration.md', '/notes/deploy-runbook.md']
+bob ['/notes/oncall-handbook.md', '/notes/billing-migration.md', '/notes/deploy-runbook.md']
+root ['/home/alice/rollback-draft.md', '/notes/oncall-handbook.md', '/notes/billing-migration.md', '/notes/deploy-runbook.md']
+```
+
+The identity that the filter uses depends on how the client connects:
+
+| Connection | Identity used | When no identity is given |
+| --- | --- | --- |
+| System credential (root, namespace or database user) | The `$me` argument. The Python library passes the `user` of the `SurrealFs` object. | The function raises an error. |
+| Record user (opt-in record access) | The signed-in user. The database ignores `$me`, so a user cannot search as someone else. | Not applicable. |
+
+A search function does not return an empty result for a missing identity, because an empty result would read as "nothing found". Under a system credential, the call `fn::sfs_search_text('rollback', 5, NONE, NONE)` raises `An error occurred: search needs an identity: pass $me, or connect as a record user`. The identity `root` bypasses the filter, and the name `root` cannot sign in as a record user. See [Permissions](/docs/agent-filesystem/security/permissions) for the rules and [Record access](/docs/agent-filesystem/security/record-access) for database-enforced permissions.
+
+> [!NOTE]
+> Search applies the owner and other permission bits and never the group bit. A user who belongs to a file's group through the group tables can read the file with a record-access session, and yet does not find it in a search. Search results can therefore be narrower than what a user can read.
+
+Files in a workspace branch are ordinary files under `/.workspaces/<branch>/`, so they appear in search results next to the files that they were copied from. See [Workspaces](/docs/agent-filesystem/concepts/workspaces).
+
+## Language-specific indexes
+
+The schema defines five more full-text indexes on separate fields of the `file` table, each with its own analyser. A field holds a file's content when the file's `language` field has one of the values in the table, and is empty otherwise.
+
+| Field and index | Analyser | `language` values |
+| --- | --- | --- |
+| `text_de`, `idx_text_de` | German tokens, lower case, German stemmer | `de` |
+| `text_fr`, `idx_text_fr` | French tokens, lower case, French stemmer | `fr` |
+| `text_es`, `idx_text_es` | Spanish tokens, lower case, Spanish stemmer | `es` |
+| `text_cjk`, `idx_text_cjk` | Every one-character and two-character gram | `ja`, `zh`, `ko` |
+| `text_code`, `idx_text_code` | Class and camel-case tokens, lower case | `code`, `python`, `rust`, `typescript`, `javascript`, `go`, `c`, `cpp`, `html`, `css`, `json`, `yaml`, `toml`, `sql`, `surrealql`, `shell` |
+
+> [!WARNING]
+> Nothing in Agent Filesystem sets `language` in this release, and none of the search functions reads these indexes. The fields stay empty until you set `language` yourself, and you query them directly with the `@@` operator. The default search functions keep using `fts_simple`. No part of the product stores a `language` value or detects the natural language of a file, and `surrealfs-rs detect` prints programming-language names without storing them.
+
+The next example writes a German file and a Chinese file, sets the `language` of those two files and of `/code/pool.py`, and then queries the matching indexes. The fields follow later edits of the content.
+
+```python
+await alice.write_text("/docs/konfiguration.txt", "Die Konfigurationen der Systeme sind wichtig.\n")
+await alice.write_text("/docs/sheji.txt", "数据库系统设计与实现\n")
+```
+
+```surql
+UPDATE file SET language = 'de' WHERE filename = 'konfiguration.txt' RETURN NONE;
+SELECT path FROM file WHERE text_de @@ 'Konfiguration';
+//- [{ path: '/docs/konfiguration.txt' }]
+
+UPDATE file SET language = 'zh' WHERE filename = 'sheji.txt' RETURN NONE;
+SELECT path FROM file WHERE text_cjk @@ '系统';
+//- [{ path: '/docs/sheji.txt' }]
+
+UPDATE file SET language = 'python' WHERE filename = 'pool.py' RETURN NONE;
+SELECT path FROM file WHERE text_code @@ 'connection';
+//- [{ path: '/code/pool.py' }]
+```
+
+The German query finds `Konfigurationen`, which the default index misses, and the CJK index finds `系统` inside a longer run of characters because it indexes one-character and two-character grams. These queries read the `file` table directly and do not use the search functions. A system credential bypasses table permissions, so under a system credential they return files that a particular user cannot read. Connect as a record user, or add a read check of your own, when the caller is not an administrator.
+
+## Limitations in this release
+
+- **Search is mainly a Python feature.** The `search` methods of the Rust library and of the TypeScript SDK do not work, the Rust `search_hybrid` method does, and the `surrealfs-rs` command has only `grep`.
+- **Full-text search analyses every file as English.** The language-specific indexes exist and no function uses them.
+- **A word in more than half of the files scores `0.0`.** The order of such files falls back to their path.
+- **The default match is any word.** A query with punctuation matches every file that contains the punctuation.
+- **Snippets are cut by the client.** The SQL functions return whole files, and the Python library and the Rust `search_hybrid` method cut snippets from them.
+- **Embeddings are not written when a file is written.** A caller supplies the embedding function, root runs `reindex_embeddings`, and the dimension is fixed at 1,536. A file keeps its old embedding until the next pass, and a file that is overwritten with bytes keeps its embedding although its content is gone, so vector search can still return it with an empty snippet.
+- **The gateway stores no embeddings.** After a write, the gateway that `surrealfs-rs serve gateway` starts requests an embedding of the file when `OPENAI_API_KEY` is set, but its statement sets the field `embedding_model`, which the schema does not define. The database rejects the statement and the gateway ignores the error, so no vector is stored.
+- **Vector search reads a pool of 80 candidates.** The permission filter and the limit apply to that pool.
+- **Search ignores the group permission bit.**
+- **Workspace copies appear in results.**
+- **Deleting a file leaves its section records.** See [Sections and chunking](/docs/agent-filesystem/concepts/sections-and-chunking).
+
+## See also
+
+- [Sections and chunking](/docs/agent-filesystem/concepts/sections-and-chunking) describes how files are split into sections and how section search works.
+- [Content analysis](/docs/agent-filesystem/concepts/understanding-pipeline) covers the job queue, code symbols and the other analysis features.
+- [Links and entities](/docs/agent-filesystem/concepts/links-and-entities) covers the relations between files.
+- [Permissions](/docs/agent-filesystem/security/permissions) describes the owner, mode and ancestry rules that search applies.
+- [Python SDK](/docs/agent-filesystem/interfaces/python-sdk) lists every method of the `SurrealFs` class.
+- [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas) lists the arguments of the `search`, `grep` and `search_sections` tools.
+- [SurrealQL functions](/docs/agent-filesystem/reference/surrealql-functions) lists the `fn::sfs_*` functions.

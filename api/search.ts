@@ -22,7 +22,8 @@ const CORS_HEADERS: Record<string, string> = {
 const CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400";
 
 // Products are isolated at the URL prefix level: every Agent Memory
-// page lives under /docs/agent-memory, every SurrealDB page does not.
+// page lives under /docs/agent-memory (or /docs/agent-filesystem, which
+// shares the product), every SurrealDB page does not.
 // The product is passed to handleSearch, which filters the search
 // index (shared across products) before applying the relevance
 // threshold and result cap - so each product gets its full quota

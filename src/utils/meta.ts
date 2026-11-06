@@ -12,15 +12,31 @@ export const BASE_URL = "https://surrealdb.com/docs";
  *
  * The section is dropped when it would only repeat the page title, which is the
  * case for a section's own landing page.
+ *
+ * `productLabel` replaces the product's own label for a page tree that shares a
+ * product without being it (see `getProductLabelOverride`). That label then
+ * names the whole tree, so it is not repeated: a section called the label is
+ * dropped, and a title that is the label stands alone. "Versioning" in the
+ * Agent Filesystem docs reads "Versioning | Agent Filesystem", not
+ * "Versioning | Agent Filesystem | Agent Filesystem". Titles without an
+ * override are built as they always were.
  */
 export function getSuffixedMetaTitle(
     title: string,
     productId: ProductId = "surrealdb",
     section?: string,
+    productLabel?: string,
 ) {
-    const product = PRODUCT_META[productId].label;
-    const repeatsTitle = section?.trim().toLowerCase() === title.trim().toLowerCase();
-    const qualifier = section && !repeatsTitle ? ` | ${section}` : "";
+    const product = productLabel ?? PRODUCT_META[productId].label;
+    const matches = (a: string | undefined, b: string) =>
+        a?.trim().toLowerCase() === b.trim().toLowerCase();
+    const repeatsTitle = matches(section, title);
+    const repeatsLabel = productLabel !== undefined && matches(section, productLabel);
+    const qualifier = section && !repeatsTitle && !repeatsLabel ? ` | ${section}` : "";
+
+    if (productLabel !== undefined && !qualifier && matches(title, productLabel)) {
+        return title;
+    }
 
     return `${title}${qualifier} | ${product}`;
 }

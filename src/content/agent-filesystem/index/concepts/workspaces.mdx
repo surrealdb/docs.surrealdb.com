@@ -1,0 +1,319 @@
+---
+position: 9
+title: Workspaces
+description: "Agent Filesystem workspaces: fork a branch of the filesystem, write isolated copies of files, diff, merge or discard, plus the sandbox context manager and the limits of file-level merge."
+---
+
+# Workspaces
+
+A workspace is a named branch of the filesystem that belongs to one agent. The agent forks a workspace, changes files inside it while reads of the original paths keep returning the files on the main branch, and then merges the changes back or discards them. Workspaces suit a multi-step task that edits existing text files, such as rewriting a group of documents, and whose intermediate states should not replace the main files until the task is complete. In this release a merge also needs every other recorded file to stay unchanged while the workspace is open, so the pattern suits one open workspace at a time. See [A change elsewhere blocks the merge](#a-change-elsewhere-blocks-the-merge).
+
+> [!WARNING]
+> In this release, a workspace carries edits to text files that already exist on the main branch. A file that is created only inside a workspace is not applied by a merge, and the merge still returns `ok`. The workspace and the copy are then deleted, so the new file is lost. See [What a merge applies](#what-a-merge-applies).
+
+A merge is also refused when any file in the workspace's snapshot has changed on the main branch since the fork, including files that the workspace never touched. Under [record authentication](/docs/agent-filesystem/security/record-access) the generation of a file does not advance, so this check does not fire, and a merge replaces a concurrent change without an error. The rules are described below.
+
+> [!NOTE]
+> Agent Filesystem is in beta. The API, schema and command-line interface may change in breaking ways between releases. This page describes the behaviour of the `next` branch of the SurrealFS repository.
+
+The examples on this page use the Python library, which has every workspace call. Start SurrealDB and install the library as described in the [Python quickstart](/docs/agent-filesystem/quickstarts/python), which starts the server with `surreal start --user root --pass secret memory`. The examples use an empty database named `workspaces`. A fork records every file in the database, so the counts and listings below assume that the database holds only the three files that the setup creates. The examples share the connection below, and later snippets reuse `alice` and `bob`. They use top-level `await`, so run them in `python -m asyncio` or wrap them in an `async` function.
+
+```python
+from surrealdb import AsyncSurreal
+from surrealfs import ConflictError, SurrealFs, apply_schema
+
+db = AsyncSurreal("ws://localhost:8000/rpc")
+await db.signin({"username": "root", "password": "secret"})
+await db.use("agents", "workspaces")
+await apply_schema(db)
+
+alice = SurrealFs(db, user="alice")
+bob = SurrealFs(db, user="bob")
+
+await alice.write_text("/docs/guide.md", "# Guide\n\nStart here.\n", create_parents=True)
+await alice.write_text("/docs/api.md", "# API\n\nEndpoints.\n")
+await alice.write_text("/docs/changelog.md", "# Changelog\n\n- 1.0\n")
+```
+
+## How a workspace works
+
+A workspace does not copy the filesystem. Forking records which files exist and at which generation, and every later write inside the workspace creates a separate copy of the one file that changed. Two tables hold this state:
+
+| Table | Purpose |
+| --- | --- |
+| `workspace` | One record for each workspace, with a `name`, an `owner`, an `is_public` flag and `created_at`. The pair `(owner, name)` is unique. |
+| `file_branch` | One record for each non-folder file that existed at the fork. It holds the `workspace`, the `path`, the original file as `base_file`, the generation of that file at the fork as `base_gen`, and the file the workspace currently uses as `current_file`. The pair `(workspace, path)` is unique. |
+
+Until the workspace changes a file, `current_file` and `base_file` are the same record. When the workspace writes a file, the library creates a new ordinary file at `/.workspaces/<branch>/<path>`, with the content, and points `current_file` at it.
+
+## Fork a workspace
+
+The `fork_workspace` method takes the name of the new workspace and, optionally, the branch to fork from. It returns the workspace name, the branch it was forked from, and the number of files recorded.
+
+```python
+print(await alice.fork_workspace("tidy-docs"))
+```
+
+```text title="Output"
+{'base_branch': 'main', 'count': 3, 'workspace': 'tidy-docs'}
+```
+
+The fork writes one `file_branch` record for every non-folder file in the database, so its cost grows with the number of files and not with the number of files the agent will change. File content, chunks and blobs are not copied. The count covers all files, including those that belong to other users and the copies under `/.workspaces` that belong to other workspaces, because the connection that Agent Filesystem uses by default is a system credential. The count above is 3 because the database holds only the three files created by the setup. Under [record authentication](/docs/agent-filesystem/security/record-access) the fork records only the files that the caller can read.
+
+A workspace name has to be unique for its owner, and a second fork with the same name raises `AlreadyExists`. The source can be another workspace of the same owner instead of `main`. The new workspace then starts with copies of that workspace's tracking records, and a missing source raises `NotFound`. The new workspace therefore starts with the edits that the source workspace holds. Merging it applies those edits to the main branch as well, so the source workspace is then in conflict on every file that the merge changed and can only be discarded.
+
+## Write inside a workspace
+
+The `write_workspace_text` method writes text to a path inside the workspace.
+
+```python
+copy = await alice.write_workspace_text(
+    "tidy-docs", "/docs/guide.md", "# Guide\n\nStart here.\n\nSee the API page.\n"
+)
+print(copy.path)
+print(repr(await alice.read_text("/docs/guide.md")))
+```
+
+```text title="Output"
+/.workspaces/tidy-docs/docs/guide.md
+'# Guide\n\nStart here.\n'
+```
+
+The file on the main branch is unchanged. The workspace holds a full second copy of the text, as an ordinary file that belongs to the writer and has mode 0666 by default. The method creates the parent folders as needed, accepts text only, and raises `NotFound` when the workspace does not exist or belongs to another owner. There are no workspace calls to delete, move or write bytes.
+
+The tracking records show which files the workspace has replaced:
+
+```surql
+SELECT path, base_gen, base_file = current_file AS unchanged FROM file_branch WHERE workspace.name = 'tidy-docs' ORDER BY path;
+```
+
+```surql title="Output"
+[
+	{
+		base_gen: 1,
+		path: '/docs/api.md',
+		unchanged: true
+	},
+	{
+		base_gen: 1,
+		path: '/docs/changelog.md',
+		unchanged: true
+	},
+	{
+		base_gen: 1,
+		path: '/docs/guide.md',
+		unchanged: false
+	}
+]
+```
+
+### Reading from a workspace
+
+The ordinary read calls `read_text`, `ls`, `grep` and `search` do not redirect to a workspace. A read of `/docs/guide.md` returns the main branch, as the example above shows. Only the sandbox described below reads through its workspace: it reads `/.workspaces/<branch>/<path>` when that file exists, and the main branch otherwise.
+
+## Compare a workspace with the main branch
+
+The `diff_workspace` method returns one dictionary for each recorded file, whether or not the workspace changed it.
+
+```python
+for entry in sorted(await alice.diff_workspace("tidy-docs"), key=lambda entry: entry["path"]):
+    print(entry["path"], entry["modified"], entry["conflict"])
+```
+
+```text title="Output"
+/docs/api.md False False
+/docs/changelog.md False False
+/docs/guide.md True False
+```
+
+| Field | Meaning |
+| --- | --- |
+| `path` | The path on the main branch |
+| `base_file`, `current_file` | The record ids of the original file and of the file the workspace uses |
+| `base_gen` | The generation of the original file when the workspace was forked |
+| `current_base_gen` | The generation of the original file now, or `None` if it no longer exists |
+| `branch_gen` | The generation of the file the workspace uses |
+| `modified` | `True` when the text of `current_file` differs from the text of `base_file` |
+| `conflict` | `True` when `current_base_gen` differs from `base_gen`, meaning the original file has changed or been removed since the fork |
+
+The diff states which files changed. It does not contain line-level differences. To compare the text of a changed file, read both copies, or use `diff` between generations as described in [Versions and history](/docs/agent-filesystem/concepts/versions-and-history).
+
+## Merge a workspace
+
+The `merge_workspace` method applies the changes of a workspace to the main branch, and then removes the workspace and its copies.
+
+```python
+print(await alice.merge_workspace("tidy-docs"))
+print(repr(await alice.read_text("/docs/guide.md")))
+print((await alice.stat("/docs/guide.md")).generation)
+print(await alice.exists("/.workspaces/tidy-docs/docs/guide.md"))
+```
+
+```text title="Output"
+{'into': 'main', 'merged': 'tidy-docs', 'status': 'ok'}
+'# Guide\n\nStart here.\n\nSee the API page.\n'
+2
+False
+```
+
+The merge works in these steps:
+
+1. It finds the workspace for the caller, and raises `NotFound` if there is none.
+2. It computes the diff. If any entry has `conflict` set to `True`, it raises `ConflictError` with the message `sfs:conflict: concurrent change on <path>` for the first such path. Nothing is written, and the workspace stays in place.
+3. For each entry with `modified` set to `True`, it copies the text of the workspace's file into the original file on the main branch. The file's generation increases by 1, and its previous state goes into the [history](/docs/agent-filesystem/concepts/versions-and-history).
+4. It deletes the tracking records and the workspace record. The Python library then removes the `/.workspaces/<branch>` folder.
+
+The conflict check runs before any write, so a conflict leaves every file on the main branch unchanged.
+
+### A change elsewhere blocks the merge
+
+A conflict is a comparison of generations, and it does not depend on whether the workspace touched the file. If anyone changes another file that was recorded at the fork, the merge is refused. A file that was removed from the main branch after the fork has the same effect.
+
+```python
+await alice.fork_workspace("review")
+await alice.write_workspace_text("review", "/docs/api.md", "# API\n\nEndpoints, reviewed.\n")
+await bob.write_text("/docs/changelog.md", "# Changelog\n\n- 1.0\n- 1.1\n")
+
+try:
+    await alice.merge_workspace("review")
+except ConflictError as error:
+    print(error)
+```
+
+```text title="Error output"
+An error occurred: sfs:conflict: concurrent change on /docs/changelog.md
+```
+
+The workspace changed only `/docs/api.md`, and the merge was refused because of `/docs/changelog.md`. No call rebases a workspace or resets its `base_gen`. To continue, discard the workspace and repeat the work in a new one.
+
+Two workspaces that are open at the same time follow the same rule. Each workspace records every file that exists when it is forked, so the first merge changes a file that the second workspace recorded, and the second merge is refused even when the two workspaces changed different files. In a local test, two workspaces forked from the same state changed `/docs/guide.md` and `/docs/api.md` respectively. The first merged, and the second was refused with `concurrent change on /docs/guide.md`. A workspace that is forked while another workspace holds copies also records those copies. In a local test, merging the earlier workspace deleted its copies, and the later workspace was refused with a message that named a copy, as in `concurrent change on /.workspaces/w1/docs/guide.md`. Merge or discard a workspace before you fork the next one.
+
+### What a merge applies
+
+> [!WARNING]
+> A merge applies one thing: the text of files that were recorded at the fork and that the workspace replaced. Everything else is dropped without an error. A merge into a file that uses [collaborative editing](/docs/agent-filesystem/concepts/collaborative-editing) is applied and then lost, as the table shows.
+
+| Change in the workspace | Result of a merge |
+| --- | --- |
+| Edit of an existing text file | Applied |
+| Edit of a file that uses collaborative editing | Applied to `content` only. The merge writes no update to the log, so the next collaborative write replaces the merged text with the text that the log produces. |
+| A new file, written once | Not applied. The merge returns `ok`, the file does not exist on the main branch, and the copy is deleted with the workspace. |
+| A new file, written twice | The merge raises `ConflictError` for that path every time, so it cannot succeed. The workspace records a new file with `base_gen` 1, and the second write advances the generation of the copy to 2. |
+| Deleting or moving a file | Cannot be expressed in a workspace, so it is never applied |
+| Frontmatter metadata and links of a changed file | Not updated on the main file. The metadata and the links of the branch copy disappear with it. |
+
+The example below shows the third row, a new file that is dropped without a warning:
+
+```python
+await alice.fork_workspace("add-page")
+await alice.write_workspace_text("add-page", "/docs/new.md", "# New page\n")
+
+print(await alice.merge_workspace("add-page"))
+print(await alice.exists("/docs/new.md"))
+```
+
+```text title="Output"
+{'into': 'main', 'merged': 'add-page', 'status': 'ok'}
+False
+```
+
+To add a file, write it to the main branch directly and use a workspace only for the files that exist already.
+
+### The target and the strategy have no effect
+
+The `target` argument of `merge_workspace` is echoed back in the result and changes nothing. A workspace that was forked from another workspace merges into the main branch like any other, and the merge applies the edits that the new workspace inherited from its source as well. The source workspace and its copies stay as they were, and its own merge is then refused. No operation merges one workspace into another.
+
+The `merge` method of the sandbox accepts a `strategy` argument with the default `"3way"`. The argument is not used. No three-way merge, line-level merge or content merge exists, and the generation comparison above is the only conflict rule.
+
+## Discard a workspace
+
+The `discard_workspace` method deletes the workspace record, its tracking records and its copies.
+
+```python
+await alice.discard_workspace("review")
+print([workspace.name for workspace in await alice.list_workspaces()])
+```
+
+```text title="Output"
+[]
+```
+
+The `list_workspaces` method returns the caller's workspaces and any public ones, newest first. The root folder `/.workspaces` stays in the filesystem after merges and discards.
+
+## The sandbox context manager
+
+The `sandbox` method forks a workspace when the block starts, and discards it when the block ends unless the block called `merge` or `discard`. This applies to a normal exit and to an exception. The object it yields has `write_text`, `read_text`, `diff`, `merge` and `discard`.
+
+```python
+async with alice.sandbox("trial") as sandbox:
+    await sandbox.write_text("/docs/api.md", "# API\n\nTrial text.\n")
+    print(repr(await sandbox.read_text("/docs/api.md")))
+
+print(repr(await alice.read_text("/docs/api.md")))
+print([workspace.name for workspace in await alice.list_workspaces()])
+```
+
+```text title="Output"
+'# API\n\nTrial text.\n'
+'# API\n\nEndpoints.\n'
+[]
+```
+
+The block left without merging, so the sandbox discarded its changes. A block that calls `await sandbox.merge()` keeps them, and the call returns the same dictionary as `merge_workspace`. If `merge()` raises, for example on a conflict, the sandbox is discarded when the block ends, and its changes are lost.
+
+## Visibility and permissions
+
+- **The copies are ordinary files.** A file in `/.workspaces/<branch>/` appears in `ls /`, in `tree`, and in `grep` and search results, and it is readable by other users with the default mode. A search for text that exists only in a workspace returns the copy.
+- **The workspace record belongs to its owner.** The `diff_workspace`, `merge_workspace` and `discard_workspace` calls filter by the owner, so another user receives `NotFound`. The `is_public` field exists, and `list_workspaces` includes public workspaces, but no call sets the field, and `diff_workspace`, `merge_workspace` and `discard_workspace` ignore it.
+- **Per-user permissions depend on the connection.** Under the default system credential, the fork, the diff and the merge do not apply per-user permission checks. Under [record authentication](/docs/agent-filesystem/security/record-access) they do, but the generation does not advance there, so the conflict rule above cannot detect a concurrent change. In a local test under record authentication, one user merged a workspace after another user had written the same file, and the merge replaced the other user's text without an error.
+
+## Workspaces on each interface
+
+| Interface | Calls |
+| --- | --- |
+| Python library | `fork_workspace`, `list_workspaces`, `write_workspace_text`, `diff_workspace`, `merge_workspace`, `discard_workspace`, `sandbox` |
+| TypeScript SDK | `forkWorkspace`, `listWorkspaces`, `writeWorkspaceText`, `diffWorkspace`, `mergeWorkspace`, `discardWorkspace`, and `setBranch` |
+| Rust library | `fork_workspace`, `diff_workspace`, `merge_workspace` |
+| `surrealfs-rs` command | `fork <SRC> <DST>`, `diff <BRANCH>`, `merge <SRC> <DST>` |
+| Tool registry | `fork_workspace`, `merge_workspace` |
+
+The `setBranch(name)` method in the TypeScript SDK makes `writeText` write into the workspace for paths outside `/.workspaces/`. Reads are not redirected, so `readText` still returns the main branch.
+
+The Rust command line has no way to write into a workspace, so a workspace created with it holds no changes. The `diff` command prints `UNCHANGED`, `MODIFIED` or `CONFLICT` followed by the path for each file, and `merge` prints the error and exits with status 1 on a conflict. Install the command as described in the [command-line quickstart](/docs/agent-filesystem/quickstarts/command-line), and set the connection first. The command reads its settings from `SURREALDB_URL`, `SURREALDB_NS`, `SURREALDB_DB`, `SURREALDB_USER` and `SURREALDB_PASS`, which differ from the `SURREALDB_NAMESPACE` and `SURREALDB_DATABASE` that the Python `surrealfs` command uses. The owner of a workspace that the command creates is the value of `--caller`, or of the `SURREALFS_CALLER` variable, and it defaults to `root`. A Python `SurrealFs` sees that workspace only when its `user` has the same value.
+
+```bash
+export SURREALDB_URL=ws://127.0.0.1:8000/rpc
+export SURREALDB_NS=agents
+export SURREALDB_DB=workspaces
+export SURREALDB_USER=root
+export SURREALDB_PASS=secret
+export SURREALFS_CALLER=alice
+
+surrealfs-rs fork main check
+surrealfs-rs diff check
+```
+
+```text title="Sample output"
+Forked workspace branch 'main' -> 'check'
+UNCHANGED  /docs/api.md
+UNCHANGED  /docs/changelog.md
+UNCHANGED  /docs/guide.md
+```
+
+## Limitations in this release
+
+- **The `fork_workspace` tool fails.** In the Python tool registry, which the MCP server, Hermes and pydantic-ai share, the handler passes an argument that the method does not accept. The tool returns the text `Error: invalid arguments for fork_workspace: SurrealFs.fork_workspace() got an unexpected keyword argument 'source'` as an ordinary result, and no workspace is created. The `merge_workspace` tool works for a workspace that was created through the library. The TypeScript tools in `@surrealdb/fs/ai` call the correct methods. See [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas).
+- **The merge check does not fire under record authentication.** The conflict rule compares generations, and a record user cannot advance them. A merge replaces a concurrent change without an error.
+- **Only one workspace can be merged safely at a time.** A second open workspace, and the copies that a workspace holds, are recorded by every later fork, and the first merge makes the second one conflict.
+- **A merge into a collaborative file is lost.** The next collaborative write replaces the merged text.
+- **The TypeScript diff misreports one field.** `diffWorkspace` always returns `currentGen` as 1, because it reads a field that the database function does not return. The `baseGen` field is correct.
+- **Rust has no write, list or discard call.** The library and the command can fork, diff and merge only.
+- **The tracking cost is one record for each file.** A fork records every non-folder file, so forking a large filesystem takes time in proportion to its size.
+- **Branch copies appear in listings and searches.** Agents that list or search the main branch also see the files under `/.workspaces`.
+
+## See also
+
+- [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases) covers the generation counter that the conflict rule uses.
+- [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) covers how a merge appears in the history of a file.
+- [Collaborative editing](/docs/agent-filesystem/concepts/collaborative-editing) covers shared files that several agents edit without a workspace.
+- [Record authentication](/docs/agent-filesystem/security/record-access) covers how permissions apply to workspaces.

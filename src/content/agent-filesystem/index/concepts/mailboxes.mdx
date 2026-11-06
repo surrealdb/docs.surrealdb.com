@@ -1,0 +1,263 @@
+---
+position: 10
+title: Mailboxes
+description: "Agent inboxes in Agent Filesystem: send, receive, claim and complete messages stored as files under /agents/AGENT_ID/inbox, with ordering rules, claim semantics and limits."
+---
+
+# Mailboxes
+
+A mailbox lets one agent hand work or information to another through the filesystem. The sender writes a file into the recipient's inbox folder, the recipient lists the folder, claims a message by moving it, and completes the message by deleting it. A message is an ordinary file, so the version history, the file modes and the change feed of Agent Filesystem all apply to it.
+
+The convention is available in the Python library and the TypeScript SDK. Both implementations use the same paths, so an agent written in one can send to and receive from an agent written in the other, subject to the file modes described under [Permissions and names](#permissions-and-names). A database that both implementations use has to be prepared with the Python package or `surrealfs-rs init`, because the schema that the TypeScript `applySchema` installs is older, and a later Python `apply_schema` on it fails. See the [TypeScript SDK](/docs/agent-filesystem/interfaces/typescript-sdk).
+
+> [!WARNING]
+> A claim is not exclusive when several consumers claim the same message at the same moment. The file ends in exactly one consumer's folder, but more than one call can return success. No automatic process returns a message that a consumer claimed and never completed, although another agent can move it back by hand, as described under [Return an abandoned message](#return-an-abandoned-message). See [Claims that overlap](#claims-that-overlap) for a way to make a claim exclusive.
+
+> [!NOTE]
+> Agent Filesystem is in beta. The API, schema and command-line interface may change in breaking ways between releases. This page describes the behaviour of the `next` branch of the SurrealFS repository.
+
+The examples on this page use the Python library, installed as described in the [Python quickstart](/docs/agent-filesystem/quickstarts/python), which also starts the server with `surreal start --user root --pass secret memory`. The examples use an empty database named `mailboxes`, and the outputs assume that it holds no other files. They share the connection below, and later snippets reuse `planner` and `worker`. They use top-level `await`, so run them in `python -m asyncio` or wrap them in an `async` function.
+
+```python
+import asyncio
+
+from surrealdb import AsyncSurreal
+from surrealfs import ConflictError, NotFound, QueryError, SurrealFs, apply_schema
+
+db = AsyncSurreal("ws://localhost:8000/rpc")
+await db.signin({"username": "root", "password": "secret"})
+await db.use("agents", "mailboxes")
+await apply_schema(db)
+
+planner = SurrealFs(db, user="planner")
+worker = SurrealFs(db, user="worker")
+```
+
+## The folder layout
+
+| Path | Meaning |
+| --- | --- |
+| `/agents/<agent_id>/inbox/<task_name>` | A pending message |
+| `/agents/<agent_id>/inbox/.claimed/<consumer_id>/<task_name>` | A message that a consumer has claimed |
+
+The `agent_id` names the recipient, and the `consumer_id` names the process or worker that takes the message. They can be the same string when one worker serves one inbox. The `task_name` is the file name of the message.
+
+## Send a message
+
+The `send_message` method takes the recipient's `agent_id`, a `task_name` and the payload as a string. It creates the inbox folders when they do not exist, and writes the payload to a file. The payload can be any text. JSON is a convenient format. The Python library takes the content type from the file extension, so `task-1.json` is stored as `application/json`, while the TypeScript SDK stores every message as `text/plain`.
+
+```python
+await planner.send_message("worker-1", "b-summarise.json", '{"task": "summarise", "file": "/reports/q3.md"}')
+await planner.send_message("worker-1", "a-review.json", '{"task": "review", "file": "/docs/api.md"}')
+entry = await planner.send_message("worker-1", "c-publish.json", '{"task": "publish"}')
+
+print(entry.path, entry.content_type, entry.owner)
+```
+
+```text title="Output"
+/agents/worker-1/inbox/c-publish.json application/json planner
+```
+
+Sending a message with a `task_name` that already exists overwrites the file. The message keeps its original creation time, so it keeps its place in the queue, and the generation of the file increases when the payload differs from the stored one.
+
+## Receive messages
+
+The `receive_messages` method lists the pending messages of an inbox, oldest first, up to `limit` (default 10). It skips folders and names that start with a dot, so the `.claimed` folder never appears. It returns an empty list when the inbox does not exist.
+
+The order is the creation time of the file, with the record id as a tie-breaker. It is not the order of the names. The messages above were sent as `b`, `a` and `c`, and they come back in that order.
+
+```python
+messages = await worker.receive_messages("worker-1")
+print([message.filename for message in messages])
+
+for message in await worker.receive_messages("worker-1", limit=1):
+    print(message.path, await worker.read_text(message.path))
+```
+
+```text title="Output"
+['b-summarise.json', 'a-review.json', 'c-publish.json']
+/agents/worker-1/inbox/b-summarise.json {"task": "summarise", "file": "/reports/q3.md"}
+```
+
+The Python library lists the whole inbox and sorts it on the client, so the cost of a call grows with the number of messages in the inbox. The TypeScript SDK sorts by creation time only.
+
+## Claim a message
+
+The `claim_message` method moves a message from the inbox into `.claimed/<consumer_id>/`, and returns the file entry at its new path. The move takes the message out of the pending list.
+
+```python
+claimed = await worker.claim_message("worker-1", "b-summarise.json", "worker-a")
+print(claimed.path)
+print([message.filename for message in await worker.receive_messages("worker-1")])
+```
+
+```text title="Output"
+/agents/worker-1/inbox/.claimed/worker-a/b-summarise.json
+['a-review.json', 'c-publish.json']
+```
+
+A claim for a message that is no longer in the inbox raises `NotFound`. In the sequential case this is the whole protocol: the second consumer that tries to claim `b-summarise.json` gets the error, and the first keeps the message.
+
+```python
+try:
+    await worker.claim_message("worker-1", "b-summarise.json", "worker-b")
+except NotFound as error:
+    print(error)
+```
+
+```text title="Error output"
+No such file or directory: /agents/worker-1/inbox/b-summarise.json
+```
+
+## Complete a message
+
+When the work is done, the `complete_message` method deletes the claimed file. Pass the same `consumer_id` that made the claim. Python raises `NotFound` when the claimed file does not exist, for example when the consumer id is wrong, and the TypeScript SDK ignores a missing file. The deletion is a hard delete, and a `delete` version stays in the history of the claimed path.
+
+```python
+await worker.complete_message("worker-1", "b-summarise.json", "worker-a")
+print([entry.path for entry in await worker.ls("/agents/worker-1/inbox/.claimed/worker-a")])
+```
+
+```text title="Output"
+[]
+```
+
+A consumer that needs to report a result can write it as a file, for example into an inbox of the sender, before it completes the message.
+
+## Return an abandoned message
+
+A claimed message waits in `.claimed/<consumer_id>/` until its consumer completes it or someone moves it. The file form has no visibility timeout and no redelivery. When a consumer fails, another agent can find the claimed messages with a recursive `ls` of `.claimed`, and the `updated_at` field of a claimed file holds the time of the claim, so it shows how long the message has waited. The agent can then return a message to the inbox with `mv`, which keeps the original creation time of the message and so its place in the queue.
+
+In the example below, a consumer claims `a-review.json`, which is older than `c-publish.json`, and another agent returns it. The message goes back in front of `c-publish.json`.
+
+```python
+await worker.claim_message("worker-1", "a-review.json", "worker-a")
+claimed = await worker.ls("/agents/worker-1/inbox/.claimed", recursive=True)
+print([entry.path for entry in claimed if not entry.is_folder])
+
+await worker.mv(
+    "/agents/worker-1/inbox/.claimed/worker-a/a-review.json",
+    "/agents/worker-1/inbox/a-review.json",
+)
+print([message.filename for message in await worker.receive_messages("worker-1")])
+```
+
+```text title="Output"
+['/agents/worker-1/inbox/.claimed/worker-a/a-review.json']
+['a-review.json', 'c-publish.json']
+```
+
+## Claims that overlap
+
+The `claim_message` method creates the consumer's `.claimed` folder, and then updates the message file with its new parent and name. The update has no condition on where the file is now, so a consumer that runs later than another one moves the file again, and the call succeeds. Two consumers that use different ids can therefore both receive a success.
+
+In local tests of eight consumers that claimed the same message at once, between two and eight calls returned a file entry, depending on timing and on whether the `.claimed` folders already existed. The other calls raised `QueryError` with a unique-index message from the creation of the `.claimed` folders, or `NotFound` when they started after the file had moved. The file ended in one consumer's folder.
+
+A lease makes the claim exclusive when every consumer uses it and every consumer has its own holder name. The first consumer to acquire the lease on the message file proceeds, and the others receive `ConflictError` while the lease is active. A consumer that arrives after the message has moved receives `NotFound`, because the path no longer exists. A lease follows the file record, so the winner releases it at the claimed path, where the file now is. See [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases) for the lease semantics.
+
+The holder of a lease is the `user` of the `SurrealFs` object, and not the `consumer_id`. A holder that acquires a lease it already holds renews it and succeeds, so consumers that share one `SurrealFs` object are not excluded from each other. In a local test of eight tasks that shared one `user`, two tasks claimed the message in 2 of 10 runs. Give each consumer its own `SurrealFs` object with a distinct `user`.
+
+The function below returns the claimed entry when this consumer won the claim, and `None` otherwise. A `None` result means that this consumer did not claim the message. Another consumer usually holds it, but a transaction conflict on the lease also returns `None`, so a caller that receives `None` lists the inbox again before it gives up. The function releases the lease in a `finally` block, at the claimed path when the move happened and at the original path when it did not. The `.claimed` folder is created once before the consumers start, because several consumers that create it at the same moment can fail with `QueryError`, outside the handling of the lease.
+
+```python
+async def claim_exclusively(fs, agent_id, task_name, consumer_id):
+    path = f"/agents/{agent_id}/inbox/{task_name}"
+    try:
+        await fs.acquire_lock(path, ttl_seconds=10, reason=f"claim by {consumer_id}")
+    except (ConflictError, NotFound, QueryError):
+        return None
+    claimed = None
+    try:
+        claimed = await fs.claim_message(agent_id, task_name, consumer_id)
+        return claimed
+    finally:
+        await fs.release_lock(claimed.path if claimed else path)
+
+
+await planner.send_message("worker-2", "job.json", "{}")
+await planner.mkdir("/agents/worker-2/inbox/.claimed", exist_ok=True)
+consumers = [SurrealFs(db, user=f"consumer-{n}") for n in range(8)]
+
+results = await asyncio.gather(
+    *(claim_exclusively(fs, "worker-2", "job.json", f"consumer-{n}") for n, fs in enumerate(consumers))
+)
+print(sum(result is not None for result in results))
+```
+
+```text title="Expected output"
+1
+```
+
+In 25 local runs, exactly one of the eight consumers received the message each time, and no lease record remained afterwards. The lease only helps against consumers that also use it, because the database does not consult leases when it moves a file.
+
+## Watch an inbox
+
+The `watch` method of the Python library and the TypeScript SDK streams file changes, and a glob filters them to one inbox. The first time a message arrives, its file produces an `UPDATE` event and then a `CREATE` event. Sending a message again under an existing name, and returning a message to the inbox with `mv`, produce an `UPDATE` event only. The first claim in an inbox produces a `CREATE` event for the `.claimed` folder. The stream has no replay and no cursor, so a watcher does not receive messages that arrived before it connected. List the inbox first, and then watch it.
+
+The function below returns the path of the first `CREATE` event for a name that does not start with a dot. It does not see a message that is sent again or returned.
+
+```python
+async def wait_for_message(fs, agent_id):
+    async for event in fs.watch(f"/agents/{agent_id}/inbox/*"):
+        if event.action == "CREATE" and not event.path.rsplit("/", 1)[-1].startswith("."):
+            return event.path
+
+
+waiting = asyncio.create_task(wait_for_message(worker, "worker-3"))
+await asyncio.sleep(0.5)
+await planner.send_message("worker-3", "task-1.json", '{"task": "summarise"}')
+
+print(await asyncio.wait_for(waiting, timeout=5))
+```
+
+```text title="Output"
+/agents/worker-3/inbox/task-1.json
+```
+
+The stream is one live query on the whole `file` table, and the glob is applied in the client, so every watcher receives every file change in the database and discards the ones outside its pattern. Under the default system credential, a watcher also receives the content of files it could not read otherwise. See [Record authentication](/docs/agent-filesystem/security/record-access).
+
+## Permissions and names
+
+- **Inboxes are open by default.** `send_message` creates `/agents` and the folders below it with mode 0777, owned by the first sender, and each message file with mode 0666. Any agent can send to any inbox, and any agent can read, claim or complete a message. Under [record authentication](/docs/agent-filesystem/security/record-access), one user could send to another user's inbox and the recipient could receive, claim and complete the message.
+- **Modes differ between implementations.** The Python library creates the inbox folders with mode 0777 and the messages with mode 0666. The TypeScript SDK creates them with 0755 and 0644, and it does not apply the write checks that the Python library applies. A Python consumer that runs as another user cannot claim from an inbox that the TypeScript SDK created, and gets `PermissionDenied`. The owner of the inbox folder can open it with `chmod("/agents/<agent_id>/inbox", 0o777)`. A Python agent that sends to a new `agent_id` also needs write permission on `/agents`, so the owner of `/agents` has to open that folder in the same way when the TypeScript SDK created it, or `/agents` has to be created from Python first.
+- **Names are not validated.** An `agent_id` of `../etc` is normalised out of `/agents`, so the message lands at `/etc/inbox/x.json`. A `task_name` that contains a slash creates a subfolder of the inbox, and `receive_messages` does not list files inside it. Check both values in the calling code.
+- **A message is a file.** The `chmod`, `history` and `watch` calls work on it as they do on any other file.
+
+## Table-based mailboxes
+
+The Rust library and the TypeScript SDK contain a second form of mailbox, which stores each message as a record instead of a file. It adds a priority and a lease for redelivery:
+
+| Implementation | Calls | Table |
+| --- | --- | --- |
+| Rust library | `send_mailbox`, `claim_mailbox`, `complete_mailbox` | `agent_mailbox` |
+| TypeScript SDK | `postMailbox`, `claimMailbox`, `completeMailbox` | `file_mailbox` |
+
+A message has an `agent_id`, an `op`, a `payload`, a `priority` and a `state` that starts as `pending`. A claim selects the pending message with the highest priority and, among equal priorities, the oldest one. It sets `state` to `processing` with the worker and a lease expiry, and a message in `processing` whose lease has passed can be claimed again. Completion sets `state` to `completed` with the result, and does not delete the record.
+
+These forms have limits in this release:
+
+- **The tables are not in the schema.** SurrealDB creates them when the first message arrives, as `SCHEMALESS` tables with `PERMISSIONS NONE`. A user that signs in under record authentication cannot read or write them.
+- **The two names do not interoperate.** A Rust sender and a TypeScript worker use different tables, so they do not see each other's messages.
+- **A claim is not exclusive.** The query selects the message and then updates it in a second statement with no condition on `state`. In ten replays of the Rust claim query with eight concurrent connections, between one and three workers received the message in each run, most of the other connections received a transaction conflict error, and the stored `worker_id` named one of the workers that had received the message.
+- **The TypeScript claim does not run on SurrealDB 3.2.3.** `claimMailbox` selects `id` and orders by `priority`, and the server rejects the query with ``Parse error: Missing order idiom `priority` in statement selection``.
+- **Nothing exposes them to a command line or a tool.** The `surrealfs-rs` command and the tool registry have no mailbox command.
+
+Use the file-based form for interoperable messaging in this release.
+
+## Mailboxes on each interface
+
+| Interface | File-based mailbox |
+| --- | --- |
+| Python library | `send_message`, `receive_messages`, `claim_message`, `complete_message` |
+| TypeScript SDK | `sendMessage`, `receiveMessages`, `claimMessage`, `completeMessage` |
+| Rust library and `surrealfs-rs` command | Not available |
+| Tool registry (MCP server, Hermes, pydantic-ai, JSON tools) | No mailbox tool |
+
+An agent that works only through tools can follow the same convention with `write_file`, `mv` and `rm` on the paths above. The first-in, first-out ordering belongs to `receive_messages`, and the tools do not provide it.
+
+## See also
+
+- [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases) covers the lease that makes a claim exclusive.
+- [Workspaces](/docs/agent-filesystem/concepts/workspaces) covers isolated copies of files that an agent edits before it merges them.
+- [Data model](/docs/agent-filesystem/concepts/data-model) describes the `file` table that stores messages.
+- [Record authentication](/docs/agent-filesystem/security/record-access) covers how permissions apply to inboxes and to the change feed.

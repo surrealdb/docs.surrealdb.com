@@ -1,0 +1,321 @@
+---
+position: 2
+title: Tool schemas
+description: "The Agent Filesystem tool registry: all 31 tools with their arguments and output, JSON schemas in the Anthropic and OpenAI shapes, and the pydantic-ai toolset."
+---
+
+# Tool schemas
+
+Agent Filesystem exposes its operations to a model as a registry of 31 tools, defined once in the `surrealfs.tools` package. The registry generates four surfaces: JSON tool definitions in the Anthropic or OpenAI shape, a pydantic-ai toolset, the [Hermes plugin](/docs/agent-filesystem/interfaces/hermes) and the [MCP server](/docs/agent-filesystem/interfaces/mcp-server). A model therefore sees the same argument schemas and the same result text on each surface, with the names prefixed on Hermes and the text wrapped in JSON there. This page is the reference for all 31 tools and for the two Python surfaces that need no protocol: raw JSON definitions and the pydantic-ai toolset.
+
+Every tool calls a method of the [Python SDK](/docs/agent-filesystem/interfaces/python-sdk) on the `SurrealFs` object that the tool context holds. A tool therefore acts as the identity of that object, follows the same permission rules, and fails for the same reasons as the method behind it.
+
+> [!NOTE]
+> The package is in beta, and the tool set can change between releases. This page describes the 31 tools of version 0.2.0 of the `surrealfs` package, installed from the repository's `next` branch: `pip install "surrealfs @ git+https://github.com/surrealdb/surrealfs.git@next"`. Replace `@next` with a release tag once the project publishes one. The JSON tool definitions need no extra. The pydantic-ai toolset needs the `pydantic-ai` extra. The semantic variant of `search` needs an embedding function that you supply, because no extra provides one.
+
+## How the registry works
+
+The registry is a tuple named `TOOLS`. Each entry is a `ToolSpec` with three parts:
+
+- **Arguments.** A Pydantic model whose JSON Schema is the tool's input schema. Every model forbids unknown arguments, so a call that names an argument that does not exist fails validation.
+- **Description.** The text that the model reads, kept in a Markdown file under `surrealfs/tools/docs/`. A process reads the file the first time that it needs the tool's definition and keeps the text, so a later edit of the file does not reach a process that is already running. Some descriptions, such as those of `ls`, `cat`, `search` and `write_file`, tell the model that the filesystem is stored in SurrealDB and is not the machine's local disk, and the MCP server's instructions and the Hermes `notes` skill say so as well.
+- **Handler.** An async function that takes a `ToolContext` and the validated arguments, and returns a string.
+
+`ToolContext(fs, embed=None)` holds the `SurrealFs` object that the tools use and an optional embedding function. The functions in `surrealfs.tools` are `get_tool(name, *, semantic=False)`, which raises `KeyError` for an unknown name, and `select_tools(*, semantic=False)`. With `semantic=True`, the `search` tool is replaced by a version that embeds the query with `ctx.embed` and fuses the vector results into the ranking.
+
+All paths in the tools are absolute, there is no working directory, and a tool that returns a size reports characters for a text file and bytes for a binary file.
+
+> [!WARNING]
+> The tools inherit the permission behaviour of the methods behind them. The `history`, `undelete`, `relate`, `backlinks` and `acquire_lease` tools, and `diff` when `to_generation` is given, do not check read permission on the file, so when several agents with different identities share one database, one agent can see the history of another agent's private file, recover it after a deletion, link to it, or lease it. The `merge_workspace` tool does not check write permission on the files that it overwrites. The warning in the [Python SDK](/docs/agent-filesystem/interfaces/python-sdk#identity-and-permissions) lists the methods behind these tools. Use [record access](/docs/agent-filesystem/security/record-access) when agents must not see each other's private files, and see [Permissions](/docs/agent-filesystem/security/permissions) for the rules.
+
+## Tool reference
+
+The tables list the required arguments and the optional arguments of each tool, with defaults and bounds, and the text that the tool returns. Errors from the filesystem come back as text that starts with `Error:`. Most name the cause, for example `Error: No such file or directory: /projects/missing.md`, and a few give only a database code, such as `Error: An error occurred: sfs:not_found` from `diff` on a generation that has no stored version.
+
+### Read and list
+
+| Tool | Required | Optional | Returns |
+| --- | --- | --- | --- |
+| `ls` | none | `path` (default `/`); `recursive` (default false); `long` (default false) | One line per entry: the size right-aligned in eight columns, two spaces, then the path. Folders end in `/` and show `-` for the size. With `long`, each line starts with the mode and the owner, as `ls -l` does. An empty folder gives `(empty)`. |
+| `glob` | `pattern` | none | The same listing for every path that matches, or `No files match` followed by the pattern. Supports `*`, `**`, `?` and `[abc]`. |
+| `cat` | `path` | none | The whole text of the file, or `(empty file)`. |
+| `head` | `path` | `n` (default 10, from 1 to 10000) | The first `n` lines, or `(empty file)`. |
+| `tail` | `path` | `n` (default 10, from 1 to 10000) | The last `n` lines, or `(empty file)`. |
+| `read_bytes` | `path` | none | The content as a base64 string, with no data-URI prefix. |
+| `read_range` | `path` | `start` (default 1, at least 1); `end` (default -1, which means the last line); `numbers` (default false) | The lines from `start` to `end`, inclusive. With `numbers`, each line starts with its line number and a vertical bar. A `start` past the end returns an empty string. |
+| `tree` | none | `path` (default `/`); `max_depth` (default 3, from 1 to 10) | An ASCII tree. See [Known issues](#known-issues) for the default path. |
+
+### Write
+
+| Tool | Required | Optional | Returns |
+| --- | --- | --- | --- |
+| `write_file` | `path`, `content` | `content_type`; `if_generation` | `Wrote 50 bytes to /projects/atlas/plan.md`. It creates the file, or replaces its whole content, and creates missing parent folders. The number is a character count. |
+| `append_file` | `path`, `content` | `if_generation` | `Appended to /projects/atlas/plan.md (now 60 bytes, gen 3)`. The append is atomic. |
+| `write_bytes` | `path`, `data_base64` | `content_type` (default `application/octet-stream`) | `Wrote 8 bytes to /img/logo.png`. Invalid base64 gives an `Error:` line. |
+| `edit` | `path`, `old`, `new` | `replace_all` (default false); `if_generation` | `Edited <path>`, a blank line, then a unified diff. `old` must not be empty. Only the first occurrence changes unless `replace_all` is true, and an absent `old` leaves the file unchanged and returns an error. |
+| `touch` | `path` | none | `Ready: <path>`. An existing file is left as it is. |
+| `mkdir` | `path` | `parents` (default false); `exist_ok` (default false) | `Created folder <path>`. The line is the same when `exist_ok` finds the folder already there. |
+| `cp` | `src`, `dst` | `recursive` (default false) | `Copied <src> to <dst>`. A folder needs `recursive`, and an existing destination is an error. |
+| `mv` | `src`, `dst` | none | `Moved <src> to <dst>`. An existing destination is an error. |
+| `rm` | `path` | `recursive` (default false) | `Deleted 2 items at <path>`. A non-empty folder needs `recursive`. |
+| `chmod` | `path`, `mode` | `recursive` (default false) | `Mode 640 on 1 item at <path>`. `mode` is three octal digits matching `^[0-7]{3}$`. |
+
+### Search
+
+| Tool | Required | Optional | Returns |
+| --- | --- | --- | --- |
+| `search` | `query` | `limit` (default 20, from 1 to 100) | For each hit, the path and then an indented snippet, best match first. No hits gives `Nothing matches` followed by the query in quotes. It is a full-text search unless the semantic variant is selected. |
+| `grep` | `pattern` | `path` (a folder prefix); `glob`; `limit` (default 100, from 1 to 1000); `is_regex` (default false); `case_sensitive` (default true) | Lines in the form `path:line:text`, or `Nothing matches` followed by the pattern. A regular expression must be valid in Python's `re` module and in the database, see [Known issues](#known-issues). |
+| `search_sections` | `query` | `path`; `limit` (default 10, from 1 to 50) | For each hit, a heading line `### path #heading (score: 0.000):` and then the section text. It needs an embedder in the context. Without one it returns `Section search requires embedding to be configured.` |
+
+### Versions
+
+| Tool | Required | Optional | Returns |
+| --- | --- | --- | --- |
+| `history` | `path` | `limit` (default 20, from 1 to 100) | `Revisions for <path>:` and then one line per version with the generation, operation, author, size and time, newest first. A file with no stored versions gives `No revision history for <path>`. |
+| `diff` | `path`, `from_generation` | `to_generation` (default: the current file) | A unified diff, or `No differences found for <path>`. |
+| `restore` | `path`, `generation` | none | `Restored <path> to generation 1 (new generation 4)`. |
+| `undelete` | `path` | none | `Recovered deleted file <path> (generation 1)`. |
+
+### Links
+
+| Tool | Required | Optional | Returns |
+| --- | --- | --- | --- |
+| `relate` | `from_path`, `relation`, `to_path` | none | `Linked <from> -[references]-> <to>`. `relation` is one of `references`, `supersedes`, `derives_from`, `implements` and `links_to`. |
+| `backlinks` | `path` | none | `Backlinks to <path>:` and then one line per edge in the form `<-[links_to]- /projects/atlas/notes.md`. No edges gives `No incoming links to <path>`. |
+
+### Leases and workspaces
+
+| Tool | Required | Optional | Returns |
+| --- | --- | --- | --- |
+| `acquire_lease` | `path` | `ttl_seconds` (default 60, from 1 to 3600); `reason` | See [Known issues](#known-issues). |
+| `release_lease` | `path` | none | `Released lease on <path>`. |
+| `fork_workspace` | `branch` | `source_branch` (default `main`) | See [Known issues](#known-issues). |
+| `merge_workspace` | `branch` | `target_branch` (default `main`) | `Merged workspace branch 'review' into 'main'`. The branch must exist, for example because you created it with `SurrealFs.fork_workspace`. |
+
+## Use the tools without a framework
+
+The `surrealfs.integrations.json_tools` module needs no extra and no agent framework. It returns tool definitions as plain dictionaries and runs one tool call at a time, so it fits a hand-written loop against any provider. The examples assume the connection and the `fs` object from the [Python SDK](/docs/agent-filesystem/interfaces/python-sdk#connect-and-write-a-first-file) page, and the files that its examples wrote, so the `ls` listing below includes `/projects/atlas/plan.md`.
+
+<Synopsis label="Signature">
+tool_definitions(*, flavor="anthropic", semantic=False) -> list[dict]
+call_tool(ctx, name, arguments, *, semantic=False) -> str
+</Synopsis>
+
+`flavor` is `"anthropic"` or `"openai"`, and any other value raises `ValueError`. The Anthropic shape is `{name, description, input_schema}`. The OpenAI shape is `{"type": "function", "function": {name, description, parameters}}`, and its `parameters` value is the same JSON Schema:
+
+```python title="Both shapes of the glob tool"
+import json
+from surrealfs.integrations.json_tools import tool_definitions
+from surrealfs.tools import ToolContext
+
+anthropic_tool = next(t for t in tool_definitions(flavor="anthropic") if t["name"] == "glob")
+print(json.dumps(anthropic_tool, indent=2))
+
+openai_tool = next(t for t in tool_definitions(flavor="openai") if t["function"]["name"] == "glob")
+print(openai_tool["type"], openai_tool["function"]["name"])
+print(list(openai_tool["function"]))
+print(openai_tool["function"]["parameters"] == anthropic_tool["input_schema"])
+print(len(tool_definitions()))
+```
+
+```text title="Output"
+{
+  "name": "glob",
+  "description": "Find files in SurrealFS whose path matches a shell-style glob.\n\nSupports `*` (within one path segment), `**` (across segments), `?`, and\ncharacter classes like `[abc]`. Examples: `/notes/**/*.md`, `/projects/*/todo.md`.\n\nPrefer this over `ls` with `recursive` when you know roughly what a file is\ncalled but not where it lives.",
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "pattern": {
+        "description": "Glob pattern, e.g. /notes/**/*.md",
+        "minLength": 1,
+        "title": "Pattern",
+        "type": "string"
+      }
+    },
+    "required": [
+      "pattern"
+    ],
+    "title": "GlobArgs",
+    "type": "object"
+  }
+}
+function glob
+['name', 'description', 'parameters']
+True
+31
+```
+
+`call_tool` validates the arguments, runs the handler and returns the result text. It returns errors as text, because a tool-calling loop must hand the model something it can read and correct: a `SurrealFsError` becomes `Error: <message>`, a validation failure becomes `Error: invalid arguments for <tool>: <details>`, and an unknown tool name becomes an error that lists the available tools. Any other exception propagates to your code, such as a lost database connection, the `re.error` that an invalid regular expression raises in `grep`, or the `AttributeError` from `acquire_lease` described under [Known issues](#known-issues).
+
+```python title="Run tools and read their results"
+from surrealfs.integrations.json_tools import call_tool
+
+ctx = ToolContext(fs=fs)
+
+calls = [
+    ("write_file", {"path": "/projects/atlas/checklist.md", "content": "- Draft the API\n- Review the schema\n"}),
+    ("append_file", {"path": "/projects/atlas/checklist.md", "content": "- Publish\n"}),
+    ("edit", {"path": "/projects/atlas/checklist.md", "old": "Draft", "new": "Write"}),
+    ("ls", {"path": "/projects/atlas", "long": True}),
+    ("read_range", {"path": "/projects/atlas/checklist.md", "start": 2, "numbers": True}),
+    ("search", {"query": "publish"}),
+    ("cat", {"path": "/projects/atlas/missing.md"}),
+]
+for name, arguments in calls:
+    print(f"--- {name}")
+    print(await call_tool(ctx, name, arguments))
+```
+
+```text title="Output"
+--- write_file
+Wrote 36 bytes to /projects/atlas/checklist.md
+--- append_file
+Appended to /projects/atlas/checklist.md (now 46 bytes, gen 2)
+--- edit
+Edited /projects/atlas/checklist.md
+
+--- a/projects/atlas/checklist.md
++++ b/projects/atlas/checklist.md
+@@ -1,3 +1,3 @@
+-- Draft the API
++- Write the API
+ - Review the schema
+ - Publish
+--- ls
+-rw-rw-rw-  alice        46  /projects/atlas/checklist.md
+-rw-rw-rw-  alice        50  /projects/atlas/plan.md
+--- read_range
+2 | - Review the schema
+3 | - Publish
+--- search
+/projects/atlas/checklist.md
+    - Write the API
+- Review the schema
+- Publish
+--- cat
+Error: No such file or directory: /projects/atlas/missing.md
+```
+
+The next call shows a validation error. The details come from Pydantic, so the wording of the last lines depends on its version:
+
+```python title="A rejected call"
+print(await call_tool(ctx, "chmod", {"path": "/projects/atlas/checklist.md", "mode": "rw"}))
+print(await call_tool(ctx, "nosuchtool", {}))
+```
+
+```text title="Sample output"
+Error: invalid arguments for chmod: 1 validation error for ChmodArgs
+mode
+  String should match pattern '^[0-7]{3}$' [type=string_pattern_mismatch, input_value='rw', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.14/v/string_pattern_mismatch
+Error: "Unknown tool 'nosuchtool'. Available tools: ls, glob, cat, head, read_bytes, tail, write_file, append_file, write_bytes, edit, touch, mkdir, cp, mv, rm, chmod, search, read_range, grep, tree, history, diff, restore, undelete, relate, backlinks, search_sections, acquire_lease, release_lease, fork_workspace, merge_workspace"
+```
+
+### A tool-calling loop
+
+A loop sends the definitions with each request, runs every tool call that the model makes, and returns the results in the next message. This block is illustrative, because it needs an API key and a model name that the examples on this page do not use. It follows the loop in the repository's `examples/anthropic_loop.py`:
+
+```python title="Anthropic loop (illustrative)"
+from anthropic import AsyncAnthropic
+
+client = AsyncAnthropic()
+tools = tool_definitions(flavor="anthropic")
+messages = [{"role": "user", "content": "Make a packing list for Lisbon and file it under /trips."}]
+
+for _ in range(20):
+    response = await client.messages.create(
+        model="<model-id>", max_tokens=4096, tools=tools, messages=messages
+    )
+    messages.append({"role": "assistant", "content": response.content})
+
+    tool_uses = [block for block in response.content if block.type == "tool_use"]
+    if not tool_uses:
+        break
+
+    results = [
+        {
+            "type": "tool_result",
+            "tool_use_id": block.id,
+            "content": await call_tool(ctx, block.name, block.input),
+        }
+        for block in tool_uses
+    ]
+    messages.append({"role": "user", "content": results})
+```
+
+With the OpenAI shape, pass `tool_definitions(flavor="openai")` as the `tools` argument. OpenAI delivers each call's arguments as a JSON string, so run `json.loads` on it before you pass it to `call_tool`.
+
+## Semantic search in the tools
+
+The `search` tool is a full-text search by default, because matching on meaning needs an embedding function that only you can supply. To switch it, pass `semantic=True` to both `tool_definitions` and `call_tool`, and put an `embed` function in the context. The package provides no embedder, so `embed` is an async function of your own that takes a string and returns a list of 1,536 floats, such as the stand-in in the [Python SDK](/docs/agent-filesystem/interfaces/python-sdk#search) page or a call to an embedding service:
+
+```python title="Hybrid search tools (illustrative)"
+ctx = ToolContext(fs=fs, embed=embed)
+tools = tool_definitions(flavor="anthropic", semantic=True)
+result = await call_tool(ctx, "search", {"query": "how do I get paid"}, semantic=True)
+```
+
+Both halves are required. A definition that advertises hybrid search while the context has no `embed` function silently runs the full-text arm alone. The count of tools stays at 31 in either mode. Nothing embeds a file as it is written, so a file takes part in the semantic arm only after an indexer has reached it, see [Search](/docs/agent-filesystem/concepts/search). The `search_sections` tool always needs `ctx.embed`.
+
+## pydantic-ai toolset
+
+The `pydantic-ai` extra adds `surrealfs.integrations.pydantic_ai`:
+
+<Synopsis label="Signature">
+build_fs_toolset(*, semantic=False, get_context=..., **toolset_kwargs) -> FunctionToolset
+fs_tools(*, semantic=False, get_context=...) -> list[Tool]
+</Synopsis>
+
+`build_fs_toolset` returns a `FunctionToolset` with all 31 tools, and passes `toolset_kwargs` such as `max_retries` or `timeout` to `FunctionToolset`. `fs_tools` returns the same tools as a list of `Tool` objects, which you can mix into a toolset of your own. The agent's `deps` carry the filesystem: they must be a `ToolContext`, or an object with an `fs_context` attribute that holds one. Pass `get_context` to extract the context from anything else. Otherwise a run raises a `TypeError` that names this rule.
+
+The toolset turns errors into the right kind of retry. A `SurrealFsError`, a validation error or a `ValueError` becomes `ModelRetry`, so the model sees the message and corrects its call. A `QueryError`, such as a malformed query or a lost connection, is re-raised, because a retry would not fix it.
+
+The following run uses pydantic-ai's `TestModel`, which calls the tools you name with generated arguments, so it needs no API key:
+
+```python title="Run an agent with the toolset"
+from pydantic_ai import Agent
+from pydantic_ai.models.test import TestModel
+from surrealfs.integrations.pydantic_ai import build_fs_toolset
+
+agent = Agent(
+    TestModel(call_tools=["write_file", "cat"]),
+    deps_type=ToolContext,
+    toolsets=[build_fs_toolset()],
+)
+result = await agent.run("Save a note", deps=ToolContext(fs=fs))
+print(result.output)
+```
+
+```text title="Sample output"
+{"write_file":"Wrote 1 bytes to /a","cat":"a"}
+```
+
+To use a real model, replace `TestModel(...)` with a model identifier that includes the provider prefix, such as `"<provider>:<model-id>"`. For hybrid search, pass `semantic=True` to `build_fs_toolset` and `embed=...` to `ToolContext`.
+
+## The same tools on other surfaces
+
+| Surface | Tool names | Notes |
+| --- | --- | --- |
+| JSON definitions, pydantic-ai | `ls`, `cat`, `write_file` and so on | Unprefixed. |
+| [MCP server](/docs/agent-filesystem/interfaces/mcp-server) | The same unprefixed names | Adds `brain_recall` when Agent Memory is configured. |
+| [Hermes plugin](/docs/agent-filesystem/interfaces/hermes) | `surrealfs_ls`, `surrealfs_cat`, `surrealfs_write_file` and so on | Prefixed, because Hermes has one flat tool namespace. |
+| TypeScript SDK | A separate set of 12 tools | See the [TypeScript SDK](/docs/agent-filesystem/interfaces/typescript-sdk#ai-tools). |
+
+## Known issues
+
+These behaviours apply to version 0.2.0. They are the ones a model or a developer meets first:
+
+- **`acquire_lease` fails after it takes the lease.** The handler reads the lease result as an object, but the SDK returns a dictionary, so the call raises an `AttributeError`. The lease is held in the database. Over MCP the client receives an error response instead of a tool result. Through the pydantic-ai toolset, the agent run raises. Through Hermes, the handler returns an `error` field. With `call_tool`, the exception propagates to your code. `release_lease` works, and `SurrealFs.acquire_lock` works from code.
+- **`fork_workspace` always fails.** The handler passes an argument that the SDK method does not accept. With `call_tool`, over MCP and through Hermes, the tool returns `Error: invalid arguments for fork_workspace: ... unexpected keyword argument 'source'`. Through the pydantic-ai toolset, the agent run raises a `TypeError`. `merge_workspace` works for a workspace that you created with `SurrealFs.fork_workspace`.
+- **`tree` fails for its default path `/`**, with `Error: Not found: /`. Give it a folder, such as `/projects`.
+- **`search_sections` reports a score of `0.000` for every hit**, and it applies the `path` filter after the limit.
+- **Regular expressions in `grep` run in two engines.** Python's `re` module matches the lines, and the database's regular-expression engine chooses the files, so `^` and `$` anchor to the whole file unless the pattern starts with `(?m)`.
+- **An invalid `grep` pattern fails in different ways.** A pattern such as `(` raises `re.error`, which `call_tool` does not catch: it reaches your code, over MCP the client receives an error response, and through Hermes the handler returns an `error` field. A pattern that Python accepts and the database rejects, such as a lookahead, returns `Error: Incorrect arguments for function string::matches()` and then the details, and under the pydantic-ai toolset it ends the run with a `QueryError`.
+- **Some descriptions differ from the behaviour.** The `rm` description says that a deletion cannot be undone, but `undelete` restores the last stored version. The `ls` description says that sizes are bytes, but a text file reports characters. The `mkdir` description says that the call fails when the path exists, but with `exist_ok` it succeeds and reports `Created folder`.
+
+## See also
+
+- [Python SDK](/docs/agent-filesystem/interfaces/python-sdk) for the methods behind each tool
+- [MCP server](/docs/agent-filesystem/interfaces/mcp-server) and [Hermes plugins](/docs/agent-filesystem/interfaces/hermes) for the other two surfaces
+- [Search](/docs/agent-filesystem/concepts/search) for full-text, semantic and hybrid ranking
