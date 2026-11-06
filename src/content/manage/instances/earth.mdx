@@ -35,7 +35,7 @@ An Earth instance has three parts:
 These parts give the behaviour that follows:
 
 - **Single-location storage, queries from many locations.** The data lives in one place, and queries arrive through the Cloudflare location nearest to each client.
-- **Scale to zero.** After the last request, an idle instance stops using compute. The next request wakes it. The first request after an idle period can take longer than later requests.
+- **Scale to zero.** About 60 seconds after its last query, commit or delivered live update, an idle instance stops using compute. The next request wakes it. The first request after an idle period can take longer than later requests.
 - **Fully transactional.** Explicit transactions (`BEGIN` and `COMMIT`) and single statements both commit in the instance's one commit order.
 - **Highly available.** No single cell holds data that only it can serve. If a cell fails, a new cell serves its sessions and reads the data from storage.
 
@@ -119,7 +119,7 @@ The instance shows the state `updating` and returns to `ready` within a few seco
 
 Every Earth instance in an organisation runs on the organisation's Earth plan.
 
-- **Earth Free** includes a monthly allowance of request units, active hours and storage. When the allowance is spent, the organisation's Earth instances pause until the next month, and Studio shows a paused instance as disabled. The data is kept.
+- **Earth Free** includes a monthly allowance of request units, active hours, storage, live updates and client time. When the allowance is spent, the organisation's Earth instances pause until the next month, and Studio shows a paused instance as disabled. The data is kept.
 - **Earth Pro** is a monthly subscription for the organisation. Instances keep running after the allowance is spent, and the usage beyond it is billed.
 
 Upgrade to Earth Pro from the deploy page, or from the **SurrealDB Earth** section of the organisation's billing page, where an owner can also cancel it. A cancelled subscription stays active until the end of the month. See [Pricing](https://surrealdb.com/pricing) for the allowances and prices.
@@ -132,13 +132,13 @@ The allowance belongs to the organisation, so all of its Earth instances use the
 | Clients connected to one instance at once | 100 | 10,000 |
 | Cells per instance | Up to 100 | Up to 100 |
 
-When an instance holds as many connections as its plan allows, it refuses a new connection.
+Connected clients are WebSocket connections that are open at the same time, counted for each instance. An open WebSocket counts even when it is idle, and HTTP requests do not count. When an instance holds as many WebSocket connections as its plan allows, it refuses a new one with HTTP status `503` and a `Retry-After` header. Connections that are already open are not affected.
 
 ### What is measured
 
-Earth measures three things for each instance: request units, active hours and storage. The dashboard of an instance shows its request units and active hours for the current billing period. Network egress is not billed on either plan.
+Earth measures five things for each instance: request units, active hours, storage, live updates and client time. The dashboard of an instance shows its request units and active hours for the current billing period, and [`surreal cloud instance usage`](/docs/reference/cli/cloud/commands/instance#instance-usage) shows every meter. Network egress is not billed on either plan.
 
-**Request units** measure the work that requests do. A request is one HTTP request, or one WebSocket message that carries a query or another RPC method. A query of several statements is one request, and its request units add up the reads and writes of all its statements.
+**Request units** measure the work that requests do. The pricing page lists them as **Requests**, but a request can cost more than one unit. A request is one HTTP request, or one WebSocket message that carries a query or another RPC method. A query of several statements is one request, and its request units add up the reads and writes of all its statements.
 
 - **Reads:** one unit for each started 16 KiB of a record or index entry that a request fetches by its key, including a check that finds nothing. A scan, such as a `SELECT` over a table or a range of an index, costs one unit for each started 16 KiB that it returns. Reads of table and field definitions cost nothing.
 - **Writes:** three units for each started 4 KiB of each record, index entry or graph edge that a committed transaction writes. A delete counts as one write. A transaction that fails or is cancelled writes nothing, so its writes cost nothing.
@@ -147,9 +147,13 @@ Earth measures three things for each instance: request units, active hours and s
 
 So a small record read by its ID costs about one unit, and the same record created costs about three units, plus three for each index entry that the write adds.
 
-**Active hours** measure how long the cells of an instance run. They are added up over all the cells, so one cell that runs for an hour and ten cells that run for six minutes each are both one active hour. A cell counts from when it starts to serve the instance until it is stopped, a short time after its last request, so a few requests spread over an hour can keep a cell running for most of it. Active hours are not CPU time. An idle instance that has scaled to zero uses no active hours.
+**Active hours** measure how long the cells of an instance run. They are added up over all the cells, so one cell that runs for an hour and ten cells that run for six minutes each are both one active hour. A cell counts from when it starts to serve the instance until it is stopped, about 60 seconds after its last query, commit or delivered live update. The 60 seconds cannot be changed. A few requests spread over an hour can therefore keep a cell running for most of it, while a WebSocket that is open but sends no queries does not keep it running. Active hours are not CPU time. An idle instance that has scaled to zero uses no active hours.
 
 **Storage** is the size of the instance's data, averaged over the month.
+
+**Live updates** count the notifications that [live queries](/docs/learn/querying/real-time/live-queries) send. One live update is one notification to one connection for one matching live query, so a change that 50 subscribers see counts as 50.
+
+**Client time** is how long WebSocket connections stay open, counted in client-months: one client-month is one connection that is open for a whole month. An idle connection adds client time but no active hours. HTTP requests add no client time, and cost two more request units each instead.
 
 ### Control usage
 
@@ -278,6 +282,8 @@ If your workload needs one of these features now, deploy it on the [Start or Sca
 - **Define a table before a long transaction writes to it.** A transaction that creates a table by its first write, and stays open for a long time, can fail at commit with a transaction conflict. Run `DEFINE TABLE` first, outside the transaction, and the same transaction commits.
 - **Send a schema as one transaction.** Each statement outside a transaction is a commit of its own, and every commit waits for durable storage. A schema of many `DEFINE` statements therefore loads faster inside one `BEGIN` ... `COMMIT` block, which also applies all of it or none of it.
 - **Capabilities still apply.** You can allow guest access, and allow or deny functions and other [capabilities](/docs/learn/security/authorization/capabilities), for an Earth instance. The scripting capability always stays off.
+- **Earth takes no snapshots.** An Earth instance has no backup schedule and cannot be restored from a snapshot. To keep a copy of the data, export it over an `https://` endpoint with `surreal db export`. See [Import and export](/docs/manage/instances/import-and-export).
+- **Earth has no metrics or logs.** The dashboard of an instance shows its request units and active hours, and [`surreal cloud instance usage`](/docs/reference/cli/cloud/commands/instance#instance-usage) shows every meter.
 - **An Earth instance can be renamed.** Change its name in the **General** tab of its settings. The instance id and the endpoints stay the same.
 - **The first request after an idle period is slower.** An instance that has scaled to zero starts again on its next request.
 
