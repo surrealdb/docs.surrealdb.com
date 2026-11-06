@@ -1,0 +1,193 @@
+---
+position: 5
+title: Vercel Sandbox
+description: Run a temporary SurrealDB server inside a Vercel Sandbox microVM for tests and agent scratch data, or give sandboxed code read-only access to a SurrealDB database.
+---
+
+# Vercel Sandbox
+
+[Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) creates isolated Linux virtual machines on demand, controlled from TypeScript with the `@vercel/sandbox` package. The virtual machines run Linux on Vercel's infrastructure, while the code that controls them runs on any system that has Node.js, including Windows. Agents use sandboxes to run code they have generated, and test suites use them to start clean environments. This page shows two ways to use SurrealDB with a sandbox: start a temporary SurrealDB server inside one, or let code inside a sandbox query a database that runs elsewhere.
+
+This page is about Vercel's product. The [SurrealDB Studio Sandbox](/docs/running/sandbox) is a separate, browser-based environment for trying SurrealQL.
+
+## Requirements
+
+- A Vercel account and a project linked with the Vercel CLI
+- Node.js 22 or later
+- For the second pattern, a SurrealDB server that the sandbox can reach, such as a [SurrealDB Cloud](/docs/running/cloud) instance
+
+## Install dependencies
+
+```sh
+npm install @vercel/sandbox surrealdb
+```
+
+The SDK authenticates with a Vercel OIDC token. On Vercel it is available automatically. On your computer, link the project and pull the token into `.env.local`:
+
+```sh
+vercel link
+vercel env pull
+```
+
+The pulled token expires after a few hours, so run `vercel env pull` again when the SDK reports that it cannot get credentials.
+
+## Choose a pattern
+
+| Pattern | Use it for | Where the data lives |
+| --- | --- | --- |
+| SurrealDB inside a sandbox | Integration tests, preview environments, and scratch databases that an agent creates and then discards | In the sandbox, until it stops |
+| Sandboxed code that connects out | Running generated code, such as a report or a data check, against your real data | In your SurrealDB server |
+
+> [!WARNING]
+> A sandbox is not a place to host a database that other systems depend on. It stops when its timeout ends, and each session has a maximum length that depends on your Vercel plan. Keep data that must last in [SurrealDB Cloud](/docs/running/cloud) or on a server that you manage.
+
+## Run SurrealDB inside a sandbox
+
+The script below creates a sandbox, installs SurrealDB, starts it with the `memory` storage engine, and queries it from your computer through the sandbox's public URL:
+
+```ts title="surreal-in-sandbox.ts"
+import { Sandbox } from "@vercel/sandbox";
+import { Surreal } from "surrealdb";
+
+const password = crypto.randomUUID();
+
+await using sandbox = await Sandbox.create({
+    ports: [8000],
+    timeout: 10 * 60 * 1000,
+});
+
+await sandbox.runCommand({
+    cmd: "sh",
+    args: ["-c", "curl -sSf https://install.surrealdb.com | sh"],
+    sudo: true,
+});
+
+await sandbox.runCommand({
+    cmd: "surreal",
+    args: ["start", "--bind", "0.0.0.0:8000", "--user", "root", "--pass", password, "memory"],
+    detached: true,
+});
+
+const url = sandbox.domain(8000);
+await waitForHealth(url);
+
+const db = new Surreal();
+await db.connect(url, {
+    authentication: { username: "root", password },
+});
+
+await db.query("DEFINE NAMESPACE app; USE NS app; DEFINE DATABASE main;");
+await db.use({ namespace: "app", database: "main" });
+
+await db.query("CREATE person CONTENT { name: 'Ada' }");
+const [people] = await db.query("SELECT * FROM person").json();
+console.log(people);
+
+await db.close();
+
+async function waitForHealth(url: string) {
+    for (let attempt = 0; attempt < 30; attempt++) {
+        const response = await fetch(`${url}/health`).catch(() => undefined);
+        if (response?.ok) return;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    throw new Error("SurrealDB did not become healthy");
+}
+```
+
+Run it with the token from `.env.local`:
+
+```sh
+npx tsx --env-file=.env.local surreal-in-sandbox.ts
+```
+
+The script prints the new record:
+
+```text title="Sample output"
+[ { id: 'person:si33pkkzl1fh2rs000a7', name: 'Ada' } ]
+```
+
+Each step in the script has a purpose:
+
+- **`ports: [8000]`** exposes the port, and `sandbox.domain(8000)` returns its public HTTPS address.
+- **`sudo: true`** lets the install script write the `surreal` binary to `/usr/local/bin`.
+- **`detached: true`** returns as soon as the server process starts, instead of waiting for it to exit.
+- **`waitForHealth`** polls the `/health` endpoint, because the server takes a moment to start listening.
+- **`DEFINE NAMESPACE` and `DEFINE DATABASE`** create the namespace and database, because SurrealDB does not create them when a client first selects them.
+- **`await using`** stops the sandbox when the script ends, even after an error. Without it, call `await sandbox.stop()` yourself.
+
+> [!IMPORTANT]
+> The address from `sandbox.domain()` is public. Anyone who finds it can try to sign in, so the script creates a random root password for each sandbox instead of a fixed one, and never logs it.
+
+The example connects through the public URL over HTTPS. Vercel does not document WebSocket support for sandbox ports, so do not depend on WebSocket connections or [live queries](/docs/reference/javascript/concepts/live-queries) through that URL.
+
+With the `memory` storage engine, the data is deleted when the process stops. That is usually what a test or a scratch database needs: every run starts from an empty database.
+
+## Let sandboxed code connect to your database
+
+To run code inside a sandbox against a database that already exists, give the sandbox credentials for a user that can do only what the code needs. A database-level user with the `VIEWER` role can read every table in one database and cannot change anything:
+
+```surql
+DEFINE USER sandbox ON DATABASE PASSWORD 'strongPassword' ROLES VIEWER;
+```
+
+A write from this user does not raise an error. The statement returns no records and leaves the data unchanged.
+
+The script below passes the credentials as environment variables and limits the sandbox's network access to the npm registry and your SurrealDB host. It then writes a small program into the sandbox and runs it:
+
+```ts title="connect-out.ts"
+import { Sandbox } from "@vercel/sandbox";
+
+const surrealHost = new URL(process.env.SURREALDB_URL!).hostname;
+
+await using sandbox = await Sandbox.create({
+    timeout: 5 * 60 * 1000,
+    env: {
+        SURREALDB_URL: process.env.SURREALDB_URL!,
+        SURREALDB_USER: "sandbox",
+        SURREALDB_PASS: process.env.SURREALDB_SANDBOX_PASS!,
+    },
+    networkPolicy: {
+        allow: ["registry.npmjs.org", surrealHost],
+    },
+});
+
+await sandbox.runCommand("npm", ["install", "surrealdb"]);
+
+await sandbox.writeFiles([
+    {
+        path: "report.mjs",
+        content: `
+import { Surreal } from "surrealdb";
+
+const db = new Surreal();
+await db.connect(process.env.SURREALDB_URL, {
+    namespace: "app",
+    database: "main",
+    authentication: {
+        namespace: "app",
+        database: "main",
+        username: process.env.SURREALDB_USER,
+        password: process.env.SURREALDB_PASS,
+    },
+});
+
+const [result] = await db.query("SELECT count() AS orders FROM order GROUP ALL").json();
+console.log(JSON.stringify(result));
+await db.close();
+`,
+    },
+]);
+
+const run = await sandbox.runCommand("node", ["report.mjs"]);
+console.log(await run.stdout());
+```
+
+When an agent writes the program instead of you, the same two limits apply: the `VIEWER` role stops the program from changing data, and the network policy stops it from sending the data to any other host.
+
+## See also
+
+- [Vercel](/docs/build/integrations/vercel), for credentials and connection guidance that apply to all Vercel products
+- [Eve](/docs/build/integrations/vercel/eve), whose agents run generated code in Vercel Sandbox
+- [System users](/docs/learn/security/authentication/users#system-users)
+- [Vercel Sandbox SDK reference](https://vercel.com/docs/vercel-sandbox/sdk-reference)

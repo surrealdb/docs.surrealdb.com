@@ -1,0 +1,131 @@
+---
+position: 2
+title: How Night Owls was built
+description: "How the Night Owls demo stores seven agents' posts, private notes and dated news in one SurrealDB Agent Memory Context, reads each agent's memory as of a post's timestamp, and keeps hindsight out of posts about real events."
+---
+
+# How Night Owls was built
+
+This page shows how the [Night Owls demo](/docs/agent-memory/cookbooks/showcase/night-owls) gives seven agents their memory, and how each post is written from it. The same steps work for any simulation in which several agents share some knowledge, keep some to themselves, and must not know what happens later.
+
+## The memory layout
+
+The demo uses one Context with three kinds of scope:
+
+| Scope | What it holds | Who reads it |
+| --- | --- | --- |
+| `news` | The dated news reports, each written when it was published | Every member |
+| `forum` | Every post, written when it was posted | Every member |
+| `member/<id>` | One member's private notes to self: predictions, bets, promises and opinions of the others | That member only |
+
+Register the scope paths before the first write:
+
+```bash
+agent-memory scopes create forum
+agent-memory scopes create news
+agent-memory scopes create member/theyknow
+```
+
+## Writing at a known time
+
+Every write sets `observed_at` to the moment it happened in the story, not the moment the demo ran. A post written 39 minutes into 1 January 2000 goes into the `forum` scope with that timestamp:
+
+```http
+POST /api/v1/{context_id}/facts
+Authorization: Bearer <your-api-key>
+Content-Type: application/json
+
+{
+  "text": "Post #123 by TheyKnow in the thread \"Y2K - is it going to be bad??\" on the Night Owls forum, Sat Jan 1, 2000 12:39 am GMT: Glad to hear your screens are bright over there, PintOfMild... but celebrating fifteen minutes after midnight is calling the game in the first inning.",
+  "infer": "full",
+  "scopes": [["forum"]],
+  "observed_at": "2000-01-01T00:39:00Z"
+}
+```
+
+The member's private note goes into their own scope at the same time:
+
+```http
+POST /api/v1/{context_id}/facts
+Authorization: Bearer <your-api-key>
+Content-Type: application/json
+
+{
+  "text": "TheyKnow's private note to self, Sat Jan 1, 2000 12:39 am GMT: PintOfMild is declaring total victory over fireworks while the overnight batch runs haven't even started yet.",
+  "infer": "full",
+  "scopes": [["member/theyknow"]],
+  "observed_at": "2000-01-01T00:39:00Z"
+}
+```
+
+News reports are written the same way into `news`, each with its publication time. The demo writes each one when the story's clock reaches it, so the memory only ever holds what had happened by then.
+
+Start each line of text with who wrote it and when. Extraction then attributes a claim to the member who made it, and an item that comes back from recall years later still says whose view it was.
+
+## Reading as of a post
+
+Before a member writes, the demo reads their memory as of the post's timestamp. The lens names the scopes this member may read: the two shared scopes and their own.
+
+```http
+POST /api/v1/{context_id}/query
+Authorization: Bearer <your-api-key>
+Content-Type: application/json
+
+{
+  "query": "TheyKnow thinks, expects, predicts or promised about the Year 2000 problem",
+  "k": 8,
+  "lens": [["forum"], ["news"], ["member/theyknow"]],
+  "asOf": "2000-01-01T00:39:00Z"
+}
+```
+
+> [!NOTE]
+> `asOf` hides facts and relations recorded after the given time. Passages come back with their own `occurredAt`, so a reader that must not see later text should also drop any hit whose `occurredAt` is after the `asOf` value.
+
+The demo runs three or four queries like this for each post, because one query brings back one kind of memory best:
+
+- **The topic:** the text of the latest post, so the member recalls what was said about it before.
+- **The member's own views:** "*member* thinks, expects, predicts or promised about *subject*".
+- **Their private notes:** "*member*'s private note to self", read from their own scope only.
+- **Earlier threads:** from the second thread on, what the member said and promised in earlier threads, and what the others said to them.
+
+A query in plain words about a member's own views, as in the second example, returns their posts and notes. A short abstract question such as "What has TheyKnow said before?" returns little more than the member's entity, so phrase each query as the text you hope to find.
+
+## How a post is written
+
+Each post goes through the same steps:
+
+1. **Choose who posts.** The member must be awake in their own time zone and not away, for example at a party or the cinema. A member who has just been addressed is more likely to reply.
+2. **Recall.** Run the queries above as of the post's time.
+3. **Read the state of mind.** A model reads only that recall and the member's starting view, and writes down where they stand now: a position, a score from 0 to 4 on the thread's question, feelings about the other members, open promises, and what changed since their last post. This is what the Agent Memory bar under each post shows.
+4. **Write the post.** A second model call writes the post from that state of mind, in the member's typing voice, at a length chosen in advance.
+5. **Check it.** A third call checks the post for knowledge the member could not have had (see below). A post that fails is written again.
+6. **Store it.** The post goes into `forum` and the member's note into their own scope, both at the post's timestamp.
+
+Chance decides some things before the model writes: the length of the post, whether it quotes an earlier post, and whether the member's quirk shows. The quirk shows in about one post in four, which keeps a personality recognisable without turning every post into a caricature.
+
+## Keeping hindsight out
+
+The model that writes the posts knows how each of these events turned out. Memory read as of a moment cannot leak the outcome, but the model's own knowledge can. The demo uses three safeguards:
+
+1. **A starting view for each member.** Each member starts every thread with a stated view, and some of those views turn out to be wrong. A member argues their own position, and does not drift towards the outcome the model already knows.
+2. **Dated input only.** A post's prompt holds the news published before it, the thread so far, and the member's memory as of that moment.
+3. **A check against the whole timeline.** The check sees the post, its timestamp, and every report around the event, including later ones. With the later reports in front of it, it can tell a reasonable guess from knowledge of what happened next. It flags hindsight, anachronisms such as a product that did not exist yet, invented news, and any rule of the thread, such as "no plot details" in the Endgame thread.
+
+## Building something similar
+
+These are the choices that made the biggest difference to the result:
+
+- **Give each agent a temperament for changing their mind.** Without one, every agent moves at the same speed towards the same conclusion. With one, a careful academic updates in proportion to the evidence, while a conspiracy theorist moves one step at a time and finds a reason to stay wary.
+- **Keep each agent's current view in memory, not in the prompt.** State the starting view once, and let the current view come from what the agent has said and noted since. A view repeated in every prompt never moves.
+- **Give each agent a private scope.** Private notes are what carry an agent's opinion of the others from one thread to the next.
+- **Tell agents that shared history is worth mentioning.** Recall brings back memories from years before, and a writing model refers to them more often when the prompt says that people who have known each other for years do.
+- **Let personalities change with time.** A newcomer in 1999 is a veteran by 2019, so give each personality a version for each period.
+- **Treat a failed write as something to retry.** A long simulation writes thousands of records, so retry a write that fails until it lands, and save progress after every post so that the run can resume.
+
+## Related pages
+
+- [Night Owls: twenty years of forum memory](/docs/agent-memory/cookbooks/showcase/night-owls): the demo and what it shows.
+- [Storing memories](/docs/agent-memory/ingest/experiential/remember): `/facts` and `observed_at`.
+- [Recalling memories](/docs/agent-memory/retrieve/recall): `/query`, `lens` and `asOf`.
+- [Contexts and scope](/docs/agent-memory/mental-model/contexts-and-scope): registering scope paths and reading through a lens.

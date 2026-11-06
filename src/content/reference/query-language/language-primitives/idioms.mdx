@@ -181,7 +181,7 @@ UPDATE stats:1 SET counts[$key] = 5;
 
 ## All elements
 
-To access all elements in an array or all fields in an object, use `.*`. This is useful when you want to access all the elements in an array or all the fields in an object.
+To access all elements in an array or all fields in an object, use `.*`. This is useful when you want to access all the elements in an array or all the fields in an object. The form `[*]`, as in `results[*]` or `items[*].name`, is another spelling of the same path part and gives the same result everywhere, including in `DEFINE FIELD` and `DEFINE INDEX`, which store it as `.*`.
 
 ```surql 
 SELECT results.* FROM student;
@@ -252,7 +252,7 @@ The output for `INFO FOR TABLE person` includes an automatically generated defin
 
 ### Using `.*` to return values
 
-The `.*` idiom in SurrealDB allows you to target all values in an object or all entries in an array. It can be used in various contexts such as querying, field definitions, and data manipulation. This section explains the behaviour of `.*` with practical examples.
+The `.*` idiom in SurrealDB allows you to target all entries in an array, or the whole of an object. It can be used in various contexts such as querying, field definitions, and data manipulation. This section explains the behaviour of `.*` with practical examples.
 
 When `.*` is applied to `NONE`, `NULL`, or a scalar value, the result is `NONE`.
 
@@ -263,51 +263,28 @@ NULL.*;
 "Some string".*;
 ```
 
-In mixed arrays, `.*` fetches linked records but leaves non-record elements unchanged.
+In mixed arrays, `.*` fetches linked records but leaves non-record elements unchanged. A record that does not exist evaluates to `NONE`.
 
 ```surql
+DEFINE TABLE person;
+
 -- person:one does not exist yet,
 -- will evaluate to NONE
 [1, person:one, "x"].*;
+//- [1, NONE, 'x']
 
 CREATE person:one SET name = "Geralt";
 
--- person:one now exists,
--- will access record and fetch fields
+-- person:one now exists, so its fields are fetched
 [1, person:one, "x"].*;
+//- [1, { id: person:one, name: 'Geralt' }, 'x']
 ```
 
-```surql title="Output"
--------- Query 1 --------
+From SurrealDB 4.0, a record id on a table that is not defined is an error rather than `NONE`, which is why the example defines `person` first.
 
-[
-	1,
-	NONE,
-	'x'
-]
+### Using `.*` on an object
 
--------- Query 2 --------
-
-{
-	id: person:one,
-	name: 'Geralt'
-}
-
--------- Query 3 --------
-
-[
-	1,
-	{
-		id: person:one,
-		name: 'Geralt'
-	},
-	'x'
-]
-```
-
-### Accessing all values in an object
-
-When applied to an object, `.*` returns an array containing all the values of the object's properties.
+From SurrealDB 3.0, `.*` applied to an object returns the object itself, so a path that continues after it, such as `$obj.*.name`, reads `name` from the object and not from each of its values. In SurrealDB 2.x, `.*` returned an array of the object's values instead.
 
 ```surql
 /**[test]
@@ -339,7 +316,7 @@ value = "{ a: 1, b: 2 }"
 </Tabs>
 
 
-To see just the values of this object, the [`object::values()`](/docs/reference/query-language/functions/database-functions/object#objectvalues) function can be used.
+To get the values of an object, use the [`object::values()`](/docs/reference/query-language/functions/database-functions/object#objectvalues) function, or the `.values()` method, as in `$obj.values().name`.
 
 ```surql
 /**[test]
@@ -584,6 +561,8 @@ SELECT name, spouse.?.name AS spouse_name FROM person;
 ```
 
 This idiom will return `NONE` for `spouse_name` if the `spouse` field is not present.
+
+A method called on a missing field fails, because there is no method for `NONE`. A `.?` before the method skips the call when the field is `NONE` or `NULL`. This is how an index column that ends in method calls accepts records without the field, as in `DEFINE INDEX ... FIELDS kind.?.trim().lowercase()`. See [Computed values on an optional field](/docs/reference/query-language/statements/define/indexes#computed-values-on-an-optional-field).
 
 ## Graph navigation
 
@@ -1027,6 +1006,67 @@ person:one.{
 }
 ```
 
+### Keeping the other fields
+
+<Since v="v4.0.0" />
+
+A `...` entry at the end of a pattern keeps every field that the other entries did not name. This changes one field of an object and leaves the rest of the object as it was, without listing each of its fields:
+
+```surql
+CREATE person:ann SET
+	name = 'Ann',
+	email = 'ann@example.com',
+	address = { city: 'Calgary', street: '1 Main St' };
+
+person:ann.{ address: address.{ city }, ... };
+```
+
+```surql title="Output"
+{
+	address: {
+		city: 'Calgary'
+	},
+	email: 'ann@example.com',
+	id: person:ann,
+	name: 'Ann'
+}
+```
+
+The same works on a record link, to fetch only some fields of the linked record:
+
+```surql
+CREATE post:one SET title = 'Hello', author = person:ann;
+
+post:one.{ author: author.{ name }, ... };
+```
+
+```surql title="Output"
+{
+	author: {
+		name: 'Ann'
+	},
+	id: post:one,
+	title: 'Hello'
+}
+```
+
+An entry claims the name it gives its output, not the field it reads. An alias with a new name therefore leaves the original field to `...`, so both appear in the result:
+
+```surql
+post:one.{ writer: author, ... };
+```
+
+```surql title="Output"
+{
+	author: person:ann,
+	id: post:one,
+	title: 'Hello',
+	writer: person:ann
+}
+```
+
+`...` has to be the last entry in the pattern. It cannot be used in an [`OMIT`](/docs/reference/query-language/clauses/omit) clause, because it names no single field to remove.
+
 ## Recursive paths
 
 A recursive path allows record link or graph traversal down to a specified depth, as opposed to manually putting together a query to navigate down each level.
@@ -1251,6 +1291,10 @@ planet:earth.{..}->has->(?);
 	city:san_francisco
 ]
 ```
+
+In the planet example, the depths line up as follows. A fixed depth returns the records at that depth, and a range returns the records where the walk stops:
+
+<img src="~/assets/img/diagrams/light/recursive-depth-light.webp" darkSrc="~/assets/img/diagrams/recursive-depth.webp" alt="The planet tree in rows by depth. Depth 0 is planet:earth, depth 1 the two countries, depth 2 the four states and provinces, and depth 3 the eight cities. planet:earth.{2}->has->(?) returns depth 2. planet:earth.{1..4}->has->(?) and planet:earth.{..}->has->(?) both return depth 3, where the walk stops. planet:earth.{4}->has->(?) returns an empty array, because no city has a has edge." />
 
 ### Using () to provide instructions at each depth
 
@@ -1510,7 +1554,10 @@ FOR $person IN SELECT * FROM person {
     RELATE $person->friends_with->$friends;
 };
 
-LET $third_degree = person:1.{..3}.{ id, connections: ->friends_with->person.@ };
+LET $third_degree = person:1.{..3}.{
+	id,
+	connections: ->friends_with->person.@
+};
 -- Object containing array of arrays of arrays of 'person'
 RETURN $third_degree;
 -- All connections: an array of arrays of arrays of 'person'
@@ -1602,17 +1649,7 @@ RELATE person:acquaintance3->knows->person:star;
 
 This representation of this small network of friends allows us to visualise the issues that these three algorithms solve. Using `+path` will output all of the possible paths from `person:you`, `+collect` will collect all of the records in this network, and `+shortest=person:star` will find the shortest path.
 
-```text
-‎
-								  ┌───────►  person:friend1  
-     ┌───►person:acquaintance1    │                                                                    
-     │                │           │                                                
-     │                │           ┼───►person:acquaintance2    person:star   
-person:you            │           │                                 ▲        
-     │                ▼           │                                 │        
-     └────────► person:friend2────┤                                 │        
-                                  └───►person:acquaintance3─────────┘                      
-```
+<img src="~/assets/img/diagrams/light/recursive-path-algorithms-light.webp" darkSrc="~/assets/img/diagrams/recursive-path-algorithms.webp" alt="The same friend network drawn three times. person:you knows friend1 and friend2, friend1 knows friend2, friend2 knows acquaintance1, acquaintance2 and acquaintance3, and acquaintance3 knows star. With +path, the output is six paths, one for each route to a record with no further edge. With +shortest=person:star, the path friend2, acquaintance3, star is highlighted. With +collect, the records are numbered in output order: friend1, friend2, acquaintance2, acquaintance1, acquaintance3, star." />
 
 After specifying an algorithm to use, such as `{..+path}`, add the path that should be followed, in this case `->knows->person`.
 
@@ -1660,7 +1697,7 @@ person:you.{..+path}->knows->person;
 
 #### +shortest
 
-As the output of the previous example is fairly short, we can see that there are two ways to get from `person:one` to the movie star at `person:star`, one of which is one step shorter than the other.
+As the output of the previous example is fairly short, we can see that there are two ways to get from `person:you` to the movie star at `person:star`, one of which is one step shorter than the other.
 
 To get the database to find the shortest path instead, change the algorithm to `+shortest=person:star`.
 
@@ -1695,7 +1732,13 @@ $shortest.len();
 
 LET $paths = person:you.{3+path}->knows->person;
 $paths.filter(|$p| $p.last() = person:star);
-//- [[person:friend2, person:acquaintance3, person:star], [person:friend1, person:acquaintance3, person:star]]
+```
+
+```surql title="Possible output"
+[
+	[person:friend2, person:acquaintance3, person:star],
+	[person:friend1, person:acquaintance3, person:star]
+]
 ```
 
 The paths are stored in a parameter before filtering because a method written directly after a recursive path is applied inside the recursion, not to its result.
@@ -1721,7 +1764,7 @@ person:you.{..+collect}->knows->person;
 
 #### +inclusive
 
-Adding `+inclusive` will show the same output, except that the original `person:one` record will also be present.
+Adding `+inclusive` will show the same output, except that the original `person:you` record will also be present.
 
 ```surql
 person:you.{..+shortest=person:star+inclusive}->knows->person;

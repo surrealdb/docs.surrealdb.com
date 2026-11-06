@@ -244,6 +244,34 @@ function databaseFunctionsOverviewRedirects(): Redirect[] {
         { source: from, destination: to, statusCode: 301 },
     ];
 }
+/** SurrealDB 4.0 renames Surrealism modules to extensions. */
+function extensionRedirects(): Redirect[] {
+    const moves: [string, string][] = [
+        [
+            "reference/query-language/statements/define/module",
+            "reference/query-language/statements/define/extension",
+        ],
+        ["reference/cli/db/commands/module", "reference/cli/ext"],
+        ["reference/cli/db/commands/extension", "reference/cli/ext"],
+        ["reference/cli/modules", "reference/cli/ext"],
+        [
+            "learn/extensions/guides/creating-custom-modules",
+            "learn/extensions/guides/creating-custom-extensions",
+        ],
+        [
+            "learn/extensions/guides/module-architecture",
+            "learn/extensions/guides/extension-architecture",
+        ],
+        ["explore/cli/modules", "explore/cli/extensions"],
+    ];
+
+    // Source without `/docs` (the www rewrite strips it); destination with `/docs`.
+    return moves.map(([from, to]) => ({
+        source: `/${from}`,
+        destination: `/docs/${to}`,
+        statusCode: 301,
+    }));
+}
 /**
  * The `surreal` launcher replaced the separate `surrealctl` and `surreal` tools,
  * and the two CLI sections became one.
@@ -378,7 +406,6 @@ function sdkReferenceRedirects(): Redirect[] {
         ["languages/php/v1/methods", "reference/php/v1/methods", "prefix"],
         ["languages/php/v1/concepts", "reference/php/v1/concepts", "prefix"],
         ["languages/php/v1/installation", "reference/php/v1/installation", "exact"],
-        ["languages/php/libraries", "reference/php/libraries", "prefix"],
         ["languages/php/v2", "reference/php/v2", "exact"],
         ["languages/php/v2/migration", "reference/php/v2/migration", "exact"],
         ["languages/php/v2/concepts", "reference/php/v2/concepts", "prefix"],
@@ -415,6 +442,31 @@ function sdkReferenceRedirects(): Redirect[] {
                 { source: `/${from}/:path*`, destination: `/docs/${to}/:path*`, statusCode: 301 },
             );
         }
+    }
+
+    return out;
+}
+
+/**
+ * Surqlize moved out of the SDK trees into the Libraries section. Page names
+ * are unchanged, so each old tree needs its folder, its landing page and one
+ * wildcard. The wildcard also serves `.md` requests, because a `.md` suffix is
+ * only more path.
+ */
+function librariesRedirects(): Redirect[] {
+    const trees: [string, string][] = [
+        ["reference/php/libraries", "libraries/surqlize-php"],
+        ["reference/javascript/libraries", "libraries/surqlize-typescript"],
+        ["languages/php/libraries", "libraries/surqlize-php"],
+    ];
+    const out: Redirect[] = [];
+
+    for (const [from, to] of trees) {
+        out.push(
+            { source: `/${from}`, destination: "/libraries", statusCode: 301 },
+            { source: `/${from}/surqlize`, destination: `/${to}`, statusCode: 301 },
+            { source: `/${from}/surqlize/:path*`, destination: `/${to}/:path*`, statusCode: 301 },
+        );
     }
 
     return out;
@@ -1056,11 +1108,13 @@ const baseRedirects: Redirect[] = [
     ...runningFromSelfHostedRedirects(),
     ...databaseFunctionsOverviewRedirects(),
     ...surrealCliRedirects(),
+    ...extensionRedirects(),
     ...phpVersionedRedirects(),
     ...sdkReferenceRedirects(),
     ...sdkGettingStartedRedirects(),
     ...aiAgentsRedirects(),
     ...cloudAndDeploymentRedirects(),
+    ...librariesRedirects(),
     ...agentMemoryRedirects(),
     // `meta::tb()` and `meta::id()` were renamed to `record::` in 2.x. Both old
     // names still work, so the note on the record page says so rather than the

@@ -1,0 +1,409 @@
+---
+position: 6
+title: Dates, times and intervals
+description: "The date, time, timestamp and interval types in SurrealQL: literals, range and precision, coercion into typed fields, casts, arithmetic, comparison, and how they differ from datetime and duration."
+---
+
+<Since v="v4.0.0" />
+
+SurrealQL has four types for calendar and clock values that are not a single instant in UTC: `date` for a calendar day, `time` for a time of day, `timestamp` for a date and a time of day with no time zone, and `interval` for a calendar period such as one month and two days. This page describes each type, how it converts to and from the other types, and how it behaves in arithmetic and comparison. For an instant and for a fixed length of time, use [`datetime`](/docs/reference/query-language/language-primitives/data-types/datetimes) and [`duration`](/docs/reference/query-language/language-primitives/data-types/durations).
+
+```surql
+[pd'2026-10-27', pt'12:30:00', ts'2026-10-27T12:30:00', ivl'1 year 2 days'];
+```
+
+```surql title="Output"
+[pd'2026-10-27', pt'12:30:00', ts'2026-10-27T12:30:00', ivl'P1Y2D']
+```
+
+## The four types
+
+| Type        | Holds                                       | Use it for                                                       | Literal                          | Range                              | Precision    |
+| ----------- | ------------------------------------------- | ---------------------------------------------------------------- | -------------------------------- | ---------------------------------- | ------------ |
+| `date`      | A calendar day                              | a birthday, a due date or a public holiday                       | `pd'2026-10-27'`               | `-262143-01-02` to `+262142-12-30` | one day      |
+| `time`      | A time of day                               | opening hours or a daily schedule                                | `pt'12:30:00.123456789'`       | `00:00:00` to `24:00:00` inclusive | nanoseconds  |
+| `timestamp` | A date and a time of day, with no time zone | an appointment at a local clock time                             | `ts'2026-10-27T12:30:00'` | the same days as `date`            | nanoseconds  |
+| `interval`  | A signed number of months, days and time    | "one month later", a monthly renewal or a person's age           | `ivl'1 year 2 mons 3 days'` | each part has its own limit        | microseconds |
+
+`date` and `timestamp` use the proleptic Gregorian calendar, which extends the Gregorian calendar to dates before it was introduced. Neither holds a time zone: `ts'2026-10-27T12:30:00'` is 12:30 on the clock on that day, in whatever place the value describes. A year with more than four digits takes a sign, as in `pd'+262142-12-30'`.
+
+An `interval` keeps three separate parts: whole months, whole days, and a time part in microseconds. Each part can be negative. The months and the days each hold a 32-bit signed integer, and the time part holds a 64-bit signed count of microseconds. The parts are kept apart because months and days do not have a fixed length: one month after 31 January is 28 February, and one month after 1 March is 1 April.
+
+## Which type to use
+
+- **To record when something happened**, such as the time a record was created or a message was sent, use a `datetime`. It is one instant in UTC, so it is the same moment for every reader. `time::now()` returns a `datetime`.
+- **To store a day on the calendar**, such as a birthday or a due date, use a `date`. It has no time zone, so it is the same day everywhere. A birthday stored as a `datetime` at midnight UTC is the previous day in any time zone west of UTC.
+- **To store a time on the clock with no date**, such as opening hours or a daily schedule, use a `time`. Adding it to a `date` gives a `timestamp` for that day.
+- **To store a local date and time**, such as an appointment at 09:30 in the city where it takes place, or a value from a source that records local time, use a `timestamp`. It keeps the clock time as it was written, while a `datetime` needs the UTC offset of that place before the value can be stored.
+- **To measure a fixed length of time**, such as a timeout or the time a request took, use a `duration`. Each unit has one length: `1d` is always 24 hours and `1y` is always 365 days.
+- **To move by calendar units**, such as "one month later", a monthly subscription renewal or an age in years, months and days, use an `interval`. It keeps months and days apart from the time part, so a month is as long as the month the value lands in, and a year after 1 January 2024 includes 29 February.
+
+A `duration` and an `interval` give different results in a leap year. `1y` adds 365 days, which ends one day early in 2024, while `ivl'1 year'` gives the same date in the next year:
+
+```surql
+d'2024-01-01T09:00:00Z' + 1y;
+//- d'2024-12-31T09:00:00Z'
+
+d'2024-01-01T09:00:00Z' + ivl'1 year';
+//- d'2025-01-01T09:00:00Z'
+```
+
+## Literals
+
+A literal is a short prefix followed directly by a quoted string: `pd` for a plain date, `pt` for a plain time, `ts` for a timestamp and `ivl` for an interval. Single and double quotes both work, and the value is always displayed with single quotes.
+
+```surql
+pd"2026-10-27";
+//- pd'2026-10-27'
+
+pt'12:30:00.123456789';
+//- pt'12:30:00.123456789'
+
+pt'24:00:00';
+//- pt'24:00:00'
+
+ts'2026-10-27 12:30:00.5';
+//- ts'2026-10-27T12:30:00.500'
+```
+
+A `timestamp` takes a space or a `T` between the date and the time. It has no time zone designator, so a string ending in `Z` or `+02:00` is written as a `datetime` instead.
+
+An `interval` literal takes two forms. The first is a list of numbers and units, as in PostgreSQL, with an optional time of day at the end. The second is ISO 8601. Both forms are displayed in ISO 8601, where each part carries its own sign:
+
+```surql
+ivl'1 year 2 mons 3 days 04:05:06.5';
+//- ivl'P1Y2M3DT4H5M6.5S'
+
+ivl'P1Y2M3DT4H5M6.5S';
+//- ivl'P1Y2M3DT4H5M6.5S'
+
+ivl'2 weeks 3 hours 15 minutes';
+//- ivl'P14DT3H15M'
+
+ivl'-1 day';
+//- ivl'P-1D'
+
+ivl'1 day -02:00:00';
+//- ivl'P1DT-2H'
+```
+
+The units are `millennium`, `century`, `decade`, `year`, `month` (`mon`), `week`, `day`, `hour`, `minute` (`min`), `second` (`sec`), `millisecond` (`ms`) and `microsecond` (`us`), each in the singular or the plural. A year is 12 months and a week is 7 days. A fraction of a second smaller than one microsecond is rounded to the nearest microsecond.
+
+An unknown unit, a time later than `24:00:00` and a date that is not on the calendar are parse errors:
+
+```surql
+pd'2026-13-45';
+//- Invalid date "2026-13-45": input is out of range
+
+pt'25:00:00';
+//- Invalid time: "25:00:00"
+
+ivl'1 fortnight';
+//- Invalid interval: "1 fortnight"
+```
+
+The `d` prefix is for a `datetime`. `d'2026-10-27'` is a `datetime` at midnight UTC, and it is a different value from `pd'2026-10-27'`.
+
+```surql
+type::of(d'2026-10-27');
+//- 'datetime'
+
+type::of(pd'2026-10-27');
+//- 'date'
+```
+
+### Infinity
+
+A `date` and a `timestamp` can also be `infinity` or `-infinity`, as in PostgreSQL. `infinity` is later than every other value of its type, and `-infinity` is earlier than every other value. These two values use the first and last days of the range of the type, which is why the latest date that can be written as a calendar date is `+262142-12-30`. Arithmetic on an infinity gives the same infinity.
+
+```surql
+pd'infinity' > pd'+262142-12-30';
+//- true
+
+pd'infinity' + 1;
+//- pd'infinity'
+```
+
+A `time` and an `interval` have no infinity.
+
+## How they differ from datetime and duration
+
+| Type        | Represents                                            | Time zone      |
+| ----------- | ----------------------------------------------------- | -------------- |
+| `datetime`  | An instant                                            | UTC            |
+| `timestamp` | A date and a time on the clock                        | none           |
+| `date`      | A calendar day                                        | none           |
+| `time`      | A time of day                                         | none           |
+| `duration`  | A fixed length of time in nanoseconds, never negative | not applicable |
+| `interval`  | A signed number of months, days and microseconds      | not applicable |
+
+A `duration` has a fixed length, so `30d` is always 30 days. An `interval` keeps months and days separately, so `ivl'1 month'` moves a value to the same day of the next month, however many days that month has:
+
+```surql
+d'2026-01-31T10:00:00Z' + 30d;
+//- d'2026-03-02T10:00:00Z'
+
+d'2026-01-31T10:00:00Z' + ivl'1 month';
+//- d'2026-02-28T10:00:00Z'
+```
+
+## Typed fields and coercion
+
+A field, a function parameter or a return type declared with one of these types accepts a value of that type. It also accepts a value of another temporal type when the conversion loses nothing:
+
+- A `date` widens into a `timestamp` or a `datetime`, at midnight.
+- A `timestamp` widens into a `datetime`, read as UTC.
+- A `datetime` narrows into a `timestamp`, as its UTC date and time, and into a `date` only when it is exactly midnight UTC.
+
+Every other conversion needs a [cast](#casts). A string never coerces into any of these types, in the same way that a string does not coerce into a `datetime`.
+
+The schema below stores bookings with a day, a start time and a length. A `datetime` at exactly midnight UTC is accepted for the `date` field:
+
+```surql
+DEFINE TABLE booking SCHEMAFULL;
+DEFINE FIELD day ON booking TYPE date;
+DEFINE FIELD starts ON booking TYPE time;
+DEFINE FIELD length ON booking TYPE interval;
+
+CREATE booking:1 CONTENT {
+	day: pd'2026-10-27',
+	starts: pt'09:30:00',
+	length: ivl'1 hour 30 minutes'
+};
+CREATE booking:2 CONTENT {
+	day: d'2026-10-28T00:00:00Z',
+	starts: pt'14:00:00',
+	length: ivl'2 hours'
+};
+```
+
+```surql title="Output"
+[{ day: pd'2026-10-28', id: booking:2, length: ivl'PT2H', starts: pt'14:00:00' }]
+```
+
+A `datetime` that is not at midnight, a string and a `duration` are refused. The error for the `datetime` names the cast to use:
+
+```surql
+CREATE booking:3 CONTENT { day: d'2026-10-28T09:00:00Z', starts: pt'14:00:00', length: ivl'2 hours' };
+//- "Couldn't coerce value for field `day` of `booking:3`: Expected `date (a datetime that is not midnight UTC needs the cast `<date>`)` but found `d'2026-10-28T09:00:00Z'`"
+
+CREATE booking:4 CONTENT { day: '2026-10-28', starts: pt'14:00:00', length: ivl'2 hours' };
+//- "Couldn't coerce value for field `day` of `booking:4`: Expected `date` but found `'2026-10-28'`"
+
+CREATE booking:5 CONTENT { day: pd'2026-10-28', starts: pt'14:00:00', length: 2h };
+//- "Couldn't coerce value for field `length` of `booking:5`: Expected `interval` but found `2h`"
+```
+
+With the two bookings stored, adding the start time to the day gives a `timestamp`, and adding the length to that gives the end:
+
+```surql
+SELECT id, day + starts AS begins, day + starts + length AS ends FROM booking;
+```
+
+```surql title="Output"
+[
+	{ begins: ts'2026-10-27T09:30:00', ends: ts'2026-10-27T11:00:00', id: booking:1 },
+	{ begins: ts'2026-10-28T14:00:00', ends: ts'2026-10-28T16:00:00', id: booking:2 }
+]
+```
+
+The types also work inside `option<>`, `array<>`, `set<>` and unions such as `date | interval`, and in a `DEFAULT` clause, which is stored and displayed as the same literal. A field of any of these types can be indexed, including with a `UNIQUE` index.
+
+## Casts
+
+The casts `<date>`, `<time>`, `<timestamp>` and `<interval>` convert a value explicitly, as do the functions [`type::date()`](/docs/reference/query-language/functions/database-functions/type#typedate), [`type::time()`](/docs/reference/query-language/functions/database-functions/type#typetime), [`type::timestamp()`](/docs/reference/query-language/functions/database-functions/type#typetimestamp) and [`type::interval()`](/docs/reference/query-language/functions/database-functions/type#typeinterval):
+
+| From            | To                          | Result                                                                                      |
+| --------------- | --------------------------- | ------------------------------------------------------------------------------------------- |
+| `string`        | any of the four             | the text forms above; a full datetime string also casts to `date`, `time` and `timestamp`   |
+| `datetime`      | `date`, `time`, `timestamp` | the UTC date, the UTC time of day, or the UTC date and time                                 |
+| `timestamp`     | `date`, `time`, `datetime`  | the date part, the time part, or the date and time read as UTC                              |
+| `date`          | `timestamp`, `datetime`     | midnight on that day, in UTC for a `datetime`                                               |
+| `time`          | `interval`, `duration`      | the time since midnight                                                                     |
+| `duration`      | `interval`                  | a time part only, refused when the duration has a part smaller than one microsecond          |
+| `interval`      | `duration`                  | a month counted as 30 days, refused when the total is negative                              |
+| any of the four | `string`                    | the text form, such as `'2026-10-27'` or `'P1Y2D'`                                          |
+
+```surql
+<date> d'2026-10-27T12:30:45Z';
+//- pd'2026-10-27'
+
+<time> d'2026-10-27T12:30:45.5Z';
+//- pt'12:30:45.500'
+
+<timestamp> '2026-10-27 12:30:45';
+//- ts'2026-10-27T12:30:45'
+
+<interval> 1h30m;
+//- ivl'PT1H30M'
+
+<duration> ivl'1 mon 1 day 00:00:01';
+//- 4w3d1s
+
+<string> ivl'1 year 2 days';
+//- 'P1Y2D'
+```
+
+A `duration` has no calendar, so a cast from one gives a time part only, and `<interval> 1y` is `ivl'PT8760H'` rather than one year. In the other direction, `<duration> ivl'1 year'` is `51w3d`, which is 360 days.
+
+A cast that cannot succeed is an error:
+
+```surql
+<date> 'not a date';
+//- "Could not cast into `date` using input `'not a date'`"
+
+<duration> ivl'-1 day';
+//- "Could not cast into `duration` using input `ivl'P-1D'`"
+
+<interval> 1ns;
+//- 'Could not cast into `interval` using input `1ns`'
+```
+
+The method forms `.to_date()`, `.to_time()`, `.to_timestamp()` and `.to_interval()` do the same as the `type::` functions:
+
+```surql
+'2026-10-27'.to_date();
+```
+
+```surql title="Output"
+pd'2026-10-27'
+```
+
+## Arithmetic
+
+The operators combine these types as PostgreSQL does. The results for `datetime` and `duration` on their own are unchanged: `datetime - datetime` is still a `duration`, and a `duration` is never negative.
+
+| Expression                               | Result      | Rule                                                                            |
+| ---------------------------------------- | ----------- | ------------------------------------------------------------------------------- |
+| `date + int`, `date - int`, `int + date` | `date`      | whole days                                                                      |
+| `date - date`                            | `int`       | the number of days between them                                                 |
+| `date + time`                            | `timestamp` | that time on that day                                                           |
+| `date ± interval`, `date ± duration`     | `timestamp` | from midnight on that day                                                       |
+| `time ± interval`, `time ± duration`     | `time`      | continues past midnight on the clock; the months and days of an interval are ignored |
+| `time - time`                            | `interval`  | a time part only                                                                |
+| `timestamp ± interval`                   | `timestamp` | months first, then days, then the time part                                     |
+| `timestamp ± duration`                   | `timestamp` |                                                                                 |
+| `timestamp - timestamp`                  | `interval`  | days and a time part, with no months                                            |
+| `datetime ± interval`                    | `datetime`  | calculated in UTC                                                               |
+| `interval ± interval`, `-interval`       | `interval`  | part by part                                                                    |
+| `interval * number`, `interval / number` | `interval`  | a fraction of a month moves into the days, and a fraction of a day into the time part |
+
+```surql
+pd'2026-10-27' + 5;
+//- pd'2026-11-01'
+
+pd'2026-10-27' - pd'2026-01-01';
+//- 299
+
+pd'2026-10-27' + pt'12:30:00';
+//- ts'2026-10-27T12:30:00'
+
+pt'23:30:00' + ivl'1 hour';
+//- pt'00:30:00'
+
+ts'2026-10-27T10:00:00' - ts'2026-10-20T08:30:00';
+//- ivl'P7DT1H30M'
+
+ivl'1 mon' * 1.5;
+//- ivl'P1M15D'
+```
+
+When adding months gives a day that the target month does not have, the result is the last day of that month:
+
+```surql
+ts'2026-01-31T10:00:00' + ivl'1 month';
+//- ts'2026-02-28T10:00:00'
+
+ts'2024-02-29T10:00:00' + ivl'1 year';
+//- ts'2025-02-28T10:00:00'
+```
+
+A result outside the range of its type is an error, except for `time`, which continues past midnight as shown above. Dividing an interval by zero is also an error, and some combinations of types have no operator at all:
+
+```surql
+ivl'2147483647 mons' + ivl'1 mon';
+//- 'Failed to compute: "interval", as the operation results in an arithmetic overflow.'
+
+ivl'1 day' / 0;
+//- 'An interval cannot be divided by zero.'
+
+pd'2026-10-27' + pd'2026-10-27';
+//- "Cannot perform addition with 'date' and 'date'"
+```
+
+## Comparison and ordering
+
+Values of the same type compare in time order. `pt'24:00:00'` is later than every other time of day.
+
+```surql
+pd'2026-10-27' < pd'2026-10-28';
+//- true
+
+pt'24:00:00' > pt'23:59:59.999999999';
+//- true
+```
+
+Two intervals compare by their total length, with a month counted as 30 days and a day as 24 hours. So `ivl'1 mon'` is equal to `ivl'30 days'`, although each is still stored and displayed as it was written. The same rule applies to sorting, to `array::distinct()` and to a `UNIQUE` index, which treats the two as one key.
+
+```surql
+ivl'1 mon' = ivl'30 days';
+//- true
+
+ivl'1 day' = ivl'24 hours';
+//- true
+
+array::distinct([ivl'1 mon', ivl'30 days']);
+//- [ivl'P1M']
+```
+
+Values of two different types are never equal, and the operators do not convert one into the other. A `date` and a `datetime` at midnight on the same day are not equal:
+
+```surql
+pd'2026-10-27' = d'2026-10-27';
+//- false
+```
+
+> [!WARNING]
+> The ordering operators also compare different types by type rather than by time. Every `datetime` sorts before every `date`, so `pd'2026-10-27' < d'2027-01-01'` is `false`. Cast one side first, as in `<date> $created_at < pd'2027-01-01'`, to compare the two in time order.
+
+When values of different types are sorted together, they sort by type in this order: `datetime`, `date`, `time`, `timestamp`, `interval`.
+
+```surql
+array::sort([
+	pd'2026-10-27',
+	d'2026-10-27',
+	ivl'1 day',
+	pt'01:00:00',
+	ts'2026-10-27T00:00:00'
+]);
+```
+
+```surql title="Output"
+[
+	d'2026-10-27T00:00:00Z',
+	pd'2026-10-27',
+	pt'01:00:00',
+	ts'2026-10-27T00:00:00',
+	ivl'P1D'
+]
+```
+
+## Functions
+
+- The [interval functions](/docs/reference/query-language/functions/database-functions/interval) build an interval from its parts, read each part, and normalise an interval with `interval::justify_interval()`.
+- The [time functions](/docs/reference/query-language/functions/database-functions/time) read parts of a `date`, `time` or `timestamp` and build these values with `time::make_date()`, `time::make_time()` and `time::make_timestamp()`. `time::age()` returns the interval between two dates, `time::extract()` reads a field by name, and `time::trunc()` truncates a value to the start of a unit.
+- The [type functions](/docs/reference/query-language/functions/database-functions/type) convert a value with `type::date()` and the other casts, and check a value with `type::is_date()`, `type::is_time()`, `type::is_timestamp()` and `type::is_interval()`.
+
+```surql
+time::age(ts'2026-10-27T12:00:00', ts'2020-02-29T06:30:00');
+//- ivl'P6Y7M27DT5H30M'
+
+interval::make(1, 2, 1, 3, 4, 5, 6.5);
+//- ivl'P1Y2M10DT4H5M6.5S'
+```
+
+## See also
+
+- [Datetimes](/docs/reference/query-language/language-primitives/data-types/datetimes)
+- [Durations](/docs/reference/query-language/language-primitives/data-types/durations)
+- [Casting](/docs/reference/query-language/language-primitives/casting)

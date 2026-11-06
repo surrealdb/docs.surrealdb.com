@@ -1,0 +1,115 @@
+---
+position: 4
+title: SQL drivers querying
+description: Run SQL with the native API of @surrealdb/pg and @surrealdb/mysql, using tagged templates, query, execute and batch, with bound parameters, nested templates and per-call options.
+---
+
+# SQL drivers querying
+
+Both packages export the same native API. The examples use `@surrealdb/pg`. For `@surrealdb/mysql`, use `?` placeholders in place of `$1`, `$2` and so on.
+
+```ts
+import { connect } from "@surrealdb/pg";
+
+const sql = connect("postgres://root:secret@abc123.surrealdb.earth/app?namespace=prod");
+```
+
+## Tagged templates
+
+A tagged template returns the rows. Each value becomes a bound parameter.
+
+```ts
+const rows = await sql`SELECT * FROM person WHERE age > ${18}`;
+```
+
+The template is a lazy thenable, so it runs when you `await` it. A template that you do not await sends nothing.
+
+## query and execute
+
+Use `query` to pass the text and the parameters separately. It resolves to the full [result](/docs/libraries/sql-drivers/results-and-types), not only the rows. `execute` is the same call, and reads better for writes.
+
+```ts
+const result = await sql.query(
+    "UPDATE person SET age = $1 WHERE id = $2",
+    [31, "tobie"],
+);
+console.log(result.command, result.rowCount);
+
+await sql.execute("DELETE FROM person WHERE id = $1", ["tobie"]);
+```
+
+A text with several statements resolves to the result of its last statement. The `results` field lists the result of every statement in order.
+
+## Parameters are always bound
+
+- Values travel as variables (`_1` to `_n`) and the instance binds them as typed parameters. The client does not escape or interpolate values.
+- `sql.raw(text)` splices trusted text into a statement as it is. It is the only way to put text into a statement.
+- Calling `sql("...", [...])` as a plain function throws, so a misused call never sends unbound placeholders.
+- A statement built with `query(text, params)` cannot be nested inside a template, because its placeholders are already numbered.
+
+Nested templates and `sql.raw` share one placeholder counter.
+
+```ts
+const adults = sql`age > ${18}`;
+await sql`SELECT * FROM person WHERE name = ${"a"} AND ${adults}
+    ORDER BY ${sql.raw("name")}`;
+```
+
+Values bind as follows:
+
+| JavaScript value | Bound as |
+| --- | --- |
+| `undefined` | `null` |
+| `Date` | ISO string |
+| `bigint` | A number within the safe range, a decimal string beyond it |
+| `Uint8Array` | Base64 text |
+| Arrays and objects | JSON |
+| `RecordId` | `table:key` text |
+
+## Batches
+
+`batch` sends several statements in one request. Entries can be statements, strings or `{ text, params }` objects, and the result holds one entry for each, in order.
+
+```ts
+const [created, count] = await sql.batch([
+    sql`INSERT INTO person (id, name) VALUES (${"a"}, ${"A"})`,
+    sql`SELECT count(*) FROM person`,
+]);
+```
+
+A batch is atomic by default. See [transactions](/docs/libraries/sql-drivers/transactions) for the options.
+
+## Options
+
+Client options, in addition to the [connection options](/docs/libraries/sql-drivers/connections):
+
+<Tabs syncKey="sql-dialect">
+<TabItem label="PostgreSQL">
+| Option | Meaning |
+| --- | --- |
+| `bigint` | `"auto"` (default), `"always"` or `"never"` |
+| `recordIds` | `"record"` (default) or `"string"` |
+| `vectors` | `"float32"` (default) or `"array"` |
+| `parse` | Decoders by type name, for example `{ timestamptz: (raw) => raw }` |
+| `cast` | A catch-all `(column, value) => value`, applied last |
+</TabItem>
+<TabItem label="MySQL">
+| Option | Meaning |
+| --- | --- |
+| `bigint` | `"auto"` (default), `"string"` or `"bigint"` for `BIGINT` columns |
+| `dateStrings` | Return `DATE`, `DATETIME` and `TIMESTAMP` as text instead of `Date` |
+| `decimalNumbers` | Return `DECIMAL` as numbers instead of exact strings |
+| `cast` | A catch-all `(column, value) => value`, applied last |
+</TabItem>
+</Tabs>
+
+Per-call options are the last argument of `query`, `execute`, `batch` and `begin`:
+
+| Option | Meaning |
+| --- | --- |
+| `rowMode` | `"object"` (default) or `"array"` |
+| `signal` | An `AbortSignal` that cancels the call |
+| `timeout` | Milliseconds. Overrides the client default. |
+| Decoding options | Override the client's options for this call |
+
+Precedence is: call options, then batch or transaction options, then client options, then defaults.

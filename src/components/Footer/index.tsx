@@ -45,6 +45,7 @@ const COLUMNS: FooterColumn[] = [
             { label: "SurrealQL", href: "/docs/reference/query-language" },
             { label: "SDKs", href: "/docs/reference/javascript" },
             { label: "Cloud", href: "/docs/manage/instances" },
+            { label: "Earth", href: "/docs/manage/instances/earth" },
             { label: "Labs", href: "/docs/labs" },
         ],
     },
@@ -55,7 +56,7 @@ const COLUMNS: FooterColumn[] = [
             { label: "Blog", href: "/blog" },
             { label: "Case studies", href: "/casestudies" },
             { label: "Releases", href: "/releases" },
-            { label: "Roadmap", href: "/roadmap" },
+            { label: "Changelog", href: "/changelog" },
             { label: "Events and webinars", href: "/events" },
         ],
     },
@@ -140,7 +141,7 @@ export function Footer() {
                         lts="-0.01em"
                         maw={760}
                     >
-                        The context and memory layer for AI agents
+                        The database and memory for every agent
                     </Text>
                     <Text
                         c="slate"

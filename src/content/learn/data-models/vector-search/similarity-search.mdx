@@ -89,10 +89,22 @@ Let’s create a dataset of actors and define an approximate vector index on the
 
 ```surql
 -- Create a dataset of actors with embeddings and flags
-CREATE actor:1 SET name = 'Actor 1', embedding = [0.1, 0.2, 0.3, 0.4], flag = true;
-CREATE actor:2 SET name = 'Actor 2', embedding = [0.2, 0.1, 0.4, 0.3], flag = false;
-CREATE actor:3 SET name = 'Actor 3', embedding = [0.4, 0.3, 0.2, 0.1], flag = true;
-CREATE actor:4 SET name = 'Actor 4', embedding = [0.3, 0.4, 0.1, 0.2], flag = true;
+CREATE actor:1 SET
+    name = 'Actor 1',
+    embedding = [0.1, 0.2, 0.3, 0.4],
+    flag = true;
+CREATE actor:2 SET
+    name = 'Actor 2',
+    embedding = [0.2, 0.1, 0.4, 0.3],
+    flag = false;
+CREATE actor:3 SET
+    name = 'Actor 3',
+    embedding = [0.4, 0.3, 0.2, 0.1],
+    flag = true;
+CREATE actor:4 SET
+    name = 'Actor 4',
+    embedding = [0.3, 0.4, 0.1, 0.2],
+    flag = true;
 
 -- Define an embedding to represent a face
 LET $person_embedding = [0.15, 0.25, 0.35, 0.45];
@@ -131,6 +143,10 @@ Because `embedding` is indexed, the `flag = true` condition is *not* applied aft
 * Correct, because you still receive up to `K` records that match the condition.
 * Efficient, since the search does not spend its slots on records that would only be filtered out afterwards.
 
+With the four actors above, the two nearest records are `actor:1` and `actor:2`, and `actor:2` has `flag = false`. Filtering afterwards would leave one result, while filtering during the search skips `actor:2` and fills the second slot with `actor:4`:
+
+<img src="~/assets/img/diagrams/light/knn-filter-light.webp" darkSrc="~/assets/img/diagrams/knn-filter.webp" alt="Four actors on a line by Euclidean distance from the query: actor:1 at 0.10, actor:2 at 0.22, actor:4 at 0.41 and actor:3 at 0.46. Only actor:2 has flag = false. If the filter ran after the search, the two result slots would hold actor:1 and actor:2, and removing actor:2 would leave one result. SurrealDB filters during the search, so it skips actor:2 and returns actor:1 and actor:4." />
+
 SurrealDB applies the condition in one of two ways:
 
 * **Checked on each candidate.** The search reads the record of each candidate it visits and tests the condition. The example above runs this way, because `flag` has no index of its own.
@@ -149,10 +165,9 @@ EXPLAIN SELECT id, flag, vector::distance::knn() AS distance FROM actor
 
 ```surql title="Output"
 'SelectProject [ctx: Db] [projections: id, flag, distance]
-    SortByKey [ctx: Db] [sort_keys: distance ASC]
-        Compute [ctx: Db] [fields: distance = vector::distance::knn(...)]
-            Filter [ctx: Db] [predicate: flag = true]
-                KnnScan [ctx: Db] [index: hnsw_pts, k: 2, ef: 40, dimension: 4, predicate: flag = true]'
+    Sort [ctx: Db] [sort_keys: vector::distance::knn() ASC]
+        Filter [ctx: Db] [predicate: flag = true]
+            KnnScan [ctx: Db] [index: hnsw_pts, k: 2, ef: 40, dimension: 4, predicate: flag = true]'
 ```
 
 The `predicate: flag = true` on the `KnnScan` line is the condition being evaluated inside the index search. If the attribute is missing and no bitmap operator appears beneath `KnnScan`, the condition is not applied during the search (for example, when the vector field is not indexed). A DISKANN index produces an identical `KnnScan` line.
@@ -163,15 +178,19 @@ The `predicate: flag = true` on the `KnnScan` line is the condition being evalua
 
 A condition is pre-filtered when an index identifies exactly the records it matches. That is the case for:
 
-* An equality or range condition, or an `OR` of them, on a field that has a standard or unique index and a declared type that cannot hold an array, such as `TYPE bool` or `TYPE string`. An array value has one index entry per element, so without that type the index could list records the condition does not match.
+* An equality or range condition, or an `OR` of them, on a field whose standard or unique index has never stored an array. An array value has one index entry per element, so an index that holds one could list records the condition does not match. An index records this from SurrealDB 4.0, so an index built by an earlier release qualifies only after [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild). In SurrealDB 3.3, the field needs a declared type that cannot hold an array, such as `TYPE bool` or `TYPE string`.
 * A full-text `@@` condition on a field with a full-text index.
 
-A `NOT` condition, or any other condition, is still checked on each candidate. When a `WHERE` clause mixes the two kinds, the qualifying conditions form the allow-list and the rest are checked on each candidate. A query with a `WITH` clause or a `VERSION` clause is not pre-filtered.
+A `NOT` condition, or any other condition, is still checked on each candidate. When a `WHERE` clause mixes the two kinds, the qualifying conditions form the allow-list and the rest are checked on each candidate. A query with a `VERSION` clause is not pre-filtered. From SurrealDB 4.0, a [`WITH INDEX`](/docs/reference/query-language/clauses/with) clause limits which indexes build the allow-list, and the vector index still runs the search, so the clause does not change which records are returned:
 
-Defining a type and an index for `flag` in the example above is enough for its condition to qualify:
+* A `WITH INDEX` clause that names the index on the filtered field, such as `idx_flag` below, pre-filters through that index.
+* A `WITH INDEX` clause that names only the vector index, such as `hnsw_pts`, checks every condition on each candidate.
+
+Before SurrealDB 4.0, any `WITH` clause turned pre-filtering off.
+
+Defining an index for `flag` in the example above is enough for its condition to qualify, because none of its values is an array:
 
 ```surql
-DEFINE FIELD flag ON actor TYPE bool;
 DEFINE INDEX idx_flag ON actor FIELDS flag;
 
 EXPLAIN ANALYZE SELECT id, flag, vector::distance::knn() AS distance FROM actor
@@ -179,12 +198,11 @@ EXPLAIN ANALYZE SELECT id, flag, vector::distance::knn() AS distance FROM actor
 ```
 
 ```surql title="Sample output"
-'SelectProject [ctx: Db] [projections: id, flag, distance] {rows: 2, batches: 1, elapsed: 393.21µs}
-    SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 2, batches: 1, elapsed: 369.46µs}
-        Compute [ctx: Db] [fields: distance = vector::distance::knn(...)] {rows: 2, batches: 1, elapsed: 334.87µs}
-            Filter [ctx: Db] [predicate: flag = true] {rows: 2, batches: 1, elapsed: 303.08µs}
-                KnnScan [ctx: Db] [index: hnsw_pts, k: 2, ef: 40, dimension: 4, prefilter_tier: exact] {rows: 2, batches: 1, elapsed: 276.58µs}
-                    BitmapIndexScan [ctx: Db] [index: idx_flag, access: = true] {rows: 3, batches: 0, elapsed: 0ns}
+'SelectProject [ctx: Db] [projections: id, flag, distance] {rows: 2, batches: 1, elapsed: 472.29µs}
+    Sort [ctx: Db] [sort_keys: vector::distance::knn() ASC] {rows: 2, batches: 1, elapsed: 472.29µs}
+        Filter [ctx: Db] [predicate: flag = true] {rows: 2, batches: 1, elapsed: 472.29µs}
+            KnnScan [ctx: Db] [index: hnsw_pts, k: 2, ef: 40, dimension: 4, prefilter_tier: exact] {rows: 2, batches: 1, elapsed: 472.29µs}
+                BitmapIndexScan [ctx: Db] [index: idx_flag, access: = true] {rows: 3, batches: 0, elapsed: 0ns}
 
 Total rows: 2'
 ```
@@ -198,11 +216,85 @@ The `prefilter_tier` attribute, reported under `EXPLAIN ANALYZE`, shows how the 
 | `exact` | Up to 2,000 | Computes the distance to each allowed record without using the vector index, so the result is the exact nearest `K`. |
 | `graph` | Up to 100,000 | Searches the vector index, admitting only allowed records, with the search width `ef` multiplied by 4 to make up for the candidates the list rejects. The boosted width is at most 1,024, and never less than the `ef` in the query. |
 | `graph_unboosted` | More than 100,000 | Searches the vector index, admitting only allowed records, with the `ef` in the query. |
-| `fallback` | Not built | An index read passed the `SURREAL_BITMAP_BRANCH_BUDGET` limit, so every condition is checked on each candidate, as it is without pre-filtering. |
+| `fallback` | Not built | An index read passed its entry budget, so every condition is checked on each candidate, as it is without pre-filtering. From SurrealDB 4.0 the budget grows with `ef`, up to the `SURREAL_BITMAP_BRANCH_BUDGET` limit. |
 
 The thresholds are set with `SURREAL_KNN_PREFILTER_EXACT_THRESHOLD`, `SURREAL_KNN_PREFILTER_EF_BOOST_THRESHOLD`, `SURREAL_KNN_PREFILTER_EF_BOOST` and `SURREAL_KNN_PREFILTER_EF_MAX`, and `SURREAL_KNN_PREFILTER_ENABLED=false` turns pre-filtering off. See [environment variables](/docs/reference/cli/db/environment-variables). The allow-list is built with the same bitmaps that [combine indexes](/docs/learn/querying/concepts-and-guides/query-optimisation#how-surrealdb-combines-indexes) in other queries.
 
 > [!NOTE]
 > Indexes built by SurrealDB 3.2 keep working on 3.3 without a rebuild, but a search is only pre-filtered when both the vector index and the index on the filtered field were defined or rebuilt on 3.3. An optional [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild) brings a 3.2 index into pre-filtered search.
+
+### Ordering by distance
+
+<Since v="v4.0.0" />
+
+A search for the nearest records can also be written as an ordering by a distance function with a `LIMIT`. When the function matches the distance that an HNSW or DISKANN index was defined with, the index answers the query, and a `WHERE` condition is pre-filtered in the same way as with the `<|K, EF|>` operator. The index in the example above uses the default `EUCLIDEAN` distance:
+
+```surql
+SELECT id, vector::distance::euclidean(embedding, $person_embedding) AS distance FROM actor
+  WHERE flag = true
+  ORDER BY vector::distance::euclidean(embedding, $person_embedding)
+  LIMIT 2;
+```
+
+```surql title="Output"
+[
+	{
+		distance: 0.09999999999999998f,
+		id: actor:1
+	},
+	{
+		distance: 0.412310562561766f,
+		id: actor:4
+	}
+]
+```
+
+`EXPLAIN` shows a `KnnScan` with `k: 2`, the `LIMIT`, beneath the sort:
+
+```surql
+EXPLAIN SELECT id FROM actor
+  WHERE flag = true
+  ORDER BY vector::distance::euclidean(embedding, $person_embedding)
+  LIMIT 2;
+```
+
+```surql title="Output"
+'SelectProject [ctx: Db] [projections: id]
+    Limit [ctx: Db] [limit: 2]
+        Sort [ctx: Db] [sort_keys: vector::distance::euclidean(embedding, $person_embedding) ASC, keep: 2]
+            Filter [ctx: Db] [predicate: flag = true]
+                KnnScan [ctx: Db] [index: hnsw_pts, k: 2, ef: 150, dimension: 4]
+                    BitmapIndexScan [ctx: Db] [index: idx_flag, access: = true]'
+```
+
+The index answers the ordering only when all of the following are true. Otherwise the query reads and sorts every matching record, and returns the exact result.
+
+* The ordering is ascending, has a single key, and the statement has a `LIMIT` without `START`.
+* The function is `vector::distance::cosine`, `euclidean`, `manhattan`, `chebyshev`, `hamming` or `minkowski`, and matches the `DIST` of the index. For an index defined with `DIST COSINE`, use [`vector::distance::cosine`](/docs/reference/query-language/functions/database-functions/vector#vectordistancecosine).
+* Every record of the table has a vector in the indexed field, so the index holds an entry for each of them. A record whose field is `NONE` or `NULL` stops the index from answering the ordering.
+* The index was defined or rebuilt on SurrealDB 4.0. An older index answers the ordering after [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild).
+
+The search runs with the search width that `<|K|>` uses, which is the larger of `K` and the `EFC` of an HNSW index or the `L_BUILD` of a DISKANN index. Like the `<|K, EF|>` operator, it is approximate. To get the exact nearest records, add `WITH NOINDEX`, which sorts every record by the distance function.
+
+### Filtering after the search
+
+A pre-filtered search returns up to `K` records that match the condition. To find the `K` nearest records first and then keep only those that match, put the search in a subquery and the condition in the outer `WHERE` clause. The condition is not moved into the subquery, so the result can hold fewer than `K` records:
+
+```surql
+SELECT id, flag FROM (
+  SELECT id, flag FROM actor WHERE embedding <|2,40|> $person_embedding
+) WHERE flag = true;
+```
+
+```surql title="Output"
+[
+	{
+		flag: true,
+		id: actor:1
+	}
+]
+```
+
+The two nearest records are `actor:1` and `actor:2`, and only `actor:1` has `flag = true`.
 
 For HNSW and DISKANN configuration and the KNN cheat sheet, see [Vector indexes](/docs/learn/data-models/vector-search/vector-indexes).

@@ -1,0 +1,385 @@
+---
+position: 3
+title: Migrating to Python SDK 3.x
+description: Move a Python project from SDK 2.x to 3.x, which supports SurrealDB 4.0. Covers plain strings as table names, StringRecordId, query() and select() results, running blocking builders, the removed merge(), patch() and insert_relation(), live query subscriptions, NULL, sets and datetimes, error classes and embedded data.
+---
+
+# Migrating to Python SDK 3.x
+
+Version 3 of the Python SDK supports SurrealDB 4.0 and changes what several common calls return. This guide lists each change that can break a project written for version 2, with the 2.x code and the 3.x code that replaces it. The sections are in order of how much code each change usually affects, so work through them from the top.
+
+> [!IMPORTANT]
+> Upgrade the SDK before you upgrade the server to SurrealDB 4.0. Version 2 sends every datetime as text, which SurrealDB 4.0 refuses, so any write that holds a datetime fails with `ValidationError: CBOR tag 0 (a datetime as text) is not accepted: send tag 12 [seconds, nanos]`. Version 3 works with SurrealDB 2.x, 3.x and 4.x, so you can move to it on the server you run today.
+
+## What changed
+
+- A plain string is always a table name. Use `RecordID` or `StringRecordId` to target a record.
+- On a blocking connection, `select()`, `delete()` and `query()` return a builder that sends nothing until you call `.execute()`.
+- `query()` returns one result for each statement, where 2.x returned the first statement's result only.
+- `select()` on a single record returns the record or `None`, where 2.x returned a list.
+- `merge()`, `patch()` and `insert_relation()` are now clauses and options on the other methods.
+- `live()` returns a subscription that you can iterate, and each notification is the full notification object.
+- `NULL` reads as `Null`, sets read as `SurrealSet`, and datetimes keep their nanoseconds.
+- Every request times out after 30 seconds by default, also over a WebSocket.
+- Transport failures raise SDK errors rather than errors from `requests` or `aiohttp`.
+- The embedded engine is an optional extra, and it runs SurrealDB 4.0.
+
+## 1. Install version 3
+
+Upgrade the package:
+
+```bash
+pip install --upgrade "surrealdb>=3.0.0"
+```
+
+With `uv`:
+
+```bash
+uv add "surrealdb>=3.0.0"
+```
+
+Version 3 still needs Python 3.10 or later. It needs `websockets` 15.0 or later and `aiohttp` 3.14.0 or later, so raise any lower pin on those packages in your own requirements.
+
+Some features are now optional extras:
+
+| Extra | Install | Use it for |
+| --- | --- | --- |
+| `embedded` | `pip install "surrealdb[embedded]"` | `mem://`, `memory`, `file://` and `surrealkv://` connections. In 2.x the engine was part of the main package; without the extra, an embedded URL raises `UnsupportedEngineError`. |
+| `pydantic` | `pip install "surrealdb[pydantic]"` | `RecordID` and `StringRecordId` fields in pydantic models. |
+| `memory` | `pip install "surrealdb[memory]"` | The [Agent Memory client](/docs/agent-memory/reference/sdk-python), imported as `from surrealdb.memory import Memory`. |
+
+## 2. Replace plain strings that name a record
+
+In 2.x, the SDK inserted a string target into the SurrealQL text as it was, so the server read `"person:tobie"` as a record and `"person:1..10"` as a range of records. In 3.x a plain string is always a table name, and the SDK sends it as a value rather than as query text.
+
+> [!WARNING]
+> A write does not fail when it gets a string that names a record. `db.create("person:tobie", data)` creates a record with a random id in a new table that is named `person:tobie`. On SurrealDB 3.x and 4.0, a read of the same string raises `NotFoundError: The table 'person:tobie' does not exist`, and on SurrealDB 2.x it returns an empty list.
+
+Target a record with a [`RecordID`](/docs/reference/python/api/values/record-id), and a range of records with a `RecordID` whose id is a `Range`:
+
+```python title="2.x"
+person = db.select("person:tobie")
+db.create("person:jaime", {"name": "Jaime"})
+db.delete("person:1..10")
+```
+
+```python title="3.x"
+from surrealdb import BoundExcluded, BoundIncluded, Range, RecordID
+
+person = db.select(RecordID("person", "tobie")).execute()
+db.create(RecordID("person", "jaime"), {"name": "Jaime"})
+
+ids = Range(BoundIncluded(1), BoundExcluded(10))
+db.delete(RecordID("person", ids)).execute()
+```
+
+When a record id arrives as text, for example from a URL or a configuration file, wrap it in a [`StringRecordId`](/docs/reference/python/api/values/record-id#stringrecordid). The SDK sends the text for the server to parse, so every record id form the server accepts works. `RecordID.parse()` also reads text, but it always makes a string id, so it misses a record whose id is a number:
+
+```python
+from surrealdb import RecordID, StringRecordId
+
+# Finds the record post:1
+db.select(StringRecordId("post:1")).execute()
+
+# Looks for the string id "1", finds nothing, and returns None
+db.select(RecordID.parse("post:1")).execute()
+```
+
+To find the calls to change, search the project for a CRUD method whose first argument is a string literal that holds a colon:
+
+```bash
+grep -rnE "\.(select|create|update|upsert|delete|merge|patch)\([[:space:]]*f?['\"][^'\"]*:" --include='*.py' .
+```
+
+The search does not find a variable that holds such a string, so also check each place where a record target comes from user input or configuration.
+
+Two other methods are strict about strings. `insert()` accepts a plain string only when it is a simple identifier, so a table name such as `my-table` needs `Table("my-table")`. The new `relate()` method refuses a plain string for either end and raises `TypeError`.
+
+## 3. Run blocking builders
+
+In 2.x, every method on a blocking connection sent its request at once. In 3.x, `select()`, `delete()` and `query()` return a builder, and a builder sends nothing until you run it:
+
+```python title="2.x"
+people = db.select("person")
+db.delete(RecordID("person", "tobie"))
+db.query("DELETE person WHERE active = false")
+```
+
+```python title="3.x"
+people = db.select("person").execute()
+db.delete(RecordID("person", "tobie")).execute()
+db.query("DELETE person WHERE active = false").execute()
+```
+
+The rule on a blocking connection is that a write you give its data runs at once, and everything else returns a builder:
+
+| Runs at once and returns the result | Returns a builder |
+| --- | --- |
+| `create(target, data)` | `select(target)` |
+| `update(target, data)` | `delete(target)` |
+| `upsert(target, data)` | `query(sql, vars)` |
+| `insert(table, data)` | `create(target)`, `update(target)`, `upsert(target)` and `insert(table)` without data |
+
+Run a builder with `.execute()`, with a data clause such as `.merge(data)`, or by iterating it. A builder never runs because you call `len()`, `bool()` or `==` on it, and `len()` or an index raises a `TypeError` that names `.execute()`.
+
+In 2.x, `db.create(target, None)` created a record with no content. In 3.x, `None` is sent as the content and the server refuses it with `ValidationError: Cannot use NONE in a CONTENT clause`. Leave the data out and run the builder: `db.create(Table("person")).execute()`.
+
+A builder that you forget to run does not raise an error. When it is garbage-collected without running, it emits a `RuntimeWarning` that names the call and the line. Run your test suite after the upgrade and look for this warning, which pytest shows in its warnings summary:
+
+```text
+RuntimeWarning: delete() was called at app.py:42 but its builder was never executed (.execute(), .rows(), or iterating it), so nothing was sent to the server.
+```
+
+On an async connection a builder is awaitable, so `await db.select(...)` and `await db.query(...)` still send the request. Only the shape of the results changes, as the next two sections describe.
+
+## 4. Read query() results as one entry per statement
+
+In 2.x, `query()` returned the result of the first statement and dropped the rest. In 3.x it returns a list with one entry for each statement, also when the query holds one statement. `.first()` returns the result of the first statement:
+
+| Call | 2.x | 3.x, `.execute()` or `await` | 3.x, `.first()` |
+| --- | --- | --- | --- |
+| `query("RETURN 1")` | `1` | `[1]` | `1` |
+| `query("RETURN 1; RETURN 2")` | `1` | `[1, 2]` | `1` |
+| `query("SELECT * FROM person")` | `[{...}, {...}]` | `[[{...}, {...}]]` | `[{...}, {...}]` |
+
+Code that ran one statement and used its result needs `.first()`:
+
+```python title="2.x"
+people = db.query(
+    "SELECT * FROM person WHERE age > $age",
+    {"age": 18},
+)
+```
+
+```python title="3.x"
+people = db.query(
+    "SELECT * FROM person WHERE age > $age",
+    {"age": 18},
+).first()
+```
+
+On an async connection, write `await db.query(...).first()`. To read every statement, unpack the list: `people, count = db.query("SELECT * FROM person; SELECT count() FROM person GROUP ALL").execute()`.
+
+The keyword for variables on `query_raw()` changed from `params` to `vars`, which matches `query()`.
+
+## 5. Read single records without a list
+
+In 2.x, `select()` returned a list, also for one record. In 3.x a `RecordID` or `StringRecordId` target returns the record itself, or `None` when it does not exist:
+
+| Call | 2.x | 3.x |
+| --- | --- | --- |
+| `select(RecordID(...))` | `[record]` or `[]` | `record` or `None` |
+| `update(RecordID(...), data)` for a record that does not exist | `[]` | `None` |
+| `delete(RecordID(...))` | `record` | `record`, or `None` when it does not exist |
+| `select(Table(...))` or `select("person")` | a list | a list |
+
+```python title="2.x"
+rows = db.select(RecordID("person", "tobie"))
+person = rows[0] if rows else None
+```
+
+```python title="3.x"
+person = db.select(RecordID("person", "tobie")).execute()
+```
+
+A `RecordID` whose id is a `Range` targets many records, so it returns a list.
+
+## 6. Replace removed methods
+
+| 2.x | 3.x |
+| --- | --- |
+| `db.merge(record, data)` | `db.update(record).merge(data)` |
+| `db.patch(record, patches)` | `db.update(record).patch(patches)` |
+| `db.insert_relation(table, data)` | `db.insert(table, data, relation=True)` |
+| `db.query_raw(sql, params=...)` | `db.query_raw(sql, vars=...)` |
+| `db.set_token(token)` on an HTTP connection | `db.authenticate(token)` |
+| `from surrealdb import TAG_RECORD_ID` and the other `TAG_*` constants | `from surrealdb.data.types.constants import TAG_RECORD_ID` |
+
+A data clause runs a blocking builder, so `db.update(record).merge(data)` sends the request and returns the updated record. On an async connection, write `await db.update(record).merge(data)`. The same clauses work after `create()` and `upsert()`.
+
+```python title="2.x"
+like = {"in": RecordID("person", "jaime"), "out": RecordID("post", 1)}
+
+db.merge(RecordID("person", "jaime"), {"vip": True})
+db.insert_relation("likes", like)
+```
+
+```python title="3.x"
+like = {"in": RecordID("person", "jaime"), "out": RecordID("post", 1)}
+
+db.update(RecordID("person", "jaime")).merge({"vip": True})
+db.insert("likes", like, relation=True)
+```
+
+## 7. Update live queries
+
+In 2.x, `live()` returned the UUID of the live query, and `subscribe_live()` yielded the changed record only. In 3.x, `live()` returns a [subscription](/docs/reference/python/api/core/live-subscription), and every notification is the full object, with the record under `"result"`:
+
+```python title="2.x"
+live_id = db.live("person")
+for person in db.subscribe_live(live_id):
+    print(person["name"])
+```
+
+```python title="3.x"
+with db.live("person") as people:
+    for change in people:
+        print(change["action"], change["result"]["name"])
+```
+
+A notification holds `action` (`"CREATE"`, `"UPDATE"` or `"DELETE"`), `result` (the record), `record` (its `RecordID`) and `id` (the live query id). Leaving the `with` block kills the live query. On an async connection, write `async with await db.live("person") as people:` and `async for change in people:`.
+
+The subscription is a `uuid.UUID`, so code that passes it to `subscribe_live()` or `kill()` still works. Change only the code that reads each notification: `notification["result"]` holds what 2.x yielded.
+
+## 8. Check NULL, sets, datetimes and other values
+
+Some values now come back as different types, and some values that 2.x could not send now work. See [Value types](/docs/reference/python/concepts/value-types) for the full mapping.
+
+- **NULL is `Null`.** In 2.x, `NULL` and `NONE` both read as `None`, and `None` is sent as `NONE`, so a record that was read and written back lost every `NULL` field. In 3.x a `NULL` field reads as `surrealdb.Null`, which is falsy and is not equal to `None`. Code that tests a field that can hold `NULL` with `is None` must also test for `Null`.
+
+  ```python
+  from surrealdb import Null
+
+  nickname = person["nickname"]
+  if nickname is None or nickname is Null:
+      ...
+  ```
+
+- **Sets are `SurrealSet`.** Version 2 could not read a set from SurrealDB 3.x or 4.0, and raised `BufferError`. Version 3 reads a set as a `SurrealSet`, which is a `list` subclass that is written back as a set. A Python `set` is still sent as a set.
+- **Datetimes are `PreciseDatetime`.** A datetime reads as a `PreciseDatetime`, which is a `datetime` subclass that keeps the nanoseconds a `datetime` cannot hold, so `isinstance(value, datetime)` is still true. A naive `datetime` is sent as UTC.
+- **Dates, times and durations can be sent.** Version 2 sent a `Duration` and a `datetime.date` in forms that SurrealDB 3.3 and 4.0 refuse, and a `datetime.time` raised `TypeError`. Version 3 sends all three. Against SurrealDB 4.0 a `date` and a naive `time` become the new `date` and `time` types; against earlier servers they become a datetime at midnight UTC and a duration.
+- **`Duration.parse()` is strict.** It raises `InvalidDurationError` for text that the server refuses, such as `"1.5s"`, `"-1s"` or `"1H"`, where 2.x returned a different duration.
+- **Integers must fit in 64 bits.** An `int` outside the signed 64-bit range raises `ValueError` before anything is sent. Version 2 sent `2**63` to SurrealDB 3.x, which stored it as `-9223372036854775808`. Use a `Decimal`, or a `U64` against SurrealDB 4.0.
+- **`RecordID` and `Table` check their arguments.** A table name must be a `str`, and an id must be a `str`, `int`, `uuid.UUID`, `list`, `tuple`, `dict` or `Range`, so `Table(None)` and `RecordID("person", 1.5)` raise `TypeError`. `RecordID(Table("person"), 1)` also raises: pass the table name.
+- **Values the SDK cannot encode raise `TypeError`**, where 2.x raised `BufferError`. A `datetime.timedelta` is one of them: use a `Duration`.
+
+## 9. Allow for the request timeout
+
+In 2.x, a request over a WebSocket waited for its reply for as long as the server took. In 3.x, every request waits for at most 30 seconds by default, on every transport, and then raises `TransportTimeoutError`:
+
+```text
+TransportTimeoutError: timed out while query: no answer within 30s
+```
+
+The SDK stops waiting, but the server does not stop the statement, so a write that times out can still complete on the server. For a connection that runs long queries, set the default with `timeout=`, or change it for one block of code with [`timeout()`](/docs/reference/python/api/core/surreal#timeout). `None` waits indefinitely, which is what 2.x did over a WebSocket:
+
+```python
+db = Surreal("ws://localhost:8000", timeout=120)
+
+with db.timeout(None):
+    report = db.query("SELECT * FROM order").execute()
+```
+
+Over HTTP, 2.x already stopped waiting after 30 seconds, so HTTP code sees no change.
+
+## 10. Update error handling
+
+Every error the SDK raises is a `SurrealError`, and the errors that describe a failed transport now have their own branch. See [Error handling](/docs/reference/python/concepts/error-handling) for the full hierarchy.
+
+| Failure | 2.x raised | 3.x raises |
+| --- | --- | --- |
+| A non-2xx HTTP response | `requests.exceptions.HTTPError` or `aiohttp.ClientResponseError` | `HttpStatusError`, with `.status`, `.body` and `.url` |
+| A host that does not answer | `requests.exceptions.ConnectionError`, `aiohttp.ClientConnectorError` or `ConnectionRefusedError` | `ConnectionUnavailableError` |
+| A request that timed out | an error from the transport library | `TransportTimeoutError` |
+| A response the SDK cannot decode | `BufferError` | `UnexpectedResponseError` |
+| A URL with an unknown scheme, such as `ftp://` | `ValueError` | `UnsupportedEngineError` |
+| A URL that cannot be parsed, such as a bad port | `ValueError` | `InvalidUrlError` |
+| A server other than SurrealDB 2.x, 3.x or 4.x | nothing, the connection opened | `UnsupportedVersionError` when the connection opens |
+| A feature the server is too old for, such as sessions on SurrealDB 2.x | an error from the server | `UnavailableFeatureError`, a subclass of `UnsupportedFeatureError`, before the request is sent |
+
+`ConnectionUnavailableError`, `TransportTimeoutError` and `HttpStatusError` share the new base class `TransportError`. A `TransportError` can succeed if you retry it, and a `ServerError` describes a decision the server made, which fails again. Each `TransportError` keeps the original exception as `__cause__`.
+
+To connect to a server outside the supported range, pass `version_check=False` to `Surreal()` or `AsyncSurreal()`. `QueryError.timeout` now returns the `Duration` that the statement exceeded, where it always returned `None` before.
+
+## 11. Move embedded databases
+
+The embedded engine is now the `surrealdb-embedded` package, which the `embedded` extra installs. It runs SurrealDB 4.0, where the 2.x SDK ran SurrealDB 2.3, so the changes to SurrealQL between those releases apply to your queries. The server guides list them: [2.x to 3.x](/docs/build/migrating/from-old-surrealdb-versions/2x-to-3x) and [3.x to 4.0](/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x).
+
+Sessions, client-side transactions and live queries are still not available on an embedded connection, and the factory options such as `timeout=` and `auth=` have no effect there. See [Embedded databases](/docs/reference/python/concepts/embedded-databases).
+
+### Remove sign-in calls
+
+An embedded connection is allowed to do everything and has no root user, so a `signin()` call on it raises `NotAllowedError`. Remove those calls and call `use()` directly:
+
+```python
+from surrealdb import Surreal
+
+with Surreal("mem://") as db:
+    db.use("app", "main")
+    db.create("person", {"name": "Tobie"})
+```
+
+### Move data on disk
+
+The SurrealDB 4.0 engine cannot open a `file://` or `surrealkv://` directory that the 2.x SDK wrote. Move the data the way a SurrealDB 2.x server moves to 3.x: make a 3.x-compatible export of it, with SurrealDB Studio or with the `surreal v2 export --v3` command, as [the 2.x to 3.x guide describes](/docs/build/migrating/from-old-surrealdb-versions/2x-to-3x#using-the-cli). Then load the export into a new directory. An embedded connection has no `import_()` method, so run the export text through `query()`:
+
+```python
+from pathlib import Path
+from surrealdb import Surreal
+
+with Surreal("surrealkv://data/app-v3") as db:
+    db.use("app", "main")
+    db.query(Path("v2_exported_for_v3.surql").read_text()).execute()
+```
+
+Loading into a new directory leaves the old one as it was, so keep the old one until you have checked the new one. In-memory databases need no move.
+
+## Method mapping
+
+The table lists each 2.x method with what replaces it. Calls that are not listed work as before.
+
+| 2.x | 3.x |
+| --- | --- |
+| `Surreal(url)`, `AsyncSurreal(url)` | Unchanged, with new keyword options such as `timeout=`, `reconnect=` and `auth=` |
+| `db.use(namespace, database)` | Unchanged. `db.use(database="other")` changes one of them |
+| `db.select(target)` (blocking) | `db.select(target).execute()` |
+| `db.select("table:id")` | `db.select(RecordID("table", id)).execute()` or `db.select(StringRecordId("table:id")).execute()` |
+| `db.create("table:id", data)` | `db.create(RecordID("table", id), data)` |
+| `db.update(target, data)` | Unchanged for a `RecordID` or a table. Returns `None` for a missing record |
+| `db.merge(target, data)` | `db.update(target).merge(data)` |
+| `db.patch(target, patches)` | `db.update(target).patch(patches)` |
+| `db.delete(target)` (blocking) | `db.delete(target).execute()` |
+| `db.insert(table, data)` | Unchanged. Use `Table(name)` for a name that is not a simple identifier |
+| `db.insert_relation(table, data)` | `db.insert(table, data, relation=True)` |
+| `db.query(sql, vars)` (blocking) | `db.query(sql, vars).first()` for the first statement, `.execute()` for all |
+| `await db.query(sql, vars)` | `await db.query(sql, vars).first()` for the first statement, `await db.query(sql, vars)` for all |
+| `db.query_raw(sql, params=...)` | `db.query_raw(sql, vars=...)` |
+| `db.live(table)` | Unchanged. Returns a subscription that is also the UUID |
+| `db.subscribe_live(live_id)` yielding records | Yields notifications: read `notification["result"]` |
+| `session.begin_transaction()` | Unchanged. `db.begin_transaction()` is new on the connection |
+| `db.set_token(token)` (HTTP) | `db.authenticate(token)` |
+
+## New in version 3
+
+These additions need no changes to existing code:
+
+- Connection options for [timeouts, reconnection and keepalive](/docs/reference/python/concepts/connecting-to-surrealdb), with connection events and a server version check.
+- [Sign-in with `auth=`](/docs/reference/python/concepts/authentication), automatic token renewal, and `refresh()`, `revoke()` and `reset()`.
+- [`relate()`, `fields=`, `into=` and builder modifiers](/docs/reference/python/concepts/data-manipulation) such as `.where()`, `.limit()` and `.output()`.
+- [`batch()`, `api()`, `gql()` and `graphql()`](/docs/reference/python/concepts/executing-queries).
+- [Streaming results](/docs/reference/python/concepts/streaming) from SurrealDB 3.3 and later.
+- [Transactions as context managers](/docs/reference/python/concepts/transactions), also on the connection itself.
+- [Import and export](/docs/reference/python/concepts/import-and-export) and [files](/docs/reference/python/concepts/files).
+- [The SurrealDB 4.0 value types](/docs/reference/python/concepts/value-types): sized numbers, dates, times, timestamps, intervals, big decimals and regexes.
+
+## Migration checklist
+
+1. Install `surrealdb` 3.0.0 or later, and the `embedded` extra if you use embedded databases.
+2. Replace every string that names a record with a `RecordID` or a `StringRecordId`.
+3. Add `.execute()` to blocking `select()`, `delete()` and `query()` calls, or `.first()` where the code used the result of one statement.
+4. Remove the list unwrapping around single-record `select()` results.
+5. Replace `merge()`, `patch()`, `insert_relation()` and `set_token()`, and rename `params=` to `vars=` on `query_raw()`.
+6. Read `notification["result"]` in live query loops.
+7. Check the code that tests for `None` on fields that can hold `NULL`.
+8. Set `timeout=` on connections that run requests longer than 30 seconds.
+9. Replace `except` clauses that name `requests`, `aiohttp` or `ValueError` for connection failures with the SDK errors.
+10. Remove `signin()` calls on embedded connections, and move on-disk embedded data with an export.
+11. Run the test suite and fix every `RuntimeWarning` about a builder that was never executed.
+12. Upgrade the server to SurrealDB 4.0 only after the SDK upgrade is deployed.
+
+## Learn more
+
+- [Python SDK](/docs/reference/python) for the full documentation of version 3
+- [`Surreal` reference](/docs/reference/python/api/core/surreal) for every method and option
+- [Upgrading from 3.x to 4.0](/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x) for the server side of a SurrealDB 4.0 upgrade
+- [Changelog](https://github.com/surrealdb/surrealdb.py/blob/main/CHANGELOG.md) for every change in the 3.0.0 release

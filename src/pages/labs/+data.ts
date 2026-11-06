@@ -1,14 +1,7 @@
-import { getCollection, sortCollection } from "vike-content-collection";
+import { getLabItems } from "~/utils/collections";
 
 export default function data() {
-    const entries = sortCollection(getCollection("labs-items"), "title", "asc");
-
-    const items = entries.map((entry) => ({
-        slug: entry.slug,
-        ...entry.metadata,
-    }));
-
-    return { items };
+    return { items: getLabItems() };
 }
 
 export type LabsPageData = ReturnType<typeof data>;

@@ -1,0 +1,195 @@
+---
+position: 5
+title: LiveSubscription
+description: "Reference for LiveSubscription and AsyncLiveSubscription in the Python SDK: the live query subscription returned by live() and live_of(), a uuid.UUID with id, is_alive and managed, kill(), iteration, the context manager and the notification dict."
+---
+
+# `LiveSubscription` / `AsyncLiveSubscription` {#live-subscription}
+
+A `LiveSubscription` is a running live query on a blocking connection, and an `AsyncLiveSubscription` is one on an asynchronous connection. Iterate a subscription to read the notifications of its live query, and kill it to stop the query. This page is the reference for both classes. [Live queries](/docs/reference/python/concepts/live-queries) shows them in use.
+
+Both classes are subclasses of `uuid.UUID`, equal to the id of the live query, so a subscription can go anywhere a live query id goes, such as [`db.kill()`](/docs/reference/python/api/core/surreal#kill) and [`db.subscribe_live()`](/docs/reference/python/api/core/surreal#subscribe-live).
+
+> [!NOTE]
+> Live queries need a WebSocket connection (`ws://` or `wss://`). On HTTP and embedded connections, `live()` and `live_of()` raise `UnsupportedFeatureError`.
+
+**Source:** [`live.py`](https://github.com/surrealdb/surrealdb.py/blob/main/src/surrealdb/connections/live.py)
+
+---
+
+## Getting a subscription {#getting-a-subscription}
+
+A connection or a session gives you a subscription. Do not construct either class yourself. Both are exported from `surrealdb` for type annotations.
+
+```python title="Syntax"
+subscription = db.live(table, diff=False)
+subscription = db.live_of(live_id)
+```
+
+| Method | Returns | `managed` |
+| --- | --- | --- |
+| [`db.live(table, diff=False)`](/docs/reference/python/api/core/surreal#live) | A subscription to a new live query on `table`. With `diff=True`, each notification holds JSON Patch operations. | `True` |
+| [`db.live_of(live_id)`](/docs/reference/python/api/core/surreal#live-of) | A subscription to a live query started some other way, such as a `LIVE SELECT` sent with `query()` | `False` |
+
+On an asynchronous connection, `live()` is awaited and `live_of()` is not. A subscription listens from the moment it is returned, so notifications for changes made before the first loop are kept for it. From SurrealDB 3.0, `live()` raises `NotFoundError` when the table does not exist.
+
+```python
+from surrealdb import Surreal
+
+with Surreal("ws://localhost:8000") as db:
+    db.signin({"username": "root", "password": "secret"})
+    db.use("surrealdb", "docs")
+    db.query("DEFINE TABLE IF NOT EXISTS person").execute()
+
+    people = db.live("person")
+    print(repr(people))
+```
+
+```text title="Sample output"
+LiveSubscription('ee8119f2-3150-4859-b45d-95d4c03984ff')
+```
+
+---
+
+## Properties {#properties}
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `id` | `uuid.UUID` | The id of the live query, as a plain `uuid.UUID`. After a reconnect it is still the id the subscription was given. |
+| `is_alive` | `bool` | `True` until the live query ends, as far as this client knows. `False` once it is killed, through the subscription or the connection, once its notifications end, or once the connection closes. |
+| `managed` | `bool` | `True` for a subscription from `live()`, which the connection starts again after a reconnect. `False` for one from `live_of()`, which it does not. |
+
+```python
+people = db.live("person")
+print(people.managed, people.is_alive)
+
+people.kill()
+print(people.is_alive)
+```
+
+```text title="Output"
+True True
+False
+```
+
+`is_alive` stays `True` when the server ends a live query without telling the client. That happens on SurrealDB 2.x when another connection kills the query, and on every version when the session signs in as a different user.
+
+A subscription is also its id: `str(people)` is the id as text, `people == people.id` is `True`, and the two have the same hash, so they find the same entry in a `dict`. Pickling or copying a subscription gives a plain `uuid.UUID`.
+
+---
+
+## Iterating a subscription {#iterating}
+
+```python title="Syntax"
+for notification in subscription: ...
+async for notification in subscription: ...
+```
+
+Each item is a [notification](#notification). A loop waits for the next notification for as long as the live query runs, and ends without an error when one of these things happens:
+
+- The live query is killed by this connection, or by another connection from SurrealDB 3.0. SurrealDB 2.x does not tell the subscriber when another connection kills the query.
+- The connection closes.
+- The session that started the live query is reset with `reset()` or closed with `close_session()`.
+
+Reading a subscription raises `ConnectionUnavailableError` when the connection was lost and the live query was not started again: always for a subscription from `live_of()`, and for one from `live()` when its session signed in as a different user or the connection could not reconnect. Every later read raises the same error.
+
+A `break` does not stop the live query. The next loop over the subscription continues from the first notification that the last loop did not read. A loop over a subscription that has ended stops at once, and notifications that arrived before the end but were not read are dropped.
+
+```python
+from surrealdb import RecordID
+
+with db.live("person") as people:
+    writer.create(RecordID("person", "tobie"), {"name": "Tobie"})
+
+    for change in people:
+        print(change["action"], change["record"])
+        break
+```
+
+```text title="Output"
+CREATE person:tobie
+```
+
+Here `writer` is a second connection to the same database.
+
+---
+
+## Context manager {#context-manager}
+
+```python title="Syntax"
+with db.live(table) as subscription: ...
+async with await db.live(table) as subscription: ...
+```
+
+Entering the block returns the subscription. Leaving the block calls [`kill()`](#kill), also when the block raises an exception. A subscription from `live_of()` works the same way: `with db.live_of(live_id) as subscription:`, or `async with db.live_of(live_id) as subscription:` on an asynchronous connection.
+
+---
+
+## `.kill()` {#kill}
+
+Stops the live query on the server and ends every loop over the subscription, in any thread or task.
+
+```python title="Syntax"
+subscription.kill()
+await subscription.kill()
+```
+
+**Returns:** `None`
+
+Calling `kill()` on a subscription that has already ended does nothing. If the request fails, `kill()` raises the error and the subscription stays alive, so you can call it again. `db.kill(subscription)` stops the query in the same way.
+
+```python
+people = db.live("person")
+people.kill()
+people.kill()
+
+print(people.is_alive)
+```
+
+```text title="Output"
+False
+```
+
+---
+
+## Notification {#notification}
+
+A notification is a `dict` that describes one change to a record:
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `action` | `str` | `"CREATE"`, `"UPDATE"` or `"DELETE"` |
+| `result` | `dict` or `list` | The record after the change. For `"DELETE"`, the record as it was before it was deleted. With `diff=True`, a list of [JSON Patch](https://jsonpatch.com/) operations. |
+| `record` | [`RecordID`](/docs/reference/python/api/values/record-id) | The id of the record that changed |
+| `id` | `uuid.UUID` | The id of the live query. After a reconnect it is still the id the subscription was given. |
+| `session` | `uuid.UUID` | The id of the session that started the live query: `session.id` for a session from `new_session()`. SurrealDB 2.x does not send it. |
+
+A loop over a subscription, and a generator from `subscribe_live()`, yield the same notifications. The server also marks the end of a live query with a notification whose `action` is `KILLED`. The SDK ends the loop on it and does not yield it.
+
+```python
+from pprint import pprint
+
+with db.live("person") as people:
+    writer.create(RecordID("person", "jaime"), {"name": "Jaime"})
+
+    for change in people:
+        pprint(change)
+        break
+```
+
+```python title="Sample output"
+{'action': 'CREATE',
+ 'id': UUID('86f54469-db1b-48a3-8df8-b616afbdddb0'),
+ 'record': RecordID(table_name=person, record_id='jaime'),
+ 'result': {'id': RecordID(table_name=person, record_id='jaime'),
+            'name': 'Jaime'},
+ 'session': UUID('6b8e6c2a-cbb3-4354-a547-cab5ce667608')}
+```
+
+---
+
+## See also
+
+- [Live queries](/docs/reference/python/concepts/live-queries) for the concepts and complete examples
+- [`live()`](/docs/reference/python/api/core/surreal#live), [`live_of()`](/docs/reference/python/api/core/surreal#live-of), [`subscribe_live()`](/docs/reference/python/api/core/surreal#subscribe-live) and [`kill()`](/docs/reference/python/api/core/surreal#kill) on the connection
+- [LIVE SELECT](/docs/reference/query-language/statements/live-select) for the SurrealQL statement

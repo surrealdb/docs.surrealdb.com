@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import type { Server } from "vike/types";
 import agentInstructions from "~/lib/agent-instructions.md?raw";
 import { fetchAllSdkVersions } from "~/lib/versions";
+import { agentGuidePath } from "~/utils/agent-guides";
 import {
     AGENT_DISCOVERY_LINK_HEADER,
     acceptsMarkdown,
@@ -108,6 +109,49 @@ app.get(`${BASE}/agents/instructions.md`, (c) =>
 );
 
 /**
+ * A page's markdown representation, as both the `.md` URLs and the agent
+ * guides serve it: the page with its related lessons and posts, below a
+ * pointer to the documentation index.
+ *
+ * SDK versions come from the same file-backed cache the page render uses, so
+ * `<Version>` markers report what the HTML reports.
+ */
+async function composePageMarkdown(
+    entry: NonNullable<ReturnType<typeof resolveCollectionEntry>>,
+    docsPath: string,
+): Promise<string> {
+    const sdkVersions = await fetchAllSdkVersions();
+
+    return withIndexPointer(withRelated(composeRawMarkdown(entry, sdkVersions), docsPath));
+}
+
+/**
+ * Guides for coding agents, at a stable slug that names a documentation page.
+ * The map of slugs and the reason for it are in `~/utils/agent-guides`.
+ *
+ * Marked `noindex`, like a `.md` URL, because each guide duplicates the page
+ * it names. An unknown slug is a 404 rather than a redirect, so a typo in a
+ * prompt fails where it can be seen.
+ */
+app.get(`${BASE}/llms/guides/:slug`, async (c) => {
+    const path = agentGuidePath(c.req.param("slug"));
+    const entry = path === undefined ? undefined : resolveCollectionEntry(path);
+
+    if (path === undefined || !entry) {
+        return c.text("Not Found", 404);
+    }
+
+    const markdown = await composePageMarkdown(entry, `/docs${path}`);
+
+    return c.body(markdown, 200, {
+        "Content-Type": MARKDOWN_CONTENT_TYPE,
+        "Cache-Control": MARKDOWN_CACHE_CONTROL,
+        "X-Markdown-Tokens": String(estimateTokens(markdown)),
+        "X-Robots-Tag": "noindex",
+    });
+});
+
+/**
  * Serves a page's markdown representation, two ways:
  *
  *   - a `.md`-suffixed URL, e.g.
@@ -138,7 +182,7 @@ app.get("*", async (c, next) => {
         new RegExp(`^${BASE}`),
         "",
     );
-    // Labs is a React listing over `labs-items`, not a documentation
+    // Labs is a React listing over `getLabItems()`, not a documentation
     // collection, so the resolver below cannot see it. It is listed in
     // `llms.txt` all the same, and the index promises `.md` on any entry, so
     // it is answered here - by both entry points, like every other page.
@@ -197,16 +241,11 @@ app.get("*", async (c, next) => {
         return c.text("Not Found", 404);
     }
 
-    // Resolved from the same file-backed cache the page render uses, so
-    // `<Version>` markers report what the HTML reports.
-    const sdkVersions = await fetchAllSdkVersions();
     const docsPath = `/docs/${path.replace(/^\/?index$/, "").replace(/^\/+|\/+$/g, "")}`.replace(
         /\/$/,
         "",
     );
-    const markdown = withIndexPointer(
-        withRelated(composeRawMarkdown(entry, sdkVersions), docsPath),
-    );
+    const markdown = await composePageMarkdown(entry, docsPath);
 
     return c.body(markdown, 200, {
         "Content-Type": MARKDOWN_CONTENT_TYPE,

@@ -1,0 +1,124 @@
+---
+position: 17
+title: ALTER TYPE
+description: "The ALTER TYPE statement adds values to a union type at any position and renames values, rewriting the records that hold a renamed value."
+---
+
+# `ALTER TYPE` statement
+
+<Since v="v4.0.0" />
+
+The `ALTER TYPE` statement changes the values of a union of strings declared with [`DEFINE TYPE`](/docs/reference/query-language/statements/define/type), such as `DEFINE TYPE priority AS 'low' | 'medium' | 'high'`. It can add a value at any position in the order, and rename a value. A rename also rewrites the records that hold the old value.
+
+## Statement syntax
+
+<Tabs syncKey="alter-statement">
+  <TabItem label="SurrealQL Syntax">
+
+```syntax title="SurrealQL Syntax"
+ALTER TYPE [ IF EXISTS ] @name
+[
+    ADD VALUE [ IF NOT EXISTS ] @value [ BEFORE @value | AFTER @value ] |
+    RENAME VALUE @value TO @value
+] ...
+```
+
+  </TabItem>
+  <TabItem label="Railroad Diagram">
+
+
+<RailroadDiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"ALTER"},{"type":"Terminal","text":"TYPE"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"EXISTS"}]}},{"type":"NonTerminal","text":"@name"},{"type":"OneOrMore","child":{"type":"Choice","index":0,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"ADD"},{"type":"Terminal","text":"VALUE"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}},{"type":"NonTerminal","text":"@value"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"BEFORE"},{"type":"NonTerminal","text":"@value"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"AFTER"},{"type":"NonTerminal","text":"@value"}]}]}}]},{"type":"Sequence","children":[{"type":"Terminal","text":"RENAME"},{"type":"Terminal","text":"VALUE"},{"type":"NonTerminal","text":"@value"},{"type":"Terminal","text":"TO"},{"type":"NonTerminal","text":"@value"}]}]}}]}]}' />
+
+  </TabItem>
+</Tabs>
+
+A statement takes one or more `ADD VALUE` and `RENAME VALUE` clauses, applied in the order they are written. If one clause fails, the statement changes nothing. Without `IF EXISTS`, a statement on a type that does not exist fails with `The type 'name' does not exist`. A type that is not a union of strings is refused with `The type 'name' is not a union of string labels, so it has no values to alter`. To change the checks, default, comment or permissions of a type, define it again with `OVERWRITE`.
+
+## Adding values
+
+`ADD VALUE` places a new value at the end of the order, or directly before or after an existing value. Adding a value does not change any stored record.
+
+```surql
+DEFINE TYPE priority AS 'low' | 'medium' | 'high';
+
+ALTER TYPE priority ADD VALUE 'urgent';
+ALTER TYPE priority ADD VALUE 'trivial' BEFORE 'low';
+ALTER TYPE priority ADD VALUE 'normal' AFTER 'medium';
+
+enum::values('priority');
+```
+
+```surql title="Output"
+['trivial', 'low', 'medium', 'normal', 'high', 'urgent']
+```
+
+A value that the type already lists is refused, unless the clause has `IF NOT EXISTS`. A position that names a value the type does not list is refused as well.
+
+```surql
+ALTER TYPE priority ADD VALUE 'urgent';
+//- "The type 'priority' already has the value 'urgent'"
+
+ALTER TYPE priority ADD VALUE IF NOT EXISTS 'urgent';
+//- NONE
+
+ALTER TYPE priority ADD VALUE 'blocker' AFTER 'critical';
+//- "The type 'priority' has no value 'critical'; its values are 'trivial', 'low', 'medium', 'normal', 'high', 'urgent'"
+```
+
+## Several changes in one statement
+
+The clauses of one statement apply in order, so a later clause can refer to a value that an earlier one added or renamed.
+
+```surql
+ALTER TYPE priority
+	ADD VALUE 'blocker' AFTER 'urgent'
+	RENAME VALUE 'trivial' TO 'minor';
+enum::values('priority');
+```
+
+```surql title="Output"
+['minor', 'low', 'medium', 'normal', 'high', 'urgent', 'blocker']
+```
+
+## Renaming values
+
+`RENAME VALUE` changes the spelling of a value and keeps its position. It also rewrites the old value to the new one in every record and index entry of every field whose type names it, including inside an `option`, an `array` or a `set`, so the records keep passing the type check on their next write.
+
+```surql
+DEFINE TABLE ticket SCHEMAFULL;
+DEFINE FIELD priority ON ticket TYPE priority;
+DEFINE FIELD history ON ticket TYPE array<priority> DEFAULT [];
+DEFINE INDEX ticket_priority ON ticket FIELDS priority;
+
+CREATE ticket:1 SET priority = 'medium', history = ['low', 'medium'];
+CREATE ticket:2 SET priority = 'high';
+
+ALTER TYPE priority RENAME VALUE 'medium' TO 'moderate';
+SELECT * FROM ticket ORDER BY id;
+```
+
+```surql title="Output"
+[
+	{ history: ['low', 'moderate'], id: ticket:1, priority: 'moderate' },
+	{ history: [], id: ticket:2, priority: 'high' }
+]
+```
+
+The rewrite is maintenance by the database, not a write by a user. It writes only the records that hold the old value, rewrites a `READONLY` field, does not run the `VALUE` or `DEFAULT` clauses of the fields, and does not trigger any [event](/docs/reference/query-language/statements/define/event). A table with a changefeed records each rewritten record as an update.
+
+Renaming a value to one the type already lists is refused. A rename is also refused while a field holds the type in an array inside another array, such as `array<array<priority>>`, because the rewrite does not reach that depth:
+
+```surql
+DEFINE FIELD grid ON ticket TYPE option<array<array<priority>>>;
+ALTER TYPE priority RENAME VALUE 'low' TO 'lowest';
+```
+
+```surql title="Error output"
+"the type 'priority' is held by the field 'grid.*.*' on the table 'ticket', whose path a rename does not reach"
+```
+
+## See also
+
+* [`DEFINE TYPE`](/docs/reference/query-language/statements/define/type)
+* [Named types](/docs/reference/query-language/language-primitives/data-types/named-types)
+* [Enum functions](/docs/reference/query-language/functions/database-functions/enum)

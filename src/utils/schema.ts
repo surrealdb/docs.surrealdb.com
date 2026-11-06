@@ -1,6 +1,7 @@
 import {
     enum as _enum,
     boolean,
+    iso,
     literal,
     number,
     object,
@@ -9,7 +10,7 @@ import {
     string,
 } from "zod";
 import { SECTION_ICONS_NAMES } from "./icons";
-import { labCategories, labLanguages, labTopics } from "./labs";
+import { labFormats, labLanguages, labStages, labTopics } from "./labs";
 
 /**
  * The schema for a page in a content collection.
@@ -17,7 +18,11 @@ import { labCategories, labLanguages, labTopics } from "./labs";
 export const pageSchema = strictObject({
     title: string().optional(),
     description: string().optional(),
-    position: number().optional(),
+    /**
+     * Sort order among siblings. A whole number: to fit a page between two
+     * others, move the later siblings up by one rather than using a fraction.
+     */
+    position: number().int().optional(),
     /**
      * How early this page is offered a description in `llms.txt`.
      *
@@ -72,9 +77,12 @@ export type PageSchema = output<typeof pageSchema>;
 
 export const labSchema = strictObject({
     title: string(),
+    /** Date the item was added, `YYYY-MM-DD`; the listing is newest first. */
+    date: iso.date(),
     description: string().optional(),
     url: string().optional(),
-    category: _enum(labCategories),
+    stage: _enum(labStages),
+    format: _enum(labFormats),
     author: literal("surrealdb").or(
         object({
             name: string(),
@@ -82,7 +90,7 @@ export const labSchema = strictObject({
             avatar: string(),
         }),
     ),
-    topics: _enum(labTopics).array().max(2).default([]),
+    topics: _enum(labTopics).array().default([]),
     languages: _enum(labLanguages).array().optional(),
 });
 
