@@ -32,7 +32,7 @@ ALTER TYPE [ IF EXISTS ] @name
   </TabItem>
 </Tabs>
 
-A statement takes one or more `ADD VALUE` and `RENAME VALUE` clauses, applied in the order they are written. If one clause fails, the statement changes nothing. Without `IF EXISTS`, a statement on a type that does not exist fails with `The type 'name' does not exist`. A type that is not a union of strings is refused with `The type 'name' is not a union of string labels, so it has no values to alter`. To change the checks, default, comment or permissions of a type, define it again with `OVERWRITE`.
+A statement takes one or more `ADD VALUE` and `RENAME VALUE` clauses, applied in the order they are written. If one clause fails, the statement changes nothing. Without `IF EXISTS`, a statement on a type that does not exist fails with `The type 'name' does not exist`. A type that is not a union of strings is refused with `The type 'name' is not a union of string labels, so it has no values to alter`. To change the checks, default, comment or permissions of a type, define it again with `OVERWRITE`, which checks the values that records already hold. See [Changing a type that is in use](/docs/reference/query-language/statements/define/type#changing-a-type-that-is-in-use).
 
 ## Adding values
 
@@ -117,8 +117,94 @@ ALTER TYPE priority RENAME VALUE 'low' TO 'lowest';
 "the type 'priority' is held by the field 'grid.*.*' on the table 'ticket', whose path a rename does not reach"
 ```
 
+## `ALTER TYPE` or `ALTER FIELD`
+
+The same values can be written out on each field as a literal, or defined once with `DEFINE TYPE` and named by each field. While the tables are empty, the two forms behave the same. Once they hold records, a change to the values works differently. [`ALTER FIELD`](/docs/reference/query-language/statements/alter/field) changes one field at a time, and compares its old definition with the new one. `ALTER TYPE` changes every field that names the type, and rewrites the records it needs to.
+
+Here are the two forms, each with a `priority` field on two tables and a few records. Each one starts in a new database, because the examples above already define a `priority` type and a `ticket` table.
+
+```surql title="A literal on each field"
+DEFINE TABLE ticket SCHEMAFULL;
+DEFINE FIELD priority ON ticket TYPE 'low' | 'medium' | 'high';
+DEFINE TABLE task SCHEMAFULL;
+DEFINE FIELD priority ON task TYPE 'low' | 'medium' | 'high';
+
+CREATE ticket:1 SET priority = 'high';
+CREATE ticket:2 SET priority = 'medium';
+CREATE task:1 SET priority = 'medium';
+```
+
+```surql title="A named type"
+DEFINE TYPE priority AS 'low' | 'medium' | 'high';
+DEFINE TABLE ticket SCHEMAFULL;
+DEFINE FIELD priority ON ticket TYPE priority;
+DEFINE TABLE task SCHEMAFULL;
+DEFINE FIELD priority ON task TYPE priority;
+
+CREATE ticket:1 SET priority = 'high';
+CREATE ticket:2 SET priority = 'medium';
+CREATE task:1 SET priority = 'medium';
+```
+
+Adding a value works with both forms. The new literal accepts every value the old one did, so `ALTER FIELD` needs no migration, but it has to be run once for each field:
+
+```surql
+-- A literal on each field
+ALTER FIELD priority ON ticket TYPE 'low' | 'medium' | 'high' | 'urgent';
+ALTER FIELD priority ON task TYPE 'low' | 'medium' | 'high' | 'urgent';
+
+-- A named type
+ALTER TYPE priority ADD VALUE 'urgent';
+```
+
+Renaming a value is where the two forms differ. To `ALTER FIELD`, a rename is a new literal that no longer accepts `'medium'`, so a table with records refuses it until the statement says what those records become:
+
+```surql
+-- A literal on each field
+ALTER FIELD priority ON ticket TYPE 'low' | 'normal' | 'high';
+//- 'Cannot change field `priority` of table `ticket`: the table is SCHEMAFULL in a database at compatibility level 4 and has rows, and the new definition does not accept every value the old one did: add MIGRATE EXISTING ROWS'
+
+ALTER FIELD priority ON ticket TYPE 'low' | 'normal' | 'high'
+    MIGRATE EXISTING ROWS AS medium_to_normal
+    USING { medium: 'normal' }[$value] ?? $value FALLBACK 'normal';
+
+SELECT * FROM ticket ORDER BY id;
+//- [{ id: ticket:1, priority: 'high' }, { id: ticket:2, priority: 'normal' }]
+SELECT * FROM task;
+//- [{ id: task:1, priority: 'medium' }]
+```
+
+The migration changed `ticket` only, and `task` still holds `'medium'` until its own field is changed in the same way. With a named type, one `RENAME VALUE` rewrites the records of every field that names the type:
+
+```surql
+-- A named type
+ALTER TYPE priority RENAME VALUE 'medium' TO 'normal';
+
+SELECT * FROM ticket ORDER BY id;
+//- [{ id: ticket:1, priority: 'high' }, { id: ticket:2, priority: 'normal' }]
+SELECT * FROM task;
+//- [{ id: task:1, priority: 'normal' }]
+```
+
+Removing a value works the other way around. `ALTER FIELD` with `MIGRATE EXISTING ROWS` can narrow a literal and convert the records that held the removed value. `ALTER TYPE` has no clause to remove a value, and [`DEFINE TYPE ... OVERWRITE`](/docs/reference/query-language/statements/define/type#changing-a-type-that-is-in-use) refuses a different list of values while a field names the type:
+
+```surql
+-- A named type
+DEFINE TYPE OVERWRITE priority AS 'medium' | 'high';
+//- "Invalid statement: Cannot change the values of the type 'priority': the field 'priority' on the table 'task' has a type that names it"
+```
+
+To remove a value from a named type, define a new type without it, and change each field to the new type with a migration.
+
+| Change | A literal on each field | A named type |
+| ------ | ----------------------- | ------------ |
+| Add a value | `ALTER FIELD` on each field, without a migration | One `ALTER TYPE ... ADD VALUE` |
+| Rename a value | `ALTER FIELD` on each field, with `MIGRATE EXISTING ROWS` | One `ALTER TYPE ... RENAME VALUE`, which rewrites the records |
+| Remove a value | `ALTER FIELD` on each field, with `MIGRATE EXISTING ROWS` | A new type, then `ALTER FIELD` on each field with `MIGRATE EXISTING ROWS` |
+
 ## See also
 
+* [`ALTER FIELD`](/docs/reference/query-language/statements/alter/field)
 * [`DEFINE TYPE`](/docs/reference/query-language/statements/define/type)
 * [Named types](/docs/reference/query-language/language-primitives/data-types/named-types)
 * [Enum functions](/docs/reference/query-language/functions/database-functions/enum)
