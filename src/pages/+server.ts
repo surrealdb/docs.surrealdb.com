@@ -2,6 +2,9 @@ import vike, { type App } from "@vikejs/hono";
 import { Hono } from "hono";
 import type { Server } from "vike/types";
 import agentInstructions from "~/lib/agent-instructions.md?raw";
+import { handleFeedbackRequest } from "~/lib/api/feedback";
+import { handleSearchRequest } from "~/lib/api/search";
+import { type Assets, serveEdge } from "~/lib/edge-routes";
 import { fetchAllSdkVersions } from "~/lib/versions";
 import { agentGuidePath } from "~/utils/agent-guides";
 import {
@@ -24,7 +27,24 @@ import { redirectDestinationForDev, resolveRedirect } from "../../redirects";
 
 const BASE = "/docs";
 
+/**
+ * Whether this bundle is the Cloudflare Workers build. Replaced at build time by
+ * Vite's `define` (see vite.config.ts), so the Vercel bundle drops the branches.
+ */
+const IS_CLOUDFLARE = import.meta.env.DEPLOY_TARGET === "cloudflare";
+
 const app = new Hono();
+
+/**
+ * The JSON endpoints. On Vercel they are functions in `api/`; the Worker serves
+ * the same handlers from `src/lib/api/` here, so there is one implementation.
+ * They reach SurrealDB over the SDK's HTTP engine, so `SURREAL_ENDPOINT` must be
+ * an `https://` URL on Cloudflare: Workers cannot open an outbound WebSocket.
+ */
+if (IS_CLOUDFLARE) {
+    app.all(`${BASE}/api/search`, (c) => handleSearchRequest(c.req.raw));
+    app.all(`${BASE}/api/feedback`, (c) => handleFeedbackRequest(c.req.raw));
+}
 
 /**
  * Advertise the page index on every response, HTML included.
@@ -264,7 +284,7 @@ const honoFetch = app.fetch.bind(app);
 // before forwarding, and on Vercel preview/direct access the prefix is
 // absent altogether. Re-attach `/docs` here so Vike's `checkBaseUrl`
 // accepts the request.
-const fetch: Server["fetch"] = (request) => {
+const vikeFetch = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
     if (!url.pathname.startsWith(BASE)) {
         url.pathname = url.pathname === "/" ? BASE : `${BASE}${url.pathname}`;
@@ -272,5 +292,13 @@ const fetch: Server["fetch"] = (request) => {
     }
     return honoFetch(request);
 };
+
+// On Cloudflare the Worker is also the edge: `serveEdge` applies the
+// `vercel.ts` redirects, static files and headers first, against the path as
+// it arrived (before `/docs` is re-attached), which is where Vercel applies
+// them. The Workers runtime passes `env` as the second argument; Vercel never
+// does.
+const fetch: Server["fetch"] = (request: Request, env?: { ASSETS?: Assets }) =>
+    IS_CLOUDFLARE ? serveEdge(request, env?.ASSETS, vikeFetch) : vikeFetch(request);
 
 export default { fetch } satisfies Server;

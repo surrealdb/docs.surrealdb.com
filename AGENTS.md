@@ -754,6 +754,34 @@ bun run generate:cli-history
 
 When a page documents a setting as added, removed or changed in a version that is already tagged, check that the chart agrees. A setting that is documented on a branch for an unreleased version, such as `3.4` for 4.0, goes into the chart once that version is tagged.
 
+## Deployment targets
+
+Vercel serves production. A Cloudflare Worker (`docs-surrealdb-com`) is built
+from the same code for previews and for the move off Vercel; nothing about the
+Vercel build changes.
+
+```bash
+bun run build:cloudflare    # Workers build (DEPLOY_TARGET=cloudflare)
+bun run preview:cloudflare  # build, then wrangler dev
+bun run test:routes         # check the compiled route table
+```
+
+- `vercel.ts` stays the one place routing rules are written. Vercel serves them
+  from its edge; `scripts/generate-edge-routes.ts` compiles them into
+  `generated/edge-routes.json` and `src/lib/edge-routes.ts` applies them in the
+  Worker, in Vercel's order. A rule added to `vercel.ts` or `redirects.ts`
+  reaches both.
+- The Worker takes no zone route. The apex Worker in the www repo reaches it
+  through a service binding (`DOCS`) with `/docs` stripped, as the Vercel
+  rewrite does today.
+- Responses on any host other than `surrealdb.com` (previews, `workers.dev`)
+  carry `X-Robots-Tag: noindex, nofollow`.
+- `/api/search` and `/api/feedback` are shared handlers in `src/lib/api/`;
+  `api/` holds the Vercel adapters. On Cloudflare `SURREAL_ENDPOINT` must be an
+  `https://` URL, because Workers cannot open an outbound WebSocket.
+- Search indexing (`postbuild`) runs on Vercel production builds and the
+  re-index workflow, never in the Workers build.
+
 ## Content collections
 
 Content lives in `src/content`. Frontmatter schemas live in
@@ -887,7 +915,9 @@ page group `src/pages/<url-prefix>/` needs `+route.ts`, `+data.ts`, `+Page.tsx`,
 ### Redirects
 
 Redirects live in `redirects.ts` (the `docsRedirects` array), read by `vercel.ts`
-in production and by `plugins/vite-dev-redirects.ts` in dev and preview. There is
+in production, compiled from `vercel.ts` for the Cloudflare Worker (see
+[Deployment targets](#deployment-targets)), and read by
+`plugins/vite-dev-redirects.ts` in dev and preview. There is
 no `aws/` directory.
 
 `www.surrealdb.com` rewrites `/docs/(.*)` to this project with the `/docs` prefix
