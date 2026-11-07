@@ -1,0 +1,252 @@
+---
+position: 6
+title: Memory housekeeping agent
+description: "A scheduled TypeScript job that prunes SurrealDB Agent Memory: it retires finished projects, erases the memory of deleted users and reports open uncertainties for review."
+---
+
+# Memory housekeeping agent
+
+A memory housekeeping agent is a job that runs on a schedule and removes memory your application no longer needs. This guide builds one in TypeScript with the [`@surrealdb/memory`](/docs/agent-memory/integrations/sdks/javascript-and-typescript) SDK. Each run does three things:
+
+1. Retires projects that closed more than 30 days ago.
+2. Erases all memory of users your application has deleted.
+3. Lists open uncertainties, so that a person can settle them.
+
+When you finish, you will have one script that you can run every day with cron or any other scheduler.
+
+## What Agent Memory already does
+
+Agent Memory runs its own background passes on every Context, so the housekeeping agent does not repeat them:
+
+| Pass | Schedule | Effect |
+| --- | --- | --- |
+| Expiry | Every hour | Ends each `context` fact 7 days after its known time |
+| Decay | Every day | Lowers importance: `context` × 0.95, `knowledge` × 0.995 |
+| Consolidation and elaboration | Every hour | Combine repeated observations and infer links |
+
+Do not call `POST /lifecycle/expire` or `POST /lifecycle/decay` from a scheduled job. Expiry already runs every hour. Each decay call applies one more decay step on top of the daily pass, so a scheduled call makes memory fade faster than designed.
+
+This guide does not move facts between categories. A stored fact keeps the category it was written with. To keep a fact longer than the 7-day expiry of `context` facts, write it with the `knowledge` or `identity` category when your application learns it, as [Setting the category](/docs/agent-memory/mental-model/memory-categories#setting-the-category) shows.
+
+## Before you start
+
+You need:
+
+- A Context, with its endpoint and Context ID. See the [hosted quickstart](/docs/agent-memory/quickstarts/hosted).
+- A principal for the job, with an API key. Give it the `memory:read` grant over the scopes the job reviews, and the `memory:forget` grant over the user scopes it erases.
+- A runtime with the Fetch API, such as Node.js 18 or later, and the SDK:
+
+```bash
+npm install @surrealdb/memory
+```
+
+> [!WARNING]
+> `memory:forget` over any scope is enough to retire an entity anywhere in the Context, because entity delete and `POST /forget` act on the whole Context. Give the job its own principal, and keep its key out of application code.
+
+## Step 1 - Connect
+
+Read the connection details from the environment:
+
+```typescript
+import { AgentMemory } from "@surrealdb/memory";
+
+const memory = new AgentMemory({
+    endpoint: process.env.AGENT_MEMORY_ENDPOINT!,
+    context: process.env.AGENT_MEMORY_CONTEXT!,
+    apiKey: process.env.AGENT_MEMORY_API_KEY!,
+});
+
+// Set DRY_RUN=1 to log what the job would remove without removing it.
+const dryRun = process.env.DRY_RUN === "1";
+```
+
+Run the job with `DRY_RUN=1` first and read its log before you let it remove anything.
+
+## Step 2 - Retire finished projects
+
+The job finds finished work by reading an attribute that your application writes. In this example the application records each project's status as a structured fact when the status changes:
+
+```typescript
+await memory.remember(undefined, {
+    infer: "triples",
+    scopes: ["org/acme/team/platform"],
+    memoryCategory: "knowledge",
+    triples: [{ entity: { type: "project", name: "Atlas" }, key: "status", value: "closed" }],
+});
+```
+
+Each new status written at the same scope supersedes the previous one, because both values come from the same kind of source. The live `status` attribute is therefore the current one, and its `createdAt` is the time the project reached that status.
+
+The job lists the live `status` attributes, keeps the projects that closed before the cut-off, and deletes each of those entities:
+
+```typescript
+const RETENTION_DAYS = 30;
+
+async function retireFinishedProjects(): Promise<void> {
+    const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+    // Every live `status` attribute the key can read, following every page.
+    const statuses = await memory.facts.allAttributes({ key: "status" });
+
+    const finished = statuses.filter(
+        (attr) =>
+            attr.entity.startsWith("entity:project/") &&
+            attr.value === "closed" &&
+            Date.parse(attr.createdAt) < cutoff,
+    );
+
+    for (const attr of finished) {
+        // `entity` is a reference such as `entity:project/atlas`.
+        const name = attr.entity.slice("entity:project/".length);
+        if (dryRun) {
+            console.log(`Would retire project ${name}`);
+            continue;
+        }
+        await memory.entities.delete("project", name);
+        console.log(`Retired project ${name}`);
+    }
+}
+```
+
+`GET /attributes` has no category or date filter, so the job filters on the attribute key in the request and on everything else in code. Filtering on a key keeps each run small even in a large Context.
+
+Deleting an entity retires it with all of its live attributes, relations and actions, in every scope and every category. The records stay in storage for audit, but recall, profiles and point-in-time reads no longer return them. A retired project does not appear in the next run, because its `status` attribute is no longer live. If your application writes about the project again later, Agent Memory creates new memory for it.
+
+## Step 3 - Erase deleted users
+
+When a user leaves your application, a [scoped forget](/docs/agent-memory/operations/forget#scoped-forget---erase-a-whole-subtree) erases everything stored under that user's scope. Your application knows which users it has deleted, so it passes their IDs to the job:
+
+```typescript
+async function eraseDeletedUsers(userIds: string[]): Promise<void> {
+    for (const id of userIds) {
+        const path = `org/acme/user/${id}/`;
+        if (dryRun) {
+            console.log(`Would erase ${path}`);
+            continue;
+        }
+        const { forgotten } = await memory.scopes.forget({ path });
+        console.log(`Erased ${forgotten} records under ${path}`);
+    }
+}
+```
+
+A scoped forget is permanent. It deletes each record that is stored only under the subtree: facts, relations, instructions, uncertainties, documents, sessions and stored conversation text. A record that is also stored under another scope keeps that other scope and loses only the deleted one, so another owner's access stays. `forgotten` counts the records deleted. Retrieval traces are kept as the audit record.
+
+The key needs `memory:forget` over the whole subtree, or the call is refused. After a successful run, mark the user as erased in your application so that the next run skips them. Running a scoped forget again on an erased subtree deletes nothing.
+
+## Step 4 - Report open uncertainties
+
+An uncertainty is a conflict that Agent Memory records instead of choosing a value, for example when a user's statement disagrees with an uploaded document. The job lists the open ones for a person to review:
+
+```typescript
+async function reportOpenUncertainties(): Promise<void> {
+    const open = await memory.uncertainty.listAll({ resolved: false });
+
+    for (const flag of open) {
+        console.log(`${flag.entity ?? "(no subject)"}: ${flag.about} - ${flag.reason}`);
+    }
+    console.log(`${open.length} open uncertainties`);
+}
+```
+
+Send the list to wherever your team reviews data, such as a ticket queue or a chat channel. A reviewer settles an uncertainty with `POST /uncertainty/{id}/resolve`, which needs the `memory:write` grant. The `resolvable` field on each flag shows whether the calling key can settle it. See [Uncertainty](/docs/agent-memory/reference/rest-api#uncertainty) in the REST API reference.
+
+## Step 5 - Run it on a schedule
+
+Put the steps in one script. The complete version is below.
+
+```typescript title="housekeeping.ts"
+import { AgentMemory } from "@surrealdb/memory";
+
+const memory = new AgentMemory({
+    endpoint: process.env.AGENT_MEMORY_ENDPOINT!,
+    context: process.env.AGENT_MEMORY_CONTEXT!,
+    apiKey: process.env.AGENT_MEMORY_API_KEY!,
+});
+
+const dryRun = process.env.DRY_RUN === "1";
+const RETENTION_DAYS = 30;
+
+async function retireFinishedProjects(): Promise<void> {
+    const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    const statuses = await memory.facts.allAttributes({ key: "status" });
+    const finished = statuses.filter(
+        (attr) =>
+            attr.entity.startsWith("entity:project/") &&
+            attr.value === "closed" &&
+            Date.parse(attr.createdAt) < cutoff,
+    );
+    for (const attr of finished) {
+        const name = attr.entity.slice("entity:project/".length);
+        if (dryRun) {
+            console.log(`Would retire project ${name}`);
+            continue;
+        }
+        await memory.entities.delete("project", name);
+        console.log(`Retired project ${name}`);
+    }
+}
+
+async function eraseDeletedUsers(userIds: string[]): Promise<void> {
+    for (const id of userIds) {
+        const path = `org/acme/user/${id}/`;
+        if (dryRun) {
+            console.log(`Would erase ${path}`);
+            continue;
+        }
+        const { forgotten } = await memory.scopes.forget({ path });
+        console.log(`Erased ${forgotten} records under ${path}`);
+    }
+}
+
+async function reportOpenUncertainties(): Promise<void> {
+    const open = await memory.uncertainty.listAll({ resolved: false });
+    for (const flag of open) {
+        console.log(`${flag.entity ?? "(no subject)"}: ${flag.about} - ${flag.reason}`);
+    }
+    console.log(`${open.length} open uncertainties`);
+}
+
+// Replace with a lookup in your own user store.
+async function loadDeletedUserIds(): Promise<string[]> {
+    return [];
+}
+
+async function main(): Promise<void> {
+    await retireFinishedProjects();
+    await eraseDeletedUsers(await loadDeletedUserIds());
+    await reportOpenUncertainties();
+}
+
+main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+});
+```
+
+A failed request stops the run and exits with status `1`, so the scheduler can report the failure.
+
+Run it once a day with any scheduler. With cron and the `tsx` TypeScript runner, this entry runs it at 03:00:
+
+```bash
+0 3 * * * cd /opt/memory-housekeeping && npx tsx housekeeping.ts >> housekeeping.log 2>&1
+```
+
+Each step is safe to repeat. A retired project and an erased subtree are not found again, so a run that stops part of the way through can run again from the start.
+
+## Operations to keep out of a scheduled job
+
+| Operation | Why |
+| --- | --- |
+| `POST /forget` | It matches by meaning across the whole Context, and an entity that matches loses all of its facts in every scope and category. Use it for a specific request, after a preview with `dryRun: true`. See [Forgetting memories](/docs/agent-memory/operations/forget). |
+| `POST /lifecycle/expire` | Expiry already runs every hour with the same rules. |
+| `POST /lifecycle/decay` | Each call applies one more decay step on top of the daily pass. |
+
+## Related reading
+
+- [Forgetting memories](/docs/agent-memory/operations/forget) - retire, purge and scoped erasure
+- [Supersession, decay, and forget](/docs/agent-memory/mental-model/memory-lifecycle) - how facts change, fade and end
+- [Stateful workflows](/docs/agent-memory/cookbooks/patterns/stateful-workflows) - recording status as structured facts
+- [REST API](/docs/agent-memory/reference/rest-api) - every route the SDK calls
+- [Sundance Lake Loop](/docs/agent-memory/cookbooks/showcase/sundance-lake) - a demo of a project that runs for a year, with its records and conversations filed under team and personal scopes
+- [Night Owls](/docs/agent-memory/cookbooks/showcase/night-owls) - a demo of forum members, each with a private scope of their own, like the user scopes in step 3
