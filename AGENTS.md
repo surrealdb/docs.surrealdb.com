@@ -688,7 +688,7 @@ Fine, because these describe what SurrealDB asks of the reader and remove an
 obligation:
 
 - "No need to learn another query language just for time series."
-- "You do not have to author Rust yourself to benefit from Surrealism."
+- "You do not have to author Rust yourself to benefit from SurrealDB extensions."
 - "You do not need to create the table first - SurrealDB adds it on the first write."
 
 Not fine, because each one only works if the reader is in a state we have
