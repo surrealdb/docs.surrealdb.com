@@ -39,10 +39,15 @@ export class FileCache {
     }
 
     private async read<T>(key: string): Promise<T | undefined> {
-        const { readFile } = await import("node:fs/promises");
-        const cacheFilePath = await this.getCacheFilePath(key);
-
         try {
+            const { readFile } = await import("node:fs/promises");
+            // Inside the try with the read itself. Resolving the path can fail
+            // on its own in a runtime with no filesystem - on Cloudflare
+            // Workers `import.meta.url` is undefined and `fileURLToPath` throws
+            // - and this class already treats an unusable cache as a miss
+            // everywhere else. Left outside, that throw escaped `getOrSet` and
+            // failed the render instead of falling back to a fresh fetch.
+            const cacheFilePath = await this.getCacheFilePath(key);
             const file = await readFile(cacheFilePath, "utf8");
             const envelope = JSON.parse(file) as CacheEnvelope<T>;
 
