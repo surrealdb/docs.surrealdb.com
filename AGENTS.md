@@ -781,7 +781,7 @@ When a page documents a setting as added, removed or changed in a version that i
 
 ## Deployment targets
 
-Vercel serves production. A Cloudflare Worker (`docs-surrealdb-com`) is built
+Vercel serves production. A Cloudflare Worker (`docs`) is built
 from the same code for previews and for the move off Vercel; nothing about the
 Vercel build changes.
 
