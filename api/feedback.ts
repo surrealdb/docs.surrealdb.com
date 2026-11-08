@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-import { handleFeedbackRequest } from "../src/lib/api/feedback";
-import { sendWebResponse, toWebRequest } from "./_adapter";
+import { handleFeedbackRequest } from "../src/lib/api/feedback.js";
+import { sendWebResponse, toWebRequest } from "./_adapter.js";
 
 /**
  * Vercel's view of the page-feedback endpoint.

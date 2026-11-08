@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-import { handleSearchRequest } from "../src/lib/api/search";
-import { sendWebResponse, toWebRequest } from "./_adapter";
+import { handleSearchRequest } from "../src/lib/api/search.js";
+import { sendWebResponse, toWebRequest } from "./_adapter.js";
 
 /**
  * Vercel's view of the search endpoint.
