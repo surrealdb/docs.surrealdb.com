@@ -15,6 +15,9 @@
 //
 // The repositories are read from local clones, which the check does not fetch.
 // Run `git -C ~/studio fetch` first, or set STUDIO_REPO to another clone.
+//
+// Images that are not screenshots of a SurrealDB interface get an entry with
+// `untracked` instead, so that every image the docs show is accounted for.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -23,13 +26,25 @@ import { join, relative } from "node:path";
 
 type Capture = "scripted" | "sign-in" | "manual";
 
-interface Entry {
+// An image with `untracked` is recorded but not compared with any source,
+// because it is not a screenshot of a SurrealDB interface: a diagram, a photo,
+// a render made by a demo, or another product's screen. Its value says which.
+interface Untracked {
+    untracked: string;
+}
+
+interface Tracked {
     app: keyof typeof APPS;
     sources: string[];
     capture: Capture;
     baseline: string;
     accepted: string;
+    // Where the screen is in Studio, and what it needs to look as it does.
+    route?: string;
+    needs?: string;
 }
+
+type Entry = Tracked | Untracked;
 
 const APPS = {
     studio: { env: "STUDIO_REPO", clone: join(homedir(), "studio"), branch: "origin/main" },
@@ -54,7 +69,7 @@ const accept = acceptAt >= 0 ? (args[acceptAt + 1] ?? "") : undefined;
 
 const manifest: Record<string, Entry> = JSON.parse(readFileSync(MANIFEST, "utf8"));
 
-function repo(app: Entry["app"]): string {
+function repo(app: Tracked["app"]): string {
     const { env, clone } = APPS[app];
     const dir = process.env[env] ?? clone;
     if (!existsSync(join(dir, ".git"))) {
@@ -101,6 +116,13 @@ const shown = shownImages();
 const notes: string[] = [];
 
 for (const [image, entry] of Object.entries(manifest)) {
+    if ("untracked" in entry) {
+        const issues: string[] = [];
+        if (!existsSync(join(IMG, image))) issues.push("image file is missing");
+        if (!shown.has(image)) issues.push("not shown on any page; remove its entry");
+        if (issues.length) notes.push(`${image}\n${issues.map((i) => `  - ${i}`).join("\n")}`);
+        continue;
+    }
     const dir = repo(entry.app);
     const head = git(dir, "rev-parse", "--short", APPS[entry.app].branch);
 
@@ -112,18 +134,24 @@ for (const [image, entry] of Object.entries(manifest)) {
     const issues: string[] = [];
     if (!existsSync(join(IMG, image))) issues.push("image file is missing");
     if (!shown.has(image)) issues.push("not shown on any page");
+    if (entry.sources.length === 0)
+        issues.push(
+            "no Studio source renders this screen any more; remove the image or rewrite the page",
+        );
     for (const source of entry.sources) {
         if (!git(dir, "ls-tree", "--name-only", APPS[entry.app].branch, "--", source))
             issues.push(`source no longer exists in ${entry.app}: ${source}`);
     }
-    const commits = git(
-        dir,
-        "log",
-        "--format=%h %cs %s",
-        `${entry.baseline}..${APPS[entry.app].branch}`,
-        "--",
-        ...entry.sources,
-    );
+    const commits =
+        entry.sources.length > 0 &&
+        git(
+            dir,
+            "log",
+            "--format=%h %cs %s",
+            `${entry.baseline}..${APPS[entry.app].branch}`,
+            "--",
+            ...entry.sources,
+        );
     if (commits) {
         const list = commits.split("\n");
         issues.push(
@@ -148,7 +176,7 @@ if (accept !== undefined) {
         `Accepted ${accept === "all" ? "every screenshot" : accept} as matching the current UI.`,
     );
 } else {
-    const mapped = Object.keys(manifest).length;
+    const mapped = Object.values(manifest).filter((e) => !("untracked" in e)).length;
     if (notes.length)
         console.log(`${notes.length} screenshot(s) to look at:\n\n${notes.join("\n\n")}\n`);
     else console.log(`All ${mapped} mapped screenshots match the UI they were taken from.\n`);
