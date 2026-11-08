@@ -1119,6 +1119,8 @@ A screenshot goes out of date when the interface it shows changes, and that inte
 
 The check reads a local clone of surrealdb/studio at `~/studio`, or at `STUDIO_REPO`, and does not fetch it, so run `git -C ~/studio fetch` first. As with diagrams, it cannot tell whether a change is visible: retake the screenshot, or run `bun run screenshots:check --accept NAME` to record it as matching the current UI. Each entry's `capture` says how to retake it: `scripted` with the capture script, `sign-in` with the capture script and a signed-in SurrealDB Cloud session, or `manual` by hand. Add an entry for a new Studio screenshot when you add the image, and see `--unmapped` for those that still have none.
 
+`bun run screenshots:capture` retakes every screenshot whose entry has a `shot`: the path within the organisation, any steps to reach the screen, and the element to crop to. It drives Chrome with its own profile in `generated/screenshots/`, which git ignores. Run it once with `--sign-in`, sign in in the window it opens, open the organisation the screenshots should show, and close the window. Later runs reuse that session without a window. Screenshots are taken in dark mode at twice the pixel density. The script hides announcements, tips and open menus rather than clicking them away, and it refuses to save a screenshot in which an email address is visible, so the signed-in account does not appear in the docs. After retaking a screenshot, check it, update the alt text if the screen changed, and accept it with `screenshots:check --accept`.
+
 ## Data loading and rendering
 
 A doc page group's `+data.ts` is a single call:
