@@ -6,20 +6,23 @@ description: "Embed SurrealKit in a Rust application, and skip the CLI."
 
 # Using SurrealKit as a library
 
-SurrealKit is published as a Rust crate, so you can drive connections, schema sync, rollouts, and seeding from application code rather than the CLI. This suits applications that apply schema inside their own process at startup, for example with an embedded SurrealDB backend (RocksDB, SpeeDB) or when running SurrealDB in the same binary during tests.
+SurrealKit is published as a Rust crate, so you can drive connections, schema sync, rollouts, and seeding from application code rather than the CLI. This suits applications that apply schema inside their own process at startup, for example with an embedded SurrealKV store, or when running SurrealDB in the same binary during tests.
 
 ## Adding the dependency
 
 ```toml
 [dependencies]
-surrealkit = "1.0.0-beta.1"
+surrealkit = "1.0.0-rc.1"
+surrealdb = "4"
 ```
+
+SurrealKit `1.0.0-rc.1` builds against the SurrealDB 4.0 SDK, so the `Surreal` handle you pass in comes from the `surrealdb` 4.x crate, and a project on the 3.x crate does not compile until it upgrades. `Sync`, `Rollout`, `Rollouts` and `Seed` also return an error against a server older than 4.0.
 
 The default features include `cli`, which pulls in the argument parser and its supporting crates. A library-only consumer can drop them:
 
 ```toml
 [dependencies]
-surrealkit = { version = "1.0.0-beta.1", default-features = false, features = ["kv-mem"] }
+surrealkit = { version = "1.0.0-rc.1", default-features = false, features = ["kv-mem"] }
 ```
 
 > [!WARNING]
@@ -67,7 +70,7 @@ let cfg = DbCfg::from_env(None, &DbOverrides {
 
 ### In-process SurrealDB
 
-For an embedded SurrealDB engine (`mem://`, `rocksdb://`, `speedb://`), construct a `Surreal` client directly and pass it to any library function:
+For an embedded SurrealDB engine (`mem://` or `surrealkv://`), construct a `Surreal` client directly and pass it to any library function. Enable the engine's feature on your own `surrealdb` dependency, such as `features = ["kv-surrealkv"]`; SurrealKit needs no engine feature of its own for this:
 
 ```rust
 use surrealdb::engine::any::connect;
@@ -87,7 +90,7 @@ use surrealkit::{EmbeddedSchemaFile, Sync, Surreal};
 use surrealkit::engine::any::Any;
 
 static SCHEMA: &[EmbeddedSchemaFile] = &[EmbeddedSchemaFile {
-    path: "database/schema/person.surql",
+    path: "schema/person.surql",
     sql:  "DEFINE TABLE person SCHEMALESS;",
 }];
 
@@ -97,6 +100,8 @@ async fn run(db: &Surreal<Any>) -> anyhow::Result<()> {
     Ok(())
 }
 ```
+
+Each `path` is a stable tracking key, not a file that has to exist at run time. Write it relative to the project folder, such as `schema/person.surql`, which is the key the CLI and the [`embed_schema!` macro](/docs/manage/schema-migration/embed-schema-macro) record for the same file, so that the library and the CLI agree on what is applied. Before SurrealKit 1.0.0-beta.2 the CLI keyed files from the working directory (`database/schema/person.surql`); the first sync after upgrading re-keys those entries.
 
 The builder methods customise behaviour before calling `run`:
 
@@ -148,7 +153,7 @@ use surrealkit::engine::any::Any;
 // The desired schema once the rollout completes (used to compute the managed
 // catalog). Pass `&[]` if your steps fully describe the entity changes.
 static TARGET: &[EmbeddedSchemaFile] = &[EmbeddedSchemaFile {
-    path: "database/schema/account.surql",
+    path: "schema/account.surql",
     sql:  "DEFINE TABLE account SCHEMAFULL;",
 }];
 
@@ -238,13 +243,13 @@ Each file is applied once and re-applied only when its content changes, tracked 
 
 ## Template variables
 
-`${VAR}` placeholders in schema, seed, or rollout SQL are substituted from a [`TemplateVars`] map before execution. Lookups are case-insensitive, and an undefined variable is an error naming the missing key and file. Pass them via `Sync::vars(...)`, `Rollout::vars(...)`, or the `seed` argument:
+`${VAR}` placeholders in schema, seed, or rollout SQL are substituted from a [`TemplateVars`] map before execution. A placeholder is looked up in upper case, so `${schema_prefix}` reads the key `SCHEMA_PREFIX`, and an undefined variable is an error naming the missing key and file. Insert keys in upper case into the `vars` map, and pass the result via `Sync::vars(...)`, `Rollout::vars(...)`, or the `seed` argument:
 
 ```rust
 use surrealkit::{Sync, TemplateVars};
 
 let mut vars = TemplateVars::default();
-vars.insert("schema_prefix", "acme");
+vars.vars.insert("SCHEMA_PREFIX".to_string(), "acme".to_string());
 
 Sync::embedded(SCHEMA).vars(vars).run(db).await?;
 ```

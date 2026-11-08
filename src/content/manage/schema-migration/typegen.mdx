@@ -18,9 +18,14 @@ By default this writes a JSON document to `database/types/schema.json`. SurrealK
 
 | Flag | Default | Description |
 |---|---|---|
-| `--out <path>` | `{folder}/types/schema.json` | Write the JSON to a specific path |
-| `--stdout` | off | Print the JSON to stdout instead of writing a file |
+| `--out <path>` | `[typegen] json`, else `{folder}/types/schema.json` | Write the JSON to a specific path |
+| `--stdout` | off | Print the JSON to stdout instead of writing the JSON file. Configured TypeScript is still written |
 | `--compact` | off | Emit compact, single-line JSON instead of pretty-printed |
+| `--typescript <path>` | `[typegen] typescript` | Also write TypeScript to this `.ts` file or directory |
+| `--check` | off | Write nothing, and exit non-zero when a generated file is missing or out of date |
+| `--strict` | off | Fail instead of warning when an output cannot be produced exactly as configured |
+| `--no-generated-at` | off | Leave `generatedAt` out of the JSON |
+| `--from <schema.json>` | | Read the schema document from a file instead of a database |
 
 ```bash
 # Pretty-printed JSON to the default location
@@ -44,8 +49,17 @@ format = "biome check --write"
 
 | Key | Description |
 |---|---|
-| `typescript` | Directory for the generated `index.ts`. Setting it enables TypeScript output for `typegen` and `sync --watch`. |
+| `typescript` | Where generated TypeScript goes. Setting it enables TypeScript output for `typegen` and `sync`. A path ending in `.ts`, `.mts` or `.cts`, such as `src/types/database.ts`, is the file itself; any other path is a directory. |
+| `filename` | The file to write inside the `typescript` directory. Defaults to `index.ts`; another name leaves `index.ts` free for your own barrel file. |
 | `format` | Optional formatter command run on the generated file after writing (for example `biome check --write`, `prettier --write`, or `eslint --fix`). |
+| `json` | Where the JSON document goes. Setting it makes `sync` write the document too, and `typegen` writes it there instead of `database/types/schema.json`. A path ending in `.json` is the file itself; any other path is a directory, and the file in it is `schema.json`. |
+| `strict` | Fail instead of warning when an output cannot be produced exactly as configured. Defaults to `false`. |
+| `generated_at` | Set to `false` to leave the `generatedAt` timestamp out of the JSON, so the same schema always produces the same bytes. |
+| `schema_version` | `1` (the default) or `2`, which writes [schema document v2](#schema-document-v2) instead. |
+
+Unknown keys in `[typegen]` are an error, so a misspelt key cannot turn an output off without a message. `surrealkit typegen --typescript <path>` and `--out <path>` override the configured TypeScript and JSON paths for one run.
+
+Generated files are written atomically, to a temporary file beside the real one and then renamed, so a bundler or `tsc --watch` never reads half a file, and a failure leaves the previous version in place. A file whose content would not change is not rewritten.
 
 With `typescript` configured, `surrealkit typegen` writes both the JSON document and an `index.ts`:
 
@@ -66,11 +80,11 @@ The emitter targets the SurrealDB JavaScript SDK (v2): one interface per table, 
 
 ### Formatter
 
-When `format` is set, SurrealKit appends the generated file path to the command and runs it, so the output matches your project's house style. The command inherits the working directory so the formatter discovers your project's own config. Formatter failures (a missing binary or a non-zero exit) are reported as warnings and never fail `typegen` or `sync --watch`.
+When `format` is set, SurrealKit appends the generated file path to the command and runs it, so the output matches your project's house style. The command inherits the working directory so the formatter discovers your project's own config. The formatter runs on the temporary file, which has the same directory and extension as the real one but a name such as `index.surrealkit-tmp-<pid>-<n>.ts`, so a formatter that only accepts files matching a pattern has to accept that name too. Formatter failures (a missing binary or a non-zero exit) are reported as warnings, unless `strict` is set.
 
 ## Regenerating on sync
 
-When `[typegen] typescript` is configured, `surrealkit sync --watch` regenerates the TypeScript types whenever the schema changes, so your types stay current with the schema during local development:
+When `[typegen] typescript` or `json` is configured, `surrealkit sync` regenerates the outputs after it applies schema changes, so the generated types never drift from the database. With `--watch`, they stay current while you edit the schema:
 
 ```bash
 surrealkit sync --watch --user root --pass secret
@@ -78,13 +92,27 @@ surrealkit sync --watch --user root --pass secret
 
 Regeneration is gated on actual schema changes (or a missing output file), so idle watch ticks do not re-introspect the database.
 
-## Type generation and targets
+## Checking types in CI
 
-`typegen` introspects the database given by `--host`, `--ns` and `--db`. It does not resolve [targets](/docs/manage/schema-migration/modules-and-targets), so in `1.0.0-beta.1` neither `--target` nor `[target.<name>] primary = true` changes which database it reads. Pass the connection explicitly to introspect a particular one:
+`surrealkit typegen --check` writes nothing, and exits with a non-zero code when a configured output is missing or differs from what would be generated. It compares content, so an unchanged schema passes even though `generatedAt` would be a new time:
 
 ```bash
-surrealkit typegen --host wss://production-6xk2.aws-euw1.surreal.cloud --ns main --db main --user root --pass secret
+surrealkit typegen --check --user root --pass secret
 ```
+
+`--strict` and `--no-generated-at` turn on `strict` and `generated_at = false` for one run.
+
+Typegen understands every SurrealDB field type, including `regex`, `range`, `table<…>`, `file<…>`, tuples such as `[A, B]`, object literals such as `{ a: int }`, and literal values. Anything it cannot represent is reported as a diagnostic rather than typed `unknown` without a message. A field type it cannot parse is an error, which fails a `strict` run, and a field without `TYPE` is still `unknown`, with an informational message under `--verbose`.
+
+## Type generation and targets
+
+`typegen` reads one database: the `--target` you name, else the target marked `primary = true`, else the only declared target, else the ambient connection from `--host`, `--ns` and `--db`. With `--schema`, that target must accept the module in its `schemas` list.
+
+```bash
+surrealkit typegen --target staging
+```
+
+A project with exactly one declared target therefore introspects that target, not the ambient connection.
 
 > [!NOTE]
 > There is one `[typegen] typescript` directory for the whole project, so `surrealkit sync --all` regenerates the same `index.ts` once per module and target pair, and the last pair to run leaves its output in place. Generate types from a single target rather than from a fan-out.
@@ -112,7 +140,18 @@ async fn run(db: &Surreal<Any>) -> anyhow::Result<()> {
 }
 ```
 
-`generate` returns a `SchemaTypes` document that the JSON and TypeScript emitters share, so a single introspection can produce both formats. `write_typescript_formatted` writes the file and runs an optional formatter command in the same call.
+`generate` returns a `SchemaTypes` document that the JSON and TypeScript emitters share, so a single introspection can produce both formats. `write_typescript_formatted` writes the file and runs an optional formatter command in the same call, and `generate_with_diagnostics` also returns what typegen could not represent.
+
+## Schema document v2
+
+<Since v="v1.0" />
+
+`[typegen] schema_version = 2` writes schema document v2, a format for tools that generate their own code from the schema, instead of the version 1 JSON. The TypeScript output does not change. Two commands work with it without a running database:
+
+- `surrealkit compile` builds the document from your schema files in an embedded engine with no network access. Set `[typegen] engine` to the SurrealDB minor version you deploy to, such as `"4.0"`, and `compile` reports an error when its embedded engine is a different minor version.
+- `surrealkit typegen --from <schema.json>` generates the configured outputs from a document on disk.
+
+External emitters, declared as `[typegen.emit.<name>]` with a `command` and an `out` directory, read the document on standard input and return files to write, such as the Effect schemas from the `effect-surrealkit` package. `[typegen] acknowledge` lets a named error diagnostic through a `strict` run, with the reason it is acceptable. The [schema document v2 specification](https://github.com/surrealdb/surrealkit/blob/main/docs/typegen/schema-document-v2.md) and the [external emitter protocol](https://github.com/surrealdb/surrealkit/blob/main/docs/typegen/external-emitters.md) describe both in full.
 
 ## Next steps
 

@@ -1,0 +1,98 @@
+---
+position: 11
+title: Migrating existing records
+description: "Change a field on a table that already holds records with MIGRATE EXISTING ROWS, in sync and in rollouts, and raise a database to compatibility level 4."
+---
+
+# Migrating existing records
+
+<Since v="v1.0" />
+
+Changing a field's definition does not rewrite the records a table already holds. On SurrealDB 4.0, a `MIGRATE EXISTING ROWS` clause on [`DEFINE FIELD`](/docs/reference/query-language/statements/define/field#migrating-existing-records) says what those records become. SurrealKit runs these migrations from your schema files, in sync and in rollouts, and makes sure that each one runs once.
+
+## Write the migration in the schema file
+
+Put the clause in the schema file, next to the definition it changes:
+
+```surql title="database/schema/product.surql"
+DEFINE TABLE product SCHEMAFULL;
+
+DEFINE FIELD stock ON product TYPE int
+    MIGRATE EXISTING ROWS AS stock_to_int USING <int> $value FALLBACK 0;
+```
+
+`USING` converts each stored value, and `FALLBACK` is the value stored when the conversion fails. A record whose `stock` was the string `'5'` now holds `5`, and one that held `'x'` holds `0`.
+
+Leave the clause in the file after it has run. SurrealDB runs each migration name once per table, and SurrealKit applies a statement whose name has already run without its clause, so later changes to the field, such as new `PERMISSIONS` or a `COMMENT`, still reach the database. The clause is not part of the statement's hash, so removing it from the file later does not count as a change.
+
+A few details apply:
+
+- Each name belongs to one transform. SurrealKit records the clause that ran under each name, and refuses a name reused for a different transform. Give every transform a name of its own.
+- `USING` reads only `$value`, the field's own value. A rename, which copies one field into another, still needs an `UPDATE` in a rollout `run_sql` step.
+- A field that an index reads cannot be migrated while the index exists. SurrealKit removes those indexes, applies the file and defines them again. A `UNIQUE` index does not hold while it is gone, and SurrealKit warns about it. Define an index after the field it reads.
+- `ALTER TABLE product MIGRATE EXISTING ROWS AS drop_old_fields REMOVE UNDECLARED FIELDS` may sit in a schema file, to clear the fields a table no longer declares. It is the only `ALTER` statement a schema file may hold.
+- A change to a type that accepts every value the field held, such as `int` to `int | string`, needs no migration.
+
+## In sync
+
+In a database at [compatibility level 4](#compatibility-levels), a `SCHEMAFULL` table that holds records refuses a field change that its records might not fit, unless the definition has `MIGRATE EXISTING ROWS`. Sync reports the refusal with the clause to add.
+
+A migration converts each record as soon as it commits, so application code that still reads the old shape sees the new values at once. That suits local development. For a shared database, use a rollout.
+
+## In a rollout {#in-a-rollout}
+
+`rollout plan` treats a migrated field as a change it can plan without `--allow-modified`. The start phase applies the file, as for any other change.
+
+Restoring the old definition cannot undo a migration, because the records no longer fit it. The plan therefore adds a `revert_migration` step to the rollback phase, for you to fill in with the reverse transform:
+
+```toml title="database/rollouts/20261108120000__stock_to_int.toml"
+[[steps]]
+id = "revert_product_stock"
+phase = "rollback"
+kind = "revert_migration"
+table = "product"
+field = "stock"
+name = "stock_to_int_revert"
+using = "<string> $value"
+fallback = "''"
+```
+
+`rollout lint` and `rollout start` refuse the manifest while `using` is empty, or when it holds something SurrealDB refuses in a transform: a statement such as `IF` or `SELECT`, a parameter other than `$value`, or an `fn::` call. If the server still refuses the revert when it runs, fix the step and run `rollout rollback` again. A rollback accepts a manifest that changed only in steps that have not run.
+
+To make a rollout irreversible instead, delete the step. `rollout status` then reports the rollout as `irreversible`, and `rollout rollback` refuses once the migrating step has run.
+
+SurrealDB runs each name once per table, even after a revert. When a rolled-back rollout is started again, or a file restates a migration that a later one replaced, SurrealKit runs it again under a new name, such as `stock_to_int_2`.
+
+The complete phase starts with an `await_migrations` step. It waits until SurrealDB has rewritten and checked the migrated tables, for an hour at most (set `timeout_secs` on the step to change this), and fails if any record does not fit.
+
+> [!TIP]
+> A migration changes every record as soon as it commits, so the old application sees the new values during the cutover. For a change without downtime, add a new field, backfill it, and remove the old field in a later rollout.
+
+## Compatibility levels {#compatibility-levels}
+
+A database has a [compatibility level](/docs/reference/query-language/statements/define/database#compatibility-level). A database that a SurrealDB 4.0 datastore creates is at level 4. A database that a 3.x datastore created stays at level 3 after the upgrade to 4.0.
+
+At level 4:
+
+- A `SCHEMAFULL` table that holds records refuses a field change they might not fit, unless the `DEFINE FIELD` has `MIGRATE EXISTING ROWS`.
+- `REMOVE FIELD` on a `SCHEMAFULL` table clears the values the field held. Sync's prune and a rollout's `remove_legacy_entities` step say so: a dry run labels each such field `deletes stored values (compatibility 4)`, and a real run warns.
+
+`surrealkit status` and `rollout status` print the server version and the level. Two commands work with the level directly:
+
+```bash
+surrealkit compat status --user root --pass secret
+surrealkit compat raise --yes --wait --user root --pass secret
+```
+
+`compat status` shows the level, and for each table, the migrations it has run, the fields every record fits, and what SurrealDB is still doing. `compat raise --yes` runs [`ALTER DATABASE COMPATIBILITY 4`](/docs/reference/query-language/statements/alter/database). With `--wait`, it waits for SurrealDB to check every `SCHEMAFULL` table (for an hour at most, or `--timeout-secs`), and for each field whose records do not fit, it names the schema file to change and the `MIGRATE EXISTING ROWS` clause to add.
+
+> [!WARNING]
+> Raise the level only after every node runs SurrealDB 4.0. The change alters what `REMOVE FIELD` does, and there is no documented way to lower the level again, so `compat raise` needs `--yes`.
+
+[Upgrading from 3.x to 4.0](/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x) covers the database upgrade itself.
+
+## Next steps
+
+- [Rollouts](/docs/manage/schema-migration/rollouts): the phased migration workflow
+- [Sync](/docs/manage/schema-migration/sync): how schema files are applied
+- [`DEFINE FIELD`](/docs/reference/query-language/statements/define/field#migrating-existing-records): the full `MIGRATE EXISTING ROWS` syntax
