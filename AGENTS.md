@@ -11,9 +11,10 @@ bun run dev             # start dev server
 bun run qa              # apply code quality formatting
 bun run qc              # check code quality
 bun run diagrams:check  # list diagrams whose page sections have changed
+bun run check:links     # check every internal link and anchor in src/content
 ```
 
-Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate).
+Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist and on an anchor that names no heading on its page, so a renamed heading needs every link to it updated.
 
 ## References
 
