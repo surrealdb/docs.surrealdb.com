@@ -355,3 +355,4 @@ Here are the commands for some of the common commands you may need to use.
 - `bun run qa` - Apply safe code quality suggestions
 - `bun run qau` - Apply (un)safe code quality suggestions
 - `bun run qts` - Type-check with TypeScript
+- `bun run check:links` - Check every internal link and anchor in `src/content`

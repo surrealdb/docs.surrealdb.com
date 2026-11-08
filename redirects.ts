@@ -6,10 +6,10 @@ import type { Redirect } from "@vercel/config/v1";
  */
 function legacyPrefixRedirects(from: string, to: string): Redirect[] {
     return [
-        { source: `/docs/${from}`, destination: `/${to}`, statusCode: 302 },
-        { source: `/docs/${from}/:path*`, destination: `/${to}/:path*`, statusCode: 302 },
-        { source: `/${from}`, destination: `/${to}`, statusCode: 302 },
-        { source: `/${from}/:path*`, destination: `/${to}/:path*`, statusCode: 302 },
+        { source: `/docs/${from}`, destination: `/${to}`, statusCode: 301 },
+        { source: `/docs/${from}/:path*`, destination: `/${to}/:path*`, statusCode: 301 },
+        { source: `/${from}`, destination: `/${to}`, statusCode: 301 },
+        { source: `/${from}/:path*`, destination: `/${to}/:path*`, statusCode: 301 },
     ];
 }
 
@@ -17,28 +17,28 @@ function legacyPrefixRedirects(from: string, to: string): Redirect[] {
 function sdkRedirects(): Redirect[] {
     const versions = ["1.x", "2.x", "3.x"] as const;
     const out: Redirect[] = [
-        { source: "/docs/sdk/:sdk", destination: "/docs/languages/:sdk", statusCode: 302 },
+        { source: "/docs/sdk/:sdk", destination: "/docs/languages/:sdk", statusCode: 301 },
         {
             source: "/docs/sdk/:sdk/:path*",
             destination: "/docs/languages/:sdk/:path*",
-            statusCode: 302,
+            statusCode: 301,
         },
-        { source: "/sdk/:sdk", destination: "/docs/languages/:sdk", statusCode: 302 },
-        { source: "/sdk/:sdk/:path*", destination: "/docs/languages/:sdk/:path*", statusCode: 302 },
+        { source: "/sdk/:sdk", destination: "/docs/languages/:sdk", statusCode: 301 },
+        { source: "/sdk/:sdk/:path*", destination: "/docs/languages/:sdk/:path*", statusCode: 301 },
     ];
     for (const v of versions) {
         out.push(
-            { source: `/docs/${v}/sdk/:sdk`, destination: "/languages/:sdk", statusCode: 302 },
+            { source: `/docs/${v}/sdk/:sdk`, destination: "/languages/:sdk", statusCode: 301 },
             {
                 source: `/docs/${v}/sdk/:sdk/:path*`,
                 destination: "/languages/:sdk/:path*",
-                statusCode: 302,
+                statusCode: 301,
             },
-            { source: `/${v}/sdk/:sdk`, destination: "/languages/:sdk", statusCode: 302 },
+            { source: `/${v}/sdk/:sdk`, destination: "/languages/:sdk", statusCode: 301 },
             {
                 source: `/${v}/sdk/:sdk/:path*`,
                 destination: "/languages/:sdk/:path*",
-                statusCode: 302,
+                statusCode: 301,
             },
         );
     }
@@ -1029,8 +1029,8 @@ function guessableEntryPointRedirects(): Redirect[] {
         ["sdk", "/docs/languages"],
         ["sdks", "/docs/languages"],
         ["clients", "/docs/languages"],
-        ["install", "/docs/running/overview"],
-        ["installation", "/docs/running/overview"],
+        ["install", "/docs/running/installation"],
+        ["installation", "/docs/running/installation"],
         ["docker", "/docs/running/docker"],
         ["schema", "/docs/learn/schema-management"],
         ["query", "/docs/reference/query-language"],
@@ -1078,7 +1078,7 @@ function legacyIntegrationApiRedirects(): Redirect[] {
 
 const baseRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
-    { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
+    { source: "/start", destination: "/what-is-surrealdb", statusCode: 301 },
     ...overviewConsolidationRedirects(),
     ...legacyPrefixRedirects("surrealql", "reference/query-language"),
     // `surrealist/*` cannot map path-for-path: the tree it points at was
