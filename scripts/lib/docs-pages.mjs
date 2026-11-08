@@ -122,8 +122,8 @@ export function byDepthThenUrl(a, b) {
  *
  * Mirrors `isHidden` in `src/utils/navigation.ts`, where a hidden folder takes
  * its whole subtree out of the sidebar. The collection root counts too, so a
- * collection whose root category is hidden is left out. Without this, pages in
- * a hidden folder were listed here although no navigation reached them.
+ * collection whose root category is hidden is left out. This keeps a page that
+ * no navigation reaches out of the generated lists as well.
  */
 function inHiddenFolder(root, file) {
     const folders = relative(root, dirname(file)).split("/").filter(Boolean);

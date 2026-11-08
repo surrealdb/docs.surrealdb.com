@@ -46,6 +46,29 @@ Apply SOLID where it fits:
 - Inline `style` only for truly dynamic values.
 - Shared UI that could benefit other SurrealDB frontends belongs in `@surrealdb/ui`, not here.
 
+### Comments describe the code, not its history
+
+A comment says what the code does and why it needs to, in the present tense.
+The history of a change - the audit that found a problem, the date something
+broke, what the code did before - belongs in the commit message and the pull
+request description, which keep it next to its date. In a comment it starts to
+go out of date on the day it merges, and a later reader cannot tell whether the
+problem it describes still exists.
+
+| Avoid                                                                                     | Use                                                                                   |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `An audit in November 2026 found 16 dead anchors that had shipped.`                       | `The build does not catch these: a broken link renders, and a broken anchor scrolls nowhere.` |
+| `Without this, pages in a hidden folder were listed although no navigation reached them.` | `This keeps a page that no navigation reaches out of the generated lists as well.`     |
+
+Pages follow the same rule. Write the behaviour that stays true, such as
+"`--beta` installs the most recent beta, which can be older than the stable
+release", not the state of things on the day of writing, such as "no beta of a
+later version is published yet".
+
+This guide is the exception. Its dated figures, such as the count of duplicate
+links in October 2026, record why a rule exists, and a reader takes them as
+history.
+
 ### Language
 
 All user-facing text uses **British English** spelling (`-ise`, `-our`, `-re`, `-ogue`).

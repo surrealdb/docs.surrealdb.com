@@ -12,8 +12,7 @@
  * numeric suffix on a repeated heading (`setup`, `setup-1`).
  *
  * The build does not catch these: a broken link renders, and a broken anchor
- * scrolls nowhere. An audit in November 2026 found 16 dead anchors and a link to
- * a page that had moved, all of which had shipped.
+ * scrolls nowhere.
  *
  * Usage: bun scripts/check-links.ts
  */
