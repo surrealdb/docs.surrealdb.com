@@ -31,6 +31,10 @@ expectRedirect("/self-hosted/installation", "/docs/running/installation", 301);
 expectRedirect("/sdk/rust/setup", "/docs/languages/rust/setup", 301);
 expectRedirect("/docs/sdk/rust/setup", "/docs/languages/rust/setup", 301);
 
+// A short URL from `short-urls.ts`.
+expectRedirect("/python", "/docs/reference/python", 302);
+expectRedirect("/define-table", "/docs/reference/query-language/statements/define/table", 302);
+
 // A live page passes through.
 assert.equal(matchRedirect("/reference/query-language/statements/select"), null);
 checked++;

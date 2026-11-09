@@ -14,6 +14,8 @@
  * The build does not catch these: a broken link renders, and a broken anchor
  * scrolls nowhere.
  *
+ * It also checks the short URLs in `short-urls.ts`; see `checkShortUrls`.
+ *
  * Usage: bun scripts/check-links.ts
  */
 
@@ -21,6 +23,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { extractHeadings, markdownSourceFromString, parseMarkdownTree } from "@surrealdb/ui";
 import { resolveRedirect } from "../redirects";
+import { SHORT_URL_FOLDERS, shortUrls } from "../short-urls";
 import { CONTENT_DIR, PAGES_DIR, readCollections, slugify, walk } from "./lib/docs-pages.mjs";
 
 const PUBLIC_DIR = "public";
@@ -256,12 +259,64 @@ for (const page of pages.values()) {
     }
 }
 
+/**
+ * The short URLs in `short-urls.ts`: each lands on a page with no other redirect
+ * in the way, none hides a page, a word is listed once, and every page in the
+ * folders under `SHORT_URL_FOLDERS` has one.
+ */
+function checkShortUrls(): string[] {
+    const found: string[] = [];
+    const seen = new Set<string>();
+    const targets = new Set<string>();
+
+    for (const [word, destination] of shortUrls) {
+        const path = `/docs/${word}`;
+        const target = normalise(destination.split("#")[0]);
+        const resolved = resolveRedirect(`/${word}`);
+
+        targets.add(target);
+
+        if (seen.has(word)) found.push(`${path} is listed more than once`);
+        seen.add(word);
+
+        if (pages.has(path) || folders.has(path) || statics.has(path)) {
+            found.push(`${path} is a page, so a short URL for it would hide the page`);
+        } else if (resolved?.destination !== destination) {
+            found.push(`${path} is taken by an earlier redirect to ${resolved?.destination}`);
+        }
+
+        if (!pages.has(target) && !folders.has(target)) {
+            found.push(`${path} goes to ${target}, which is not a page`);
+        }
+    }
+
+    for (const folder of SHORT_URL_FOLDERS) {
+        for (const url of pages.keys()) {
+            const child =
+                url.startsWith(`${folder}/`) && !url.slice(folder.length + 1).includes("/");
+
+            if (child && !url.endsWith("/overview") && !targets.has(url)) {
+                found.push(`${url} has no short URL; add one to short-urls.ts`);
+            }
+        }
+    }
+
+    return found;
+}
+
+const shortUrlProblems = checkShortUrls();
+
 for (const problem of problems) {
     console.error(`${problem.file}:${problem.line}  ${problem.link}\n    ${problem.reason}`);
+}
+
+for (const problem of shortUrlProblems) {
+    console.error(`short-urls.ts  ${problem}`);
 }
 
 console.log(
     `[links] ${checked} internal links checked across ${pages.size} pages, ${problems.length} broken`,
 );
+console.log(`[links] ${shortUrls.length} short URLs checked, ${shortUrlProblems.length} problems`);
 
-if (problems.length > 0) process.exit(1);
+if (problems.length > 0 || shortUrlProblems.length > 0) process.exit(1);

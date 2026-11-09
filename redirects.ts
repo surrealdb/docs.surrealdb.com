@@ -1,4 +1,5 @@
 import type { Redirect } from "@vercel/config/v1";
+import { shortUrls } from "./short-urls";
 
 /**
  * Legacy path prefixes from src-old (see src-old/content/config.ts urlForCollection)
@@ -973,21 +974,6 @@ function stutteringPathRedirects(): Redirect[] {
 }
 
 /**
- * Short, guessable entry points that nothing served.
- *
- * These are not legacy paths - none of them ever existed. They are the URLs a
- * developer types and an agent constructs before it has seen the navigation,
- * and every one of them answered 404 (verified September 2026). An agent trace
- * looking for authentication docs spent eight web searches and 53% of its
- * fetches on Google recovering paths it could not guess, having failed on
- * `/docs/sdk`, `/docs/build` and `/docs/integration/apis`.
- *
- * A guess that lands is worth more than a guess that 404s even when the landing
- * is approximate, so these aim at the section a reader asking that word wants
- * rather than at an exact page. They are 302s for that reason: the destination
- * is our current best answer to a word, not a page that moved.
- */
-/**
  * Two more pages folded for the same reason. `blink` became a section of the
  * demos index it sat under; `ai-agents/ai-frameworks` was a middleman that
  * listed the frameworks and then told the reader to start from the integrations
@@ -1008,44 +994,14 @@ function shortPageFoldRedirects(): Redirect[] {
     ];
 }
 
-function guessableEntryPointRedirects(): Redirect[] {
-    const entries: [string, string][] = [
-        ["quickstart", "/docs"],
-        ["quick-start", "/docs"],
-        ["getting-started", "/docs"],
-        ["get-started", "/docs"],
-        ["intro", "/docs/what-is-surrealdb"],
-        ["introduction", "/docs/what-is-surrealdb"],
-        ["api", "/docs/reference/rest-api"],
-        ["apis", "/docs/reference/rest-api"],
-        ["rest", "/docs/reference/rest-api"],
-        ["http", "/docs/reference/rest-api/http-protocol"],
-        ["rpc", "/docs/reference/rest-api/rpc-protocol"],
-        ["auth", "/docs/learn/security/authentication/overview"],
-        ["authentication", "/docs/learn/security/authentication/overview"],
-        ["security", "/docs/learn/security"],
-        ["permissions", "/docs/learn/security/authorization/permissions-and-row-level-security"],
-        // The bare prefix. `sdk/:sdk` is already mapped by `sdkRedirects`.
-        ["sdk", "/docs/languages"],
-        ["sdks", "/docs/languages"],
-        ["clients", "/docs/languages"],
-        ["install", "/docs/running/installation"],
-        ["installation", "/docs/running/installation"],
-        ["docker", "/docs/running/docker"],
-        ["schema", "/docs/learn/schema-management"],
-        ["query", "/docs/reference/query-language"],
-        ["queries", "/docs/reference/query-language"],
-        ["functions", "/docs/reference/query-language/functions/database-functions"],
-        // The statements folder has no page of its own, so a link to it lands
-        // on whichever child sorts first (`DEFINE ACCESS`). The SurrealQL index
-        // lists them all, which is what someone typing this word wants.
-        ["statements", "/docs/reference/query-language"],
-        // `cli` is deliberately absent: `legacySurrealdbTreeRedirects` already
-        // maps it, and a second rule for the same source would never be read.
-    ];
-
-    return entries.map(([from, destination]) => ({
-        source: `/${from}`,
+/**
+ * The short URLs in `short-urls.ts`. Their markdown forms, such as
+ * `/docs/python.md`, need no rules of their own: the `.md` handler in
+ * `src/pages/+server.ts` looks up the path without the suffix.
+ */
+function shortUrlRedirects(): Redirect[] {
+    return shortUrls.map(([word, destination]) => ({
+        source: `/${word}`,
         destination,
         statusCode: 302 as const,
     }));
@@ -1078,7 +1034,6 @@ function legacyIntegrationApiRedirects(): Redirect[] {
 
 const baseRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
-    { source: "/start", destination: "/what-is-surrealdb", statusCode: 301 },
     ...overviewConsolidationRedirects(),
     ...legacyPrefixRedirects("surrealql", "reference/query-language"),
     // `surrealist/*` cannot map path-for-path: the tree it points at was
@@ -1213,10 +1168,10 @@ const baseRedirects: Redirect[] = [
     ...enterpriseConsolidationRedirects(),
     ...stutteringPathRedirects(),
     ...shortPageFoldRedirects(),
-    // Last, so that every rule naming a real former path is tried first. These
-    // are single-word guesses, and a guess should only be answered once nothing
+    // Last, so that every rule naming a real former path is tried first. A short
+    // URL is a guess at a word, and a guess should only be answered once nothing
     // better matches.
-    ...guessableEntryPointRedirects(),
+    ...shortUrlRedirects(),
 ];
 
 export const docsRedirects: Redirect[] = withMarkdownTwins(baseRedirects.map(withDocsDestination));
