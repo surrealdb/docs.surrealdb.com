@@ -136,9 +136,11 @@ automatically.
 
 ## Production
 
-On Vercel production builds, `bun run search:index` runs automatically as a
-`postbuild` step. Preview and development builds skip indexing and fall back to
-the production search API.
+The "Index site search" job in `.github/workflows/reindex-docs.yml` runs
+`bun run search:index` on every push to `main`. It reads `src/content/`
+directly, so it needs no build. The script also runs as `postbuild`, where it
+skips Vercel previews and the CI build job; the Cloudflare build does not run
+`postbuild` at all.
 
 ### Two indexes during the transition
 
@@ -148,7 +150,7 @@ search is retired, a merge to `main` updates both:
 
 | Index | Written by | Read by |
 | --- | --- | --- |
-| This one | `postbuild` on the Vercel production build | `/docs/api/search`, which the site's UI calls today |
+| This one | The "Index site search" job in `.github/workflows/reindex-docs.yml` | `/docs/api/search`, which the site's UI calls today |
 | The API's | `.github/workflows/reindex-docs.yml` calling `POST /api/docs/v1/reindex` | `api.surrealdb.com/api/docs/v1/search`, and the `search_documentation` MCP tool |
 
 The two do not collide, because they write to different databases - but both pay
@@ -161,7 +163,11 @@ hand with `bun run search:reindex`. Note that a 409 from the endpoint means
 another index run already holds its lease and is covering the same commit, so the
 script treats that as success.
 
-### Environment variables (Vercel project settings)
+### Environment variables
+
+The indexing job reads these as GitHub Actions repository secrets. The docs
+Worker reads them as runtime secrets in Cloudflare, where `SURREAL_ENDPOINT`
+must be an `https://` URL.
 
 | Variable              | Description                             |
 | --------------------- | --------------------------------------- |
