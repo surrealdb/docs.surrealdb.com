@@ -1,0 +1,156 @@
+---
+position: 10
+title: Numbers
+description: "Numbers in the Go SDK: Go integers and floats as SurrealDB int and float, the SurrealDB 4.0 sized numbers i8 to u64, f16 and f32 as Go's sized types and models.Float16, decimals as models.DecimalString, and bigdecimal as models.BigDecimal, with how each converts over cbor.2 and plain CBOR."
+---
+
+# Numbers {#numbers}
+
+SurrealDB has the number kinds `int`, `float` and `decimal`. SurrealDB 4.0 adds sized numbers, which are the integers `i8` to `u64` and the floats `f16` and `f32`. It also adds `bigdecimal`, a decimal of any precision. The Go SDK maps most of these kinds onto Go's own number types. For the three that Go has no type for, the SDK has a type in the `models` package: `Float16`, `DecimalString` and `BigDecimal`. This page covers each.
+
+**Package:** `github.com/surrealdb/surrealdb.go/v2/pkg/models`
+
+**Source:** [sized.go](https://github.com/surrealdb/surrealdb.go/blob/main/pkg/models/sized.go), [big_decimal.go](https://github.com/surrealdb/surrealdb.go/blob/main/pkg/models/big_decimal.go)
+
+---
+
+## Plain numbers {#plain-numbers}
+
+The SDK sends a Go `int`, `int64` or `uint64` up to `math.MaxInt64` as a SurrealDB `int`, and a `float64` as a `float`. When the target is `any`, an `int` of zero or more decodes into a `uint64`, and a negative `int` into an `int64`. A `float` decodes into a `float64`. A struct field of any Go number type takes any number that fits it.
+
+---
+
+## Sized numbers {#sized-numbers}
+
+Over cbor.2, which SurrealDB 4.0 speaks, the SDK sends Go's sized number types as the sized numbers of SurrealDB 4.0. These numbers decode back into the same Go types, including from `any`. Over plain CBOR, which earlier servers speak, the SDK sends them as the older kinds in the last column:
+
+| Go type | Over cbor.2 (SurrealDB 4.0) | Over plain CBOR |
+| --- | --- | --- |
+| `int8`, `uint8` | `i8`, `u8` | `int` |
+| `int16`, `uint16` | `i16`, `u16` | `int` |
+| `int32`, `uint32` | `i32`, `u32` | `int` |
+| `uint64` above `math.MaxInt64` | `u64` | `decimal` |
+| [`models.Float16`](#float16) | `f16` | `float` |
+| `float32` | `f32` | `float` |
+
+```go
+results, err := surrealdb.Query[[]any](ctx, db,
+	"RETURN [type::of($level), type::of($score), type::of($big)]",
+	map[string]any{
+		"level": int8(5),
+		"score": float32(1.5),
+		"big":   uint64(math.MaxUint64),
+	},
+)
+fmt.Println((*results)[0].Result)
+```
+
+```text title="Output with SurrealDB 4.0"
+[i8 f32 u64]
+```
+
+When you send a value as a sized type, the server stores it as that type. A later read into `any` then gives the sized Go type back. Code that asserts a decoded number to `int64` or `uint64` has to allow for these types.
+
+`models.Float32Exact(f)` reports whether a `float64` converts to a `float32` without losing precision. `0.1` does not, and `1.5` does.
+
+### `Float16` {#float16}
+
+Go has no half-precision float, so `models.Float16` holds the 16 bits of an IEEE 754 binary16 value. Its zero value is `+0`.
+
+| Function or method | Description |
+| --- | --- |
+| `NewFloat16(f)` | Returns `f` as a `Float16`, or an error when a `Float16` cannot hold it exactly, such as `0.1` or `65536`. It accepts NaN and the infinities. |
+| `MustFloat16(f)` | As `NewFloat16`, but panics on an error |
+| `Float16FromBits(bits)` | The `Float16` with the given bits |
+| `.Float64()`, `.Float32()` | The value, converted exactly |
+| `.Bits()` | The 16 bits |
+| `.String()` | The value in its shortest form |
+
+```go
+h := models.MustFloat16(1.5)
+fmt.Println(h, h.Float64())
+
+_, err := models.NewFloat16(0.1)
+fmt.Println(err)
+```
+
+```text title="Output"
+1.5 1.5
+float 0.1 cannot be losslessly represented as f16
+```
+
+---
+
+## `DecimalString` {#decimalstring}
+
+A SurrealDB `decimal` holds up to 28 digits after the point without rounding. Go has no decimal type, so `models.DecimalString` keeps the decimal as text:
+
+```go
+type DecimalString string
+```
+
+A `decimal` decodes into a `DecimalString`, including from `any`. The SDK sends a `DecimalString` as a `decimal`:
+
+```go
+type Price struct {
+	Amount models.DecimalString `json:"amount"`
+}
+
+results, err := surrealdb.Query[Price](ctx, db, "RETURN { amount: 19.99dec }", nil)
+fmt.Println((*results)[0].Result.Amount)
+```
+
+```text title="Output"
+19.99
+```
+
+For arithmetic, read the text with `math/big` or a decimal library, such as `new(big.Rat).SetString(string(amount))`.
+
+---
+
+## `BigDecimal` {#bigdecimal}
+
+A `models.BigDecimal` is a decimal of any precision, for the SurrealDB 4.0 `bigdecimal` kind. It holds what a `decimal` cannot: more than 28 digits after the point, or a coefficient of 2^96 or more. It keeps the digits as the server writes them, so `1.50` stays `1.50`. The zero value is `0`, a real number rather than `NONE`, so use a `*BigDecimal` with `omitempty` for a field that may be absent.
+
+### Constructors {#bigdecimal-constructors}
+
+| Function | Description |
+| --- | --- |
+| `ParseBigDecimal(s)` | Parses a decimal as the server does: an optional sign, digits with an optional point, and an optional exponent. It applies the exponent to the value, so `1.5e3` gives `1500`. It refuses spaces, NaN and the infinities. |
+| `MustParseBigDecimal(s)` | As `ParseBigDecimal`, but panics on an error |
+
+### Methods {#bigdecimal-methods}
+
+| Method | Returns |
+| --- | --- |
+| `.Equal(o)` | Whether the values are equal, so `1.50` equals `1.5`. `==` compares the digits as written. |
+| `.Compare(o)` | `-1`, `0` or `+1`, comparing the values |
+| `.FitsDecimal()` | Whether a SurrealDB `decimal` holds the value exactly |
+| `.String()` | The value as the server writes it, such as `1.50` |
+| `.SurrealString()` | The value as a SurrealQL literal, such as `1.50bigdec` |
+
+```go
+price := models.MustParseBigDecimal("79228162514264337593543950336.50")
+fmt.Println(price, price.FitsDecimal())
+fmt.Println(models.MustParseBigDecimal("1.5e3"))
+fmt.Println(models.MustParseBigDecimal("1.50").Equal(models.MustParseBigDecimal("1.5")))
+```
+
+```text title="Output"
+79228162514264337593543950336.50 false
+1500
+true
+```
+
+For arithmetic, read `.String()` with `math/big` or a decimal library, such as `new(big.Rat).SetString(price.String())`.
+
+### Sending and reading big decimals {#bigdecimal-conversion}
+
+Over cbor.2, the SDK sends a `BigDecimal` as a `bigdecimal`, and a `bigdecimal` decodes into a `BigDecimal`, including from `any`. Over plain CBOR, the SDK sends a `BigDecimal` as a `decimal` when the value fits one, and as text when it does not. A `BigDecimal` decodes from either form.
+
+---
+
+## See also
+
+- [Value types](/docs/reference/golang/concepts/value-types#surrealdb-40-kinds) for every SurrealDB 4.0 kind
+- [Numbers](/docs/reference/query-language/language-primitives/data-types/numbers) for the SurrealQL number kinds

@@ -1,0 +1,267 @@
+---
+position: 11
+title: Dates, times and intervals
+description: "PlainDate, PlainTime, Timestamp and Interval in the Go SDK for the SurrealDB 4.0 date, time, timestamp and interval kinds: constructors, parsing, infinity, conversion to and from time.Time, comparison, zero values, and what each becomes over cbor.2 and plain CBOR."
+---
+
+# Dates, times and intervals {#temporal}
+
+SurrealDB 4.0 adds four kinds for calendar and clock values that are not an instant. The Go SDK has a type for each kind in the `models` package:
+
+- `PlainDate` for `date`, a calendar day
+- `PlainTime` for `time`, a time of day
+- `Timestamp` for `timestamp`, a date and a time of day with no time zone
+- `Interval` for `interval`, a calendar period, such as one month and two days
+
+This page documents the four types and how they convert. For an instant, use a `time.Time`, which the SDK sends as a [`datetime`](/docs/reference/golang/api/values/datetime). For a fixed length of time, use a `time.Duration`, which the SDK sends as a [`duration`](/docs/reference/golang/api/values/duration).
+
+**Package:** `github.com/surrealdb/surrealdb.go/v2/pkg/models`
+
+**Source:** [plain_date.go](https://github.com/surrealdb/surrealdb.go/blob/main/pkg/models/plain_date.go), [plain_time.go](https://github.com/surrealdb/surrealdb.go/blob/main/pkg/models/plain_time.go), [timestamp.go](https://github.com/surrealdb/surrealdb.go/blob/main/pkg/models/timestamp.go), [interval.go](https://github.com/surrealdb/surrealdb.go/blob/main/pkg/models/interval.go)
+
+---
+
+## How the types convert {#conversion}
+
+Over cbor.2, which SurrealDB 4.0 speaks, the SDK sends each type as its own kind. Each kind decodes back into the same type, including from `any`. Servers before 4.0 speak plain CBOR and have none of these kinds, so the SDK and the server send the nearest older kind:
+
+| Go type | Over cbor.2 (SurrealDB 4.0) | Over plain CBOR (earlier servers) |
+| --- | --- | --- |
+| `PlainDate` | `date` | A `datetime` at midnight UTC |
+| `PlainTime` | `time` | The `duration` since midnight |
+| `Timestamp` | `timestamp` | A `datetime`, with the wall clock read as UTC |
+| `Interval` | `interval` | Its ISO 8601 text, as a `string` |
+
+When the target is a Go type other than its own, a value decodes in the form that plain CBOR carries. A `date` decodes into a `time.Time` field as its midnight UTC, and a `time` decodes into a `models.CustomDuration` as the time since midnight.
+
+```go
+type Booking struct {
+	ID     *models.RecordID `json:"id,omitempty"`
+	Day    models.PlainDate `json:"day"`
+	Opens  models.PlainTime `json:"opens"`
+	Local  models.Timestamp `json:"local"`
+	Length models.Interval  `json:"length"`
+}
+
+day, err := models.NewPlainDate(2026, time.March, 14)
+if err != nil {
+	log.Fatal(err)
+}
+opens, err := models.NewPlainTime(9, 30, 0, 0)
+if err != nil {
+	log.Fatal(err)
+}
+
+b, err := surrealdb.Create[Booking](ctx, db, models.NewRecordID("booking", 1), Booking{
+	Day:    day,
+	Opens:  opens,
+	Local:  models.MustParseTimestamp("2026-03-14T09:30:00"),
+	Length: models.Interval{Months: 1, Days: 2},
+})
+fmt.Println(b.Day, b.Opens, b.Local, b.Length)
+```
+
+```text title="Output with SurrealDB 4.0"
+2026-03-14 09:30:00 2026-03-14T09:30:00 P1M2D
+```
+
+### Zero values and optional fields {#zero-values}
+
+The zero value of each type is a real value: `PlainDate` is 1970-01-01, `PlainTime` is 00:00:00, `Timestamp` is 1970-01-01T00:00:00, and `Interval` is `PT0S`. None of them is `NONE`, and `omitempty` never leaves them out. For a field that may be absent, use a pointer with `omitempty`:
+
+```go
+type Subscription struct {
+	Starts models.PlainDate  `json:"starts"`
+	Ends   *models.PlainDate `json:"ends,omitempty"`
+}
+```
+
+---
+
+## `PlainDate` {#plaindate}
+
+A calendar date with no time of day and no time zone, such as 2024-02-29, for the SurrealDB `date` kind. It holds the days since 1970-01-01 in the proleptic Gregorian calendar, from -262143-01-01 to +262142-12-31. These two dates stand for `-infinity` and `infinity`. You can compare `PlainDate` values with `==`.
+
+### Constructors {#plaindate-constructors}
+
+| Function | Description |
+| --- | --- |
+| `NewPlainDate(year, month, day)` | The date `year-month-day`, where year 0 is 1 BCE. It refuses a day that does not exist, such as February 30. |
+| `ParsePlainDate(s)` | Parses `YYYY-MM-DD` as the server does, and `infinity`, `-infinity` and `epoch` |
+| `MustParsePlainDate(s)` | As `ParsePlainDate`, but panics on an error |
+| `PlainDateOf(t)` | The date on which a `time.Time` falls, in its own location |
+| `PlainDateFromDays(days)` | The date `days` after 1970-01-01 |
+
+`PlainDateInfinity` and `PlainDateNegInfinity` are the two infinities.
+
+### Methods {#plaindate-methods}
+
+| Method | Returns |
+| --- | --- |
+| `.Date()` | The year, month and day |
+| `.Days()` | The days since 1970-01-01, negative before it |
+| `.In(loc)` | The `time.Time` at the start of the date in `loc` |
+| `.Compare(o)` | `-1`, `0` or `+1`. `-infinity` is before every date, and `infinity` after. |
+| `.IsInfinite()` | Whether the date is `infinity` or `-infinity` |
+| `.String()` | The date as the server writes it, such as `2024-02-29` or `infinity` |
+| `.SurrealString()` | The date as a SurrealQL literal, such as `pd'2024-02-29'` |
+
+```go
+due := models.MustParsePlainDate("2024-02-29")
+year, month, day := due.Date()
+fmt.Println(year, month, day)
+fmt.Println(due.SurrealString())
+fmt.Println(models.PlainDateInfinity, models.PlainDateInfinity.Compare(due))
+```
+
+```text title="Output"
+2024 February 29
+pd'2024-02-29'
+infinity 1
+```
+
+SurrealQL adds intervals and durations to dates. This query adds one month:
+
+```go
+results, err := surrealdb.Query[models.PlainDate](ctx, db, "RETURN $day + $length", map[string]any{
+	"day":    models.MustParsePlainDate("2026-03-14"),
+	"length": models.Interval{Months: 1},
+})
+fmt.Println((*results)[0].Result)
+```
+
+```text title="Output"
+2026-04-14
+```
+
+---
+
+## `PlainTime` {#plaintime}
+
+A time of day with no date and no time zone, such as 12:34:56.789, for the SurrealDB `time` kind. It holds the nanoseconds since midnight, from 00:00:00 up to and including 24:00:00, the end of the day. You can compare `PlainTime` values with `==`.
+
+### Constructors {#plaintime-constructors}
+
+| Function | Description |
+| --- | --- |
+| `NewPlainTime(hour, minute, sec, nsec)` | The time `hour:minute:sec` and `nsec` nanoseconds. The only time past 23:59:59.999999999 is 24:00:00. |
+| `ParsePlainTime(s)` | Parses `H:MM`, `H:MM:SS` or `H:MM:SS.fraction`, with up to nine digits in the fraction |
+| `MustParsePlainTime(s)` | As `ParsePlainTime`, but panics on an error |
+| `PlainTimeOf(t)` | The time of day of a `time.Time`, in its own location |
+| `PlainTimeFromDuration(d)` | The time `d` after midnight, for `d` from 0 to 24 hours |
+
+### Methods {#plaintime-methods}
+
+| Method | Returns |
+| --- | --- |
+| `.Clock()` | The hour, minute and second. The hour is 24 for 24:00:00. |
+| `.Nanosecond()` | The nanoseconds within the second |
+| `.SinceMidnight()` | The time since midnight, as a `time.Duration` |
+| `.Compare(o)` | `-1`, `0` or `+1` |
+| `.String()` | The time as the server writes it, such as `09:30:00` |
+| `.SurrealString()` | The time as a SurrealQL literal, such as `pt'09:30:00'` |
+
+```go
+fmt.Println(models.PlainTimeOf(time.Date(2026, 1, 1, 18, 45, 0, 0, time.UTC)))
+fmt.Println(models.MustParsePlainTime("24:00"))
+```
+
+```text title="Output"
+18:45:00
+24:00:00
+```
+
+---
+
+## `Timestamp` {#timestamp}
+
+A date and a time of day with no time zone, such as 2024-02-29T12:34:56.789, for the SurrealDB `timestamp` kind. A `Timestamp` is the reading of a wall clock, not an instant: the same reading is a different instant in each time zone. For an instant, use a `time.Time`. A `Timestamp` holds the seconds and nanoseconds since 1970-01-01T00:00:00 of that reading. Like a `PlainDate`, it has an `infinity` and a `-infinity`. You can compare `Timestamp` values with `==`.
+
+### Constructors {#timestamp-constructors}
+
+| Function | Description |
+| --- | --- |
+| `ParseTimestamp(s)` | Parses a date, `T` or a space, and a time of day before 24:00:00, and `infinity`, `-infinity` and `epoch` |
+| `MustParseTimestamp(s)` | As `ParseTimestamp`, but panics on an error |
+| `TimestampOf(t)` | The reading of the wall clock of a `time.Time`, in its own location. Call `t.UTC()` first for the reading in UTC. |
+| `TimestampFromUnix(sec, nsec)` | The timestamp `sec` seconds and `nsec` nanoseconds after 1970-01-01T00:00:00 |
+
+`TimestampInfinity` and `TimestampNegInfinity` are the two infinities.
+
+### Methods {#timestamp-methods}
+
+| Method | Returns |
+| --- | --- |
+| `.In(loc)` | The instant at which a clock in `loc` shows the reading |
+| `.Unix()` | The whole seconds since 1970-01-01T00:00:00 |
+| `.Nanosecond()` | The nanoseconds within the second |
+| `.Compare(o)` | `-1`, `0` or `+1` |
+| `.IsInfinite()` | Whether the timestamp is `infinity` or `-infinity` |
+| `.String()` | The timestamp as the server writes it, such as `2024-01-15T09:30:00` |
+| `.SurrealString()` | The timestamp as a SurrealQL literal, such as `ts'2024-01-15T09:30:00'` |
+
+A timestamp keeps the reading of the clock, whatever the time zone of the `time.Time` it came from:
+
+```go
+opens := time.Date(2024, 1, 15, 9, 30, 0, 0, time.FixedZone("UTC-5", -5*3600))
+
+ts, err := models.TimestampOf(opens)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(ts)
+fmt.Println(ts.In(time.UTC))
+```
+
+```text title="Output"
+2024-01-15T09:30:00
+2024-01-15 09:30:00 +0000 UTC
+```
+
+---
+
+## `Interval` {#interval}
+
+A span of months, days and microseconds, such as P1Y2M3DT4H5M6.5S, for the SurrealDB `interval` kind, as in PostgreSQL. An `Interval` keeps the three parts apart, because a month and a day have no fixed length. For example, a month after January 31 is not 30 days after it. Each part can be negative on its own.
+
+```go
+type Interval struct {
+	Months       int32
+	Days         int32
+	Microseconds int64
+}
+```
+
+### Methods {#interval-methods}
+
+| Method | Returns |
+| --- | --- |
+| `.Equal(o)` | Whether the totals are equal, where a month is 30 days and a day is 24 hours |
+| `.Compare(o)` | `-1`, `0` or `+1`, comparing the totals |
+| `.String()` | The interval in ISO 8601, as the server writes it, such as `P1Y2M3DT4H5M6.5S`, and `PT0S` for zero |
+| `.SurrealString()` | The interval as a SurrealQL literal, such as `ivl'P1D'` |
+
+Like the server, `.Equal()` and `.Compare()` use the total, so one month equals 30 days. `==` compares the parts, as it does for `time.Time`, so a Go map keeps `P1M` and `P30D` apart:
+
+```go
+month := models.Interval{Months: 1}
+days := models.Interval{Days: 30}
+fmt.Println(month, days)
+fmt.Println(month.Equal(days), month == days)
+```
+
+```text title="Output"
+P1M P30D
+true false
+```
+
+To read an interval from text, use `.UnmarshalText()`, which reads the form that `.String()` writes.
+
+---
+
+## See also
+
+- [Value types](/docs/reference/golang/concepts/value-types#surrealdb-40-kinds) for every SurrealDB 4.0 kind
+- [CustomDateTime](/docs/reference/golang/api/values/datetime) for instants
+- [CustomDuration](/docs/reference/golang/api/values/duration) for fixed lengths of time
+- [Dates and times](/docs/reference/query-language/language-primitives/data-types/dates-and-times) for the SurrealQL kinds

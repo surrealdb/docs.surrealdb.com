@@ -1,17 +1,12 @@
 ---
 position: 10
 title: Reliable connections
-description: The Go SDK provides a contrib package for auto-reconnecting WebSocket connections with session restoration and live query persistence.
+description: How a Go SDK WebSocket client reconnects by itself - backoff with WithReconnectAttempts and WithReconnectDelay, what it restores and what it loses, watching the connection with Status and OnStatus, and the contrib/rews package for custom retry strategies.
 ---
 
 # Reliable connections
 
-> [!WARNING]
-> This feature is provided by the `contrib/rews` package, which is outside of the backward compatibility guarantees of the core SDK. Its API may change without following semantic versioning.
-
-The `rews` (reliable WebSocket) package wraps a standard WebSocket connection and adds automatic reconnection when the connection is lost. On reconnect, it restores the previous session state including namespace, database, authentication, variables, and live queries.
-
-This is useful for long-running applications that need to survive transient network failures without manual reconnection logic.
+A client can lose its WebSocket connection, for example when the network changes or the server restarts. A Go SDK client that uses WebSocket then reconnects by itself. Before it sends anything else on the new connection, it restores what it held on the old one. This page covers how reconnection works, and what the client restores and loses. It also covers how to watch the state of the connection, and the `contrib/rews` package for custom retry strategies.
 
 ## API references
 
@@ -24,23 +19,131 @@ This is useful for long-running applications that need to survive transient netw
 	</thead>
 	<tbody>
 		<tr>
+			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#withreconnect"><code>surrealdb.WithReconnect(enabled)</code></a></td>
+			<td scope="row" data-label="Description">Turns reconnection on or off</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#withreconnectattempts"><code>surrealdb.WithReconnectAttempts(attempts)</code></a></td>
+			<td scope="row" data-label="Description">Sets how many consecutive attempts the client makes</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#withreconnectdelay"><code>surrealdb.WithReconnectDelay(min, max)</code></a></td>
+			<td scope="row" data-label="Description">Sets the wait before each attempt</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#status"><code>db.Status()</code></a></td>
+			<td scope="row" data-label="Description">Returns the state of the connection</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#onstatus"><code>db.OnStatus(fn)</code></a></td>
+			<td scope="row" data-label="Description">Calls a function at each change of the state</td>
+		</tr>
+		<tr>
 			<td scope="row" data-label="Function"><code>rews.New(newConn, interval, unmarshaler, logger)</code></td>
-			<td scope="row" data-label="Description">Creates a new auto-reconnecting WebSocket connection</td>
-		</tr>
-		<tr>
-			<td scope="row" data-label="Function"><code>rews.NewExponentialBackoffRetryer()</code></td>
-			<td scope="row" data-label="Description">Creates a retryer with exponential backoff and jitter</td>
-		</tr>
-		<tr>
-			<td scope="row" data-label="Function"><code>rews.NewFixedDelayRetryer(delay, maxRetries)</code></td>
-			<td scope="row" data-label="Description">Creates a retryer with a fixed delay between attempts</td>
+			<td scope="row" data-label="Description">Creates a reconnecting WebSocket connection with its own retry strategy</td>
 		</tr>
 	</tbody>
 </table>
 
-## Setting up a reliable connection
+## How reconnection works
 
-Create a `rews.Connection` by providing a factory function that constructs the underlying WebSocket connection, a check interval for detecting disconnections, a CBOR unmarshaler, and an optional logger.
+Reconnection is on by default for WebSocket connections. When the client loses the connection, it connects again, with backoff between attempts. The wait before attempt *n* is the minimum delay times 2 to the power of *n*, counting attempts from 1. Each wait also has up to 10% random jitter in either direction, and no wait is longer than the maximum delay. With the default delays of `1s` and `1m`, the client waits about 2, 4, 8, 16 and 32 seconds before its five attempts. When the last attempt fails, the client gives up and closes.
+
+While the client reconnects:
+
+- A request made in that time waits until the client has reconnected and restored the session. If the request's context ends first, the request fails with `waiting to reconnect: context deadline exceeded`.
+- A request that was waiting for its response when the client lost the connection fails with an error that wraps `connection.ErrConnectionClosed`. The server may or may not have run that request.
+- After the client gives up, every request fails with an error that wraps `surrealdb.ErrClientClosed`.
+
+Pass options to change the number of attempts and the delays:
+
+```go
+db, err := surrealdb.FromEndpointURLStringWithOptions(ctx, "wss://example.surrealdb.cloud",
+	surrealdb.WithReconnectAttempts(10),
+	surrealdb.WithReconnectDelay(500*time.Millisecond, 30*time.Second),
+)
+```
+
+`WithReconnectAttempts(0)`, or any number below 1, removes the limit, so the client tries until it reconnects or you close it. `WithReconnect(false)` turns reconnection off: a lost connection then closes the client, and later requests fail.
+
+HTTP connections are stateless, so they have nothing to reconnect. Each HTTP request opens what it needs.
+
+## What gets restored
+
+Before it sends any other request on the new connection, the client restores what it held on the old one:
+
+1. The **sessions** attached with `Attach` or `Fork`, under the same UUIDs.
+2. The **authentication** of the default session and of each session, with the last token that the session received. With [token renewal](/docs/reference/golang/concepts/authentication#automatic-token-renewal) on, the client first exchanges an expired pair for a new one.
+3. The **namespace and database** of each session.
+4. The **variables** that each session set with `.Let()`.
+5. The **live queries** started with `Live`, under the same UUIDs, each in the namespace and database where it started. Their channels keep receiving notifications.
+
+The client ends a live query, instead of restoring it, when its session is no longer signed in as the same user. The client also ends a live query when the server refuses to start it again. In both cases, the channel of the live query closes, and the status event reports `surrealdb.ErrLiveQueryEnded`.
+
+## What is lost
+
+The client cannot restore some state on a new connection:
+
+- **Open transactions.** A transaction that was open is gone, and calls on it fail. Run the transaction again from the start.
+- **Live queries started with a `LIVE SELECT` statement.** The client does not know their definition, so it cannot start them again. Use `Live` for a live query that must survive a reconnect.
+- **Changes made while the client was disconnected.** Live queries that restart do not receive notifications for those changes.
+- **A sign-in whose token has expired.** A session that signed in with a username and password can outlive its token. By default, the token lasts one hour. Without token renewal, the client cannot authenticate the session again on the new connection, and the status event reports the error.
+- **A sign-in on a server that restarted with a new datastore.** A server that runs in memory starts empty after a restart. It does not accept the tokens that it issued before the restart. The status event reports `authenticate: There was a problem with authentication`. The session is signed out, and its live queries end. A server with a persistent datastore accepts the old token, so the client restores the session.
+
+If the client cannot restore the sign-in, sign the session in again. You can do this in the function that you pass to `.OnStatus()`.
+
+## Watching the connection status
+
+`.Status()` returns the state of the connection, as a `surrealdb.ConnectionStatus`:
+
+| Status | Meaning |
+| --- | --- |
+| `StatusConnected` | The client sends requests to the server. |
+| `StatusDisconnected` | The client lost the connection, or an attempt to reconnect failed. Requests wait. |
+| `StatusReconnecting` | The client is trying to reconnect. |
+| `StatusClosed` | The client was closed, or gave up reconnecting. Requests fail. |
+
+`.OnStatus()` calls a function with a [`StatusEvent`](/docs/reference/golang/api/types#statusevent) at each change of state, until you call the function that `.OnStatus()` returns:
+
+```go
+stop := db.OnStatus(func(ev surrealdb.StatusEvent) {
+	switch ev.Status {
+	case surrealdb.StatusDisconnected:
+		log.Printf("connection lost (attempt %d): %v", ev.Attempt, ev.Err)
+	case surrealdb.StatusConnected:
+		if ev.Err != nil {
+			log.Printf("reconnected, but could not restore: %v", ev.Err)
+		}
+	case surrealdb.StatusClosed:
+		log.Printf("gave up: %v", ev.Err)
+	}
+})
+defer stop()
+```
+
+`Attempt` counts the attempts since the client lost the connection, from 1. It is 0 for the event that reports the loss. On a `StatusConnected` event after a reconnect, `Err` holds what the client could not restore, such as an expired token. `Err` is `nil` when the client restored everything.
+
+The client calls the function with one event at a time, in order, on a goroutine of its own. The function can make requests on the client, or close the client. The next events wait until the function returns. Only a client that reconnects reports changes. A client without reconnection reports `StatusConnected` until it is closed.
+
+## Custom connections
+
+A `gorillaws` or `gws` connection that you pass to [`FromConnection`](/docs/reference/golang/api/core/db#fromconnection) reconnects in the same way. Both connection types implement `connection.Redialer` and `connection.CloseNotifier`. A connection of your own reconnects when it implements those two interfaces.
+
+## Using the rews package
+
+> [!WARNING]
+> The `contrib/rews` package is outside the backward compatibility guarantee of the SDK. Its API can change in a minor release.
+
+The `rews` package provides a reconnecting WebSocket connection with its own retry strategies. For example, it can use exponential backoff without a limit on attempts, or a strategy that you write yourself. Use it when the built-in reconnection options do not fit.
+
+Create a `rews.Connection` with `rews.New`. It takes these arguments, in this order:
+
+- A function that builds the underlying WebSocket connection
+- An interval for checking the connection
+- A CBOR unmarshaler
+- An optional logger
+
+The example below uses a `gorillaws` connection, checks it every 5 seconds, and passes no logger:
 
 ```go
 import (
@@ -48,32 +151,27 @@ import (
 	"net/url"
 	"time"
 
-	surrealdb "github.com/surrealdb/surrealdb.go"
-	"github.com/surrealdb/surrealdb.go/contrib/rews"
-	"github.com/surrealdb/surrealdb.go/pkg/connection"
-	"github.com/surrealdb/surrealdb.go/pkg/connection/gorillaws"
-	"github.com/surrealdb/surrealdb.go/surrealcbor"
+	surrealdb "github.com/surrealdb/surrealdb.go/v2"
+	"github.com/surrealdb/surrealdb.go/v2/contrib/rews"
+	"github.com/surrealdb/surrealdb.go/v2/pkg/connection"
+	"github.com/surrealdb/surrealdb.go/v2/pkg/connection/gorillaws"
 )
 
-endpoint, _ := url.Parse("ws://localhost:8000/rpc")
-codec := surrealcbor.New()
+u, err := url.ParseRequestURI("ws://localhost:8000")
+if err != nil {
+	log.Fatal(err)
+}
+conf := connection.NewConfig(u)
 
 conn := rews.New(
-	func(ctx context.Context) (*gorillaws.WebSocket, error) {
-		conf := connection.NewConfig(endpoint)
-		conf.Marshaler = codec
-		conf.Unmarshaler = codec
+	func(ctx context.Context) (*gorillaws.Connection, error) {
 		return gorillaws.New(conf), nil
 	},
 	5*time.Second,
-	codec,
+	conf.Unmarshaler,
 	nil,
 )
-```
 
-Then pass the connection to [`FromConnection`](/docs/reference/golang/api/core/db#fromconnection) to create a [`*DB`](/docs/reference/golang/api/core/db):
-
-```go
 db, err := surrealdb.FromConnection(ctx, conn)
 if err != nil {
 	log.Fatal(err)
@@ -81,36 +179,36 @@ if err != nil {
 defer db.Close(ctx)
 ```
 
-## Configuring retry behaviour
+A `rews` connection reconnects by itself. The client does not use its built-in reconnection on this connection.
 
-By default, connection attempts are not retried. Set the `Retryer` field to enable automatic retries on connection failure.
+### Configuring retry behaviour
 
-The `ExponentialBackoffRetryer` increases the delay between retries exponentially, with optional jitter to avoid thundering herd problems:
+By default, `rews` does not retry a failed attempt to connect. To retry, set the `Retryer` field of the connection. `ExponentialBackoffRetryer` makes the delay between attempts grow exponentially, with jitter:
 
 ```go
 retryer := rews.NewExponentialBackoffRetryer()
 retryer.MaxRetries = 10
-retryer.InitialDelay = 1 * time.Second
+retryer.InitialDelay = time.Second
 retryer.MaxDelay = 30 * time.Second
 conn.Retryer = retryer
 ```
 
 | Field | Default | Description |
-|---|---|---|
-| `InitialDelay` | 1s | Delay before the first retry |
-| `MaxDelay` | 30s | Maximum delay between retries |
-| `Multiplier` | 2.0 | Exponential backoff multiplier |
-| `MaxRetries` | 0 (infinite) | Maximum retry attempts, 0 for unlimited |
-| `Jitter` | `true` | Add randomness to avoid synchronised retries |
-| `JitterFactor` | 0.3 | Maximum jitter as a fraction of the delay |
+| --- | --- | --- |
+| `InitialDelay` | `1s` | The delay before the first retry |
+| `MaxDelay` | `30s` | The longest delay between retries |
+| `Multiplier` | `2.0` | The factor by which the delay grows |
+| `MaxRetries` | `0` | The number of retries, where `0` means no limit |
+| `Jitter` | `true` | Adds randomness to each delay |
+| `JitterFactor` | `0.3` | The largest jitter, as a fraction of the delay |
 
-For simpler cases, `FixedDelayRetryer` uses a constant delay:
+`FixedDelayRetryer` waits the same time before each attempt:
 
 ```go
 conn.Retryer = rews.NewFixedDelayRetryer(2*time.Second, 5)
 ```
 
-You can also implement the `Retryer` interface for custom strategies:
+A strategy of your own implements the `Retryer` interface:
 
 ```go
 type Retryer interface {
@@ -119,36 +217,20 @@ type Retryer interface {
 }
 ```
 
-## What gets restored on reconnect
+### What rews restores
 
-When the connection is lost and re-established, `rews` automatically restores:
-
-1. **Namespace and database** - the last values passed to [`.Use()`](/docs/reference/golang/api/core/db#use)
-2. **Authentication** - the last token from [`.SignIn()`](/docs/reference/golang/api/core/db#signin), [`.SignUp()`](/docs/reference/golang/api/core/db#signup), or [`.Authenticate()`](/docs/reference/golang/api/core/db#authenticate)
-3. **Connection variables** - all variables set with [`.Let()`](/docs/reference/golang/api/core/db#let) (and removed with [`.Unset()`](/docs/reference/golang/api/core/db#unset))
-4. **[Live queries](/docs/reference/golang/concepts/live-queries)** - all active live queries are re-subscribed, and notification routing is restored
-
-The figure below shows the connection states and the order in which the session is restored.
+When `rews` reconnects, it restores the namespace and database, the authentication, the variables and the live queries. The figure below shows the states of a `rews` connection and the order in which it restores the session.
 
 <img src="~/assets/img/diagrams/light/conn-reconnect-go-light.webp" darkSrc="~/assets/img/diagrams/conn-reconnect-go.webp" alt="The rews connection of the Go SDK moves from Disconnected to Connecting to Connected, and to Closing and Closed after Close(). At each CheckInterval it checks the socket, and if the socket has closed it reconnects and restores the session; a failed attempt is tried again at the next check. The session is restored in this order: the namespace and database from the last Use(), the authentication with the last token or, if the server refuses it, with the refresh token from SignInWithRefresh, the variables set with Let(), and the live queries from Live() or from a Query() call that starts with LIVE SELECT, whose notifications keep their original IDs. With an expired token and no refresh token the reconnect fails, and a LIVE SELECT that is not at the start of its query is not restored." />
 
 > [!NOTE]
-> If the authentication token has expired by the time reconnection occurs, the server refuses it. When the session was started with [`.SignInWithRefresh()`](/docs/reference/golang/concepts/authentication#using-refresh-tokens) or `.SignUpWithRefresh()`, `rews` then signs in with the refresh token and keeps the new pair; set `OnTokensRefreshed` to receive it, because the server revokes a refresh token once it is used. Without a refresh token, re-authentication fails and the reconnect is tried again at the next check.
+> When the server refuses the last token on a reconnect, and the session signed in with `.SignInWithRefresh()` or `.SignUpWithRefresh()`, `rews` signs in with the refresh token and keeps the new pair. The server revokes a refresh token once it is used, so set `OnTokensRefreshed` to receive the new pair, or read it with `conn.Tokens(ctx)`. Without a refresh token, the sign-in fails and the reconnect is tried again at the next check.
 
-## Connection states
-
-The `rews.Connection` tracks its state through a state machine:
-
-| State | Description |
-|---|---|
-| `Disconnected` | Not connected, initial state |
-| `Connecting` | Connection attempt in progress |
-| `Connected` | Connection established and active |
-| `Closing` | Close requested, shutting down |
-| `Closed` | Fully closed, cannot be reused |
+A `rews.Connection` moves through the states `Disconnected`, `Connecting`, `Connected`, `Closing` and `Closed`. After `Closed`, it cannot be used again.
 
 ## Learn more
 
-- [Connecting to SurrealDB](/docs/reference/golang/concepts/connecting-to-surrealdb) for standard connection setup
-- [Live queries](/docs/reference/golang/concepts/live-queries) for live query setup that persists across reconnections
-- [DB API reference](/docs/reference/golang/api/core/db) for `FromConnection` usage
+- [Connecting to SurrealDB](/docs/reference/golang/concepts/connecting-to-surrealdb) for the connection options
+- [Live queries](/docs/reference/golang/concepts/live-queries#reconnecting) for live queries across a reconnect
+- [Authentication](/docs/reference/golang/concepts/authentication#automatic-token-renewal) for token renewal
+- [DB API reference](/docs/reference/golang/api/core/db#withreconnect) for the reconnection options
