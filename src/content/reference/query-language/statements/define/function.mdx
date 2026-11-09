@@ -22,7 +22,8 @@ DEFINE FUNCTION [ OVERWRITE | IF NOT EXISTS ] fn::@name
   ( [ @argument: @type ... ] ) [ -> @type ] {
 	[ @query ... ]
 	[ RETURN @returned ]
-} [ COMMENT @string ] [ PERMISSIONS [ NONE | FULL | WHERE @condition]]
+} [ COMMENT @string ] [ SECURITY DEFINER | SECURITY INVOKER ]
+  [ PERMISSIONS [ NONE | FULL | WHERE @condition]]
   [ GRAPHQL_ALIAS @string ] [ GRAPHQL_DEPRECATED @string ]
 ```
 
@@ -242,7 +243,7 @@ SELECT * FROM secret_note;
 fn::read_notes();
 ```
 
-To let users change data they cannot reach directly, use an [event](/docs/reference/query-language/statements/define/event#events-and-permissions) or a [`DEFINE API`](/docs/reference/query-language/statements/define/api#permissions) endpoint, whose bodies run without table permission checks, or a table permission clause that allows the change.
+To let users read or change data they cannot reach directly, define the function with [`SECURITY DEFINER`](#running-the-body-without-table-permissions), or use an [event](/docs/reference/query-language/statements/define/event#events-and-permissions) or a [`DEFINE API`](/docs/reference/query-language/statements/define/api#permissions) endpoint, whose bodies run without table permission checks. A table permission clause that allows the change works as well.
 
 > [!NOTE]
 > The examples below use the [`Surreal Deal Store`](/docs/explore/tutorials/demos/surreal-deal-store) dataset.
@@ -302,6 +303,40 @@ value = "NONE"
 DEFINE FUNCTION fn::fetchAllProducts() -> array {
 	 SELECT * FROM product LIMIT 10
 } PERMISSIONS WHERE $auth.admin = true;
+```
+
+### Running the body without table permissions
+
+From SurrealDB 4.0.1, `SECURITY DEFINER` runs the body of a function without table and field permission checks, so the function can read and write records that the caller cannot reach directly. `SECURITY INVOKER` is the default, and runs the body with the caller's permissions as described above. The clause comes after any `COMMENT` and before `PERMISSIONS`.
+
+In the example below, a record user who selects from `category` gets only the visible categories, and gets every category through the function:
+
+```surql
+DEFINE TABLE category PERMISSIONS FOR select WHERE visible = true;
+
+DEFINE FUNCTION fn::all_categories() -> array {
+	SELECT * FROM category
+} SECURITY DEFINER PERMISSIONS WHERE $auth != NONE;
+
+-- As a record user
+SELECT * FROM category;
+fn::all_categories();
+```
+
+Only the body runs without permission checks:
+
+- The arguments are evaluated before the call, with the caller's permissions, so `fn::all_categories((SELECT * FROM category))` passes only the categories the caller can see.
+- The `PERMISSIONS` clause of the function is checked against the caller, before the body runs.
+- Inside the body, `$auth` is still the caller. Check it in the body where different callers should get different records.
+- A `SECURITY INVOKER` function that calls a `SECURITY DEFINER` function keeps the permission checks on its own queries. A `SECURITY INVOKER` function called from the body of a `SECURITY DEFINER` function runs without them, like the rest of that body.
+
+> [!WARNING]
+> The body of a `SECURITY DEFINER` function returns whatever it selects to everyone its `PERMISSIONS` clause lets in. Set `PERMISSIONS` on every such function that reads or writes data.
+
+`INFO FOR DB` and exports show `SECURITY DEFINER` after any `COMMENT`, and leave the clause out for a `SECURITY INVOKER` function. `DEFINE FUNCTION OVERWRITE` without the clause returns the function to `SECURITY INVOKER`. To change only the mode, use [`ALTER FUNCTION`](/docs/reference/query-language/statements/alter/function), which keeps the current mode when the clause is left out:
+
+```surql
+ALTER FUNCTION fn::all_categories SECURITY INVOKER;
 ```
 
 ## Transactional behaviour
