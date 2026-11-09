@@ -969,6 +969,14 @@ Two things to check alongside a move:
   than a gap. Twelve unreachable tutorials went unnoticed for seven weeks that
   way, each answering 302 and resolving to a page that returned 200.
 
+### Short URLs
+
+`/docs/<word>` answers for the words a reader types and an agent constructs before it has seen the navigation: `/docs/python`, `/docs/kubernetes`, `/docs/select`, `/docs/define-table`, `/docs/string` for the string functions and `/docs/strings` for the data type. The list is `short-urls.ts`, and `redirects.ts` adds it after every other rule as 302s, because each one names the current best page for a word rather than a page that moved. When a page moves, change its target in `short-urls.ts` and keep the word.
+
+Part of the list is chosen by hand and part follows the reference tree: every statement, `DEFINE` and `ALTER` page, clause, `surreal` command, function family and data type has one. `bun run check:links` fails when a target is not a page, when a word would hide a page or is taken by an earlier redirect, when a word is listed twice, and when a page in one of those reference folders has no short URL, so a new statement is reported until it gets one.
+
+The www repo's `redirects.json` runs first and already maps a few of these words, such as `install` and `cloud`. Where it does, its target is the one a reader gets, so keep the two the same, or remove the www entry and let this list answer.
+
 ## Content components
 
 Markdown pages can use a small set of React components. Most are registered in
