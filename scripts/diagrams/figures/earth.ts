@@ -5,8 +5,8 @@ import type { Verified } from "../provenance";
 
 export const verified: Verified = {
     against:
-        "the Earth page's sizing example; capacity_msgs_per_s 1,300 with admit_fraction 0.8 in config/limits.toml, and about 3 units a commit in docs/design/EXECUTOR-CPU.md, of surrealdb/earth (9a218d9)",
-    on: "2026-11-05",
+        "the Earth page's sizing example; capacity_msgs_per_s 1,300 with admit_fraction 0.8 in config/limits.toml, and about 3 units a commit in docs/design/EXECUTOR-CPU.md, of surrealdb/earth (9a218d9); large scans do not run across cells in production, so the figure no longer draws one",
+    on: "2026-11-09",
 };
 
 const CELL_W = 240;
@@ -59,12 +59,11 @@ const rowLabel = (s: string[], t: Theme, y: number, title: string, lines: string
     });
 };
 
-// How an Earth instance adds cells as load grows, up to its Cells limit, and
-// how a large scan runs across several of them
+// How an Earth instance adds cells as load grows, up to its Cells limit
 const earthCells: Figure = {
     name: "earth-cells",
     width: 2400,
-    height: 1260,
+    height: 1000,
     draw(t: Theme) {
         const s: string[] = [markers([t.accent, t.line, t.red])];
         s.push(
@@ -111,40 +110,10 @@ const earthCells: Figure = {
             }),
         );
 
-        // A large scan: parts on several cells, merged into one result
-        const y0 = 960;
-        rowLabel(s, t, y0, "A large scan", [
-            "runs in parts on several cells",
-            "at once, from the same limit",
-        ]);
-        s.push(rect(X0, y0, 380, CELL_H, { fill: t.card }));
-        s.push(text(X0 + 190, y0 + 62, "Query", { size: 28, fill: t.text, weight: 700 }));
-        s.push(text(X0 + 190, y0 + 102, "scans a large table", { size: 22, fill: t.muted }));
-        const px = 1240;
-        const pw = 300;
-        const ph = 52;
-        const pTop = y0 + CELL_H / 2 - (4 * ph + 3 * 14) / 2;
-        for (let i = 0; i < 4; i++) {
-            const py = pTop + i * (ph + 14);
-            s.push(rect(px, py, pw, ph, { fill: t.accentBg, stroke: t.accent, r: 12 }));
-            s.push(
-                text(px + pw / 2, py + 34, `part ${i + 1}, on a cell`, {
-                    size: 22,
-                    fill: t.text,
-                    weight: 600,
-                }),
-            );
-            s.push(arrow(X0 + 386, y0 + CELL_H / 2, px - 8, py + ph / 2, t.line, 3));
-            s.push(arrow(px + pw + 6, py + ph / 2, 1752, y0 + CELL_H / 2, t.line, 3));
-        }
-        s.push(rect(1760, y0, 380, CELL_H, { fill: t.card }));
-        s.push(text(1950, y0 + 62, "One result", { size: 28, fill: t.text, weight: 700 }));
-        s.push(text(1950, y0 + 102, "the parts merged", { size: 22, fill: t.muted }));
-
         s.push(
             text(
                 80,
-                1220,
+                960,
                 "Six cells stand for the Cells limit here; the default is 100. A cell takes about 1,000 small reads a second, or about 200 small writes, before it takes no new connections.",
                 { size: 24, fill: t.muted, anchor: "start" },
             ),
