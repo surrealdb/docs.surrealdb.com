@@ -192,6 +192,10 @@ const TABLES: Table[] = [
 
 const blogSchema: Figure = {
     name: "blog-schema-links",
+    verified: {
+        against: "the record-links page's schema and queries, run on SurrealDB 4.0.0",
+        on: "2026-11-10",
+    },
     width: 2320,
     height: 760,
     draw(t: Theme) {
@@ -226,7 +230,7 @@ const blogSchema: Figure = {
         const stored: [string, string, string, string, string][] = [
             ["blog", "owner", "user", "one-to-one", "record<user>, UNIQUE index"],
             ["post", "blog", "blog", "one-to-many", "record<blog>, ON DELETE CASCADE"],
-            ["post", "tags", "tag", "many-to-many", "array<record<tag>>"],
+            ["post", "tags", "tag", "many-to-many", "set<record<tag>>"],
         ];
         stored.forEach(([from, field, to, kind, type]) => {
             const y1 = fieldY(from, field);
