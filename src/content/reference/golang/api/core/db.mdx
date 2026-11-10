@@ -1,12 +1,16 @@
 ---
 position: 1
 title: DB
-description: The DB struct is the main entry point for connecting to and interacting with a SurrealDB instance from Go.
+description: Reference for the DB client of the SurrealDB Go SDK 2.x and the package functions that take it - constructors and options, connection, authentication, variables, sessions, transactions, import and export, Query, QueryRaw, QueryStream, Run, API, GQL, the CRUD functions, PatchWithResult, live queries, version helpers and Send.
 ---
 
 # `DB` {#db}
 
-The `DB` struct is the main client for interacting with SurrealDB. It holds the underlying connection and provides methods for [authentication](/docs/reference/golang/concepts/authentication), namespace selection, and [live query](/docs/reference/golang/concepts/live-queries) management. Data operations are performed through generic top-level functions that accept `*DB` as a parameter.
+`DB` is the client of the Go SDK. It holds the connection and the default session, and has methods for connecting, [authentication](/docs/reference/golang/concepts/authentication), variables, sessions, transactions, and import and export. Queries and record operations are generic package functions, such as `surrealdb.Query[T]`, that take a `*DB`, a [`*Session`](/docs/reference/golang/api/core/session) or a [`*Transaction`](/docs/reference/golang/api/core/transaction) as their `s` argument. This page is the reference for both. For explanations and longer examples, follow the links to the concept pages.
+
+```go title="Import"
+import surrealdb "github.com/surrealdb/surrealdb.go/v2"
+```
 
 **Source:** [db.go](https://github.com/surrealdb/surrealdb.go/blob/main/db.go)
 
@@ -16,7 +20,7 @@ The `DB` struct is the main client for interacting with SurrealDB. It holds the 
 
 ### `FromEndpointURLString` {#fromendpointurlstring}
 
-Creates a new `*DB` and connects to a SurrealDB instance. The URL scheme determines the connection type (WebSocket or HTTP).
+Creates a client and connects it. The scheme of the URL chooses the connection: `ws://` and `wss://` for WebSocket, `http://` and `https://` for HTTP.
 
 ```go title="Syntax"
 db, err := surrealdb.FromEndpointURLString(ctx, connectionURL)
@@ -34,31 +38,48 @@ db, err := surrealdb.FromEndpointURLString(ctx, connectionURL)
         <tr>
             <td><code>ctx</code> <Label label="required" /></td>
             <td><code>context.Context</code></td>
-            <td>Context for canceling the connection attempt.</td>
+            <td>Bounds the connection attempt.</td>
         </tr>
         <tr>
             <td><code>connectionURL</code> <Label label="required" /></td>
             <td><code>string</code></td>
-            <td>The endpoint URL. Supported schemes: <code>ws://</code>, <code>wss://</code>, <code>http://</code>, <code>https://</code>.</td>
+            <td>The address of the server, such as <code>ws://localhost:8000</code>.</td>
         </tr>
     </tbody>
 </table>
 
 **Returns:** `(*DB, error)`
 
-#### Examples
-
-```go title="WebSocket"
+```go
 db, err := surrealdb.FromEndpointURLString(ctx, "ws://localhost:8000")
+if err != nil {
+	log.Fatal(err)
+}
+defer db.Close(ctx)
 ```
 
-```go title="HTTPS"
-db, err := surrealdb.FromEndpointURLString(ctx, "https://cloud.surrealdb.com")
+A URL with another scheme returns `invalid connection url`. For `mem://`, `memory` and `surrealkv://`, the function returns `embedded database not enabled`. See [Connecting to SurrealDB](/docs/reference/golang/concepts/connecting-to-surrealdb).
+
+### `FromEndpointURLStringWithOptions` {#fromendpointurlstringwithoptions}
+
+Creates a client and connects it, configured by [options](#options). With no options, it does what `FromEndpointURLString` does.
+
+```go title="Syntax"
+db, err := surrealdb.FromEndpointURLStringWithOptions(ctx, connectionURL, opts...)
+```
+
+**Returns:** `(*DB, error)`
+
+```go
+db, err := surrealdb.FromEndpointURLStringWithOptions(ctx, "ws://localhost:8000",
+	surrealdb.WithVersionCheck(true),
+	surrealdb.WithTokenRenewal(true),
+)
 ```
 
 ### `FromConnection` {#fromconnection}
 
-Creates a new `*DB` from a custom `connection.Connection` implementation. Calls `.Connect(ctx)` automatically.
+Creates a client from a connection you built, such as `gorillaws.New(conf)`, `gws.New(conf)` or `http.New(conf)`, and calls `.Connect(ctx)` on it.
 
 ```go title="Syntax"
 db, err := surrealdb.FromConnection(ctx, conn)
@@ -76,17 +97,83 @@ db, err := surrealdb.FromConnection(ctx, conn)
         <tr>
             <td><code>ctx</code> <Label label="required" /></td>
             <td><code>context.Context</code></td>
-            <td>Context for canceling the connection attempt.</td>
+            <td>Bounds the connection attempt.</td>
         </tr>
         <tr>
             <td><code>conn</code> <Label label="required" /></td>
             <td><code>connection.Connection</code></td>
-            <td>A connection implementation (e.g., <code>gorillaws.New(conf)</code> or <code>http.New(conf)</code>).</td>
+            <td>The connection. See <a href="/docs/reference/golang/concepts/connecting-to-surrealdb#using-a-custom-connection">Using a custom connection</a>.</td>
         </tr>
     </tbody>
 </table>
 
 **Returns:** `(*DB, error)`
+
+### `FromConnectionWithOptions` {#fromconnectionwithoptions}
+
+Creates a client from a connection you built, configured by [options](#options).
+
+```go title="Syntax"
+db, err := surrealdb.FromConnectionWithOptions(ctx, conn, opts...)
+```
+
+**Returns:** `(*DB, error)`
+
+`Connect`, `New` and `.WithContext()` are deprecated. Use `FromEndpointURLString`, and pass a context to each call.
+
+---
+
+## Options {#options}
+
+An `Option` configures a client created with `FromEndpointURLStringWithOptions` or `FromConnectionWithOptions`.
+
+### `WithVersionCheck` {#withversioncheck}
+
+Turns the check of the server version on or off. It is off by default. When it is on, the client sends a version request each time it connects. Connecting fails with an [`UnsupportedVersionError`](/docs/reference/golang/api/errors#unsupportedversionerror) when the server version is outside [`MinimumServerVersion`](#version-constants) to `MaximumServerVersion`. Connecting also fails when the server does not answer the version request.
+
+```go title="Syntax"
+surrealdb.WithVersionCheck(enabled bool) Option
+```
+
+### `WithReconnect` {#withreconnect}
+
+Turns reconnection on or off. It is on by default for WebSocket connections. When the client loses the connection, it connects again, with backoff. Before it sends any other request, it restores the sessions, authentication, namespaces, databases, variables and live queries. See [Reliable connections](/docs/reference/golang/concepts/reliable-connections).
+
+```go title="Syntax"
+surrealdb.WithReconnect(enabled bool) Option
+```
+
+### `WithReconnectAttempts` {#withreconnectattempts}
+
+Sets how many consecutive attempts the client makes to reconnect before it gives up and closes. It defaults to `DefaultReconnectAttempts`, which is `5`. Zero or less means no limit.
+
+```go title="Syntax"
+surrealdb.WithReconnectAttempts(attempts int) Option
+```
+
+### `WithReconnectDelay` {#withreconnectdelay}
+
+Sets the wait before each attempt to reconnect. The wait is `minDelay` times 2 to the power of the attempt's number, counting from 1. It has up to 10% jitter, and is at most `maxDelay`. `minDelay` and `maxDelay` default to `DefaultReconnectMinDelay` (`1s`) and `DefaultReconnectMaxDelay` (`1m`).
+
+```go title="Syntax"
+surrealdb.WithReconnectDelay(minDelay, maxDelay time.Duration) Option
+```
+
+### `WithTokenRenewal` {#withtokenrenewal}
+
+Turns automatic token renewal on or off. It is off by default. When it is on, a session that holds a token pair exchanges the pair for a new one shortly before the access token expires. A session gets a token pair from `.SignInWithRefresh()`, `.SignUpWithRefresh()` or `.Refresh()`. [`.Tokens()`](#tokens) returns the current pair. See [Automatic token renewal](/docs/reference/golang/concepts/authentication#automatic-token-renewal).
+
+```go title="Syntax"
+surrealdb.WithTokenRenewal(enabled bool) Option
+```
+
+### `WithTokenExpiryMargin` {#withtokenexpirymargin}
+
+Sets the margin: the session renews an access token this long before the token expires. It defaults to `DefaultTokenExpiryMargin`, which is `1m`. When an access token lives for less than twice the margin, the session renews it halfway through its life.
+
+```go title="Syntax"
+surrealdb.WithTokenExpiryMargin(margin time.Duration) Option
+```
 
 ---
 
@@ -94,34 +181,17 @@ db, err := surrealdb.FromConnection(ctx, conn)
 
 ### `.Close()` {#close}
 
-Closes the underlying connection and releases resources.
+Closes the connection and releases its resources. Later requests return `ErrClientClosed`.
 
 ```go title="Syntax"
 err := db.Close(ctx)
 ```
 
-<table>
-    <thead>
-        <tr>
-            <th>Parameter</th>
-            <th>Type</th>
-            <th>Description</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td><code>ctx</code> <Label label="required" /></td>
-            <td><code>context.Context</code></td>
-            <td>Context for the close operation.</td>
-        </tr>
-    </tbody>
-</table>
-
 **Returns:** `error`
 
 ### `.Use()` {#use}
 
-Selects the namespace and database to use for subsequent operations.
+Selects the namespace and database of the default session.
 
 ```go title="Syntax"
 err := db.Use(ctx, ns, database)
@@ -139,7 +209,7 @@ err := db.Use(ctx, ns, database)
         <tr>
             <td><code>ctx</code> <Label label="required" /></td>
             <td><code>context.Context</code></td>
-            <td>Context for the operation.</td>
+            <td>Bounds the request.</td>
         </tr>
         <tr>
             <td><code>ns</code> <Label label="required" /></td>
@@ -158,23 +228,53 @@ err := db.Use(ctx, ns, database)
 
 ### `.Version()` {#version}
 
-Returns version information about the connected SurrealDB instance.
+Returns the version, build and timestamp of the server.
 
 ```go title="Syntax"
 ver, err := db.Version(ctx)
 ```
 
-**Returns:** `(*VersionData, error)`, see [`VersionData`](/docs/reference/golang/api/types#versiondata)
+**Returns:** `(*VersionData, error)`. See [`VersionData`](/docs/reference/golang/api/types#versiondata).
 
-#### Examples
+### `.Health()` {#health}
 
-```go
-ver, err := db.Version(ctx)
-if err != nil {
-    log.Fatal(err)
-}
-fmt.Println(ver.Version)
+Checks that the server is up. It sends `GET /health` over HTTP, whichever transport the client uses, and needs no authentication. It returns `nil` when the server answers with a `2xx` status. Otherwise, it returns a [`*HealthError`](/docs/reference/golang/api/errors#healtherror) with the status and the body.
+
+```go title="Syntax"
+err := db.Health(ctx)
 ```
+
+**Returns:** `error`
+
+### `.CBORVersion()` {#cborversion}
+
+Returns the CBOR version the connection uses: `connection.CBORv2` (cbor.2, with SurrealDB 4.0) or `connection.CBORv1` (plain CBOR). Its `String()` method returns `cbor.2` or `cbor`. See [cbor.2 and plain CBOR](/docs/reference/golang/concepts/value-types#cbor2-and-plain-cbor).
+
+```go title="Syntax"
+v := db.CBORVersion()
+```
+
+**Returns:** `connection.CBORVersion`
+
+### `.Status()` {#status}
+
+Returns the state of the connection. A client that does not reconnect stays `StatusConnected` until it closes.
+
+```go title="Syntax"
+status := db.Status()
+```
+
+**Returns:** [`ConnectionStatus`](/docs/reference/golang/api/types#connectionstatus)
+
+### `.OnStatus()` {#onstatus}
+
+Calls `fn` with a [`StatusEvent`](/docs/reference/golang/api/types#statusevent) each time the state of the connection changes. The calls stop when you call the function that `.OnStatus()` returns. The client passes events one at a time, in order, on a goroutine other than the one that reconnects. Only a client that reconnects reports changes.
+
+```go title="Syntax"
+stop := db.OnStatus(fn func(StatusEvent))
+```
+
+**Returns:** `func()`, which stops the calls
 
 ---
 
@@ -182,7 +282,7 @@ fmt.Println(ver.Version)
 
 ### `.SignIn()` {#signin}
 
-Signs in an existing user. The fields provided in `authData` determine the authentication level (root, namespace, database, or record).
+Signs in a user. The fields of `authData` decide the level: root, namespace, database, record, or a bearer key with the `key` field.
 
 ```go title="Syntax"
 token, err := db.SignIn(ctx, authData)
@@ -200,130 +300,73 @@ token, err := db.SignIn(ctx, authData)
         <tr>
             <td><code>ctx</code> <Label label="required" /></td>
             <td><code>context.Context</code></td>
-            <td>Context for the operation.</td>
+            <td>Bounds the request.</td>
         </tr>
         <tr>
             <td><code>authData</code> <Label label="required" /></td>
             <td><code>any</code></td>
-            <td>An <a href="/docs/reference/golang/api/types#auth"><code>Auth</code></a> struct or <code>map[string]any</code> with credentials.</td>
+            <td>An <a href="/docs/reference/golang/api/types#auth"><code>Auth</code></a> struct, or a <code>map[string]any</code> with the keys <code>NS</code>, <code>DB</code>, <code>AC</code>, <code>user</code>, <code>pass</code>, <code>key</code>, or the fields an access method reads.</td>
         </tr>
     </tbody>
 </table>
 
-**Returns:** `(string, error)` - the JWT token string
+**Returns:** `(string, error)`, where the string is the JWT
 
-#### Examples
-
-```go title="Root signin"
+```go title="Root user"
 token, err := db.SignIn(ctx, surrealdb.Auth{
-    Username: "root",
-    Password: "secret",
+	Username: "root",
+	Password: "secret",
 })
 ```
 
-```go title="Record signin"
+```go title="Record user"
 token, err := db.SignIn(ctx, map[string]any{
-    "NS": "my_ns", "DB": "my_db", "AC": "user_access",
-    "user": "tobie", "pass": "s3cret",
+	"NS":    "surrealdb",
+	"DB":    "docs",
+	"AC":    "account",
+	"email": "tobie@example.com",
+	"pass":  "hunter123",
 })
 ```
+
+For an access method defined `WITH REFRESH`, use `.SignInWithRefresh()`.
 
 ### `.SignInWithRefresh()` {#signinwithrefresh}
 
-Signs in using a `TYPE RECORD` access method with `WITH REFRESH` enabled. Returns both an access token and a refresh token. SurrealDB v3+ only.
+Signs in through a `TYPE RECORD` access method defined `WITH REFRESH`, and returns an access token and a refresh token. To exchange a refresh token for a new pair, pass a `refresh` key in place of the credentials.
 
 ```go title="Syntax"
 tokens, err := db.SignInWithRefresh(ctx, authData)
 ```
 
-<table>
-    <thead>
-        <tr>
-            <th>Parameter</th>
-            <th>Type</th>
-            <th>Description</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td><code>ctx</code> <Label label="required" /></td>
-            <td><code>context.Context</code></td>
-            <td>Context for the operation.</td>
-        </tr>
-        <tr>
-            <td><code>authData</code> <Label label="required" /></td>
-            <td><code>any</code></td>
-            <td>Credentials as <code>map[string]any</code>. Use <code>"refresh"</code> key for token refresh.</td>
-        </tr>
-    </tbody>
-</table>
-
-**Returns:** `(*Tokens, error)` - see [`Tokens`](/docs/reference/golang/api/types#tokens)
-
-#### Examples
-
-```go title="Initial signin"
-tokens, err := db.SignInWithRefresh(ctx, map[string]any{
-    "NS": "my_ns", "DB": "my_db", "AC": "user_access",
-    "user": "tobie", "pass": "s3cret",
-})
-```
-
-```go title="Refresh"
-newTokens, err := db.SignInWithRefresh(ctx, map[string]any{
-    "NS": "my_ns", "DB": "my_db", "AC": "user_access",
-    "refresh": tokens.Refresh,
-})
-```
+**Returns:** `(*Tokens, error)`. See [`Tokens`](/docs/reference/golang/api/types#tokens).
 
 ### `.SignUp()` {#signup}
 
-Signs up a new record user.
+Signs up a record user through the `SIGNUP` clause of an access method, and signs them in.
 
 ```go title="Syntax"
 token, err := db.SignUp(ctx, authData)
 ```
 
-<table>
-    <thead>
-        <tr>
-            <th>Parameter</th>
-            <th>Type</th>
-            <th>Description</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td><code>ctx</code> <Label label="required" /></td>
-            <td><code>context.Context</code></td>
-            <td>Context for the operation.</td>
-        </tr>
-        <tr>
-            <td><code>authData</code> <Label label="required" /></td>
-            <td><code>any</code></td>
-            <td>An <a href="/docs/reference/golang/api/types#auth"><code>Auth</code></a> struct or <code>map[string]any</code> with signup credentials.</td>
-        </tr>
-    </tbody>
-</table>
-
-**Returns:** `(string, error)` - the JWT token string
+**Returns:** `(string, error)`, where the string is the JWT
 
 ### `.SignUpWithRefresh()` {#signupwithrefresh}
 
-Signs up using a `TYPE RECORD` access method with `WITH REFRESH` enabled. SurrealDB v3+ only.
+Signs up a record user through an access method defined `WITH REFRESH`, and returns an access token and a refresh token.
 
 ```go title="Syntax"
 tokens, err := db.SignUpWithRefresh(ctx, authData)
 ```
 
-**Returns:** `(*Tokens, error)` - see [`Tokens`](/docs/reference/golang/api/types#tokens)
+**Returns:** `(*Tokens, error)`
 
-### `.Authenticate()` {#authenticate}
+### `.Refresh()` {#refresh}
 
-Authenticates the connection with a JWT token.
+Exchanges a token pair for a new one, and authenticates the session with it. The server revokes the refresh token that you pass. After that, you can refresh only the returned pair.
 
 ```go title="Syntax"
-err := db.Authenticate(ctx, token)
+newTokens, err := db.Refresh(ctx, tokens)
 ```
 
 <table>
@@ -338,21 +381,51 @@ err := db.Authenticate(ctx, token)
         <tr>
             <td><code>ctx</code> <Label label="required" /></td>
             <td><code>context.Context</code></td>
-            <td>Context for the operation.</td>
+            <td>Bounds the request.</td>
         </tr>
         <tr>
-            <td><code>token</code> <Label label="required" /></td>
-            <td><code>string</code></td>
-            <td>The JWT token to authenticate with.</td>
+            <td><code>tokens</code> <Label label="required" /></td>
+            <td><a href="/docs/reference/golang/api/types#tokens"><code>Tokens</code></a></td>
+            <td>The pair to exchange.</td>
         </tr>
     </tbody>
 </table>
+
+**Returns:** `(*Tokens, error)`
+
+### `.Revoke()` {#revoke}
+
+Revokes the refresh token of a pair. After that, you cannot refresh the pair. The session stays signed in.
+
+```go title="Syntax"
+err := db.Revoke(ctx, tokens)
+```
+
+**Returns:** `error`
+
+### `.Tokens()` {#tokens}
+
+Returns the token pair that the session holds. The pair changes at each renewal. It returns `nil` when the session holds no pair or when token renewal is off.
+
+```go title="Syntax"
+pair := db.Tokens()
+```
+
+**Returns:** `*Tokens`
+
+### `.Authenticate()` {#authenticate}
+
+Authenticates the connection with a JWT, such as a token from an earlier sign-in or one that a `TYPE JWT` access method verifies.
+
+```go title="Syntax"
+err := db.Authenticate(ctx, token)
+```
 
 **Returns:** `error`
 
 ### `.Invalidate()` {#invalidate}
 
-Invalidates the current authentication, returning the connection to an unauthenticated state.
+Signs the session out. The namespace, database and variables stay as they are.
 
 ```go title="Syntax"
 err := db.Invalidate(ctx)
@@ -360,9 +433,19 @@ err := db.Invalidate(ctx)
 
 **Returns:** `error`
 
+### `.Reset()` {#reset}
+
+Returns the default session to the state it had when the client connected. It signs the session out, clears its namespace, database and variables, and kills its live queries. Over HTTP, it clears the state that the client keeps, without calling the server.
+
+```go title="Syntax"
+err := db.Reset(ctx)
+```
+
+**Returns:** `error`
+
 ### `.Info()` {#info}
 
-Returns the record of the currently authenticated user.
+Returns the record of the signed-in record user, as `SELECT * FROM $auth` does. Table permissions apply.
 
 ```go title="Syntax"
 info, err := db.Info(ctx)
@@ -376,7 +459,7 @@ info, err := db.Info(ctx)
 
 ### `.Let()` {#let}
 
-Defines a variable on the connection that can be used in subsequent queries.
+Sets a variable in the default session, which later queries can use as `$key`. Over WebSocket, the client keeps a copy of the variable, encoded once. It uses this copy to set the variable again when it reconnects, and to copy the variable to a fork.
 
 ```go title="Syntax"
 err := db.Let(ctx, key, val)
@@ -394,17 +477,17 @@ err := db.Let(ctx, key, val)
         <tr>
             <td><code>ctx</code> <Label label="required" /></td>
             <td><code>context.Context</code></td>
-            <td>Context for the operation.</td>
+            <td>Bounds the request.</td>
         </tr>
         <tr>
             <td><code>key</code> <Label label="required" /></td>
             <td><code>string</code></td>
-            <td>The variable name (without <code>$</code> prefix).</td>
+            <td>The name of the variable, without <code>$</code>.</td>
         </tr>
         <tr>
             <td><code>val</code> <Label label="required" /></td>
             <td><code>any</code></td>
-            <td>The value to assign.</td>
+            <td>The value.</td>
         </tr>
     </tbody>
 </table>
@@ -413,10 +496,68 @@ err := db.Let(ctx, key, val)
 
 ### `.Unset()` {#unset}
 
-Removes a previously defined variable from the connection.
+Removes a variable from the default session.
 
 ```go title="Syntax"
 err := db.Unset(ctx, key)
+```
+
+**Returns:** `error`
+
+---
+
+## Sessions and transactions
+
+### `.Attach()` {#attach}
+
+Attaches a new session to the connection. The new session starts signed out, with no namespace or database. Needs a WebSocket connection, and returns `constants.ErrSessionsNotSupported` otherwise. See [Multiple sessions](/docs/reference/golang/concepts/multiple-sessions).
+
+```go title="Syntax"
+session, err := db.Attach(ctx)
+```
+
+**Returns:** `(*Session, error)`. See [`Session`](/docs/reference/golang/api/core/session).
+
+### `.Fork()` {#fork}
+
+Attaches a new session that starts as a copy of the default session. The new session has the same namespace, database and variables, and is signed in with the same access token. After that token expires, `.Fork()` returns an error that wraps `constants.ErrForkTokenExpired`. `.Fork()` does not copy a token pair. Needs a WebSocket connection.
+
+```go title="Syntax"
+session, err := db.Fork(ctx)
+```
+
+**Returns:** `(*Session, error)`
+
+### `.Sessions()` {#sessions}
+
+Lists the sessions attached to the connection, other than the default one, including sessions that this client did not attach. Needs a WebSocket connection.
+
+```go title="Syntax"
+sessions, err := db.Sessions(ctx)
+```
+
+**Returns:** `([]*Session, error)`
+
+### `.Begin()` {#begin}
+
+Starts an interactive transaction in the default session. Needs a WebSocket connection, and returns `constants.ErrTransactionsNotSupported` otherwise. See [Transactions](/docs/reference/golang/concepts/transactions).
+
+```go title="Syntax"
+tx, err := db.Begin(ctx)
+```
+
+**Returns:** `(*Transaction, error)`. See [`Transaction`](/docs/reference/golang/api/core/transaction).
+
+---
+
+## Import and export
+
+### `.Export()` {#export}
+
+Writes the namespace and database of the default session as a SurrealQL document to `w`, with `POST /export`. Works over WebSocket and HTTP, and authenticates with the token the client last received. See [Import and export](/docs/reference/golang/concepts/import-and-export).
+
+```go title="Syntax"
+err := db.Export(ctx, w, options)
 ```
 
 <table>
@@ -431,12 +572,49 @@ err := db.Unset(ctx, key)
         <tr>
             <td><code>ctx</code> <Label label="required" /></td>
             <td><code>context.Context</code></td>
-            <td>Context for the operation.</td>
+            <td>Bounds the request.</td>
         </tr>
         <tr>
-            <td><code>key</code> <Label label="required" /></td>
-            <td><code>string</code></td>
-            <td>The variable name to remove.</td>
+            <td><code>w</code> <Label label="required" /></td>
+            <td><code>io.Writer</code></td>
+            <td>Where the method writes the document. The method does not close it.</td>
+        </tr>
+        <tr>
+            <td><code>options</code> <Label label="optional" /></td>
+            <td><a href="/docs/reference/golang/api/types#exportoptions"><code>*ExportOptions</code></a></td>
+            <td>What to export. <code>nil</code> exports everything.</td>
+        </tr>
+    </tbody>
+</table>
+
+**Returns:** `error`
+
+### `.Import()` {#import}
+
+Runs a SurrealQL document in the namespace and database of the default session, with `POST /import`. The document must start with `OPTION IMPORT;`. The server does not roll back the statements that succeed. When statements fail, the method returns an [`*ImportError`](/docs/reference/golang/api/errors#importerror).
+
+```go title="Syntax"
+err := db.Import(ctx, document)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>ctx</code> <Label label="required" /></td>
+            <td><code>context.Context</code></td>
+            <td>Bounds the request.</td>
+        </tr>
+        <tr>
+            <td><code>document</code> <Label label="required" /></td>
+            <td><code>io.Reader</code></td>
+            <td>The SurrealQL to run. The method does not close it.</td>
         </tr>
     </tbody>
 </table>
@@ -445,37 +623,13 @@ err := db.Unset(ctx, key)
 
 ---
 
-## Sessions and transactions
-
-### `.Attach()` {#attach}
-
-Creates a new session on the WebSocket connection. Sessions are only supported on WebSocket connections (SurrealDB v3+).
-
-```go title="Syntax"
-session, err := db.Attach(ctx)
-```
-
-**Returns:** `(*Session, error)` - see [`Session`](/docs/reference/golang/api/core/session)
-
-### `.Begin()` {#begin}
-
-Starts a new interactive transaction on the default session. Transactions are only supported on WebSocket connections (SurrealDB v3+).
-
-```go title="Syntax"
-tx, err := db.Begin(ctx)
-```
-
-**Returns:** `(*Transaction, error)` - see [`Transaction`](/docs/reference/golang/api/core/transaction)
-
----
-
 ## Query functions
 
-These are top-level generic functions that accept [`*DB`](#constructors), [`*Session`](/docs/reference/golang/api/core/session), or [`*Transaction`](/docs/reference/golang/api/core/transaction) as the `s` parameter.
+These are generic package functions. Their `s` argument is a `*DB`, a [`*Session`](/docs/reference/golang/api/core/session) or a [`*Transaction`](/docs/reference/golang/api/core/transaction).
 
 ### `Query` {#query}
 
-Executes a SurrealQL query string and returns typed results.
+Runs SurrealQL and returns one result for each statement. When any statement fails, the error joins the [`QueryError`](/docs/reference/golang/api/errors#queryerror) of each failed statement. The function still returns the results. See [Executing queries](/docs/reference/golang/concepts/executing-queries).
 
 ```go title="Syntax"
 results, err := surrealdb.Query[TResult](ctx, s, sql, vars)
@@ -493,45 +647,43 @@ results, err := surrealdb.Query[TResult](ctx, s, sql, vars)
         <tr>
             <td><code>TResult</code></td>
             <td>type parameter</td>
-            <td>The expected result type for each statement.</td>
+            <td>The Go type of each statement's result.</td>
         </tr>
         <tr>
             <td><code>ctx</code> <Label label="required" /></td>
             <td><code>context.Context</code></td>
-            <td>Context for the operation.</td>
+            <td>Bounds the request.</td>
         </tr>
         <tr>
             <td><code>s</code> <Label label="required" /></td>
             <td><code>*DB | *Session | *Transaction</code></td>
-            <td>The sender to execute the query on.</td>
+            <td>Where the query runs.</td>
         </tr>
         <tr>
             <td><code>sql</code> <Label label="required" /></td>
             <td><code>string</code></td>
-            <td>The SurrealQL query string.</td>
+            <td>The SurrealQL.</td>
         </tr>
         <tr>
             <td><code>vars</code> <Label label="required" /></td>
             <td><code>map[string]any</code></td>
-            <td>Variables to bind into the query. Pass <code>nil</code> for no variables.</td>
+            <td>The variables of the query. Pass <code>nil</code> for none.</td>
         </tr>
     </tbody>
 </table>
 
-**Returns:** `(*[]QueryResult[TResult], error)` - see [`QueryResult`](/docs/reference/golang/api/types#queryresult)
-
-#### Examples
+**Returns:** `(*[]QueryResult[TResult], error)`. See [`QueryResult`](/docs/reference/golang/api/types#queryresult).
 
 ```go
 results, err := surrealdb.Query[[]Person](ctx, db,
-    "SELECT * FROM persons WHERE age > $min",
-    map[string]any{"min": 18},
+	"SELECT * FROM person WHERE age > $min",
+	map[string]any{"min": 18},
 )
 ```
 
 ### `QueryRaw` {#queryraw}
 
-Composes and executes a batch of query statements with per-statement results.
+Runs a list of statements as one query, and writes each result to its [`QueryStmt`](/docs/reference/golang/api/types#querystmt). Each `QueryStmt` must hold exactly one statement.
 
 ```go title="Syntax"
 err := surrealdb.QueryRaw(ctx, s, queries)
@@ -549,32 +701,119 @@ err := surrealdb.QueryRaw(ctx, s, queries)
         <tr>
             <td><code>ctx</code> <Label label="required" /></td>
             <td><code>context.Context</code></td>
-            <td>Context for the operation.</td>
+            <td>Bounds the request.</td>
         </tr>
         <tr>
             <td><code>s</code> <Label label="required" /></td>
             <td><code>*DB | *Session | *Transaction</code></td>
-            <td>The sender to execute the query on.</td>
+            <td>Where the query runs.</td>
         </tr>
         <tr>
             <td><code>queries</code> <Label label="required" /></td>
             <td><code>*[]QueryStmt</code></td>
-            <td>A pointer to a slice of <a href="/docs/reference/golang/api/types#querystmt"><code>QueryStmt</code></a> objects. Results are written back to each statement.</td>
+            <td>The statements. The function writes their results back to them.</td>
         </tr>
     </tbody>
 </table>
 
 **Returns:** `error`
 
+### `QueryStream` {#querystream}
+
+Runs SurrealQL and yields its result frame by frame while it runs, with the `query_stream` method over WebSocket. Leaving the loop early cancels the query on the server. Over HTTP, or when the server refuses `query_stream`, the function runs the query with the `query` method. It then yields the result as frames of the same form. See [Streaming results](/docs/reference/golang/concepts/streaming).
+
+```go title="Syntax"
+for frame, err := range surrealdb.QueryStream[T](ctx, s, sql, vars) {
+	// ...
+}
+```
+
+**Returns:** `iter.Seq2[StreamFrame[T], error]`. See [`StreamFrame`](/docs/reference/golang/api/types#streamframe).
+
+`QueryStreamVersion` is the revision of the streaming protocol that the SDK reads. When a server announces a later revision, the stream fails with `ErrStreamProtocol`.
+
+### `Run` {#run}
+
+Calls a function with arguments and returns its result. The name has parts joined by `::`, such as `string::len` or `fn::greet`. It can also be one of the built-ins `count`, `not`, `rand` and `sleep`. The SDK refuses any other name before it sends a request.
+
+```go title="Syntax"
+result, err := surrealdb.Run[TResult](ctx, s, name, args...)
+```
+
+**Returns:** `(*TResult, error)`
+
+```go
+length, err := surrealdb.Run[int](ctx, db, "string::len", "SurrealDB")
+```
+
+### `RunVersion` {#runversion}
+
+Calls a function at a version, such as the machine learning model `ml::house_price` at `1.0.0`. An empty version is the same as `Run`.
+
+```go title="Syntax"
+result, err := surrealdb.RunVersion[TResult](ctx, s, name, version, args...)
+```
+
+**Returns:** `(*TResult, error)`
+
+### `API` {#api}
+
+Calls an endpoint defined with `DEFINE API`, at a path such as `/users/123`, in the namespace and database of the session. A `nil` request is a `GET` without a body. A response with an unsuccessful status is not an error, so check `Status`. When the body of such a response does not fit `TBody`, `Body` is its zero value.
+
+```go title="Syntax"
+res, err := surrealdb.API[TBody](ctx, s, path, req)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>TBody</code></td>
+            <td>type parameter</td>
+            <td>The Go type of the response body.</td>
+        </tr>
+        <tr>
+            <td><code>path</code> <Label label="required" /></td>
+            <td><code>string</code></td>
+            <td>The path of the endpoint.</td>
+        </tr>
+        <tr>
+            <td><code>req</code> <Label label="optional" /></td>
+            <td><a href="/docs/reference/golang/api/types#apirequest"><code>*APIRequest</code></a></td>
+            <td>The method, body, headers and query parameters.</td>
+        </tr>
+    </tbody>
+</table>
+
+**Returns:** `(*APIResponse[TBody], error)`. See [`APIResponse`](/docs/reference/golang/api/types#apiresponse).
+
+### `GQL` {#gql}
+
+Runs an ISO GQL query with the `gql` method of the server, and returns one result for each statement, as `Query` does.
+
+```go title="Syntax"
+results, err := surrealdb.GQL[TResult](ctx, s, query, vars)
+```
+
+**Returns:** `(*[]QueryResult[TResult], error)`
+
 ---
 
 ## Data functions
 
-These are top-level generic functions that accept [`*DB`](#constructors), [`*Session`](/docs/reference/golang/api/core/session), or [`*Transaction`](/docs/reference/golang/api/core/transaction) as the `s` parameter.
+These generic package functions send a SurrealQL statement with the `query` RPC method. Their `s` argument is a `*DB`, a `*Session` or a `*Transaction`. Their `what` argument is a [`TableOrRecord`](/docs/reference/golang/api/types#tableorrecord): a `models.RecordID`, a `models.Table`, a `string`, or a slice of record IDs or tables. A string is always a table name. A record ID gives one record, or `nil` when the record does not exist. A table, a range or a slice gives a slice. See [Data manipulation](/docs/reference/golang/concepts/data-manipulation).
+
+A failed statement returns an `*RPCError` that unwraps to a [`*ServerError`](/docs/reference/golang/api/errors#servererror).
 
 ### `Select` {#select}
 
-Retrieves records from the database.
+Selects records.
 
 ```go title="Syntax"
 result, err := surrealdb.Select[TResult](ctx, s, what)
@@ -592,22 +831,12 @@ result, err := surrealdb.Select[TResult](ctx, s, what)
         <tr>
             <td><code>TResult</code></td>
             <td>type parameter</td>
-            <td>Use a slice type for tables, a single type for record IDs.</td>
-        </tr>
-        <tr>
-            <td><code>ctx</code> <Label label="required" /></td>
-            <td><code>context.Context</code></td>
-            <td>Context for the operation.</td>
-        </tr>
-        <tr>
-            <td><code>s</code> <Label label="required" /></td>
-            <td><code>*DB | *Session | *Transaction</code></td>
-            <td>The sender.</td>
+            <td>A record type for a record ID, and a slice for a table, a range or a slice.</td>
         </tr>
         <tr>
             <td><code>what</code> <Label label="required" /></td>
-            <td><code>string |</code> <a href="/docs/reference/golang/api/values/table"><code>Table</code></a> <code>|</code> <a href="/docs/reference/golang/api/values/record-id"><code>RecordID</code></a></td>
-            <td>The table or record to select.</td>
+            <td><code>TableOrRecord</code></td>
+            <td>The record, table or range to select.</td>
         </tr>
     </tbody>
 </table>
@@ -616,7 +845,7 @@ result, err := surrealdb.Select[TResult](ctx, s, what)
 
 ### `Create` {#create}
 
-Creates a new record.
+Creates a record. A record ID, or a table name as a string, gives the created record. A `models.Table` or a slice gives a slice.
 
 ```go title="Syntax"
 result, err := surrealdb.Create[TResult](ctx, s, what, data)
@@ -632,24 +861,14 @@ result, err := surrealdb.Create[TResult](ctx, s, what, data)
     </thead>
     <tbody>
         <tr>
-            <td><code>ctx</code> <Label label="required" /></td>
-            <td><code>context.Context</code></td>
-            <td>Context for the operation.</td>
-        </tr>
-        <tr>
-            <td><code>s</code> <Label label="required" /></td>
-            <td><code>*DB | *Session | *Transaction</code></td>
-            <td>The sender.</td>
-        </tr>
-        <tr>
             <td><code>what</code> <Label label="required" /></td>
-            <td><code>string |</code> <a href="/docs/reference/golang/api/values/table"><code>Table</code></a> <code>|</code> <a href="/docs/reference/golang/api/values/record-id"><code>RecordID</code></a></td>
-            <td>The table or record ID to create.</td>
+            <td><code>TableOrRecord</code></td>
+            <td>The record ID to create, or the table to create a record in.</td>
         </tr>
         <tr>
             <td><code>data</code> <Label label="required" /></td>
             <td><code>any</code></td>
-            <td>The record data (struct or map).</td>
+            <td>The content, as a struct or a map. <code>nil</code> creates a record with no other fields.</td>
         </tr>
     </tbody>
 </table>
@@ -658,7 +877,7 @@ result, err := surrealdb.Create[TResult](ctx, s, what, data)
 
 ### `Insert` {#insert}
 
-Inserts one or more records into a table.
+Inserts one record or a slice of records into a table. It cannot create a relation.
 
 ```go title="Syntax"
 results, err := surrealdb.Insert[TResult](ctx, s, table, data)
@@ -674,14 +893,9 @@ results, err := surrealdb.Insert[TResult](ctx, s, table, data)
     </thead>
     <tbody>
         <tr>
-            <td><code>ctx</code> <Label label="required" /></td>
-            <td><code>context.Context</code></td>
-            <td>Context for the operation.</td>
-        </tr>
-        <tr>
-            <td><code>s</code> <Label label="required" /></td>
-            <td><code>*DB | *Session | *Transaction</code></td>
-            <td>The sender.</td>
+            <td><code>TResult</code></td>
+            <td>type parameter</td>
+            <td>The type of one record.</td>
         </tr>
         <tr>
             <td><code>table</code> <Label label="required" /></td>
@@ -691,7 +905,7 @@ results, err := surrealdb.Insert[TResult](ctx, s, table, data)
         <tr>
             <td><code>data</code> <Label label="required" /></td>
             <td><code>any</code></td>
-            <td>A single record or slice of records to insert.</td>
+            <td>One record or a slice of records.</td>
         </tr>
     </tbody>
 </table>
@@ -700,7 +914,7 @@ results, err := surrealdb.Insert[TResult](ctx, s, table, data)
 
 ### `Update` {#update}
 
-Replaces the entire content of a record (like a PUT).
+Replaces the content of existing records, as `UPDATE ... CONTENT` does. It removes the fields that the data leaves out.
 
 ```go title="Syntax"
 result, err := surrealdb.Update[TResult](ctx, s, what, data)
@@ -710,7 +924,7 @@ result, err := surrealdb.Update[TResult](ctx, s, what, data)
 
 ### `Upsert` {#upsert}
 
-Creates a record if it does not exist, or replaces it entirely.
+Creates records, or replaces their content when they exist, as `UPSERT ... CONTENT` does.
 
 ```go title="Syntax"
 result, err := surrealdb.Upsert[TResult](ctx, s, what, data)
@@ -720,7 +934,7 @@ result, err := surrealdb.Upsert[TResult](ctx, s, what, data)
 
 ### `Merge` {#merge}
 
-Merges data into an existing record, preserving unmentioned fields.
+Merges data into existing records, as `UPDATE ... MERGE` does, and keeps the fields it does not mention.
 
 ```go title="Syntax"
 result, err := surrealdb.Merge[TResult](ctx, s, what, data)
@@ -730,7 +944,7 @@ result, err := surrealdb.Merge[TResult](ctx, s, what, data)
 
 ### `Patch` {#patch}
 
-Applies JSON Patch operations to a record or table.
+Applies JSON Patch operations to records, and returns the operations that changed them, as `PatchWithResult` does with `ReturnDiff`. Its result fits one record. For a table, use `PatchWithResult` with a `TResult` of `[][]PatchData`.
 
 ```go title="Syntax"
 result, err := surrealdb.Patch(ctx, s, what, patches)
@@ -746,33 +960,68 @@ result, err := surrealdb.Patch(ctx, s, what, patches)
     </thead>
     <tbody>
         <tr>
-            <td><code>ctx</code> <Label label="required" /></td>
-            <td><code>context.Context</code></td>
-            <td>Context for the operation.</td>
-        </tr>
-        <tr>
-            <td><code>s</code> <Label label="required" /></td>
-            <td><code>*DB | *Session | *Transaction</code></td>
-            <td>The sender.</td>
-        </tr>
-        <tr>
             <td><code>what</code> <Label label="required" /></td>
-            <td><code>string |</code> <a href="/docs/reference/golang/api/values/table"><code>Table</code></a> <code>|</code> <a href="/docs/reference/golang/api/values/record-id"><code>RecordID</code></a></td>
-            <td>The table or record to patch.</td>
+            <td><code>TableOrRecord</code></td>
+            <td>The records to patch.</td>
         </tr>
         <tr>
             <td><code>patches</code> <Label label="required" /></td>
-            <td><code>[]PatchData</code></td>
-            <td>JSON Patch operations. See <a href="/docs/reference/golang/api/types#patchdata"><code>PatchData</code></a>.</td>
+            <td><a href="/docs/reference/golang/api/types#patchdata"><code>[]PatchData</code></a></td>
+            <td>The JSON Patch operations.</td>
         </tr>
     </tbody>
 </table>
 
 **Returns:** `(*[]PatchData, error)`
 
+### `PatchWithResult` {#patchwithresult}
+
+Applies JSON Patch operations to records. It returns what `output` asks for: the records after or before the change, the operations that changed them, or nothing. With `ReturnNone`, the result is `nil`.
+
+```go title="Syntax"
+result, err := surrealdb.PatchWithResult[TResult](ctx, s, what, patches, output)
+```
+
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>TResult</code></td>
+            <td>type parameter</td>
+            <td>A record type, a slice of records, <code>[]PatchData</code> or <code>[][]PatchData</code>, to match <code>what</code> and <code>output</code>.</td>
+        </tr>
+        <tr>
+            <td><code>patches</code> <Label label="required" /></td>
+            <td><code>[]PatchData</code></td>
+            <td>The JSON Patch operations.</td>
+        </tr>
+        <tr>
+            <td><code>output</code> <Label label="required" /></td>
+            <td><a href="/docs/reference/golang/api/types#returnmode"><code>ReturnMode</code></a></td>
+            <td><code>ReturnAfter</code>, <code>ReturnBefore</code>, <code>ReturnDiff</code> or <code>ReturnNone</code>.</td>
+        </tr>
+    </tbody>
+</table>
+
+**Returns:** `(*TResult, error)`
+
+```go
+patched, err := surrealdb.PatchWithResult[Person](ctx, db,
+	models.NewRecordID("person", "tobie"),
+	[]surrealdb.PatchData{{Op: "replace", Path: "/age", Value: 38}},
+	surrealdb.ReturnAfter,
+)
+```
+
 ### `Delete` {#delete}
 
-Removes records from the database.
+Deletes records, and returns them as they were before the delete.
 
 ```go title="Syntax"
 result, err := surrealdb.Delete[TResult](ctx, s, what)
@@ -782,7 +1031,7 @@ result, err := surrealdb.Delete[TResult](ctx, s, what)
 
 ### `Relate` {#relate}
 
-Creates a relationship between two records with an auto-generated ID.
+Creates an edge from `rel.In` to `rel.Out` in the relation table `rel.Relation`, with a generated ID and the fields in `rel.Data`. It ignores the `ID` of the `Relationship`. Returns the edge.
 
 ```go title="Syntax"
 result, err := surrealdb.Relate[TResult](ctx, s, rel)
@@ -798,19 +1047,9 @@ result, err := surrealdb.Relate[TResult](ctx, s, rel)
     </thead>
     <tbody>
         <tr>
-            <td><code>ctx</code> <Label label="required" /></td>
-            <td><code>context.Context</code></td>
-            <td>Context for the operation.</td>
-        </tr>
-        <tr>
-            <td><code>s</code> <Label label="required" /></td>
-            <td><code>*DB | *Session | *Transaction</code></td>
-            <td>The sender.</td>
-        </tr>
-        <tr>
             <td><code>rel</code> <Label label="required" /></td>
-            <td><code>*Relationship</code></td>
-            <td>The relationship to create. See <a href="/docs/reference/golang/api/types#relationship"><code>Relationship</code></a>.</td>
+            <td><a href="/docs/reference/golang/api/types#relationship"><code>*Relationship</code></a></td>
+            <td>The edge to create.</td>
         </tr>
     </tbody>
 </table>
@@ -819,7 +1058,7 @@ result, err := surrealdb.Relate[TResult](ctx, s, rel)
 
 ### `InsertRelation` {#insertrelation}
 
-Inserts a relation record, optionally with a specified ID.
+Inserts an edge, as `INSERT RELATION` does. It uses `rel.ID` if you set it, and generates an ID otherwise. Returns a slice, so pass a slice type, such as `[]map[string]any` or `[]connection.ResponseID[models.RecordID]`.
 
 ```go title="Syntax"
 result, err := surrealdb.InsertRelation[TResult](ctx, s, rel)
@@ -829,11 +1068,13 @@ result, err := surrealdb.InsertRelation[TResult](ctx, s, rel)
 
 ---
 
-## Live query methods
+## Live query functions
+
+`Live` and `Kill` take a `*DB` or a `*Session`, but not a `*Transaction`, because a live query belongs to a session. Live queries need a WebSocket connection. See [Live queries](/docs/reference/golang/concepts/live-queries).
 
 ### `Live` {#live}
 
-Starts a live query on a table. Only available on `*DB` and `*Session`.
+Starts a live query on a table, and returns its UUID. When the client reconnects, the live query starts again under the same UUID, in its original namespace and database. When the session is no longer signed in as it was before, the live query ends with `ErrLiveQueryEnded` instead.
 
 ```go title="Syntax"
 liveID, err := surrealdb.Live(ctx, s, table, diff)
@@ -849,14 +1090,9 @@ liveID, err := surrealdb.Live(ctx, s, table, diff)
     </thead>
     <tbody>
         <tr>
-            <td><code>ctx</code> <Label label="required" /></td>
-            <td><code>context.Context</code></td>
-            <td>Context for the operation.</td>
-        </tr>
-        <tr>
             <td><code>s</code> <Label label="required" /></td>
             <td><code>*DB | *Session</code></td>
-            <td>The sender (not <code>*Transaction</code>).</td>
+            <td>The session the live query belongs to.</td>
         </tr>
         <tr>
             <td><code>table</code> <Label label="required" /></td>
@@ -866,16 +1102,16 @@ liveID, err := surrealdb.Live(ctx, s, table, diff)
         <tr>
             <td><code>diff</code> <Label label="required" /></td>
             <td><code>bool</code></td>
-            <td>If <code>true</code>, notifications contain JSON Patch diffs.</td>
+            <td>With <code>true</code>, each notification holds the JSON Patch operations that changed the record, instead of the record.</td>
         </tr>
     </tbody>
 </table>
 
-**Returns:** [`(*models.UUID, error)`](/docs/reference/golang/api/values/uuid)
+**Returns:** `(*models.UUID, error)`. See [`UUID`](/docs/reference/golang/api/values/uuid).
 
 ### `Kill` {#kill}
 
-Terminates a live query and closes its notification channel.
+Stops a live query and closes its notification channel.
 
 ```go title="Syntax"
 err := surrealdb.Kill(ctx, s, id)
@@ -885,17 +1121,17 @@ err := surrealdb.Kill(ctx, s, id)
 
 ### `.LiveNotifications()` {#livenotifications}
 
-Returns the notification channel for a live query.
+Returns the notification channel of a live query of the default session. For a live query that the client ended on a reconnect, it returns `ErrLiveQueryEnded`.
 
 ```go title="Syntax"
 ch, err := db.LiveNotifications(liveQueryID)
 ```
 
-**Returns:** `(chan` [`connection.Notification`](/docs/reference/golang/api/types#notification)`, error)`
+**Returns:** `(chan connection.Notification, error)`. See [`Notification`](/docs/reference/golang/api/types#notification).
 
 ### `.CloseLiveNotifications()` {#closelivenotifications}
 
-Closes the notification channel without killing the server-side live query.
+Closes the notification channel of a live query, without stopping the live query on the server.
 
 ```go title="Syntax"
 err := db.CloseLiveNotifications(liveQueryID)
@@ -905,11 +1141,46 @@ err := db.CloseLiveNotifications(liveQueryID)
 
 ---
 
+## Version helpers
+
+### `MinimumServerVersion` and `MaximumServerVersion` {#version-constants}
+
+`MinimumServerVersion` is `"3.3.0"`, the oldest SurrealDB version the SDK supports, pre-releases included. `MaximumServerVersion` is `"5.0.0"`, the first version it does not support.
+
+### `IsVersionSupported` {#isversionsupported}
+
+Reports whether the SDK supports a server of the given version, such as `"4.0.0"`, `"surrealdb-4.1.2"` or `"4.1.0-nightly+20261014"`. It compares only the major, minor and patch numbers.
+
+```go title="Syntax"
+ok := surrealdb.IsVersionSupported(version)
+```
+
+**Returns:** `bool`
+
+### `IsVersionInRange` {#isversioninrange}
+
+Reports whether a version is at least `minimum` and below `maximum`. Use it, for example, to check whether a server has a feature that a later release added. When the function cannot parse the version or a bound, it returns `false`.
+
+```go title="Syntax"
+ok := surrealdb.IsVersionInRange(version, minimum, maximum)
+```
+
+**Returns:** `bool`
+
+```go
+ver, err := db.Version(ctx)
+if err == nil && surrealdb.IsVersionInRange(ver.Version, "4.1.0", surrealdb.MaximumServerVersion) {
+	// use a feature that SurrealDB 4.1 added
+}
+```
+
+---
+
 ## Low-level RPC
 
 ### `Send` {#send}
 
-Sends a raw RPC request to SurrealDB. Limited to data methods: `select`, `create`, `insert`, `insert_relation`, `kill`, `live`, `merge`, `relate`, `update`, `upsert`, `patch`, `delete`, `query`.
+Sends an RPC request and decodes the response into `res`. It accepts only the methods `select`, `create`, `insert`, `insert_relation`, `kill`, `live`, `merge`, `relate`, `update`, `upsert`, `patch`, `delete` and `query`. It refuses other methods before it sends anything. The `res` argument is a `*connection.RPCResponse[Result]`.
 
 ```go title="Syntax"
 err := surrealdb.Send[Result](ctx, db, res, method, params...)
@@ -919,10 +1190,25 @@ err := surrealdb.Send[Result](ctx, db, res, method, params...)
 
 ---
 
+## Availability by connection type {#availability}
+
+| Feature | WebSocket | HTTP |
+| --- | --- | --- |
+| `Query`, `QueryRaw`, `Run`, `API`, `GQL`, the CRUD functions | Yes | Yes |
+| Authentication, `.Use()`, `.Let()`, `.Unset()`, `.Reset()` | Yes, kept by the server | Yes, kept by the client |
+| `.Health()`, `.Version()`, `.Export()`, `.Import()` | Yes | Yes |
+| `QueryStream` | Yes, streamed | Yes, the whole result at once |
+| `Live`, `Kill`, `.LiveNotifications()` | Yes | No |
+| `.Attach()`, `.Fork()`, `.Sessions()` | Yes | No: `ErrSessionsNotSupported` |
+| `.Begin()` | Yes | No: `ErrTransactionsNotSupported` |
+| Reconnection and `.OnStatus()` | Yes | Not needed |
+
+---
+
 ## See also
 
-- [Session](/docs/reference/golang/api/core/session) for session management reference
-- [Transaction](/docs/reference/golang/api/core/transaction) for transaction reference
-- [Types](/docs/reference/golang/api/types) for type definitions used by these methods
-- [Errors](/docs/reference/golang/api/errors) for error types
+- [Session](/docs/reference/golang/api/core/session) for the methods of a session
+- [Transaction](/docs/reference/golang/api/core/transaction) for the methods of a transaction
+- [Types](/docs/reference/golang/api/types) for the types these functions use
+- [Errors](/docs/reference/golang/api/errors) for the error types
 - [Connecting to SurrealDB](/docs/reference/golang/concepts/connecting-to-surrealdb) for connection patterns
