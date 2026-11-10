@@ -11,9 +11,11 @@ bun run dev             # start dev server
 bun run qa              # apply code quality formatting
 bun run qc              # check code quality
 bun run diagrams:check  # list diagrams whose page sections have changed
+bun run screenshots:check # list screenshots whose UI has changed in Studio
+bun run check:links     # check every internal link and anchor in src/content
 ```
 
-Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate).
+Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist and on an anchor that names no heading on its page, so a renamed heading needs every link to it updated.
 
 ## References
 
@@ -44,6 +46,29 @@ Apply SOLID where it fits:
 - SCSS modules: `style.module.scss`, kebab-case class names, imported as `import classes from "./style.module.scss"`.
 - Inline `style` only for truly dynamic values.
 - Shared UI that could benefit other SurrealDB frontends belongs in `@surrealdb/ui`, not here.
+
+### Comments describe the code, not its history
+
+A comment says what the code does and why it needs to, in the present tense.
+The history of a change - the audit that found a problem, the date something
+broke, what the code did before - belongs in the commit message and the pull
+request description, which keep it next to its date. In a comment it starts to
+go out of date on the day it merges, and a later reader cannot tell whether the
+problem it describes still exists.
+
+| Avoid                                                                                     | Use                                                                                   |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `An audit in November 2026 found 16 dead anchors that had shipped.`                       | `The build does not catch these: a broken link renders, and a broken anchor scrolls nowhere.` |
+| `Without this, pages in a hidden folder were listed although no navigation reached them.` | `This keeps a page that no navigation reaches out of the generated lists as well.`     |
+
+Pages follow the same rule. Write the behaviour that stays true, such as
+"`--beta` installs the most recent beta, which can be older than the stable
+release", not the state of things on the day of writing, such as "no beta of a
+later version is published yet".
+
+This guide is the exception. Its dated figures, such as the count of duplicate
+links in October 2026, record why a rule exists, and a reader takes them as
+history.
 
 ### Language
 
@@ -756,7 +781,7 @@ When a page documents a setting as added, removed or changed in a version that i
 
 ## Deployment targets
 
-Vercel serves production. A Cloudflare Worker (`docs-surrealdb-com`) is built
+Vercel serves production. A Cloudflare Worker (`docs`) is built
 from the same code for previews and for the move off Vercel; nothing about the
 Vercel build changes.
 
@@ -947,6 +972,14 @@ Two things to check alongside a move:
   than a gap. Twelve unreachable tutorials went unnoticed for seven weeks that
   way, each answering 302 and resolving to a page that returned 200.
 
+### Short URLs
+
+`/docs/<word>` answers for the words a reader types and an agent constructs before it has seen the navigation: `/docs/python`, `/docs/kubernetes`, `/docs/select`, `/docs/define-table`, `/docs/string` for the string functions and `/docs/strings` for the data type. The list is `short-urls.ts`, and `redirects.ts` adds it after every other rule as 302s, because each one names the current best page for a word rather than a page that moved. When a page moves, change its target in `short-urls.ts` and keep the word.
+
+Part of the list is chosen by hand and part follows the reference tree: every statement, `DEFINE` and `ALTER` page, clause, `surreal` command, function family and data type has one. `bun run check:links` fails when a target is not a page, when a word would hide a page or is taken by an earlier redirect, when a word is listed twice, and when a page in one of those reference folders has no short URL, so a new statement is reported until it gets one.
+
+The www repo's `redirects.json` runs first and already maps a few of these words, such as `install` and `cloud`. Where it does, its target is the one a reader gets, so keep the two the same, or remove the www entry and let this list answer.
+
 ## Content components
 
 Markdown pages can use a small set of React components. Most are registered in
@@ -1090,6 +1123,14 @@ Every figure file exports `verified`, which says what its figures were checked a
 - If it still matches, run `bun run diagrams:check --accept NAME` to record the current sections.
 
 Run the check before finishing any task that changed content, as the commands at the top of this file say. Also run it after a release, alongside reading the `verified` records: a change to the code a figure depends on, such as a SurrealDB default or an Agent Memory threshold, does not change any page, so the check cannot see it, and the `verified` record says which release or source to check again.
+
+## Screenshots
+
+A screenshot goes out of date when the interface it shows changes, and that interface lives in another repository. `scripts/screenshots/manifest.json` maps each screenshot, as a path under `src/assets/img`, to the Studio source files that render the screen, and records the Studio commit the screenshot matches. `bun run screenshots:check` lists every screenshot whose source files have changed on Studio's main branch since that commit, with the commits that changed them.
+
+The check reads a local clone of surrealdb/studio at `~/studio`, or at `STUDIO_REPO`, and does not fetch it, so run `git -C ~/studio fetch` first. As with diagrams, it cannot tell whether a change is visible: retake the screenshot, or run `bun run screenshots:check --accept NAME` to record it as matching the current UI. Each entry's `capture` says how to retake it: `scripted` with the capture script, `sign-in` with the capture script and a signed-in SurrealDB Cloud session, or `manual` by hand. Add an entry for a new Studio screenshot when you add the image, and see `--unmapped` for those that still have none.
+
+`bun run screenshots:capture` retakes every screenshot whose entry has a `shot`: the path within the organisation, any steps to reach the screen, and the element to crop to. It drives Chrome with its own profile in `generated/screenshots/`, which git ignores. Run it once with `--sign-in`, sign in in the window it opens, open the organisation the screenshots should show, and close the window. Later runs reuse that session without a window. Screenshots are taken in dark mode at twice the pixel density. The script hides announcements, tips and open menus rather than clicking them away, and it refuses to save a screenshot in which an email address is visible, so the signed-in account does not appear in the docs. After retaking a screenshot, check it, update the alt text if the screen changed, and accept it with `screenshots:check --accept`.
 
 ## Data loading and rendering
 

@@ -1,14 +1,12 @@
 ---
 position: 1
 title: Connecting to SurrealDB
-description: The Go SDK supports connecting to SurrealDB over WebSocket or HTTP using a URL-based connection factory.
+description: Connect the Go SDK to SurrealDB over WebSocket or HTTP with FromEndpointURLString, pass options for the version check, reconnection and token renewal, check server health, read the CBOR version, and build a custom gorillaws, gws or HTTP connection.
 ---
 
 # Connecting to SurrealDB
 
-The Go SDK supports connecting to SurrealDB over WebSocket or HTTP. The `FromEndpointURLString` factory function inspects the URL scheme and creates the appropriate connection automatically.
-
-This page covers how to create, configure, and manage connections to a SurrealDB instance.
+The Go SDK connects to SurrealDB over WebSocket or HTTP. [`FromEndpointURLString`](/docs/reference/golang/api/core/db#fromendpointurlstring) reads the scheme of a URL, creates the matching connection, and connects it. This page covers opening and closing a connection, the options that change how a client behaves, the health and version checks, and custom connections.
 
 ## API references
 
@@ -22,30 +20,42 @@ This page covers how to create, configure, and manage connections to a SurrealDB
 	<tbody>
 		<tr>
 			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#fromendpointurlstring"><code>surrealdb.FromEndpointURLString(ctx, url)</code></a></td>
-			<td scope="row" data-label="Description">Creates a connection from a URL string</td>
+			<td scope="row" data-label="Description">Creates a client from a URL and connects it</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#fromendpointurlstringwithoptions"><code>surrealdb.FromEndpointURLStringWithOptions(ctx, url, opts...)</code></a></td>
+			<td scope="row" data-label="Description">Creates a client from a URL, configured by options</td>
 		</tr>
 		<tr>
 			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#fromconnection"><code>surrealdb.FromConnection(ctx, conn)</code></a></td>
-			<td scope="row" data-label="Description">Creates a client from a custom connection implementation</td>
-		</tr>
-		<tr>
-			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#close"><code>db.Close(ctx)</code></a></td>
-			<td scope="row" data-label="Description">Closes the connection and releases resources</td>
+			<td scope="row" data-label="Description">Creates a client from a connection you build yourself</td>
 		</tr>
 		<tr>
 			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#use"><code>db.Use(ctx, ns, db)</code></a></td>
 			<td scope="row" data-label="Description">Selects a namespace and database</td>
 		</tr>
 		<tr>
+			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#health"><code>db.Health(ctx)</code></a></td>
+			<td scope="row" data-label="Description">Checks that the server is up</td>
+		</tr>
+		<tr>
 			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#version"><code>db.Version(ctx)</code></a></td>
-			<td scope="row" data-label="Description">Returns the version of the connected SurrealDB instance</td>
+			<td scope="row" data-label="Description">Returns the version of the server</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#cborversion"><code>db.CBORVersion()</code></a></td>
+			<td scope="row" data-label="Description">Returns the CBOR version the connection uses</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Function"><a href="/docs/reference/golang/api/core/db#close"><code>db.Close(ctx)</code></a></td>
+			<td scope="row" data-label="Description">Closes the connection and releases its resources</td>
 		</tr>
 	</tbody>
 </table>
 
 ## Opening a connection
 
-Use `FromEndpointURLString` to create a new client and connect to a SurrealDB instance. The function accepts a `context.Context` for cancellation and a URL string that determines the connection type.
+Call `FromEndpointURLString` with a `context.Context` and the address of the server. It returns a [`*DB`](/docs/reference/golang/api/core/db) that is already connected:
 
 ```go
 ctx := context.Background()
@@ -57,7 +67,7 @@ if err != nil {
 defer db.Close(ctx)
 ```
 
-The context controls how long the connection attempt blocks. You can use `context.WithTimeout` to limit the connection time on unreliable networks:
+The context limits the connection attempt. Use `context.WithTimeout` to set how long the attempt can block on an unreliable network:
 
 ```go
 ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -66,60 +76,207 @@ defer cancel()
 db, err := surrealdb.FromEndpointURLString(ctx, "ws://localhost:8000")
 ```
 
-## Connection string protocols
+## Connection URLs
 
-The URL scheme determines the connection type and its capabilities.
+The scheme of the URL chooses the connection type:
 
 | Scheme | Connection type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `ws://` | WebSocket | Unencrypted stateful connection |
 | `wss://` | WebSocket | TLS-encrypted stateful connection |
 | `http://` | HTTP | Unencrypted stateless connection |
 | `https://` | HTTP | TLS-encrypted stateless connection |
-| `mem://` | Memory | In-memory [embedded instance](/docs/reference/golang/embedding) |
 
-WebSocket connections are long-lived and stateful. They support all SDK features including [live queries](/docs/reference/golang/concepts/live-queries), [sessions](/docs/reference/golang/concepts/multiple-sessions), and [transactions](/docs/reference/golang/concepts/transactions).
+A WebSocket connection is long-lived and stateful. It supports every feature of the SDK, including [live queries](/docs/reference/golang/concepts/live-queries), [sessions](/docs/reference/golang/concepts/multiple-sessions), [interactive transactions](/docs/reference/golang/concepts/transactions), [streaming results](/docs/reference/golang/concepts/streaming) and [automatic reconnection](/docs/reference/golang/concepts/reliable-connections).
 
-HTTP connections are stateless. Each request is independent and requires its own authentication token. [Live queries](/docs/reference/golang/concepts/live-queries), [sessions](/docs/reference/golang/concepts/multiple-sessions), and [transactions](/docs/reference/golang/concepts/transactions) are not available over HTTP.
+An HTTP connection is stateless. The client keeps the namespace, database, variables and token itself, and sends them with each request. Live queries, sessions and interactive transactions are not available over HTTP. Over HTTP, `QueryStream` returns the whole result at once.
 
-## Using a custom connection
-
-If you need to configure the underlying connection (for example, custom TLS settings or a specific WebSocket implementation), you can create a connection manually and pass it to [`FromConnection`](/docs/reference/golang/api/core/db#fromconnection):
-
-```go
-import (
-	"net/url"
-
-	"github.com/surrealdb/surrealdb.go/pkg/connection"
-	"github.com/surrealdb/surrealdb.go/pkg/connection/gorillaws"
-)
-
-endpoint, _ := url.Parse("ws://localhost:8000/rpc")
-conf := connection.NewConfig(endpoint)
-conn := gorillaws.New(conf)
-
-db, err := surrealdb.FromConnection(ctx, conn)
-```
-
-[`FromConnection`](/docs/reference/golang/api/core/db#fromconnection) calls `.Connect(ctx)` on the connection for you, so you do not need to call it separately. For auto-reconnecting connections, see [Reliable connections](/docs/reference/golang/concepts/reliable-connections).
+A connection to a `mem://`, `memory` or `surrealkv://` URL fails with the error `embedded database not enabled`. To run SurrealDB inside a Go program, use the separate [surrealdb.c.go module](/docs/reference/golang/embedding).
 
 ## Selecting a namespace and database
 
-After connecting, use `.Use()` to select the namespace and database you want to work with. Most operations require a namespace and database to be selected first.
+After connecting, call `.Use()` to select the namespace and database that later requests work in:
 
 ```go
-if err := db.Use(ctx, "my_namespace", "my_database"); err != nil {
+if err := db.Use(ctx, "surrealdb", "docs"); err != nil {
 	log.Fatal(err)
 }
 ```
 
-You can call `.Use()` multiple times to switch between namespaces and databases on the same connection.
+You can call `.Use()` again at any time to switch to another namespace or database on the same connection.
+
+## Connection options
+
+`FromEndpointURLStringWithOptions` and `FromConnectionWithOptions` take options that change how the client behaves. With no options, they do what `FromEndpointURLString` and `FromConnection` do.
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| [`WithVersionCheck(enabled)`](/docs/reference/golang/api/core/db#withversioncheck) | Off | Makes connecting fail on a server outside the supported versions. |
+| [`WithReconnect(enabled)`](/docs/reference/golang/api/core/db#withreconnect) | On, for WebSocket | Reconnects when the connection is lost, and restores the session. |
+| [`WithReconnectAttempts(attempts)`](/docs/reference/golang/api/core/db#withreconnectattempts) | `5` | Sets how many consecutive attempts the client makes to reconnect. |
+| [`WithReconnectDelay(min, max)`](/docs/reference/golang/api/core/db#withreconnectdelay) | `1s`, `1m` | Sets the wait before each attempt to reconnect. |
+| [`WithTokenRenewal(enabled)`](/docs/reference/golang/api/core/db#withtokenrenewal) | Off | Renews a token pair before the access token expires. |
+| [`WithTokenExpiryMargin(margin)`](/docs/reference/golang/api/core/db#withtokenexpirymargin) | `1m` | Sets how long before expiry the client renews a token. |
+
+```go
+db, err := surrealdb.FromEndpointURLStringWithOptions(ctx, "wss://example.surrealdb.cloud",
+	surrealdb.WithVersionCheck(true),
+	surrealdb.WithReconnectAttempts(10),
+	surrealdb.WithTokenRenewal(true),
+)
+```
+
+[Reliable connections](/docs/reference/golang/concepts/reliable-connections) explains reconnection, and [Authentication](/docs/reference/golang/concepts/authentication#automatic-token-renewal) explains token renewal.
+
+### Server version check
+
+The SDK supports SurrealDB 3.3.0 and later versions before 5.0.0. With `WithVersionCheck(true)`, the client asks the server for its version when it connects. If the version is outside that range, connecting fails with an [`UnsupportedVersionError`](/docs/reference/golang/api/errors#unsupportedversionerror):
+
+```go
+db, err := surrealdb.FromEndpointURLStringWithOptions(ctx, "ws://localhost:8000",
+	surrealdb.WithVersionCheck(true),
+)
+
+var uv *surrealdb.UnsupportedVersionError
+if errors.As(err, &uv) {
+	log.Fatalf("SurrealDB %s is not supported", uv.Version)
+}
+```
+
+The check is off by default, because it adds a request to every connection. This extra request matters to code that opens a new connection for each request. The check also fails on a server that does not answer the version request, such as one started with `--deny-rpc version`.
+
+To check a version without connecting, use [`IsVersionSupported`](/docs/reference/golang/api/core/db#isversionsupported). Use [`IsVersionInRange`](/docs/reference/golang/api/core/db#isversioninrange) to check for a feature that a later release added:
+
+```go
+ver, err := db.Version(ctx)
+if err != nil {
+	log.Fatal(err)
+}
+
+if surrealdb.IsVersionInRange(ver.Version, "4.1.0", surrealdb.MaximumServerVersion) {
+	// use a feature that SurrealDB 4.1 added
+}
+```
+
+### Request timeouts
+
+Each request waits for its answer until its context ends or the connection's timeout passes. The timeout is 30 seconds for a WebSocket connection and 10 seconds for an HTTP connection. A request that times out returns an error that wraps `context.DeadlineExceeded`. You can check for this error with `errors.Is`.
+
+Pass a context with a deadline to limit a single request:
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+defer cancel()
+
+results, err := surrealdb.Query[[]Person](ctx, db, "SELECT * FROM person", nil)
+```
+
+To change the timeout of every request, build the connection yourself, as shown in [Using a custom connection](#using-a-custom-connection). Then call `SetTimeOut` on a `gorillaws` connection, or `SetTimeout` on an `http` connection. A WebSocket timeout of `0` turns the timeout off. The context is then the only limit on a request.
+
+## Checking server health
+
+`.Health()` sends `GET /health` to the server over HTTP, whichever transport the client uses. The request needs no authentication. `.Health()` returns `nil` when the server answers with a `2xx` status:
+
+```go
+if err := db.Health(ctx); err != nil {
+	var he *surrealdb.HealthError
+	if errors.As(err, &he) {
+		log.Printf("unhealthy: %d %s", he.StatusCode, he.Body)
+	}
+}
+```
+
+The server answers with another status when it cannot reach its datastore. The [`HealthError`](/docs/reference/golang/api/errors#healtherror) then holds the status and the start of the body. On a network failure, `.Health()` returns the error of the HTTP request.
+
+## Server version and CBOR version
+
+`.Version()` returns the version, build and timestamp that the server reports:
+
+```go
+ver, err := db.Version(ctx)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(ver.Version)
+```
+
+```text title="Possible output"
+4.0.0
+```
+
+The SDK sends requests as CBOR. SurrealDB 4.0 adds cbor.2, a version of the CBOR protocol. Over cbor.2, the sized numbers and the date, time, timestamp, interval, bigdecimal and regex kinds of SurrealDB 4.0 keep their types. The SDK offers cbor.2 when it connects. If the server does not accept cbor.2, the SDK uses plain CBOR. Servers before 4.0 do not accept cbor.2. `.CBORVersion()` returns the version the connection uses:
+
+```go
+fmt.Println(db.CBORVersion())
+```
+
+```text title="Output with SurrealDB 4.0"
+cbor.2
+```
+
+A WebSocket connection chooses the version in its handshake. An HTTP connection sends plain CBOR until the server first answers in cbor.2. As a result, a new HTTP client reports `cbor` until the server answers its first request, such as `.SignIn()`. With `WithVersionCheck(true)`, the version request is the first request, so with SurrealDB 4.0 the client uses cbor.2 from the start. [Value types](/docs/reference/golang/concepts/value-types#cbor2-and-plain-cbor) lists what changes between the two.
+
+## Connection status
+
+A WebSocket client that reconnects reports the state of its connection. `.Status()` returns the state, and `.OnStatus()` calls a function at each change:
+
+```go
+stop := db.OnStatus(func(ev surrealdb.StatusEvent) {
+	log.Printf("connection %s (attempt %d): %v", ev.Status, ev.Attempt, ev.Err)
+})
+defer stop()
+```
+
+See [Reliable connections](/docs/reference/golang/concepts/reliable-connections#watching-the-connection-status) for the states and events.
+
+## Using a custom connection
+
+To configure the connection itself, create it yourself. Then pass it to [`FromConnection`](/docs/reference/golang/api/core/db#fromconnection) or [`FromConnectionWithOptions`](/docs/reference/golang/api/core/db#fromconnectionwithoptions). The module has three connection packages:
+
+| Package | Connection |
+| --- | --- |
+| `pkg/connection/gorillaws` | WebSocket, with [gorilla/websocket](https://github.com/gorilla/websocket). `FromEndpointURLString` uses it for `ws://` and `wss://`. |
+| `pkg/connection/gws` | WebSocket, with [lxzan/gws](https://github.com/lxzan/gws). |
+| `pkg/connection/http` | HTTP. `FromEndpointURLString` uses it for `http://` and `https://`. |
+
+```go
+import (
+	"net/url"
+	"time"
+
+	surrealdb "github.com/surrealdb/surrealdb.go/v2"
+	"github.com/surrealdb/surrealdb.go/v2/pkg/connection"
+	"github.com/surrealdb/surrealdb.go/v2/pkg/connection/gorillaws"
+)
+
+u, err := url.ParseRequestURI("ws://localhost:8000")
+if err != nil {
+	log.Fatal(err)
+}
+
+conf := connection.NewConfig(u)
+conn := gorillaws.New(conf).SetTimeOut(time.Minute)
+
+db, err := surrealdb.FromConnectionWithOptions(ctx, conn,
+	surrealdb.WithVersionCheck(true),
+)
+```
+
+`FromConnection` calls `.Connect(ctx)` on the connection for you. A `gorillaws` or `gws` connection reconnects in the same way as a connection from `FromEndpointURLString`. For a connection with its own retry strategies, see [the rews package](/docs/reference/golang/concepts/reliable-connections#using-the-rews-package).
+
+`connection.NewConfig` sets the CBOR codec to `surrealcbor`. Set the fields of the configuration before you create the connection:
+
+| Field | What it sets |
+| --- | --- |
+| `Marshaler`, `Unmarshaler` | The CBOR codec. The deprecated `models.CborMarshaler` and `models.CborUnmarshaler` support plain CBOR only. |
+| `Logger` | The logger for the connection. `nil` turns logging off. |
+| `DisableCBORv2` | Offers plain CBOR only, even to a SurrealDB 4.0 server. |
 
 ## Effect of connection protocol on token and session duration
 
 WebSocket connections (`ws://`, `wss://`) are long-lived and stateful. After authentication, the session persists for the lifetime of the connection. The session duration defaults to `NONE`, meaning it never expires unless configured otherwise.
 
-HTTP connections (`http://`, `https://`) are stateless. Each request requires its own authentication token. The token duration defaults to 1 hour.
+HTTP connections (`http://`, `https://`) are short-lived and stateless. The SDK sends the access token from the sign-in with each request, so requests fail when the token expires. The token duration defaults to 1 hour.
 
 The figure below shows which duration ends the session in each case, with the default durations.
 
@@ -132,16 +289,17 @@ You can configure token and session durations using the `DURATION` clause in [`D
 
 ## Closing a connection
 
-Call `.Close()` to release the underlying connection resources when you are done.
+Call `.Close()` to close the connection and release its resources:
 
 ```go
 db.Close(ctx)
 ```
 
-Use `defer db.Close(ctx)` immediately after creating the connection to ensure cleanup happens even when errors occur.
+Call `defer db.Close(ctx)` directly after you create the connection. The connection then closes even when a later step fails. After `.Close()`, requests return `surrealdb.ErrClientClosed`.
 
 ## Learn more
 
 - [DB API reference](/docs/reference/golang/api/core/db) for complete method signatures and parameters
-- [Authentication](/docs/reference/golang/concepts/authentication) for signing in and managing user sessions
-- [Error handling](/docs/reference/golang/concepts/error-handling) for handling connection and authentication errors
+- [Authentication](/docs/reference/golang/concepts/authentication) for signing in and managing tokens
+- [Reliable connections](/docs/reference/golang/concepts/reliable-connections) for reconnection and the connection status
+- [Error handling](/docs/reference/golang/concepts/error-handling) for connection and authentication errors

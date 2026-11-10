@@ -16,7 +16,7 @@ surrealkit sync --user root --pass secret
 
 SurrealKit connects to the database, reads your schema files, applies any definitions that have changed, and removes definitions for files that have been deleted (pruning).
 
-To apply several independently tracked schemas, or to apply one schema to several databases in a single run, see [Schema modules and targets](/docs/manage/schema-migration/modules-and-targets). Sync is the only command that fans out across targets in `1.0.0-beta.1`.
+To apply several independently tracked schemas, or to apply one schema to several databases in a single run, see [Schema modules and targets](/docs/manage/schema-migration/modules-and-targets). Sync and `rollout status` are the only commands that fan out across several targets.
 
 ## Watch mode
 
@@ -42,7 +42,19 @@ Any definition that exists in the database but not in a file will be removed on 
 
 ## Tracked schema objects
 
-Sync manages the full range of SurrealDB schema definitions, tracking each one in the `__entity` table so it can be updated and pruned. This includes `TABLE`, `FIELD`, `INDEX`, `ANALYZER`, `PARAM`, `FUNCTION`, `ACCESS`, and `USER` definitions, as well as `BUCKET`, `SEQUENCE`, `CONFIG`, `MODEL`, and `MODULE`.
+Sync manages the full range of SurrealDB schema definitions, tracking each one in the `__entity` table so it can be updated and pruned. This includes `TABLE`, `FIELD`, `INDEX`, `ANALYZER`, `PARAM`, `FUNCTION`, `ACCESS`, and `USER` definitions, as well as `BUCKET`, `SEQUENCE`, `CONFIG`, `MODEL`, `TYPE`, and `MODULE` (which also covers `DEFINE EXTENSION`).
+
+## How schema files are applied
+
+Sync and rollouts re-apply whole files, so every `DEFINE` has to be safe to run again. SurrealKit adds `OVERWRITE`, and turns `IF NOT EXISTS` into `OVERWRITE` so that a changed definition reaches the database. Everything else in the statement, comments and regex literals included, reaches the server exactly as written.
+
+Some definitions are handled differently:
+
+- **Sequences.** A sequence's definition carries its counter, so `OVERWRITE` would put it back to `START`, and the next ids it hands out would collide with existing records. A plain `DEFINE SEQUENCE` is applied as `IF NOT EXISTS`, and an explicit `IF NOT EXISTS` is kept. A changed sequence definition therefore does not reach a database where the sequence exists, and sync says so. An explicit `OVERWRITE` is applied as written, with a warning every time. To reposition a sequence, do it on purpose in a rollout `run_sql` step or by hand.
+- **Record access without a key.** A record `DEFINE ACCESS` with no `WITH JWT ... KEY` gets a new random signing key every time it is overwritten, which signs every user out. SurrealKit warns when it applies one. Give it a stable key, for example `WITH JWT ALGORITHM HS512 KEY ${JWT_SECRET}` with a [template variable](/docs/manage/schema-migration/template-variables).
+- **Fields on tables that hold records.** A field change that existing records might not fit needs a `MIGRATE EXISTING ROWS` clause on SurrealDB 4.0. See [Migrating existing records](/docs/manage/schema-migration/existing-records).
+
+SurrealKit reads schema files with a SurrealQL tokenizer. A file it cannot read, such as one with an unterminated string, an unmatched bracket, or a `DEFINE` that starts inside another statement, stops sync before anything is applied or pruned, and the error names the file, line and column.
 
 ## Empty source sets
 
@@ -145,11 +157,13 @@ The `schemas`, `targets` and `all` options, and the glob covering `database/modu
 | Flag | Default | Description |
 |---|---|---|
 | `--watch` | off | Re-sync automatically when schema files change |
+| `--debounce-ms` | | With `--watch`, how often to check for changes, in milliseconds |
+| `--no-prune` | off | Leave objects whose schema files were deleted in the database |
 | `--allow-shared-prune` | off | Permit pruning on a database that already has SurrealKit metadata |
 | `--allow-all-statements` | off | Permit non-`DEFINE` statements (e.g. `INSERT`, `UPDATE`, `CREATE`) in schema files; disables catalog entity tracking |
 | `--allow-empty-prune` | off | Permit a sync whose schema directory holds no `.surql` files |
 | `--dry-run` | off | Print what would be applied without modifying the database |
-| `--fail-fast` | off | Stop on the first error rather than continuing |
+| `--fail-fast` | off | With `--watch`, stop at the first sync that fails |
 
 Sync also accepts the [selection flags](/docs/manage/schema-migration/modules-and-targets#selecting-what-to-apply) `--schema`, `--no-deps`, `--target`, `--all` and `--keep-going`.
 

@@ -24,6 +24,10 @@ import { buildSlug, buildUrl, CONTENT_DIR, discoverCollections, walkMarkdown } f
  */
 const COMPONENT_LINKS: { tag: string; targets: () => string[] }[] = [
     { tag: "<AgentPicker", targets: () => AGENTS.map((a) => `/docs/agents/${a.id}`) },
+    {
+        tag: "<AgentBanner",
+        targets: () => ["/docs/agents", ...AGENTS.map((a) => `/docs/agents/${a.id}`)],
+    },
 ];
 
 /** A reader sees roughly this much of a page without scrolling. */

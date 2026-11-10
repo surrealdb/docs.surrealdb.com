@@ -321,11 +321,8 @@ DEFINE FIELD emails ON TABLE user TYPE array<object>;
 DEFINE FIELD bytes ON TABLE data TYPE array<int, 640> ASSERT $value.all(|$val| $val IN 0..=255);
 
 -- Field for a block in a game showing the possible distinct directions a character can move next.
--- The array can contain no more than four directions
-DEFINE FIELD next_paths ON TABLE block 
-  TYPE array<"north" | "east" | "south" | "west"> 
-  VALUE $value.distinct() 
-  ASSERT $value.len() <= 4;
+-- A set removes duplicates, so it holds each of the four directions at most once
+DEFINE FIELD next_paths ON TABLE block TYPE set<"north" | "east" | "south" | "west">;
 ```
 
 ### Making a field optional
@@ -834,6 +831,27 @@ DEFINE FIELD stock ON item TYPE int
 
 A field defined as `option<int>` needs no migration, and records can be given a value later. Changing it to `TYPE int` afterwards is still a narrowing, though, and needs `MIGRATE EXISTING ROWS` even when every record already holds an integer, because the check compares the two definitions and not the stored values.
 
+The same comparison applies to a change that converts values, even one that can never fail. A stored `float` is not a `decimal`, and a stored `200u8` is not a `u16`, so changing `float` to `decimal` or `u8` to `u16` needs a migration that says how to convert them:
+
+```surql
+-- In a database at compatibility level 4
+DEFINE TABLE item SCHEMAFULL;
+DEFINE FIELD price ON item TYPE float;
+CREATE item:1 SET price = 0.1f + 0.2f;
+
+DEFINE FIELD OVERWRITE price ON item TYPE decimal;
+//- 'Cannot change field `price` of table `item`: the table is SCHEMAFULL in a database at compatibility level 4 and has rows, and the new definition does not accept every value the old one did: add MIGRATE EXISTING ROWS'
+
+DEFINE FIELD OVERWRITE price ON item TYPE decimal
+    MIGRATE EXISTING ROWS AS price_to_decimal USING <decimal> $value FALLBACK 0dec;
+SELECT price FROM item;
+//- [{ price: 0.3dec }]
+```
+
+The record held `0.30000000000000004f`, and the cast to `decimal` stored `0.3dec`. The order of a union matters for the same reason, because a value is converted to the first numeric type in the union that can hold it. `float` to `float | decimal` needs no migration, while `float` to `decimal | float` does, since it would turn a stored `1.5f` into `1.5dec`. `number` accepts every numeric value unchanged, so changing any numeric type to `number` needs no migration.
+
+A type defined with [`DEFINE TYPE`](/docs/reference/query-language/statements/define/type) is checked the other way. Redefining it with `OVERWRITE` checks the values that its fields already hold, on every table, and it has no `MIGRATE EXISTING ROWS` clause. See [Changing a type that is in use](/docs/reference/query-language/statements/define/type#changing-a-type-that-is-in-use).
+
 At level 4, [`REMOVE FIELD`](/docs/reference/query-language/statements/remove#behaviour-after-removal) on a `SCHEMAFULL` table also removes the field's stored values, so a field defined again later with the same name starts empty.
 
 At level 3, a table accepts any change to its fields, as in SurrealDB 3.x, and records written before the change keep the values they held. `MIGRATE EXISTING ROWS` works at both levels, and a `SCHEMALESS` table accepts any change at either level.
@@ -935,8 +953,8 @@ DEFINE FIELD filter ON TABLE search_settings TYPE
 A `COMMENT` documents how the field is meant to be used. Comments can be useful when describing how someone (or an agent) would write a query: comparison rules, units, allowed values, or invariants. The comment is stored with the definition and shown by [`INFO`](/docs/reference/query-language/statements/info). See also [Comments on definitions](/docs/reference/query-language/statements/define/overview#comments-on-definitions).
 
 ```surql
-DEFINE FIELD time ON meeting TYPE string
-	COMMENT "Meeting date as an ISO string, 'YYYY-MM-DD'. It is a string, not a datetime: compare and sort lexicographically (time >= '2026-07-10').";
+DEFINE FIELD day ON meeting TYPE date
+	COMMENT "Calendar day of the meeting, with no time zone. Compare it with a date literal (day >= pd'2026-07-10'), or cast a datetime first (<date> time::now()), because a datetime never equals a date.";
 
 DEFINE FIELD is_organizer ON attended TYPE bool
 	COMMENT "True if this person ran the meeting, false if they only attended. Exactly one attendee per meeting has it true.";
