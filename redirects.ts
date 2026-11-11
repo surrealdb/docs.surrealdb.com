@@ -1051,7 +1051,16 @@ const baseRedirects: Redirect[] = [
     },
     { source: "/surrealist", destination: "/explore/studio", statusCode: 301 },
     { source: "/surrealist/:path*", destination: "/explore/studio", statusCode: 301 },
-    ...legacyPrefixRedirects("surrealml", "explore/ml-models"),
+    // SurrealDB 4.0 removed SurrealML, so its pages and the older `/surrealml`
+    // URLs go to the upgrade guide's section on what the removal takes away.
+    ...["/surrealml", "/surrealml/:path*", "/explore/ml-models", "/explore/ml-models/:path*"].map(
+        (source): Redirect => ({
+            source,
+            destination:
+                "/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x#surrealml-is-removed",
+            statusCode: 301,
+        }),
+    ),
     ...legacyIntegrationSdkRedirects(),
     ...legacyIntegrationApiRedirects(),
     ...legacyPrefixRedirects("integrations", "build/integrations"),
@@ -1077,6 +1086,18 @@ const baseRedirects: Redirect[] = [
     {
         source: "/reference/query-language/functions/database-functions/meta",
         destination: "/docs/reference/query-language/functions/database-functions/record",
+        statusCode: 301,
+    },
+    // `DEFINE SCOPE` and `DEFINE TOKEN` were replaced in 2.0 and removed in 3.0.
+    // Each redirects to the statement that replaced it, whose page says so.
+    {
+        source: "/reference/query-language/statements/define/scope",
+        destination: "/docs/reference/query-language/statements/define/access/record",
+        statusCode: 301,
+    },
+    {
+        source: "/reference/query-language/statements/define/token",
+        destination: "/docs/reference/query-language/statements/define/access/jwt",
         statusCode: 301,
     },
     // `surreal format` was removed from the CLI shortly after it shipped. The

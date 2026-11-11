@@ -26,7 +26,6 @@ export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
     { prefix: "build/integrations", id: "build/integrations" },
     { prefix: "build/migrating", id: "build/migrating" },
     { prefix: "explore/cli", id: "explore/cli" },
-    { prefix: "explore/ml-models", id: "explore/ml-models" },
     { prefix: "explore/studio", id: "explore/studio" },
     { prefix: "explore/tutorials", id: "explore/tutorials" },
     { prefix: "learn/data-models", id: "learn/data-models" },
