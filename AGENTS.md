@@ -436,10 +436,18 @@ can tell which half is runnable.
 `Output` is the plain label, and `Response` is kept only on the HTTP and RPC
 pages, where it is the counterpart of a `Request` block. Anything with the word
 `output` in it pairs and renders in full, so use a qualifier whenever the
-value shown is one of several a reader might see - `Sample output` and
-`Possible output` for a generated record id, a datetime or a live API,
-`Expected output` for a value a test asserts, `Error output` for a failure, or a
-condition spelled out as in `title="Output when $transfer_amount set to 150"`.
+value shown is not exactly what every run gives:
+
+- `Example output` when the shape is fixed but incidental values differ on each
+  run: a generated record id, a datetime, a UUID, a request id or a timing.
+- `Possible output` when the result itself is random: a random number, how many
+  records come back, an order that depends on generated ids, or a timeout that
+  may or may not fire.
+- `Expected output` for a value a test asserts, `Error output` for a failure,
+  or a condition spelled out as in `title="Output when $transfer_amount set to 150"`.
+
+Where the block's own setup makes the value the same on every run, use plain
+`Output`, even for a datetime or a record id the setup writes out.
 `Response` and `Result` only pair at the start of a title, because a code block
 titled for what it does with a response (`Handle Individual Responses`,
 `Map results onto a dataclass`) would otherwise be joined to the example above
@@ -480,7 +488,7 @@ CREATE ONLY cat:one;
 
 Because `//-` asserts that the statement returned this, a value a rerun would
 not reproduce needs the label above to say so - the inline counterpart of the
-`Possible output` and `Sample output` fence titles:
+`Possible output` and `Example output` fence titles:
 
 ```surql
 -- Possible output, since the timeout may or may not be exceeded
@@ -541,6 +549,43 @@ values alongside for an agent to diff against.
 On a block that sets up its data first, the fence labels the **last** statement,
 the same convention `RETURN` follows: three `CREATE`s and then the `SELECT`
 whose result is shown is one fence pair, not four.
+
+**Self-contained examples.** A SurrealQL example runs exactly as written on a
+fresh database, for a reader who pastes it from the site and for one who reads
+the raw MDX. When it uses a table, records, an index, a type or a parameter
+that an earlier block on the page creates, copy those statements into the top
+of the block rather than relying on the reader having run the earlier one.
+Copy only what the block uses. Where nothing on the page creates it, write the
+smallest setup that makes the query return something meaningful: usually two
+or three `CREATE` statements with the fields the query reads.
+
+Put the setup under a label line and end it with a blank line:
+
+```surql
+-- Setup from the example above
+CREATE person:tobie SET name = 'Tobie', age = 30;
+CREATE person:jaime SET name = 'Jaime', age = 25;
+
+SELECT name FROM person WHERE age > 28;
+```
+
+The site collapses everything from the label to the first blank line under a
+"setup lines" toggle, so the reader sees the query first, while the copy button,
+the raw MDX and the `.md` endpoints keep the whole block. The label is one of
+`-- Setup`, `-- Setup from the example above` (or `examples`, or `below`), or
+`-- Setup:` followed by a note such as the page the data comes from. Any other
+comment that starts with the word, such as `-- Setup accounts` inside a
+transaction the page is teaching, stays visible, so use one of those forms only
+for setup a reader can skip. Statements after the blank line are the example,
+and the stated results follow the usual rules: an `Output` fence is the last
+statement's value, a `//-` line the value of the statement above it, and a
+`/** [test] */` config lists one result per statement, setup included.
+
+Mark a block `notest` (```` ```surql notest ````) only when it cannot run on its
+own: a template whose parameters an SDK, an HTTP request or the application
+supplies, old syntax shown on purpose, or a statement that needs a signed-in
+session, credentials or a dataset. `notest` does not show on the page. It is
+never a way to skip an example that is wrong for the current release.
 
 **Long lines in code.** A code block shows about 70 characters on a
 1440-pixel laptop screen, about 98 on a 1920-pixel monitor and about 36 on a

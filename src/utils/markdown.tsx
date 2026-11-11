@@ -10,6 +10,7 @@ import { AgentBanner } from "~/components/AgentBanner";
 import { AgentPicker } from "~/components/AgentPicker";
 import { AgentPrompt } from "~/components/AgentPrompt";
 import { Boxes } from "~/components/Boxes";
+import { CodeSetup } from "~/components/CodeSetup";
 import { CodeWithOutput } from "~/components/CodeWithOutput";
 import { DemoEmbed } from "~/components/DemoEmbed";
 import { Edition } from "~/components/Edition";
@@ -137,9 +138,9 @@ function inlineSynopsisCommands(markdown: string): string {
  * A fence title that marks the block as the result of the block above it.
  *
  * `output` matches anywhere in the title, because a qualifier carries information a
- * bare label cannot: `Sample output` and `Possible output` say the value shown is one
- * of several the reader might see, from a generated record id, a datetime or a live
- * API. `Response` and `Result` have to be anchored, because several code blocks are
+ * bare label cannot: `Example output` says incidental values such as a generated
+ * record id or a datetime differ on each run, and `Possible output` that the result
+ * itself is random. `Response` and `Result` have to be anchored, because several code blocks are
  * titled for what they do with a response - `Handle Individual Responses`,
  * `Map results onto a dataclass` - and pairing one of those would attach a second
  * example to the first as though it were its output.
@@ -228,10 +229,84 @@ export function wrapOutputPairs(markdown: string): string {
     return out.join("\n");
 }
 
+/**
+ * A comment line that opens a SurrealQL example's setup statements: `-- Setup`, on
+ * its own or followed by `from ...` or a colon. Other comments that start with the
+ * word, such as `-- Setup accounts` inside a transaction, are part of the example.
+ */
+const SETUP_LABEL = /^\s*--\s*Setup(?:\s*$|\s+from\b|:)/;
+
+/**
+ * The lines of a SurrealQL fence body that hold its setup: from a `-- Setup` comment
+ * to the line before the first blank line after it, as 1-based line numbers. `null`
+ * when the body has no setup, or only the label.
+ */
+export function setupRange(body: string[]): { from: number; to: number } | null {
+    const label = body.findIndex((line) => SETUP_LABEL.test(line));
+    if (label < 0) return null;
+
+    const blank = body.findIndex((line, i) => i > label && line.trim() === "");
+    const last = (blank < 0 ? body.length : blank) - 1;
+
+    return last > label ? { from: label + 1, to: last + 1 } : null;
+}
+
+/**
+ * Wrap a SurrealQL fence whose code starts with setup statements in `<CodeSetup>`,
+ * which shows the setup collapsed under its `-- Setup` label until a reader opens it.
+ *
+ * Examples copy in the records and definitions they need so that each runs on its
+ * own, but on a page where the point is the query, the setup can bury it. Hiding it
+ * at render time keeps the code itself whole: the fence still renders through the
+ * viewer's own code path, its copy button still yields the full example, and, as
+ * with `wrapOutputPairs`, the `.md` endpoints never see the wrapper.
+ *
+ * Runs after `wrapOutputPairs`, which needs a code fence and its output fence to be
+ * adjacent lines.
+ */
+export function wrapSetupSections(markdown: string): string {
+    const lines = markdown.split("\n");
+    const out: string[] = [];
+    let i = 0;
+
+    while (i < lines.length) {
+        const line = lines[i] ?? "";
+        const marker = fenceMarker(line);
+
+        if (!marker) {
+            out.push(line);
+            i++;
+            continue;
+        }
+
+        const fence = readFence(lines, i, marker);
+        const block = lines.slice(i, fence.end + 1);
+        const range =
+            !fence.unterminated && /^(`{3,}|~{3,})surql\b/.test(line)
+                ? setupRange(lines.slice(i + 1, fence.end))
+                : null;
+
+        if (range) {
+            out.push(
+                `<CodeSetup from="${range.from}" to="${range.to}">`,
+                "",
+                ...block,
+                "",
+                "</CodeSetup>",
+            );
+        } else {
+            out.push(...block);
+        }
+        i = fence.end + 1;
+    }
+
+    return out.join("\n");
+}
+
 export function resolveMarkdown(markdown: string) {
     const content = injectIconScope(
         inlineSynopsisCommands(
-            wrapOutputPairs(stripLanguageTestComments(stripLeadingH1(markdown))),
+            wrapSetupSections(wrapOutputPairs(stripLanguageTestComments(stripLeadingH1(markdown)))),
         ),
     );
     const tree = parseMarkdownTree(content);
@@ -266,6 +341,7 @@ export function registerMarkdownComponents(): MarkdownComponents {
         AgentPrompt: { component: AgentPrompt, block: true },
         IconBox: { component: IconBox, block: true },
         Boxes: { component: Boxes, block: true, preserveNewlines: false },
+        CodeSetup: { component: CodeSetup, block: true, preserveNewlines: false },
         CodeWithOutput: { component: CodeWithOutput, block: true, preserveNewlines: false },
         // A showcase demo: its own finished page, framed on the card surface
         // with tabs between its pages. A raw <iframe> would be stripped.
