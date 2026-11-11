@@ -30,6 +30,7 @@ import { ClientOnly } from "vike-react/ClientOnly";
 import { usePageContext } from "vike-react/usePageContext";
 import { SurrealDBLogo } from "~/components/Logo";
 import { SearchDocs } from "~/components/SearchDocs";
+import { VersionMenu } from "~/components/VersionMenu";
 import { ColorSchemeToggle, HEADER_CONTROL_SIZE } from "../ColorSchemeToggle";
 import {
     flattenMenuItems,
@@ -624,6 +625,7 @@ export function Header({ navLinks, opened, onToggle }: HeaderProps) {
                         mb={0}
                         visibleFrom="sm"
                     />
+                    {product.id === "surrealdb" && <VersionMenu />}
                     <ClientOnly
                         fallback={
                             <ActionIcon
