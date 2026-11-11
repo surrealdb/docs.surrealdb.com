@@ -38,11 +38,28 @@ Implicit transactions also roll back on errors, whether that is a [`THROW`](/doc
 };
 ```
 
+```surql title="Error output"
+'An error occurred: Insufficient stock'
+```
+
 Without the braces the order would persist while the stock it reserved never moved, which is the inconsistency a transaction exists to prevent.
 
 In a bare sequence of statements, each one is its own transaction. Here the `THROW` reports an error, and both records still exist afterwards, because the statements either side of it committed independently:
 
 ```surql
+/**[test]
+
+[[test.results]]
+value = "[{ id: product:keyboard, stock: 40 }]"
+
+[[test.results]]
+error = "An error occurred: Stop the import"
+
+[[test.results]]
+value = "[{ id: product:mouse, stock: 25 }]"
+
+*/
+
 CREATE product:keyboard SET stock = 40;   -- commits
 THROW "Stop the import";                  -- errors, and stops nothing
 CREATE product:mouse SET stock = 25;      -- commits
@@ -55,6 +72,10 @@ So wrapping statements in braces is enough to make them atomic.
 A block does not, however, give a failure somewhere to be contained. There is one transaction per query rather than a stack of them, so a block inside a manual transaction is part of that transaction rather than a nested one. A `THROW` inside the block aborts the whole thing, including the statements that ran before it:
 
 ```surql
+-- Setup from the example below
+CREATE account:one SET balance = 135605.16;
+CREATE account:two SET balance = 91031.31;
+
 BEGIN;
 UPDATE account:one SET balance -= 100;    -- rolled back as well
 {
@@ -69,7 +90,7 @@ COMMIT;                                   -- fails: the transaction was already 
 
 Three statements control a manual transaction:
 
-```surql title="Transaction statements"
+```surql notest title="Transaction statements"
 BEGIN [ TRANSACTION ];
 COMMIT [ TRANSACTION ];
 CANCEL [ TRANSACTION ];
@@ -103,6 +124,37 @@ Client SDKs expose the same model through transaction handles. See the transacti
 A transaction rolls back on its own when a statement errors. [`THROW`](/docs/reference/query-language/statements/throw) breaks out of one deliberately, at any point. `THROW` can be followed by any value, which serves as the error message, and is usually a string.
 
 ```surql
+/**[test]
+
+[[test.results]]
+value = "[{ dollars: 100, id: account:one }]"
+
+[[test.results]]
+value = "[{ dollars: 100, id: account:two }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+error = "The query was not executed due to a failed transaction"
+
+[[test.results]]
+error = "The query was not executed due to a failed transaction"
+
+[[test.results]]
+error = "An error occurred: Insufficient funds, would have $-50 after transfer"
+
+[[test.results]]
+error = "Cannot COMMIT: the transaction was aborted due to a prior error"
+
+[[test.results]]
+value = "[{ dollars: 100, id: account:one }, { dollars: 100, id: account:two }]"
+
+*/
+
 CREATE account:one SET dollars =  100;
 CREATE account:two SET dollars =  100;
 
@@ -275,7 +327,7 @@ A `UNIQUE` index is the way to make an insert happen exactly once, for example s
 
 When two concurrent transactions insert records with the same value for a `UNIQUE` index, neither waits for the other. Each checks the index against its own snapshot, in which the other's uncommitted record does not exist, so both statements succeed. The first transaction to commit wins. The second fails at `COMMIT` with a transaction conflict error that says the transaction can be retried, and none of its writes are kept. When the losing transaction runs again, its snapshot now holds the committed record, and the insert fails straight away with the unique index error:
 
-```surql
+```surql notest
 DEFINE INDEX unique_key ON notification FIELDS key UNIQUE;
 
 -- Run by two workers at the same time; one commit fails with a
@@ -328,6 +380,10 @@ Where the rule depends on a query rather than on named records, such as "no othe
 The [`FOR UPDATE`](/docs/reference/query-language/statements/select#the-for-update-clause) clause on `SELECT` enrols a record that the transaction only reads into the same commit-time conflict check that already covers writes. The transaction commits only if no other transaction wrote that record after the snapshot was taken. Otherwise `COMMIT` fails with a transaction conflict error and the transaction can be retried.
 
 ```surql
+-- Setup
+CREATE doctor:ana SET on_call = true;
+CREATE doctor:ben SET on_call = true;
+
 BEGIN;
 
 -- Register the other doctor's record for commit-time conflict detection
@@ -368,7 +424,7 @@ A transaction started with `BEGIN ISOLATION LEVEL SERIALIZABLE` adds every recor
 
 The example below books a doctor for Monday only if no booking exists for that day. Under snapshot isolation, two of these transactions running at the same time both see no booking and both commit, which gives Monday two doctors. Under serializable isolation, the second `COMMIT` fails, because the first transaction created a record that the second one's `SELECT` read:
 
-```surql
+```surql notest
 -- Defined once, outside the transaction
 DEFINE TABLE booking;
 
