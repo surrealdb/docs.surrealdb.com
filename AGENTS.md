@@ -348,6 +348,16 @@ version first. Tabs that share a `syncKey` switch together by label, so reorder
 every group with that key at once, and check for prose that refers to a tab by
 position ("the first tab").
 
+Where content differs between major versions, the group uses
+`syncKey="surrealdb-version"` and the labels `SurrealDB 4.x` and `SurrealDB 3.x`,
+exactly as written in `MAJOR_VERSIONS` (`src/utils/major-version.ts`). The
+version menu in the header selects those labels in every such group on the page
+and on later pages, so a group with any other spelling ignores it. A difference
+inside one major version is a `<Since>` badge or a sentence, not a tab. The badge
+hides itself at or below the `.0.0` of the version the reader selected, so a
+`v4.0.0` badge shows only to a reader on 3.x, and a `v3.0.0` badge shows to
+nobody.
+
 **Spelled-out defaults.** A clause that only restates the default belongs on the
 page teaching that clause, and nowhere else. `DEFINE INDEX … HNSW DIMENSION 4
 DIST COSINE` and `DEFINE INDEX … HNSW DIMENSION 4 DIST COSINE TYPE F32 EFC 150
