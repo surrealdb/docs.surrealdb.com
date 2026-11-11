@@ -290,9 +290,12 @@ const reference: ShortUrl[] = [
     ["live", `${STATEMENTS}/live-select`],
     ["if", `${STATEMENTS}/if-else`],
 
-    ...family(`${STATEMENTS}/define`, [...defineAndAlter, "extension", "scope", "token"], (page) =>
+    ...family(`${STATEMENTS}/define`, [...defineAndAlter, "extension"], (page) =>
         page === "indexes" ? "define-index" : `define-${page}`,
     ),
+    // The 1.x statements, removed in 3.0, answer with the statements that replaced them.
+    ["define-scope", `${STATEMENTS}/define/access/record`],
+    ["define-token", `${STATEMENTS}/define/access/jwt`],
     ...family(`${STATEMENTS}/alter`, [...defineAndAlter, "system"], (page) =>
         page === "indexes" ? "alter-index" : `alter-${page}`,
     ),
