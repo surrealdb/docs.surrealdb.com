@@ -1,4 +1,5 @@
 import { Badge, type BadgeProps } from "@mantine/core";
+import { isSinceRelevant, useMajorVersion } from "~/utils/major-version";
 
 export interface SinceProps extends Omit<BadgeProps, "children"> {
     v: string;
@@ -14,8 +15,17 @@ export interface SinceProps extends Omit<BadgeProps, "children"> {
  * matches the server-rendered tree, and React abandons hydration and
  * re-renders every page from scratch (minified error #418) - which is
  * where much of the slow tab-spinner went.
+ *
+ * The badge renders nothing when it dates something at or below the `.0.0`
+ * of the major version the reader has selected, because everything shown
+ * for that version already has it. A reader on 4.x sees badges from 4.1
+ * onwards, and a reader on 3.x sees 3.1 to 3.3 and anything 4.x-only.
  */
 export function Since({ v, prefix, ...props }: SinceProps) {
+    const { major } = useMajorVersion();
+
+    if (!isSinceRelevant(v, major)) return null;
+
     return (
         <Badge
             component="span"

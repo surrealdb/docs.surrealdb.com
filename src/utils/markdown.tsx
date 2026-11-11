@@ -19,6 +19,7 @@ import { ShowcaseCard } from "~/components/ShowcaseCard";
 import { Since } from "~/components/Since";
 import { SurrealistMini } from "~/components/SurrealistMini";
 import { Synopsis } from "~/components/Synopsis";
+import { Tabs } from "~/components/Tabs";
 import { Verdict } from "~/components/Verdict";
 import { Version } from "~/components/Version";
 import { VersionBlock } from "~/components/VersionBlock";
@@ -235,29 +236,9 @@ export function resolveMarkdown(markdown: string) {
     );
     const tree = parseMarkdownTree(content);
     const source = markdownSourceFromString(content);
-    const headings = alignHeadingIds(extractHeadings(tree, source));
+    const headings = extractHeadings(tree, source);
 
     return { content, headings };
-}
-
-/**
- * Makes the page aside agree with the rendered DOM about heading ids.
- *
- * `extractHeadings` suffixes repeated slugs (`arguments`, `arguments-1`, ...)
- * but `MarkdownViewer` renders every repeat with the plain slug, so on a page
- * whose sections repeat (an SDK method page has one "Arguments" per variant)
- * the aside linked ids that exist nowhere - dozens of dead anchors per page.
- * Until the kit suffixes both sides, the aside uses the id the DOM actually
- * has; a repeated section's link lands on the first occurrence.
- */
-function alignHeadingIds(headings: DocHeading[]): DocHeading[] {
-    const ids = new Set(headings.map((h) => h.id));
-
-    return headings.map((heading) => {
-        const base = heading.id.replace(/-\d+$/, "");
-
-        return base !== heading.id && ids.has(base) ? { ...heading, id: base } : heading;
-    });
 }
 
 export function resolveImageDescriptor(node: MediaDescriptor): MediaDescriptor {
@@ -291,6 +272,9 @@ export function registerMarkdownComponents(): MarkdownComponents {
         DemoEmbed: { component: DemoEmbed, block: true },
         ShowcaseCard: { component: ShowcaseCard, block: true },
         Synopsis: { component: Synopsis, block: true },
+        // Overrides the kit's Tabs so that groups sharing a syncKey switch
+        // together on the same page, which the header's version menu needs.
+        Tabs: { component: Tabs, block: true },
         OptionsTable: { component: OptionsTable, block: true },
         Edition: { component: Edition },
         // Overrides the kit's Since: markdown puts the badge inside <p>, and
