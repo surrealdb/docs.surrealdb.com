@@ -26,7 +26,6 @@ export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
     { prefix: "build/integrations", id: "build/integrations" },
     { prefix: "build/migrating", id: "build/migrating" },
     { prefix: "explore/cli", id: "explore/cli" },
-    { prefix: "explore/ml-models", id: "explore/ml-models" },
     { prefix: "explore/studio", id: "explore/studio" },
     { prefix: "explore/tutorials", id: "explore/tutorials" },
     { prefix: "learn/data-models", id: "learn/data-models" },
@@ -238,7 +237,7 @@ const DOCS_ORIGIN = "https://surrealdb.com";
 export function composeFullCorpusMarkdown(sdkVersions?: SdkVersionMap): string {
     const sections: string[] = [
         "# SurrealDB documentation - full corpus",
-        `> The complete SurrealDB documentation as a single markdown document. Each page starts with a "Source:" line naming its canonical URL. The page index is at ${DOCS_ORIGIN}/docs/llms.txt, and every page is also available individually by appending \`.md\` to its URL. In code examples, a fenced block whose title contains "output" holds the result of the block above it rather than runnable code, and a qualifier such as "Sample output" or "Possible output" means the value shown is one of several possible ones. Inside a block, a "//-" comment marks a value the statement above it returned, while "--" is an ordinary comment.`,
+        `> The complete SurrealDB documentation as a single markdown document. Each page starts with a "Source:" line naming its canonical URL. The page index is at ${DOCS_ORIGIN}/docs/llms.txt, and every page is also available individually by appending \`.md\` to its URL. In code examples, a fenced block whose title contains "output" holds the result of the block above it rather than runnable code, and a qualifier such as "Example output" or "Possible output" means the value shown is one of several possible ones. Inside a block, a "//-" comment marks a value the statement above it returned, while "--" is an ordinary comment.`,
     ];
 
     for (const { prefix, id } of COLLECTION_ROUTES) {

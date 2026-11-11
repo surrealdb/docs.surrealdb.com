@@ -2,6 +2,7 @@ import { Button, Loader, Menu, Stack, Text, ThemeIcon } from "@mantine/core";
 import { useClipboard } from "@mantine/hooks";
 import {
     Icon,
+    iconAI,
     iconArrowUpRight,
     iconChatGPT,
     iconCheck,
@@ -12,6 +13,7 @@ import {
     useStable,
 } from "@surrealdb/ui";
 import { useMemo, useState } from "react";
+import { SETUP_PROMPT } from "~/utils/agents";
 import classes from "./style.module.scss";
 
 const LLM_PREFIXES = {
@@ -47,6 +49,14 @@ export function CopyPageMenu() {
         } finally {
             setIsFetching(false);
         }
+    });
+
+    const handleCopySetupPrompt = useStable(() => {
+        copy(SETUP_PROMPT);
+        window.dataLayer?.push({
+            event: "copy_setup_prompt",
+            page_path: window.location.pathname,
+        });
     });
 
     const handleViewMarkdown = useStable(() => {
@@ -170,6 +180,34 @@ export function CopyPageMenu() {
                             opacity={0.6}
                         >
                             Open the raw markdown page
+                        </Text>
+                    </Stack>
+                </Menu.Item>
+                <Menu.Item
+                    className={classes.menuItem}
+                    leftSection={
+                        <ThemeIcon>
+                            <Icon
+                                path={iconAI}
+                                opacity={1}
+                                size="lg"
+                            />
+                        </ThemeIcon>
+                    }
+                    onClick={handleCopySetupPrompt}
+                >
+                    <Stack gap={0}>
+                        <Text
+                            fz="sm"
+                            fw={500}
+                        >
+                            Set up your agent
+                        </Text>
+                        <Text
+                            fz="xs"
+                            opacity={0.6}
+                        >
+                            Copy the SurrealDB setup prompt
                         </Text>
                     </Stack>
                 </Menu.Item>

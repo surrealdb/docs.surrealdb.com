@@ -1,0 +1,138 @@
+---
+position: 2
+title: Migrating from Rust SDK 2.x
+description: Move a Rust project from the surrealdb 2.x crate to 3.x or 4.x. Covers the supported server versions, the SurrealValue derive in place of serde, the surrealdb::types module, RecordId::new, owned credentials and IndexedResults in place of Response.
+---
+
+# Migrating from Rust SDK 2.x
+
+Version 3 of the `surrealdb` crate changes how Rust values reach the database and where its types live. This guide lists each change that can break a project written for version 2, with the 2.x code and the code that replaces it. The same changes apply when you move straight to the current 4.x crate, so the examples use names that both versions share. The sections are in order of how much code each change usually affects, so work through them from the top.
+
+The API reference for the 2.x crate stays on [docs.rs](https://docs.rs/surrealdb/2.4.1/surrealdb/), for a project that has to stay on version 2 for now.
+
+> [!IMPORTANT]
+> The crate only connects to a server in the range it supports. Version 2 connects to SurrealDB 1.2.0 up to, but not including, 3.0.0. Version 3 connects to 3.x, and version 4 connects to 3.x and 4.x. So no version of the crate works with both a 2.x server and a 4.x server. Upgrade the server to 3.x first, as the [2.x to 3.x upgrade guide](/docs/build/migrating/from-old-surrealdb-versions/2x-to-3x) describes, and change the crate at the same time.
+
+## What changed
+
+- Values that go to and from the database implement `SurrealValue`, which you derive, in place of serde's `Serialize` and `Deserialize`.
+- `RecordId`, `Value`, `Datetime` and the other value types are in the `surrealdb::types` module, and the `surrealdb::sql` module is gone.
+- `RecordId::new(table, key)` creates a record ID, in place of `RecordId::from((table, key))`.
+- `Root`, `Namespace`, `Database` and `Record` hold owned `String`s in place of `&str`.
+- `query()` returns an `IndexedResults`, which was called `Response`.
+
+## 1. Update the dependency
+
+Change the version in `Cargo.toml`, keeping the features the project already uses:
+
+```toml title="2.x"
+[dependencies]
+surrealdb = "2"
+```
+
+```toml title="4.x"
+[dependencies]
+surrealdb = "4"
+```
+
+Version 4 no longer has the `kv-rocksdb`, `kv-indxdb` and `kv-tikv` features. The [3.x to 4.x upgrade guide](/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x) lists what replaces each of them.
+
+## 2. Derive `SurrealValue` in place of serde
+
+In version 2, a struct passed to `.content()` or returned by `.select()` implemented serde's `Serialize` and `Deserialize`. In version 3 and later, those methods take and return types that implement `SurrealValue`, which keeps record IDs, datetimes and the other SurrealDB types intact on the way through. Derive it in place of the serde traits:
+
+```rust title="2.x"
+use serde::{Deserialize, Serialize};
+use surrealdb::RecordId;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Person {
+    id: RecordId,
+    name: String,
+    age: u8,
+}
+```
+
+```rust title="4.x"
+use surrealdb::types::{RecordId, SurrealValue};
+
+#[derive(Debug, SurrealValue)]
+struct Person {
+    id: RecordId,
+    name: String,
+    age: u8,
+}
+```
+
+A struct that also goes to or comes from JSON, such as the body of a request in a web framework, can derive both: `#[derive(SurrealValue, Serialize, Deserialize)]`. The derive takes attributes of its own for renaming fields and choosing how enums are stored, which [`SurrealValue` attributes](/docs/reference/rust/concepts/surrealvalue-attributes) lists. To work without a struct, [flexible typing](/docs/reference/rust/concepts/flexible-typing) shows `Value` and `serde_json::Value`.
+
+## 3. Import value types from `surrealdb::types`
+
+The value types moved from the crate root into the `surrealdb::types` module. Version 2 also re-exported the server's own types under `surrealdb::sql`, and that module no longer exists, so a type imported from it comes from `surrealdb::types` as well:
+
+```rust title="2.x"
+use surrealdb::sql::Datetime;
+use surrealdb::{RecordId, RecordIdKey, Value};
+```
+
+```rust title="4.x"
+use surrealdb::types::{Datetime, RecordId, RecordIdKey, Value};
+```
+
+`Surreal`, the `engine` and `opt` modules, `Notification` and `Result` keep their paths.
+
+## 4. Create record IDs with `RecordId::new`
+
+Version 2 converted a tuple into a `RecordId`. Version 3 and later take the table and the key as two arguments:
+
+```rust title="2.x"
+let id = RecordId::from(("person", "john"));
+```
+
+```rust title="4.x"
+let id = RecordId::new("person", "john");
+```
+
+The methods that take a resource still accept a tuple, so `db.select(("person", "john"))` works in both versions.
+
+## 5. Pass owned strings to the credentials
+
+`Root`, `Namespace`, `Database` and `Record` held borrowed `&str` fields in version 2. They hold `String`s in version 3 and later:
+
+```rust title="2.x"
+db.signin(Root {
+    username: "root",
+    password: "secret",
+})
+.await?;
+```
+
+```rust title="4.x"
+db.signin(Root {
+    username: "root".to_string(),
+    password: "secret".to_string(),
+})
+.await?;
+```
+
+The `params` of `Record` implement `SurrealValue` in place of `Serialize`, as in section 2.
+
+## 6. Rename `Response` to `IndexedResults`
+
+The type that `query()` returns is `IndexedResults`. Its `.take()` and `.check()` methods work as before, so only code that names the type changes:
+
+```rust title="2.x"
+use surrealdb::Response;
+
+fn first_names(mut response: Response) -> surrealdb::Result<Vec<String>> {
+    response.take("name")
+}
+```
+
+```rust title="4.x"
+use surrealdb::IndexedResults;
+
+fn first_names(mut response: IndexedResults) -> surrealdb::Result<Vec<String>> {
+    response.take("name")
+}
+```

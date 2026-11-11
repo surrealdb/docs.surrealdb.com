@@ -10,6 +10,7 @@ import { AgentBanner } from "~/components/AgentBanner";
 import { AgentPicker } from "~/components/AgentPicker";
 import { AgentPrompt } from "~/components/AgentPrompt";
 import { Boxes } from "~/components/Boxes";
+import { CodeSetup } from "~/components/CodeSetup";
 import { CodeWithOutput } from "~/components/CodeWithOutput";
 import { DemoEmbed } from "~/components/DemoEmbed";
 import { Edition } from "~/components/Edition";
@@ -19,6 +20,7 @@ import { ShowcaseCard } from "~/components/ShowcaseCard";
 import { Since } from "~/components/Since";
 import { SurrealistMini } from "~/components/SurrealistMini";
 import { Synopsis } from "~/components/Synopsis";
+import { Tabs } from "~/components/Tabs";
 import { Verdict } from "~/components/Verdict";
 import { Version } from "~/components/Version";
 import { VersionBlock } from "~/components/VersionBlock";
@@ -136,9 +138,9 @@ function inlineSynopsisCommands(markdown: string): string {
  * A fence title that marks the block as the result of the block above it.
  *
  * `output` matches anywhere in the title, because a qualifier carries information a
- * bare label cannot: `Sample output` and `Possible output` say the value shown is one
- * of several the reader might see, from a generated record id, a datetime or a live
- * API. `Response` and `Result` have to be anchored, because several code blocks are
+ * bare label cannot: `Example output` says incidental values such as a generated
+ * record id or a datetime differ on each run, and `Possible output` that the result
+ * itself is random. `Response` and `Result` have to be anchored, because several code blocks are
  * titled for what they do with a response - `Handle Individual Responses`,
  * `Map results onto a dataclass` - and pairing one of those would attach a second
  * example to the first as though it were its output.
@@ -227,37 +229,91 @@ export function wrapOutputPairs(markdown: string): string {
     return out.join("\n");
 }
 
+/**
+ * A comment line that opens a SurrealQL example's setup statements: `-- Setup`, on
+ * its own or followed by `from ...` or a colon. Other comments that start with the
+ * word, such as `-- Setup accounts` inside a transaction, are part of the example.
+ */
+const SETUP_LABEL = /^\s*--\s*Setup(?:\s*$|\s+from\b|:)/;
+
+/**
+ * The lines of a SurrealQL fence body that hold its setup: from a `-- Setup` comment
+ * to the line before the first blank line after it, as 1-based line numbers. `null`
+ * when the body has no setup, or only the label.
+ */
+export function setupRange(body: string[]): { from: number; to: number } | null {
+    const label = body.findIndex((line) => SETUP_LABEL.test(line));
+    if (label < 0) return null;
+
+    const blank = body.findIndex((line, i) => i > label && line.trim() === "");
+    const last = (blank < 0 ? body.length : blank) - 1;
+
+    return last > label ? { from: label + 1, to: last + 1 } : null;
+}
+
+/**
+ * Wrap a SurrealQL fence whose code starts with setup statements in `<CodeSetup>`,
+ * which shows the setup collapsed under its `-- Setup` label until a reader opens it.
+ *
+ * Examples copy in the records and definitions they need so that each runs on its
+ * own, but on a page where the point is the query, the setup can bury it. Hiding it
+ * at render time keeps the code itself whole: the fence still renders through the
+ * viewer's own code path, its copy button still yields the full example, and, as
+ * with `wrapOutputPairs`, the `.md` endpoints never see the wrapper.
+ *
+ * Runs after `wrapOutputPairs`, which needs a code fence and its output fence to be
+ * adjacent lines.
+ */
+export function wrapSetupSections(markdown: string): string {
+    const lines = markdown.split("\n");
+    const out: string[] = [];
+    let i = 0;
+
+    while (i < lines.length) {
+        const line = lines[i] ?? "";
+        const marker = fenceMarker(line);
+
+        if (!marker) {
+            out.push(line);
+            i++;
+            continue;
+        }
+
+        const fence = readFence(lines, i, marker);
+        const block = lines.slice(i, fence.end + 1);
+        const range =
+            !fence.unterminated && /^(`{3,}|~{3,})surql\b/.test(line)
+                ? setupRange(lines.slice(i + 1, fence.end))
+                : null;
+
+        if (range) {
+            out.push(
+                `<CodeSetup from="${range.from}" to="${range.to}">`,
+                "",
+                ...block,
+                "",
+                "</CodeSetup>",
+            );
+        } else {
+            out.push(...block);
+        }
+        i = fence.end + 1;
+    }
+
+    return out.join("\n");
+}
+
 export function resolveMarkdown(markdown: string) {
     const content = injectIconScope(
         inlineSynopsisCommands(
-            wrapOutputPairs(stripLanguageTestComments(stripLeadingH1(markdown))),
+            wrapSetupSections(wrapOutputPairs(stripLanguageTestComments(stripLeadingH1(markdown)))),
         ),
     );
     const tree = parseMarkdownTree(content);
     const source = markdownSourceFromString(content);
-    const headings = alignHeadingIds(extractHeadings(tree, source));
+    const headings = extractHeadings(tree, source);
 
     return { content, headings };
-}
-
-/**
- * Makes the page aside agree with the rendered DOM about heading ids.
- *
- * `extractHeadings` suffixes repeated slugs (`arguments`, `arguments-1`, ...)
- * but `MarkdownViewer` renders every repeat with the plain slug, so on a page
- * whose sections repeat (an SDK method page has one "Arguments" per variant)
- * the aside linked ids that exist nowhere - dozens of dead anchors per page.
- * Until the kit suffixes both sides, the aside uses the id the DOM actually
- * has; a repeated section's link lands on the first occurrence.
- */
-function alignHeadingIds(headings: DocHeading[]): DocHeading[] {
-    const ids = new Set(headings.map((h) => h.id));
-
-    return headings.map((heading) => {
-        const base = heading.id.replace(/-\d+$/, "");
-
-        return base !== heading.id && ids.has(base) ? { ...heading, id: base } : heading;
-    });
 }
 
 export function resolveImageDescriptor(node: MediaDescriptor): MediaDescriptor {
@@ -285,12 +341,16 @@ export function registerMarkdownComponents(): MarkdownComponents {
         AgentPrompt: { component: AgentPrompt, block: true },
         IconBox: { component: IconBox, block: true },
         Boxes: { component: Boxes, block: true, preserveNewlines: false },
+        CodeSetup: { component: CodeSetup, block: true, preserveNewlines: false },
         CodeWithOutput: { component: CodeWithOutput, block: true, preserveNewlines: false },
         // A showcase demo: its own finished page, framed on the card surface
         // with tabs between its pages. A raw <iframe> would be stripped.
         DemoEmbed: { component: DemoEmbed, block: true },
         ShowcaseCard: { component: ShowcaseCard, block: true },
         Synopsis: { component: Synopsis, block: true },
+        // Overrides the kit's Tabs so that groups sharing a syncKey switch
+        // together on the same page, which the header's version menu needs.
+        Tabs: { component: Tabs, block: true },
         OptionsTable: { component: OptionsTable, block: true },
         Edition: { component: Edition },
         // Overrides the kit's Since: markdown puts the badge inside <p>, and

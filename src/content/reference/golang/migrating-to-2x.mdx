@@ -1,0 +1,201 @@
+---
+position: 3
+title: Migrating to Go SDK 2.x
+description: Move a Go project from SDK 1.x to 2.x, which supports SurrealDB 3.3 to 4.x. Covers the /v2 module path, the supported server versions, zero time.Time as NONE, time.Duration as a duration, models.Regex, uint64, cbor.2 and exact Go kinds, CRUD functions that run as queries, and SinceVersionstamp.
+---
+
+# Migrating to Go SDK 2.x
+
+Version 2 of the Go SDK supports SurrealDB 4.0. It changes the module path, the supported server versions, and how the SDK sends some Go values to the server. This guide lists each change that can break a project written for version 1, with the 1.x code and the 2.x code that replaces it. The sections are in order of how much code each change usually affects, so work through them from the top.
+
+> [!IMPORTANT]
+> Version 1 cannot write a `time.Time` to SurrealDB 4.0. It sends a bare `time.Time` as text, which SurrealDB 4.0 refuses with `CBOR tag 0 (a datetime as text) is not accepted: send tag 12 [seconds, nanos]`. Version 2 works with SurrealDB 3.3.0 and later. If the server is older than 3.3, upgrade it to 3.3 or later first. Then move to version 2 while the server runs 3.3 or a later 3.x release. After that, upgrade the server to 4.0.
+
+## What changed
+
+- The module path is `github.com/surrealdb/surrealdb.go/v2`, so every import changes.
+- The SDK supports SurrealDB 3.3.0 and later, before 5.0.0. Version 1 supported 2.1.0 and later.
+- The SDK sends a zero `time.Time` as `NONE` and a `time.Duration` as a `duration`, and refuses a `regexp.Regexp`.
+- On SurrealDB 4.0 the SDK uses cbor.2. Sized numbers keep their kind when the SDK sends them and when it receives them, and decoding into `any` gives the exact Go type.
+- The CRUD functions run SurrealQL through the `query` RPC method, so the text of some errors is different.
+- `surrealql.SinceVersionstamp` sends the versionstamp unchanged.
+
+## 1. Install version 2 and update imports
+
+Add the new module:
+
+```bash
+go get github.com/surrealdb/surrealdb.go/v2
+```
+
+Then change every import of the SDK, including `pkg/...`, `contrib/...` and `memory`, to the `/v2` path:
+
+```go title="1.x"
+import (
+	surrealdb "github.com/surrealdb/surrealdb.go"
+	"github.com/surrealdb/surrealdb.go/pkg/models"
+)
+```
+
+```go title="2.x"
+import (
+	surrealdb "github.com/surrealdb/surrealdb.go/v2"
+	"github.com/surrealdb/surrealdb.go/v2/pkg/models"
+)
+```
+
+The package names do not change, so the code that uses them stays as it is. To rewrite the imports in every Go file of a module at once, run this command from the module root:
+
+```bash
+perl -pi -e 's#"github\.com/surrealdb/surrealdb\.go(?!/v2)#"github.com/surrealdb/surrealdb.go/v2#g' $(grep -rl --include='*.go' 'github.com/surrealdb/surrealdb.go' .)
+```
+
+Then remove the version 1 requirement from `go.mod`:
+
+```bash
+go mod tidy
+```
+
+Version 2 needs Go 1.24 or later, as the later 1.x releases do.
+
+## 2. Check the server version
+
+Version 2 supports SurrealDB 3.3.0 and later versions before 5.0.0, pre-releases included. SurrealDB 4.0 is the recommended version. With a 3.x server, the kinds that 4.0 adds are not available, and error kinds are less precise.
+
+The SDK does not check the version unless you ask it to. With [`WithVersionCheck(true)`](/docs/reference/golang/api/core/db#withversioncheck), connecting to a 2.x, 3.0, 3.1 or 3.2 server now fails with an [`UnsupportedVersionError`](/docs/reference/golang/api/errors#unsupportedversionerror):
+
+```go
+db, err := surrealdb.FromEndpointURLStringWithOptions(ctx, "ws://localhost:8000",
+	surrealdb.WithVersionCheck(true),
+)
+```
+
+```text title="Error output with SurrealDB 3.2"
+SurrealDB server version "3.2.4+20260803.93ab219" is not supported by this SDK (supported: >= 3.3.0, < 5.0.0); to connect anyway, turn the check off with surrealdb.WithVersionCheck(false)
+```
+
+`surrealdb.MinimumServerVersion` is now `"3.3.0"`, and [`IsVersionSupported`](/docs/reference/golang/api/core/db#isversionsupported) returns `false` for versions before it. Code that compares a version with `MinimumServerVersion` itself, for example in a health check, now refuses servers that version 1 accepted.
+
+## 3. Check the Go values your code sends
+
+Version 2 sends some standard library values as different SurrealDB kinds:
+
+| Go value | 1.x sent | 2.x sends |
+| --- | --- | --- |
+| A zero `time.Time` | `NULL` | `NONE` |
+| A `time.Time` that is not zero | Its text, which SurrealDB 4.0 refuses | A `datetime`, with its nanoseconds |
+| `time.Duration` | An `int` of nanoseconds | A `duration` |
+| `regexp.Regexp`, `*regexp.Regexp` | An empty object `{}` | An encoding error. Use [`models.Regex`](/docs/reference/golang/api/values/regex). |
+| A `uint64` above `math.MaxInt64` | An integer that SurrealDB refuses | A `decimal`, or a `u64` on SurrealDB 4.0 |
+| A `models.CustomDurationString` that is not a valid duration | A string | An encoding error |
+
+The SDK converts these values wherever they are: in a struct field, a map, a slice, or a variable of [`Query`](/docs/reference/golang/api/core/db#query).
+
+Then check the schema for the fields that your code writes these values to:
+
+- A field of `TYPE datetime | null` refuses a zero `time.Time`, because the SDK now sends that value as `NONE`. The error is ``Expected `datetime | null` but found `NONE` ``. Define the field as `option<datetime>`, or send a `nil` `*time.Time` to store `NULL`.
+- A field of `TYPE int` that stores a `time.Duration` refuses the new values, with ``Expected `int` but found `1m` ``. A query that compares such a field with an integer also stops matching. Give the field a type that accepts a `duration`, such as `int | duration`. Integers that are already stored still decode into a `time.Duration`.
+- Use a `models.Regex` for a regular expression. A `models.Regex` holds the pattern as text. SurrealDB compiles the pattern with the syntax of the Rust `regex` crate, which is close to Go's but not the same.
+
+```go title="1.x"
+pattern := regexp.MustCompile(`^[a-z]+$`)
+db.Let(ctx, "pattern", pattern)
+```
+
+```go title="2.x"
+pattern := models.Regex{Pattern: `^[a-z]+$`}
+db.Let(ctx, "pattern", pattern)
+```
+
+A `models.Regex` needs SurrealDB 4.0. Over plain CBOR, which earlier servers use, it fails to encode. See [Value types](/docs/reference/golang/concepts/value-types) for every kind.
+
+## 4. Check values that you read into `any`
+
+On WebSocket and HTTP, the SDK now offers cbor.2, the CBOR dialect of SurrealDB 4.0. The SDK uses cbor.2 when the server accepts it. Over cbor.2:
+
+- The SDK sends `int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32` and `float32` values as the sized numbers `i8` to `u32` and `f32`, and `models.Float16` as `f16`.
+- A sized number decodes into `any` as the exact Go type, such as `int8` or `float32`. Version 1 gave a widened `uint64`, `int64` or `float64`. The new kinds of SurrealDB 4.0 decode into `any` as their `models` types, such as `models.PlainDate` and `models.Regex`.
+
+Code that decodes into `any` or `map[string]any` and then asserts the type can stop matching. In this example, the program wrote the `level` field from a Go `int32`. Version 1 stored the value as an `int`, which read back as a `uint64`. Version 2 stores it as an `i32`, which reads back as an `int32`:
+
+```go title="1.x"
+level := row["level"].(uint64)
+```
+
+```go title="2.x"
+level := row["level"].(int32)
+```
+
+If you decode into a struct field of a concrete type, such as `Level int`, the SDK converts every numeric kind. This works the same in both versions. It is the simpler fix when you know the shape of the data.
+
+To keep plain CBOR, set `DisableCBORv2` in the [connection configuration](/docs/reference/golang/concepts/connecting-to-surrealdb#using-a-custom-connection). [`db.CBORVersion()`](/docs/reference/golang/api/core/db#cborversion) reports which version a connection uses. A connection that uses the deprecated `models.CborMarshaler` and `models.CborUnmarshaler` stays on plain CBOR.
+
+## 5. Allow for CRUD functions that run as queries
+
+[`Select`](/docs/reference/golang/api/core/db#select), [`Create`](/docs/reference/golang/api/core/db#create), [`Update`](/docs/reference/golang/api/core/db#update), [`Upsert`](/docs/reference/golang/api/core/db#upsert), [`Merge`](/docs/reference/golang/api/core/db#merge), [`Patch`](/docs/reference/golang/api/core/db#patch), [`Delete`](/docs/reference/golang/api/core/db#delete), [`Insert`](/docs/reference/golang/api/core/db#insert), [`InsertRelation`](/docs/reference/golang/api/core/db#insertrelation), [`Relate`](/docs/reference/golang/api/core/db#relate), [`Live`](/docs/reference/golang/api/core/db#live) and [`Kill`](/docs/reference/golang/api/core/db#kill) now send a SurrealQL statement with the `query` RPC method. In version 1, each of these functions called its own RPC method, such as `select` or `insert_relation`. Results have the same shape, and a failure is still an `*RPCError` that unwraps to a [`*ServerError`](/docs/reference/golang/api/errors#servererror).
+
+Two things can be different:
+
+- The text of an error message. Match on the error kind rather than on the message. Use `errors.As` or an `Is*` helper, such as [`surrealdb.IsNotFound`](/docs/reference/golang/api/errors#kind-helpers).
+- Server settings that limit the `query` method now apply to these functions too.
+
+## 6. Update `SinceVersionstamp` in the query builder
+
+In the [query builder](/docs/reference/golang/concepts/query-builder), `ShowChangesForTableQuery.SinceVersionstamp` now sends the versionstamp as it is. Version 1 shifted it right by 16 bits first. Pass a versionstamp exactly as `SHOW CHANGES` returned it:
+
+```go title="2.x"
+q := surrealql.ShowChangesForTable("reading").SinceVersionstamp(versionstamp).Limit(10)
+```
+
+`SINCE` is inclusive. When you continue from the last change that you received, the server returns that change again.
+
+## 7. Upgrading from a release before 1.8
+
+Releases 1.6 to 1.8 added features that change how a client behaves by default. A project that moves to version 2 from an earlier 1.x release gets them too:
+
+- **A WebSocket client reconnects by itself.** When the connection drops, the client connects again and restores the namespace, database, variables, authentication, sessions and live queries. A request that you send during the reconnect waits until the reconnect finishes or its context ends. It does not fail at once. Pass [`WithReconnect(false)`](/docs/reference/golang/api/core/db#withreconnect) for the earlier behaviour. See [Reliable connections](/docs/reference/golang/concepts/reliable-connections).
+- **Package `spectron` is now `memory`.** Import the Agent Memory client from `github.com/surrealdb/surrealdb.go/v2/memory`.
+- **A live query channel closes when the server kills the query.** A notification with the action `KILLED` ends it.
+- **New methods and types** for [`Health`](/docs/reference/golang/api/core/db#health), [`Refresh`](/docs/reference/golang/api/core/db#refresh), [`Revoke`](/docs/reference/golang/api/core/db#revoke), [`Reset`](/docs/reference/golang/api/core/db#reset), [token renewal](/docs/reference/golang/concepts/authentication#automatic-token-renewal), selecting [a range of records](/docs/reference/golang/concepts/data-manipulation#selecting-a-range-of-records), the [error kind helpers](/docs/reference/golang/api/errors#kind-helpers), and the [`Set`](/docs/reference/golang/api/values/set) and [`File`](/docs/reference/golang/api/values/file) values.
+
+## Import path mapping
+
+| 1.x import | 2.x import |
+| --- | --- |
+| `github.com/surrealdb/surrealdb.go` | `github.com/surrealdb/surrealdb.go/v2` |
+| `github.com/surrealdb/surrealdb.go/pkg/models` | `github.com/surrealdb/surrealdb.go/v2/pkg/models` |
+| `github.com/surrealdb/surrealdb.go/pkg/connection` | `github.com/surrealdb/surrealdb.go/v2/pkg/connection` |
+| `github.com/surrealdb/surrealdb.go/pkg/constants` | `github.com/surrealdb/surrealdb.go/v2/pkg/constants` |
+| `github.com/surrealdb/surrealdb.go/surrealcbor` | `github.com/surrealdb/surrealdb.go/v2/surrealcbor` |
+| `github.com/surrealdb/surrealdb.go/contrib/rews` | `github.com/surrealdb/surrealdb.go/v2/contrib/rews` |
+| `github.com/surrealdb/surrealdb.go/contrib/surrealql` | `github.com/surrealdb/surrealdb.go/v2/contrib/surrealql` |
+| `github.com/surrealdb/surrealdb.go/memory` | `github.com/surrealdb/surrealdb.go/v2/memory` |
+
+## New in version 2
+
+- The kinds that SurrealDB 4.0 adds: [`models.PlainDate`, `PlainTime`, `Timestamp` and `Interval`](/docs/reference/golang/api/values/temporal), [`BigDecimal` and `Float16`](/docs/reference/golang/api/values/numbers), and [`Regex`](/docs/reference/golang/api/values/regex).
+- [`QueryStream`](/docs/reference/golang/concepts/streaming), to read the results of a query as the server sends them.
+- [`Run` and `RunVersion`](/docs/reference/golang/concepts/executing-queries#calling-a-function), [`API`](/docs/reference/golang/concepts/executing-queries#calling-a-define-api-endpoint) and [`GQL`](/docs/reference/golang/concepts/executing-queries#running-iso-gql).
+- [`DB.Import` and `DB.Export`](/docs/reference/golang/concepts/import-and-export).
+- [`DB.Sessions`, `DB.Fork` and `Session.Fork`](/docs/reference/golang/concepts/multiple-sessions#copying-a-session).
+- [`PatchWithResult`](/docs/reference/golang/concepts/data-manipulation#choosing-what-a-patch-returns), to choose what a patch returns.
+- After a reconnect, a live query restarts in the namespace and database where it started.
+- The context of each WebSocket request bounds the write of that request.
+
+## Migration checklist
+
+1. Run `go get github.com/surrealdb/surrealdb.go/v2`. Rewrite the imports. Then run `go mod tidy`.
+2. Check that the server runs SurrealDB 3.3.0 or later. Upgrade the server to 4.0 after you upgrade the SDK.
+3. Find the fields that store a zero `time.Time` or a `time.Duration`. Update their types in the schema.
+4. Replace every `regexp.Regexp` that your code sends to the server with a `models.Regex`.
+5. Find type assertions on values that your code decodes into `any`. Change them to allow for the sized Go types.
+6. Replace checks on error message text with checks on the error kind.
+7. Pass versionstamps to `SinceVersionstamp` as `SHOW CHANGES` returns them.
+8. Run your tests against SurrealDB 4.0.
+
+## Learn more
+
+- [Go SDK 2.0.0 release notes](https://github.com/surrealdb/surrealdb.go/releases/tag/v2.0.0) for the full list of changes
+- [Value types](/docs/reference/golang/concepts/value-types) for how each SurrealDB kind maps onto Go
+- [Connecting to SurrealDB](/docs/reference/golang/concepts/connecting-to-surrealdb) for the connection options
+- [Error handling](/docs/reference/golang/concepts/error-handling) for matching on error kinds

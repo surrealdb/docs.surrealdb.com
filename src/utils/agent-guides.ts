@@ -11,6 +11,7 @@
  */
 const AGENT_GUIDES: ReadonlyMap<string, string> = new Map([
     ["python-migration-2x-to-3x", "/reference/python/migrating-to-3x"],
+    ["go-migration-1x-to-2x", "/reference/golang/migrating-to-2x"],
 ]);
 
 /** The documentation path, without `/docs`, of the guide served at *slug*. */

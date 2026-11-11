@@ -1,4 +1,5 @@
 import type { SdkVersionMap } from "~/lib/versions";
+import { AGENTS, SETUP_PROMPT } from "~/utils/agents";
 
 /**
  * Flattens the MDX components used across docs content into plain markdown.
@@ -233,6 +234,19 @@ function surrealistMini(attrs: Record<string, string>): string {
     return parts.length > 0 ? `\n\n${parts.join("\n\n")}\n` : "";
 }
 
+/** Renders a prompt for an agent as a labelled block, so it can be copied as it stands. */
+function agentPrompt(text: string): string {
+    return `\n\nAgent prompt:\n\n\`\`\`text\n${text}\n\`\`\`\n\n`;
+}
+
+/** Renders the agent picker as the list of setup pages it links to. */
+function agentPicker(): string {
+    const items = AGENTS.map(
+        (agent) => `- [${agent.name}](/docs/agents/${agent.id}) - ${agent.description}`,
+    );
+    return `\n\n${items.join("\n")}\n\n`;
+}
+
 /** Resolves `<Version>` against the same SDK version map the pages render. */
 function version(attrs: Record<string, string>, versions: SdkVersionMap): string {
     const resolved = versions[attrs.sdk ?? "surrealdb"];
@@ -316,6 +330,15 @@ export function flattenMdxComponents(markdown: string, sdkVersions: SdkVersionMa
     out = out.replace(tag("SurrealistMini"), (_match, raw: string) =>
         surrealistMini(parseAttrs(raw)),
     );
+    out = out.replace(
+        tag("AgentBanner"),
+        () =>
+            `${agentPrompt(SETUP_PROMPT)}Setup steps for each agent: [Agent setup](/docs/agents)\n\n`,
+    );
+    out = out.replace(tag("AgentPrompt"), (_match, raw: string) =>
+        agentPrompt(parseAttrs(raw).text ?? SETUP_PROMPT),
+    );
+    out = out.replace(tag("AgentPicker"), agentPicker);
     out = out.replace(tag("Button"), (_match, raw: string) => {
         const attrs = parseAttrs(raw);
         return attrs.href ? `[${attrs.label ?? attrs.href}](${attrs.href})` : "";
