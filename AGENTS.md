@@ -13,9 +13,10 @@ bun run qc              # check code quality
 bun run diagrams:check  # list diagrams whose page sections have changed
 bun run screenshots:check # list screenshots whose UI has changed in Studio
 bun run check:links     # check every internal link and anchor in src/content
+bun run generate:doc-tests # write every SurrealQL example to tests/doc-examples.surql
 ```
 
-Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist and on an anchor that names no heading on its page, so a renamed heading needs every link to it updated.
+Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist and on an anchor that names no heading on its page, so a renamed heading needs every link to it updated. Then run `bun run generate:doc-tests` and commit `tests/doc-examples.surql` with the change: CI regenerates it and fails when the committed copy differs. See [Tested examples](#tested-examples).
 
 ## References
 
@@ -1150,6 +1151,19 @@ Each row needs `name` and `description`; `short`, `value`, `type`, `default`,
 `Environment variable` columns render only when a row uses them, so a table never
 carries a column of em-dashes. Use `value` for CLI placeholders and `type` for
 SDK parameter types. Backtick spans inside `description` render as inline code.
+
+## Tested examples
+
+Every runnable SurrealQL example is a test. `bun run generate:doc-tests` reads `src/content` and writes them all to one file, `tests/doc-examples.surql`, which the language-test runner in the SurrealDB repository splits and runs against the engine. The file is committed so that it shows what is tested, and its git history shows when an example changed.
+
+Each test starts with a marker line naming the file it splits into, then a `-- source:` line with the page and line it came from, then an ordinary test file: a `/** ... */` config and the example's statements. The runner sees only that format. The docs' own conventions are resolved by the generator:
+
+- A fence is a test when its language is `surql`, it is not marked `notest`, and its title does not mark it as output. A signature such as `math::abs(number) -> number` goes in a ```` ```syntax ```` fence, which is never a test.
+- A block that starts with its own `/** [test] */` config keeps that config.
+- Otherwise each statement is expected to return a value rather than an error. An adjacent `Output` or `Expected output` fence gives the value of the last statement, `Error output` says that it fails (or fails to parse, when the output starts with `Parse error`), and a `//-` line gives the value of the statement above it. A qualified title such as `Example output` or `Possible output` is not compared.
+- Every test runs on a datastore of its own, as `[env] clean = true` makes it, and a test whose code calls `eval::` is allowed to.
+
+A test is named after its page, the heading it sits under and its position under that heading, such as `reference/query-language/statements/select/basic-usage-2.surql`, so editing one example changes one entry in the file.
 
 ## Diagrams
 

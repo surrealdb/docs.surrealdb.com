@@ -44,10 +44,7 @@ export function CodeSetup({ from, to, children }: CodeSetupProps) {
 
     const onClick = (event: MouseEvent<HTMLDivElement>) => {
         const span = (event.target as HTMLElement).closest("pre code > span");
-        if (
-            span?.parentElement &&
-            [...span.parentElement.children].indexOf(span) === label - 1
-        ) {
+        if (span?.parentElement && [...span.parentElement.children].indexOf(span) === label - 1) {
             setOpen((value) => !value);
         }
     };
