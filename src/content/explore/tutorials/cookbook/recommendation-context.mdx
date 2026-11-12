@@ -1,0 +1,203 @@
+---
+position: 6
+title: Context for a recommendation prompt
+description: "Gather what a language model needs to recommend products to one customer in a single query: purchases, returns, recent searches, sizes in stock and a vector search over the catalogue."
+---
+
+# Context for a recommendation prompt
+
+This recipe builds the context that a language model needs before it recommends a product to a customer. A request such as "white boots" says little on its own. The model answers better when it also knows that the customer has been searching for wedding shoes, returned a pair of boots as too casual, and wears size 38. One query collects those facts and a vector search of the catalogue, and returns them as one object to put into the prompt.
+
+It is based on the talk [How a luxury fashion retailer scaled personalised recommendations using SurrealDB](https://www.youtube.com/watch?v=yLw9MvNfuY8), which describes the same approach in production: context facts about each customer, products related to their size and colour variants, and embeddings stored beside the records. The catalogue and the 4-dimension embeddings below are illustrative. A real embedding model gives vectors with hundreds of dimensions.
+
+## Schema
+
+A `product` has an embedding of its description, and one `variant` record for each size. A customer is linked to the variants they `bought` and `returned`, and each `search` they make is a record.
+
+```surql
+DEFINE TABLE product SCHEMAFULL;
+DEFINE FIELD name ON product TYPE string;
+DEFINE FIELD brand ON product TYPE string;
+DEFINE FIELD embedding ON product TYPE array<float, 4>;
+DEFINE INDEX product_embedding ON product FIELDS embedding HNSW DIMENSION 4 DIST COSINE;
+
+DEFINE TABLE variant SCHEMAFULL;
+DEFINE FIELD product ON variant TYPE record<product>;
+DEFINE FIELD size ON variant TYPE int;
+DEFINE FIELD in_stock ON variant TYPE bool;
+
+DEFINE TABLE customer SCHEMAFULL;
+DEFINE FIELD name ON customer TYPE string;
+
+DEFINE TABLE bought TYPE RELATION IN customer OUT variant SCHEMAFULL;
+DEFINE FIELD price ON bought TYPE decimal;
+DEFINE FIELD at ON bought TYPE datetime;
+DEFINE TABLE returned TYPE RELATION IN customer OUT variant SCHEMAFULL;
+DEFINE FIELD reason ON returned TYPE string;
+
+DEFINE TABLE search SCHEMAFULL;
+DEFINE FIELD customer ON search TYPE record<customer>;
+DEFINE FIELD text ON search TYPE string;
+DEFINE FIELD at ON search TYPE datetime;
+```
+
+The relations point at a `variant` rather than a `product`, because a size or a colour is often the reason for a return. The product is one step further along the graph, at `->variant.product`.
+
+## Example data
+
+Six products have three sizes each, and one size is out of stock. Maya bought a heel and a pair of boots in size 38, and returned the boots.
+
+```surql
+INSERT INTO product [
+	{ id: product:ivory_ankle, name: 'Ivory ankle boot', brand: 'Arden', embedding: [0.9, 0.9, 0.7, 0.1] },
+	{ id: product:white_leather, name: 'White leather boot', brand: 'Kessel', embedding: [0.95, 0.85, 0.4, 0.3] },
+	{ id: product:studded_white, name: 'Studded white boot', brand: 'Rook', embedding: [0.9, 0.8, 0.1, 0.95] },
+	{ id: product:black_biker, name: 'Black biker boot', brand: 'Rook', embedding: [0.9, 0.05, 0.1, 0.9] },
+	{ id: product:cream_heel, name: 'Cream satin heel', brand: 'Arden', embedding: [0.1, 0.8, 0.95, 0.05] },
+	{ id: product:white_trainer, name: 'White trainer', brand: 'Kessel', embedding: [0.1, 0.9, 0.1, 0.3] },
+];
+FOR $p IN (SELECT VALUE id FROM product) {
+	FOR $size IN [37, 38, 39] {
+		CREATE variant CONTENT {
+			product: $p,
+			size: $size,
+			in_stock: !($p = product:ivory_ankle AND $size = 37),
+		};
+	};
+};
+
+CREATE customer:maya CONTENT { name: 'Maya' };
+LET $heel = SELECT VALUE id FROM ONLY variant
+	WHERE product = product:cream_heel AND size = 38 LIMIT 1;
+LET $boot = SELECT VALUE id FROM ONLY variant
+	WHERE product = product:white_leather AND size = 38 LIMIT 1;
+RELATE customer:maya->bought->$heel CONTENT { price: 420dec, at: d'2026-03-02' };
+RELATE customer:maya->bought->$boot CONTENT { price: 380dec, at: d'2026-09-14' };
+RELATE customer:maya->returned->$boot CONTENT { reason: 'Too casual' };
+INSERT INTO search [
+	{ customer: customer:maya, text: 'wedding guest shoes', at: d'2026-11-08T19:02:00Z' },
+	{ customer: customer:maya, text: 'white boots', at: d'2026-11-08T19:05:00Z' },
+];
+```
+
+## The context query
+
+Maya asks for white boots. Your application turns the request into an embedding with the same model that embedded the products, here `[0.9, 0.9, 0.8, 0.05]`, and runs one query:
+
+```surql
+LET $customer = customer:maya;
+LET $query = [0.9, 0.9, 0.8, 0.05];
+LET $owned = $customer->bought->variant.product;
+LET $sizes = ($customer->bought->variant.size).distinct();
+{
+	customer: $customer.name,
+	lifetime_spend: math::sum($customer->bought.price),
+	sizes: $sizes,
+	recent_searches: SELECT VALUE text FROM search
+		WHERE customer = $customer ORDER BY at DESC LIMIT 3,
+	returned: $customer->returned.map(|$r| {
+		product: $r.out.product.name,
+		reason: $r.reason,
+	}),
+	candidates: (
+		SELECT
+			name,
+			brand,
+			math::fixed(vector::distance::knn(), 3) AS distance,
+			(SELECT VALUE size FROM variant
+				WHERE product = $parent.id AND in_stock AND size IN $sizes) AS sizes_in_stock
+		FROM product
+		WHERE embedding <|4,40|> $query AND id NOT IN $owned
+		ORDER BY distance
+	),
+};
+```
+
+```surql title="Output"
+{
+	candidates: [
+		{
+			brand: 'Arden',
+			distance: 0.002f,
+			name: 'Ivory ankle boot',
+			sizes_in_stock: [
+				38
+			]
+		},
+		{
+			brand: 'Rook',
+			distance: 0.283f,
+			name: 'Studded white boot',
+			sizes_in_stock: [
+				38
+			]
+		},
+		{
+			brand: 'Kessel',
+			distance: 0.31f,
+			name: 'White trainer',
+			sizes_in_stock: [
+				38
+			]
+		},
+		{
+			brand: 'Rook',
+			distance: 0.49f,
+			name: 'Black biker boot',
+			sizes_in_stock: [
+				38
+			]
+		}
+	],
+	customer: 'Maya',
+	lifetime_spend: 800dec,
+	recent_searches: [
+		'white boots',
+		'wedding guest shoes'
+	],
+	returned: [
+		{
+			product: 'White leather boot',
+			reason: 'Too casual'
+		}
+	],
+	sizes: [
+		38
+	]
+}
+```
+
+Each field answers one question the model would otherwise have to guess:
+
+| Field             | Comes from                                  | Tells the model                                    |
+| ----------------- | ------------------------------------------- | -------------------------------------------------- |
+| `lifetime_spend`  | The `price` on each `bought` edge           | How much the customer usually spends               |
+| `sizes`           | The variants the customer bought            | Which sizes to offer                               |
+| `recent_searches` | The latest `search` records                 | The occasion, here a wedding                       |
+| `returned`        | The `returned` edges and their `reason`     | What did not suit the customer, and why            |
+| `candidates`      | The vector index, minus products owned      | Products close to the request, with sizes in stock |
+
+`<|4,40|>` asks the HNSW index for the 4 nearest products, searching 40 candidates. The other conditions in the `WHERE` clause apply at the same time, so the query returns four products that Maya does not own. The inner `SELECT` uses `$parent.id` to list the sizes of each product that are in stock and that Maya wears.
+
+## Use the context in a prompt
+
+Pass the object to the model as JSON, with an instruction to choose from the candidates only:
+
+```text title="Prompt"
+You recommend shoes to a customer of a fashion retailer.
+Recommend up to two products from "candidates", and say why each one suits the customer.
+Use the other fields as facts about the customer.
+
+Context: { …the object above… }
+Customer: I want some white boots.
+```
+
+With the context, a model can prefer the ivory ankle boot for a wedding over the studded boot, although both are close to "white boots", and avoid a boot like the one that was returned as too casual.
+
+## Taking it further
+
+- **Store embeddings from more than one model.** Add a field and an index for each model, such as one for images and one for text, and search the one that suits the request.
+- **Create embeddings in the database.** An [event](/docs/reference/query-language/statements/define/event) on `product` can call an embedding service with [`http::post`](/docs/reference/query-language/functions/database-functions/http) when a product is created or its description changes.
+- **Add more facts.** Any record or relation that describes the customer, such as a wish list or a store visit, becomes one more field of the object.
+
+The [talk](https://www.youtube.com/watch?v=yLw9MvNfuY8) also covers the production setup: loading data from many systems, running the database at scale, and the volume of recommendations it serves.

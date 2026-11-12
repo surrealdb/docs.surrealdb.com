@@ -1,0 +1,189 @@
+---
+position: 5
+title: IoT telemetry with outlier alerts
+description: "Store sensor readings under [sensor, time] record IDs, read them back with record ranges, raise an alert from an event when a reading is an outlier, and follow the graph from sites to alerts."
+---
+
+# IoT telemetry with outlier alerts
+
+This recipe stores readings from sensors, summarises them over time, and raises an alert when a reading is far from the recent values of its sensor. The database does all three: the record ID of each reading makes time ranges fast to read, an event checks every new reading, and graph relations connect each alert to its sensor and site.
+
+It is based on the [IoT telemetry example](https://github.com/surrealdb/example-iot-telemetry) by Martin Schaer, which adds a simulator that streams readings from eight sensors and shows them on a dashboard.
+
+## Schema
+
+A `sensor` is `located_at` a `site`, and `raised` links a sensor to each `alert` it caused. A `reading` has only a value: the sensor and the time are in its record ID.
+
+```surql
+DEFINE TABLE site SCHEMAFULL;
+DEFINE FIELD name ON site TYPE string;
+
+DEFINE TABLE sensor SCHEMAFULL;
+DEFINE FIELD kind ON sensor TYPE 'temperature' | 'humidity';
+
+DEFINE TABLE located_at TYPE RELATION IN sensor OUT site;
+
+DEFINE TABLE reading SCHEMAFULL;
+DEFINE FIELD value ON reading TYPE float;
+
+DEFINE TABLE alert SCHEMAFULL;
+DEFINE FIELD reading ON alert TYPE record<reading>;
+DEFINE FIELD value ON alert TYPE float;
+DEFINE FIELD message ON alert TYPE string;
+
+DEFINE TABLE raised TYPE RELATION IN sensor OUT alert;
+```
+
+A record ID such as `reading:[sensor:t2, d'2026-11-01T09:30:00Z']` is an [array-based ID](/docs/reference/query-language/language-primitives/data-types/record-ids). Records are stored in the order of their IDs, so all readings of one sensor sit together in time order, and a [record range](/docs/reference/query-language/language-primitives/data-types/record-ids) reads one sensor over one period without an index or a scan of the table.
+
+## Alert on outliers
+
+The event runs after each new reading. It reads the previous hour of values from the same sensor and uses the interquartile range (IQR) to decide what is unusual: a value more than 1.5 times the IQR below the first quartile or above the third quartile is an outlier.
+
+```surql
+DEFINE EVENT outlier ON reading WHEN $event = 'CREATE' THEN {
+	LET $sensor = $after.id[0];
+	LET $at = $after.id[1];
+	LET $recent = SELECT VALUE value FROM reading:[$sensor, $at - 1h]..[$sensor, $at];
+	IF $recent.len() >= 10 {
+		LET $iqr = math::interquartile($recent);
+		LET $low = math::percentile($recent, 25) - 1.5 * $iqr;
+		LET $high = math::percentile($recent, 75) + 1.5 * $iqr;
+		IF $after.value < $low OR $after.value > $high {
+			LET $alert = CREATE ONLY alert CONTENT {
+				reading: $after.id,
+				value: $after.value,
+				message: IF $after.value > $high { 'High reading' } ELSE { 'Low reading' },
+			};
+			RELATE $sensor->raised->($alert.id);
+		};
+	};
+};
+```
+
+Three choices keep the check predictable:
+
+- **The window is measured from the reading's own time**, `$at`, rather than from `time::now()`. Readings that arrive late, or that you import from a file, are compared with the hour before they were taken.
+- **The range ends before `$at`**, because `..` leaves out its upper bound, so the new reading is not part of the values it is compared with.
+- **At least ten earlier readings are needed** before the event judges anything, so the first readings of a new sensor do not raise alerts.
+
+## Example data
+
+Two sensors in two greenhouses report once a minute for half an hour. Then the sensor in the south greenhouse reports `29.5`, followed by a normal value.
+
+```surql
+INSERT INTO site [
+	{ id: site:north, name: 'North greenhouse' },
+	{ id: site:south, name: 'South greenhouse' },
+];
+INSERT INTO sensor [
+	{ id: sensor:t1, kind: 'temperature' },
+	{ id: sensor:t2, kind: 'temperature' },
+];
+RELATE sensor:t1->located_at->site:north;
+RELATE sensor:t2->located_at->site:south;
+
+FOR $i IN 0..30 {
+	LET $at = d'2026-11-01T09:00:00Z' + duration::from_mins($i);
+	CREATE type::record('reading', [sensor:t1, $at]) CONTENT { value: 20.0 + ($i % 5) * 0.2 };
+	CREATE type::record('reading', [sensor:t2, $at]) CONTENT { value: 22.0 + ($i % 4) * 0.3 };
+};
+CREATE reading:[sensor:t2, d'2026-11-01T09:30:00Z'] CONTENT { value: 29.5 };
+CREATE reading:[sensor:t2, d'2026-11-01T09:31:00Z'] CONTENT { value: 22.4 };
+```
+
+The event raised one alert, for the reading of `29.5`:
+
+```surql
+SELECT message, value, reading FROM alert;
+```
+
+```surql title="Output"
+[
+	{
+		message: 'High reading',
+		reading: reading:[
+			sensor:t2,
+			d'2026-11-01T09:30:00Z'
+		],
+		value: 29.5f
+	}
+]
+```
+
+## Summarise over time
+
+A record range and `GROUP BY` give the average and the highest value of one sensor in each 10-minute window. `time::floor` rounds the time in the record ID, `id[1]`, down to the start of its window:
+
+```surql
+SELECT
+	time::floor(id[1], 10m) AS window,
+	math::fixed(math::mean(value), 2) AS average,
+	math::max(value) AS highest
+FROM reading:[sensor:t2, d'2026-11-01T09:00:00Z']..[sensor:t2, d'2026-11-01T10:00:00Z']
+GROUP BY window
+ORDER BY window;
+```
+
+```surql title="Output"
+[
+	{
+		average: 22.39f,
+		highest: 22.9f,
+		window: d'2026-11-01T09:00:00Z'
+	},
+	{
+		average: 22.51f,
+		highest: 22.9f,
+		window: d'2026-11-01T09:10:00Z'
+	},
+	{
+		average: 22.39f,
+		highest: 22.9f,
+		window: d'2026-11-01T09:20:00Z'
+	},
+	{
+		average: 25.95f,
+		highest: 29.5f,
+		window: d'2026-11-01T09:30:00Z'
+	}
+]
+```
+
+## Alerts by site
+
+The graph answers the question an operator asks first: which sites have alerts? The query follows `located_at` back from each site to its sensors, then `raised` forward to their alerts:
+
+```surql
+SELECT
+	name,
+	<-located_at<-sensor->raised->alert.{ value, message } AS alerts
+FROM site
+ORDER BY name;
+```
+
+```surql title="Output"
+[
+	{
+		alerts: [],
+		name: 'North greenhouse'
+	},
+	{
+		alerts: [
+			{
+				message: 'High reading',
+				value: 29.5f
+			}
+		],
+		name: 'South greenhouse'
+	}
+]
+```
+
+## Taking it further
+
+- **Notify someone.** Call a webhook from the event with [`http::post`](/docs/reference/query-language/functions/database-functions/http), or have a dashboard follow new alerts with a [live query](/docs/reference/query-language/statements/live-select).
+- **Keep summaries up to date.** A [table view](/docs/reference/query-language/statements/define/table) defined with `AS SELECT … GROUP BY` stores per-sensor aggregates and updates them as readings arrive.
+- **Remove old readings.** Delete a range such as `reading:[sensor:t1, NONE]..[sensor:t1, time::now() - 30d]` from a scheduled job in your application, after its summaries are stored.
+
+The [example repository](https://github.com/surrealdb/example-iot-telemetry) includes the simulator and dashboard, so you can watch alerts appear as readings stream in.

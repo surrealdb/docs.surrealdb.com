@@ -1,0 +1,159 @@
+---
+position: 4
+title: Prove a sports statistic
+description: "Find the youngest players to start a competitive game from players, games and starting line-ups, using record links, a subquery per player and datetime arithmetic."
+---
+
+# Prove a sports statistic
+
+This recipe answers a question that sports writers ask often: who are the youngest players to start a competitive game for their national team? The answer needs three things from the data: the first competitive game that each player started, the player's age on that day, and a ranking by that age. One SurrealQL query does all three.
+
+It is based on the video [Using SurrealDB to prove football statistics](https://www.youtube.com/watch?v=6J1SPMXzOh4) by Joseph McCarthy, which proves the same statistic for the Republic of Ireland from real match data, after earlier episodes of the series prove it with other databases. The players and games below are illustrative.
+
+## Schema
+
+A `game` holds its starting line-up as an array of links to `player` records, and a link to its `level`, which says whether the game was competitive or a friendly.
+
+```surql
+DEFINE TABLE level SCHEMAFULL;
+DEFINE FIELD name ON level TYPE string;
+DEFINE FIELD competitive ON level TYPE bool;
+
+DEFINE TABLE player SCHEMAFULL;
+DEFINE FIELD name ON player TYPE string;
+DEFINE FIELD born ON player TYPE option<datetime>;
+
+DEFINE TABLE game SCHEMAFULL;
+DEFINE FIELD date ON game TYPE datetime;
+DEFINE FIELD level ON game TYPE record<level>;
+DEFINE FIELD opponent ON game TYPE string;
+DEFINE FIELD score ON game TYPE string;
+DEFINE FIELD starting_xi ON game TYPE array<record<player>>;
+```
+
+`born` is optional, because historical records do not always include a date of birth.
+
+## Example data
+
+Each line-up lists only a few of the eleven players, to keep the example short.
+
+```surql
+INSERT INTO level [
+	{ id: level:friendly, name: 'Friendly', competitive: false },
+	{ id: level:qualifier, name: 'World Cup qualifier', competitive: true },
+	{ id: level:nations, name: 'Nations League', competitive: true },
+];
+INSERT INTO player [
+	{ id: player:aoife, name: 'Aoife Byrne', born: d'2005-03-14' },
+	{ id: player:cian, name: 'Cian Walsh', born: d'2004-11-02' },
+	{ id: player:niamh, name: 'Niamh Doyle', born: d'2006-01-20' },
+	{ id: player:sean, name: 'Seán Kelly', born: d'1999-07-08' },
+	{ id: player:orla, name: 'Orla Ryan', born: d'2003-05-30' },
+	{ id: player:liam, name: 'Liam Murphy' },
+];
+INSERT INTO game [
+	{ id: game:1, date: d'2022-06-04', level: level:friendly, opponent: 'Norway',
+		score: '1-1', starting_xi: [player:niamh, player:sean, player:orla] },
+	{ id: game:2, date: d'2022-09-23', level: level:nations, opponent: 'Scotland',
+		score: '2-0', starting_xi: [player:sean, player:orla, player:liam] },
+	{ id: game:3, date: d'2023-03-27', level: level:qualifier, opponent: 'Latvia',
+		score: '3-1', starting_xi: [player:cian, player:sean, player:liam] },
+	{ id: game:4, date: d'2023-09-10', level: level:qualifier, opponent: 'Greece',
+		score: '0-2', starting_xi: [player:aoife, player:cian, player:orla] },
+	{ id: game:5, date: d'2024-06-11', level: level:friendly, opponent: 'Hungary',
+		score: '2-1', starting_xi: [player:aoife, player:niamh] },
+	{ id: game:6, date: d'2024-10-13', level: level:nations, opponent: 'Finland',
+		score: '1-0', starting_xi: [player:niamh, player:aoife, player:sean] },
+];
+```
+
+## One player's first competitive start
+
+Start with one player. `level.competitive` follows the link from the game to its level record and reads a field there, so the query filters on the level without a join.
+
+```surql
+SELECT date, level.name AS level, opponent
+FROM game
+WHERE level.competitive AND player:orla IN starting_xi
+ORDER BY date
+LIMIT 1;
+```
+
+```surql title="Output"
+[
+	{
+		date: d'2022-09-23T00:00:00Z',
+		level: 'Nations League',
+		opponent: 'Scotland'
+	}
+]
+```
+
+Orla started a friendly against Norway earlier, in June 2022. The `WHERE` clause leaves it out, because a friendly is not competitive.
+
+## Every player, ranked by age
+
+To do the same for every player, the query above becomes a subquery inside a `SELECT` on `player`. [`$parent`](/docs/reference/query-language/language-primitives/parameters) refers to the record of the outer query, so `$parent.id` takes the place of `player:orla`. An outer `SELECT` then works out each age and sorts on it:
+
+```surql
+SELECT
+	name,
+	first_start.date AS first_start,
+	first_start.opponent AS opponent,
+	first_start.date - born AS age
+FROM (
+	SELECT
+		name,
+		born,
+		(SELECT date, opponent FROM game
+			WHERE level.competitive AND $parent.id IN starting_xi
+			ORDER BY date LIMIT 1)[0] AS first_start
+	FROM player
+	WHERE born != NONE
+)
+WHERE first_start != NONE
+ORDER BY age
+LIMIT 3;
+```
+
+```surql title="Output"
+[
+	{
+		age: 18y21w2d,
+		first_start: d'2023-03-27T00:00:00Z',
+		name: 'Cian Walsh',
+		opponent: 'Latvia'
+	},
+	{
+		age: 18y26w2d,
+		first_start: d'2023-09-10T00:00:00Z',
+		name: 'Aoife Byrne',
+		opponent: 'Greece'
+	},
+	{
+		age: 18y38w5d,
+		first_start: d'2024-10-13T00:00:00Z',
+		name: 'Niamh Doyle',
+		opponent: 'Finland'
+	}
+]
+```
+
+Each part of the query has one job:
+
+- **`[0]`** takes the single game out of the array that the subquery returns. A player with no competitive start gets `NONE`, and the outer `WHERE first_start != NONE` removes them. The original video uses `SPLIT` for the same two effects.
+- **`WHERE born != NONE`** removes players with no date of birth, such as Liam, whose age cannot be known.
+- **`first_start.date - born`** subtracts one datetime from another and gives a [duration](/docs/reference/query-language/language-primitives/data-types/durations).
+- **`ORDER BY age`** sorts on the field that the query projects. `ORDER BY` takes a field, not an expression, so the age is given a name first.
+
+Niamh is the youngest player in the data to start a game, at 16 in the friendly against Norway, but she is third here, because her first competitive start was more than two years later.
+
+> [!NOTE]
+> A `y` in a duration is 365 days, so an age shown as a duration can differ by a day or more from the calendar age across leap years. Compare the durations to rank players, and compute the calendar age separately where the exact number of days matters.
+
+## Taking it further
+
+- **Use graph edges for appearances.** With a `started` relation from each player to each game, created with `RELATE player:niamh->started->game:6`, the first competitive start of one player is `(->started->game[WHERE level.competitive].date).min()`. Edges can also hold details of the appearance, such as the minutes played.
+- **Ask other questions of the same data.** Change the `ORDER BY` to find the oldest debut, or count the competitive starts of each player with `count()` and `GROUP BY`.
+
+The [original video](https://www.youtube.com/watch?v=6J1SPMXzOh4) runs the query on the real Republic of Ireland data, and also sends it to the HTTP `/sql` endpoint from a REST client.

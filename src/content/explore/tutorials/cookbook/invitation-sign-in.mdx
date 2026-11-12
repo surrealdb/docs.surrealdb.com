@@ -1,0 +1,157 @@
+---
+position: 1
+title: Invitation sign-in
+description: "Let users join a team only through an invitation code: a record access method checks the code, its expiry and whether it was used, then creates the account and the membership."
+---
+
+# Invitation sign-in
+
+This recipe lets a person create an account only by accepting an invitation to a team. The database checks the invitation code, rejects one that is unknown, expired or already used, and then creates the user and their team membership in the same step. Your application only passes the code and a password.
+
+It is based on [Setting up an invite system](https://mord-blog.vercel.app/articles/surrealdb-invitation-system) by Mordechai Hadad, which builds the same idea into a Rust application with projects, creators and permissions for each resource.
+
+## Schema
+
+A `user` belongs to a `team` through a `member_of` relation. An `invite` holds the team, the email address it was sent to, a random code, an expiry time and the user who used it.
+
+```surql
+DEFINE TABLE user SCHEMAFULL PERMISSIONS FOR select WHERE id = $auth;
+DEFINE FIELD email ON user TYPE string ASSERT string::is_email($value);
+DEFINE FIELD password ON user TYPE string PERMISSIONS FOR select NONE;
+DEFINE INDEX user_email ON user FIELDS email UNIQUE;
+
+DEFINE TABLE team SCHEMAFULL
+	PERMISSIONS FOR select WHERE id IN $auth->member_of->team;
+DEFINE FIELD name ON team TYPE string;
+
+DEFINE TABLE member_of TYPE RELATION IN user OUT team SCHEMAFULL
+	PERMISSIONS FOR select WHERE in = $auth;
+DEFINE FIELD role ON member_of TYPE 'owner' | 'member';
+DEFINE INDEX member_of_pair ON member_of FIELDS in, out UNIQUE;
+
+DEFINE TABLE invite SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD team ON invite TYPE record<team>;
+DEFINE FIELD email ON invite TYPE string ASSERT string::is_email($value);
+DEFINE FIELD code ON invite TYPE string DEFAULT rand::string(24) READONLY;
+DEFINE FIELD expires ON invite TYPE datetime DEFAULT time::now() + 7d;
+DEFINE FIELD used_by ON invite TYPE option<record<user>>;
+DEFINE INDEX invite_code ON invite FIELDS code UNIQUE;
+```
+
+The `invite` table has `PERMISSIONS NONE`, so a signed-in user cannot list invitations or read their codes. Only the access method below and system users can read them.
+
+## The access method
+
+The `SIGNUP` block runs when someone accepts an invitation. Each `THROW` returns its message to the caller, so your application can show why the code was refused.
+
+```surql
+DEFINE ACCESS invite ON DATABASE TYPE RECORD
+	SIGNUP {
+		LET $invite = SELECT * FROM ONLY invite WHERE code = $code LIMIT 1;
+		IF $invite = NONE { THROW 'This invitation does not exist' };
+		IF $invite.used_by != NONE { THROW 'This invitation has already been used' };
+		IF $invite.expires < time::now() { THROW 'This invitation has expired' };
+		LET $user = CREATE ONLY user CONTENT {
+			email: $invite.email,
+			password: crypto::argon2::generate($password),
+		};
+		RELATE $user->member_of->($invite.team) CONTENT { role: 'member' };
+		UPDATE $invite.id SET used_by = $user.id;
+		RETURN $user;
+	}
+	SIGNIN {
+		RETURN SELECT * FROM ONLY user
+			WHERE email = $email AND crypto::argon2::compare(password, $password)
+			LIMIT 1;
+	}
+	DURATION FOR SESSION 12h;
+```
+
+The variable is called `$code` rather than `$token`, because `$token` is a [protected parameter](/docs/reference/query-language/language-primitives/parameters) that holds the claims of the current session.
+
+The account takes its email address from the invitation, not from the person who signs up. An invitation sent to one address therefore cannot create an account for another.
+
+## Create an invitation
+
+A system user, or your backend, creates the invitation and sends the code to the invited person.
+
+```surql
+CREATE team:design CONTENT { name: 'Design' };
+CREATE invite:ana CONTENT { team: team:design, email: 'ana@example.com' };
+SELECT code, expires FROM invite:ana;
+```
+
+```surql title="Sample output"
+[
+	{
+		code: 'mfCdX3Uyx4zVDcVEJC3X38uA',
+		expires: d'2026-11-19T02:10:14.630889Z'
+	}
+]
+```
+
+## Accept the invitation
+
+The invited person signs up with the code and a password of their choice. With the [JavaScript SDK](/docs/reference/javascript/concepts/authentication), the variables of the `SIGNUP` block go in `variables`:
+
+```ts
+await db.signup({
+	namespace: 'app',
+	database: 'app',
+	access: 'invite',
+	variables: {
+		code: 'mfCdX3Uyx4zVDcVEJC3X38uA',
+		password: 'hunter123',
+	},
+});
+```
+
+The session is now signed in as the new user. A second sign-up with the same code fails with `This invitation has already been used`, and the other two checks return their own messages:
+
+| Code                         | Result                                    |
+| ---------------------------- | ----------------------------------------- |
+| Valid and unused             | A new user, a membership and a session    |
+| Used before                  | `This invitation has already been used`   |
+| Past its `expires` time      | `This invitation has expired`             |
+| Not in the `invite` table    | `This invitation does not exist`          |
+
+## Sign in later
+
+After the first visit, the user signs in with the email address of the invitation and their password, through the `SIGNIN` block of the same access method:
+
+```ts
+await db.signin({
+	namespace: 'app',
+	database: 'app',
+	access: 'invite',
+	variables: {
+		email: 'ana@example.com',
+		password: 'hunter123',
+	},
+});
+```
+
+Signed in, the user sees their own record and the teams they belong to, and nothing from the `invite` table:
+
+```surql
+SELECT ->member_of.role AS roles, ->member_of->team.name AS teams FROM ONLY $auth;
+```
+
+```surql title="Output"
+{
+	roles: [
+		'member'
+	],
+	teams: [
+		'Design'
+	]
+}
+```
+
+## Taking it further
+
+- **Invite existing users.** Add a second record access method, or a function called by a signed-in user, that takes a code and only creates the `member_of` relation.
+- **Send the email from the database.** An [event](/docs/reference/query-language/statements/define/event) on `invite` can call an email service with [`http::post`](/docs/reference/query-language/functions/database-functions/http) when the network capability allows it.
+- **Resend an invitation.** Update `expires` on the existing record. The code stays the same, because the field is `READONLY`.
+
+The [original article](https://mord-blog.vercel.app/articles/surrealdb-invitation-system) shows the full flow in Rust, including invitations to individual projects.

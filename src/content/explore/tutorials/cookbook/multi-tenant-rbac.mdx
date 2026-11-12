@@ -1,0 +1,202 @@
+---
+position: 2
+title: Multi-tenant role-based access
+description: "Model tenants, roles and permissions as a graph, and enforce them with a table permission that follows the graph from the signed-in user."
+---
+
+# Multi-tenant role-based access
+
+This recipe gives each user roles inside one or more tenants, such as the companies that share one application, and lets each role grant a set of permissions. The rules live in the database: a table permission follows the graph from the signed-in user to their roles in the record's tenant, so a query returns only what that user may see.
+
+It is based on the series [Unlocking SurrealDB: building a real-world multi-tenant RBAC system](https://dev.to/sebastian_wessel/series/24535) by Sebastian Wessel, which models tenants, roles and permissions as a graph and shows how to query them. This recipe uses a smaller model and adds record access and table permissions that enforce the roles.
+
+## Schema
+
+A `role` belongs to one `tenant`. A `grants` relation links a role to each `permission` it gives, and a `has_role` relation links a user to each of their roles.
+
+```surql
+DEFINE TABLE tenant SCHEMAFULL;
+DEFINE FIELD name ON tenant TYPE string;
+
+DEFINE TABLE user SCHEMAFULL PERMISSIONS FOR select WHERE id = $auth;
+DEFINE FIELD email ON user TYPE string ASSERT string::is_email($value);
+DEFINE FIELD password ON user TYPE string PERMISSIONS FOR select NONE;
+DEFINE INDEX user_email ON user FIELDS email UNIQUE;
+
+DEFINE TABLE role SCHEMAFULL;
+DEFINE FIELD name ON role TYPE string;
+DEFINE FIELD tenant ON role TYPE record<tenant>;
+
+DEFINE TABLE permission SCHEMAFULL;
+DEFINE FIELD description ON permission TYPE string;
+
+DEFINE TABLE grants TYPE RELATION IN role OUT permission SCHEMAFULL;
+DEFINE INDEX grants_pair ON grants FIELDS in, out UNIQUE;
+DEFINE TABLE has_role TYPE RELATION IN user OUT role SCHEMAFULL;
+DEFINE INDEX has_role_pair ON has_role FIELDS in, out UNIQUE;
+```
+
+The unique indexes on `in, out` stop the same role from being granted twice, which would otherwise repeat a permission in every query that follows the edges.
+
+## The permission check
+
+One function answers the question every rule asks: does the signed-in user hold this permission in this tenant? It walks from `$auth` to the user's roles, keeps only the roles of that tenant, and collects the permissions they grant.
+
+```surql
+DEFINE FUNCTION fn::can($tenant: record<tenant>, $permission: record<permission>) -> bool {
+	$permission IN $auth->has_role->(role WHERE tenant = $tenant)->grants->permission
+};
+```
+
+A table that belongs to a tenant then states its rules with that function:
+
+```surql
+DEFINE TABLE invoice SCHEMAFULL
+	PERMISSIONS
+		FOR select WHERE fn::can(tenant, permission:invoice_read)
+		FOR create, update, delete WHERE fn::can(tenant, permission:invoice_write);
+DEFINE FIELD tenant ON invoice TYPE record<tenant>;
+DEFINE FIELD customer ON invoice TYPE string;
+DEFINE FIELD amount ON invoice TYPE decimal;
+
+DEFINE ACCESS account ON DATABASE TYPE RECORD
+	SIGNIN {
+		RETURN SELECT * FROM ONLY user
+			WHERE email = $email AND crypto::argon2::compare(password, $password)
+			LIMIT 1;
+	}
+	DURATION FOR SESSION 12h;
+```
+
+A system user is not subject to table permissions, so your backend and administration tools keep full access.
+
+## Example data
+
+Two tenants each have an accountant role, and Acme also has a read-only viewer role. Ana is an accountant at Acme. Ben is a viewer at Acme and an accountant at Globex.
+
+```surql
+INSERT INTO tenant [
+	{ id: tenant:acme, name: 'Acme' },
+	{ id: tenant:globex, name: 'Globex' },
+];
+INSERT INTO permission [
+	{ id: permission:invoice_read, description: 'Read invoices' },
+	{ id: permission:invoice_write, description: 'Create, change and delete invoices' },
+];
+INSERT INTO role [
+	{ id: role:acme_accountant, name: 'Accountant', tenant: tenant:acme },
+	{ id: role:acme_viewer, name: 'Viewer', tenant: tenant:acme },
+	{ id: role:globex_accountant, name: 'Accountant', tenant: tenant:globex },
+];
+RELATE role:acme_accountant->grants->[permission:invoice_read, permission:invoice_write];
+RELATE role:acme_viewer->grants->permission:invoice_read;
+RELATE role:globex_accountant->grants->[permission:invoice_read, permission:invoice_write];
+
+INSERT INTO user [
+	{ id: user:ana, email: 'ana@example.com', password: crypto::argon2::generate('hunter123') },
+	{ id: user:ben, email: 'ben@example.com', password: crypto::argon2::generate('hunter123') },
+];
+RELATE user:ana->has_role->role:acme_accountant;
+RELATE user:ben->has_role->[role:acme_viewer, role:globex_accountant];
+
+INSERT INTO invoice [
+	{ id: invoice:a1, tenant: tenant:acme, customer: 'Harbour Café', amount: 1200dec },
+	{ id: invoice:a2, tenant: tenant:acme, customer: 'Kite Studio', amount: 340dec },
+	{ id: invoice:g1, tenant: tenant:globex, customer: 'Pine Books', amount: 990dec },
+];
+```
+
+## Query the roles
+
+As a system user, the same graph answers administration questions. This query lists Ben's roles with the permissions each one grants:
+
+```surql
+SELECT
+	tenant.name AS tenant,
+	name AS role,
+	->grants->permission.description AS can
+FROM user:ben->has_role->role
+ORDER BY tenant;
+```
+
+```surql title="Output"
+[
+	{
+		can: [
+			'Read invoices'
+		],
+		role: 'Viewer',
+		tenant: 'Acme'
+	},
+	{
+		can: [
+			'Create, change and delete invoices',
+			'Read invoices'
+		],
+		role: 'Accountant',
+		tenant: 'Globex'
+	}
+]
+```
+
+Following the edges the other way gives the members of each role in a tenant:
+
+```surql
+SELECT name, <-has_role<-user.email AS members
+FROM role WHERE tenant = tenant:acme
+ORDER BY name;
+```
+
+```surql title="Output"
+[
+	{
+		members: [
+			'ana@example.com'
+		],
+		name: 'Accountant'
+	},
+	{
+		members: [
+			'ben@example.com'
+		],
+		name: 'Viewer'
+	}
+]
+```
+
+## Query as each user
+
+Each user signs in through the `account` access method and runs ordinary queries. Ana sees the invoices of Acme only, and an attempt to move one of them to Globex changes nothing, because she holds no role there:
+
+```surql
+-- Signed in as ana@example.com
+SELECT VALUE customer FROM invoice ORDER BY id;
+//- ['Harbour Café', 'Kite Studio']
+
+UPDATE invoice:a2 SET tenant = tenant:globex;
+//- []
+```
+
+Ben sees the invoices of both tenants. He can change the Globex invoice, where he is an accountant, but cannot create one for Acme, where he is a viewer:
+
+```surql
+-- Signed in as ben@example.com
+SELECT VALUE customer FROM invoice ORDER BY id;
+//- ['Harbour Café', 'Kite Studio', 'Pine Books']
+
+CREATE invoice CONTENT { tenant: tenant:acme, customer: 'Lakeside Dental', amount: 75dec };
+//- []
+
+UPDATE invoice:g1 SET amount = 1000dec RETURN VALUE amount;
+//- [1000dec]
+```
+
+A statement that the permissions refuse returns an empty array rather than an error, so check the result where your application needs to tell the user that an action was not allowed.
+
+## Taking it further
+
+- **Add a resource.** Give each new tenant-owned table a `tenant` field and the same two `PERMISSIONS` lines, with its own permission records.
+- **Let tenant administrators manage roles.** Add a `role_manage` permission and use `fn::can` in the permissions of `has_role`, so an administrator can grant roles only in their own tenant.
+- **Pass the tenant in the session.** Read a tenant chosen at sign-in from `$session` or the token claims, so a user with roles in several tenants works in one at a time.
+
+The [original series](https://dev.to/sebastian_wessel/series/24535) goes further into querying the graph, with roles shared between tenants and a schema built up step by step.
