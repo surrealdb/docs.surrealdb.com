@@ -1,0 +1,128 @@
+---
+position: 3
+title: An HTTP API in the database
+description: "Serve a small JSON task API from SurrealDB itself with DEFINE API: routes, path parameters, input checks and status codes, without a separate web server."
+---
+
+# An HTTP API in the database
+
+This recipe serves a small JSON API for a task list directly from SurrealDB. Each route is a [`DEFINE API`](/docs/reference/query-language/statements/define/api) statement, so the routes, the input checks and the queries they run are all stored in the database, and a client calls them over HTTP like any other web service.
+
+It is based on three tutorials that build the same kind of API with a web framework in front of SurrealDB: [Simple API with Gin/Gonic and SurrealDB](https://atoo.hashnode.dev/simple-api-with-gingonic-and-surrealdb) by Atharva Deshpande in Go, [How to use SurrealDB with the Fresh framework and Deno](https://www.freecodecamp.org/news/how-to-use-surrealdb-with-fresh-framework/) by Rajdeep Singh, and [How to build a Rust backend with Actix Web and SurrealDB](https://www.youtube.com/watch?v=Rnw-x21kGaA). Use one of those when the API needs a framework's features, such as templating or calls to other services.
+
+| Method   | Path         | Result                                  |
+| -------- | ------------ | --------------------------------------- |
+| `GET`    | `/tasks`     | All tasks, oldest first                 |
+| `POST`   | `/tasks`     | Creates a task from `{ "title": … }`    |
+| `GET`    | `/tasks/:id` | One task                                |
+| `PATCH`  | `/tasks/:id` | Sets `done` from `{ "done": true }`     |
+| `DELETE` | `/tasks/:id` | Deletes the task                        |
+
+## Schema
+
+The `task` table has `PERMISSIONS NONE`, so a client that is not a system user cannot query it directly. The API bodies still read and write it, because an API body runs without table permission checks by default.
+
+```surql
+DEFINE TABLE task SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD title ON task TYPE string ASSERT $value.len() > 0;
+DEFINE FIELD done ON task TYPE bool DEFAULT false;
+DEFINE FIELD created ON task TYPE datetime VALUE time::now() READONLY;
+
+DEFINE FUNCTION fn::task_json($task: record<task>) -> object {
+	$task.{ id: record::id(id), title, done }
+};
+```
+
+`fn::task_json` gives every route the same response shape. It returns the key of the record ID without the table name, such as `"yb6i1rge67pkqmbc369x"`, because that is the part a client puts in `/tasks/:id`.
+
+## JSON in and out
+
+An API response body reaches an HTTP client as bytes or a string, so the database needs to know how to serialise the objects that the routes return. [`DEFINE CONFIG API`](/docs/reference/query-language/statements/define/config) sets middleware for every endpoint of the database:
+
+```surql
+DEFINE CONFIG API MIDDLEWARE api::res::body("json");
+```
+
+The request side is set for each method instead, with `api::req::body("json")` on the methods that receive a body. A `GET` request has no body, and the JSON parser would refuse it.
+
+## The routes
+
+```surql
+DEFINE API "/tasks"
+	FOR get THEN {
+		{
+			status: 200,
+			body: (SELECT VALUE id FROM task ORDER BY created).map(|$t| fn::task_json($t)),
+		}
+	}
+	FOR post MIDDLEWARE api::req::body("json") THEN {
+		LET $title = $request.body.title;
+		IF !$title.is_string() OR $title.len() = 0 {
+			RETURN { status: 400, body: { error: 'A task needs a title' } };
+		};
+		LET $task = CREATE ONLY task CONTENT { title: $title };
+		{ status: 201, body: fn::task_json($task.id) }
+	};
+
+DEFINE API "/tasks/:id"
+	FOR get THEN {
+		LET $task = type::record('task', $request.params.id);
+		IF $task.* = NONE { RETURN { status: 404, body: { error: 'No such task' } } };
+		{ status: 200, body: fn::task_json($task) }
+	}
+	FOR patch MIDDLEWARE api::req::body("json") THEN {
+		LET $done = $request.body.done;
+		IF !$done.is_bool() {
+			RETURN { status: 400, body: { error: 'Send done as true or false' } };
+		};
+		LET $task = UPDATE ONLY type::record('task', $request.params.id) MERGE { done: $done };
+		IF $task = NONE { RETURN { status: 404, body: { error: 'No such task' } } };
+		{ status: 200, body: fn::task_json($task.id) }
+	}
+	FOR delete THEN {
+		DELETE type::record('task', $request.params.id);
+		{ status: 204 }
+	};
+```
+
+A few details:
+
+- **`$request.params.id`** holds the `:id` segment of the path, and `type::record('task', …)` turns it into a record ID.
+- **The input checks return `400`** with a message. Without them, a missing title would fail the `ASSERT` on the field, and a handler that fails answers with a `500` and no explanation.
+- **`UPDATE ONLY`** on a record that does not exist returns `NONE` and creates nothing, which the `PATCH` route turns into a `404`.
+
+## Call the API
+
+Every endpoint is served at `/api/<namespace>/<database>/<path>`. With a server started by `surreal start --user root --pass secret` and the statements above run in the namespace `app` and the database `app`:
+
+```bash
+curl -X POST http://localhost:8000/api/app/app/tasks \
+	-H 'Content-Type: application/json' \
+	-d '{"title":"Write the release notes"}'
+```
+
+```json title="Output"
+{"done":false,"id":"yb6i1rge67pkqmbc369x","title":"Write the release notes"}
+```
+
+The other routes answer in the same way:
+
+| Request                                       | Status | Body                                                                  |
+| --------------------------------------------- | ------ | --------------------------------------------------------------------- |
+| `GET /tasks`                                  | `200`  | `[{"done":false,"id":"yb6i1rge67pkqmbc369x","title":"Write the release notes"}]` |
+| `PATCH /tasks/yb6i1rge67pkqmbc369x` with `{"done":true}` | `200`  | `{"done":true,"id":"yb6i1rge67pkqmbc369x","title":"Write the release notes"}` |
+| `PATCH /tasks/yb6i1rge67pkqmbc369x` with `{"done":"yes"}` | `400`  | `{"error":"Send done as true or false"}`                              |
+| `POST /tasks` with `{"title":""}`             | `400`  | `{"error":"A task needs a title"}`                                    |
+| `GET /tasks/nope`                             | `404`  | `{"error":"No such task"}`                                            |
+| `DELETE /tasks/yb6i1rge67pkqmbc369x`          | `204`  | Empty                                                                 |
+
+Inside the database, [`api::invoke`](/docs/reference/query-language/functions/database-functions/api) calls a route without HTTP, which is useful in tests.
+
+> [!WARNING]
+> These routes have no `PERMISSIONS` clause, so they use `PERMISSIONS FULL`: anyone who can reach the server can call them, without signing in. Before you expose an API like this one, add a clause to each method, such as `FOR post MIDDLEWARE api::req::body("json") PERMISSIONS WHERE $auth != NONE THEN { … }`, which answers `403` to a caller who has not signed in, and check `$auth` in the body where users should see different tasks.
+
+## Taking it further
+
+- **Give each user their own tasks.** Add an `owner` field set from `$auth`, filter on it in each route, and allow only signed-in callers with `PERMISSIONS WHERE $auth != NONE`.
+- **Accept only API calls.** Turn off arbitrary queries for record users with the [capabilities](/docs/learn/security/authorization/capabilities) of the server, so that the routes are the only way in.
+- **Add middleware.** [`api::timeout`](/docs/reference/query-language/functions/database-functions/api) and your own [middleware functions](/docs/learn/querying/custom-apis/middleware) run before a route, for limits, headers or checks that every route shares.
