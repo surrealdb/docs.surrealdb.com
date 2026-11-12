@@ -436,10 +436,18 @@ can tell which half is runnable.
 `Output` is the plain label, and `Response` is kept only on the HTTP and RPC
 pages, where it is the counterpart of a `Request` block. Anything with the word
 `output` in it pairs and renders in full, so use a qualifier whenever the
-value shown is one of several a reader might see - `Sample output` and
-`Possible output` for a generated record id, a datetime or a live API,
-`Expected output` for a value a test asserts, `Error output` for a failure, or a
-condition spelled out as in `title="Output when $transfer_amount set to 150"`.
+value shown is not exactly what every run gives:
+
+- `Example output` when the shape is fixed but incidental values differ on each
+  run: a generated record id, a datetime, a UUID, a request id or a timing.
+- `Possible output` when the result itself is random: a random number, how many
+  records come back, an order that depends on generated ids, or a timeout that
+  may or may not fire.
+- `Expected output` for a value a test asserts, `Error output` for a failure,
+  or a condition spelled out as in `title="Output when $transfer_amount set to 150"`.
+
+Where the block's own setup makes the value the same on every run, use plain
+`Output`, even for a datetime or a record id the setup writes out.
 `Response` and `Result` only pair at the start of a title, because a code block
 titled for what it does with a response (`Handle Individual Responses`,
 `Map results onto a dataclass`) would otherwise be joined to the example above
@@ -480,7 +488,7 @@ CREATE ONLY cat:one;
 
 Because `//-` asserts that the statement returned this, a value a rerun would
 not reproduce needs the label above to say so - the inline counterpart of the
-`Possible output` and `Sample output` fence titles:
+`Possible output` and `Example output` fence titles:
 
 ```surql
 -- Possible output, since the timeout may or may not be exceeded
@@ -541,6 +549,43 @@ values alongside for an agent to diff against.
 On a block that sets up its data first, the fence labels the **last** statement,
 the same convention `RETURN` follows: three `CREATE`s and then the `SELECT`
 whose result is shown is one fence pair, not four.
+
+**Self-contained examples.** A SurrealQL example runs exactly as written on a
+fresh database, for a reader who pastes it from the site and for one who reads
+the raw MDX. When it uses a table, records, an index, a type or a parameter
+that an earlier block on the page creates, copy those statements into the top
+of the block rather than relying on the reader having run the earlier one.
+Copy only what the block uses. Where nothing on the page creates it, write the
+smallest setup that makes the query return something meaningful: usually two
+or three `CREATE` statements with the fields the query reads.
+
+Put the setup under a label line and end it with a blank line:
+
+```surql
+-- Setup from the example above
+CREATE person:tobie SET name = 'Tobie', age = 30;
+CREATE person:jaime SET name = 'Jaime', age = 25;
+
+SELECT name FROM person WHERE age > 28;
+```
+
+The site collapses everything from the label to the first blank line under a
+"setup lines" toggle, so the reader sees the query first, while the copy button,
+the raw MDX and the `.md` endpoints keep the whole block. The label is one of
+`-- Setup`, `-- Setup from the example above` (or `examples`, or `below`), or
+`-- Setup:` followed by a note such as the page the data comes from. Any other
+comment that starts with the word, such as `-- Setup accounts` inside a
+transaction the page is teaching, stays visible, so use one of those forms only
+for setup a reader can skip. Statements after the blank line are the example,
+and the stated results follow the usual rules: an `Output` fence is the last
+statement's value, a `//-` line the value of the statement above it, and a
+`/** [test] */` config lists one result per statement, setup included.
+
+Mark a block `notest` (```` ```surql notest ````) only when it cannot run on its
+own: a template whose parameters an SDK, an HTTP request or the application
+supplies, old syntax shown on purpose, or a statement that needs a signed-in
+session, credentials or a dataset. `notest` does not show on the page. It is
+never a way to skip an example that is wrong for the current release.
 
 **Long lines in code.** A code block shows about 70 characters on a
 1440-pixel laptop screen, about 98 on a 1920-pixel monitor and about 36 on a
@@ -1006,6 +1051,7 @@ every component in that file.
 | `<Version sdk="…" />`            | Inline current version number for an SDK.                     |
 | `<YouTube code="…" />`           | Embedded video. The `code` is the YouTube id.                 |
 | `<SurrealistMini query="…" />`   | Runnable query embed of a live editor.                        |
+| `<DemoEmbed pages={[…]} />`      | A page from `public/` in a frame, such as a showcase demo.    |
 
 `<CodeWithOutput>` is absent from that table on purpose: `wrapOutputPairs` inserts
 it around an output pair while parsing, and no page writes it by hand.
@@ -1108,6 +1154,42 @@ Each row needs `name` and `description`; `short`, `value`, `type`, `default`,
 `Environment variable` columns render only when a row uses them, so a table never
 carries a column of em-dashes. Use `value` for CLI placeholders and `type` for
 SDK parameter types. Backtick spans inside `description` render as inline code.
+
+### `<DemoEmbed>`
+
+```mdx
+<DemoEmbed title="Who decides here?" height={820} pages={[{ "label": "Who decides here?", "src": "/docs/showcase/who-decides/who-decides.html" }]} />
+```
+
+`<DemoEmbed>` shows a page from `public/` in a frame, with one tab for each
+entry in `pages`. Markdown strips a raw `<iframe>`, so this is the only way to
+embed one. A showcase demo keeps its files in `public/showcase/<name>/`.
+
+Two mistakes break an embed on surrealdb.com while it still works in
+`bun run dev`:
+
+- **A page named `index.html`.** Vercel serves `/docs/x/index.html` as `/docs/x`
+  with no trailing slash, so a relative `fetch("data.json")` asks for
+  `/docs/data.json`. Name the page after what it shows, as in `who-decides.html`.
+- **An inline `<script>`.** The Content-Security-Policy that surrealdb.com sends
+  has no `'unsafe-inline'` in `script-src`, so the browser blocks the script,
+  and a Vercel preview can still look correct. Put the script in its own `.js`
+  file. Inline styles are allowed.
+
+#### A SurrealDB engine in the page
+
+`public/showcase/who-decides/engine.wasm` is the unmodified binary of
+`@surrealdb/wasm-native` 3.3.4, about 14 MB. It loads only with the wasm-bindgen
+glue code built for that exact version, and that glue is bundled into
+`who-decides.js` with the demo's interface, so another page cannot load the file
+on its own. A new demo that runs SurrealDB in the browser installs
+`@surrealdb/wasm` and `@surrealdb/wasm-native` and bundles its own copy.
+
+When a second demo needs the engine, move the engine to one shared folder, such
+as `public/showcase/engine/`, with its glue as a separate module, and load it
+from there in both demos instead of committing a second 14 MB copy. Updating the
+shared engine to a new SurrealDB release then changes every demo that uses it,
+so open each of them afterwards.
 
 ## Diagrams
 
