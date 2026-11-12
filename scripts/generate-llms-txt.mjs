@@ -52,15 +52,12 @@ const OUTPUT_FILE = "public/llms.txt";
  */
 const SIZE_BUDGET = 99_000;
 
-/** Collections that are not part of the documentation tree. */
-const SKIP_COLLECTIONS = new Set(["labs-items"]);
-
 /**
  * Pages that exist as routes but not as entries in a documentation collection,
  * so the walk below cannot find them.
  *
- * `/docs/labs` renders the `labs-items` collection as a listing rather than
- * being a page in it, which left it in the sitemap and absent from the index.
+ * `/docs/labs` renders the entries of `src/data/labs.json` as a listing
+ * rather than being a page in a collection, so the walk does not reach it.
  * Keyed by section so it lands under the right heading.
  */
 const EXTRA_PAGES = {
@@ -205,8 +202,6 @@ const collections = readCollections();
 const sections = new Map();
 
 for (const [id, prefix] of collections) {
-    if (SKIP_COLLECTIONS.has(id)) continue;
-
     const fallback = sectionOf(id);
 
     for (const page of pagesFor(id, prefix)) {

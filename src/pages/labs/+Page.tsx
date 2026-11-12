@@ -239,17 +239,17 @@ export default function Page() {
                             maw={832}
                         >
                             Find client SDKs, videos, development tools, and learning resources to
-                            help you build and scale your applications. Have something to share?
-                            Check out our{" "}
+                            help you build and scale your applications. To add your own, open a pull
+                            request to{" "}
                             <Anchor
-                                href="https://github.com/surrealdb/docs.surrealdb.com?tab=readme-ov-file#creating-a-new-lab"
+                                href="https://github.com/surrealdb/awesome-surreal/blob/main/CONTRIBUTING.md"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 variant="vibrant"
                             >
-                                guide on creating a new Lab
-                            </Anchor>{" "}
-                            to contribute your own.
+                                awesome-surreal
+                            </Anchor>
+                            , where these entries are maintained.
                         </Text>
 
                         <Group

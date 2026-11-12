@@ -86,8 +86,10 @@ export const labSchema = strictObject({
     author: literal("surrealdb").or(
         object({
             name: string(),
-            role: string(),
-            avatar: string(),
+            /** Shown under the name on the card. */
+            role: string().optional(),
+            /** File name of a photo in `src/assets/img/labs-authors`, without `.jpg`. */
+            avatar: string().optional(),
         }),
     ),
     topics: _enum(labTopics).array().default([]),
