@@ -1048,6 +1048,7 @@ every component in that file.
 | `<Version sdk="…" />`            | Inline current version number for an SDK.                     |
 | `<YouTube code="…" />`           | Embedded video. The `code` is the YouTube id.                 |
 | `<SurrealistMini query="…" />`   | Runnable query embed of a live editor.                        |
+| `<DemoEmbed pages={[…]} />`      | A page from `public/` in a frame, such as a showcase demo.    |
 
 `<CodeWithOutput>` is absent from that table on purpose: `wrapOutputPairs` inserts
 it around an output pair while parsing, and no page writes it by hand.
@@ -1150,6 +1151,42 @@ Each row needs `name` and `description`; `short`, `value`, `type`, `default`,
 `Environment variable` columns render only when a row uses them, so a table never
 carries a column of em-dashes. Use `value` for CLI placeholders and `type` for
 SDK parameter types. Backtick spans inside `description` render as inline code.
+
+### `<DemoEmbed>`
+
+```mdx
+<DemoEmbed title="Who decides here?" height={820} pages={[{ "label": "Who decides here?", "src": "/docs/showcase/who-decides/who-decides.html" }]} />
+```
+
+`<DemoEmbed>` shows a page from `public/` in a frame, with one tab for each
+entry in `pages`. Markdown strips a raw `<iframe>`, so this is the only way to
+embed one. A showcase demo keeps its files in `public/showcase/<name>/`.
+
+Two mistakes break an embed on surrealdb.com while it still works in
+`bun run dev`:
+
+- **A page named `index.html`.** Vercel serves `/docs/x/index.html` as `/docs/x`
+  with no trailing slash, so a relative `fetch("data.json")` asks for
+  `/docs/data.json`. Name the page after what it shows, as in `who-decides.html`.
+- **An inline `<script>`.** The Content-Security-Policy that surrealdb.com sends
+  has no `'unsafe-inline'` in `script-src`, so the browser blocks the script,
+  and a Vercel preview can still look correct. Put the script in its own `.js`
+  file. Inline styles are allowed.
+
+#### A SurrealDB engine in the page
+
+`public/showcase/who-decides/engine.wasm` is the unmodified binary of
+`@surrealdb/wasm-native` 3.3.4, about 14 MB. It loads only with the wasm-bindgen
+glue code built for that exact version, and that glue is bundled into
+`who-decides.js` with the demo's interface, so another page cannot load the file
+on its own. A new demo that runs SurrealDB in the browser installs
+`@surrealdb/wasm` and `@surrealdb/wasm-native` and bundles its own copy.
+
+When a second demo needs the engine, move the engine to one shared folder, such
+as `public/showcase/engine/`, with its glue as a separate module, and load it
+from there in both demos instead of committing a second 14 MB copy. Updating the
+shared engine to a new SurrealDB release then changes every demo that uses it,
+so open each of them afterwards.
 
 ## Diagrams
 
