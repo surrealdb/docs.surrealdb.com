@@ -179,6 +179,12 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         description: "Create, scale, and monitor your database instances.",
                     },
                     {
+                        label: "SurrealDB Earth",
+                        href: "/docs/manage/instances/earth",
+                        description: "Run serverless SurrealDB on the Cloudflare network.",
+                        badge: "new",
+                    },
+                    {
                         label: "Organisations",
                         href: "/docs/manage/organisations",
                         description: "Manage members, roles, and billing for your team.",
@@ -336,6 +342,27 @@ export const SURREALDB_NAV_LINKS: NavEntry[] = [
                         label: "Swift",
                         href: "/docs/reference/swift",
                         image: brandSwift,
+                    },
+                ],
+            },
+            {
+                heading: "Libraries",
+                items: [
+                    {
+                        label: "Surqlize for TypeScript",
+                        href: "/docs/libraries/surqlize-typescript",
+                        description: "A type-safe TypeScript ORM for SurrealDB.",
+                    },
+                    {
+                        label: "Surqlize for PHP",
+                        href: "/docs/libraries/surqlize-php",
+                        description: "An object-relational mapper for SurrealDB in PHP.",
+                    },
+                    {
+                        label: "SQL drivers for JavaScript",
+                        href: "/docs/libraries/sql-drivers",
+                        description:
+                            "PostgreSQL and MySQL dialect clients for edge and serverless runtimes.",
                     },
                 ],
             },

@@ -1,15 +1,17 @@
 import { resolve } from "node:path";
 import { checkbox, input, select } from "@inquirer/prompts";
 import { slug } from "github-slugger";
-import { labCategories, labTopics } from "~/utils/labs";
+import { labFormats, labLanguages, labStages, labTopics } from "~/utils/labs";
 
 try {
     const config = {
         name: process.argv.slice(2).join(" "),
         description: "",
         url: "",
-        category: "",
+        stage: "",
+        format: "",
         topics: [] as string[],
+        languages: [] as string[],
         authorName: "",
         authorRole: "",
     };
@@ -29,14 +31,24 @@ try {
         message: "URL (optional):",
     });
 
-    config.category = await select({
-        message: "Category:",
-        choices: labCategories,
+    config.stage = await select({
+        message: "Stage:",
+        choices: labStages,
+    });
+
+    config.format = await select({
+        message: "Format:",
+        choices: labFormats,
     });
 
     config.topics = await checkbox({
         message: "Topics (optional):",
         choices: labTopics,
+    });
+
+    config.languages = await checkbox({
+        message: "Languages (optional):",
+        choices: labLanguages,
     });
 
     config.authorName = await input({
@@ -56,6 +68,7 @@ try {
     let content = "---\n";
 
     content += `title: "${config.name}"\n`;
+    content += `date: "${new Date().toISOString().slice(0, 10)}"\n`;
 
     if (config.description.trim() !== "") {
         content += `description: "${config.description}"\n`;
@@ -65,7 +78,8 @@ try {
         content += `url: ${config.url}\n`;
     }
 
-    content += `category: ${config.category}\n`;
+    content += `stage: ${config.stage}\n`;
+    content += `format: ${config.format}\n`;
 
     if (config.topics.length > 0) {
         content += "topics:\n";
@@ -75,6 +89,14 @@ try {
         }
     } else {
         content += "topics: []\n";
+    }
+
+    if (config.languages.length > 0) {
+        content += "languages:\n";
+
+        for (const language of config.languages) {
+            content += `  - ${language}\n`;
+        }
     }
 
     if (isOfficial) {

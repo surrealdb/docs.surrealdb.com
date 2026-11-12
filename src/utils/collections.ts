@@ -1,10 +1,12 @@
 import type { CollectionMap } from "vike-content-collection";
-import { getCollection, getCollectionEntry, sortCollection } from "vike-content-collection";
+import { getCollection, getCollectionEntry } from "vike-content-collection";
+import labsBlog from "~/data/labs-blog.json";
 import type { SdkVersionMap } from "~/lib/versions";
 import { LLMS_TXT_URL } from "./agent-markdown";
-import { labCategories } from "./labs";
+import { labStages } from "./labs";
 import { stripLanguageTestComments, stripLeadingH1 } from "./markdown";
 import { flattenMdxComponents } from "./mdx-to-markdown";
+import type { LabSchema } from "./schema";
 
 /**
  * Maps a URL prefix to the content collection that serves it.
@@ -18,12 +20,12 @@ import { flattenMdxComponents } from "./mdx-to-markdown";
  * The empty-prefix `index` entry is the root catch-all and must remain last.
  */
 export const COLLECTION_ROUTES: { prefix: string; id: string }[] = [
+    { prefix: "libraries", id: "libraries" },
     { prefix: "build/ai-agents", id: "build/ai-agents" },
     { prefix: "build/embedding", id: "build/embedding" },
     { prefix: "build/integrations", id: "build/integrations" },
     { prefix: "build/migrating", id: "build/migrating" },
     { prefix: "explore/cli", id: "explore/cli" },
-    { prefix: "explore/ml-models", id: "explore/ml-models" },
     { prefix: "explore/studio", id: "explore/studio" },
     { prefix: "explore/tutorials", id: "explore/tutorials" },
     { prefix: "learn/data-models", id: "learn/data-models" },
@@ -164,25 +166,40 @@ export function withIndexPointer(markdown: string): string {
 }
 
 /**
+ * Every Labs item, newest first: the `labs-items` collection plus the blog
+ * posts in `src/data/labs-blog.json` (written by `bun run generate:labs-blog`).
+ */
+export function getLabItems(): (LabSchema & { slug: string })[] {
+    const entries = getCollection("labs-items").map((entry) => ({
+        slug: entry.slug,
+        ...entry.metadata,
+    }));
+
+    return [...entries, ...(labsBlog as (LabSchema & { slug: string })[])].sort(
+        (a, b) => b.date.localeCompare(a.date) || a.title.localeCompare(b.title),
+    );
+}
+
+/**
  * The Labs listing as markdown.
  *
- * Labs is a React page over the `labs-items` collection rather than an entry in
+ * Labs is a React page over `getLabItems()` rather than an entry in
  * a documentation collection, so `resolveCollectionEntry` cannot reach it and it
  * had no `.md` of its own. `llms.txt` lists it and its preamble tells an agent
  * that appending `.md` works on any entry, so the choice was to write this or to
  * drop Labs back out of the index - and the listing is the answer to "what talks
  * and examples exist", which is worth more in markdown than in a card grid.
  *
- * Grouped by `labCategories` in its declared order, matching the page.
+ * Grouped by `labStages` in journey order.
  */
 export function composeLabsMarkdown(): string {
-    const items = sortCollection(getCollection("labs-items"), "title", "asc");
+    const items = getLabItems();
 
-    const sections = labCategories.flatMap((category) => {
+    const sections = labStages.flatMap((stage) => {
         const lines = items
-            .filter((item) => item.metadata.category === category)
+            .filter((item) => item.stage === stage)
             .map((item) => {
-                const { title, url, description, author } = item.metadata;
+                const { title, url, description, author } = item;
                 // `author` is either the literal "surrealdb" or an object.
                 const by = author === "surrealdb" ? "SurrealDB" : author.name;
                 const link = url ? `[${title}](${url})` : title;
@@ -194,7 +211,7 @@ export function composeLabsMarkdown(): string {
                 return `- ${link} - ${description ? `${description} ` : ""}${credit}`;
             });
 
-        return lines.length ? [`## ${category}\n\n${lines.join("\n")}`] : [];
+        return lines.length ? [`## ${stage}\n\n${lines.join("\n")}`] : [];
     });
 
     return [
@@ -220,7 +237,7 @@ const DOCS_ORIGIN = "https://surrealdb.com";
 export function composeFullCorpusMarkdown(sdkVersions?: SdkVersionMap): string {
     const sections: string[] = [
         "# SurrealDB documentation - full corpus",
-        `> The complete SurrealDB documentation as a single markdown document. Each page starts with a "Source:" line naming its canonical URL. The page index is at ${DOCS_ORIGIN}/docs/llms.txt, and every page is also available individually by appending \`.md\` to its URL. In code examples, a fenced block whose title contains "output" holds the result of the block above it rather than runnable code, and a qualifier such as "Sample output" or "Possible output" means the value shown is one of several possible ones. Inside a block, a "//-" comment marks a value the statement above it returned, while "--" is an ordinary comment.`,
+        `> The complete SurrealDB documentation as a single markdown document. Each page starts with a "Source:" line naming its canonical URL. The page index is at ${DOCS_ORIGIN}/docs/llms.txt, and every page is also available individually by appending \`.md\` to its URL. In code examples, a fenced block whose title contains "output" holds the result of the block above it rather than runnable code, and a qualifier such as "Example output" or "Possible output" means the value shown is one of several possible ones. Inside a block, a "//-" comment marks a value the statement above it returned, while "--" is an ordinary comment.`,
     ];
 
     for (const { prefix, id } of COLLECTION_ROUTES) {

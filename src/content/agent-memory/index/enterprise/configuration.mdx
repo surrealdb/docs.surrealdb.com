@@ -1,0 +1,211 @@
+---
+position: 2
+title: Enterprise configuration
+description: "What you can configure on a SurrealDB Agent Memory Enterprise deployment: per-Context settings, deployment settings for models, storage, ingest providers, limits, security and observability, and the behaviour that stays fixed."
+---
+
+# Enterprise configuration
+
+This page lists what you can configure on an [Agent Memory Enterprise](/docs/agent-memory/enterprise) deployment, and what stays the same on every deployment. Use it to plan a single-tenant or self-hosted deployment, or to check whether a behaviour you want to change is a setting at all.
+
+## Where each setting lives
+
+| Level | Applies to | Who changes it | Plans |
+| --- | --- | --- | --- |
+| Per-Context settings | One Context | Admins and owners, in [SurrealDB Studio](https://studio.surrealdb.com) under **Settings** → **configuration** on SurrealDB Cloud | Every plan |
+| Deployment settings | Every Context on one deployment | SurrealDB on a single-tenant deployment, as agreed with you. You on a self-hosted deployment, as environment variables | Enterprise |
+| Fixed behaviour | Every deployment | Nobody. It is part of the product | Every plan |
+
+## Per-Context settings
+
+Each Context stores its own configuration. These settings are the same on every plan, and the [Configuration reference](/docs/agent-memory/reference/configuration) lists each field with its default.
+
+| Area | Fields | Reference |
+| --- | --- | --- |
+| Models and provider keys | `models.extraction`, `models.elaboration_consolidation`, `models.synthesis`, `models.reconciliation`, `models.embedding`, `providers.*` | [Config fields](/docs/agent-memory/reference/configuration#config-fields) |
+| Token budget | `token_limit`, `billing_anchor_day` | [Config fields](/docs/agent-memory/reference/configuration#config-fields) |
+| Document ingest and extraction | `ingestion_profile`, `chunking_strategy`, `pii_redaction_enabled`, `injection_scan.*`, `reconciliation.confidence_floor` | [Extraction tuning](/docs/agent-memory/reference/configuration#extraction-tuning) |
+| Response cache | `response_cache.*` | [Cache settings](/docs/agent-memory/reference/configuration#cache-settings) |
+| Trace retention | `trace_retention.*` | [Trace retention](/docs/agent-memory/reference/configuration#trace-retention) |
+| Scopes and labels | `scope_limits.*`, `label_limits.*`, `label_dimensions` | [Scope and label limits](/docs/agent-memory/reference/configuration#scope-and-label-limits) |
+| API keys | `allow_self_service_keys`, `max_token_ttl_seconds` | [Key policy](/docs/agent-memory/reference/configuration#key-policy) |
+
+Not every stored model setting is applied yet. [Which settings are applied](/docs/agent-memory/tuning/models-per-stage#which-settings-are-applied) shows the stages that use their per-Context model.
+
+## Deployment settings
+
+Deployment settings apply to every Context on a deployment. On a single-tenant deployment, SurrealDB applies the values agreed with you. On a self-hosted deployment, you set them as environment variables on the Agent Memory processes, and the tables below give each variable's name.
+
+### Processes on a self-hosted deployment
+
+A self-hosted deployment runs four kinds of process from one service image:
+
+- **API:** serves the REST API and the MCP server. Run as many as you need.
+- **Worker:** runs document ingest and the background passes. Run as many as you need.
+- **Scheduler:** queues the background passes. Run exactly one. It holds a lease in the database, so a second instance waits.
+- **Management API:** creates and manages Contexts, principals and keys.
+
+The API and the management API both answer `GET /api/v1/health` for health checks.
+
+Give every process the same model and provider settings. The API calls a model for `/chat`, `/reflect` and extraction on `POST /facts`, and the worker calls one for document ingest and the background passes.
+
+### Language models
+
+| Setting | Environment variable | Default | Notes |
+| --- | --- | --- | --- |
+| Default provider | `SPECTRON_LLM_PROVIDER` | None | One of `google`, `openai`, `anthropic`, `cerebras`, `openrouter` or `openai_compatible`. With no value, the API uses Google when a Google key is set, and the worker runs language-model stages only for Contexts that store a provider key of their own. An unknown value does not fall back to another provider: requests that need the default model fail instead. |
+| Default model | `SPECTRON_LLM_MODEL` | The provider's built-in model | Replaces the built-in model of the default provider. Required when the default provider is `cerebras`, `openrouter` or `openai_compatible`, which have no built-in model. |
+| Provider key | `SPECTRON_PROVIDER_<PROVIDER>_API_KEY` | None | `<PROVIDER>` is `GOOGLE`, `OPENAI`, `ANTHROPIC`, `CEREBRAS`, `OPENROUTER` or `OPENAI_COMPATIBLE`. A key stored on a Context overrides the deployment key for that Context. |
+| Extra request fields | `SPECTRON_PROVIDER_<PROVIDER>_EXTRA_BODY` | None | A JSON object merged into every request body sent to that provider, for example to pin OpenRouter routing. Anthropic ignores it. |
+
+The API uses one model for `/chat`, `/reflect`, extraction on `POST /facts`, and on-demand `POST /elaborate` and `POST /consolidate` calls. The worker chooses a model for each stage. The built-in models are:
+
+| Provider | API | Worker: document extraction | Worker: elaboration and consolidation |
+| --- | --- | --- | --- |
+| Google | `gemini-3.8-flash` | `gemini-3.5-flash-lite` | `gemini-3.8-flash` |
+| OpenAI | `gpt-5.1` | `gpt-5-mini` | `gpt-5-mini` |
+| Anthropic | `claude-opus-4-8` | `claude-haiku-4-5-20251001` | `claude-sonnet-4-6` |
+
+A Context can choose its own model for the two worker stages. The deployment default applies to every stage that a Context leaves unset. See [Which settings are applied](/docs/agent-memory/tuning/models-per-stage#which-settings-are-applied).
+
+### Your own model
+
+The `openai_compatible` provider sends language-model calls to an endpoint that speaks the OpenAI chat API, such as a model gateway or a model server you run. It replaces the language-model stages only. The embedding model stays fixed, as [Fixed behaviour](#fixed-behaviour) shows.
+
+| Setting | Environment variable | Notes |
+| --- | --- | --- |
+| Endpoint | `SPECTRON_PROVIDER_OPENAI_COMPATIBLE_BASE_URL` | Must be an `https://` URL. Any other scheme is ignored with a warning, and the provider is then unavailable. A URL with a user name or password in it is refused. |
+| Key | `SPECTRON_PROVIDER_OPENAI_COMPATIBLE_API_KEY` | Required. The provider is available only when the key and the endpoint are both set. |
+| Private networks | `SPECTRON_PROVIDER_OPENAI_COMPATIBLE_ALLOWED_NETWORKS` | Comma-separated CIDR ranges inside the private address ranges that the endpoint may resolve to. |
+
+To use your own model as the default, set `SPECTRON_LLM_PROVIDER` to `openai_compatible` and `SPECTRON_LLM_MODEL` to the model ID your endpoint expects.
+
+Agent Memory checks every connection to this endpoint:
+
+- A public address is allowed.
+- A private address is allowed only inside a range listed in `SPECTRON_PROVIDER_OPENAI_COMPATIBLE_ALLOWED_NETWORKS`.
+- Loopback and link-local addresses are always refused, whatever the list says. So is any host name that resolves to a refused address.
+- Redirects are not followed, and no proxy is used.
+
+A model server on the same machine, or one that serves plain HTTP, therefore needs an HTTPS address on your network in front of it.
+
+A Context cannot store its own key for `openai_compatible`. The key is set for the deployment only.
+
+### Document and media providers
+
+Document ingest can read text in images, transcribe audio and video, embed images, parse whole documents and rerank passages. Each capability is off until you configure it. The [`ingestion_profile`](/docs/agent-memory/ingest/authoritative/multimodal-content) of each Context then decides which of the configured steps run for that Context.
+
+| Capability | Use Gemini | Use your own service |
+| --- | --- | --- |
+| Text in images (OCR) | `SPECTRON_OCR_PROVIDER=gemini` | `SPECTRON_OCR_URL`, `SPECTRON_OCR_MODEL`, `SPECTRON_OCR_API_KEY` |
+| Speech-to-text | `SPECTRON_STT_PROVIDER=gemini` | `SPECTRON_STT_URL`, `SPECTRON_STT_MODEL`, `SPECTRON_STT_API_KEY` |
+| Image embeddings | `SPECTRON_CLIP_PROVIDER=gemini` | `SPECTRON_CLIP_URL`, `SPECTRON_CLIP_MODEL`, `SPECTRON_CLIP_API_KEY` |
+| Whole-document parsing | `SPECTRON_DOC_PARSER_PROVIDER=gemini`, with `SPECTRON_DOC_PARSER_MODEL` (default `gemini-2.5-flash`) | Not available |
+| Reranking | `SPECTRON_RERANKER_PROVIDER=gemini`, or `openrouter` with `SPECTRON_RERANKER_MODEL` | `SPECTRON_RERANKER_URL`, `SPECTRON_RERANKER_MODEL`, `SPECTRON_RERANKER_API_KEY` |
+
+A Google key alone does not turn on any of these capabilities. Set the `_PROVIDER` variable for each one you want. `gemini` (or `google`) is the only value these variables accept, apart from `openrouter` for the reranker, and any other value is an error at startup. `gemini` also needs `SPECTRON_PROVIDER_GOOGLE_API_KEY`. To use your own service instead, leave `_PROVIDER` unset and set `_URL`.
+
+Without a document parser, Agent Memory reads hard-to-parse PDFs by rasterising each page and running OCR on it.
+
+Your own service can use HTTP or HTTPS. `_MODEL` is required with `_URL`, and `_API_KEY` is optional: when it is set, Agent Memory sends it as `Authorization: Bearer <key>`. Each service answers a `POST` with JSON in these shapes:
+
+| Service | Request body | Response |
+| --- | --- | --- |
+| OCR | The image bytes, with an `image/...` content type | `{ "text": "...", "confidence": 0.95 }`, where `confidence` is optional |
+| Speech-to-text | The audio or video bytes, with an `audio/...` or `video/...` content type | `{ "text": "...", "language": "en", "confidence": 0.9, "segments": [...] }`, where only `text` is required |
+| Image embeddings | The image bytes, with an `image/...` content type | `{ "embedding": [...] }`, with 3072 values |
+| Reranker | `{ "query": "...", "passages": ["...", "..."] }` | `{ "scores": [...] }`, one score for each passage, in the same order |
+
+Each segment in a speech-to-text response has `text`, `start_seconds`, `end_seconds` and an optional `confidence`.
+
+> [!NOTE]
+> Images embedded by your own service are stored in that model's vector space. A text query searches with the text embedder, so it does not return those images. Text-to-image recall needs `SPECTRON_CLIP_PROVIDER=gemini`.
+
+### Storage
+
+| Setting | Environment variable | Default | Notes |
+| --- | --- | --- | --- |
+| SurrealDB | `SURREALDB_CONNECTION` | Required | `<endpoint>;<username>;<password>`, or `<endpoint>` alone for a database without authentication. Agent Memory signs in as a root user, and connects to a SurrealDB server over the network. |
+| Object storage | `SPECTRON_OBJECT_STORE_URL` | Required | Where uploaded documents are stored. See the URL forms below. |
+| Unreferenced object grace period | `SPECTRON_GC_GRACE_SECONDS` | `86400` (24 hours) | How long an object that no document refers to is kept before document clean-up deletes it. |
+
+The object storage URL takes one of these forms. The path after the bucket or container becomes a key prefix.
+
+| Backend | URL |
+| --- | --- |
+| Amazon S3 | `s3://<bucket>/<prefix>?region=<region>` |
+| S3-compatible service | `s3://<bucket>/<prefix>?endpoint=<url>`. An `endpoint` also allows plain HTTP. |
+| Google Cloud Storage | `gs://<bucket>/<prefix>` |
+| Azure Blob Storage | `azure://<container>/<prefix>` |
+| Local file system | `file:///<path>`. Use it only when every API and worker process reads the same directory. |
+
+Credentials for S3, Google Cloud Storage and Azure come from the standard environment variables of each cloud provider.
+
+### Capacity and limits
+
+| Setting | Environment variable | Default | Notes |
+| --- | --- | --- | --- |
+| Concurrent requests per API process | `SPECTRON_HTTP_MAX_CONCURRENT_REQUESTS` | `1000` | A request over the limit gets `503` with `Retry-After: 1`. `0` removes the limit. |
+| Maximum upload size | `SPECTRON_MAX_UPLOAD_BYTES` | 4 GiB | The largest document `POST /documents` accepts. |
+| Default page size | `SPECTRON_DEFAULT_PAGE_SIZE` | `100` | Used when a list request has no `limit`. |
+| Maximum page size | `SPECTRON_MAX_LIST_LIMIT` | `500` | A larger `limit` is clamped to it. |
+| Maximum `k` | `SPECTRON_MAX_QUERY_K` | `50` | The most results one recall returns. You can lower it, but not raise it above 50. |
+| Ingest jobs per worker | `SPECTRON_INGEST_CONCURRENCY` | `1024` | Ingest jobs one worker process holds at once, across all Contexts. Raise it only together with the worker's memory, because each job holds a document's text, chunks and vectors. |
+| Ingest jobs per Context | `SPECTRON_INGEST_CONTEXT_CONCURRENCY` | `64` | Ingest jobs one Context holds at once on a worker, so one Context's backlog cannot take every slot. |
+| Provider calls during ingest | `SPECTRON_INGEST_PROVIDER_CONCURRENCY` | `64` | Model and embedding calls in flight at once from one worker. Set it from your provider's rate limit. |
+| Database connections | `SPECTRON_DB_POOL_MAX` | `10` | Connections in each process's pool. |
+
+Agent Memory has no per-key request rate limit. The concurrency limit above and the token budget below are the controls on load.
+
+### Token budget
+
+These settings decide how a Context's [`token_limit`](/docs/agent-memory/reference/configuration#config-fields) is enforced on a deployment.
+
+| Setting | Environment variable | Default | Notes |
+| --- | --- | --- | --- |
+| Counted models | `SPECTRON_TOKEN_BUDGET_MODELS` | None | Comma-separated model IDs whose usage counts towards `token_limit`. `*` matches any characters, so `gemini-*` counts every Gemini model. With no value, no model counts. |
+| Enforcement | `SPECTRON_TOKEN_BUDGET_ENFORCEMENT` | `soft` | `soft` allows every call and records that the Context is over its limit. `hard` rejects new calls once the Context's total reaches `token_limit`. Calls already running finish. |
+| Background work | `SPECTRON_TOKEN_BUDGET_ENFORCE_SYSTEM` | `false` | With `false`, model calls from background work, such as document ingest and the scheduled passes, are recorded but not limited. With `true`, they are limited too. |
+
+### Network and security
+
+| Setting | Environment variable | Default | Notes |
+| --- | --- | --- | --- |
+| API address | `SPECTRON_BIND_ADDRESS` | `0.0.0.0:9090` | Where the API listens for REST and MCP. |
+| Management API addresses | `SPECTRON_MANAGEMENT_BIND_ADDRESS`, `SPECTRON_MANAGEMENT_GRPC_BIND_ADDRESS` | `0.0.0.0:9090`, `0.0.0.0:9091` | REST and gRPC. The API and the management REST server have the same default port, so change one of them when both run on one host. |
+| Management key | `SPECTRON_MANAGEMENT_API_KEY` | Required | The operator key for the management API. Keep it out of application code. |
+| Browser origins | `SPECTRON_CORS_ALLOWED_ORIGINS`, `SPECTRON_MANAGEMENT_CORS_ALLOWED_ORIGINS` | None | Comma-separated origins that browsers may call from. An entry can use `*` inside an origin, for example for preview deployments, but a bare `*` is refused. With no value, browsers can call only from the same origin. |
+
+Every listener serves plain HTTP or gRPC. Terminate TLS in a load balancer, ingress or gateway in front of the API and the management API.
+
+### Observability
+
+| Setting | Environment variable | Default | Notes |
+| --- | --- | --- | --- |
+| Prometheus metrics | `SPECTRON_PROMETHEUS_BIND_ADDR` | `127.0.0.1:9464` | Serves `/metrics`. Set `0.0.0.0:9464` to scrape from another host, or an empty value to turn metrics off. |
+| OpenTelemetry export | `OTEL_EXPORTER_OTLP_ENDPOINT` | None | Sends traces, logs and metrics over OTLP gRPC. The other standard `OTEL_*` variables also apply. |
+| Service name | `OTEL_SERVICE_NAME` | `spectron` | The service name on exported telemetry. |
+| Environment name | `SPECTRON_DEPLOYMENT_ENV` | `dev` | The `deployment.environment` attribute on exported telemetry. |
+| Log filter | `RUST_LOG` | `spectron=info` and a few library filters | Logs are written as text to standard error. |
+| Quiet routes | `SPECTRON_HTTP_QUIET_ROUTES` | None | Comma-separated route templates, such as `/api/v1/health`, whose access logs drop to debug level. Their metrics are still recorded. |
+
+## Fixed behaviour
+
+This behaviour is the same on every deployment, and no setting changes it:
+
+| Behaviour | Value |
+| --- | --- |
+| Embedding model | `gemini-embedding-2`, at 3072 dimensions. A Context's `models.embedding` accepts only this value. |
+| Expiry of `context` facts | 7 days after the fact's known time, checked every hour. See [Expiry of context facts](/docs/agent-memory/mental-model/memory-lifecycle#expiry-of-context-facts). |
+| Importance decay | Once a day: `context` × 0.95, `knowledge` × 0.995, `identity` unchanged. |
+| Background passes every hour | Context-fact expiry, consolidation, elaboration, removal of duplicate conversation chunks, document clean-up and trace retention. |
+| Background passes every day | Importance decay and document reconciliation. |
+
+To keep a fact past the 7-day expiry, write it with the `knowledge` or `identity` category when your application learns it. [Setting the category](/docs/agent-memory/mental-model/memory-categories#setting-the-category) shows how.
+
+## Related reading
+
+- [Agent Memory Enterprise](/docs/agent-memory/enterprise) - what the plan adds and how it is deployed
+- [Configuration reference](/docs/agent-memory/reference/configuration) - every per-Context field and its default
+- [Models per stage](/docs/agent-memory/tuning/models-per-stage) - stages, providers and per-Context model choice
+- [Multimodal content](/docs/agent-memory/ingest/authoritative/multimodal-content) - ingestion profiles and media types

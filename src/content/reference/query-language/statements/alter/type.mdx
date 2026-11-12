@@ -1,0 +1,257 @@
+---
+position: 17
+title: ALTER TYPE
+description: "The ALTER TYPE statement adds values to a union type at any position and renames values, rewriting the records that hold a renamed value."
+---
+
+# `ALTER TYPE` statement
+
+<Since v="v4.0.0" />
+
+The `ALTER TYPE` statement changes the values of a union of strings declared with [`DEFINE TYPE`](/docs/reference/query-language/statements/define/type), such as `DEFINE TYPE priority AS 'low' | 'medium' | 'high'`. It can add a value at any position in the order, and rename a value. A rename also rewrites the records that hold the old value.
+
+## Statement syntax
+
+<Tabs syncKey="alter-statement">
+  <TabItem label="SurrealQL Syntax">
+
+```syntax title="SurrealQL Syntax"
+ALTER TYPE [ IF EXISTS ] @name
+[
+    ADD VALUE [ IF NOT EXISTS ] @value [ BEFORE @value | AFTER @value ] |
+    RENAME VALUE @value TO @value
+] ...
+```
+
+  </TabItem>
+  <TabItem label="Railroad Diagram">
+
+
+<RailroadDiagram ast='{"type":"Diagram","padding":[10,20,10,20],"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"ALTER"},{"type":"Terminal","text":"TYPE"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"EXISTS"}]}},{"type":"NonTerminal","text":"@name"},{"type":"OneOrMore","child":{"type":"Choice","index":0,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"ADD"},{"type":"Terminal","text":"VALUE"},{"type":"Optional","child":{"type":"Sequence","children":[{"type":"Terminal","text":"IF"},{"type":"Terminal","text":"NOT"},{"type":"Terminal","text":"EXISTS"}]}},{"type":"NonTerminal","text":"@value"},{"type":"Optional","child":{"type":"Choice","index":1,"children":[{"type":"Sequence","children":[{"type":"Terminal","text":"BEFORE"},{"type":"NonTerminal","text":"@value"}]},{"type":"Sequence","children":[{"type":"Terminal","text":"AFTER"},{"type":"NonTerminal","text":"@value"}]}]}}]},{"type":"Sequence","children":[{"type":"Terminal","text":"RENAME"},{"type":"Terminal","text":"VALUE"},{"type":"NonTerminal","text":"@value"},{"type":"Terminal","text":"TO"},{"type":"NonTerminal","text":"@value"}]}]}}]}]}' />
+
+  </TabItem>
+</Tabs>
+
+A statement takes one or more `ADD VALUE` and `RENAME VALUE` clauses, applied in the order they are written. If one clause fails, the statement changes nothing. Without `IF EXISTS`, a statement on a type that does not exist fails with `The type 'name' does not exist`. A type that is not a union of strings is refused with `The type 'name' is not a union of string labels, so it has no values to alter`. To change the checks, default, comment or permissions of a type, define it again with `OVERWRITE`, which checks the values that records already hold. See [Changing a type that is in use](/docs/reference/query-language/statements/define/type#changing-a-type-that-is-in-use).
+
+## Adding values
+
+`ADD VALUE` places a new value at the end of the order, or directly before or after an existing value. Adding a value does not change any stored record.
+
+```surql
+DEFINE TYPE priority AS 'low' | 'medium' | 'high';
+
+ALTER TYPE priority ADD VALUE 'urgent';
+ALTER TYPE priority ADD VALUE 'trivial' BEFORE 'low';
+ALTER TYPE priority ADD VALUE 'normal' AFTER 'medium';
+
+enum::values('priority');
+```
+
+```surql title="Output"
+['trivial', 'low', 'medium', 'normal', 'high', 'urgent']
+```
+
+A value that the type already lists is refused, unless the clause has `IF NOT EXISTS`. A position that names a value the type does not list is refused as well.
+
+```surql
+-- Setup from the example above
+DEFINE TYPE priority AS 'low' | 'medium' | 'high';
+ALTER TYPE priority ADD VALUE 'urgent';
+ALTER TYPE priority ADD VALUE 'trivial' BEFORE 'low';
+ALTER TYPE priority ADD VALUE 'normal' AFTER 'medium';
+
+ALTER TYPE priority ADD VALUE 'urgent';
+//- "The type 'priority' already has the value 'urgent'"
+
+ALTER TYPE priority ADD VALUE IF NOT EXISTS 'urgent';
+//- NONE
+
+ALTER TYPE priority ADD VALUE 'blocker' AFTER 'critical';
+//- "The type 'priority' has no value 'critical'; its values are 'trivial', 'low', 'medium', 'normal', 'high', 'urgent'"
+```
+
+## Several changes in one statement
+
+The clauses of one statement apply in order, so a later clause can refer to a value that an earlier one added or renamed.
+
+```surql
+-- Setup from the example above
+DEFINE TYPE priority AS 'low' | 'medium' | 'high';
+ALTER TYPE priority ADD VALUE 'urgent';
+ALTER TYPE priority ADD VALUE 'trivial' BEFORE 'low';
+ALTER TYPE priority ADD VALUE 'normal' AFTER 'medium';
+
+ALTER TYPE priority
+	ADD VALUE 'blocker' AFTER 'urgent'
+	RENAME VALUE 'trivial' TO 'minor';
+enum::values('priority');
+```
+
+```surql title="Output"
+['minor', 'low', 'medium', 'normal', 'high', 'urgent', 'blocker']
+```
+
+## Renaming values
+
+`RENAME VALUE` changes the spelling of a value and keeps its position. It also rewrites the old value to the new one in every record and index entry of every field whose type names it, including inside an `option`, an `array` or a `set`, so the records keep passing the type check on their next write.
+
+```surql
+-- Setup from the example above
+DEFINE TYPE priority AS 'low' | 'medium' | 'high';
+
+DEFINE TABLE ticket SCHEMAFULL;
+DEFINE FIELD priority ON ticket TYPE priority;
+DEFINE FIELD history ON ticket TYPE array<priority> DEFAULT [];
+DEFINE INDEX ticket_priority ON ticket FIELDS priority;
+
+CREATE ticket:1 SET priority = 'medium', history = ['low', 'medium'];
+CREATE ticket:2 SET priority = 'high';
+
+ALTER TYPE priority RENAME VALUE 'medium' TO 'moderate';
+SELECT * FROM ticket ORDER BY id;
+```
+
+```surql title="Output"
+[
+	{ history: ['low', 'moderate'], id: ticket:1, priority: 'moderate' },
+	{ history: [], id: ticket:2, priority: 'high' }
+]
+```
+
+The rewrite is maintenance by the database, not a write by a user. It writes only the records that hold the old value, rewrites a `READONLY` field, does not run the `VALUE` or `DEFAULT` clauses of the fields, and does not trigger any [event](/docs/reference/query-language/statements/define/event). A table with a changefeed records each rewritten record as an update.
+
+Renaming a value to one the type already lists is refused. A rename is also refused while a field holds the type in an array inside another array, such as `array<array<priority>>`, because the rewrite does not reach that depth:
+
+```surql
+DEFINE FIELD grid ON ticket TYPE option<array<array<priority>>>;
+ALTER TYPE priority RENAME VALUE 'low' TO 'lowest';
+```
+
+```surql title="Error output"
+"the type 'priority' is held by the field 'grid.*.*' on the table 'ticket', whose path a rename does not reach"
+```
+
+## `ALTER TYPE` or `ALTER FIELD`
+
+The same values can be written out on each field as a literal, or defined once with `DEFINE TYPE` and named by each field. While the tables are empty, the two forms behave the same. Once they hold records, a change to the values works differently. [`ALTER FIELD`](/docs/reference/query-language/statements/alter/field) changes one field at a time, and compares its old definition with the new one. `ALTER TYPE` changes every field that names the type, and rewrites the records it needs to.
+
+Here are the two forms, each with a `priority` field on two tables and a few records. Each one starts in a new database, because the examples above already define a `priority` type and a `ticket` table.
+
+```surql title="A literal on each field"
+DEFINE TABLE ticket SCHEMAFULL;
+DEFINE FIELD priority ON ticket TYPE 'low' | 'medium' | 'high';
+DEFINE TABLE task SCHEMAFULL;
+DEFINE FIELD priority ON task TYPE 'low' | 'medium' | 'high';
+
+CREATE ticket:1 SET priority = 'high';
+CREATE ticket:2 SET priority = 'medium';
+CREATE task:1 SET priority = 'medium';
+```
+
+```surql title="A named type"
+DEFINE TYPE priority AS 'low' | 'medium' | 'high';
+DEFINE TABLE ticket SCHEMAFULL;
+DEFINE FIELD priority ON ticket TYPE priority;
+DEFINE TABLE task SCHEMAFULL;
+DEFINE FIELD priority ON task TYPE priority;
+
+CREATE ticket:1 SET priority = 'high';
+CREATE ticket:2 SET priority = 'medium';
+CREATE task:1 SET priority = 'medium';
+```
+
+Adding a value works with both forms. The new literal accepts every value the old one did, so `ALTER FIELD` needs no migration, but it has to be run once for each field:
+
+```surql
+-- Setup from the examples above
+DEFINE TABLE ticket SCHEMAFULL;
+DEFINE FIELD priority ON ticket TYPE 'low' | 'medium' | 'high';
+DEFINE TABLE task SCHEMAFULL;
+DEFINE FIELD priority ON task TYPE 'low' | 'medium' | 'high';
+
+CREATE ticket:1 SET priority = 'high';
+CREATE ticket:2 SET priority = 'medium';
+CREATE task:1 SET priority = 'medium';
+DEFINE TYPE priority AS 'low' | 'medium' | 'high';
+
+-- A literal on each field
+ALTER FIELD priority ON ticket TYPE 'low' | 'medium' | 'high' | 'urgent';
+ALTER FIELD priority ON task TYPE 'low' | 'medium' | 'high' | 'urgent';
+
+-- A named type
+ALTER TYPE priority ADD VALUE 'urgent';
+```
+
+Renaming a value is where the two forms differ. To `ALTER FIELD`, a rename is a new literal that no longer accepts `'medium'`, so a table with records refuses it until the statement says what those records become:
+
+```surql
+-- Setup from the example above
+DEFINE TABLE ticket SCHEMAFULL;
+DEFINE FIELD priority ON ticket TYPE 'low' | 'medium' | 'high';
+DEFINE TABLE task SCHEMAFULL;
+DEFINE FIELD priority ON task TYPE 'low' | 'medium' | 'high';
+
+CREATE ticket:1 SET priority = 'high';
+CREATE ticket:2 SET priority = 'medium';
+CREATE task:1 SET priority = 'medium';
+
+-- A literal on each field
+ALTER FIELD priority ON ticket TYPE 'low' | 'normal' | 'high';
+//- 'Cannot change field `priority` of table `ticket`: the table is SCHEMAFULL in a database at compatibility level 4 and has rows, and the new definition does not accept every value the old one did: add MIGRATE EXISTING ROWS'
+
+ALTER FIELD priority ON ticket TYPE 'low' | 'normal' | 'high'
+    MIGRATE EXISTING ROWS AS medium_to_normal
+    USING { medium: 'normal' }[$value] ?? $value FALLBACK 'normal';
+
+SELECT * FROM ticket ORDER BY id;
+//- [{ id: ticket:1, priority: 'high' }, { id: ticket:2, priority: 'normal' }]
+SELECT * FROM task;
+//- [{ id: task:1, priority: 'medium' }]
+```
+
+The migration changed `ticket` only, and `task` still holds `'medium'` until its own field is changed in the same way. With a named type, one `RENAME VALUE` rewrites the records of every field that names the type:
+
+```surql
+-- Setup from the example above
+DEFINE TYPE priority AS 'low' | 'medium' | 'high';
+DEFINE TABLE ticket SCHEMAFULL;
+DEFINE FIELD priority ON ticket TYPE priority;
+DEFINE TABLE task SCHEMAFULL;
+DEFINE FIELD priority ON task TYPE priority;
+
+CREATE ticket:1 SET priority = 'high';
+CREATE ticket:2 SET priority = 'medium';
+CREATE task:1 SET priority = 'medium';
+
+-- A named type
+ALTER TYPE priority RENAME VALUE 'medium' TO 'normal';
+
+SELECT * FROM ticket ORDER BY id;
+//- [{ id: ticket:1, priority: 'high' }, { id: ticket:2, priority: 'normal' }]
+SELECT * FROM task;
+//- [{ id: task:1, priority: 'normal' }]
+```
+
+Removing a value works the other way around. `ALTER FIELD` with `MIGRATE EXISTING ROWS` can narrow a literal and convert the records that held the removed value. `ALTER TYPE` has no clause to remove a value, and [`DEFINE TYPE ... OVERWRITE`](/docs/reference/query-language/statements/define/type#changing-a-type-that-is-in-use) refuses a different list of values while a field names the type:
+
+```surql
+-- A named type
+DEFINE TYPE OVERWRITE priority AS 'medium' | 'high';
+//- "Invalid statement: Cannot change the values of the type 'priority': the field 'priority' on the table 'task' has a type that names it"
+```
+
+To remove a value from a named type, define a new type without it, and change each field to the new type with a migration.
+
+| Change | A literal on each field | A named type |
+| ------ | ----------------------- | ------------ |
+| Add a value | `ALTER FIELD` on each field, without a migration | One `ALTER TYPE ... ADD VALUE` |
+| Rename a value | `ALTER FIELD` on each field, with `MIGRATE EXISTING ROWS` | One `ALTER TYPE ... RENAME VALUE`, which rewrites the records |
+| Remove a value | `ALTER FIELD` on each field, with `MIGRATE EXISTING ROWS` | A new type, then `ALTER FIELD` on each field with `MIGRATE EXISTING ROWS` |
+
+## See also
+
+* [`ALTER FIELD`](/docs/reference/query-language/statements/alter/field)
+* [`DEFINE TYPE`](/docs/reference/query-language/statements/define/type)
+* [Named types](/docs/reference/query-language/language-primitives/data-types/named-types)
+* [Enum functions](/docs/reference/query-language/functions/database-functions/enum)

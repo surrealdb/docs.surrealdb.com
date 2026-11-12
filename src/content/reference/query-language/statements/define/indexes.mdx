@@ -37,8 +37,11 @@ The `@special_clause` part of the statement is an optional part in which an inde
 UNIQUE [ NULLS NOT DISTINCT ]
 | COUNT [ WHERE @condition ]
 | FULLTEXT ANALYZER @analyzer [ BM25 [(@k1, @b)] ] [ HIGHLIGHTS ]
-| HNSW DIMENSION @dimension [ TYPE @type ] [ DIST @distance ] [ EFC @efc ] [ M @m ]
-| DISKANN DIMENSION @dimension [ TYPE @type ] [ DIST @distance ] [ DEGREE @degree ] [ L_BUILD @l_build ] [ ALPHA @alpha ] [ HASHED_VECTOR ]
+| HNSW DIMENSION @dimension [ TYPE @type ] [ DIST @distance ]
+    [ EFC @efc ] [ M @m ]
+| DISKANN DIMENSION @dimension [ TYPE @type ] [ DIST @distance ]
+    [ DEGREE @degree ] [ L_BUILD @l_build ]
+    [ ALPHA @alpha ] [ HASHED_VECTOR ]
 | SPATIAL
 ```
 
@@ -131,7 +134,7 @@ SELECT id FROM product WHERE kind.trim().lowercase() = 'banana' EXPLAIN;
 				access: "= 'banana'",
 				direction: 'Forward',
 				index: 'product_kind',
-				predicate: "kind.trim().lowercase() = 'banana'"
+				table: 'product'
 			},
 			context: 'Db',
 			operator: 'IndexScan'
@@ -144,10 +147,68 @@ SELECT id FROM product WHERE kind.trim().lowercase() = 'banana' EXPLAIN;
 
 A query uses the index only when its condition repeats the expression as it is written in `FIELDS`. `WHERE kind = 'banana'` and the function-call form `WHERE string::lowercase(kind) = 'banana'` both scan the table, although the second one returns the same records, and their `EXPLAIN` output shows a `TableScan` instead. Comparisons and `IN` work on a computed value in the same way as on a stored one, and a [composite index](#composite-index) can mix the two, as in `FIELDS kind.lowercase(), price`.
 
-Two limits apply:
+Only method calls on a field path are accepted. A function call such as `string::lowercase(kind)` or an operator such as `price * qty` fails when the index is defined. To index one of those, store the result in a field of its own with [`DEFINE FIELD ... VALUE`](/docs/reference/query-language/statements/define/field) and index that field.
 
-- Only method calls on a field path are accepted. A function call such as `string::lowercase(kind)` or an operator such as `price * qty` fails when the index is defined. To index one of those, store the result in a field of its own with [`DEFINE FIELD ... VALUE`](/docs/reference/query-language/statements/define/field) and index that field.
-- Every record write runs the methods. A record where they cannot run fails, so with the index above, `CREATE product:3 SET kind = 5` and a record with no `kind` both return an error such as `There was a problem running the trim() function. no such method found for the none type`.
+A column that ends in method calls is accepted on a `SCHEMALESS` table only. On a `SCHEMAFULL` table, defining such an index fails with an error such as `The field 'kind.lowercase()' does not exist`, even when the field `kind` is defined. On a `SCHEMAFULL` table, store the computed value with `DEFINE FIELD ... VALUE` and index that field instead.
+
+#### Computed values on an optional field
+
+Every record write runs the methods, and a method cannot run on `NONE` or `NULL`. With the index on `kind.trim().lowercase()` above, a record with no `kind`, or with `kind` set to `NULL`, fails with an error such as `There was a problem running the trim() function. no such method found for the none type`, and so does `CREATE product:3 SET kind = 5`. A `DEFINE INDEX` over existing records that lack the field fails in the same way. The index never yields `NONE` in place of the error, because the same condition in a table scan fails with it too.
+
+To accept records without the field, write [`.?`](/docs/reference/query-language/language-primitives/idioms#optional-parts) before the first method in the column and in the condition. The methods are then skipped when the field is `NONE` or `NULL`, and the index returns the same records as a table scan:
+
+```surql
+/**[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: product:1, kind: '  Banana ' }]"
+
+[[test.results]]
+value = "[{ id: product:2, kind: 'APPLE' }]"
+
+[[test.results]]
+value = "[{ id: product:3 }]"
+
+[[test.results]]
+value = "[{ id: product:4, kind: NULL }]"
+
+[[test.results]]
+value = "[{ id: product:5, kind: 'banana' }]"
+
+[[test.results]]
+value = "[product:1, product:5]"
+
+[[test.results]]
+value = "[product:3]"
+
+*/
+
+DEFINE TABLE product SCHEMALESS;
+DEFINE INDEX product_kind_optional ON product FIELDS kind.?.trim().lowercase();
+
+CREATE product:1 SET kind = '  Banana ';
+CREATE product:2 SET kind = 'APPLE';
+CREATE product:3;
+CREATE product:4 SET kind = NULL;
+CREATE product:5 SET kind = 'banana';
+
+SELECT VALUE id FROM product WHERE kind.?.trim().lowercase() = 'banana' ORDER BY id;
+//- [product:1, product:5]
+
+-- NULL is a value, so only the record without the field matches NONE
+SELECT VALUE id FROM product WHERE kind.?.trim().lowercase() = NONE ORDER BY id;
+//- [product:3]
+```
+
+A `UNIQUE` index on such a column accepts any number of records without the field or with it set to `NULL`, and still refuses two records whose computed values are equal.
+
+Writing the optional part as `?.`, as in `kind?.trim().lowercase()`, is a parse error.
 
 ### Unique index
 
@@ -437,7 +498,8 @@ DEFINE INDEX tags_sizes ON product FIELDS tags.*, sizes.*;
 CREATE product:jumper SET tags = ["wool", "winter"], sizes = ["S", "M"];
 CREATE product:shirt SET tags = ["cotton"], sizes = ["M", "L"];
 
-EXPLAIN SELECT id FROM product WHERE tags.* CONTAINS "wool" AND sizes.* CONTAINS "M";
+EXPLAIN SELECT id FROM product
+	WHERE tags.* CONTAINS "wool" AND sizes.* CONTAINS "M";
 ```
 
 ```text title="Output"
@@ -615,7 +677,8 @@ value = "NONE"
 -- Define the an analyzer with
 DEFINE ANALYZER example_ascii TOKENIZERS class FILTERS ascii;
 -- Since 3.0.0: only FULLTEXT used to benefit from concurrent full-text search
-DEFINE INDEX userNameIndex ON TABLE user FIELDS name FULLTEXT ANALYZER example_ascii BM25 HIGHLIGHTS;
+DEFINE INDEX userNameIndex ON TABLE user FIELDS name
+	FULLTEXT ANALYZER example_ascii BM25 HIGHLIGHTS;
 ```
 
 - `SEARCH` or `FULLTEXT`: By using the `SEARCH` keyword, you enable full-text search on the specified field.
@@ -643,7 +706,7 @@ SELECT id FROM book WHERE title @@ 'grey';
 
 Both indexes are used without naming them: the query planner chooses the index by the operator in the condition, so `WHERE title = 'The Grey Book'` uses `title_unique` and `WHERE title @@ 'grey'` uses `title_search`. [`WITH INDEX`](/docs/reference/query-language/statements/select#the-with-clause) is not needed here, and naming the index that cannot serve the operator, as in `WITH INDEX title_search` with `=`, makes the query scan the table instead.
 
-A `DEFINE INDEX` takes at most one of `UNIQUE`, `COUNT`, `FULLTEXT`, `HNSW` and `DISKANN`. Writing two kinds in one statement is a parse error that points at the second kind, and the same kind written twice reports that it is given twice:
+From SurrealDB 4.0, a `DEFINE INDEX` takes at most one of `UNIQUE`, `COUNT`, `FULLTEXT`, `HNSW`, `DISKANN` and `SPATIAL`. Writing two kinds in one statement is a parse error that points at the second kind, and the same kind written twice reports that it is given twice. SurrealDB 3.x accepts the statement below without an error but keeps only the last kind, so the index is a `FULLTEXT` index and the `UNIQUE` check is silently dropped. Define two indexes, as above, on every version:
 
 ```surql
 DEFINE INDEX title ON book FIELDS title UNIQUE FULLTEXT ANALYZER simple;
@@ -654,7 +717,7 @@ Parse error: Cannot combine FULLTEXT with UNIQUE
  --> [1:48]
   |
 1 | DEFINE INDEX title ON book FIELDS title UNIQUE FULLTEXT ANALYZER simple;
-  |                                                ^^^^^^^^ an index can only be one of UNIQUE, COUNT, FULLTEXT, HNSW or DISKANN
+  |                                                ^^^^^^^^ an index can only be one of UNIQUE, COUNT, FULLTEXT, HNSW, DISKANN or SPATIAL
  --> [1:41]
   |
 1 | DEFINE INDEX title ON book FIELDS title UNIQUE FULLTEXT ANALYZER simple;
@@ -717,7 +780,8 @@ Since version 3.0.0, using `FULLTEXT ANALYZER` is the syntax used for a text ana
 A `SPATIAL` index lets a query find the records whose geometry lies in an area without reading every record of the table. It indexes a field holding a [geometry](/docs/reference/query-language/language-primitives/data-types/geometries), such as a `geometry<point>`, and it can index any geometry type.
 
 ```syntax title="Syntax"
-DEFINE INDEX @name ON [ TABLE ] @table FIELDS [ @prefix_field, ... , ] @geometry_field SPATIAL
+DEFINE INDEX @name ON [ TABLE ] @table
+	FIELDS [ @prefix_field, ... , ] @geometry_field SPATIAL
 ```
 
 The index serves these conditions on the indexed field:
@@ -743,7 +807,9 @@ INSERT INTO city [
 	{ id: city:tokyo, name: 'Tokyo', location: (139.6917, 35.6895) }
 ] RETURN NONE;
 
-SELECT VALUE name FROM city WHERE geo::distance(location, (-0.1276, 51.5072)) < 400000 ORDER BY name;
+SELECT VALUE name FROM city
+	WHERE geo::distance(location, (-0.1276, 51.5072)) < 400000
+	ORDER BY name;
 ```
 
 ```surql title="Output"
@@ -753,7 +819,8 @@ SELECT VALUE name FROM city WHERE geo::distance(location, (-0.1276, 51.5072)) < 
 The index stores each geometry as cells of a grid over the globe. A query reads the ranges of cells that cover its area and then checks each record it finds against the exact condition. [`EXPLAIN`](/docs/reference/query-language/clauses/explain) shows one `IndexScan` for each range:
 
 ```surql
-EXPLAIN SELECT VALUE name FROM city WHERE geo::distance(location, (-0.1276, 51.5072)) < 400000;
+EXPLAIN SELECT VALUE name FROM city
+	WHERE geo::distance(location, (-0.1276, 51.5072)) < 400000;
 ```
 
 ```text title="Output"
@@ -765,6 +832,10 @@ ProjectValue [ctx: Db] [expr: name]
         IndexScan [ctx: Db] [table: city, index: city_location, access: >=1802284275878330376 <=1803128700808462328, point_filter: geo::distance(location, (-0.1276, 51.5072)) < 400000, direction: Forward]
         IndexScan [ctx: Db] [table: city, index: city_location, access: >=1803410175785173000 <=1803691650761883640, point_filter: geo::distance(location, (-0.1276, 51.5072)) < 400000, direction: Forward]
 ```
+
+The cells are rectangles of longitude and latitude, and each range is a run of neighbouring cells. Drawn on a map, the five ranges cover the 400 km circle with some margin. London is in one range and Paris, Brussels and Amsterdam are in another, while Berlin and Tokyo are in none, so the query never reads them:
+
+<img src="~/assets/img/diagrams/light/spatial-index-light.webp" darkSrc="~/assets/img/diagrams/spatial-index.webp" alt="A map of north-west Europe with a dashed 400 km circle around London. Rectangular cells in five colours cover the circle, one colour for each IndexScan range. Range 3 holds London, range 4 holds Paris, Brussels and Amsterdam, and ranges 1, 2 and 5 find nothing. Berlin is outside every cell, so the query never reads it." />
 
 A polygon works in the same way. With the records above, this query uses the index and returns the cities inside a box around the Low Countries:
 
@@ -800,7 +871,10 @@ INSERT INTO vehicle [
 	{ id: vehicle:4, fleet: 'north', location: (-0.11, 51.52) }
 ] RETURN NONE;
 
-SELECT VALUE id FROM vehicle WHERE fleet = 'north' AND geo::distance(location, (-0.1276, 51.5072)) < 10000 ORDER BY id;
+SELECT VALUE id FROM vehicle
+	WHERE fleet = 'north'
+		AND geo::distance(location, (-0.1276, 51.5072)) < 10000
+	ORDER BY id;
 ```
 
 ```surql title="Output"
@@ -846,7 +920,8 @@ INSERT INTO place [
 ] RETURN NONE;
 
 SELECT id, vector::distance::knn() AS distance FROM place
-	WHERE geo::distance(location, (-0.1276, 51.5072)) < 10000 AND embedding <|2,40|> [1.0, 0.0]
+	WHERE geo::distance(location, (-0.1276, 51.5072)) < 10000
+		AND embedding <|2,40|> [1.0, 0.0]
 	ORDER BY distance;
 ```
 
@@ -872,21 +947,27 @@ Vector search indexes in SurrealDB support efficient [k-nearest neighbors](https
 > From 3.0.0 until 3.3.1, an HNSW or DISKANN index lost track of records when more than nine of them held an identical vector. KNN results left out the tenth and later records, and could return fewer than `k` results after such records were deleted. SurrealDB 3.3.1 fixes this for new writes, but an index that was already affected stays that way until it is rebuilt. After upgrading, run [`REBUILD INDEX`](/docs/reference/query-language/statements/rebuild) on each vector index whose table can hold more than nine records with the same vector, such as duplicated embeddings or a placeholder vector.
 
 > [!WARNING]
-> Before SurrealDB 3.3.1, a KNN query could return fewer than `k` results for a user whose table `SELECT` permission hides some records. With no other condition in the `WHERE` clause, as in `WHERE embedding <|10|> $query`, hidden records took places in the top `k` and were then removed, so a record user who can see few of the records could get no results at all. Adding any other condition to the `WHERE` clause avoided this. A DISKANN index could also return no results for a query with a `SELECT` permission or another `WHERE` condition once the index had been compacted. SurrealDB 3.3.1 applies the permission while it searches, so both return the nearest records that the user can see.
+> Before SurrealDB 3.3.1, a KNN query could return fewer than `k` results for a user whose table `SELECT` permission hides some records. With no other condition in the `WHERE` clause, as in `WHERE embedding <|10,40|> $query`, hidden records took places in the top `k` and were then removed, so a record user who can see few of the records could get no results at all. Adding any other condition to the `WHERE` clause avoided this. A DISKANN index could also return no results for a query with a `SELECT` permission or another `WHERE` condition once the index had been compacted. SurrealDB 3.3.1 applies the permission while it searches, so both return the nearest records that the user can see.
 
 ### Types
 
 When defining a vector index with [HNSW](#hnsw-hierarchical-navigable-small-world), you can define the types the vector will be stored in. The `TYPE` clause is optional and can be used to specify the data type of the vector. SurrealDB supports the following types:
-`F64` | `F32` | `I64` | `I32` | `I16`
+`F64` | `F32` | `F16` | `I64` | `I32` | `I16` | `I8` | `U8`
 
 - `F64`: Represents 64-bit floating-point numbers (double precision floating-point numbers).
 - `F32`: Represents 32-bit floating-point numbers (single precision floating-point numbers).
+- `F16`: Represents 16-bit floating-point numbers (half precision floating-point numbers).
 - `I64`: Represents 64-bit signed integers.
 - `I32`: Represents 32-bit signed integers.
 - `I16`: Represents 16-bit signed integers.
+- `I8`: Represents 8-bit signed integers.
+- `U8`: Represents 8-bit unsigned integers.
 
 > [!NOTE]
 > In SurrealDB the default type for vectors is `F32`.
+
+> [!WARNING]
+> An integer `TYPE` truncates each component rather than quantising it, so a normalised embedding, with components between -1 and 1, is stored as all zeros and KNN results become arbitrary. Use `F32` or `F16` for embeddings.
 
 [DISKANN](#diskann-disk-based-approximate-nearest-neighbours) indexes, available from SurrealDB 3.1, accept a **narrower** set of element types: `F32`, `F16`, `I8`, and `U8` only, and only a subset of distance metrics - see the [DISKANN](#diskann-disk-based-approximate-nearest-neighbours) section below.
 
@@ -943,7 +1024,7 @@ This budget covers the cached **vectors** only. As noted above, the HNSW graph i
 [DiskANN](https://arxiv.org/abs/1907.01668)-style indexes provide **on-disk** approximate nearest-neighbour graphs. They are aimed at **very large** embedding sets where keeping the full graph in RAM (as with HNSW) is impractical: vectors and graph structure are persisted in the key-value store and paged through a bounded cache, trading some latency for a much larger working set.
 
 > [!NOTE]
-> DISKANN indexes are **not supported on WASM** targets. Use HNSW or brute-force KNN for browser / embedded WASM builds.
+> DISKANN is available on 64-bit platforms and in WebAssembly builds, including the [Wasm engine](/docs/reference/javascript/engines/wasm) in a browser. Other 32-bit platforms, such as 32-bit x86 and 32-bit Arm, do not include DISKANN and use HNSW as their vector index.
 
 #### Syntax and defaults
 
@@ -989,14 +1070,14 @@ The cache is a single budget **shared across every DISKANN index** in the proces
 The Brute Force method is suitable for tasks with smaller datasets or when the highest accuracy is required.
 Brute Force currently supports [Euclidean](/docs/reference/query-language/functions/database-functions/vector#vectordistanceeuclidean), [Cosine](/docs/reference/query-language/functions/database-functions/vector#vectorsimilaritycosine), [Manhattan](/docs/reference/query-language/functions/database-functions/vector#vectordistancemanhattan) and [Minkowski](/docs/reference/query-language/functions/database-functions/vector#vectordistanceminkowski) distance functions.
 
-In the example below, the query searches for points closest to the vector `[2,3,4,5]` and uses [vector functions](/docs/reference/query-language/functions/database-functions/vector) to calculate the distance between two points, indicated by `<|2|>`.
+In the example below, the query searches for points closest to the vector `[2,3,4,5]` and uses [vector functions](/docs/reference/query-language/functions/database-functions/vector) to calculate the distance between two points, indicated by `<|2,EUCLIDEAN|>`.
 
 <SurrealistMini orientation="horizontal" query="CREATE pts:1 SET point = [1,2,3,4];
 CREATE pts:2 SET point = [4,5,6,7];
 CREATE pts:3 SET point = [8,9,10,11];
 LET $pt = [2,3,4,5];
 SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt;
-SELECT id FROM pts WHERE point <|2|> $pt EXPLAIN;" />
+SELECT id FROM pts WHERE point <|2,EUCLIDEAN|> $pt EXPLAIN;" />
 
 ## Verifying index use in queries
 
@@ -1011,7 +1092,7 @@ SELECT * FROM user WHERE email = 'test@surrealdb.com' EXPLAIN FULL;
 
 An `IndexScan` operator names the index the query planner used. With `FULL`, each operator also reports `metrics`, including how many rows it produced (`output_rows`).
 
-```surql title="Sample output"
+```surql title="Example output"
 {
 	attributes: {
 		projections: '*'
@@ -1263,7 +1344,7 @@ This wait is kept in the memory of the node that runs the definition. On a datas
 <Since v="v2.5.0" />
 
 > [!WARNING]
-> `DEFER` is available in SurrealDB 2.5 through 2.x only. On 3.x the clause is rejected at parse time, and this section applies to 2.x deployments. On 3.x, use [`CONCURRENTLY`](/docs/reference/query-language/statements/define/indexes#using-concurrently-clause) to build an index in the background - note that it addresses initial builds, not the ongoing write-path queueing `DEFER` provided.
+> `DEFER` is available in SurrealDB 2.5 through 2.x only. On 3.x the clause is rejected at parse time, and this section applies to 2.x deployments, so its example uses the 2.x `SEARCH ANALYZER` clause that 3.x renamed to `FULLTEXT ANALYZER`. On 3.x, use [`CONCURRENTLY`](/docs/reference/query-language/statements/define/indexes#using-concurrently-clause) to build an index in the background - note that it addresses initial builds, not the ongoing write-path queueing `DEFER` provided.
 
 Index updates in SurrealDB occur synchronously during document operations. This ensures **immediate consistency**, in which all reads return the most recent write. However, this can become a bottleneck during high-volume parallel ingestion, leading to write-write conflicts and increased latency, particularly with Full-Text or Vector indexes.
 
@@ -1271,7 +1352,8 @@ The `DEFER` clause can be used in this case if **eventual consistency** is accep
 
 ```surql
 DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
-DEFINE INDEX title_index ON blog FIELDS title FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS DEFER;
+DEFINE INDEX title_index ON blog FIELDS title
+	SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS DEFER;
 ```
 
 Note: As unique indexes offer a guarantee that no records that contravene the index will ever exist, the `UNIQUE` clause cannot be used together with `DEFER`.

@@ -19,7 +19,7 @@
 
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import {
     extractHeadings,
     type MarkdownSource,
@@ -63,6 +63,7 @@ const URL_BASE = "/docs";
 interface CategoryMeta {
     title: string;
     position: number;
+    hidden?: boolean;
 }
 
 /** Frontmatter fields the crawler needs. Full validation happens at
@@ -70,6 +71,7 @@ interface CategoryMeta {
 interface PageFrontmatter {
     title?: string;
     description?: string;
+    hidden?: boolean;
 }
 
 // ──────────────────────────────────────────────────────────
@@ -411,6 +413,32 @@ function contentHash(...parts: string[]): string {
     return hash.digest("hex");
 }
 
+/**
+ * Whether a page is out of the navigation, so search should not offer it.
+ *
+ * Mirrors `isHidden` in `src/utils/navigation.ts`: a page is hidden by
+ * `hidden: true` in its own frontmatter, and a folder by `"hidden": true` on its
+ * `__category.json`, which takes the whole subtree with it. The collection root
+ * counts too, so a collection whose root category is hidden is left out. Hidden
+ * pages still build and answer by URL.
+ */
+function isHiddenPage(
+    filePath: string,
+    collectionDir: string,
+    frontmatter: PageFrontmatter,
+    categories: Map<string, CategoryMeta>,
+): boolean {
+    if (frontmatter.hidden === true) return true;
+
+    const folders = relative(collectionDir, dirname(filePath)).split("/").filter(Boolean);
+
+    for (let depth = 0; depth <= folders.length; depth++) {
+        if (categories.get(folders.slice(0, depth).join("/"))?.hidden === true) return true;
+    }
+
+    return false;
+}
+
 // ──────────────────────────────────────────────────────────
 // Main crawl generator
 //
@@ -431,6 +459,8 @@ export async function* crawl(): AsyncGenerator<CrawledEntry> {
             const raw = await readFile(filePath, "utf-8");
             const { data: frontmatter, content: body } = matter(raw);
             const parsed = frontmatter as PageFrontmatter;
+
+            if (isHiddenPage(filePath, collectionDir, parsed, categories)) continue;
 
             const slug = buildSlug(filePath, collectionDir);
             const source = markdownSourceFromString(body);

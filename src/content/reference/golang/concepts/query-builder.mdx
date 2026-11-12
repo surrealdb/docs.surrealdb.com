@@ -1,242 +1,288 @@
 ---
 position: 11
 title: Query builder
-description: The Go SDK provides a contrib package for building type-safe SurrealQL queries programmatically with automatic parameter binding.
+description: Build SurrealQL with the Go SDK's contrib/surrealql package - SELECT, CREATE, UPDATE, UPSERT, DELETE, INSERT and RELATE with bound parameters, expressions, return clauses, record ranges, SHOW CHANGES, and text transactions - and run the result with surrealdb.Query.
 ---
 
 # Query builder
 
 > [!WARNING]
-> This feature is provided by the `contrib/surrealql` package, which is outside of the backward compatibility guarantees of the core SDK. Its API may change without following semantic versioning.
+> The `contrib/surrealql` package that provides this feature is outside the backward compatibility guarantee of the SDK. Its API can change in a minor release.
 
-The `surrealql` query builder lets you construct SurrealQL queries programmatically using a fluent Go API. It automatically binds values as parameters to prevent injection, and produces a query string and variables map that you can pass directly to [`surrealdb.Query`](/docs/reference/golang/api/core/db#query).
+The `surrealql` package builds SurrealQL statements with Go method calls. It binds each value as a parameter, and does not write the value into the text of the query. It returns the SurrealQL and a map of variables, which you pass to [`surrealdb.Query`](/docs/reference/golang/api/core/db#query). This page covers each kind of statement that the package builds. The comment below each example shows the SurrealQL that the example builds.
 
-## Installing the package
+## Importing the package
 
-The query builder is part of the SDK module. Import it alongside the main package:
+The query builder is part of the SDK module, so it needs no other `go get`:
 
 ```go
-import "github.com/surrealdb/surrealdb.go/contrib/surrealql"
+import "github.com/surrealdb/surrealdb.go/v2/contrib/surrealql"
 ```
 
-## Building and executing queries
+## Building and running queries
 
-Every query builder type has a `.Build()` method that returns a SurrealQL string and a `map[string]any` of parameters. Pass these directly to [`surrealdb.Query`](/docs/reference/golang/api/core/db#query):
+Every builder has a `.Build()` method that returns the SurrealQL and a `map[string]any` of variables. Pass both to `surrealdb.Query`:
 
 ```go
-q := surrealql.Select("users").Where("age > ?", 18).Limit(10)
+q := surrealql.Select("user").Where("age > ?", 18).OrderBy("name").Limit(10)
 sql, vars := q.Build()
+// SELECT * FROM user WHERE (age > $param_1) ORDER BY name LIMIT 10
 
 results, err := surrealdb.Query[[]User](ctx, db, sql, vars)
 ```
 
+The builder writes a table name that you give as a string into the SurrealQL as it is. Only pass names that your own code chooses. To bind the target as a parameter too, pass a [`models.RecordID`](/docs/reference/golang/api/values/record-id) or a [`models.Table`](/docs/reference/golang/api/values/table).
+
 ## Selecting records
 
-Use `Select` to start a `SELECT` query. Chain `.Fields()`, `.Where()`, `.OrderBy()`, `.Limit()`, and other methods to refine it.
+`Select` starts a `SELECT` statement. Chain `.Fields()`, `.Field()`, `.Where()`, `.GroupBy()`, `.OrderBy()`, `.Limit()` and the other methods to refine it:
 
 ```go
-surrealql.Select("users")
-// SELECT * FROM users
+surrealql.Select("user")
+// SELECT * FROM user
 
-surrealql.Select("users").Fields("name", "email").Where("active = ?", true)
-// SELECT name, email FROM users WHERE active = $param_1
+surrealql.Select("user").Fields("name", "email").Where("active = ?", true)
+// SELECT name, email FROM user WHERE (active = $param_1)
 
-surrealql.Select("users").
+surrealql.Select("user").
 	Field(surrealql.Expr("count()").As("total")).
 	GroupBy("department")
-// SELECT count() AS total FROM users GROUP BY department
+// SELECT count() AS total FROM user GROUP BY department
 ```
 
-`SelectOnly` produces a `SELECT ... ONLY` query that returns a single record instead of an array. You can pass [`RecordID`](/docs/reference/golang/api/values/record-id) and [`Table`](/docs/reference/golang/api/values/table) values directly as targets:
+`SelectOnly` builds `SELECT ... FROM ONLY`, which returns one record instead of an array:
 
 ```go
-surrealql.SelectOnly(models.NewRecordID("users", "tobie")).Fields("name")
-// SELECT ONLY name FROM $id_1
+surrealql.SelectOnly(models.NewRecordID("user", "tobie")).Fields("name")
+// SELECT name FROM ONLY $from_id_1
 ```
 
 ### Filtering with Where
 
-The `.Where()` method accepts a condition string with `?` placeholders. Values are bound as parameters automatically.
+`.Where()` takes a condition with `?` placeholders, and binds each value as a parameter. Each further call to `.Where()` adds another condition with `AND`:
 
 ```go
-surrealql.Select("products").
+surrealql.Select("product").
 	Where("price < ?", 100).
 	Where("category = ?", "electronics")
-// SELECT * FROM products WHERE price < $param_1 AND category = $param_2
+// SELECT * FROM product WHERE (price < $param_1) AND (category = $param_2)
 ```
+
+The builder puts each condition in brackets, so an `OR` inside one condition stays within that condition.
 
 ### Ordering and pagination
 
 ```go
-surrealql.Select("users").
+surrealql.Select("user").
 	OrderByDesc("created_at").
 	Limit(20).
 	Start(40)
-// SELECT * FROM users ORDER BY created_at DESC LIMIT 20 START 40
+// SELECT * FROM user ORDER BY created_at DESC LIMIT 20 START 40
 ```
+
+### Selecting a range of records
+
+The package has helpers that build a [`models.Range`](/docs/reference/golang/api/values/range), such as `RangeBeginInclusiveEndExclusive` and `RangeOpen`. To select a range of records, use a range as the `ID` of a `models.RecordID`:
+
+```go
+surrealql.Select(models.RecordID{
+	Table: "reading",
+	ID:    surrealql.RangeBeginInclusiveEndExclusive(2, 4),
+})
+// SELECT * FROM $from_id_1, where $from_id_1 is reading:2..4
+```
+
+The same value works as the target of [`surrealdb.Select`](/docs/reference/golang/concepts/data-manipulation#selecting-a-range-of-records).
 
 ## Creating records
 
-Use `Create` to build a `CREATE` query. Set fields with `.Set()` or provide the entire content with `.Content()`.
+`Create` builds a `CREATE` statement. Set fields with `.Set()`, or give the whole content with `.Content()`:
 
 ```go
-surrealql.Create("users").
+surrealql.Create("user").
 	Set("name", "Alice").
 	Set("age", 30)
-// CREATE users SET name = $set_1, age = $set_2
+// CREATE user SET name = $param_1, age = $param_2
 
-surrealql.Create("users").Content(map[string]any{
+surrealql.Create("user").Content(map[string]any{
 	"name": "Alice",
 	"age":  30,
 })
-// CREATE users CONTENT $content_1
+// CREATE user CONTENT $content_1
 ```
 
-`CreateOnly` produces a `CREATE ... ONLY` query:
+`CreateOnly` builds `CREATE ONLY`, which returns one record:
 
 ```go
-surrealql.CreateOnly("users").Set("name", "Alice").ReturnNone()
-// CREATE ONLY users SET name = $set_1 RETURN NONE
+surrealql.CreateOnly("user").Set("name", "Alice").ReturnNone()
+// CREATE ONLY user SET name = $param_1 RETURN NONE
 ```
 
 ## Updating records
 
-Use `Update` to build an `UPDATE` query with `.Set()` and `.Where()`:
+`Update` builds an `UPDATE` statement, with `.Set()` and `.Where()`:
 
 ```go
-surrealql.Update("users").
+surrealql.Update("user").
 	Set("active", false).
 	Where("last_login < ?", "2025-01-01")
-// UPDATE users SET active = $set_1 WHERE last_login < $param_1
+// UPDATE user SET active = $param_1 WHERE (last_login < $param_2)
 ```
 
-Compound operations are supported in `.Set()`:
+`.Set()` also takes a compound operation, such as `-=` or `+=`, with a placeholder:
 
 ```go
-surrealql.Update("products").Set("stock -= ?", 1).Where("id = ?", "products:apple")
-// UPDATE products SET stock -= $set_1 WHERE id = $param_1
+surrealql.Update(models.NewRecordID("product", "apple")).Set("stock -= ?", 1)
+// UPDATE $id_1 SET stock -= $param_1
 ```
 
 ## Upserting records
 
-Use `Upsert` to build an `UPSERT` query. This creates a record if it does not exist, or updates it if it does. After calling `Upsert`, choose one of the data modes: `.Set()`, `.Content()`, `.Merge()`, `.Patch()`, or `.Replace()`.
+`Upsert` builds an `UPSERT` statement, which creates a record when it does not exist and updates it when it does. Choose how to give the data with `.Set()`, `.Content()`, `.Merge()`, `.Patch()` or `.Replace()`:
 
 ```go
-surrealql.Upsert("users:tobie").Set("name", "Tobie").Set("active", true)
-// UPSERT users:tobie SET name = $set_1, active = $set_2
+surrealql.Upsert(models.NewRecordID("user", "tobie")).
+	Set("name", "Tobie").
+	Set("active", true)
+// UPSERT $id_1 SET name = $param_1, active = $param_2
 
-surrealql.Upsert("users:tobie").Content(map[string]any{
-	"name": "Tobie",
+surrealql.Upsert("user:tobie").Content(map[string]any{
+	"name":   "Tobie",
 	"active": true,
 })
-// UPSERT users:tobie CONTENT $upsert_content_1
+// UPSERT user:tobie CONTENT $upsert_content_1
 
-surrealql.Upsert("users:tobie").Merge(map[string]any{"active": false})
-// UPSERT users:tobie MERGE $upsert_merge_1
+surrealql.Upsert("user:tobie").Merge(map[string]any{"active": false})
+// UPSERT user:tobie MERGE $upsert_merge_1
 ```
 
-Upsert queries also support `.Where()`, `.Timeout()`, `.Parallel()`, and `.Explain()`.
+The `Upsert` builder also has `.Where()`, `.Timeout()`, `.Parallel()` and `.Explain()`.
 
 ## Deleting records
 
-Use `Delete` to build a `DELETE` query:
+`Delete` builds a `DELETE` statement:
 
 ```go
-surrealql.Delete("sessions").Where("expired_at < ?", "2025-01-01")
-// DELETE sessions WHERE expired_at < $param_1
+surrealql.Delete("session").Where("expired_at < ?", "2025-01-01")
+// DELETE session WHERE (expired_at < $param_1)
 ```
 
 ## Inserting records
 
-Use `Insert` to build an `INSERT` query. This is useful for bulk inserts and inserting from subqueries.
+`Insert` builds an `INSERT` statement, for one record, several records, or lists of values:
 
 ```go
-surrealql.Insert("users").Value(map[string]any{
+surrealql.Insert("user").Value(map[string]any{
 	"name": "Alice",
 	"age":  30,
 })
-// INSERT INTO users $insert_data_1
+// INSERT INTO user $insert_data_1
 
-surrealql.Insert("users").
+surrealql.Insert("user").
 	Fields("name", "age").
 	Values("Alice", 30).
 	Values("Bob", 25)
-// INSERT INTO users (name, age) VALUES ($insert_0_0_1, $insert_0_1_1), ($insert_1_0_1, $insert_1_1_1)
-
-surrealql.Insert("users").Relation().Value(map[string]any{
-	"in":  "users:tobie",
-	"out": "posts:first",
-})
-// INSERT RELATION INTO users $insert_data_1
+// INSERT INTO user (name, age) VALUES ($insert_0_0_1, $insert_0_1_1), ($insert_1_0_1, $insert_1_1_1)
 ```
 
-Handle conflicts with `ON DUPLICATE KEY UPDATE`:
+`.Relation()` builds `INSERT RELATION`, for edges between records:
 
 ```go
-surrealql.Insert("products").
+surrealql.Insert("knows").Relation().Value(map[string]any{
+	"in":  models.NewRecordID("user", "tobie"),
+	"out": models.NewRecordID("user", "jaime"),
+})
+// INSERT RELATION INTO knows $insert_data_1
+```
+
+To update a record that already exists, add `ON DUPLICATE KEY UPDATE`:
+
+```go
+surrealql.Insert("product").
 	Fields("id", "stock").
-	Values("products:apple", 10).
+	Values(models.NewRecordID("product", "apple"), 10).
 	OnDuplicateKeyUpdateRaw("stock += $input.stock")
+// INSERT INTO product (id, stock) VALUES ($insert_0_0_1, $insert_0_1_1) ON DUPLICATE KEY UPDATE stock += $input.stock
 ```
 
 ## Creating relations
 
-Use `Relate` to build a `RELATE` query between two records:
+`Relate` builds a `RELATE` statement between two records:
 
 ```go
 surrealql.Relate(
-	models.NewRecordID("users", "tobie"),
+	models.NewRecordID("user", "tobie"),
 	"wrote",
-	models.NewRecordID("posts", "first"),
+	models.NewRecordID("post", "first"),
 ).Set("created_at", "2026-01-01")
+// RELATE $id_1->wrote->$id_2 SET created_at = $param_1
 ```
 
 ## Using expressions
 
-The `Expr` function creates parameterised expressions with `?` placeholders. Use it for function calls, graph traversals, or any expression that needs value binding.
+`Expr` builds an expression with `?` placeholders, for a function call, a graph traversal, or any expression that needs bound values:
 
 ```go
-surrealql.Select("users").
+surrealql.Select("user").
 	Field(surrealql.Expr("math::mean([?, ?, ?])", 1, 2, 3).As("avg"))
-// SELECT math::mean([$param_1, $param_2, $param_3]) AS avg FROM users
+// SELECT math::mean([$param_1, $param_2, $param_3]) AS avg FROM user
 
-surrealql.Select(surrealql.Expr("?->knows->users", models.NewRecordID("users", "tobie")))
-// SELECT * FROM $from_param_1->knows->users
+surrealql.Select(surrealql.Expr("?->knows->user", models.NewRecordID("user", "tobie")))
+// SELECT * FROM $from_param_1->knows->user
 ```
 
 ## Return clauses
 
-All mutation queries support return clauses:
+The statements that change records take a return clause:
 
 ```go
-surrealql.Create("users").Set("name", "Alice").ReturnNone()
-// CREATE users SET name = $set_1 RETURN NONE
+surrealql.Create("user").Set("name", "Alice").ReturnNone()
+// CREATE user SET name = $param_1 RETURN NONE
 
-surrealql.Update("users").Set("active", true).Return("AFTER")
-// UPDATE users SET active = $set_1 RETURN AFTER
+surrealql.Update("user").Set("active", true).Return("AFTER")
+// UPDATE user SET active = $param_1 RETURN AFTER
 
-surrealql.Delete("sessions").ReturnBefore()
-// DELETE sessions RETURN BEFORE
+surrealql.Delete("session").ReturnBefore()
+// DELETE session RETURN BEFORE
 ```
 
-## Building text-based transactions
+## Reading changes with SHOW CHANGES
 
-The query builder can compose text-based transactions with `Begin`:
+`ShowChangesForTable` builds a [`SHOW CHANGES`](/docs/reference/query-language/statements/show) statement, for a table defined with a change feed. `.SinceVersionstamp()` starts from a versionstamp, and `.Limit()` sets the maximum number of changes:
+
+```go
+surrealql.ShowChangesForTable("reading").SinceVersionstamp(versionstamp).Limit(10)
+// SHOW CHANGES FOR TABLE reading SINCE 65536 LIMIT 10, for a versionstamp of 65536
+```
+
+Pass a versionstamp exactly as `SHOW CHANGES` returned it. `SINCE` is inclusive. When you continue from the last change that you received, the server returns that change again. Version 1 of the SDK shifted the versionstamp right by 16 bits, as [the migration guide](/docs/reference/golang/migrating-to-2x#6-update-sinceversionstamp-in-the-query-builder) describes.
+
+## Building text transactions
+
+`Begin` builds a text transaction, which runs its statements in one request and commits them together. Add statements with `.Do()`, variables with `.Let()`, and raw SurrealQL with `.Raw()`:
 
 ```go
 q := surrealql.Begin().
-	Then(surrealql.Create("users").Set("name", "Alice")).
-	Then(surrealql.Create("users").Set("name", "Bob"))
+	Let("amount", 100).
+	Do(surrealql.Update(models.NewRecordID("account", "one")).Set("balance -= $amount")).
+	Do(surrealql.Update(models.NewRecordID("account", "two")).Set("balance += $amount"))
 
 sql, vars := q.Build()
-// BEGIN TRANSACTION; CREATE users SET name = $set_1; CREATE users SET name = $set_2; COMMIT TRANSACTION;
+```
+
+```surql title="Output"
+BEGIN TRANSACTION;
+LET $amount = 100;
+UPDATE $id_1 SET balance -= $amount;
+UPDATE $id_2 SET balance += $amount;
+COMMIT TRANSACTION;
 ```
 
 > [!NOTE]
-> Text-based transactions built with the query builder are different from [interactive transactions](/docs/reference/golang/concepts/transactions). Text-based transactions execute all statements atomically in a single RPC call. Interactive transactions allow inspecting results between statements.
+> A text transaction is not an [interactive transaction](/docs/reference/golang/concepts/transactions). A text transaction runs every statement in a single request, so your code cannot read a result before the next statement runs. An interactive transaction runs one statement at a time.
 
 ## Learn more
 
 - [Executing queries](/docs/reference/golang/concepts/executing-queries) for running the built queries with `surrealdb.Query`
-- [Data manipulation](/docs/reference/golang/concepts/data-manipulation) for the typed CRUD functions as an alternative to the query builder
+- [Data manipulation](/docs/reference/golang/concepts/data-manipulation) for the typed CRUD functions, which need no builder
 - [SurrealQL statements](/docs/reference/query-language/statements/overview) for the query language reference

@@ -1,0 +1,167 @@
+---
+position: 13
+title: Surqlize transactions and batches
+description: Run several Surqlize queries atomically with db.batch() in one request, or with db.transaction() in callback or manual form when intermediate results decide whether to commit or cancel, with retries, signals and runtime validation.
+---
+
+# Surqlize transactions and batches
+
+Surqlize has two ways to run several queries as a unit. A **batch** sends all queries in one request and applies them atomically, but gives you no results until it finishes. A **transaction** stays open on the server, so you can read the result of each query and decide what to do next before you commit or cancel.
+
+| | Batch | Transaction |
+| --- | --- | --- |
+| Round trips | One | One to begin, one for each query and one to commit |
+| Intermediate results | No | Yes |
+| Can be retried as a unit | Yes | No |
+
+The examples on this page use the tables below, with `db` created as described in [connections](/docs/libraries/surqlize-typescript/connections).
+
+```ts title="Example schema"
+import { edge, orm, t, table } from "surqlize";
+
+const user = table("user", {
+    name: t.object({ first: t.string(), last: t.string() }),
+    email: t.string(),
+    age: t.number(),
+    role: t.union([t.literal("admin"), t.literal("moderator"), t.literal("member")]).default("member"),
+});
+
+const post = table("post", {
+    title: t.string(),
+    content: t.string(),
+    author: t.record("user"),
+});
+
+const authored = edge("user", "authored", "post", {
+    created: t.date(),
+});
+
+const db = orm(surreal, user, post, authored);
+```
+
+## Batches
+
+`db.batch()` takes any number of queries and resolves to a tuple of their results, typed in order. Either every query takes effect or none does.
+
+```ts title="Run queries in a batch"
+const [created, updated, users] = await db.batch(
+    db.create("user").set({
+        name: { first: "Alice", last: "Smith" },
+        email: "alice@example.com",
+        age: 30,
+    }),
+    db.update("user", "bob").set({ age: 31 }),
+    db.select("user"),
+);
+// each result is typed according to its own query
+```
+
+A batch is sent as one request using the SDK's stateless `transaction()`, so it works over HTTP as well as WebSockets. When it fails, the promise rejects with the error that made it fail, and none of its statements take effect.
+
+Because a batch is a single request, it is safe to replay. Use `.retry()` to send it again after a conflict with a concurrent transaction. A batch also takes `.signal()` and `.requestTimeout()`. Aborting a batch or reaching its timeout stops the wait only. The server may still have committed the batch. See [cancellation, timeouts and retries](/docs/libraries/surqlize-typescript/request-options).
+
+```ts title="Retry a batch"
+const [saved] = await db
+    .batch(
+        db.create("user").set({
+            name: { first: "Alice", last: "Smith" },
+            email: "alice@example.com",
+            age: 30,
+        }),
+    )
+    .retry()
+    .requestTimeout(5_000);
+```
+
+To see the SurrealQL of a batch before you run it, call `toString()`:
+
+```ts title="Inspect a batch"
+const batch = db.batch(
+    db.update("user", "bob").set({ age: 31 }),
+    db.delete("user", "carol"),
+);
+
+console.log(batch.toString());
+```
+
+```surql title="Output"
+BEGIN TRANSACTION; UPDATE $_v0 SET age = $_v1; DELETE $_v2; COMMIT TRANSACTION;
+```
+
+## Transactions
+
+`db.transaction()` opens a server-side transaction through the SDK's `beginTransaction()`. It needs a connection that supports open transactions, such as a WebSocket connection. Over HTTP it rejects with the SDK's `UnsupportedFeatureError`, so use a batch there. The SDK documents the limits of open transactions in [transactions](/docs/reference/javascript/concepts/transactions).
+
+### Callback form
+
+With a callback, the transaction commits when the callback returns and cancels when it throws. The result of the callback is the result of `db.transaction()`.
+
+```ts title="Run a transaction with a callback"
+const result = await db.transaction(async (tx) => {
+    const alice = await tx.create("user").only().set({
+        name: { first: "Alice", last: "Smith" },
+        email: "alice@example.com",
+        age: 30,
+    });
+
+    // Use the result to decide what to do next
+    if (alice.age > 25) {
+        await tx.update(alice.id).set({ role: "moderator" });
+    }
+
+    return alice;
+});
+```
+
+### Manual form
+
+Without a callback, `db.transaction()` returns the transaction, and you commit or cancel it yourself.
+
+```ts title="Commit or cancel a transaction"
+import { RecordId } from "surrealdb";
+
+const tx = await db.transaction();
+
+try {
+    const alice = await tx.create("user").only().set({
+        name: { first: "Alice", last: "Smith" },
+        email: "alice@example.com",
+        age: 30,
+    });
+    await tx
+        .relate("authored", alice.id, new RecordId("post", "hello"))
+        .set({ created: new Date() });
+    await tx.commit();
+} catch (error) {
+    await tx.cancel();
+    throw error;
+}
+```
+
+The transaction object has the query builders of `db`: `select`, `create`, `insert`, `update`, `upsert`, `delete`, `relate` and `run`. A batch is already atomic, and a transaction cannot be nested. So `tx.batch()` throws an `OrmError`. Run the queries on `tx` instead.
+
+> [!NOTE]
+> Do not retry a query inside a transaction. A conflict has already failed the transaction. To retry statements together, use a batch, which is atomic and can be retried as a unit.
+
+### Cancelling work with a signal
+
+`tx.withSignal(signal)` returns a handle on the same transaction in which every query is abandoned when the signal aborts. `commit()` and `cancel()` work on either handle. They are not tied to the signal, so an aborted request cannot leave the outcome of a commit uncertain.
+
+## Runtime validation
+
+A transaction keeps the validation setting of the ORM that opened it. `tx.validated()` returns a handle on the same transaction with validation switched on or off. See [runtime validation](/docs/libraries/surqlize-typescript/validation).
+
+## Next steps
+
+<Boxes>
+    <IconBox
+        title="Cancellation, timeouts, and retries"
+        description="Control how long and how hard the client waits."
+        href="/docs/libraries/surqlize-typescript/request-options"
+    />
+    <IconBox
+        title="Transactions in the SDK"
+        description="The SDK's own transaction API."
+        href="/docs/reference/javascript/concepts/transactions"
+    />
+</Boxes>

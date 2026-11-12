@@ -42,16 +42,50 @@ SurrealKit computes the diff between the current snapshot and your schema files,
 database/rollouts/20260302153045__add_customer_indexes.toml
 ```
 
-Review this file before proceeding. It lists each step, the SQL it will execute, and which phase (start or complete) it belongs to. Commit it to your repository alongside your schema changes.
+Review this file before proceeding. It lists each step, the SQL it will execute, and which phase (start or complete) it belongs to.
+
+<Since v="v1.0" />
+
+`plan` also copies every schema file the rollout changes into a directory beside the manifest, `database/rollouts/<id>/`, and records each copy's SHA-256 in the manifest. The rollout applies those copies, not whatever `database/schema` holds when it runs. A rollout planned for one release therefore still applies that release's SQL when a database several releases behind catches up. The copies are what was reviewed, so editing one fails the rollout with a hash mismatch. To change a planned rollout, plan a new one instead.
+
+`plan` writes the snapshots too, so commit the manifest, its directory and the snapshots together. A deploy image needs the directory as well as the manifest: an image that copies only `rollouts/*.toml` fails with the path of the missing file. On Windows checkouts, add `database/rollouts/** -text` to `.gitattributes`, so that git leaves the line endings, and therefore the hashes, of the copies alone.
+
+Changing a definition that already exists, such as tightening an `ASSERT` or adjusting `PERMISSIONS`, needs `--allow-modified`:
+
+```bash
+surrealkit rollout plan --name tighten_age_assert --allow-modified
+```
+
+The flag is about rollback. Undoing such a change means restoring the previous definition, which `start` captures from the live database. That is a full undo for `ASSERT`, `PERMISSIONS` and `COMMENT`, and only a partial one for `TYPE`, `VALUE` or `DEFAULT`, because it restores the schema but not data written under the new definition. Such a rollout is recorded as `reversibility: definition_only`, and `rollout status` says so. A field change that uses `MIGRATE EXISTING ROWS` needs no flag; see [Migrating existing records](/docs/manage/schema-migration/existing-records#in-a-rollout).
+
+### Deploy with `rollout up`
+
+<Since v="v1.0" />
+
+`rollout up` works out where the database is and runs every rollout it has not run yet, in order:
+
+```bash
+surrealkit rollout up --user root --pass secret
+# deploy the application
+surrealkit rollout up --complete --user root --pass secret
+```
+
+Each pending rollout is started and completed, except the newest, which is started and left `ready_to_complete` so that the old and new application can overlap. Running `up` again leaves it waiting. `up --complete` or `rollout complete <id>` finishes it.
+
+`up` places the database from its completed rollouts, or for a database that has only been baselined, from the file hashes `baseline` stored. Catching up across several releases runs the older rollouts' complete phases straight away, so anything they remove is gone before the new application starts, as if each release had been deployed in turn. `--dry-run` shows what would run, and `--from <id>` names the first rollout a database still needs when its history cannot show it, for example when its schema was applied by hand.
+
+A new database should get its schema with `surrealkit sync` and then `surrealkit rollout baseline`, after which `up` has nothing to do.
 
 ### Start the rollout
+
+To drive one rollout at a time instead:
 
 ```bash
 surrealkit rollout start 20260302153045__add_customer_indexes --user root \
   --pass secret
 ```
 
-This applies all start-phase steps. SurrealKit records resumable state in the `__rollout` metadata table, so if the process is interrupted it can pick up where it left off. Only one rollout can be in progress at a time; concurrent starts are blocked.
+This applies all start-phase steps. SurrealKit records resumable state in the `__rollout` metadata table, so if the process is interrupted it can pick up where it left off. Only one rollout can be in progress at a time; concurrent starts are blocked. `start` refuses a rollout whose predecessors have not run on this database, and names them.
 
 ### Deploy your application
 
@@ -77,7 +111,27 @@ surrealkit rollout rollback 20260302153045__add_customer_indexes --user root --p
 
 Rollback reverses what `start` applied. It is not available after `complete` has run, so verify your application is working correctly before calling `complete`.
 
+A rolled-back rollout leaves the database where it was before the rollout, and nothing planned after it can run until you decide what to do with it. `rollout up` stops and asks rather than running it again. You can do one of the following:
+
+- Fix whatever made you roll it back, then run it again by name. `up` carries on from there:
+
+  ```bash
+  surrealkit rollout start 20260302153045__add_customer_indexes --user root --pass secret
+  surrealkit rollout up --user root --pass secret
+  ```
+
+- Drop it from the project and plan again:
+
+  ```bash
+  surrealkit rollout discard 20260302153045__add_customer_indexes
+  surrealkit rollout plan --name add_customer_indexes
+  ```
+
+`discard` deletes the manifest and its directory, and puts `snapshots/` back to where they were before the rollout was planned. Deleting a manifest by hand leaves the snapshots at the end of the discarded rollout, so the next plan would find nothing to do. Only discard the newest rollout, and only one that no database has completed, because a database that ran it can no longer be placed in the chain.
+
 ## Other commands
+
+The commands that change a database act on one database. They take the `--target` you name, or the [primary or only target](/docs/manage/schema-migration/modules-and-targets#which-commands-use-the-selection), and refuse a selection of several. `rollout status` makes no rollout changes, so it fans out across every selected target.
 
 ### status
 
@@ -87,16 +141,31 @@ Inspect the state of rollouts stored in the database:
 surrealkit rollout status --user root --pass secret
 ```
 
+After the rollout records, `status` lists a rollout that is in flight or rolled back on this database, the rollouts still pending, in order, and any rollout the database moved past without running, whose data steps never ran there. `surrealkit status` and `rollout status` also print the server version and the database's [compatibility level](/docs/manage/schema-migration/existing-records#compatibility-levels).
+
 ### lint
 
-Validate a manifest file without connecting to the database or applying anything:
+Check a manifest without connecting to the database or applying anything:
 
 ```bash
-surrealkit rollout lint 20260302153045__add_customer_indexes --user root \
-  --pass secret
+surrealkit rollout lint 20260302153045__add_customer_indexes
 ```
 
-This is useful in CI to catch manifest errors before they reach a shared environment.
+Without a rollout id, `lint` checks every manifest and how they chain. It fails when two rollouts were planned from the same snapshots (two branches each ran `plan`; delete the later one and plan it again after merging), when the chain has a gap, when a frozen file does not match its manifest, and when schema files have changes that no rollout plans yet. It needs no database, so it suits a CI check:
+
+```bash
+surrealkit rollout lint
+```
+
+### freeze
+
+Manifests planned before SurrealKit 1.0.0-beta.6 do not carry their SQL, so they can only run against the schema they were planned from, and `lint` lists them. To let a database catch up across one, check out the commit that planned it and freeze it, which converts the manifest in place:
+
+```bash
+surrealkit rollout freeze 20260302153045__add_customer_indexes
+```
+
+Freezing changes a manifest's checksum, so finish any rollout that has started somewhere before you freeze it.
 
 ### repair
 
@@ -114,9 +183,11 @@ The behaviour depends on the stuck state:
 |---|---|
 | `running_complete` | Flips to `completed` and restores the target entities |
 | `running_rollback` | Flips to `rolled_back` and restores the source entities |
-| `running_start` | Flips to `failed`; re-run `start` (idempotent) or `rollback` |
+| `running_start` | Moves to `ready_to_complete` when every start step had run; otherwise flips to `failed`, and you re-run `start` (idempotent) or `rollback` |
 
 Repair never re-executes per-step SQL. It only reconciles the `__rollout` and `__entity` tables so subsequent `sync` and `plan` runs see a clean state.
+
+On a distributed SurrealDB, the small writes a rollout makes around its steps, such as taking the lock and recording each step, can lose a transaction conflict. SurrealKit retries those writes up to six times, logging each retry as a warning, so a lost conflict no longer fails a run whose steps all ran.
 
 ## Rollout state machine
 
@@ -126,6 +197,10 @@ Each rollout transitions through the following states, recorded in the `__rollou
 planned → running_start → ready_to_complete → running_complete → completed
                                        │
                                        └── running_rollback → rolled_back
+
+running_start, running_complete or running_rollback → failed   (a step fails)
+failed → the same running_* state                              (re-run the command)
+failed → running_rollback                                       (rollback)
 ```
 
 | State | Meaning |
@@ -137,15 +212,18 @@ planned → running_start → ready_to_complete → running_complete → complet
 | `completed` | Both phases completed (terminal) |
 | `running_rollback` | Rollback is in progress or was interrupted |
 | `rolled_back` | Start phase was reversed (terminal) |
-| `failed` | A phase failed; recover with `rollback` or `repair` |
+| `failed` | A phase failed; re-run the same command, or run `rollback` |
 
-`completed` and `rolled_back` are terminal. The `running_*` states and `failed` are stuck states left by an interrupted run; recover them with [`repair`](#repair). Only one rollout may be in a non-terminal state at a time.
+`completed` and `rolled_back` are terminal, although running `start` on a rolled-back rollout begins it again as a first run. A `running_*` state is left by an interrupted run; recover it with [`repair`](#repair). `failed` is left by a step that returned an error, and `repair` refuses it; re-run the command that failed, or run `rollback`. Only one rollout may be in a non-terminal state at a time.
+
+`start` on a rollout that is already `ready_to_complete` does nothing. `start` refuses a rollout that is `running_complete` or that failed while completing, and points at `complete`. `complete` refuses a `failed` rollout whose start phase did not finish; run `start` again first, and it carries on from the first step that did not finish.
 
 ## Artifacts
 
 | Path | Description |
 |---|---|
 | `database/rollouts/*.toml` | Generated rollout manifests; commit these |
+| `database/rollouts/<id>/` | The frozen copies of the schema files each rollout applies, and the snapshots `discard` restores; commit these with the manifest |
 | `database/snapshots/schema_snapshot.json` | Schema state snapshot used for diffing |
 | `database/snapshots/catalog_snapshot.json` | Catalog snapshot |
 

@@ -1,4 +1,5 @@
 import type { Redirect } from "@vercel/config/v1";
+import { shortUrls } from "./short-urls";
 
 /**
  * Legacy path prefixes from src-old (see src-old/content/config.ts urlForCollection)
@@ -6,10 +7,10 @@ import type { Redirect } from "@vercel/config/v1";
  */
 function legacyPrefixRedirects(from: string, to: string): Redirect[] {
     return [
-        { source: `/docs/${from}`, destination: `/${to}`, statusCode: 302 },
-        { source: `/docs/${from}/:path*`, destination: `/${to}/:path*`, statusCode: 302 },
-        { source: `/${from}`, destination: `/${to}`, statusCode: 302 },
-        { source: `/${from}/:path*`, destination: `/${to}/:path*`, statusCode: 302 },
+        { source: `/docs/${from}`, destination: `/${to}`, statusCode: 301 },
+        { source: `/docs/${from}/:path*`, destination: `/${to}/:path*`, statusCode: 301 },
+        { source: `/${from}`, destination: `/${to}`, statusCode: 301 },
+        { source: `/${from}/:path*`, destination: `/${to}/:path*`, statusCode: 301 },
     ];
 }
 
@@ -17,28 +18,28 @@ function legacyPrefixRedirects(from: string, to: string): Redirect[] {
 function sdkRedirects(): Redirect[] {
     const versions = ["1.x", "2.x", "3.x"] as const;
     const out: Redirect[] = [
-        { source: "/docs/sdk/:sdk", destination: "/docs/languages/:sdk", statusCode: 302 },
+        { source: "/docs/sdk/:sdk", destination: "/docs/languages/:sdk", statusCode: 301 },
         {
             source: "/docs/sdk/:sdk/:path*",
             destination: "/docs/languages/:sdk/:path*",
-            statusCode: 302,
+            statusCode: 301,
         },
-        { source: "/sdk/:sdk", destination: "/docs/languages/:sdk", statusCode: 302 },
-        { source: "/sdk/:sdk/:path*", destination: "/docs/languages/:sdk/:path*", statusCode: 302 },
+        { source: "/sdk/:sdk", destination: "/docs/languages/:sdk", statusCode: 301 },
+        { source: "/sdk/:sdk/:path*", destination: "/docs/languages/:sdk/:path*", statusCode: 301 },
     ];
     for (const v of versions) {
         out.push(
-            { source: `/docs/${v}/sdk/:sdk`, destination: "/languages/:sdk", statusCode: 302 },
+            { source: `/docs/${v}/sdk/:sdk`, destination: "/languages/:sdk", statusCode: 301 },
             {
                 source: `/docs/${v}/sdk/:sdk/:path*`,
                 destination: "/languages/:sdk/:path*",
-                statusCode: 302,
+                statusCode: 301,
             },
-            { source: `/${v}/sdk/:sdk`, destination: "/languages/:sdk", statusCode: 302 },
+            { source: `/${v}/sdk/:sdk`, destination: "/languages/:sdk", statusCode: 301 },
             {
                 source: `/${v}/sdk/:sdk/:path*`,
                 destination: "/languages/:sdk/:path*",
-                statusCode: 302,
+                statusCode: 301,
             },
         );
     }
@@ -406,7 +407,6 @@ function sdkReferenceRedirects(): Redirect[] {
         ["languages/php/v1/methods", "reference/php/v1/methods", "prefix"],
         ["languages/php/v1/concepts", "reference/php/v1/concepts", "prefix"],
         ["languages/php/v1/installation", "reference/php/v1/installation", "exact"],
-        ["languages/php/libraries", "reference/php/libraries", "prefix"],
         ["languages/php/v2", "reference/php/v2", "exact"],
         ["languages/php/v2/migration", "reference/php/v2/migration", "exact"],
         ["languages/php/v2/concepts", "reference/php/v2/concepts", "prefix"],
@@ -443,6 +443,31 @@ function sdkReferenceRedirects(): Redirect[] {
                 { source: `/${from}/:path*`, destination: `/docs/${to}/:path*`, statusCode: 301 },
             );
         }
+    }
+
+    return out;
+}
+
+/**
+ * Surqlize moved out of the SDK trees into the Libraries section. Page names
+ * are unchanged, so each old tree needs its folder, its landing page and one
+ * wildcard. The wildcard also serves `.md` requests, because a `.md` suffix is
+ * only more path.
+ */
+function librariesRedirects(): Redirect[] {
+    const trees: [string, string][] = [
+        ["reference/php/libraries", "libraries/surqlize-php"],
+        ["reference/javascript/libraries", "libraries/surqlize-typescript"],
+        ["languages/php/libraries", "libraries/surqlize-php"],
+    ];
+    const out: Redirect[] = [];
+
+    for (const [from, to] of trees) {
+        out.push(
+            { source: `/${from}`, destination: "/libraries", statusCode: 301 },
+            { source: `/${from}/surqlize`, destination: `/${to}`, statusCode: 301 },
+            { source: `/${from}/surqlize/:path*`, destination: `/${to}/:path*`, statusCode: 301 },
+        );
     }
 
     return out;
@@ -949,21 +974,6 @@ function stutteringPathRedirects(): Redirect[] {
 }
 
 /**
- * Short, guessable entry points that nothing served.
- *
- * These are not legacy paths - none of them ever existed. They are the URLs a
- * developer types and an agent constructs before it has seen the navigation,
- * and every one of them answered 404 (verified September 2026). An agent trace
- * looking for authentication docs spent eight web searches and 53% of its
- * fetches on Google recovering paths it could not guess, having failed on
- * `/docs/sdk`, `/docs/build` and `/docs/integration/apis`.
- *
- * A guess that lands is worth more than a guess that 404s even when the landing
- * is approximate, so these aim at the section a reader asking that word wants
- * rather than at an exact page. They are 302s for that reason: the destination
- * is our current best answer to a word, not a page that moved.
- */
-/**
  * Two more pages folded for the same reason. `blink` became a section of the
  * demos index it sat under; `ai-agents/ai-frameworks` was a middleman that
  * listed the frameworks and then told the reader to start from the integrations
@@ -984,44 +994,14 @@ function shortPageFoldRedirects(): Redirect[] {
     ];
 }
 
-function guessableEntryPointRedirects(): Redirect[] {
-    const entries: [string, string][] = [
-        ["quickstart", "/docs"],
-        ["quick-start", "/docs"],
-        ["getting-started", "/docs"],
-        ["get-started", "/docs"],
-        ["intro", "/docs/what-is-surrealdb"],
-        ["introduction", "/docs/what-is-surrealdb"],
-        ["api", "/docs/reference/rest-api"],
-        ["apis", "/docs/reference/rest-api"],
-        ["rest", "/docs/reference/rest-api"],
-        ["http", "/docs/reference/rest-api/http-protocol"],
-        ["rpc", "/docs/reference/rest-api/rpc-protocol"],
-        ["auth", "/docs/learn/security/authentication/overview"],
-        ["authentication", "/docs/learn/security/authentication/overview"],
-        ["security", "/docs/learn/security"],
-        ["permissions", "/docs/learn/security/authorization/permissions-and-row-level-security"],
-        // The bare prefix. `sdk/:sdk` is already mapped by `sdkRedirects`.
-        ["sdk", "/docs/languages"],
-        ["sdks", "/docs/languages"],
-        ["clients", "/docs/languages"],
-        ["install", "/docs/running/overview"],
-        ["installation", "/docs/running/overview"],
-        ["docker", "/docs/running/docker"],
-        ["schema", "/docs/learn/schema-management"],
-        ["query", "/docs/reference/query-language"],
-        ["queries", "/docs/reference/query-language"],
-        ["functions", "/docs/reference/query-language/functions/database-functions"],
-        // The statements folder has no page of its own, so a link to it lands
-        // on whichever child sorts first (`DEFINE ACCESS`). The SurrealQL index
-        // lists them all, which is what someone typing this word wants.
-        ["statements", "/docs/reference/query-language"],
-        // `cli` is deliberately absent: `legacySurrealdbTreeRedirects` already
-        // maps it, and a second rule for the same source would never be read.
-    ];
-
-    return entries.map(([from, destination]) => ({
-        source: `/${from}`,
+/**
+ * The short URLs in `short-urls.ts`. Their markdown forms, such as
+ * `/docs/python.md`, need no rules of their own: the `.md` handler in
+ * `src/pages/+server.ts` looks up the path without the suffix.
+ */
+function shortUrlRedirects(): Redirect[] {
+    return shortUrls.map(([word, destination]) => ({
+        source: `/${word}`,
         destination,
         statusCode: 302 as const,
     }));
@@ -1054,7 +1034,6 @@ function legacyIntegrationApiRedirects(): Redirect[] {
 
 const baseRedirects: Redirect[] = [
     ...authDiscoveryRedirects(),
-    { source: "/start", destination: "/what-is-surrealdb", statusCode: 302 },
     ...overviewConsolidationRedirects(),
     ...legacyPrefixRedirects("surrealql", "reference/query-language"),
     // `surrealist/*` cannot map path-for-path: the tree it points at was
@@ -1072,7 +1051,16 @@ const baseRedirects: Redirect[] = [
     },
     { source: "/surrealist", destination: "/explore/studio", statusCode: 301 },
     { source: "/surrealist/:path*", destination: "/explore/studio", statusCode: 301 },
-    ...legacyPrefixRedirects("surrealml", "explore/ml-models"),
+    // SurrealDB 4.0 removed SurrealML, so its pages and the older `/surrealml`
+    // URLs go to the upgrade guide's section on what the removal takes away.
+    ...["/surrealml", "/surrealml/:path*", "/explore/ml-models", "/explore/ml-models/:path*"].map(
+        (source): Redirect => ({
+            source,
+            destination:
+                "/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x#surrealml-is-removed",
+            statusCode: 301,
+        }),
+    ),
     ...legacyIntegrationSdkRedirects(),
     ...legacyIntegrationApiRedirects(),
     ...legacyPrefixRedirects("integrations", "build/integrations"),
@@ -1090,6 +1078,7 @@ const baseRedirects: Redirect[] = [
     ...sdkGettingStartedRedirects(),
     ...aiAgentsRedirects(),
     ...cloudAndDeploymentRedirects(),
+    ...librariesRedirects(),
     ...agentMemoryRedirects(),
     // `meta::tb()` and `meta::id()` were renamed to `record::` in 2.x. Both old
     // names still work, so the note on the record page says so rather than the
@@ -1097,6 +1086,18 @@ const baseRedirects: Redirect[] = [
     {
         source: "/reference/query-language/functions/database-functions/meta",
         destination: "/docs/reference/query-language/functions/database-functions/record",
+        statusCode: 301,
+    },
+    // `DEFINE SCOPE` and `DEFINE TOKEN` were replaced in 2.0 and removed in 3.0.
+    // Each redirects to the statement that replaced it, whose page says so.
+    {
+        source: "/reference/query-language/statements/define/scope",
+        destination: "/docs/reference/query-language/statements/define/access/record",
+        statusCode: 301,
+    },
+    {
+        source: "/reference/query-language/statements/define/token",
+        destination: "/docs/reference/query-language/statements/define/access/jwt",
         statusCode: 301,
     },
     // `surreal format` was removed from the CLI shortly after it shipped. The
@@ -1188,10 +1189,10 @@ const baseRedirects: Redirect[] = [
     ...enterpriseConsolidationRedirects(),
     ...stutteringPathRedirects(),
     ...shortPageFoldRedirects(),
-    // Last, so that every rule naming a real former path is tried first. These
-    // are single-word guesses, and a guess should only be answered once nothing
+    // Last, so that every rule naming a real former path is tried first. A short
+    // URL is a guess at a word, and a guess should only be answered once nothing
     // better matches.
-    ...guessableEntryPointRedirects(),
+    ...shortUrlRedirects(),
 ];
 
 export const docsRedirects: Redirect[] = withMarkdownTwins(baseRedirects.map(withDocsDestination));

@@ -1,14 +1,14 @@
 ---
 position: 8
 title: Multiple sessions
-description: The Go SDK supports creating multiple isolated sessions on a single WebSocket connection, each with its own authentication and namespace.
+description: Run isolated sessions over one WebSocket connection with the Go SDK - attach a session with Attach, sign it in and select its namespace, copy a session with Fork, list sessions with Sessions, reset or detach a session, and start transactions and live queries in it.
 ---
 
 # Multiple sessions
 
-Sessions allow you to create isolated contexts on a single WebSocket connection. Each session has its own authentication state, namespace and database selection, and connection variables. This is useful when a single application needs to serve multiple users or tenants over one connection.
+A session holds its own authentication, namespace and database, and variables. The Go SDK can run several sessions over one WebSocket connection. This lets one program act as several users or tenants without a separate connection for each one. This page covers attaching, copying, listing, resetting and detaching sessions.
 
-Sessions require a WebSocket connection (`ws://` or `wss://`) and SurrealDB v3 or later.
+Sessions need a WebSocket connection (`ws://` or `wss://`). On an HTTP connection, `Attach`, `Fork` and `Sessions` return `constants.ErrSessionsNotSupported`.
 
 ## API references
 
@@ -21,8 +21,24 @@ Sessions require a WebSocket connection (`ws://` or `wss://`) and SurrealDB v3 o
 	</thead>
 	<tbody>
 		<tr>
-			<td scope="row" data-label="Method"><a href="/docs/reference/golang/api/core/session#attach"><code>db.Attach(ctx)</code></a></td>
-			<td scope="row" data-label="Description">Creates a new session on the connection</td>
+			<td scope="row" data-label="Method"><a href="/docs/reference/golang/api/core/db#attach"><code>db.Attach(ctx)</code></a></td>
+			<td scope="row" data-label="Description">Attaches a new session to the connection</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/golang/api/core/db#fork"><code>db.Fork(ctx)</code></a></td>
+			<td scope="row" data-label="Description">Attaches a session that starts as a copy of the default session</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/golang/api/core/session#fork"><code>session.Fork(ctx)</code></a></td>
+			<td scope="row" data-label="Description">Attaches a session that starts as a copy of this one</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/golang/api/core/db#sessions"><code>db.Sessions(ctx)</code></a></td>
+			<td scope="row" data-label="Description">Lists the sessions attached to the connection</td>
+		</tr>
+		<tr>
+			<td scope="row" data-label="Method"><a href="/docs/reference/golang/api/core/session#reset"><code>session.Reset(ctx)</code></a></td>
+			<td scope="row" data-label="Description">Returns a session to the state it had when it was attached</td>
 		</tr>
 		<tr>
 			<td scope="row" data-label="Method"><a href="/docs/reference/golang/api/core/session#detach"><code>session.Detach(ctx)</code></a></td>
@@ -30,14 +46,14 @@ Sessions require a WebSocket connection (`ws://` or `wss://`) and SurrealDB v3 o
 		</tr>
 		<tr>
 			<td scope="row" data-label="Method"><a href="/docs/reference/golang/api/core/session#id"><code>session.ID()</code></a></td>
-			<td scope="row" data-label="Description">Returns the session's UUID</td>
+			<td scope="row" data-label="Description">Returns the UUID of the session</td>
 		</tr>
 	</tbody>
 </table>
 
 ## Creating a session
 
-Call `.Attach()` on the `*DB` to create a new session. The session starts unauthenticated and without a selected namespace or database, so you must configure it before making queries.
+`.Attach()` attaches a new session to the connection and returns a [`*Session`](/docs/reference/golang/api/core/session). The session starts signed out, with no namespace or database selected. Before you query, sign the session in and select a namespace and database:
 
 ```go
 session, err := db.Attach(ctx)
@@ -46,58 +62,121 @@ if err != nil {
 }
 defer session.Detach(ctx)
 
-_, err = session.SignIn(ctx, surrealdb.Auth{
+if _, err := session.SignIn(ctx, surrealdb.Auth{
 	Username: "root",
 	Password: "secret",
-})
-if err != nil {
+}); err != nil {
 	log.Fatal(err)
 }
 
-if err := session.Use(ctx, "my_ns", "my_db"); err != nil {
+if err := session.Use(ctx, "surrealdb", "docs"); err != nil {
 	log.Fatal(err)
 }
 ```
 
 ## Querying with a session
 
-Sessions satisfy the [`sendable`](/docs/reference/golang/api/types#sendable) constraint, so all generic functions like [`Query`](/docs/reference/golang/api/core/db#query), [`Select`](/docs/reference/golang/api/core/db#select), [`Create`](/docs/reference/golang/api/core/db#create), etc. accept a [`*Session`](/docs/reference/golang/api/core/session) directly.
+Every query and CRUD function takes a `*Session` in place of the `*DB`:
 
 ```go
-results, err := surrealdb.Query[[]Person](ctx, session,
-	"SELECT * FROM persons",
-	nil,
-)
+people, err := surrealdb.Query[[]Person](ctx, session, "SELECT * FROM person", nil)
+
+tobie, err := surrealdb.Select[Person](ctx, session, models.NewRecordID("person", "tobie"))
 ```
 
-Each session maintains its own state. Changes to variables, authentication, or namespace on one session do not affect the parent [`*DB`](/docs/reference/golang/api/core/db) or other sessions.
+The request runs as the signed-in user of the session. It uses the namespace and database that the session selected, and the variables of the session.
 
 ## Session isolation
 
-Sessions are fully isolated from each other and from the parent connection:
+Sessions do not share state with each other, or with the default session of the `*DB`:
 
-- Authentication is independent: signing in on a session does not affect other sessions or the [`*DB`](/docs/reference/golang/api/core/db).
-- [`.Use()`](/docs/reference/golang/api/core/session#use) on a session does not change the namespace/database of other sessions.
-- Variables set with [`.Let()`](/docs/reference/golang/api/core/session#let) are scoped to the session.
-- [Live queries](/docs/reference/golang/concepts/live-queries) started on a session are scoped to that session.
+- Signing in on a session does not change who the other sessions are signed in as.
+- `.Use()` on a session does not change the namespace or database of the others.
+- Variables set with `.Let()` belong to the session that set them.
+- [Live queries](/docs/reference/golang/concepts/live-queries) started on a session belong to it, and run with its permissions.
 
 ```go
-sessionA, _ := db.Attach(ctx)
-defer sessionA.Detach(ctx)
+admin, err := db.Attach(ctx)
+if err != nil {
+	log.Fatal(err)
+}
+defer admin.Detach(ctx)
 
-sessionB, _ := db.Attach(ctx)
-defer sessionB.Detach(ctx)
+customer, err := db.Attach(ctx)
+if err != nil {
+	log.Fatal(err)
+}
+defer customer.Detach(ctx)
 
-sessionA.SignIn(ctx, surrealdb.Auth{Username: "admin", Password: "admin"})
-sessionA.Use(ctx, "ns_a", "db_a")
+_, err = admin.SignIn(ctx, surrealdb.Auth{Username: "root", Password: "secret"})
+_ = admin.Use(ctx, "shop", "main")
 
-sessionB.SignIn(ctx, surrealdb.Auth{Namespace: "ns_b", Database: "db_b", Access: "user_access", Username: "user1", Password: "pass1"})
-sessionB.Use(ctx, "ns_b", "db_b")
+_, err = customer.SignIn(ctx, map[string]any{
+	"NS":    "shop",
+	"DB":    "main",
+	"AC":    "account",
+	"email": "tobie@example.com",
+	"pass":  "hunter123",
+})
+_ = customer.Use(ctx, "shop", "main")
+```
+
+## Copying a session
+
+`.Fork()` attaches a new session that starts as a copy of another session. The copy has the same namespace and database and the same variables, and it is signed in with the same access token. `db.Fork()` copies the default session, and `session.Fork()` copies that session. After the copy, the two sessions are independent:
+
+```go
+if err := db.Let(ctx, "tenant", "acme"); err != nil {
+	log.Fatal(err)
+}
+
+fork, err := db.Fork(ctx)
+if err != nil {
+	log.Fatal(err)
+}
+defer fork.Detach(ctx)
+
+tenant, err := surrealdb.Query[string](ctx, fork, "RETURN $tenant", nil)
+fmt.Println((*tenant)[0].Result)
+```
+
+```text title="Output"
+acme
+```
+
+The server cannot copy the authentication of a session, so the fork signs in with the access token of the original. A session that signed in with a username and password can outlive that token, which lasts one hour by default. After the token expires, `.Fork()` attaches nothing and returns an error that wraps `constants.ErrForkTokenExpired`. In that case, attach a new session with `.Attach()`. Then sign in the new session yourself.
+
+A fork does not copy a token pair, because a refresh token works only once. As a result, a fork does not [renew its access token](/docs/reference/golang/concepts/authentication#automatic-token-renewal) by itself.
+
+## Listing sessions
+
+`.Sessions()` returns the sessions attached to the connection, other than the default one:
+
+```go
+sessions, err := db.Sessions(ctx)
+if err != nil {
+	log.Fatal(err)
+}
+for _, s := range sessions {
+	fmt.Println(s.ID())
+}
+```
+
+The list holds every other session on the connection. It also includes sessions that this client did not attach, such as a session from a direct call on the connection. The client does not know the state of such a session, so `.Fork()` on it returns `constants.ErrForkUntracked`.
+
+## Resetting a session
+
+`.Reset()` returns a session to the state it had when it was attached. The session is then signed out and has no namespace, database or variables. `.Reset()` also kills its live queries. The session stays attached, so it can sign in again as another user:
+
+```go
+if err := session.Reset(ctx); err != nil {
+	log.Fatal(err)
+}
 ```
 
 ## Starting transactions from a session
 
-Sessions can start their own transactions using `.Begin()`. The transaction inherits the session's authentication and namespace context.
+A session can start its own [interactive transactions](/docs/reference/golang/concepts/transactions) with `.Begin()`. The transaction runs as the signed-in user of the session, in the namespace and database of the session:
 
 ```go
 tx, err := session.Begin(ctx)
@@ -106,18 +185,18 @@ if err != nil {
 }
 defer tx.Cancel(ctx)
 
-surrealdb.Create[any](ctx, tx, models.Table("events"), map[string]any{"type": "login"})
+if _, err := surrealdb.Create[any](ctx, tx, "event", map[string]any{"type": "login"}); err != nil {
+	log.Fatal(err)
+}
 
 if err := tx.Commit(ctx); err != nil {
 	log.Fatal(err)
 }
 ```
 
-See [Transactions](/docs/reference/golang/concepts/transactions) for more on interactive transactions.
-
 ## Detaching a session
 
-Call [`.Detach()`](/docs/reference/golang/api/core/session#detach) to remove the session from the server. After detaching, the session cannot be used and any operations on it return [`ErrSessionClosed`](/docs/reference/golang/api/errors#sentinel-errors).
+`.Detach()` removes the session from the server and kills its live queries. After that, a call on the session returns [`constants.ErrSessionClosed`](/docs/reference/golang/api/errors#sentinel-errors):
 
 ```go
 if err := session.Detach(ctx); err != nil {
@@ -125,11 +204,15 @@ if err := session.Detach(ctx); err != nil {
 }
 ```
 
-Use `defer session.Detach(ctx)` immediately after `.Attach()` to ensure cleanup.
+Call `defer session.Detach(ctx)` directly after `.Attach()` or `.Fork()`, so that `.Detach()` removes the session even when a later step fails.
+
+## Sessions and reconnection
+
+When the client [reconnects](/docs/reference/golang/concepts/reliable-connections), it attaches each session again under the same UUID. It also restores the authentication, namespace, database, variables and live queries of each session. A reconnect loses the transactions that were open in a session.
 
 ## Learn more
 
 - [Session API reference](/docs/reference/golang/api/core/session) for complete method signatures
-- [Transactions](/docs/reference/golang/concepts/transactions) for interactive transaction support
-- [Connecting to SurrealDB](/docs/reference/golang/concepts/connecting-to-surrealdb) for WebSocket connection requirements
-- [Errors reference](/docs/reference/golang/api/errors) for session-related error types
+- [Transactions](/docs/reference/golang/concepts/transactions) for interactive transactions
+- [Authentication](/docs/reference/golang/concepts/authentication) for signing a session in
+- [Errors reference](/docs/reference/golang/api/errors) for the session errors

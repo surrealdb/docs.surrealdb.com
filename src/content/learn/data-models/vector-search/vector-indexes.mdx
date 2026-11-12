@@ -29,7 +29,7 @@ SurrealDB offers two **approximate** graph indexes for k-nearest-neighbour searc
 | Index | Best for | Storage |
 | --- | --- | --- |
 | [HNSW](https://en.wikipedia.org/wiki/Hierarchical_navigable_small_world) ([`DEFINE INDEX … HNSW`](/docs/reference/query-language/statements/define/indexes#hnsw-hierarchical-navigable-small-world)) | Low-latency ANN when the graph fits comfortably in memory with headroom for the bounded vector cache | In-memory hot graph + persistence |
-| [DISKANN](https://arxiv.org/abs/1907.01668) ([`DEFINE INDEX … DISKANN`](/docs/reference/query-language/statements/define/indexes#diskann-disk-based-approximate-nearest-neighbours)) *(SurrealDB 3.1+)* | Very large corpora where RAM cannot hold the full graph - full-precision vectors and graph stay in the key-value store and are paged through a bounded cache | Key-value-backed graph + bounded in-memory cache (not on **WASM** targets) |
+| [DISKANN](https://arxiv.org/abs/1907.01668) ([`DEFINE INDEX … DISKANN`](/docs/reference/query-language/statements/define/indexes#diskann-disk-based-approximate-nearest-neighbours)) *(SurrealDB 3.1+)* | Very large corpora where RAM cannot hold the full graph - full-precision vectors and graph stay in the key-value store and are paged through a bounded cache | Key-value-backed graph + bounded in-memory cache (64-bit platforms and WebAssembly builds) |
 
 Both are [proximity graph](/docs/reference/query-language/statements/define/indexes#hnsw-hierarchical-navigable-small-world)-style indexes. Queries use the same [`<|K, …|>` KNN operator shapes](/docs/reference/query-language/language-primitives/operators#knn); the optimiser picks the index when distances and types line up.
 
@@ -51,13 +51,23 @@ Both are [proximity graph](/docs/reference/query-language/statements/define/inde
 | M0            | 24        |                         | Max connections in the lowest layer
 | LM            | 0.40242960438184466f |              | Multiplier for level generation. This value is automatically calculated with a value considered as optimal.
 
+An HNSW index stores its graph in layers. Every vector is in layer 0, and each higher layer holds a smaller sample of the layer below, with links that span longer distances. `M` limits the links per node in the upper layers and `M0` in layer 0. A search enters at the top, walks towards the query in each layer and drops to the next, then keeps the `EF` nearest nodes it finds in layer 0 and returns the `K` nearest of them:
+
+<img src="~/assets/img/diagrams/light/hnsw-layers-light.webp" darkSrc="~/assets/img/diagrams/hnsw-layers.webp" alt="Three panels for the layers of a small HNSW graph. Layer 2 has three nodes; the search starts at the entry point and moves one step towards the query. Layer 1 has eight nodes; the search continues from where layer 2 ended and moves one step closer. Layer 0 holds every node with more links; the search walks to the nodes nearest the query, keeps the six nearest it finds as EF, and returns the two nearest as K." />
+
 Examples:
 
 ```surql
 -- User statement:
 DEFINE INDEX hnsw_idx ON pts FIELDS point HNSW DIMENSION 4;
 -- Defaults to:
-DEFINE INDEX hnsw_idx ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 150 M 12 M0 24 LM 0.40242960438184466f;
+DEFINE INDEX OVERWRITE hnsw_idx ON pts FIELDS point HNSW DIMENSION 4
+    DIST EUCLIDEAN
+    TYPE F32
+    EFC 150
+    M 12
+    M0 24
+    LM 0.40242960438184466f;
 -- Users are strongly suggested not to set an LM value, as
 -- it is computed based on other parameters. Only users
 -- completely versed in the field should manually set it
@@ -86,14 +96,14 @@ DEFINE INDEX diskann_idx
 
 DISKANN keeps its graph and full-precision vectors in the key-value store and answers queries through a bounded in-memory cache, so resident memory is bounded by the cache rather than by the dataset. (DISKANN does not apply product quantisation; per-vector size is governed only by the chosen `TYPE`.) The cache defaults to 256 MiB and is shared across all DISKANN indexes; cap it with [`SURREAL_DISKANN_CACHE_SIZE`](/docs/reference/cli/db/environment-variables#cache-config).
 
-See [`DEFINE INDEX` → DISKANN](/docs/reference/query-language/statements/define/indexes#diskann-disk-based-approximate-nearest-neighbours) for the full memory model and platform notes (including **no WASM support**).
+DISKANN is available on 64-bit platforms and in WebAssembly builds, including the [Wasm engine](/docs/reference/javascript/engines/wasm) in a browser. Other 32-bit platforms, such as 32-bit x86 and 32-bit Arm, use HNSW instead. See [`DEFINE INDEX` → DISKANN](/docs/reference/query-language/statements/define/indexes#diskann-disk-based-approximate-nearest-neighbours) for the full memory model.
 
 ### Querying
 
 ```surql
 DEFINE INDEX hnsw_idx ON pts FIELDS point HNSW DIMENSION 4;
 
-LET $vector = [2,3,4];
+LET $vector = [2,3,4,5];
 SELECT
     id,
     vector::distance::knn() as dist  -- distance from $vector
@@ -102,8 +112,8 @@ SELECT
                                      -- distance
 FROM pts
 WHERE point
-    <|2|>  -- return 2, in this case using the distance function defined in the
-           -- index: euclidean
+    <|2,40|>  -- return the 2 nearest, searching 40 candidates, using the
+              -- distance function defined in the index: euclidean
     $vector;
 ```
 
@@ -113,6 +123,7 @@ With a DISKANN index defined on `point`, the same `<|K, EF|>` approximate form a
 | ------------------------------------------------ | --- |
 | `vector::distance::knn()`                        | reuses the value computed during the query
 | `vector::distance::chebyshev(point, $vec)`    |
+| `vector::distance::cosine(point, $vec)`       | `1 - vector::similarity::cosine(point, $vec)`
 | `vector::distance::euclidean(point, $vec)`    |
 | `vector::distance::hamming(point, $vec)`      |
 | `vector::distance::manhattan(point, $vec)`    |
@@ -134,11 +145,6 @@ With a DISKANN index defined on `point`, the same `<|K, EF|>` approximate form a
         </tr>
     </thead>
     <tbody>
-        <tr>
-            <td scope="row" data-label="Query"><code>&lt;|2|></code></td>
-            <td scope="row" data-label="HNSW index">uses distance function defined in index</td>
-            <td scope="row" data-label="DISKANN index">same when the index distance matches</td>
-        </tr>
         <tr>
             <td scope="row" data-label="Query"><code>&lt;|2, EUCLIDEAN|></code></td>
             <td scope="row" data-label="HNSW index">brute force method</td>
@@ -171,13 +177,17 @@ With a DISKANN index defined on `point`, the same `<|K, EF|>` approximate form a
         </tr>
         <tr>
             <td scope="row" data-label="Query"><code>&lt;|2, 10|></code></td>
-            <td scope="row" data-label="HNSW index">second param is effort*</td>
+            <td scope="row" data-label="HNSW index">uses the index and its distance function; second param is effort*</td>
             <td scope="row" data-label="DISKANN index">same approximate form - second value bounds the candidate list</td>
         </tr>
     </tbody>
 </table>
 
-\* **effort** - for HNSW and DISKANN, the second number in `<|K, N|>` tells the engine how far to search along the graph. Both algorithms are approximate and may miss some vectors.
+\* **effort** - for HNSW and DISKANN, the second number in `<|K, N|>` tells the engine how far to search along the graph. Both algorithms are approximate and may miss some vectors. A query with only `K`, as in `<|2|>`, is refused: give it an effort or a distance. The effort form needs an HNSW or DISKANN index on the field: from SurrealDB 4.0.1, a query that uses it on a field with no such index fails with an error, where 4.0.0 returned `[]`.
+
+**ORDER BY statement**
+
+From SurrealDB 4.0, an HNSW or DISKANN index also answers `ORDER BY vector::distance::<metric>(point, $vec) LIMIT K` when the function matches the distance the index was defined with, so `ORDER BY vector::distance::euclidean(point, $vec) LIMIT 2` uses the `hnsw_idx` index above. The search width is the larger of `K` and the index's `EFC` for HNSW or `L_BUILD` for DISKANN. See [ordering by distance](/docs/learn/data-models/vector-search/similarity-search#ordering-by-distance) for the conditions.
 
 ### Distance under JACCARD and PEARSON
 
@@ -189,7 +199,7 @@ Rebuilding an HNSW or DISKANN index also makes KNN queries with a selective filt
 
 ### Notes
 
-- Verify index utilisation in queries using the [`EXPLAIN FULL` clause](/docs/reference/query-language/statements/select#the-explain-clause). E.g: `SELECT id FROM pts WHERE point <|10|> [2,3,4,5] EXPLAIN FULL;`
+- Verify index utilisation in queries using the [`EXPLAIN FULL` clause](/docs/reference/query-language/statements/select#the-explain-clause). E.g: `SELECT id FROM pts WHERE point <|10,40|> [2,3,4,5] EXPLAIN FULL;`
 - 𝑝 values: (more about 𝑝 in [Minkowski distance](https://en.wikipedia.org/wiki/Minkowski_distance))
   - 2<sup>0</sup> = 1 → manhattan/diamond ◇
   - 2<sup>1</sup> = 2 → euclidean/circle ○

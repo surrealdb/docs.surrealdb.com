@@ -31,6 +31,18 @@ UPDATE $new_user SET comments += (CREATE ONLY comment SET
 Querying is like reading any other field:
 
 ```surql
+-- Setup from the example above
+LET $new_user = CREATE ONLY user SET name = "User McUserson";
+-- Create a new comment, use the output to update the user
+UPDATE $new_user SET comments += (CREATE ONLY comment SET 
+    text = "I learned something new!", 
+    created_at = time::now())
+    .id;
+UPDATE $new_user SET comments += (CREATE ONLY comment SET
+    text = "I don't get it, can you explain?",
+    created_at = time::now())
+    .id;
+
 SELECT 
     name, 
     comments.{ created_at, text }
@@ -60,6 +72,18 @@ FROM user;
 Historically, record links were unidirectional, so the other direction often needed a subquery, while graph edges made reverse walks easy:
 
 ```surql
+-- Setup from the example above
+LET $new_user = CREATE ONLY user SET name = "User McUserson";
+-- Create a new comment, use the output to update the user
+UPDATE $new_user SET comments += (CREATE ONLY comment SET 
+    text = "I learned something new!", 
+    created_at = time::now())
+    .id;
+UPDATE $new_user SET comments += (CREATE ONLY comment SET
+    text = "I don't get it, can you explain?",
+    created_at = time::now())
+    .id;
+
 SELECT 
     *,
     -- Check the `user` table's `comments` field
@@ -107,7 +131,8 @@ FROM comment;
 Since version `3.0.0`, a record link can be bidirectional by defining a field with the [`REFERENCE`](/docs/reference/query-language/language-primitives/record-references) clause and using a computed back-reference:
 
 ```surql
-DEFINE FIELD comments ON user TYPE option<array<record<comment>>> REFERENCE;
+DEFINE FIELD comments ON user TYPE option<array<record<comment>>>
+    REFERENCE;
 DEFINE FIELD author ON comment COMPUTED <~user;
 
 LET $new_user = CREATE ONLY user SET name = "User McUserson";
@@ -125,10 +150,10 @@ UPDATE $new_user SET comments += (CREATE ONLY comment:two SET
 SELECT * FROM ONLY comment:one;
 
 -- Regular queries on incoming references work too
-SELECT text, <~user.id[0] AS commenter FROM comment;
+SELECT text, <~user[0] AS commenter FROM comment;
 ```
 
-```surql title="Output"
+```surql title="Example output"
 -------- Query --------
 
 {
@@ -154,6 +179,10 @@ SELECT text, <~user.id[0] AS commenter FROM comment;
 ]
 ```
 
+The three ways of linking the same user to the same two comments compare as follows:
+
+<img src="~/assets/img/diagrams/light/record-link-kinds-light.webp" darkSrc="~/assets/img/diagrams/record-link-kinds.webp" alt="Three panels linking user:mcuserson to comment:1 and comment:2. As a record link, the user's comments field holds the two comment IDs, and the way back needs a subquery. As a graph relation, an edge record in the wrote table sits between the user and each comment, and ->wrote->comment and <-wrote<-user walk it in either direction. As a reference, the comments field is defined with REFERENCE, and each comment's author field is computed from it with <~user." />
+
 ## One-to-one, one-to-many and many-to-many
 
 Each kind of relationship maps to a record link field, and the field definition decides how strict it is. The schema below models a blog with posts and tags:
@@ -163,6 +192,8 @@ Each kind of relationship maps to a record link field, and the field definition 
 | One-to-one | Each user owns at most one blog | `owner ON blog TYPE record<user>`, with a `UNIQUE` index |
 | One-to-many | A blog has many posts | `blog ON post TYPE record<blog>`, stored on the "many" side |
 | Many-to-many | A post has many tags, and a tag is on many posts | `tags ON post TYPE array<record<tag>>` |
+
+<img src="~/assets/img/diagrams/light/blog-schema-links-light.webp" darkSrc="~/assets/img/diagrams/blog-schema-links.webp" alt="Four tables in a row: user, blog, post and tag. blog.owner links to user, one-to-one with a record<user> field and a UNIQUE index. post.blog links to blog, one-to-many with a record<blog> field and ON DELETE CASCADE. post.tags links to tag, many-to-many with a set<record<tag>> field. blog.posts and tag.posts are computed with <~post." />
 
 ```surql
 DEFINE TABLE user SCHEMAFULL;
@@ -180,16 +211,22 @@ DEFINE FIELD posts ON tag COMPUTED <~post;
 
 DEFINE TABLE post SCHEMAFULL;
 DEFINE FIELD title ON post TYPE string;
-DEFINE FIELD blog ON post TYPE record<blog> REFERENCE ON DELETE CASCADE ASSERT $value.exists();
-DEFINE FIELD tags ON post TYPE array<record<tag>> DEFAULT [] REFERENCE ASSERT $value.all(|$t| $t.exists());
+DEFINE FIELD blog ON post TYPE record<blog>
+    REFERENCE ON DELETE CASCADE
+    ASSERT $value.exists();
+DEFINE FIELD tags ON post TYPE set<record<tag>>
+    DEFAULT []
+    REFERENCE
+    ASSERT $value.all(|$t| $t.exists());
 ```
 
 Some details about this schema:
 
 - **One-to-one needs the index.** `owner` holds one user, so each blog has one owner, but several blogs could name the same user. The `UNIQUE` index refuses a second blog for the same user.
 - **The link is stored once.** A post stores its blog, and the blog does not store an array of posts. The `posts` field on `blog` is [computed](/docs/reference/query-language/language-primitives/record-references) from the incoming references with `<~post`, so it cannot go out of date. This needs `REFERENCE` on the field that holds the link.
-- **`record<blog>` checks the table, not the record.** The type accepts any `blog:…` id, including one for a record that does not exist. `ASSERT $value.exists()` adds the check that a foreign key makes in a relational database, and `$value.all(|$t| $t.exists())` does the same for each element of an array.
-- **An array field needs a value.** A `SCHEMAFULL` field of type `array<record<tag>>` refuses `NONE`, so a post created without tags fails unless the field has `DEFAULT []`, or uses `option<array<record<tag>>>` instead.
+- **`record<blog>` checks the table, not the record.** The type accepts any `blog:…` id, including one for a record that does not exist. `ASSERT $value.exists()` adds the check that a foreign key makes in a relational database, and `$value.all(|$t| $t.exists())` does the same for each element of a set.
+- **A set keeps each tag once.** `set<record<tag>>` removes a duplicate link, so `tags = [tag:rust, tag:rust]` stores one link. Use `array<record<tag>>` where the order or a repeated link matters.
+- **A set field needs a value.** A `SCHEMAFULL` field of type `set<record<tag>>` refuses `NONE`, so a post created without tags fails unless the field has `DEFAULT []`, or uses `option<set<record<tag>>>` instead.
 - **`ON DELETE CASCADE`** deletes a blog's posts when the blog is deleted. The [other `ON DELETE` options](/docs/reference/query-language/language-primitives/record-references) refuse the delete, leave or remove the link, or run an expression.
 
 With some data in place, each check refuses a link that it should:
@@ -206,7 +243,7 @@ CREATE post:three SET title = 'Lost', blog = blog:gone;
 //- 'Found blog:gone for field `blog`, with record `post:three`, but field must conform to: $value.exists()'
 
 CREATE post:four SET title = 'Typo', blog = blog:news, tags = [tag:rsut];
-//- 'Found [tag:rsut] for field `tags`, with record `post:four`, but field must conform to: $value.all(|$t: any| ($t.exists()))'
+//- 'Found {tag:rsut,} for field `tags`, with record `post:four`, but field must conform to: $value.all(|$t: any| ($t.exists()))'
 
 CREATE blog:other SET title = 'Other', owner = user:ann;
 //- 'Database index `one_blog_per_owner` already contains user:ann, with record `blog:news`'
@@ -215,6 +252,35 @@ CREATE blog:other SET title = 'Other', owner = user:ann;
 Queries follow the links in either direction:
 
 ```surql
+-- Setup from the examples above
+DEFINE TABLE user SCHEMAFULL;
+DEFINE FIELD name ON user TYPE string;
+
+DEFINE TABLE blog SCHEMAFULL;
+DEFINE FIELD title ON blog TYPE string;
+DEFINE FIELD owner ON blog TYPE record<user>;
+DEFINE FIELD posts ON blog COMPUTED <~post;
+
+DEFINE TABLE tag SCHEMAFULL;
+DEFINE FIELD name ON tag TYPE string;
+DEFINE FIELD posts ON tag COMPUTED <~post;
+
+DEFINE TABLE post SCHEMAFULL;
+DEFINE FIELD title ON post TYPE string;
+DEFINE FIELD blog ON post TYPE record<blog>
+    REFERENCE ON DELETE CASCADE
+    ASSERT $value.exists();
+DEFINE FIELD tags ON post TYPE set<record<tag>>
+    DEFAULT []
+    REFERENCE
+    ASSERT $value.all(|$t| $t.exists());
+CREATE user:ann SET name = 'Ann';
+CREATE blog:news SET title = 'News', owner = user:ann;
+CREATE tag:rust SET name = 'rust';
+CREATE tag:db SET name = 'databases';
+CREATE post:one SET title = 'Hello', blog = blog:news, tags = [tag:rust, tag:db];
+CREATE post:two SET title = 'Second', blog = blog:news;
+
 SELECT title, posts.title AS posts FROM blog:news;
 //- [{ posts: ['Hello', 'Second'], title: 'News' }]
 
@@ -222,7 +288,7 @@ SELECT name, posts.title AS posts FROM tag:rust;
 //- [{ name: 'rust', posts: ['Hello'] }]
 
 SELECT title, blog.owner.name AS owner, tags.name AS tags FROM post:one;
-//- [{ owner: 'Ann', tags: ['rust', 'databases'], title: 'Hello' }]
+//- [{ owner: 'Ann', tags: ['databases', 'rust'], title: 'Hello' }]
 ```
 
 A many-to-many relationship can also be a graph edge, such as `RELATE post:one->tagged->tag:rust`. Use an edge when the relationship has data of its own, such as who added the tag and when, as the sections below describe.
@@ -288,11 +354,12 @@ SELECT * FROM likes;
 Example of record-link cleanup:
 
 ```surql
-DEFINE FIELD comments ON person TYPE option<array<record<comment>>> REFERENCE ON DELETE THEN {
-    UPDATE $this SET
-        deleted_comments += $reference,
-        comments -= $reference;
-};
+DEFINE FIELD comments ON person TYPE option<array<record<comment>>>
+    REFERENCE ON DELETE THEN {
+        UPDATE $this SET
+            deleted_comments += $reference,
+            comments -= $reference;
+    };
 ```
 
 For more on `ON DELETE` and references, see [Record references](/docs/reference/query-language/language-primitives/record-references).

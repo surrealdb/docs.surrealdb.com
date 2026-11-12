@@ -1,0 +1,151 @@
+---
+position: 12
+title: Named types
+description: "A named type, declared with DEFINE TYPE, gives a type a name that fields, function arguments and casts use: a union of strings ordered by declaration, an object shape, or a value with ASSERT checks and a DEFAULT."
+---
+
+# Named types
+
+<Since v="v4.0.0" />
+
+A named type is a type declared once in a database with [`DEFINE TYPE`](/docs/reference/query-language/statements/define/type), and then used by its name wherever a type is written: a field, a function argument or return value, a cast, or inside `option<>` and `array<>`. A value of a named type is coerced to the type and checked against its `ASSERT` clauses each time it is written. This page covers the three kinds of named type, how a union of strings orders its values, and casting.
+
+## Declaring and using a type
+
+The following statements declare a whole percentage, a ticket priority and a postal address, and use them as the types of fields.
+
+```surql
+DEFINE TYPE percent AS int
+	CONSTRAINT in_range ASSERT $value >= 0 AND $value <= 100
+	DEFAULT 50;
+DEFINE TYPE priority AS 'low' | 'medium' | 'high' | 'urgent';
+DEFINE TYPE address AS { street: string, city: string, postcode: option<string> };
+
+DEFINE TABLE ticket SCHEMAFULL;
+DEFINE FIELD title ON ticket TYPE string;
+DEFINE FIELD priority ON ticket TYPE priority;
+DEFINE FIELD progress ON ticket TYPE percent;
+DEFINE FIELD site ON ticket TYPE option<address>;
+```
+
+A write that the type refuses fails, and the error names the type and the part of it that failed: the body, an unnamed `ASSERT`, or a named `CONSTRAINT`.
+
+```surql
+CREATE ticket:1 SET title = 'Login fails', priority = 'critical';
+//- "Couldn't coerce value for field `priority` of `ticket:1`: Expected `priority ('low' | 'medium' | 'high' | 'urgent')` but found `'critical'`"
+
+CREATE ticket:1 SET title = 'Login fails', priority = 'urgent', progress = 140;
+//- "Couldn't coerce value for field `progress` of `ticket:1`: Expected `percent (constraint in_range failed)` but found `140`"
+```
+
+A field that a new record leaves empty takes the type's `DEFAULT`, unless the field has a `DEFAULT` of its own:
+
+```surql
+CREATE ticket:1 SET title = 'Login fails', priority = 'urgent';
+//- [{ id: ticket:1, priority: 'urgent', progress: 50, title: 'Login fails' }]
+```
+
+The stored value has the type of the body, so `type::of()` returns `'int'` for a `percent` and `'string'` for a `priority`. A function can take and return a named type in the same way as a field:
+
+```surql
+-- Setup from the example above
+DEFINE TYPE percent AS int
+	CONSTRAINT in_range ASSERT $value >= 0 AND $value <= 100
+	DEFAULT 50;
+
+DEFINE FUNCTION fn::half($p: percent) -> percent { $p / 2 };
+
+fn::half(90);
+//- 45
+
+fn::half(200);
+//- "Incorrect arguments for function fn::half(). Failed to coerce argument `$p`: Expected `percent (constraint in_range failed)` but found `200`"
+```
+
+## Casting
+
+A cast to a named type, such as `<percent>`, coerces the value to the body and runs the checks. It returns the value or fails with the same error as a write.
+
+```surql
+<percent> '42';
+//- 42
+
+<percent> 420;
+//- "Could not cast into `percent`: Expected `percent (constraint in_range failed)` but found `420`"
+
+<array<percent>> ['1', '2', 3];
+//- [1, 2, 3]
+
+<address> { street: '1 Main St', city: 'Oslo' };
+//- { city: 'Oslo', street: '1 Main St' }
+
+<priority> 'critical';
+//- "Could not cast into `priority`: Expected `priority ('low' | 'medium' | 'high' | 'urgent')` but found `'critical'`"
+```
+
+A cast to a name that no type has fails when it runs, with an error that says the type does not exist.
+
+## Ordering a union of strings
+
+A union of strings lists its values from the lowest to the highest. `ORDER BY`, the comparison operators `<`, `<=`, `>` and `>=`, and a range written in the query such as `IN 'low'..='medium'` compare the values of a field of the type by their position in that list. The aggregates `math::min()`, `math::max()`, `array::min()` and `array::max()` return the value that ranks lowest or highest. Sorted by spelling, the same values would come back as `'high'`, `'low'`, `'medium'`, `'urgent'`.
+
+```surql
+-- Uses the ticket:1 record created above
+CREATE ticket:2 SET title = 'Typo on home page', priority = 'low';
+CREATE ticket:3 SET title = 'Slow search', priority = 'medium';
+
+SELECT VALUE priority FROM ticket ORDER BY priority DESC;
+//- ['urgent', 'medium', 'low']
+
+SELECT VALUE title FROM ticket WHERE priority >= 'medium' ORDER BY title;
+//- ['Login fails', 'Slow search']
+
+SELECT VALUE title FROM ticket WHERE priority IN 'low'..='medium' ORDER BY title;
+//- ['Slow search', 'Typo on home page']
+
+SELECT math::max(priority) AS top, math::min(priority) AS bottom FROM ticket GROUP ALL;
+//- [{ bottom: 'low', top: 'urgent' }]
+```
+
+A comparison with a string that the type does not list fails, instead of returning no records.
+
+```surql
+SELECT VALUE title FROM ticket WHERE priority > 'missing';
+```
+
+```surql title="Error output"
+"'missing' is not a value of the type 'priority'; its values are 'low', 'medium', 'high', 'urgent'"
+```
+
+Declaration order applies only where SurrealDB knows that the value has the type, which is a field defined with it. A value on its own is a string and compares as one, so `'low' < 'high'` is `false`. A comparison between fields of two different types, and a range held in a parameter, such as `LET $r = 'low'..='medium'`, also compare by spelling. To compare values in the order of a type anywhere, use [`enum::rank()`](/docs/reference/query-language/functions/database-functions/enum#enumrank).
+
+A field of any other named type, such as `percent`, orders by its value in the usual way.
+
+An index on a field of a union type is used for `=` and `IN`. A query that orders by the field, or compares it with `<` or `>`, sorts the records instead of reading them in index order.
+
+## Inline enums
+
+A field that alone needs an ordered list of strings can list them in the type itself, as `enum<'s', 'm', 'l'>`. An inline enum checks its values and orders them in the same way as a union type, but it has no name, so `ALTER TYPE` cannot change it, and the enum functions take its values as an array instead of a name.
+
+```surql
+DEFINE FIELD size ON ticket TYPE option<enum<'s', 'm', 'l'>>;
+CREATE ticket:5 SET title = 'Export fails', priority = 'high', size = 'xl';
+```
+
+```surql title="Error output"
+"Couldn't coerce value for field `size` of `ticket:5`: Expected `none | enum<'s', 'm', 'l'>` but found `'xl'`"
+```
+
+A [literal](/docs/reference/query-language/language-primitives/data-types/literals) union such as `'s' | 'm' | 'l'` written directly on a field also restricts it to a list of strings, but compares its values by spelling. Use a named union type or an inline enum when the order of the values matters.
+
+## Changing a type
+
+[`ALTER TYPE`](/docs/reference/query-language/statements/alter/type) adds a value to a union at any position, or renames a value. A rename also rewrites every stored record and index entry that holds the old value, so existing records keep passing the type check. `DEFINE TYPE OVERWRITE` changes anything else about a type. It fails if a stored value does not pass the new definition, and it cannot change the values of a union while a field or a function uses the type.
+
+[`REMOVE TYPE`](/docs/reference/query-language/statements/remove) fails while another definition names the type, such as a field, a function, an event, a view, a permission or another type.
+
+## See also
+
+* [`DEFINE TYPE`](/docs/reference/query-language/statements/define/type)
+* [`ALTER TYPE`](/docs/reference/query-language/statements/alter/type)
+* [Enum functions](/docs/reference/query-language/functions/database-functions/enum)

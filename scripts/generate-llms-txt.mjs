@@ -80,7 +80,7 @@ const EXTRA_PAGES = {
  */
 const PREAMBLE = `# SurrealDB Documentation
 
-SurrealDB is a [multi-model database](${SITE}/features) that stores relational, document, graph, time-series, vector, full-text and key-value data in one place, queried through [SurrealQL](${SITE}/docs/reference/query-language). It runs embedded in an application, as a single node, or as a distributed cluster, and is also available as [SurrealDB Agent Memory](${SITE}/docs/agent-memory), a memory and knowledge layer for AI agents.
+SurrealDB is a [multi-model database](${SITE}/features) that stores relational, document, graph, time-series, vector, full-text and key-value data in one place, queried through [SurrealQL](${SITE}/docs/reference/query-language). It runs embedded in an application, as a single node, as a distributed cluster, or serverless on [SurrealDB Earth](${SITE}/docs/manage/instances/earth), and is also available as [SurrealDB Agent Memory](${SITE}/docs/agent-memory), a memory and knowledge layer for AI agents.
 
 > Markdown for agents: every documentation page is also available as markdown. Append ".md" to any page path to fetch it directly, for example "${SITE}/docs/reference/query-language/statements/select.md". The same document is served on the page's own URL to a request sending an "Accept: text/markdown" header, with "Content-Type: text/markdown" and an "x-markdown-tokens" estimate. HTML stays the default for browsers. Links inside a markdown page already point at the ".md" variants, so following them keeps an agent in markdown. The complete documentation is also available as a single markdown document at "${SITE}/docs/llms-full.txt".
 
@@ -164,7 +164,16 @@ function byPriorityThenDepth(a, b) {
 }
 
 /** The sections, in the order they are written. */
-const ORDER = ["index", "learn", "build", "manage", "explore", "reference", "agent-memory"];
+const ORDER = [
+    "index",
+    "learn",
+    "build",
+    "manage",
+    "explore",
+    "reference",
+    "libraries",
+    "agent-memory",
+];
 
 /** Group collections by their first path segment, which is the top-level nav. */
 function sectionOf(id) {
@@ -227,6 +236,7 @@ const SECTION_TITLES = {
     manage: "Manage",
     explore: "Explore",
     reference: "Reference",
+    libraries: "Libraries",
     "agent-memory": "Agent Memory",
 };
 

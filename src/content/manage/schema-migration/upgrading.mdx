@@ -1,22 +1,30 @@
 ---
 position: 14
 title: Upgrading to SurrealKit 1.0
-description: "What changes when moving a SurrealKit project from 0.7 to 1.0: the removed seed.surql fallback, rejected DATABASE_* variables, a --folder flag that now works, stricter test assertions, and library API changes."
+description: "What changes when moving a SurrealKit project from 0.7 or a 1.0 beta to 1.0.0-rc.1: SurrealDB 4.0 only, the removed seed.surql fallback, rejected DATABASE_* variables, a --folder flag that now works, rollout manifests that carry their SQL, stricter test assertions, and library API changes."
 ---
 
 # Upgrading to SurrealKit 1.0
 
-Most of a 0.7 project needs no change. Every 0.7 command still works, and running `surrealkit sync` on an existing project after upgrading re-applies nothing and prunes nothing. This page covers the parts that do need attention, and the new features you can adopt afterwards.
+Most of a 0.7 project needs no change. Every 0.7 command still works, and running `surrealkit sync` on an existing project after upgrading re-applies nothing and prunes nothing. This page covers the parts that do need attention, and the new features you can adopt afterwards. Upgrading from 0.7 or from any 1.0 beta carries the existing state in the database forward.
 
-Two of the changes are silent, in the sense that a project keeps running but does something different. Read [Rename the `DATABASE_*` variables](#rename-the-database-variables) and [Check whether you pass `--folder`](#check-whether-you-pass-folder) even if nothing appears broken.
+Two of the changes are silent, in the sense that a project keeps running but does something different. Read [Rename the `DATABASE_*` variables](#rename-the-database-variables) and [Check whether you pass `--folder`](#check-whether-you-pass-folder) even if nothing appears broken. If you are on a 1.0 beta, also read [Changes since 1.0.0-beta.1](#changes-since-100-beta1).
 
-## Install the beta
+## Upgrade SurrealDB first
 
-SurrealKit 1.0 is a prerelease, so it has to be requested by version:
+SurrealKit `1.0.0-rc.1` needs SurrealDB 4.0 or later. It refuses an older server on every command, and in the library's `Sync`, `Rollout`, `Rollouts` and `Seed`, because it relies on how SurrealDB 4.0 treats records that already exist and writes SurrealQL that only 4.0 reads. Keep SurrealKit `1.0.0-beta.8` until your servers run 4.0.
+
+To upgrade the database, follow [Upgrading from 3.x to 4.0](/docs/build/migrating/from-old-surrealdb-versions/3x-to-4x). SurrealKit's state in `__entity` and `__rollout` comes through unchanged, and a rollout that started on 3.x can finish on 4.0.
+
+## Install the release candidate
+
+SurrealKit 1.0 is a prerelease, so Cargo needs the version:
 
 ```bash
-cargo binstall surrealkit --version 1.0.0-beta.1
+cargo binstall surrealkit --version 1.0.0-rc.1
 ```
+
+`surreal install kit` installs the same release as the `kit` component of the SurrealDB CLI.
 
 ## Move `database/seed.surql`
 
@@ -30,6 +38,9 @@ git mv database/seed.surql database/seed/000_init.surql
 Seed tracking is keyed by file path, so the moved file counts as a new one and runs again on the next `surrealkit seed`. If the seed is not idempotent, re-key it first rather than letting it re-run:
 
 ```surql
+-- Setup
+CREATE __seed SET key = 'database/seed.surql';
+
 UPDATE __seed SET key = 'database/seed/000_init.surql'
   WHERE key = 'database/seed.surql';
 ```
@@ -96,6 +107,13 @@ exists = false
 
 `permissions_matrix` cases were reworked to handle row-level security, where a filtered result is indistinguishable from a rejected one. Create probes now recreate a record with the same fields, update probes write a marker field first, records created during the matrix are cleaned up, and a permission that skips is reported differently from one that throws. An existing matrix can report a different verdict on 1.0 as a result. Re-read any that change before adjusting them.
 
+### Other tester changes
+
+- `surrealkit test --schema-from <source>` now overrides a suite's own `schema_from`. Before, a suite that set `schema_from` ignored the flag.
+- A suite whose preparation fails (setup, sync, seed or fixtures) now has its database removed, like any other suite.
+- A TOML date or time without an offset in `signup_params` or `signin_params`, such as `dob = 1979-05-27`, stays a string.
+- A create rule whose new record a unique index refuses now fails, whatever `allow` says. Test such creates with a `sql_expect` case that sets its own unique values.
+
 ## If you use the Rust library
 
 ### `Rollout` no longer writes to disk
@@ -120,6 +138,33 @@ Rollout::new(spec, files).folder("database").start(&db).await?;
 | `rollout::run_abandon_rollout(db, id)` | `run_abandon_rollout(db, &module, id)` |
 | `SyncOpts { .. }` | Gains `module` and `allow_empty_prune` |
 
+### SurrealDB 4 in the library
+
+SurrealKit builds against the SurrealDB 4.0 SDK, so your own `surrealdb` dependency moves to 4.x with it. The `Surreal` handle you pass in and the `surrealdb_types` values that come back are the 4.0 SDK's types, so a project still on the 3.x crate does not compile until it upgrades:
+
+```toml title="Cargo.toml"
+[dependencies]
+surrealkit = "1.0.0-rc.1"
+surrealdb = "4"
+```
+
+The `kv-rocksdb` feature is gone, because SurrealDB 4.0 has no RocksDB engine; use `kv-surrealkv`. Other API changes in the 1.0 betas and the release candidate:
+
+| Before | `1.0.0-rc.1` |
+| --- | --- |
+| `typegen::run_typegen(db, folder, ns, db, opts)` | `run_typegen(db, folder, opts)`; the namespace and database come from the connection |
+| `RolloutAction` | Gains `RevertMigration` and `AwaitMigrations`, so a `match` over it needs arms for them |
+| `RolloutAction::ApplyFiles { files: Vec<String> }` | `files: Vec<FileRef>`; `FileRef::Path(String)` is the old form |
+| `EntityKind` | Gains `Type`, for SurrealDB 4.0's `DEFINE TYPE` |
+| `CatalogEntity { .. }` and `CatalogDiff { .. }` | Gain a `migration` and a `migrated` field |
+| `DbOverrides { .. }` and `DbCfg { .. }` | Gain connect and query time limit fields |
+| `tester::TestOpts { .. }` | Gains `schema_from`, `exec` and `exec_root_token`, and implements `Default` |
+| `SchemaFile.path` | Relative to the project folder (`schema/user.surql`) rather than to the working directory |
+
+`Rollouts` is new, and runs a project's rollouts in order as `rollout up` does. A frozen rollout spec runs through `Rollout::new(spec, files)` only with `.folder(..)`, which says where `rollouts/<id>/` is.
+
+If your tests run the embedded 4.0 engine under a current-thread `#[tokio::test]` runtime and overflow the stack, raise `RUST_MIN_STACK` to 8 MiB, as SurrealKit's own test configuration does.
+
 ### The library is silent by default
 
 Progress output moved to the `log` facade, so a library consumer sees nothing unless a logger is installed. Set `RUST_LOG=surrealkit=info` and initialise a logger to get the previous output back. The CLI is unaffected.
@@ -130,11 +175,61 @@ Progress output moved to the `log` facade, so a library consumer sees nothing un
 
 ```toml
 [dependencies]
-surrealkit = { version = "1.0.0-beta.1", default-features = false, features = ["kv-mem"] }
+surrealkit = { version = "1.0.0-rc.1", default-features = false, features = ["kv-mem"] }
 ```
 
 > [!WARNING]
 > The `surrealkit` binary declares `cli` as a required feature. Installing with `--no-default-features` and without `cli` builds no binary at all.
+
+## Changes since 1.0.0-beta.1 {#changes-since-100-beta1}
+
+These changes arrived in the 1.0 betas after `1.0.0-beta.1` and in the release candidate. A project upgrading straight from 0.7 gets them too.
+
+### Rollout commands work again
+
+`1.0.0-beta.1` parsed the rollout id on `rollout start`, `complete`, `rollback`, `status`, `lint` and `repair` as a database target name, so each of those commands failed with `unknown target "<rollout-id>"`. Rollout execution was unusable on `1.0.0-beta.1`, so upgrade.
+
+`--target` now selects the database for `baseline`, `start`, `complete`, `rollback`, `repair` and `up`. Before, it was accepted and ignored while the command ran against the ambient `SURREALDB_*` connection. If you passed `--target` to those commands, check which database they were really changing. Selecting more than one target is refused.
+
+### Tracked paths are relative to the project folder
+
+SurrealKit used to key tracked schema and seed files by their path relative to the working directory, so the same file had a different key in a container whose `WORKDIR` was not `/`. Keys are now relative to the project folder, such as `schema/001.surql`, and are the same in every environment.
+
+You do not need to do anything. The first `surrealkit sync` after upgrading matches your existing keys by the end of the path and rewrites them in place, and `surrealkit seed` does the same for `__seed`. Run `sync` before `seed` once on each database, from a checkout where every tracked file still exists. A rollout manifest planned before the upgrade still starts, with a warning; plan again any manifest you have not yet run. If you set your container's `WORKDIR` to `/` to work around this, you can remove that.
+
+`sync` now stops if none of the keys it tracks match a file on disk, because pruning on that would drop the live schema. Pass `--allow-empty-prune` for a deliberate rewrite in which every schema file path changed at once.
+
+### A time limit on connecting
+
+Connecting and signing in now time out after 30 seconds. Change this with `--connect-timeout-secs`, `SURREALDB_CONNECT_TIMEOUT_SECS`, or `connect_timeout_secs` on a target; `0` waits indefinitely. Rollout steps have no time limit unless you set `--query-timeout-secs`.
+
+### Rollout manifests carry their SQL
+
+`rollout plan` copies the schema files a rollout changes into `database/rollouts/<id>/`, and the rollout applies those copies. Commit the directory and ship it with the manifest. A rollout planned before `1.0.0-beta.6` still runs as before, against the schema it was planned from; to let a database catch up across it with `rollout up`, freeze it. See [Rollouts](/docs/manage/schema-migration/rollouts#freeze).
+
+### Sequences are never overwritten implicitly
+
+A plain `DEFINE SEQUENCE` is now applied as `IF NOT EXISTS`, so its counter is not reset. A changed sequence definition therefore does not reach a database where the sequence exists. See [How schema files are applied](/docs/manage/schema-migration/sync#how-schema-files-are-applied).
+
+### `-v` prints the version
+
+`-v` now prints the version, as `-V` and `--version` do. If you passed `-v` for more detailed logs, pass `--verbose`. A failure prints `error: <message>` on one line instead of `Error: <message>` and a `Caused by:` list. The exit codes are unchanged.
+
+### A rollout id has to be a plain name
+
+A manifest's `id` names its directory, which `rollout discard` deletes, so an id that contains `/` or `\`, or is `.` or `..`, is refused. Every id that `rollout plan` writes is already a plain name, so this affects only an id edited by hand.
+
+### Typegen reads the selected target
+
+`typegen` now takes its database from `--target`, the `primary` target, or the only declared target, before the ambient connection. A project with exactly one declared target therefore introspects that target. Unknown keys in `[typegen]` are an error, and the formatter runs on a temporary file beside the output. See [Type generation](/docs/manage/schema-migration/typegen).
+
+### No RocksDB engine
+
+SurrealDB 4.0 has no RocksDB engine, so the `kv-rocksdb` cargo feature is gone, and `embedded` enables `kv-surrealkv` and `kv-mem`. A build that names `kv-rocksdb` fails to resolve; use `kv-surrealkv` instead.
+
+### Fields on tables that hold records
+
+In a database that SurrealDB 4.0 created, a `SCHEMAFULL` table that holds records refuses a field change they might not fit, unless the definition has `MIGRATE EXISTING ROWS`. `REMOVE FIELD` on such a table also clears the stored values. See [Migrating existing records](/docs/manage/schema-migration/existing-records).
 
 ## If you use the Vite plugin
 

@@ -306,7 +306,7 @@ const ADVANCED = [
 		group: "Startup",
 		options: [
 			{ flag: "no-banner", label: "Hide the startup banner", bool: true },
-			{ flag: "lazy-surrealism", label: "Load Surrealism modules on first use", bool: true },
+			{ flag: "lazy-surrealism", label: "Load SurrealDB extensions on first use", bool: true },
 			{
 				flag: "planner-strategy",
 				label: "Query planner strategy",
