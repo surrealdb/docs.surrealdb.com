@@ -7,8 +7,14 @@ export async function onPageTransitionEnd() {
 
 type TrackingWindow = Window & {
     _hsq?: unknown[][];
-    twq?: (command: string, event: string) => void;
+    twq?: (command: string, id: string) => void;
 };
+
+// The X pixel's ID, as `analytics.js` configures it.
+const X_PIXEL_ID = "oexls";
+
+// The path last reported, which starts as the page the visit landed on.
+let lastPath = typeof window === "undefined" ? "" : window.location.pathname;
 
 /**
  * Tell the tracking vendors about a client-side navigation.
@@ -28,12 +34,7 @@ type TrackingWindow = Window & {
  * trigger, so a `page_view` sent from here would count each one twice.
  * LinkedIn's Insight Tag has no page-view call: `lintrk("track")` records a
  * conversion.
- *
- * This mirrors `+onPageTransitionEnd.ts` in www.surrealdb.com, which does the
- * same for the rest of the site.
  */
-let lastPath = typeof window === "undefined" ? "" : window.location.pathname;
-
 function reportPageView() {
     const w = window as TrackingWindow;
 
@@ -46,6 +47,8 @@ function reportPageView() {
         w._hsq.push(["trackPageView"]);
     }
 
-    // The same event `analytics.js` sends to X on the first page load.
-    w.twq?.("event", "PageView");
+    // `config` sends the pixel's page-visit beacon for the current URL. The
+    // second argument of `twq("event", …)` is an event ID such as
+    // `tw-oexls-…`, so it cannot record a page view.
+    w.twq?.("config", X_PIXEL_ID);
 }
