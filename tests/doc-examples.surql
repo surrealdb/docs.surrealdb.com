@@ -1110,7 +1110,7 @@ CREATE document:2 SET embedding = [0.3, 0.1, 0.2];
 REBUILD INDEX idx_embedding ON document;
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/comparing-floats-with-decimals-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:197
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:207
 /**
 [env]
 clean = true
@@ -1122,7 +1122,7 @@ value = "[false, true, true]"
 [0.1f = 0.1dec, 0.5f = 0.5dec, 1f = 1dec];
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/integer-sums-and-means-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:229
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:239
 /**
 [env]
 clean = true
@@ -1134,7 +1134,7 @@ value = "149.5"
 math::mean([299, -4611686018427387904, 299, 4611686018427387904]);
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/parameters-that-surrealdb-binds-itself-are-protected-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:283
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:293
 /**
 [env]
 clean = true
@@ -1146,7 +1146,7 @@ error = true
 FOR $item IN [1, 2] { LET $parent = $item; };
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/array-ranges-past-the-end-of-an-array-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:307
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:317
 /**
 [env]
 clean = true
@@ -1158,7 +1158,7 @@ value = "[1, 2]"
 [1, 2][0..10];
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/jaccard-and-pearson-ranking-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:374
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:384
 /**
 [env]
 clean = true
@@ -1170,7 +1170,7 @@ value = "0.3333333333333333f"
 vector::similarity::jaccard([1, 1, 0, 0], [1, 0, 1, 0]);
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/paths-over-sets-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:396
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:406
 /**
 [env]
 clean = true
@@ -1188,7 +1188,7 @@ CREATE t:1 SET s = <set>[1, 2, 3];
 SELECT VALUE s.* FROM t;
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/a-record-id-on-an-undefined-table-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:412
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:422
 /**
 [env]
 clean = true
@@ -1200,7 +1200,7 @@ error = true
 SELECT * FROM [missing:1];
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/return-inside-the-value-of-a-let-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:456
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:466
 /**
 [env]
 clean = true
@@ -1215,7 +1215,7 @@ LET $x = { IF true { RETURN 1 }; 2 };
 RETURN $x;
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/nested-aggregates-in-group-by-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:529
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:539
 /**
 [env]
 clean = true
@@ -28953,7 +28953,7 @@ clean = true
 value = "{1, 4}"
 
 [[test.results]]
-value = "{1}"
+value = "{1,}"
 */
 
 {1, 2, 3, 4}.remove([2, 3]);
@@ -53031,14 +53031,22 @@ CREATE user:1 SET email = 'test@surrealdb.com';
 clean = true
 
 [[test.results]]
-value = "Database index `userEmailIndex` already contains 'test@surrealdb.com',\nwith record `user:1`"
+error = false
+[[test.results]]
+error = false
+[[test.results]]
+error = true
 */
+
+-- Setup from the examples above
+DEFINE INDEX userEmailIndex ON TABLE user FIELDS email UNIQUE;
+CREATE user:1 SET email = 'test@surrealdb.com';
 
 -- Create another user record and set the same email ID.
 CREATE user:2 SET email = 'test@surrealdb.com';
 
 -- ===== test reference/query-language/statements/define/indexes/unique-index-6.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:282
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:285
 /**
 [env]
 clean = true
@@ -53053,7 +53061,7 @@ DELETE user:1;
 CREATE user:2 SET email = 'test@surrealdb.com'
 
 -- ===== test reference/query-language/statements/define/indexes/unique-index-7.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:297
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:300
 /**
 [env]
 clean = true
@@ -53085,7 +53093,7 @@ CREATE user:4 SET email = NULL;
 SELECT count() FROM user GROUP ALL;
 
 -- ===== test reference/query-language/statements/define/indexes/treating-null-as-a-value-with-nulls-not-distinct-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:319
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:322
 /**
 [env]
 clean = true
@@ -53110,7 +53118,7 @@ CREATE solo:3;
 CREATE solo:4 SET v = NULL;
 
 -- ===== test reference/query-language/statements/define/indexes/conditional-uniqueness-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:338
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:341
 /**
 [env]
 clean = true
@@ -53144,7 +53152,7 @@ CREATE plan SET email = 'ana@example.com', active = true;
 CREATE plan SET email = 'ana@example.com', active = true;
 
 -- ===== test reference/query-language/statements/define/indexes/conditional-uniqueness-2.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:358
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:361
 /**
 [env]
 clean = true
@@ -53163,7 +53171,7 @@ CREATE post:1 SET tags = ['a', 'b'];
 CREATE post:2 SET tags = ['b', 'c'];
 
 -- ===== test reference/query-language/statements/define/indexes/conditional-uniqueness-3.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:373
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:376
 /**
 [env]
 clean = true
@@ -53185,7 +53193,7 @@ CREATE post:2 SET tags = ['b', 'c'];
 CREATE post:3 SET tags = ['a', 'b'];
 
 -- ===== test reference/query-language/statements/define/indexes/conditional-uniqueness-4.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:387
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:390
 /**
 [env]
 clean = true
@@ -53200,7 +53208,7 @@ DEFINE FIELD tag_key ON post VALUE <string> tags.sort();
 DEFINE INDEX unique_tags ON post FIELDS tag_key UNIQUE;
 
 -- ===== test reference/query-language/statements/define/indexes/conditional-uniqueness-5.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:394
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:397
 /**
 [env]
 clean = true
@@ -53219,7 +53227,7 @@ CREATE user:1 SET name = 'Bob';
 CREATE user:2 SET name = 'bOB';
 
 -- ===== test reference/query-language/statements/define/indexes/conditional-uniqueness-6.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:407
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:410
 /**
 [env]
 clean = true
@@ -53234,7 +53242,7 @@ DEFINE FIELD name_key ON user VALUE name.lowercase();
 DEFINE INDEX unique_name ON user FIELDS name_key UNIQUE;
 
 -- ===== test reference/query-language/statements/define/indexes/composite-index-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:416
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:419
 /**
 [env]
 clean = true
@@ -53249,7 +53257,7 @@ value = "NONE"
 DEFINE INDEX test ON user FIELDS account, email UNIQUE;
 
 -- ===== test reference/query-language/statements/define/indexes/composite-index-2.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:430
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:433
 /**
 [env]
 clean = true
@@ -53274,7 +53282,7 @@ CREATE t:3 SET i = 1, j = 'a';
 CREATE t:4 SET i = 1, j = 'a';
 
 -- ===== test reference/query-language/statements/define/indexes/composite-index-3.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:447
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:450
 /**
 [env]
 clean = true
@@ -53293,7 +53301,7 @@ CREATE post:1 SET tags = ['a', 'b'], authors = ['x', 'y'];
 CREATE post:2 SET tags = ['a'], authors = ['y'];
 
 -- ===== test reference/query-language/statements/define/indexes/array-element-composite-indexes-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:469
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:472
 /**
 [env]
 clean = true
@@ -53313,7 +53321,7 @@ ORDER BY age DESC
 LIMIT 10;
 
 -- ===== test reference/query-language/statements/define/indexes/array-element-composite-indexes-2.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:496
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:499
 /**
 [env]
 clean = true
@@ -53325,7 +53333,7 @@ error = false
 [[test.results]]
 error = false
 [[test.results]]
-value = "SelectProject [ctx: Db] [projections: id]\n    IndexScan [ctx: Db] [table: product, index: tags_sizes, access: ['wool', 'M'], direction: Forward]"
+value = "\"SelectProject [ctx: Db] [projections: id]\n    IndexScan [ctx: Db] [table: product, index: tags_sizes, access: ['wool', 'M'], direction: Forward]\n\""
 */
 
 DEFINE INDEX tags_sizes ON product FIELDS tags.*, sizes.*;
@@ -53336,7 +53344,7 @@ EXPLAIN SELECT id FROM product
 	WHERE tags.* CONTAINS "wool" AND sizes.* CONTAINS "M";
 
 -- ===== test reference/query-language/statements/define/indexes/full-table-counts-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:527
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:531
 /**
 [env]
 clean = true
@@ -53369,7 +53377,7 @@ SELECT count() FROM reading GROUP ALL;
 SELECT count() FROM indexed_reading GROUP ALL;
 
 -- ===== test reference/query-language/statements/define/indexes/filtered-counts-count-where-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:548
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:552
 /**
 [env]
 clean = true
@@ -53402,7 +53410,7 @@ SELECT count() FROM item WHERE status = "active" GROUP ALL;
 EXPLAIN ANALYZE SELECT count() FROM item WHERE status = "active" GROUP ALL;
 
 -- ===== test reference/query-language/statements/define/indexes/storage-footprint-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:607
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:611
 /**
 [env]
 clean = true
@@ -53420,7 +53428,7 @@ SELECT count() FROM item WITH NOINDEX WHERE status = "active" GROUP ALL;
 SELECT count() FROM item WHERE status = "active" GROUP ALL;
 
 -- ===== test reference/query-language/statements/define/indexes/multiple-conditions-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:619
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:623
 /**
 [env]
 clean = true
@@ -53440,7 +53448,7 @@ SELECT count() FROM person
     GROUP ALL;
 
 -- ===== test reference/query-language/statements/define/indexes/other-count-syntax-notes-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:637
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:641
 /**
 [env]
 clean = true
@@ -53461,7 +53469,7 @@ DEFINE INDEX active_users ON users COUNT WHERE status = "active" CONCURRENTLY;
 DEFINE INDEX idx2 ON person FIELD name;
 
 -- ===== test reference/query-language/statements/define/indexes/full-text-search-fulltext-index-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:666
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:670
 /**
 [env]
 clean = true
@@ -53482,7 +53490,7 @@ DEFINE INDEX userNameIndex ON TABLE user FIELDS name
 	FULLTEXT ANALYZER example_ascii BM25 HIGHLIGHTS;
 
 -- ===== test reference/query-language/statements/define/indexes/a-field-that-is-unique-and-searchable-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:694
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:698
 /**
 [env]
 clean = true
@@ -53507,7 +53515,7 @@ CREATE book:1 SET title = 'The Grey Book';
 SELECT id FROM book WHERE title @@ 'grey';
 
 -- ===== test reference/query-language/statements/define/indexes/a-field-that-is-unique-and-searchable-2.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:711
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:715
 /**
 [env]
 clean = true
@@ -53519,7 +53527,7 @@ parsing-error = true
 DEFINE INDEX title ON book FIELDS title UNIQUE FULLTEXT ANALYZER simple;
 
 -- ===== test reference/query-language/statements/define/indexes/a-field-that-is-unique-and-searchable-3.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:729
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:733
 /**
 [env]
 clean = true
@@ -53550,7 +53558,7 @@ CREATE user:1 SET nickname = 'Zoë';
 CREATE user:2 SET nickname = 'ZOE';
 
 -- ===== test reference/query-language/statements/define/indexes/a-field-that-is-unique-and-searchable-4.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:746
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:750
 /**
 [env]
 clean = true
@@ -53562,7 +53570,7 @@ value = "{\n\tattributes: {\n\t\tprojections: 'id'\n\t},\n\tchildren: [\n\t\t{\n
 SELECT id FROM user WHERE nickname_key = 'zoe' EXPLAIN;
 
 -- ===== test reference/query-language/statements/define/indexes/spatial-index-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:795
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:799
 /**
 [env]
 clean = true
@@ -53600,20 +53608,44 @@ SELECT VALUE name FROM city
 	ORDER BY name;
 
 -- ===== test reference/query-language/statements/define/indexes/spatial-index-2.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:821
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:825
 /**
 [env]
 clean = true
 
 [[test.results]]
-value = "ProjectValue [ctx: Db] [expr: name]\n    UnionIndexScan [ctx: Db] [table: city, branches: 5, decode: [name]]\n        IndexScan [ctx: Db] [table: city, index: city_location, access: >=1655143231802834952 <=1655283969291190264, point_filter: geo::distance(location, (-0.1276, 51.5072)) < 400000, direction: Forward]\n        IndexScan [ctx: Db] [table: city, index: city_location, access: >=1655635813012078600 <=1655706181756256248, point_filter: geo::distance(location, (-0.1276, 51.5072)) < 400000, direction: Forward]\n        IndexScan [ctx: Db] [table: city, index: city_location, access: >=1655776550500433928 <=1656481337453838328, point_filter: geo::distance(location, (-0.1276, 51.5072)) < 400000, direction: Forward]\n        IndexScan [ctx: Db] [table: city, index: city_location, access: >=1802284275878330376 <=1803128700808462328, point_filter: geo::distance(location, (-0.1276, 51.5072)) < 400000, direction: Forward]\n        IndexScan [ctx: Db] [table: city, index: city_location, access: >=1803410175785173000 <=1803691650761883640, point_filter: geo::distance(location, (-0.1276, 51.5072)) < 400000, direction: Forward]"
+error = false
+[[test.results]]
+error = false
+[[test.results]]
+error = false
+[[test.results]]
+error = false
+[[test.results]]
+error = false
+[[test.results]]
+value = "'ProjectValue [ctx: Db] [expr: name]\n    UnionIndexScan [ctx: Db] [table: city, branches: 5, decode: [name]]\n        IndexScan [ctx: Db] [table: city, index: city_location, access: >=1655143231802834952 <=1655283969291190264, point_filter: geo::distance(location, (-0.1276, 51.5072)) < 400000, direction: Forward]\n        IndexScan [ctx: Db] [table: city, index: city_location, access: >=1655635813012078600 <=1655706181756256248, point_filter: geo::distance(location, (-0.1276, 51.5072)) < 400000, direction: Forward]\n        IndexScan [ctx: Db] [table: city, index: city_location, access: >=1655776550500433928 <=1656481337453838328, point_filter: geo::distance(location, (-0.1276, 51.5072)) < 400000, direction: Forward]\n        IndexScan [ctx: Db] [table: city, index: city_location, access: >=1802284275878330376 <=1803128700808462328, point_filter: geo::distance(location, (-0.1276, 51.5072)) < 400000, direction: Forward]\n        IndexScan [ctx: Db] [table: city, index: city_location, access: >=1803410175785173000 <=1803691650761883640, point_filter: geo::distance(location, (-0.1276, 51.5072)) < 400000, direction: Forward]\n'"
 */
+
+-- Setup from the example above
+DEFINE TABLE city SCHEMAFULL;
+DEFINE FIELD name ON city TYPE string;
+DEFINE FIELD location ON city TYPE geometry<point>;
+DEFINE INDEX city_location ON city FIELDS location SPATIAL;
+INSERT INTO city [
+	{ id: city:london, name: 'London', location: (-0.1276, 51.5072) },
+	{ id: city:paris, name: 'Paris', location: (2.3522, 48.8566) },
+	{ id: city:brussels, name: 'Brussels', location: (4.3517, 50.8503) },
+	{ id: city:amsterdam, name: 'Amsterdam', location: (4.9041, 52.3676) },
+	{ id: city:berlin, name: 'Berlin', location: (13.4050, 52.5200) },
+	{ id: city:tokyo, name: 'Tokyo', location: (139.6917, 35.6895) }
+] RETURN NONE;
 
 EXPLAIN SELECT VALUE name FROM city
 	WHERE geo::distance(location, (-0.1276, 51.5072)) < 400000;
 
 -- ===== test reference/query-language/statements/define/indexes/spatial-index-3.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:842
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:861
 /**
 [env]
 clean = true
@@ -53627,7 +53659,7 @@ SELECT VALUE name FROM city
 	ORDER BY name;
 
 -- ===== test reference/query-language/statements/define/indexes/fields-before-the-geometry-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:861
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:880
 /**
 [env]
 clean = true
@@ -53664,7 +53696,7 @@ SELECT VALUE id FROM vehicle
 	ORDER BY id;
 
 -- ===== test reference/query-language/statements/define/indexes/arrays-and-sets-of-geometries-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:888
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:907
 /**
 [env]
 clean = true
@@ -53694,7 +53726,7 @@ SELECT VALUE id FROM route
 	WHERE stops ANYINSIDE { type: 'Polygon', coordinates: [[[-1, 51], [1, 51], [1, 52], [-1, 52], [-1, 51]]] };
 
 -- ===== test reference/query-language/statements/define/indexes/vector-search-inside-an-area-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:908
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:927
 /**
 [env]
 clean = true
@@ -53734,7 +53766,7 @@ SELECT id, vector::distance::knn() AS distance FROM place
 	ORDER BY distance;
 
 -- ===== test reference/query-language/statements/define/indexes/types-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:976
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:995
 /**
 [env]
 clean = true
@@ -53747,7 +53779,7 @@ DEFINE INDEX idx_hnsw_embedding
   ON Document FIELDS items.embedding HNSW DIMENSION 4 TYPE I64;
 
 -- ===== test reference/query-language/statements/define/indexes/syntax-and-defaults-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:1033
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:1052
 /**
 [env]
 clean = true
@@ -53762,7 +53794,7 @@ DEFINE INDEX diskann_pts
 -- DEFINE INDEX diskann_pts ON pts FIELDS point DISKANN DIMENSION 4 DIST EUCLIDEAN TYPE F32 DEGREE 64 L_BUILD 100 ALPHA 1.2;
 
 -- ===== test reference/query-language/statements/define/indexes/verifying-index-use-in-queries-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:1086
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:1105
 /**
 [env]
 clean = true
@@ -53781,7 +53813,7 @@ CREATE user:test SET email = 'test@surrealdb.com';
 SELECT * FROM user WHERE email = 'test@surrealdb.com' EXPLAIN FULL;
 
 -- ===== test reference/query-language/statements/define/indexes/using-the-anyall-operators-for-string-indexes-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:1136
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:1155
 /**
 [env]
 clean = true
@@ -53818,7 +53850,7 @@ EXPLAIN SELECT * FROM account WHERE name CONTAINSANY ["Billy McConnell"];
 //- "SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: account, direction: Forward, predicate: name CONTAINSANY ['Billy McConnell'], pre_decode_filter: yes]\n"
 
 -- ===== test reference/query-language/statements/define/indexes/rebuilding-indexes-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:1179
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:1198
 /**
 [env]
 clean = true
@@ -53832,7 +53864,7 @@ error = "The index 'userEmailIndex' does not exist"
 REBUILD INDEX userEmailIndex ON user;
 
 -- ===== test reference/query-language/statements/define/indexes/using-if-not-exists-clause-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:1196
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:1215
 /**
 [env]
 clean = true
@@ -53847,7 +53879,7 @@ value = "NONE"
 DEFINE INDEX IF NOT EXISTS example ON example FIELDS example;
 
 -- ===== test reference/query-language/statements/define/indexes/using-overwrite-clause-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:1218
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:1237
 /**
 [env]
 clean = true
@@ -53862,7 +53894,7 @@ value = "NONE"
 DEFINE INDEX OVERWRITE example ON example FIELDS example;
 
 -- ===== test reference/query-language/statements/define/indexes/using-concurrently-clause-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:1233
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:1252
 /**
 [env]
 clean = true
@@ -53881,7 +53913,7 @@ INFO FOR INDEX test ON user;
 INFO FOR INDEX test ON user;
 
 -- ===== test reference/query-language/statements/define/indexes/using-concurrently-clause-2.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:1242
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:1261
 /**
 [env]
 clean = true
@@ -53894,7 +53926,7 @@ error = false
 INFO FOR INDEX test ON user;
 
 -- ===== test reference/query-language/statements/define/indexes/using-concurrently-clause-3.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:1275
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:1294
 /**
 [env]
 clean = true
@@ -53912,7 +53944,7 @@ error = false
 }
 
 -- ===== test reference/query-language/statements/define/indexes/using-concurrently-clause-4.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:1287
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:1306
 /**
 [env]
 clean = true
@@ -53937,7 +53969,7 @@ SLEEP 500ms;
 CREATE t:3 SET a = 2;
 
 -- ===== test reference/query-language/statements/define/indexes/defining-an-index-inside-a-transaction-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:1308
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:1327
 /**
 [env]
 clean = true
@@ -53962,7 +53994,7 @@ UPDATE product:1 SET sku = 'A-2';
 COMMIT;
 
 -- ===== test reference/query-language/statements/define/indexes/defining-an-index-inside-a-transaction-2.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:1325
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:1344
 /**
 [env]
 clean = true
@@ -53983,7 +54015,7 @@ DEFINE INDEX email ON user FIELDS email UNIQUE;
 COMMIT;
 
 -- ===== test reference/query-language/statements/define/indexes/the-defer-clause-1.surql
--- source: src/content/reference/query-language/statements/define/indexes.mdx:1353
+-- source: src/content/reference/query-language/statements/define/indexes.mdx:1372
 /**
 [env]
 clean = true
