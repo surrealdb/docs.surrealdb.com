@@ -18,6 +18,8 @@ bun run generate:doc-tests # write every SurrealQL example to tests/doc-examples
 
 Always run `bun run qa` then `bun run qc` before finishing any task. When the task changed anything under `src/content`, also run `bun run diagrams:check`, and deal with every figure it lists as described under [Keeping figures accurate](#keeping-figures-accurate), and run `bun run check:links`, which CI also runs. It fails on a link to a page that does not exist and on an anchor that names no heading on its page, so a renamed heading needs every link to it updated. Then run `bun run generate:doc-tests` and commit `tests/doc-examples.surql` with the change: CI regenerates it and fails when the committed copy differs. See [Tested examples](#tested-examples).
 
+The [README](README.md) lists every `bun run` command, what CI runs, and what makes each job fail. A change that adds, removes or renames a script in `package.json`, changes a CI workflow, or changes a step a contributor follows also updates the README, in the same change.
+
 ## References
 
 - [Mantine](https://mantine.dev/llms.txt): UI
