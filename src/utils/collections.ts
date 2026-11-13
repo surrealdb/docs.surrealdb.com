@@ -1,5 +1,6 @@
 import type { CollectionMap } from "vike-content-collection";
 import { getCollection, getCollectionEntry } from "vike-content-collection";
+import labs from "~/data/labs.json";
 import labsBlog from "~/data/labs-blog.json";
 import type { SdkVersionMap } from "~/lib/versions";
 import { LLMS_TXT_URL } from "./agent-markdown";
@@ -166,16 +167,14 @@ export function withIndexPointer(markdown: string): string {
 }
 
 /**
- * Every Labs item, newest first: the `labs-items` collection plus the blog
- * posts in `src/data/labs-blog.json` (written by `bun run generate:labs-blog`).
+ * Every Labs item, newest first: the awesome-surreal entries in
+ * `src/data/labs.json` (written by `bun run generate:labs`) plus the blog posts
+ * in `src/data/labs-blog.json` (written by `bun run generate:labs-blog`).
  */
-export function getLabItems(): (LabSchema & { slug: string })[] {
-    const entries = getCollection("labs-items").map((entry) => ({
-        slug: entry.slug,
-        ...entry.metadata,
-    }));
+type LabItem = LabSchema & { slug: string };
 
-    return [...entries, ...(labsBlog as (LabSchema & { slug: string })[])].sort(
+export function getLabItems(): LabItem[] {
+    return [...(labs as LabItem[]), ...(labsBlog as LabItem[])].sort(
         (a, b) => b.date.localeCompare(a.date) || a.title.localeCompare(b.title),
     );
 }
