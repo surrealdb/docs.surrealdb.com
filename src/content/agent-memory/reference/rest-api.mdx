@@ -30,7 +30,7 @@ Optional **delegated identity** on a single request (depth 1, intersected with t
 X-Spectron-On-Behalf-Of: <principal-id>
 ```
 
-Use this when an agent acts for another principal - for example a supervisor tool calling on behalf of a user. The effective authority is always the **intersection** of the caller’s key, the caller’s grants, and the target’s grants; delegation cannot widen access.
+Use this when an agent acts for another principal - for example a supervisor tool calling on behalf of a user. The effective authority is always the **intersection** of the caller’s key, the caller’s grants, and the target’s grants; delegation cannot widen access. The target principal must allow delegation, which is off until its `delegation_allowed` flag is set; otherwise the request returns `403`, and an unknown target returns `404`. The header works the same way on `/mcp` and on document uploads. Sending it more than once, or with a value that is not plain printable ASCII, returns `400`.
 
 The same `Idempotency-Key` (scoped to context + principal) within 24 hours returns the stored response. A different body with the same key, or a duplicate request while the first is still in flight, returns `409 Conflict`. Failed writes release the reservation so a retry can re-run.
 
@@ -345,6 +345,7 @@ POST /api/v1/{context_id}/lifecycle/expire
 POST /api/v1/{context_id}/lifecycle/decay
 POST /api/v1/{context_id}/elaborate
 POST /api/v1/{context_id}/consolidate
+POST /api/v1/{context_id}/derived/retire
 POST /api/v1/{context_id}/fsck
 ```
 
@@ -352,7 +353,9 @@ POST /api/v1/{context_id}/fsck
 
 **`POST /consolidate`** is **caller-scoped** when invoked on the data plane: facts are pooled only from the caller's **`memory:read`** region, and persistence requires **`memory:write`** over each scope group. A readable-but-not-writable group returns a **dry-run preview** in the response but is not committed. The background scheduler pass is unchanged and pools every scope. An empty read region denies all pooling (fail-closed).
 
-**`POST /forget`** accepts a natural-language **`query`**, optional **`purge: true`** for permanent erasure, and optional **`dryRun: true`** to return a match count without expiring anything (see [Forgetting memories](/docs/agent-memory/operations/forget)).
+**`POST /forget`** accepts a natural-language **`query`**, optional **`purge: true`** for permanent erasure, and optional **`dryRun: true`** to return a match count without expiring anything (see [Forgetting memories](/docs/agent-memory/operations/forget)). Forgetting also retires, or with `purge` deletes, the gists, rollups, elaborated relations and consolidated facts built from what it removes.
+
+**`POST /derived/retire`** takes `{"stages": [...]}`, naming any of `gist`, `rollup`, `elaboration` and `consolidation`, and retires every current row those stages produced. It needs `grant:manage` over the whole Context. See [Retire what a stage produced](/docs/agent-memory/operations/forget#retire-what-a-stage-produced).
 
 `consolidate` responses reference per-record **`DecisionKind`** values: `create`, `update`, or `supersede`.
 
@@ -472,6 +475,21 @@ See [Key policy](/docs/agent-memory/reference/configuration#key-policy).
 
 ---
 
+## Ingest judge review
+
+```http
+GET  /api/v1/{context_id}/judgements
+GET  /api/v1/{context_id}/judgements/{judgement_id}
+POST /api/v1/{context_id}/judgements/{judgement_id}/override
+POST /api/v1/{context_id}/judgements/{judgement_id}/approve
+POST /api/v1/{context_id}/judgements/{judgement_id}/reject
+POST /api/v1/{context_id}/judgements/dry-run
+```
+
+The review log of the [ingest judge](/docs/agent-memory/operations/ingest-judge). `GET /judgements` filters on `verdict` (`pass`, `warn` or `fail`), `stage` (`input` or `row`) and `held=true`, and pages with `limit` and `cursor`, newest first. `override` records a reviewer's verdict and, with `"replay": true`, ingests a kept request. `approve` and `reject` decide content held for approval. `dry-run` judges recorded entries under a candidate addendum without storing anything. Every route needs `grant:manage` over the whole Context.
+
+---
+
 ## Scopes and principals
 
 ```http
@@ -488,7 +506,7 @@ DELETE /api/v1/{context_id}/principals/{principal_id}/grants
 GET    /api/v1/{context_id}/principals/{principal_id}/effective
 ```
 
-`DELETE /scopes` tombstones a scope node (a soft delete). The root scope `/` is reserved and cannot be tombstoned. The principal routes require `grant:manage`: `POST .../grants` grants a scope pattern to a principal for the given verbs, and `DELETE .../grants` revokes it. Principals are created in SurrealDB Studio or through the SurrealDB Cloud API, not here.
+`DELETE /scopes` tombstones a scope node (a soft delete). The root scope `/` is reserved and cannot be tombstoned. The principal routes require `grant:manage`: `POST .../grants` grants a scope pattern to a principal for the given verbs, and `DELETE .../grants` revokes it. Principals are created in SurrealDB Studio or through the SurrealDB Cloud API, not here, and that is also where a principal's `delegation_allowed` flag is set.
 
 See [Permissions and delegation](/docs/agent-memory/mental-model/contexts-and-scope#permissions-and-delegation).
 
