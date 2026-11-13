@@ -1,0 +1,216 @@
+---
+position: 2
+title: Agent Filesystem architecture
+description: "The file table, the SurrealQL schema, the clients, the tool surfaces and where each part runs."
+---
+
+# Agent Filesystem architecture
+
+Agent Filesystem has three layers. A SurrealQL schema stores files in a table and applies the rules that the database can apply. Client libraries call that schema. Tool surfaces let an agent or a person use a client. This page describes each layer, follows a write and a search through them, and shows where each part runs and which part checks permissions.
+
+> [!NOTE]
+> This page describes version 0.2.0 of the `surrealfs` package, built from the `next` branch of the SurrealFS repository. The figures for tables, functions and tools are those of that build, and a build from the repository's default branch can have fewer tools.
+
+## Overview
+
+The diagram lists each client with the surfaces built on it. Clients send SurrealQL to the same SurrealDB server, normally over a WebSocket connection. The gateway connects over HTTP, and `surrealfs-rs` does the same when its URL starts with `http://` or `https://`. A client in remote mode sends its SurrealQL to the gateway at `/api/rpc` instead, and the gateway forwards it to the server. `surrealfs-rs` uses remote mode when `SURREALFS_SERVER_URL` is set, and the Python and TypeScript libraries offer it through `from_server` and `connectServer`, as [Remote clients and the gateway](/docs/agent-filesystem/interfaces/remote-clients) describes. The Python library and the Rust tool apply the same schema file, `surrealfs/schema/file.surql`, and the TypeScript SDK embeds an older copy of it.
+
+```text
+Python surrealfs
+├─ tool registry (31 tools)
+│  ├─ MCP server
+│  │  └─ Claude plugin
+│  ├─ pydantic-ai toolset
+│  ├─ JSON tool definitions
+│  └─ Hermes plugin
+└─ surrealfs command
+
+Rust crates
+├─ surrealfs-rs command
+├─ gateway (surrealfs-server)
+│  └─ web page (file browser)
+└─ WebDAV and S3 servers
+
+TypeScript SDK
+└─ @surrealdb/fs
+
+        │  SurrealQL, normally over WebSocket
+        ▼
+┌───────────────────────────────────┐
+│ SurrealDB 3.x server              │
+│  file and related tables          │
+│  fn::sfs_* functions, events,     │
+│  indexes, optional access methods │
+└───────────────────────────────────┘
+```
+
+The Python library is the reference implementation. The Rust command-line tool and the TypeScript SDK implement different parts of its capabilities, and the Rust tool adds some of its own, as the [comparison below](#what-each-implementation-covers) shows.
+
+## Where each part runs
+
+| Part | What it does | Where it runs |
+| --- | --- | --- |
+| SurrealDB server | Stores the data and runs the schema: tables, functions, events and indexes. | Wherever the SurrealDB 3.x server runs. Clients connect to it over WebSocket. |
+| Python library | The `SurrealFs` class: file operations, permission checks, search, history, links, leases, workspaces and live changes. | In the process that imports it. The library wraps a connection that you create. |
+| Tool registry | 31 tool definitions with their descriptions, generated into four surfaces: the MCP server, the pydantic-ai toolset, raw JSON tool definitions and the Hermes plugin. | In the same process as the Python library. |
+| MCP server | Serves the 31 tools and a `surrealfs://{path}` resource template over MCP. It adds the tool `brain_recall` as a 32nd when `AGENT_MEMORY_CONTEXT_ID` and `AGENT_MEMORY_API_KEY` are set. | As a subprocess of the MCP client, over stdio. It opens its own connection to SurrealDB and acts as one user. |
+| Claude plugin | Packages the MCP server with two skills. | The Claude client starts the MCP server through `uvx`, which builds the package from the repository's default branch, and that branch can have fewer tools than the `next` branch described here, unless `SURREALFS_SOURCE` names another source. The plugin manifests pass `claude plugin validate`, and the behaviour of the plugin inside a Claude client is not confirmed. |
+| Gateway | One HTTP server for a REST API, a SurrealQL endpoint, an MCP endpoint, WebDAV, S3, an assistant endpoint and the web page. After a write through it, the gateway analyses the file and requests an embedding when `OPENAI_API_KEY` is set. | As a local process, `surrealfs-server` or `surrealfs-rs serve gateway`. It holds the SurrealDB credentials, acts as `root` unless a request names a user, and has no login unless `SURREALFS_SERVER_TOKEN` is set. See [Gateway server](/docs/agent-filesystem/interfaces/gateway-server). |
+| File browser | A web page for browsing and editing the tree. | Served by the gateway from the files that `bun run build` writes to `surrealfs/browser/static`, which a git install does not include. The page has no login and cannot use the gateway's server token. See [File browser](/docs/agent-filesystem/interfaces/file-browser). |
+| Rust command-line tool | The `surrealfs-rs` binary, with commands for files, history, leases, workspaces, groups and backups. | As a local process. It does not apply the schema, and fails with `Function 'fn::sfs_ls' not found` until you run `surrealfs-rs init`. |
+| WebDAV and S3 servers | `surrealfs-rs serve webdav` and `surrealfs-rs serve s3` expose the tree to WebDAV and S3 clients. | As a local process, for trusted local use. The S3 server accepts only unsigned requests and supports basic bucket and object operations, so SDKs and tools that sign their requests fail. See [WebDAV and S3 servers](/docs/agent-filesystem/interfaces/network-servers). |
+| TypeScript SDK | The `@surrealdb/fs` package. | In the process that imports it. It takes a connection that you open, it is not published to npm, and several of its methods fail against the current schema. |
+| Agent Memory integration | Uploads files to a Context and recalls from it. | Inside the MCP server, which calls the Agent Memory service over HTTPS. See [Agent Filesystem and Agent Memory](/docs/agent-filesystem/welcome/agent-filesystem-and-agent-memory). |
+
+The `surrealfs` package is not published on PyPI either, so every client is installed from the repository. The pydantic-ai toolset, the Hermes plugin and the Agent Memory integration are not confirmed against their host or service, and [Limits and caveats](/docs/agent-filesystem/operations/limits-and-caveats) lists the status of each part.
+
+The clients store no file data of their own, and everything is in the database. The MCP server also reads an optional configuration file.
+
+### Applying the schema
+
+The Python library applies the schema when you call `apply_schema(db)`, and applying the same release again keeps the data. The MCP server and the `surrealfs` command apply it when they connect with a system credential, which is a SurrealDB root, namespace or database user. The gateway `surrealfs-server` applies it at every start, and `surrealfs-rs init` applies it when you run the command. Under record access, where each agent signs in as a SurrealDB record user with its own permissions, the `surrealfs` command skips this step, and the attempt of the MCP server fails because a record user may not define tables, so the server prints `could not apply the schema` and continues.
+
+The schema defines tables, fields, functions, events and access methods with `OVERWRITE`, so applying it from another release replaces their definitions, and an access method of the same name that the database already holds is replaced as well. The analysers and eight of the indexes use `IF NOT EXISTS` and keep their earlier definitions. The TypeScript SDK's `applySchema` function applies its older copy, which replaces eleven functions of a current database, among them the permission predicates and `fn::sfs_read`, with older versions. When a database is shared with other clients, apply the schema with the Python package or with `surrealfs-rs init` and not with the TypeScript SDK.
+
+## One table
+
+A file or a folder is one record in the `file` table. The table is `SCHEMAFULL`, and these are its main fields:
+
+| Field | Meaning |
+| --- | --- |
+| `filename` | One path segment. |
+| `parent` | A record link to the containing folder. It is `NONE` for an entry at the top level. |
+| `parent_key` | A stored copy of `parent`, with the string `root` in place of `NONE`. The unique index uses it. |
+| `path` | Computed from the chain of parents. It is never stored. |
+| `gate` | Computed. It collapses the permissions of all the folders above the file into one value. |
+| `is_folder` | Computed. It is true when the record holds no text, no bytes and no symlink target. An empty file keeps an empty string as its content, so it is not a folder. |
+| `content`, `file`, `content_type` | The text of a text file, the bytes of a binary file, and the media type. Folders use `inode/directory`. |
+| `owner`, `mode` | The owning user and the Unix-style mode bits. |
+| `generation` | An integer that starts at 1. Under a system credential it rises when the content hash changes, and under record access it stays at 1. |
+| `hash` | The MD5 hash of the text, or the MD5 hash of the unpadded Base64 text of the bytes for a binary file, so it does not equal the `md5sum` of a binary file. An event writes it. |
+| `meta` | The frontmatter of a Markdown file, parsed into an object by the Python library. |
+| `embedding` | A vector of 1,536 dimensions for semantic search, written by `reindex_embeddings`. |
+
+The remaining fields, such as `crdt`, `created_at` and `updated_at`, are described in [Data model](/docs/agent-filesystem/concepts/data-model).
+
+Because `path` is computed, a rename is one update of `filename`, and every descendant's path follows. The query below renames the `/projects/atlas` folder that the [first example](/docs/agent-filesystem/welcome/what-is-agent-filesystem#a-first-look) creates, so it assumes the state that example leaves, in the `first_look` database of the `agents` namespace. After the rename, the paths that the first example printed no longer exist. The query then lists the files:
+
+```surql
+-- Rename the folder with one update
+UPDATE file SET filename = 'atlas-launch' WHERE path = '/projects/atlas' RETURN NONE;
+
+SELECT path FROM file WHERE is_folder = false ORDER BY path;
+```
+
+```surql title="Output"
+[
+	{ path: '/projects/atlas-launch/plan.md' },
+	{ path: '/projects/atlas-launch/risks.md' }
+]
+```
+
+A unique index, `child_unique`, covers `parent_key` and `filename`. The index prevents two entries with the same name in one folder, and resolving a path walks it one segment at a time through that index. The `parent_key` field exists because a unique index skips a record in which an indexed field is `NONE`, and an index on `parent` would leave the names at the top level unprotected. A record that is renamed or moved also writes a version, so the rename above appears in `file_version` with the operation `rename`.
+
+> [!NOTE]
+> A raw update as `root` bypasses the permission checks that the Python library makes for a move. The example shows how the table works, and agents should rename through a client.
+
+The main other tables hold the following:
+
+- The previous states of files, in `file_version`.
+- Graph edges between files, in `links_to` and four other relation tables.
+- Advisory leases, in `file_lock`.
+- Workspaces, in `workspace` and `file_branch`.
+- Collaborative-editing updates and snapshots.
+- The sections of a file with their embeddings, in `file_section`.
+- Groups, in `user_group` and `group_member`.
+- A queue of processing jobs, in `sfs_job`, which [Content analysis](/docs/agent-filesystem/concepts/understanding-pipeline) describes.
+
+When `file.surql` is applied, the schema defines 32 tables and 76 functions in total, which `INFO FOR DB` lists, and [Schema reference](/docs/agent-filesystem/reference/schema) describes every one. A second schema file, `record_auth.surql`, adds a `user` table and four record access methods: `account` for agents and people, and `indexer`, `projector` and `compactor` for background workers. The file is optional for the Python library, which applies it only with `record_auth=True`. The gateway and `surrealfs-rs init` always apply it, so a database that they prepare holds 33 tables. No client in this release signs in through the three worker accesses.
+
+## What the schema does
+
+The schema keeps four events on `file`. They run in the database, so they apply to every client that writes to a database prepared with `file.surql`. The older schema of the TypeScript SDK defines every event except `evt_file_jobs`.
+
+| Event | Runs when | Does |
+| --- | --- | --- |
+| `evt_file_hash` | Content or bytes change | Writes the hash to `hash`. |
+| `evt_file_jobs` | Content or bytes change | Queues `detect`, `chunk` and `symbols` jobs in `sfs_job`. No scheduled worker runs these jobs in the current release. The gateway claims and runs the `symbols` jobs when it receives `POST /api/index` without a `path`, but it does not mark them completed, and `surrealfs-rs jobs claim` can claim all three kinds. |
+| `evt_file_move` | The name or the parent changes | Under record access, refuses a rename unless the user can write to and enter both folders. |
+| `evt_file_version` | Content, bytes, mode, name or parent change, or the record is deleted | Writes the previous state to `file_version` with the operation `write`, `chmod`, `rename` or `delete`. |
+
+Two indexes serve search. `idx_file_content` is a full-text index on `content` that ranks with BM25, and `idx_hnsw_file_embedding` is an HNSW index on `embedding` with 1,536 dimensions and cosine distance. The table `file_section` has an HNSW index on `embedding` and a unique index on `file_id` and `section_idx`, and it has no full-text index. [File search](/docs/agent-filesystem/concepts/search) describes how words are matched.
+
+The `fn::sfs_*` functions cover permission predicates, search, history, links, leases, workspaces and file operations. The Python library issues its own statements for most file operations and calls the functions for search, history and links. The Rust tool and the TypeScript SDK call the functions for nearly every operation, so the permission rules that a function applies, or does not apply, decide what those clients enforce. [Agent Filesystem functions](/docs/agent-filesystem/reference/surrealql-functions) lists every function, and [Schema reference](/docs/agent-filesystem/reference/schema) lists the tables and fields.
+
+## What happens on a write
+
+This is the path of `write_text` on an existing file in the Python library:
+
+1. The library resolves the path to a record and checks in Python that the caller may traverse the parent folders and write to the file.
+2. When the call passes `if_generation`, the library compares it with the `generation` of the record and raises `ConflictError` on a mismatch. The `UPDATE` statement repeats the comparison in its `WHERE` clause.
+3. The library sends one `UPDATE` that sets `content`, `content_type` and `meta`, where `meta` holds the frontmatter that the library parsed.
+4. SurrealDB evaluates the value expression of `generation`, which adds 1 when the MD5 hash of the new content differs from the stored hash.
+5. The database runs the events, which on SurrealDB 3.2.3 run in the alphabetical order of their names: `evt_file_hash` stores the new hash, `evt_file_jobs` queues the jobs and `evt_file_version` stores the replaced state. It also updates the full-text index.
+6. When the new content holds Markdown links or wikilinks, the library calls `fn::sfs_relate` for each link whose target file exists, which records a `links_to` edge. A link to a file that does not exist yet records no edge. Each write or edit adds a new edge for every link that is still in the text, and an edge stays after its link is deleted from the text.
+
+A write to a path that does not exist creates the record instead. The new record has `generation` 1, and no version is written until the record changes.
+
+## What happens on a search
+
+Search has three main entry points in the Python library, and each calls one schema function. The library also has `grep` and `search_sections`.
+
+- `search_text(query)` calls `fn::sfs_search_text($q, $k, $match, $me)`. The function analyses the query, matches it against `idx_file_content` with BM25, keeps the files that the caller `$me` may read, and orders the hits by score and then by path. The `match` argument is `any` by default and `all` to require every term. A BM25 score of 0.0 is normal for a word that appears in more than about half of the files, and then the path decides the order.
+- `search_semantic(vector)` calls `fn::sfs_search_semantic($qvec, $k, $me)`, which finds the nearest neighbours in the HNSW index and applies the same read filter. The index returns a fixed pool of 80 candidates before the read filter runs, so a caller who may read only some of the files can receive fewer than `k` hits, and no call returns more than those 80 candidates.
+- `search(query, vector=...)` calls `fn::sfs_hybrid_search`, which fuses the text ranking and the vector ranking with reciprocal rank fusion (`search::rrf`). Without a vector the function ranks the text results alone.
+
+Nothing in Agent Filesystem stores an embedding when a file is written. Vectors arrive when a caller computes them with its own function and stores them with `reindex_embeddings`, which only `root` may call. The package provides no embedding function and no indexing command. The gateway requests an embedding of each file that it writes when `OPENAI_API_KEY` is set, but the database rejects its statement, so it stores none. The pydantic-ai toolset and the JSON tool definitions embed the query when they are created with `semantic=True` and given an `embed` function.
+
+The MCP server and the Hermes plugins read `SURREALFS_SEMANTIC` but have no embedding function, so their `search` tool matches words only. Semantic search finds only the files that already have vectors. Without an embedder the `search` tool is full-text only, and `search_sections` answers that section search requires an embedding. [File search](/docs/agent-filesystem/concepts/search) describes the three modes in detail.
+
+## Who checks permissions
+
+Permissions use Unix-style owners and modes, and where they are checked depends on how a client connects.
+
+| Connection | What checks permissions | Notes |
+| --- | --- | --- |
+| Python library with a system credential, which every shipped surface uses by default | The `SurrealFs` class, in Python, for the user named in `user=` | The `PERMISSIONS` clauses in the schema exist, and a system credential bypasses them. Anyone who holds the credential can bypass the checks with raw SurrealQL. Some library calls, among them `history`, `diff` between two generations, `backlinks`, `watch` and `merge_workspace`, do not apply the caller's permissions. See [Permissions](/docs/agent-filesystem/security/permissions#operations-that-do-not-apply-the-callers-permissions). |
+| Python library with record access, which is opt-in | The database, through the `PERMISSIONS` clauses on `file`, for the signed-in record user | It needs the `record_auth` schema and a user record for each agent or person. See [Record access](/docs/agent-filesystem/security/record-access). |
+| Rust command-line tool and TypeScript SDK | The database functions that read file content, for the caller that `--caller` or the `user` option names. In the Rust tool, these are the commands `cat`, `chunk`, `detect`, `symbols -i`, `table-load`, `decrypt`, `export` and `backup`, and `digest` counts only the files that the caller may read. In the TypeScript SDK, they are `readText`, `grep` and `diff` with two generations. The TypeScript checks apply only when the schema came from the Python package | Listings, writes, removals, moves, copies, mode changes and `history` are not checked, and neither is `grep` in the Rust tool. The caller name is a label that nothing authenticates, so these clients cannot isolate users from each other. |
+| WebDAV and S3 servers | Nothing checks the requester | Every request runs as the identity that the server started with, whatever credentials the request carries or leaves out. The identity is `root` by default, and otherwise the name that `--caller` or the database user supplies. Reads of whole files are checked for that identity and other operations are not, so with the default nothing is refused. |
+| Gateway | The database functions, for the caller that the request names | The caller is the `X-SurrealFS-User` header, or the `user_id` of a stored credential, or `root`. Reads of file content are checked for that caller. Writes, removals and listings are not, and `POST /api/rpc` lets a request set the caller variable itself. See [Gateway server](/docs/agent-filesystem/interfaces/gateway-server#identity-and-authentication). |
+
+[Permissions](/docs/agent-filesystem/security/permissions) describes the owner, mode and `/home/<user>` rules.
+
+## What each implementation covers
+
+| Capability | Python library | Rust command-line tool | TypeScript SDK |
+| --- | --- | --- | --- |
+| Schema | `apply_schema` applies the current schema | `surrealfs-rs init` applies the current schema | `applySchema` applies an older copy, with 44 of the 76 functions and 15 of the 32 tables |
+| File operations | Text and binary files, line ranges and glob patterns | `ls`, `cat`, `write`, `mkdir`, `rm`, `mv` and `cp` | Text files only |
+| Permission checks on writes | Yes, except in workspace merges | No | No |
+| Version history | `history`, `diff`, `restore` and `undelete` | `history` and `restore` | `history` and `restore`. `diff` returns the text of a version and fails unless both generations are passed |
+| Search | Full-text, semantic and hybrid | `grep` only | `grep` runs. `search` fails because its arguments do not match the current schema |
+| Agent tools | The 31 tools of the registry | None | A separate adapter with 12 tools |
+| Sign-in with record access | The `surrealfs` command and the MCP server sign in as a record user, and the library accepts a connection that is signed in that way | Not supported: the tool signs in as a root user | The SDK takes a connection that you open and applies no permission rules |
+| Network servers | No | WebDAV and S3 | No |
+
+[Python SDK](/docs/agent-filesystem/interfaces/python-sdk), [TypeScript SDK](/docs/agent-filesystem/interfaces/typescript-sdk) and [Command-line reference](/docs/agent-filesystem/interfaces/command-line) describe each interface, and [Limits and caveats](/docs/agent-filesystem/operations/limits-and-caveats) lists known defects.
+
+## Limits that follow from the design
+
+> [!WARNING]
+> Keep paths to eight levels or fewer. The cost of reading or writing a record grows by about three times for each level of folder depth, because the computed `gate` field collapses the permissions of all the ancestors into one value. On SurrealDB 3.2.3 with the in-memory engine, creating a folder at level 8 took 0.2 to 0.3 seconds, and writing a file into a folder at level 9 took about 2.7 seconds. The figures depend on the machine and show how the cost grows, and they are not a benchmark. [Data model](/docs/agent-filesystem/concepts/data-model#folder-depth) has the measurements for each level.
+
+The other limits that follow from the design are:
+
+- Agent Filesystem needs a SurrealDB 3.x server process. The embedded `mem://` engine of the Python SDK (`surrealdb[embedded]` 3.0.0a4) returned `null` for computed fields such as `path` on indexed reads. The `AGENTS.md` file in the SurrealFS repository attributes this to that engine release and says to re-check it when a newer one ships, so the tests and examples use a server.
+- A file that the normal write calls create is stored whole in one record.
+- The `generation` check works under a system credential. Under record access the counter stays at 1, so `if_generation` does not protect concurrent writers there, and every version carries generation 1, so `diff` and `restore` cannot select a version by generation. See [Versions and history](/docs/agent-filesystem/concepts/versions-and-history#limits-to-know-about).
+- Version history is keyed by path, and each version is a full copy of the replaced state. A rename starts a new history under the new path, and a new file at a path that an earlier file used shares that file's versions. See [Versions and history](/docs/agent-filesystem/concepts/versions-and-history#history-follows-paths).
+
+## Where to go next
+
+- [Data model](/docs/agent-filesystem/concepts/data-model) describes every field of the `file` table.
+- [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) describes how versions are stored and restored.
+- [Permissions](/docs/agent-filesystem/security/permissions) describes owners, modes and the three ways of checking them.
+- [MCP server](/docs/agent-filesystem/interfaces/mcp-server) describes the tool surface that most agents use.

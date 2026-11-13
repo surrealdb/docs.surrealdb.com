@@ -1,0 +1,853 @@
+---
+position: 1.5
+title: Agent Filesystem Rust library
+description: "The surrealfs-core Rust crate for Agent Filesystem: connect over WebSocket, HTTP or the gateway, work with files, search and versions, with errors, limits and wasm32 support."
+---
+
+# Agent Filesystem Rust library
+
+The `surrealfs-core` crate is the Rust library for Agent Filesystem. Its `SurrealFs` type reads and writes files and folders in a SurrealDB database, and every operation is an `async` method: `write_text`, `read_text`, `edit_text`, `search_hybrid`, `history`, `acquire_lock` and so on. A `SurrealFs` value talks to the database over a WebSocket or over HTTP, or it talks to an Agent Filesystem gateway that holds the database credentials. This page shows how to connect, lists every public method of `SurrealFs` with its parameters, results and limits, and says what builds for `wasm32`.
+
+The `surrealfs-rs` command-line tool, the gateway and its WebDAV and S3 servers are programs written on this crate, so the method tables also show which of them calls each method. The [Python SDK](/docs/agent-filesystem/interfaces/python-sdk) and the [TypeScript SDK](/docs/agent-filesystem/interfaces/typescript-sdk) are separate implementations of the same schema. The `surrealfs-rs` commands are in the [command-line reference](/docs/agent-filesystem/interfaces/command-line).
+
+> [!NOTE]
+> The crate is in beta at version 0.2.0. The API, the schema and the command-line interface may change in breaking ways between releases. SurrealFS is the name of the open source project, so the crate, the repository and the binaries on this page carry that name. The behaviour on this page is that of the `next` branch of the repository at commit `76d2444`, run against SurrealDB 3.2.3 with Rust 1.99.0.
+
+> [!WARNING]
+> In version 0.2.0 the Rust library checks the caller in only a few methods, mostly the ones that read file content, and several methods report success when the database refused the request. The [status summary](#status-summary) lists each case next to the area it affects, and the [errors](#errors) section lists the methods that discard failures. For code that must rely on permissions, connect with a record user's token, whose limits are listed under [record users](#record-users), or use the [Python SDK](/docs/agent-filesystem/interfaces/python-sdk).
+
+## Requirements
+
+- A Rust toolchain with `cargo`.
+- `git`, because the crate is fetched from the SurrealFS repository.
+- A SurrealDB 3.x server. See [installing SurrealDB](/docs/running/installation) if the `surreal` command is not available. The examples assume a server on `localhost:8000` with the root user `root` and the password `secret`, which this command starts in memory:
+
+```bash
+surreal start --user root --pass secret memory
+```
+
+The output blocks on this page show a new in-memory database, with the examples run in the order of the page. Run them in the same order against a new server to get the same generation numbers.
+
+## Install
+
+The crate is not on crates.io, so depend on it through Git or a path:
+
+```toml title="Cargo.toml"
+[dependencies]
+surrealfs-core = { git = "https://github.com/surrealdb/surrealfs", branch = "next" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde_json = "1"
+```
+
+A dependency on a branch follows the tip of the branch. To pin a build, replace `branch = "next"` with `rev = "<commit>"`, where `<commit>` is a commit hash from the repository. The crate uses the SurrealDB Rust SDK for the WebSocket transport. The workspace manifest asks for `surrealdb = "3.0.0-alpha.13"`, which accepts any 3.x release, and the repository's own `Cargo.lock` pins 3.3.0. The examples use `tokio` for the runtime and `serde_json` for variables and payloads.
+
+The crate is Apache-2.0 in its manifest. Your project needs `chrono` only if it builds a time to pass to `export_tree` or `restore_backup`, because both take an `Option<chrono::DateTime<Utc>>`.
+
+## Status summary
+
+The table uses four terms. A generation is the integer that counts the content revisions of a file. A lease is an advisory mark that a holder places on a file for a limited time. A system credential is the login of a SurrealDB system user such as `root`, as opposed to a record user's token. A caller is the name that the library passes to the database functions.
+
+| Area | State in version 0.2.0 |
+| --- | --- |
+| Connecting | `connect`, `connect_http` and `connect_remote` run, over a WebSocket, over HTTP and against a gateway. The HTTP forms send nothing until the first call, so a wrong password appears on that call and not on connect. [Connection options](#connection-options) lists the details. |
+| Files and folders | `stat`, `exists`, `ls`, `ls_recursive`, `read_text`, `read_bytes`, `write_text`, `write_bytes`, `append_text`, `edit_text`, `mkdir`, `rm`, `mv`, `cp` and `chmod` run. `mkdir` always creates missing parents, `mv` replaces an existing destination, `cp` of a folder creates an empty folder, and a recursive `rm` removes a folder and its direct children only. See [files and folders](#files-and-folders). |
+| Permissions | With a system credential, the methods that read content check the caller and the others do not. A record user's token makes the database enforce the rules, with the limits listed under [record users](#record-users). See [identity and permissions](#identity-and-permissions). |
+| Versions and leases | `history`, `restore`, `acquire_lock`, `release_lock` and `list_locks` run. History is kept for each path and does not follow a rename. A lease is advisory and does not stop other writers. A record user's token leaves every generation at 1. See [versions](#versions) and [concurrency and leases](#concurrency-and-leases). |
+| Search | `grep` reads at most 1,000 files. `search_hybrid` runs. `search` fails with a system credential. `search_semantic` runs once embeddings are stored with SurrealQL, because `set_embedding` and `index_file_sections` store nothing against the shipped schema. See [search](#search). |
+| Workspaces, mailboxes and collaborative editing | Workspaces fork, diff and merge, but the library cannot write into one. A mailbox claim is not exclusive. Collaborative editing runs and ignores `if_generation`. See [workspaces, mailboxes and collaborative editing](#workspaces-mailboxes-and-collaborative-editing). |
+| Large files | `upload_file` and `read_range` round-trip bytes, but an uploaded file appears as a folder, `read_text` and `read_bytes` return nothing for it, and a second upload to the same path fails. See [large files](#large-files). |
+| Analysis helpers | Symbols, tables, digests and job claims run when called. The library does not call them when a file is written. See [analysis helpers](#analysis-helpers). |
+| Trust and operations | Groups, shares, credentials, legal holds, webhook records, archives, backups, Git import, encryption and statistics run as records or helpers. No program calls the webhook dispatcher, nothing serves a share link, and the connectors hold documents in memory. See [trust and operations](#trust-and-operations). |
+
+The [limits and caveats page](/docs/agent-filesystem/operations/limits-and-caveats) compares the Rust, Python and TypeScript implementations.
+
+## Connect and write a first file
+
+`SurrealFs::connect` opens the connection and selects a namespace and a database. It does not create the schema, so `apply_schema` defines the `file` table, its functions and its events, together with the optional [record-user definitions](/docs/agent-filesystem/security/record-access). Run it once for each database before any other call. It is safe to repeat for the definitions, because every statement either overwrites its own definition or is created only when it does not exist. Each run also resets the folder `/home` to the owner `root` and the mode `0o777`, so an earlier `chmod` of `/home` does not survive.
+
+This complete program connects as `root` and acts as the caller `alice`:
+
+```rust title="src/main.rs"
+use surrealfs_core::{ConnectOptions, Result, SurrealFs, SurrealFsError};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let fs = SurrealFs::connect(ConnectOptions {
+        url: "ws://localhost:8000".to_string(),
+        user: Some("root".to_string()),
+        pass: Some("secret".to_string()),
+        ns: "agents".to_string(),
+        db: "workspace".to_string(),
+        caller: Some("alice".to_string()),
+    })
+    .await?;
+    fs.apply_schema().await?;
+
+    let plan = fs
+        .write_text(
+            "/projects/atlas/plan.md",
+            "# Atlas plan\n\n- Draft the API\n- Review the schema\n",
+            None,
+        )
+        .await?;
+    println!("wrote {} at generation {} (size {})", plan.path, plan.generation, plan.size);
+
+    let plan = fs
+        .edit_text(
+            "/projects/atlas/plan.md",
+            "Draft the API",
+            "Ship the API",
+            Some(plan.generation),
+        )
+        .await?;
+    println!("edited at generation {}", plan.generation);
+
+    match fs.write_text("/projects/atlas/plan.md", "A stale write", Some(1)).await {
+        Err(SurrealFsError::Conflict(_)) => println!("the write that expected generation 1 was refused"),
+        other => println!("unexpected result: {other:?}"),
+    }
+
+    print!("{}", fs.read_text("/projects/atlas/plan.md").await?);
+    for entry in fs.ls("/projects/atlas").await? {
+        println!("{} has size {} at generation {}", entry.path, entry.size, entry.generation);
+    }
+    for version in fs.history("/projects/atlas/plan.md", None).await? {
+        println!("generation {} by {}: size {}", version.generation, version.author, version.size);
+    }
+    Ok(())
+}
+```
+
+```text title="Output"
+wrote /projects/atlas/plan.md at generation 1 (size 50)
+edited at generation 2
+the write that expected generation 1 was refused
+# Atlas plan
+
+- Ship the API
+- Review the schema
+/projects/atlas/plan.md has size 49 at generation 2
+generation 1 by alice: size 50
+```
+
+A few details of this run:
+
+- `write_text` creates the missing folders `/projects` and `/projects/atlas`, and it returns a `FileEntry`. The entry carries the new generation, the size and the owner, but its `content` field is `None`. The size counts characters for a text file and bytes for a binary file, so it equals the byte length only for ASCII text.
+- A generation counts the content revisions of a file. It starts at 1, and a write that changes the content raises it by one. Rewriting identical content, `chmod`, `chgrp` and `mv` leave it unchanged. Passing `Some(generation)` makes the write succeed only when the file is still at that generation. Otherwise the call returns `SurrealFsError::Conflict`.
+- `history` lists the states that earlier changes replaced, newest first, and not the current state. After one write and one edit it holds generation 1 only. [Versions](#versions) describes the other rows.
+- With a system credential, as here, the `author` of a version is the owner of the file when the change happened, and not necessarily the caller that wrote it. The version above shows `alice` because alice owns the file. A record user's token records the user named in the token, as [identity and permissions](#identity-and-permissions) describes.
+- A new text file gets the content type `text/plain` whatever the file extension, and a write to an existing file keeps the content type that the file has.
+
+`apply_schema` returns `Ok(())` without inspecting the result of each statement. A user that is not allowed to define tables gets `Ok(())` and an empty database, and the first file call then fails with a `NotFound` error whose message begins `Function 'fn::sfs_ls' not found`. When the schema is missing, `stat` and `exists` hide the problem by returning `None` and `false`, because the library reads the missing-function error as a missing file.
+
+## Connection options
+
+`ConnectOptions` has six public fields. Its `Default` value matches the Default column of the first table. The `surrealfs-rs` tool and the gateway use different defaults, which the second table lists.
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `url` | `String` | `ws://127.0.0.1:8000` | The server address. The scheme chooses the transport. |
+| `user` | `Option<String>` | `Some("root")` | The server username. It is also the caller when `caller` is `None`. |
+| `pass` | `Option<String>` | `Some("root")` | The server password. When `user` is `None` and `pass` is set, over HTTP, it is a bearer token. For `sfs://` URLs it is the gateway token. |
+| `ns` | `String` | `test` | The namespace. A gateway URL ignores it. |
+| `db` | `String` | `test` | The database. A gateway URL ignores it. |
+| `caller` | `Option<String>` | `None` | The identity that the library passes to the database functions. |
+
+| Program | URL | Namespace | Database |
+| --- | --- | --- | --- |
+| `ConnectOptions::default()` | `ws://127.0.0.1:8000` | `test` | `test` |
+| `surrealfs-rs` | `ws://127.0.0.1:8000/rpc` | `surrealfs` | `surrealfs` |
+| `surrealfs-server` | `http://127.0.0.1:8000` | `surrealfs` | `main` |
+
+A database that one program prepared is empty for another program unless the namespace and the database match. The default password is `root`. Set a different password in your own deployments, and read it from the environment instead of writing it in source. `ConnectOptions` derives `Debug`, which prints the password, so keep an options value out of logs.
+
+The URL scheme chooses one of three transports:
+
+| URL | Transport | Credentials |
+| --- | --- | --- |
+| `ws://`, `wss://` or no scheme | A WebSocket connection through the SurrealDB Rust SDK. It exists on native targets only. | Signs in as a root user when `user` and `pass` are both set. No other user level can sign in. |
+| `http://`, `https://`, and on `wasm32` every URL except the `sfs` forms | One JSON-RPC request for each call, sent to the `/rpc` path of the server, with the namespace and database in the `Surreal-NS` and `Surreal-DB` headers. It keeps no session. | Basic authentication when `user` and `pass` are set. A bearer token when only `pass` is set and it is not empty. |
+| `sfs://`, `sfs+http://`, `sfs+https://` | One request for each call, sent to the `/api/rpc` path of a [gateway](#connect-through-a-gateway). | `pass` is sent as a bearer token. |
+
+`SurrealFs::connect` picks the transport and is the only constructor that is `async`. `connect_http` and `connect_remote` are plain functions that return a `SurrealFs` at once. They send nothing until the first call. A few details apply:
+
+- **`ws://` and `wss://` URLs:** Both `ws://host:port` and `ws://host:port/rpc` connect. The library removes the scheme and opens a plain WebSocket, so a `wss://` URL connects to a server that does not use TLS, and the password travels unencrypted. Use `https://`, or a gateway address that starts with `sfs+https://`, when the connection needs TLS.
+- **Sign-in:** A wrong password over a WebSocket fails in `connect` with `Database("There was a problem with authentication")`. Over HTTP, `connect` succeeds and the first call fails with `Database("HTTP RPC invalid JSON ...")`. A database user (`DEFINE USER ... ON DATABASE`) failed in both forms in a test, so use a root user or a token.
+- **No credentials:** With `user` or `pass` unset, the connection does not sign in. Unless the server allows guests, every call then fails with `Database("Anonymous access not allowed: Not enough permissions to perform this action")`. A server started with `--allow-guests` runs the calls, and the session sees no files: `stat` returns `None`, `ls` returns an empty list and a write gives `NotFound`. The WebSocket and HTTP forms behave the same way.
+- **Other URL forms:** `connect_http` rewrites `ws://` to `http://` and `wss://` to `https://`, removes a trailing `/rpc` or `/sql`, and treats a URL with no scheme as `http://`. `connect_remote` removes a leading `sfs+`, maps `sfs://` to `http://`, and treats a URL with no scheme as `https://`.
+- **Bearer tokens:** Sign in to SurrealDB separately, for example with a `POST` to the `/signin` endpoint, and pass the token as `pass` with `user` set to `None`. A root token and a record user's token both worked in a test.
+
+## Identity and permissions
+
+Every `SurrealFs` carries a caller, a name that it passes to the database functions as `$caller`. `connect` takes it from `caller` and, when that is `None`, from `user`. `with_caller` returns a copy of the handle that shares the connection and carries another caller. `caller` returns the current name. The caller is a string that your program chooses, so it identifies a person or an agent only as far as you trust the program.
+
+What the database enforces depends on how the connection signed in:
+
+| Connection | The identity the database sees | What is enforced |
+| --- | --- | --- |
+| A system credential: a root user over a WebSocket or with HTTP Basic authentication, or the bearer token of any system user over HTTP | The caller string | The methods in the table below check the caller or filter their results by it. The others do not. |
+| A record user's token, sent as the bearer token over HTTP | The user named in the token. The caller string does not change it. | The database applies the table permissions to every statement. |
+| A gateway | The caller that the client sends. The gateway accepts it from the request. | Whatever the gateway's own connection enforces, which is the first row when it holds a system credential. |
+
+This program shows the first row. The handle `bob` shares the connection with `alice`. The `mode` argument of `chmod` is a `u32`, and the database stores it as the decimal value of the octal mode, so write an octal literal such as `0o600`. A decimal `600` sets the mode `0o1130`.
+
+```rust title="src/main.rs"
+use surrealfs_core::{ConnectOptions, Result, SurrealFs, SurrealFsError};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let alice = SurrealFs::connect(ConnectOptions {
+        url: "ws://localhost:8000".to_string(),
+        user: Some("root".to_string()),
+        pass: Some("secret".to_string()),
+        ns: "agents".to_string(),
+        db: "workspace".to_string(),
+        caller: Some("alice".to_string()),
+    })
+    .await?;
+    let bob = alice.with_caller("bob");
+
+    alice
+        .write_text("/home/alice/diary.md", "Private notes\n", None)
+        .await?;
+    alice.chmod("/home/alice/diary.md", 0o600).await?;
+
+    match bob.read_text("/home/alice/diary.md").await {
+        Err(SurrealFsError::PermissionDenied(_)) => println!("bob cannot read the diary"),
+        other => println!("unexpected result: {other:?}"),
+    }
+
+    let listing = bob.ls("/home/alice").await?;
+    println!("bob lists {} entry in /home/alice", listing.len());
+
+    bob.write_text("/home/alice/diary.md", "Bob was here\n", None).await?;
+    print!("alice now reads: {}", alice.read_text("/home/alice/diary.md").await?);
+    Ok(())
+}
+```
+
+```text title="Output"
+bob cannot read the diary
+bob lists 1 entry in /home/alice
+alice now reads: Bob was here
+```
+
+Reading is checked and everything else is not, so `bob` listed the folder and replaced the diary. The rest of this section lists what each method does for a caller who may not read the file. The mode and ownership rules themselves are on the [permissions page](/docs/agent-filesystem/security/permissions).
+
+| Methods | Behaviour with a system credential |
+| --- | --- |
+| `read_text`, `read_bytes`, and the methods that read through them: `export_tree`, `read_encrypted`, `index_file_symbols`, `load_tabular_file` | Return `PermissionDenied`. |
+| `digest` | Returns `PermissionDenied`. |
+| `search_hybrid`, `search_semantic`, `pack`, `symbols`, `definition`, `entities`, `query_table` | Leave out what the caller cannot read. `symbols`, `entities` and `query_table` return an empty list, the same result as for a missing path. |
+| `chgrp` | Only the owner and `root` can change the group. Another caller gets `NotFound`, which hides the reason. |
+| `stat`, `exists`, `ls`, `ls_recursive`, `grep`, `history`, `restore`, `read_range`, `write_text`, `write_bytes`, `append_text`, `edit_text`, `mkdir`, `rm`, `mv`, `cp`, `chmod` | Do not check the caller. `cp` lets a caller copy a file that the caller cannot read and own the copy. `chmod` changes the mode of any file. |
+
+A system credential that has no caller at all, such as a bearer token with `caller` set to `None`, has no identity. `read_text` and `read_bytes` fail with `PermissionDenied` for every file, including a world-readable one, and `search`, `search_hybrid` and `search_semantic` fail with `Database("... search needs an identity ...")`. `stat`, `ls`, `grep`, `digest`, `pack`, `history`, `cp` and the write methods act as `root`, so a file that `write_text` creates is owned by `root`. Set `caller` or `user` whenever you connect with a system credential.
+
+### Record users
+
+A record user's token gives the database an identity that the program cannot change. Over HTTP with `user` set to `None`, pass the token as `pass`:
+
+```rust
+let alice = SurrealFs::connect(ConnectOptions {
+    url: "http://localhost:8000".to_string(),
+    user: None,
+    pass: Some(token), // from signing in to SurrealDB as the record user
+    ns: "agents".to_string(),
+    db: "workspace".to_string(),
+    caller: Some("alice".to_string()),
+})
+.await?;
+```
+
+In a test with two record users, a private file (mode `0o600` inside a `0o700` home folder) was invisible to the other user. `read_text`, `ls`, `write_text` and `rm` returned `NotFound`, `stat` returned `None`, and `grep` and `search_hybrid` found nothing. The same token makes `search` work, because the database can then name the caller.
+
+On a file that the other user could see, a write or a removal that the table permissions refused returned `Ok` and changed nothing, so read the file again after the call to confirm the change. Files and folders that the Rust library creates are readable and listable by everyone until the owner runs `chmod`. [Record access](/docs/agent-filesystem/security/record-access) describes how to provision users.
+
+A record user's token also changes these methods:
+
+- **`generation`:** The database refuses the update of this field for a record user, so a content change leaves it at 1. In a test, three writes by one user all returned generation 1, a write that expected generation 1 then succeeded, and `history` listed every version as generation 1. A token therefore does not give the optimistic concurrency that [concurrency and leases](#concurrency-and-leases) describes. [Record access](/docs/agent-filesystem/security/record-access#differences-from-system-credentials) lists this next to the other differences.
+- **`history`:** The `author` of a version is the user named in the token.
+- **`write_bytes`:** Data that is valid UTF-8 goes through `write_text` and works. Other data for a new file fails with `NotFound`, because the library creates the file without an owner, so the owner is `root`, and the table permissions refuse the creation for any other owner. `write_encrypted` writes through `write_bytes` and fails in the same way.
+- **`acquire_lock` and `release_lock`:** The holder is the user named in the token, and the `holder` argument is ignored.
+
+## Connect through a gateway
+
+A gateway is an HTTP server that holds the database credentials and runs the SurrealQL that its clients send. The [gateway server page](/docs/agent-filesystem/interfaces/gateway-server) explains how to run one. A `SurrealFs` connects to a gateway with `connect_remote(server_url, token, caller)`, or with `connect` and an `sfs://`, `sfs+http://` or `sfs+https://` URL. The client then holds no database credential and opens no database connection. Each call becomes a `POST` to the `/api/rpc` path of the gateway, with a JSON body that carries the SurrealQL, its variables and the caller, and with the header `Authorization: Bearer` followed by the token when the client has one.
+
+```rust
+let fs = SurrealFs::connect_remote("sfs://localhost:8787", Some("gateway-token"), Some("alice"))?;
+fs.write_text("/team/standup.md", "# Standup\n\n- Ship the docs\n", None).await?;
+```
+
+`connect_remote` is a plain function, so it sends nothing until the first call, and a wrong address or token appears then. A gateway that was started with `SURREALFS_SERVER_TOKEN` answers a request with no token with `Authentication required` and a request with a wrong token with `Invalid authentication credentials`, both as `Database` errors. The [remote clients page](/docs/agent-filesystem/interfaces/remote-clients) lists the address forms and the settings, and the `surrealfs-rs` program uses the same transport when `SURREALFS_SERVER_URL` is set.
+
+> [!WARNING]
+> The `/api/rpc` endpoint runs the SurrealQL that it receives on the gateway's own database connection, so a client with the token can do anything that the gateway's database user can do. Without `SURREALFS_SERVER_TOKEN` the gateway serves every request, and the caller is whatever the client sends. A gateway therefore does not separate the identities of its clients. See [what a token grants](/docs/agent-filesystem/interfaces/remote-clients#what-a-token-grants) and the [security section of the gateway page](/docs/agent-filesystem/interfaces/gateway-server#security).
+
+## Types
+
+The crate has the public modules `archive`, `backup`, `chunking`, `connector`, `crdt`, `crypto`, `errors`, `fs`, `git`, `models`, `paths`, `stats`, `understanding` and `webhooks`. The crate root re-exports everything in them except the transport types of `fs`, so `use surrealfs_core::{...}` imports every item on this page. The exceptions are `DbClient`, `DbResponse`, `QueryBuilder`, `HttpDbClient`, `RemoteServerClient` and `SValue`, which you import from `surrealfs_core::fs`.
+
+The result types are plain structs in `surrealfs_core::models`. Most derive `Debug`, `Clone`, `Serialize` and `Deserialize`, so they convert to and from JSON with `serde_json`.
+
+| Type | Returned by | Fields |
+| --- | --- | --- |
+| `FileEntry` | `stat`, `ls`, `ls_recursive`, the write methods, `mkdir`, `mv`, `cp`, `restore`, `chgrp`, `set_legal_hold`, `upload_file`; inside `SearchHit` | `path`, `filename`, `is_folder`, `size`, `content_type`, `content`, `mode`, `owner`, `group`, `branch`, `generation`, `parent_key`, `crdt`, `created_at`, `updated_at`, `meta` |
+| `FileVersion` | `history` | `path`, `generation`, `author`, `op`, `size`, `reason`, `created_at` |
+| `FileLock` | `acquire_lock`, `list_locks` | `path`, `holder`, `reason`, `acquired_at`, `expires_at` |
+| `SearchHit` | `search`, `search_hybrid`, `search_semantic` | `entry`, `score`, `snippet` |
+| `SectionHit` | `search_sections` | `path`, `heading`, `line_start`, `line_end`, `content`, `score` |
+| `GrepMatch` | `grep` | `path`, `line_number`, `line_text` |
+| `WorkspaceDiff` | `diff_workspace` | `path`, `modified`, `conflict`, `base_gen`, `branch_gen` |
+| `MailboxMessage` | `claim_mailbox` | `id`, `agent_id`, `op`, `payload`, `priority`, `state`, `worker_id`, `created_at` |
+| `UsageStats` | `du` | `path`, `files`, `logical_bytes`, `stored_bytes` |
+| `CodeSymbol` | `symbols`, `definition` | `id`, `file_id`, `path`, `name`, `qualified`, `kind`, `language`, `signature`, `doc`, `line_start`, `line_end` |
+| `FolderDigest` | `digest` | `path`, `folder_id`, `summary`, `notable_files`, `subfolders`, `total_readable`, `private_unsummarised`, `updated_at` |
+| `PackResult` | `pack` | `question`, `budget`, `used_tokens`, `blocks`, `formatted` |
+| `PipelineJob` | `claim_jobs` | `id`, `file_id`, `path`, `kind`, `source_hash`, `status`, `attempts`, `error`, `created_at` |
+| `EntityRecord` | `entities` | `id`, `name`, `kind`, `source_path` |
+| `TableRow` | `query_table` | `row_idx`, `sheet`, `data` |
+| `UserGroupRecord`, `GroupMemberRecord` | The group methods | `name`, `description`, `created_at`, and `group_name`, `user_id`, `added_at` |
+| `ShareRecord` | The share methods | `id`, `path`, `mode`, `token`, `created_by`, `expires_at`, `revoked`, `created_at` |
+| `CredentialRecord` | The credential methods | `kind`, `identifier`, `secret_hash`, `user_id`, `enabled`, `meta` |
+| `WebhookRecord`, `WebhookDeliveryRecord` | The webhook methods | `id`, `owner`, `path_pattern`, `events`, `url`, `secret`, `active`, `created_at`, and `id`, `webhook_id`, `owner`, `event`, `path`, `status_code`, `success`, `error`, `attempts`, `delivered_at` |
+| `FsStats`, `ImportReport`, `RestoreReport`, `BackupManifest`, `GitImportResult` | `get_stats`, the archive, backup and Git methods | Counters and a manifest, in `stats.rs`, `archive.rs`, `backup.rs` and `git.rs` |
+
+These fields of `FileEntry` need explanation:
+
+- **`size`:** The number of characters for a text file and the number of bytes for binary data, so it equals the byte length only for ASCII text. `FileVersion.size` counts the same way.
+- **`mode`:** The permission bits as a `u32` that holds the decimal value of the octal mode, so `420` is `0o644`.
+- **`content`:** `None` in the results of `stat`, `ls` and the write methods. A search hit carries the whole text of the file.
+- **`group`:** Set by `stat` and by `chgrp`. The results of `ls` and `ls_recursive` leave it `None`.
+- **`branch` and `parent_key`:** The library does not read them from the database. `branch` is always `"main"` and `parent_key` is always `None`.
+- **`created_at` and `updated_at`:** `Option<chrono::DateTime<Utc>>` values. The other timestamp fields, `FileVersion.created_at`, `FileLock.expires_at` and `WebhookDeliveryRecord.delivered_at`, have the same type.
+- **`meta`:** A JSON value, or `None`. Encrypted files, imported mirrors and legal holds record their state in it.
+- **`FileLock.acquired_at`:** Always `None`, because the shipped `file_lock` table has no such field.
+
+## Errors
+
+Every method returns `surrealfs_core::Result<T>`, which uses the `SurrealFsError` enum. Each variant holds a `String`, and its `Display` text is a category, a colon and the detail, such as `Conflict: An error occurred: sfs:conflict`.
+
+The library does not read a structured error code. The public function `SurrealFsError::from_db_message` searches the text of the database error for codes, in this order, and the first match decides the variant:
+
+| Variant | Chosen when the error text contains | Typical cause |
+| --- | --- | --- |
+| `NotFound` | `sfs:not_found` or `not found` | A missing file, workspace or function, an `edit_text` target that is not in the file, or a missing schema |
+| `LegalHold` | `sfs:legal_hold` | `rm` of a held path |
+| `PermissionDenied` | `sfs:permission`, `denied` or `Permissions` | `sfs:denied` and `sfs:denied_or_missing` from a read. A failed decryption also returns this variant. |
+| `Conflict` | `sfs:conflict`, `conflict` or `Transaction` | A generation mismatch, a workspace merge conflict, a transaction conflict |
+| `IsADirectory` | `sfs:is_a_directory` | `write_text` on a folder, `cp` of a folder without `recursive` |
+| `DirectoryNotEmpty` | `sfs:not_empty` | `rm` of a folder that has children, without `recursive` |
+| `AlreadyExists` | `sfs:already_exists` | Nothing in the shipped schema raises this code |
+| `Database` | Anything else from the database or the transport | `sfs:locked`, `sfs:exists`, `sfs:not_a_directory`, a parse error, a failed sign-in, an HTTP failure, a result that does not decode into the Rust type |
+| `Lock` | Not matched from text | Returned by `acquire_lock` only when the function returns no record, which the shipped schema does not do |
+| `InvalidPath` | Not matched from text | Not returned by the library. The gateway uses it for a missing request field |
+| `Io` | Not matched from text | A failed read or write of a backup folder |
+| `Storage` | Not matched from text | An archive that cannot be read or written, a failed encryption, a bad nonce |
+| `InvalidArguments` | Not matched from text | An unsupported archive format in `ArchiveFormat::from_str` |
+| `Other` | Not matched from text | An invalid regular expression in `grep`, a collaborative edit whose target text is absent, a JSON error |
+
+Match on the variant and never on the text. The same failure can arrive with a different message depending on the transport, and a call through a gateway repeats the category, as in `Conflict: Conflict: Conflict: Conflict: An error occurred: sfs:conflict`. A lock held by another holder arrives as `Database("An error occurred: sfs:locked")` and not as `Lock`.
+
+### Methods that discard failures
+
+Some methods run a statement and never look at its result, so the database can refuse the statement while the call returns `Ok`. In tests, these returned `Ok(())` for a missing path, an unknown identifier or a refused request, and changed nothing:
+
+- `chmod`, `complete_mailbox`, `complete_job`, `set_embedding`, `set_simhash`, `record_entities`, `remove_group_member`, `revoke_share` and `delete_webhook`.
+- `apply_schema`, for a user who is not allowed to define tables.
+- `create_credential`, for a `kind` outside the six that the schema allows. `resolve_credential` then returns `None`.
+- `add_group_member`, `create_credential`, `log_webhook_delivery`, `load_tabular_file` and `enable_crdt`, when a record user's token lacks the permission that the statement needs. No group, credential or delivery record was stored. `load_tabular_file` returned the number of rows that it parsed with none stored, and `stat` still reported `crdt: false` after `enable_crdt` on a file that the user could read and not write.
+
+In the source, `compact_crdt`, `record_git_commit` and the metadata step of `write_encrypted` also never inspect the result of their statement.
+
+Some methods that return a list turn a failed statement into an empty list, so an error and an empty result look alike. `symbols`, `entities` and `query_table` returned an empty list for a missing path in tests. `definition`, `claim_jobs`, `list_credentials`, `list_groups`, `list_group_members`, `get_user_groups`, `list_shares` and `list_webhooks` discard errors in the same way. `chgrp` and `set_legal_hold` report any failure as `NotFound` with the path.
+
+To see the database's own message, run the statement through `raw_query`, which reports a failed statement as an `Err` entry, or through `client()` and `take`, as the [raw SurrealQL](#raw-surrealql) example shows.
+
+## Files and folders
+
+Every signature on this page omits `&self` and `async`. `Result` is `surrealfs_core::Result`.
+
+<Synopsis label="Signature">
+stat(path: &str) -> Result<Option<FileEntry>>
+exists(path: &str) -> Result<bool>
+ls(path: &str) -> Result<Vec<FileEntry>>
+ls_recursive(path: &str) -> Result<Vec<FileEntry>>
+read_text(path: &str) -> Result<String>
+read_bytes(path: &str) -> Result<Vec<u8>>
+write_text(path: &str, content: &str, if_generation: Option<u64>) -> Result<FileEntry>
+write_bytes(path: &str, data: &[u8], if_generation: Option<u64>) -> Result<FileEntry>
+append_text(path: &str, chunk: &str) -> Result<FileEntry>
+edit_text(path: &str, old: &str, new: &str, if_generation: Option<u64>) -> Result<FileEntry>
+mkdir(path: &str, recursive: bool) -> Result<FileEntry>
+rm(path: &str, recursive: bool) -> Result<()>
+mv(src: &str, dst: &str) -> Result<FileEntry>
+cp(src: &str, dst: &str, recursive: bool) -> Result<FileEntry>
+chmod(path: &str, mode: u32) -> Result<()>
+chgrp(path: &str, group: Option<&str>) -> Result<FileEntry>
+</Synopsis>
+
+In the **Called by** column, `CLI` is the `surrealfs-rs` command and `servers` is the `surrealfs-server` crate: the [gateway](/docs/agent-filesystem/interfaces/gateway-server) with its REST and MCP endpoints, the [WebDAV and S3](/docs/agent-filesystem/interfaces/network-servers) handlers, and the NFS and SFTP handlers. `None` means that no program calls the method.
+
+| Method | Called by | Behaviour |
+| --- | --- | --- |
+| `stat` | servers | Returns `None` for a missing path. For `/` it returns an entry for a folder with the owner `root`, the mode `0o755` and generation 1. |
+| `exists` | CLI, servers | Calls `stat`. |
+| `ls` | CLI, servers | Returns the children of a folder sorted by filename. A missing folder gives `NotFound`. |
+| `ls_recursive` | servers | Walks the tree breadth first with one `ls` for each folder, and sorts by path. The folder you pass is not in the result. |
+| `read_text` | CLI, servers | Returns the text. A folder gives an empty string, a binary file gives a `Database` error, and a file that the caller cannot read gives `PermissionDenied`. |
+| `read_bytes` | CLI, servers | Returns the bytes. A text file gives its UTF-8 bytes. |
+| `write_text` | CLI, servers | Creates missing parent folders. A new file gets the content type `text/plain`, the mode `0o644` and the caller as owner, and a write to an existing file keeps its content type. `Some(generation)` for a path that does not exist gives `Conflict`, and a folder gives `IsADirectory`. |
+| `write_bytes` | servers | Sends data that is valid UTF-8 through `write_text`. Other data creates a file with the type `application/octet-stream`, the mode `0o666` and the owner `root`. A stale `if_generation` on an existing binary file changes nothing and returns the current entry, without an error. A record user's token cannot create the binary file, as [record users](#record-users) explains. |
+| `append_text` | servers | Needs an existing file, and gives `NotFound` otherwise. It has no generation check. |
+| `edit_text` | servers | Replaces every occurrence of `old` in an ordinary file. A missing `old` gives `NotFound`. |
+| `mkdir` | CLI, servers | The `recursive` argument has no effect, because missing parents are always created. A folder that exists is returned unchanged. A new folder gets the mode `0o755`. |
+| `rm` | CLI, servers | A folder with children needs `recursive`, and gives `DirectoryNotEmpty` without it. A recursive removal deletes the folder and its direct children. Records further down stay in the database and point at a parent that no longer exists. A held path gives `LegalHold`. |
+| `mv` | CLI, servers | Creates missing parent folders of the destination and replaces an existing destination. A missing source gives `NotFound`. |
+| `cp` | CLI, servers | Copies the content, the type and the mode, with the caller as owner and generation 1. A folder gives `IsADirectory` unless `recursive` is true, and then it creates an empty folder at the destination without copying any child. |
+| `chmod` | CLI | Takes the mode as an octal literal. It does not check the caller. |
+| `chgrp` | CLI | The owner and `root` can change the group. `None` clears it. |
+
+The file methods normalise a path before they use it with `normalize_path`. It trims surrounding whitespace, drops empty and `.` segments, resolves `..` and returns an absolute path, so `a//b/./c/../d/` becomes `/a/b/d`, `../x` becomes `/x` and `rel/file.txt` becomes `/rel/file.txt`. The crate also exports `parent_path`, `filename` and `glob_to_regex`, which turns a glob into a regular expression: `*` matches any run of characters except `/`, `**` also crosses folders and `?` matches one character except `/`.
+
+## Versions
+
+<Synopsis label="Signature">
+history(path: &str, limit: Option<usize>) -> Result<Vec<FileVersion>>
+restore(path: &str, generation: u64) -> Result<FileEntry>
+</Synopsis>
+
+| Method | Called by | Behaviour |
+| --- | --- | --- |
+| `history` | CLI, servers | Returns up to `limit` rows, 20 by default, newest first. Each row holds the state of the file before one change, and its `op` names that change: `write` for new content, `chmod` for a mode change, `rename` for `mv` and `delete` for a removal. A `chmod` or an `mv` adds a row that carries the generation the file already has, because those changes do not raise it, so one generation can appear twice. Rows are stored for the path that the file had when the row was written, so `history` does not follow a rename. |
+| `restore` | CLI, servers | Writes the content of an earlier generation back as a new generation. It looks for the generation among the rows stored for the path that you pass, so a generation that is not there gives `NotFound`, and so does a generation from before an `mv` when you pass the new path. It replaces the content and the stored bytes, and keeps the mode and the owner. |
+
+Neither method checks the caller. The [versions and history page](/docs/agent-filesystem/concepts/versions-and-history) describes how generations and versions relate.
+
+## Concurrency and leases
+
+Concurrent writers do not overwrite each other when each write states the generation that it read, on a connection that uses a system credential. `write_text`, `write_bytes`, `edit_text` and `upload_file` take `if_generation`. A mismatch gives `Conflict` and the write does not happen. `append_text` takes no generation. A file with collaborative editing enabled ignores `if_generation`, `write_bytes` ignores a stale value for an existing binary file without an error, and `upload_file` has the limits that the [large files](#large-files) section lists. With a record user's token the generation stays at 1, so a write that states a generation does not detect a concurrent change, as [record users](#record-users) explains.
+
+`SurrealFs` is `Clone` and its futures are `Send`, so one value can serve many tasks. A clone shares the connection. This program starts four workers that append a line to one file. The loop reads the generation, reads the text, and writes with that generation. When another worker wrote first, the write gives `Conflict` and the loop starts again:
+
+```rust title="src/main.rs"
+use surrealfs_core::{ConnectOptions, Result, SurrealFs, SurrealFsError};
+
+/// Append one line, retrying when another writer changes the file first.
+async fn append_line(fs: &SurrealFs, path: &str, line: &str) -> Result<u64> {
+    loop {
+        let current = fs.stat(path).await?.expect("the file exists");
+        let text = fs.read_text(path).await?;
+        let updated = format!("{text}{line}\n");
+        match fs.write_text(path, &updated, Some(current.generation)).await {
+            Ok(entry) => return Ok(entry.generation),
+            Err(SurrealFsError::Conflict(_)) => continue,
+            Err(other) => return Err(other),
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let fs = SurrealFs::connect(ConnectOptions {
+        url: "ws://localhost:8000".to_string(),
+        user: Some("root".to_string()),
+        pass: Some("secret".to_string()),
+        ns: "agents".to_string(),
+        db: "workspace".to_string(),
+        caller: Some("alice".to_string()),
+    })
+    .await?;
+    fs.write_text("/logs/run.log", "", None).await?;
+
+    let mut tasks = Vec::new();
+    for worker in 1..=4 {
+        let fs = fs.clone();
+        tasks.push(tokio::spawn(async move {
+            append_line(&fs, "/logs/run.log", &format!("worker {worker} finished")).await
+        }));
+    }
+    let mut generations = Vec::new();
+    for task in tasks {
+        generations.push(task.await.expect("the task completed")?);
+    }
+    generations.sort();
+    println!("generations written: {generations:?}");
+    println!("lines in the file: {}", fs.read_text("/logs/run.log").await?.lines().count());
+    Ok(())
+}
+```
+
+```text title="Output"
+generations written: [2, 3, 4, 5]
+lines in the file: 4
+```
+
+Each worker's write raised the generation by one, so no line was lost. The [concurrency and leases page](/docs/agent-filesystem/concepts/concurrency-and-leases) explains the model.
+
+A lease marks a file as in use for a limited time:
+
+<Synopsis label="Signature">
+acquire_lock(path: &str, ttl_seconds: u64, reason: &str, holder: &str) -> Result<FileLock>
+release_lock(path: &str, holder: &str) -> Result<()>
+list_locks() -> Result<Vec<FileLock>>
+</Synopsis>
+
+| Method | Called by | Behaviour |
+| --- | --- | --- |
+| `acquire_lock` | CLI, servers | The file must exist. The same `holder` can call it again to renew the lease. A different holder before the lease expires gets `Database("... sfs:locked")`. After `ttl_seconds` another holder can acquire it. |
+| `release_lock` | CLI, servers | Releasing a lease that is not held succeeds. A holder other than the current one, before expiry, gets the same `sfs:locked` error. |
+| `list_locks` | CLI, servers | Returns the leases that have not expired. |
+
+A lease is advisory. In a test, `bob` wrote a file while another holder had leased it, and the write succeeded. Programs that share files have to call `acquire_lock` themselves before they write.
+
+## Search
+
+This program writes two files, runs a search and then calls the plain full-text method:
+
+```rust title="src/main.rs"
+use surrealfs_core::{ConnectOptions, Result, SurrealFs};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let fs = SurrealFs::connect(ConnectOptions {
+        url: "ws://localhost:8000".to_string(),
+        user: Some("root".to_string()),
+        pass: Some("secret".to_string()),
+        ns: "agents".to_string(),
+        db: "workspace".to_string(),
+        caller: Some("alice".to_string()),
+    })
+    .await?;
+
+    fs.write_text(
+        "/notes/launch.md",
+        "# Launch plan\n\nThe launch date is 15 October. Announce the launch on the blog.\n",
+        None,
+    )
+    .await?;
+    fs.write_text("/notes/budget.md", "# Budget\n\nThe offsite budget is small.\n", None)
+        .await?;
+
+    for hit in fs.search_hybrid("launch", None, 5).await? {
+        println!("{}: {}", hit.entry.path, hit.snippet.trim_end());
+    }
+
+    // With a system credential, the plain full-text method fails.
+    if let Err(error) = fs.search("launch", 5).await {
+        println!("search failed: {error}");
+    }
+    Ok(())
+}
+```
+
+```text title="Output"
+/notes/launch.md: # Launch plan  The launch date is 15 October. Announce the launch on the blog.
+search failed: Database error: An error occurred: search needs an identity: pass $me, or connect as a record user
+```
+
+<Synopsis label="Signature">
+grep(pattern: &str, path_prefix: Option<&str>, is_regex: bool) -> Result<Vec<GrepMatch>>
+search(query: &str, limit: usize) -> Result<Vec<SearchHit>>
+search_hybrid(query: &str, vector: Option<&[f32]>, limit: usize) -> Result<Vec<SearchHit>>
+search_semantic(vector: &[f32], limit: usize) -> Result<Vec<SearchHit>>
+search_sections(vector: &[f32], limit: usize) -> Result<Vec<SectionHit>>
+set_embedding(path: &str, vector: &[f32], model: &str) -> Result<()>
+index_file_sections(path: &str, sections: &[(MarkdownSection, Option<Vec<f32>>)]) -> Result<usize>
+</Synopsis>
+
+| Method | Called by | Behaviour |
+| --- | --- | --- |
+| `grep` | CLI, servers | Reads the `content` of at most 1,000 text files in one query, and only then applies `path_prefix` and the pattern. A literal pattern is case-sensitive, and a regular expression uses the Rust `regex` syntax. It returns one match for each line, with 1-based line numbers. It does not check the caller. |
+| `search` | servers | Fails with `search needs an identity` for a system credential, because the call passes no identity to the database function. It works for a record user's token. The gateway's `search_text` tool calls it and returns that error. |
+| `search_hybrid` | servers | Ranks files by BM25 on the text, where one matching term is enough, and with `Some(vector)` it fuses that ranking with the nearest vectors. It leaves out files that the caller cannot read. `SearchHit.score` is the BM25 score, and it is `0.0` when only the vector found the file. The hits are in fused order, which the result does not expose. |
+| `search_semantic` | servers | Returns files whose embedding is nearest to `vector`, nearest first, from a pool of 80 candidates that the caller's read filter then trims. `SearchHit.score` is `0.0`. |
+| `search_sections` | None | Runs its own nearest-neighbour query on section records without a caller filter. It returns an empty list until section records with embeddings exist. |
+| `set_embedding` | servers | Returns `Ok(())` and stores nothing, because the statement writes a field that the shipped schema does not define. |
+| `index_file_sections` | servers | Fails and stores nothing. With `Some(vector)` for a section it fails with `Couldn't coerce value for field source_hash`, because the call supplies no hash. With `None` it fails earlier, on the field `embedding`, because the call sends `NULL` where the schema accepts `NONE`. The gateway ignores the error. |
+
+The library never calls an embedding model, and the vector index has 1,536 dimensions, so every vector must have that length. Because `set_embedding` stores nothing, store a vector with SurrealQL and then call `search_semantic` or `search_hybrid`. This statement stored vectors in a test:
+
+```rust
+let mut vars = serde_json::Map::new();
+vars.insert("path".to_string(), serde_json::json!("/notes/launch.md"));
+vars.insert("vector".to_string(), serde_json::json!(embedding)); // 1,536 floats
+fs.raw_query("UPDATE fn::sfs_resolve($path) SET embedding = $vector;", vars).await?;
+```
+
+The [search page](/docs/agent-filesystem/concepts/search) describes the ranking and the indexes, and the [sections page](/docs/agent-filesystem/concepts/sections-and-chunking) describes how files are split.
+
+## Workspaces, mailboxes and collaborative editing
+
+### Workspaces
+
+A workspace is a named branch of the files that one owner can diff against the base and merge back. See the [workspaces page](/docs/agent-filesystem/concepts/workspaces) for the model.
+
+<Synopsis label="Signature">
+fork_workspace(src: &str, dst: &str, owner: &str) -> Result<serde_json::Value>
+diff_workspace(branch: &str, owner: &str) -> Result<Vec<WorkspaceDiff>>
+merge_workspace(branch: &str, target: &str, owner: &str) -> Result<serde_json::Value>
+</Synopsis>
+
+| Method | Called by | Behaviour |
+| --- | --- | --- |
+| `fork_workspace` | CLI | `src` is `"main"` or the name of another workspace of the same owner, and it is not a path. The call creates one branch record for each file and returns `{"workspace", "base_branch", "count"}`. A name that exists gives `Database("... sfs:exists ...")`, and an unknown source gives `NotFound`. |
+| `diff_workspace` | CLI | Returns one `WorkspaceDiff` for each file. `modified` is true when the branch content differs from the base. `conflict` is true when the base file changed after the fork. |
+| `merge_workspace` | CLI | Copies the changed content into the base files, deletes the workspace and returns `{"merged", "into", "status": "ok"}`. A conflict gives `Conflict` with the path, and the workspace stays. `target` appears only in the result. |
+
+The library has no method that writes into a workspace, lists workspaces or discards one, so a workspace that it creates holds no changes. The Python and TypeScript SDKs have those methods.
+
+### Mailboxes
+
+A mailbox is a queue of messages for an agent. No program in the repository calls these three methods.
+
+<Synopsis label="Signature">
+send_mailbox(agent_id: &str, op: &str, payload: serde_json::Value, priority: i64) -> Result<String>
+claim_mailbox(agent_id: &str, worker_id: &str, lease_seconds: u64) -> Result<Option<MailboxMessage>>
+complete_mailbox(message_id: &str, result: serde_json::Value) -> Result<()>
+</Synopsis>
+
+- **`send_mailbox`:** Creates a record in the table `agent_mailbox` and returns its id as a string, such as `agent_mailbox:0clxwitoki4lk042ffo2`. The shipped schema does not define this table, so it has no defined fields or permissions. The Python and TypeScript SDKs use other mailbox forms, which the [mailboxes page](/docs/agent-filesystem/concepts/mailboxes) compares.
+- **`claim_mailbox`:** Returns the pending message with the highest `priority`, oldest first among equals, sets its state to `processing` and gives it a lease of `lease_seconds`. A message whose lease has expired can be claimed again. The payload comes back as a `Value::String` that holds JSON text, so parse it with `serde_json::from_str`.
+- **`complete_mailbox`:** Takes the full id that `send_mailbox` returned, sets the state to `completed` and stores the result as JSON text. It returns `Ok(())` for an unknown id.
+- **Claims are not exclusive.** The claim selects a message and then updates it with no condition on its state. When eight workers claimed one message at the same time, two or three of them received it in each of five rounds.
+
+### Collaborative editing
+
+<Synopsis label="Signature">
+enable_crdt(path: &str) -> Result<()>
+compact_crdt(path: &str) -> Result<()>
+</Synopsis>
+
+`enable_crdt` turns an existing text file into a collaborative document, and gives `NotFound` for a missing file. It records the current text as the first update of a log, and `stat` then reports `crdt: true`. After that, `write_text`, `append_text` and `edit_text` store each change as an update in the log, with the caller as its author, and raise the generation. `compact_crdt` folds the updates into one snapshot. Both are called by the CLI only.
+
+Three limits apply to a collaborative file:
+
+- `if_generation` is ignored, so a write with a stale generation succeeds.
+- `edit_text` replaces the first occurrence of `old`, where an ordinary file has every occurrence replaced. A missing `old` gives `Other`, not `NotFound`.
+- A non-ASCII character before the target text can corrupt an edit. In a test, `edit_text` changed `coffee` to `tea` in `say café now` followed by a line `coffee later`, and the file then read `say café nowteae later`. The [collaborative editing page](/docs/agent-filesystem/concepts/collaborative-editing) lists the cases and describes concurrent writers.
+
+## Large files
+
+<Synopsis label="Signature">
+upload_file(path: &str, data: &[u8], if_generation: Option<u64>, config: Option<FastCdcConfig>) -> Result<FileEntry>
+read_range(path: &str, offset: u64, length: u64) -> Result<Vec<u8>>
+du(path: &str) -> Result<UsageStats>
+gc_blobs(max_age_secs: u64) -> Result<usize>
+</Synopsis>
+
+| Method | Called by | Behaviour |
+| --- | --- | --- |
+| `upload_file` | CLI | Splits the data into content-defined chunks with FastCDC, names each chunk by its BLAKE3 hash, compresses a chunk with zstd when that makes it smaller, sends the chunks that the database does not hold for the caller, and commits a manifest. `FastCdcConfig` sets the chunk sizes: the default is 256 KiB at least, 1 MiB on average and 4 MiB at most, and `FastCdcConfig::small()` gives 4 KiB, 16 KiB and 64 KiB. Empty data goes through `write_bytes`. |
+| `read_range` | servers | Reads a byte range. For a chunked file it returns exactly `length` bytes, filled with zeros past the end of the file. For a small text file the database function reads `length` as an end position and not as a count: it returns the characters from `offset` up to the position `length`, so `read_range(path, 3, 4)` returns one character, and an `offset` at or beyond `length` returns an empty result. Use `read_text` for a small text file. For a small binary file it returns the whole file and ignores the range. It does not check the caller. |
+| `du` | CLI | Returns the usage that uploads recorded for the caller. Ordinary files are not counted, and `stored_bytes` equals `logical_bytes`. |
+| `gc_blobs` | CLI | Deletes the chunks that no file references and that are older than `max_age_secs`, and returns how many it deleted. |
+
+`upload_file` honours `if_generation` only when it replaces an ordinary text file, where a stale value gives `Conflict`. An uploaded file reports itself as a folder, so a second `upload_file` to the same path fails with `IsADirectory`, whatever `if_generation` holds. An upload over an existing text file succeeds, and in a test the file then reported `is_folder: true` and stayed at generation 1. Empty data is written with no generation check.
+
+An uploaded file has no `content` and no `file` bytes, which makes the database report it as a folder. In a test with 300,000 bytes, `stat` returned `is_folder: true`, `ls` listed a folder, and `read_text` and `read_bytes` returned nothing. `read_range` returned the correct bytes, including across a chunk boundary, so it is the only way to read the data back. Archives and backups decide by `is_folder`, so they treat the file as an empty folder. The [content storage page](/docs/agent-filesystem/concepts/content-storage) describes the chunk store, and the [quotas and usage page](/docs/agent-filesystem/operations/quotas-and-usage) describes `du`.
+
+## Analysis helpers
+
+These methods store and read the records that describe a file: its symbols, entities, table rows, fingerprint and jobs. The library runs none of them when a file is written. The gateway runs a subset of them after a write that goes through the gateway, as the [understanding pipeline page](/docs/agent-filesystem/concepts/understanding-pipeline#what-the-gateway-does-after-a-write) describes.
+
+<Synopsis label="Signature">
+index_file_symbols(path: &str) -> Result<usize>
+symbols(path: &str) -> Result<Vec<CodeSymbol>>
+definition(name: &str) -> Result<Vec<CodeSymbol>>
+record_entities(path: &str, entities: &[ExtractedEntity]) -> Result<()>
+entities(path: &str) -> Result<Vec<EntityRecord>>
+digest(path: &str) -> Result<FolderDigest>
+pack(question: &str, budget: usize, scope: Option<&str>) -> Result<PackResult>
+load_tabular_file(path: &str, max_rows: usize) -> Result<usize>
+query_table(path: &str, limit: Option<usize>) -> Result<Vec<TableRow>>
+set_simhash(path: &str, simhash: u64) -> Result<()>
+check_near_duplicates(text: &str, threshold: f64) -> Result<Vec<(String, f64)>>
+claim_jobs(worker_id: &str, kinds: &[&str], limit: usize) -> Result<Vec<PipelineJob>>
+complete_job(job_id: &str, error: Option<&str>) -> Result<()>
+</Synopsis>
+
+| Method | Called by | Behaviour |
+| --- | --- | --- |
+| `index_file_symbols` | CLI, servers | Reads the file, extracts its symbols and replaces the stored ones. It returns how many it stored. A Python file with a class, a method and a function gave 3. |
+| `symbols` | CLI | Returns the stored symbols of a file or of a folder subtree. The list is empty until `index_file_symbols` has run. |
+| `definition` | CLI | Finds symbols by name or qualified name, at most 20. |
+| `record_entities` | servers | Upserts each entity and relates the file to it with a new `mentions` record on every call, so calling it twice for one file doubles the relations. |
+| `entities` | CLI | Returns the entities that the stored `mentions` records name for a file or a folder. |
+| `digest` | CLI | Returns a summary for a folder: a line such as `Folder /proj containing 2 items.`, the readable files and the subfolders. A file gives a `Database` error with `sfs:not_a_directory`. |
+| `pack` | CLI | Searches for the files that match a question and returns them as blocks within a token `budget`, together with a formatted string. The blocks carry no content: the library reads a field that the database function does not return, so each block is an empty code fence. |
+| `load_tabular_file` | CLI | Parses a CSV or TSV file that is already in the filesystem into records, one for each row, and returns how many rows it parsed. |
+| `query_table` | CLI | Returns the loaded rows of a file as JSON objects, 100 rows by default. |
+| `set_simhash` | servers | Stores a 64-bit SimHash of the text in the field `meta.simhash` of the file. |
+| `check_near_duplicates` | CLI | Compares a text with every stored fingerprint and returns the paths whose similarity is at least `threshold`, highest first. The similarity is 1 minus the Hamming distance between the two 64-bit fingerprints, divided by 64, so scores move in steps of 1/64 and the same text scores 1.0. |
+| `claim_jobs` | CLI, servers | Claims pending jobs and marks them `processing` for 60 seconds. The database queues the kinds `detect`, `chunk` and `symbols` on every content change. |
+| `complete_job` | CLI, servers | Marks a job `completed`, or `failed` when `error` is set. |
+
+The `understanding` module also exports the pure functions that these methods use: `detect_type_and_language`, `extract_symbols`, `extract_entities_and_tags`, `extract_entities`, `split_markdown_sections`, `compute_simhash`, `simhash_similarity`, `parse_tabular_records`, `estimate_tokens`, `pack_blocks`, and two notebook functions that nothing calls. The `chunking` module exports `chunk_markdown`, `chunk_lines`, `chunk_text`, `chunk_data`, `compute_merkle_root` and `decompress_chunk`, and the `crdt` module exports `CrdtDoc`. They take text or bytes and need no connection.
+
+## Trust and operations
+
+These methods manage groups, share links, credentials, legal holds, webhook records, statistics, archives and encryption. The pages on [groups and sharing](/docs/agent-filesystem/security/groups-and-sharing), [credentials](/docs/agent-filesystem/security/credentials), [encryption and legal hold](/docs/agent-filesystem/security/encryption-and-legal-hold), [webhooks](/docs/agent-filesystem/operations/webhooks) and [backup and restore](/docs/agent-filesystem/operations/backup-and-restore) describe the features. This section lists the Rust API and how each method behaves.
+
+### Groups, shares and credentials
+
+<Synopsis label="Signature">
+create_group(name: &str, description: Option<&str>) -> Result<UserGroupRecord>
+list_groups() -> Result<Vec<UserGroupRecord>>
+add_group_member(group: &str, user: &str) -> Result<()>
+remove_group_member(group: &str, user: &str) -> Result<()>
+list_group_members(group: &str) -> Result<Vec<GroupMemberRecord>>
+get_user_groups(user: &str) -> Result<Vec<String>>
+create_share(path: &str, mode: &str, duration_secs: Option<u64>) -> Result<ShareRecord>
+revoke_share(token_or_id: &str) -> Result<()>
+resolve_share(token: &str) -> Result<Option<ShareRecord>>
+list_shares() -> Result<Vec<ShareRecord>>
+create_credential(kind: &str, identifier: &str, secret_hash: Option<&str>, user_id: &str, meta: Option<serde_json::Value>) -> Result<()>
+resolve_credential(kind: &str, identifier: &str) -> Result<Option<CredentialRecord>>
+revoke_credential(kind: &str, identifier: &str) -> Result<bool>
+list_credentials(kind: Option<&str>) -> Result<Vec<CredentialRecord>>
+</Synopsis>
+
+| Methods | Called by | Behaviour |
+| --- | --- | --- |
+| `create_group`, `list_groups`, `list_group_members`, `remove_group_member` | CLI | `create_group` returns the existing group when the name is taken. |
+| `add_group_member` | CLI | Creates the group when it does not exist, so a misspelt group name creates a new group. |
+| `get_user_groups` | None | Returns the names of the groups that a user belongs to. |
+| `create_share` | CLI | Returns a record with a random 32-character token, and an expiry when `duration_secs` is set. The schema comment names `ro` and `append` as the two modes, and nothing validates `mode`: the value `bogus` was stored as given. |
+| `resolve_share`, `list_shares`, `revoke_share` | CLI | `resolve_share` returns `None` for an unknown, revoked or expired token. Only the creator or `root` can revoke, and anyone else gets `Ok(())` and the share stays valid. No code in this release opens a file with a share token. |
+| `create_credential` | CLI | Stores the record as given, so `secret_hash` holds a password as plain text unless you pass a hash. The kind must be one of `webdav`, `s3`, `ssh`, `slack`, `teams` or `bearer`. Any other kind returns `Ok(())` and stores nothing. |
+| `resolve_credential` | servers | Returns the enabled credential, or `None`. The gateway and the WebDAV and S3 servers use it to authenticate a request. |
+| `revoke_credential`, `list_credentials` | CLI | `revoke_credential` disables the credential and returns whether it found one. |
+
+### Legal holds, webhooks, statistics and archives
+
+<Synopsis label="Signature">
+set_legal_hold(path: &str, enabled: bool) -> Result<FileEntry>
+is_legal_hold(path: &str) -> Result<bool>
+create_webhook(path_pattern: &str, events: &[&str], url: &str, secret: &str) -> Result<WebhookRecord>
+list_webhooks() -> Result<Vec<WebhookRecord>>
+delete_webhook(webhook_id: &str) -> Result<()>
+log_webhook_delivery(delivery: &WebhookDeliveryRecord) -> Result<()>
+get_stats() -> Result<FsStats>
+read_virtual_stats(path: &str) -> Option<String>
+export_tree(path: &str, format: ArchiveFormat, as_of: Option<DateTime<Utc>>) -> Result<Vec<u8>>
+import_tree(target_prefix: &str, archive_bytes: &[u8], format: ArchiveFormat) -> Result<ImportReport>
+import_git(opts: &GitImportOptions) -> Result<GitImportResult>
+record_git_commit(commit: &GitCommit, target_root: &str) -> Result<()>
+write_encrypted(path: &str, data: &[u8], key: &[u8; 32], key_id: Option<&str>) -> Result<()>
+read_encrypted(path: &str, key: &[u8; 32]) -> Result<Vec<u8>>
+</Synopsis>
+
+| Methods | Called by | Behaviour |
+| --- | --- | --- |
+| `set_legal_hold`, `is_legal_hold` | CLI | A hold is the field `meta.legal_hold`. `is_legal_hold` is true when the path or a folder above it is held, and false for a path that does not exist. `rm` refuses a held path. |
+| `create_webhook`, `list_webhooks` | CLI | `create_webhook` stores a record with the caller as owner. `list_webhooks` returns every record for `root` and only the caller's own for other callers. |
+| `delete_webhook` | CLI | Takes the id without the `webhook:` prefix. The full id that `WebhookRecord.id` holds deletes nothing and returns `Ok(())`. |
+| `log_webhook_delivery` | None | Stores a delivery record. Only `WebhookDispatcher` calls it. The method expects the webhook id without the `webhook:` prefix, as `delete_webhook` does. The dispatcher passes the full id, so the records that it stores hold the prefix twice in `webhook_id` and link to no webhook record. |
+| `get_stats` | CLI | Counts files, folders, bytes, shares, webhooks, groups and legal holds. `total_chunks` counts a table that the shipped schema does not define, so it is 0, and `dedup_ratio` is then 1.0. |
+| `read_virtual_stats` | CLI | Returns the statistics as JSON for `/.surrealfs/stats` or `/stats`, Prometheus text for `/.surrealfs/metrics` or `/metrics`, and `None` for any other path. The leading slash is optional. |
+| `export_tree`, `import_tree` | CLI | Package a subtree as `ArchiveFormat::Tar`, `TarGz` or `Zip` in memory. `ArchiveFormat` parses `tar`, `tar.gz`, `targz`, `tgz` and `zip`. They keep paths and bytes. `as_of` has no effect. |
+| `import_git` | CLI | Copies the working tree of a local repository into the filesystem and records its commits with `git log`, which needs the `git` program. It skips every path that has a segment named `.git`, `node_modules`, `target`, `.venv`, `venv`, `__pycache__`, `.DS_Store`, `dist`, `build` or `.turbo`, at any depth and whether or not Git tracks the file, and every file whose name ends in `.pyc`, `.swp` or `.DS_Store`. It also reads the `.gitignore` in the top folder only, and treats each line as a simple rule: a line that starts with `*` matches a file name that ends with the rest of the line, and any other line matches a path, a folder or a name that equals it. A negation with `!`, a nested `.gitignore` and a `*` inside a path are not interpreted. The call records the latest 50 commits by default, and `max_commits` changes the number. In a test, a repository with 55 commits gave 50 recorded commits, and running the import twice recorded the commits twice. The `branch` field of `GitImportOptions` is not read. |
+| `record_git_commit` | `import_git` | Stores one commit record. |
+| `write_encrypted`, `read_encrypted` | CLI | Encrypt with AES-256-GCM and a 32-byte key that your program supplies. The ciphertext is stored as the bytes of the file, with the algorithm, the nonce and the `key_id` label in `meta`. The key is not stored. A wrong key gives `PermissionDenied`, and `read_text` of the file gives a `Database` error. |
+
+### Backups, webhook delivery and connectors
+
+Three more items are exported as free functions and types:
+
+- **`create_backup(fs, root_path, backup_dir)` and `restore_backup(fs, backup_dir, target_prefix, as_of)`:** Write a folder tree into a directory on disk, as one `blobs/<hash>.blob` file for each distinct content and a `manifest.json`, and read it back under another prefix. Both are called by the CLI. `as_of` skips files created after that time. Both use `std::fs`.
+- **`WebhookDispatcher`:** Sends an event to every active webhook whose events and path pattern match. Each request is a `POST` with the headers `X-SurrealFS-Event`, `X-SurrealFS-Path`, `X-SurrealFS-Timestamp` and `X-SurrealFS-Signature`. The signature header holds `sha256=` followed by the hexadecimal HMAC-SHA256 of the body, keyed with the webhook secret. The dispatcher makes up to 3 attempts (`max_retries`), waits `initial_backoff_ms` (100) milliseconds after the first one and doubles the wait after each later one, times each request out after 10 seconds, and records the outcome in `webhook_delivery`. `matches_pattern` returns true for the patterns `*` and `**` whatever the path. Inside a longer pattern, `*` matches one path segment and `**` matches any depth. For an unreachable URL it returned a delivery with `success: false` and `attempts: 3`. No command and no server calls the dispatcher, so nothing sends a webhook when a file changes. See the [webhooks page](/docs/agent-filesystem/operations/webhooks).
+- **`Connector`, `ConnectorManager` and four adapters:** `GoogleDriveConnector`, `NotionConnector`, `GitHubConnector` and `SlackConnector` each hold a `Vec<SourceDocument>` that you give to `new`, and `sync` mirrors it under `/sources/<name>/`. The adapters make no network requests, and no program uses them.
+
+## Raw SurrealQL
+
+`raw_query` runs a SurrealQL string with variables on the connection and returns one `Result<serde_json::Value>` for each statement. A statement that fails is an `Err` entry, and a query that cannot be parsed is an `Err` from the call itself. `client()` returns the `DbClient`, whose `query` method builds a query that takes `bind` calls and returns a `DbResponse` when awaited. `take` converts the result of one statement into any type that implements `serde::de::DeserializeOwned`, and unlike most methods on this page it reports the database's own error.
+
+```rust title="src/main.rs"
+use serde_json::{json, Map, Value};
+use surrealfs_core::{ConnectOptions, Result, SurrealFs};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let fs = SurrealFs::connect(ConnectOptions {
+        url: "ws://localhost:8000".to_string(),
+        user: Some("root".to_string()),
+        pass: Some("secret".to_string()),
+        ns: "agents".to_string(),
+        db: "workspace".to_string(),
+        caller: Some("alice".to_string()),
+    })
+    .await?;
+
+    // The result holds one entry for each statement in the query.
+    let mut vars = Map::new();
+    vars.insert("prefix".to_string(), json!("/projects/"));
+    let statements = fs
+        .raw_query(
+            "SELECT path, generation FROM file \
+             WHERE string::starts_with(path, $prefix) AND is_folder = false;",
+            vars,
+        )
+        .await?;
+    for statement in statements {
+        println!("{}", statement?);
+    }
+
+    // The query builder gives typed access to the same connection.
+    let mut response = fs
+        .client()
+        .query("RETURN fn::sfs_stat($path);")
+        .bind(("path", "/projects/atlas/plan.md"))
+        .await?;
+    let entry: Value = response.take(0)?;
+    println!("generation {}", entry["generation"]);
+    Ok(())
+}
+```
+
+```text title="Output"
+[{"generation":2,"path":"/projects/atlas/plan.md"}]
+generation 2
+```
+
+The database functions that the methods call are named `fn::sfs_*`, for example `fn::sfs_stat`, `fn::sfs_ls` and `fn::sfs_hybrid_search`. The [SurrealQL functions reference](/docs/agent-filesystem/reference/surrealql-functions) lists them and the [schema reference](/docs/agent-filesystem/reference/schema) lists the tables. A gateway runs `raw_query` on its own connection for every `/api/rpc` request, and the same method works through all three transports.
+
+## Which programs call which methods
+
+The tables above show which method each program calls. Taken together they show these patterns:
+
+- **The CLI** calls the file, history, lease, workspace, collaborative editing, upload, analysis, trust and operations methods, and it calls `connect` or, when `SURREALFS_SERVER_URL` is set, `connect_remote`. It does not call `stat`, `append_text`, `edit_text`, `write_bytes`, `read_range`, `ls_recursive`, `raw_query` or any search method except `grep`.
+- **The gateway and the other servers** call the file methods, `search_hybrid`, `raw_query`, `with_caller`, `read_range`, `resolve_credential`, the job methods and the methods that write symbols, entities and fingerprints after a write. The gateway calls `connect_http` and `apply_schema` when it starts.
+- **Library only:** `search_sections`, the three mailbox methods, `get_user_groups`, `WebhookDispatcher` (with `log_webhook_delivery`, which only the dispatcher calls), `ConnectorManager` and the four connector adapters have no caller in the repository outside its tests.
+- **Called, with no effect:** The gateway's `search_text` tool calls `search`, which fails for a system credential. After a write, the gateway calls `index_file_sections`, and `set_embedding` too when it has an embedding model configured. Neither stores anything against the shipped schema, and the gateway ignores their results.
+
+The `surrealfs-fuse`, `surrealfs-shim` and `surrealfs-sim` crates also depend on `surrealfs-core` and call a few of the file and lease methods. The [limits and caveats page](/docs/agent-filesystem/operations/limits-and-caveats) covers their status.
+
+## WebAssembly
+
+The crate type-checks for the `wasm32-unknown-unknown` target. The commands `cargo check --target wasm32-unknown-unknown -p surrealfs-core` and `cargo check --target wasm32-unknown-unknown -p surrealfs-server --lib` finish without errors, and `cargo build --target wasm32-unknown-unknown -p surrealfs-server --lib` produces a `surrealfs_server.wasm` module. The `just worker-check` recipe runs `cargo check` for both crates with this target.
+
+On `wasm32` the crate drops its native-only dependencies, and these behaviours change:
+
+| Area | On `wasm32` |
+| --- | --- |
+| Transport | `connect` uses HTTP, and `ws://` and `wss://` URLs become `http://` and `https://`. The `sfs://`, `sfs+http://` and `sfs+https://` URLs still go to a gateway. The WebSocket client and `DbClient::Ws` do not exist, and the SurrealDB Rust SDK is not a dependency. `connect_http` and `connect_remote` work as on native targets. |
+| Compression | `chunk_data` stores every chunk uncompressed. `decompress_chunk` returns an `Unsupported` error for a chunk that a native client compressed with zstd, so `read_range` fails on such a file. |
+| Webhook delivery | `WebhookDispatcher` has no 10-second timeout and does not wait between attempts, so the 3 attempts run one after another. |
+| Randomness | `encrypt_bytes` takes its nonce from the JavaScript host through `getrandom` with its `js` feature. |
+| The `Connector` trait | Its futures are not required to be `Send`. |
+
+`create_backup`, `restore_backup` and `import_git` compile, but they read and write local files and run the `git` program, which this target does not provide, so they cannot work in a Worker. Everything that talks to the database goes through `reqwest`, which uses the host's `fetch` on this target.
+
+The repository's Cloudflare Worker runs the gateway, which is the `surrealfs-server` crate compiled to this target, and the Worker connects to the database with `connect_http`. The [deployment page](/docs/agent-filesystem/operations/deployment#run-as-a-cloudflare-worker) gives the build steps, including the `wasm-bindgen` step that the Worker module needs, and lists the Worker's variables.
+
+## See also
+
+- [Python SDK](/docs/agent-filesystem/interfaces/python-sdk) and [TypeScript SDK](/docs/agent-filesystem/interfaces/typescript-sdk): the other two client libraries.
+- [Command-line reference](/docs/agent-filesystem/interfaces/command-line): the `surrealfs-rs` commands that call this crate.
+- [Gateway server](/docs/agent-filesystem/interfaces/gateway-server) and [remote clients](/docs/agent-filesystem/interfaces/remote-clients): run a gateway and connect to it.
+- [Deployment](/docs/agent-filesystem/operations/deployment): run the gateway on a host or as a Cloudflare Worker.
+- [Permissions](/docs/agent-filesystem/security/permissions) and [record access](/docs/agent-filesystem/security/record-access): how the database enforces access.
+- [Limits and caveats](/docs/agent-filesystem/operations/limits-and-caveats): what is ready, what works with limits and what is not available.
+- [Architecture](/docs/agent-filesystem/welcome/architecture): how the clients, the schema and the servers fit together.

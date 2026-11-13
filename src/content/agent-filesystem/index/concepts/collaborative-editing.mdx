@@ -1,0 +1,414 @@
+---
+position: 8
+title: Collaborative editing
+description: "How a file opts in to CRDT mode in Agent Filesystem: the Yjs update log and snapshot, enable_crdt and compact_crdt, what concurrent edits produce, and the limitations of this release."
+---
+
+# Collaborative editing
+
+Collaborative editing is an opt-in mode in which a file's text is stored as a **CRDT** (conflict-free replicated data type) instead of as a single value that each write replaces. A CRDT document is rebuilt from a log of small updates. Any set of updates can be applied in any order, and every replica that has applied the same set holds the same text. Agent Filesystem uses [Yjs](https://yjs.dev) documents for this, with one text type per file.
+
+The mode is meant for files that several agents edit over time, such as a shared runbook or a running collection of notes. A file that does not need it keeps the default behaviour, where the [generation counter](/docs/agent-filesystem/concepts/concurrency-and-leases) detects stale writes.
+
+> [!WARNING]
+> In this release the Yjs library merges updates, but Agent Filesystem does not hand it the updates of two writers at the same time. Each call that changes a collaborative file reads the log, applies its change and stores one update under the next sequence number. When two calls do this at the same time, a unique index accepts one of them and rejects the others with an error, so two overlapping calls do not merge. A rejected call cannot be repeated safely in the Python library, because it can leave `content` different from the text that the log produces, and a retry can store its change twice. See [Concurrent calls](#concurrent-calls) for an approach that serialises the writers with a lease, and [Non-ASCII text](#non-ascii-text) for a data-corruption limitation in the Python and Rust implementations.
+
+The examples on this page use the Python library, installed as described in the [Python quickstart](/docs/agent-filesystem/quickstarts/python), which also starts the server with `surreal start --user root --pass secret memory`. Collaborative editing needs the `crdt` extra, which adds the `pycrdt` package. The TypeScript SDK uses `yjs`, and the Rust library uses `yrs`.
+
+```bash
+pip install "surrealfs[crdt] @ git+https://github.com/surrealdb/surrealfs.git@next"
+```
+
+Without the extra, `enable_crdt` and every write to a collaborative file raise `RuntimeError`, with a message that starts `CRDT support requires pycrdt` and names the `crdt` extra. The examples use an empty database named `collaboration`, and the outputs assume that it holds no other files. They share the connection below, and later snippets reuse `alice` and `bob`. They use top-level `await`, so run them in `python -m asyncio` or wrap them in an `async` function.
+
+```python
+from surrealdb import AsyncSurreal
+from surrealfs import SurrealFs, apply_schema
+
+db = AsyncSurreal("ws://localhost:8000/rpc")
+await db.signin({"username": "root", "password": "secret"})
+await db.use("agents", "collaboration")
+await apply_schema(db)
+
+alice = SurrealFs(db, user="alice")
+bob = SurrealFs(db, user="bob")
+```
+
+> [!NOTE]
+> Agent Filesystem is in beta. The API, schema and command-line interface may change in breaking ways between releases. This page describes the behaviour of the `next` branch of the SurrealFS repository.
+
+## Enable collaborative editing for a file
+
+Collaborative editing is a flag on a single file, stored in the boolean field `crdt` of the `file` record. It defaults to `false`. The `enable_crdt` method sets it for a text file, and the caller needs write permission on that file.
+
+```python
+await alice.write_text(
+    "/runbooks/restart.md",
+    "# Restart a worker\n\n1. Check the queue\n2. Restart the worker\n",
+    create_parents=True,
+)
+await alice.enable_crdt("/runbooks/restart.md")
+
+print((await alice.stat("/runbooks/restart.md")).crdt)
+```
+
+```text title="Output"
+True
+```
+
+In a single request, `enable_crdt` builds a document from the current text and makes three changes:
+
+- A snapshot in `file_crdt_snapshot` with `upto` set to 1, which holds the initial document state.
+- An update in `file_crdt_update` with `seq` set to 1, which holds the same bytes.
+- The flag on the file, `crdt = true`.
+
+Calling `enable_crdt` on a file that already has the flag does nothing. A folder raises `IsADirectory`, a missing path raises `NotFound`, and a caller without write permission raises `PermissionDenied`. The flag cannot be turned off, because no implementation provides a way to do it.
+
+> [!NOTE]
+> `enable_crdt` succeeds on a binary file and sets the flag, but the document starts empty, and `read_text`, `append_text` and `edit` then raise `NotATextFile`. A `write_text` call replaces the bytes with the new text and keeps the binary content type. Enable the mode on text files only.
+
+## Work with a collaborative file
+
+After the flag is set, the same methods that change a text file go through the update log:
+
+| Call | What it stores |
+| --- | --- |
+| `write_text` | A replacement. The update deletes the whole text and inserts the new text. |
+| `append_text` | An insertion at the end of the text. |
+| `edit` | A deletion of the first occurrence of `old` and an insertion of `new`. Only the first occurrence changes, whatever the `replace_all` option says. |
+
+Each call creates one record in `file_crdt_update`, and then writes the resulting text into the `content` field of the file. That field is a cache of the document. The `read_text` method, search and indexing all read it, and the generation counter is computed from it, so the generation increases by 1 for each call that changes the text.
+
+In the example below, Bob appends a step and Alice edits another one. The two changes are independent.
+
+```python
+await bob.append_text("/runbooks/restart.md", "3. Confirm the alert clears\n")
+await alice.edit("/runbooks/restart.md", "Restart the worker", "Restart the worker pool")
+
+print(await alice.read_text("/runbooks/restart.md"))
+print((await alice.stat("/runbooks/restart.md")).generation)
+```
+
+```text title="Output"
+# Restart a worker
+
+1. Check the queue
+2. Restart the worker pool
+3. Confirm the alert clears
+
+3
+```
+
+The log has one record for each call, and the `author` field shows who made it.
+
+```surql
+SELECT seq, author, base_gen, update_bytes.len() AS update_size FROM file_crdt_update WHERE file_id.path = '/runbooks/restart.md' ORDER BY seq;
+```
+
+```surql title="Sample output"
+[
+	{
+		author: 'alice',
+		base_gen: 1,
+		seq: 1,
+		update_size: 81
+	},
+	{
+		author: 'bob',
+		base_gen: 1,
+		seq: 2,
+		update_size: 51
+	},
+	{
+		author: 'alice',
+		base_gen: 2,
+		seq: 3,
+		update_size: 66
+	}
+]
+```
+
+Other calls treat a collaborative file as follows:
+
+| Operation | Effect |
+| --- | --- |
+| `mv` | The flag and the log stay with the file, because they are keyed by the file record. |
+| `cp` | The copy is an ordinary file with `crdt` set to `false`, and the log is not copied. |
+| `restore` | Goes through `write_text`, so the earlier content becomes a new replacement update. |
+| `write_bytes` | Replaces the content with bytes, leaves the flag set and writes no update. A following `append_text` raises `NotATextFile`. |
+| `merge_workspace` | Writes the merged text into `content` and writes no update, so the log does not contain it. The next call that changes the file rebuilds `content` from the log and discards the merged text. |
+| `rm` | Removes the file. The records in `file_crdt_update` and `file_crdt_snapshot` stay in their tables. |
+
+### Non-ASCII text
+
+> [!WARNING]
+> In the Python library, `edit` can corrupt a collaborative file whose text contains characters outside ASCII, and in the Rust implementation `edit_text` and `write_text` can. The Yjs libraries that these implementations use measure positions in UTF-8 bytes, and the code passes character counts. The TypeScript implementation uses UTF-16 offsets, which match what its code passes, and handled the same texts correctly in testing.
+
+The damage depends on where the non-ASCII character is. In the Python library, an `edit` goes wrong when a non-ASCII character comes before the target, and also when the text to replace contains one. In the first case the call changes the wrong characters:
+
+```python
+await alice.write_text("/notes/greeting.md", "héllo world\n", create_parents=True)
+await alice.enable_crdt("/notes/greeting.md")
+await alice.edit("/notes/greeting.md", "world", "WORLD")
+
+print(repr(await alice.read_text("/notes/greeting.md")))
+```
+
+```text title="Output"
+'hélloWORLDd\n'
+```
+
+The expected text is `'héllo WORLD\n'`. In the second case the text after the target is deleted:
+
+```python
+await alice.write_text("/notes/menu.md", "say cafe now\ncafé later\n")
+await alice.enable_crdt("/notes/menu.md")
+await alice.edit("/notes/menu.md", "café", "coffee")
+
+print(repr(await alice.read_text("/notes/menu.md")))
+```
+
+```text title="Output"
+'say cafe now\ncoffee'
+```
+
+The expected text is `'say cafe now\ncoffee later\n'`. In the same tests, Chinese text before the target gave the same kind of result as the accented letter, and an emoji before the target made the call raise `pyo3_runtime.PanicException`. That exception derives from `BaseException`, so an `except Exception` clause does not catch it. A non-ASCII character in `new` with an ASCII `old` and an ASCII prefix gave the correct text. In the Rust command, `surrealfs-rs write` on a collaborative file that held `héllo wörld` with the argument `x` left `xld`.
+
+Appends were not affected in any of the three implementations, and neither was `write_text` in Python on the strings that were tested. Do not call `edit` on a collaborative file that holds non-ASCII text, except through the TypeScript SDK.
+
+## The update log and the snapshot
+
+Three tables hold the state of the mode.
+
+| Table | Fields | Purpose |
+| --- | --- | --- |
+| `file_crdt_update` | `file_id`, `seq`, `update_bytes`, `author`, `base_gen`, `created_at` | The append-only log. A unique index on `(file_id, seq)` allows one update for each sequence number of a file. |
+| `file_crdt_snapshot` | `file_id`, `upto`, `state`, `author`, `created_at` | At most one snapshot for each file. It holds the full document state up to the sequence number `upto`. |
+| `file_crdt` | `file_id`, `peer_id`, `peer_owner`, `state_vec`, `clock`, `updated_at` | Defined for peer state. No implementation reads or writes this table. |
+
+The updates are Yjs version 1 binary updates, and each file holds a single text type named `text`. To load a document, an implementation reads the snapshot, applies it, and then applies every update with `seq` greater than `upto`, in order. The next sequence number is the larger of `upto` and the highest `seq`, plus 1.
+
+Three details help when reading the log:
+
+- **`author`:** A string that the client supplies: the `user` of the Python `SurrealFs`, the `user` of the TypeScript client, or the `--caller` option of the Rust command, which falls back to the `--user` option and so to `root` by default. Without [record authentication](/docs/agent-filesystem/security/record-access), the database does not verify it. With record authentication, it must equal the authenticated user.
+- **`base_gen`:** The generation of the file when the writer loaded the document. Nothing reads it, so it is informational.
+- **Updates are not editable.** Under record authentication the table permits create and select only, which is why compaction cannot delete from it in that mode.
+
+## Compact the log
+
+The log grows by one record for each call. The `compact_crdt` method folds it into the snapshot: it loads the document, writes a snapshot with `upto` set to the highest sequence number, and deletes the updates up to that number. Compaction is manual, and no code runs it automatically.
+
+```python
+await alice.compact_crdt("/runbooks/restart.md")
+await bob.append_text("/runbooks/restart.md", "4. Close the ticket\n")
+```
+
+```surql
+SELECT seq, author FROM file_crdt_update WHERE file_id.path = '/runbooks/restart.md' ORDER BY seq;
+```
+
+```surql title="Sample output"
+[
+	{
+		author: 'bob',
+		seq: 4
+	}
+]
+```
+
+```surql
+SELECT upto, author FROM file_crdt_snapshot WHERE file_id.path = '/runbooks/restart.md';
+```
+
+```surql title="Sample output"
+[
+	{
+		author: 'alice',
+		upto: 3
+	}
+]
+```
+
+After compaction the log holds only the updates that came later, numbered after `upto`, and the file continues to accept edits. The `compact_crdt` method returns without doing anything for a file that is not collaborative, and it needs write permission on the file.
+
+> [!NOTE]
+> Record authentication changes compaction in two ways. The `file_crdt_update` table does not allow deletes, so compaction writes the snapshot, but the delete removes nothing and raises no error, and the log keeps its records. Loading stays correct because it skips every update at or below `upto`, but the space is not reclaimed. The snapshot can also be changed only by its author, who is the user that enabled the mode. For any other user, `compact_crdt` returns without changing anything.
+
+## What merging produces
+
+The merge rules belong to the Yjs library, and they apply to whichever set of updates a document receives. The example below uses `pycrdt` directly, to show what two replicas that edit at the same time end up with. It does not call Agent Filesystem. Each replica starts from the same text, makes one change without seeing the other, and then applies the other replica's update.
+
+```python
+from pycrdt import Doc, Text
+
+
+def replica_from(update):
+    doc = Doc()
+    doc.apply_update(update)
+    return doc
+
+
+def edit(doc, change):
+    before = doc.get_state()
+    change(doc.get("text", type=Text))
+    return doc.get_update(before)
+
+
+def text_of(doc):
+    return str(doc.get("text", type=Text))
+
+
+origin = Doc()
+origin_text = origin.get("text", type=Text)
+origin_text += "Line 1\nLine 2\nLine 3\n"
+base = origin.get_update()
+
+# Two replicas change different lines.
+a, b = replica_from(base), replica_from(base)
+update_a = edit(a, lambda t: t.insert(len("Line 1"), " (reviewed)"))
+update_b = edit(b, lambda t: t.insert(len("Line 1\nLine 2\nLine 3"), " (approved)"))
+a.apply_update(update_b)
+b.apply_update(update_a)
+print(repr(text_of(a)))
+print(text_of(a) == text_of(b))
+
+# Both replicas replace the whole text.
+a, b = replica_from(base), replica_from(base)
+
+
+def replace_all(new):
+    def change(t):
+        del t[:]
+        t += new
+    return change
+
+
+update_a = edit(a, replace_all("From A\n"))
+update_b = edit(b, replace_all("From B\n"))
+a.apply_update(update_b)
+b.apply_update(update_a)
+print(repr(text_of(a)))
+print(text_of(a) == text_of(b))
+```
+
+```text title="Sample output"
+'Line 1 (reviewed)\nLine 2\nLine 3 (approved)\n'
+True
+'From A\nFrom B\n'
+True
+```
+
+Two replicas that exchange updates follow these rules:
+
+- **Merging works on positions in the text.** The two changes to different lines both survive, because they touch different positions.
+- **Two changes at the same position both apply.** Two replicas that replace the same line produce both replacements one after the other, such as `Line 2 (edited by A)Line 2 (edited by B)`, with no conflict reported.
+- **Replacements of the whole text merge into a concatenation.** Two replicas that each delete the whole text and insert a new one end with both new texts, one after the other, as the second part of the example shows.
+- **Concurrent insertions at one position have no predictable order.** The order differs between runs, but every replica that applies both updates produces the same order. Two replicas that both append at the end of a text follow this rule.
+- **The merge has no knowledge of structure.** It does not parse Markdown, JSON or code, so a merged document can be invalid in the format it is written in.
+
+These rules describe replicas that exchange updates. They do not describe what two overlapping calls to Agent Filesystem produce in this release: the second call is rejected with an error, as [Concurrent calls](#concurrent-calls) shows, and two sequential `write_text` calls are two replacements, so the second replaces the first and does not concatenate with it.
+
+Use `append_text` and `edit` with small, specific changes for collaborative files. Avoid `write_text` on a file that more than one agent writes, because a write is a replacement.
+
+## Concurrent calls
+
+The merge rules above apply when updates from different replicas reach one document. Through the Agent Filesystem API, each call is a read-modify-write cycle: it loads the document, applies its change locally, and creates an update with `seq` equal to the next number. Two calls that load before either one stores compute the same `seq`. The unique index `idx_crdt_seq` accepts one and rejects the other.
+
+```python
+import asyncio
+from collections import Counter
+
+
+async def try_append(n):
+    try:
+        await alice.append_text("/runbooks/restart.md", f"note {n}\n")
+        return "returned"
+    except Exception as error:
+        return type(error).__name__
+
+
+print(Counter(await asyncio.gather(*(try_append(n) for n in range(10)))))
+```
+
+```text title="Sample output"
+Counter({'QueryError': 8, 'returned': 2})
+```
+
+In local runs of ten concurrent `append_text` calls, at most three calls returned normally and the rest raised an error. The error depends on the implementation:
+
+| Implementation | Error for a rejected call |
+| --- | --- |
+| Python | `QueryError` with a message such as ``Database index `idx_crdt_seq` already contains [...]``. It is not a `ConflictError`, and its `retryable` flag is `False`. |
+| TypeScript | `SurrealFsError` with the same index message, or `ConflictError` with `Transaction conflict: Write conflict`. Both forms occurred in four local runs of ten calls, and the content matched the log afterwards. |
+| Rust | `SurrealFsError::Database` with the `idx_crdt_seq` message, or `SurrealFsError::Conflict` for a transaction conflict. Both forms occurred when ten `surrealfs-rs write` processes overlapped, and the content matched the log afterwards. The mutation runs as one block, so a rejected log record stops the update of the file. |
+
+The library does not retry, and a rejected caller has to run its whole call again. Two behaviours make a retry loop unsafe in Python:
+
+- **A rejected call can leave `content` different from the text that the log produces.** The Python library sends the log record and the update of `content` as two statements without a transaction. When the log record is rejected, the update of `content` still runs, so `content` holds the loser's local text. The next successful call computes `content` from the log again and replaces it. Until then, `read_text` returns text that the log does not contain. In local runs of the ten overlapping appends above, `content` differed from the text that the log produces in most runs. In the TypeScript and Rust implementations the two statements are one block, and a rejected log record stops the update.
+- **An error does not prove that the update was not stored.** When the database reports a transaction conflict, the Python library sends the request again. If the first attempt had already stored the log record, the second attempt fails on the same sequence number, and the caller receives `QueryError` for an update that exists. A caller that then retries stores its change a second time. In local tests of ten appenders that retried on any error, at least one line was duplicated in between 9 and 12 of 12 runs, depending on the delay between retries. Every line was stored at least once.
+
+The dependable approach in this release is to prevent the overlap, so that only one agent changes a collaborative file at a time. A [lease](/docs/agent-filesystem/concepts/concurrency-and-leases#advisory-leases) provides the coordination when every writer uses it and every writer has its own holder name. The holder is the `user` of the `SurrealFs` object, and a caller that acquires a lease it already holds renews it and succeeds, so writers that share one `user` do not exclude each other. The function below takes the lease, appends and releases the lease, and it waits briefly when another agent holds the lease. In local tests, ten agents with distinct users stored every line exactly once in 10 of 10 runs, and ten tasks that shared one user lost lines in 7 of 10 runs.
+
+```python
+from surrealfs import ConflictError, QueryError
+
+
+async def append_with_lease(fs, path, line):
+    while True:
+        try:
+            await fs.acquire_lock(path, ttl_seconds=30, reason="appending")
+        except (ConflictError, QueryError):
+            await asyncio.sleep(0.05)
+            continue
+        try:
+            return await fs.append_text(path, line)
+        finally:
+            await fs.release_lock(path)
+
+
+await alice.write_text("/runbooks/shared.md", "Shared notes\n")
+await alice.enable_crdt("/runbooks/shared.md")
+
+agents = [SurrealFs(db, user=f"agent{n}") for n in range(10)]
+await asyncio.gather(
+    *(append_with_lease(agent, "/runbooks/shared.md", f"note {n}\n") for n, agent in enumerate(agents))
+)
+
+text = await alice.read_text("/runbooks/shared.md")
+print(len(text.splitlines()))
+```
+
+```text title="Output"
+11
+```
+
+A lease is advisory, so an agent that ignores it can still write at the same moment. The approach protects only the agents that use it.
+
+## The mode on each interface
+
+| Capability | Python | TypeScript | Rust library | `surrealfs-rs` command |
+| --- | --- | --- | --- | --- |
+| Enable | `enable_crdt` | `enableCrdt` | `enable_crdt` | `crdt enable PATH` |
+| Compact | `compact_crdt` | `compactCrdt` | `compact_crdt` | `crdt compact PATH` |
+| Writes that use the log | `write_text`, `append_text`, `edit` | `writeText`, `appendText`, `editText` | `write_text`, `append_text`, `edit_text` | `write` only, as a full replacement |
+| Unit of text positions | UTF-8 bytes | UTF-16 units | UTF-8 bytes | UTF-8 bytes |
+
+The log format is shared, so a file that one implementation enabled can be changed by another. In a test with ASCII text, a file enabled in Python was appended to and edited by TypeScript, replaced by the Rust command and edited again by Python, and the final content equalled the text rebuilt from the log. The `author` field showed the writer of each update. The result applies to ASCII text, because of the limitation described above. A database that more than one implementation uses has to be prepared with the Python package or `surrealfs-rs init`, because the schema that the TypeScript `applySchema` installs is older. See the [TypeScript SDK](/docs/agent-filesystem/interfaces/typescript-sdk).
+
+## Limitations in this release
+
+- **No tool exposes the mode.** The tool registry, which the MCP server, Hermes and pydantic-ai share, has no tool that enables or compacts a collaborative file, and the TypeScript tools do not either. An agent that works only through tools cannot turn the mode on. When a file already has the flag, the `write_file`, `append_file` and `edit` tools go through the log, with the limitations above. See [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas).
+- **A generation check applies only in Python.** The Python library compares `if_generation` with the file before it loads the document. The TypeScript SDK and the Rust library ignore the expected generation for collaborative files, and the `base_gen` stored in the log is not checked by anyone.
+- **The `replace_all` option of `edit` has no effect.** Only the first occurrence changes. In the Python library the option defaults to `False`, so an ordinary file also changes only its first occurrence unless `replace_all=True` is passed, and passing it has no effect on a collaborative file. The TypeScript `editText` and the Rust `edit_text` always replace every occurrence in an ordinary file, and only the first occurrence in a collaborative file.
+- **A workspace merge into a collaborative file does not last.** The merge writes `content` without a log update, and the next collaborative write replaces it with the text that the log produces. See [Workspaces](/docs/agent-filesystem/concepts/workspaces#what-a-merge-applies).
+- **The mode has no off switch.** A file stays collaborative after `enable_crdt`.
+- **The peer-state table is unused.** The schema defines `file_crdt`, and no implementation reads or writes it. The release has no awareness or presence feature for editors.
+- **Compaction is manual.** No code runs `compact_crdt` automatically.
+- **Removing a file leaves its log.** The update and snapshot records stay in their tables after `rm`.
+
+## See also
+
+- [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases) covers conditional writes and leases, which suit files that do not use the CRDT mode.
+- [Versions and history](/docs/agent-filesystem/concepts/versions-and-history) covers how earlier generations of a file are kept.
+- [Workspaces](/docs/agent-filesystem/concepts/workspaces) covers isolated copies that are merged back as a whole.
+- [Data model](/docs/agent-filesystem/concepts/data-model) describes the `file` table.

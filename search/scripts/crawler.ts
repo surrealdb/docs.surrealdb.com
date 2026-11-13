@@ -55,6 +55,8 @@ const URL_PREFIX_OVERRIDES: Record<string, string> = {
     index: "",
     // Served from /docs/agent-memory rather than /docs/agent-memory/index.
     "agent-memory/index": "agent-memory",
+    // Served from /docs/agent-filesystem rather than /docs/agent-filesystem/index.
+    "agent-filesystem/index": "agent-filesystem",
 };
 
 /** The site is served under a `/docs` base path (see vite.config.ts). */

@@ -1,0 +1,425 @@
+---
+position: 1
+title: Agent Filesystem TypeScript SDK
+description: "The @surrealdb/fs TypeScript SDK for Agent Filesystem: install from source, connect, the methods that work, the ones that do not yet, and the 12-tool AI adapter."
+---
+
+# Agent Filesystem TypeScript SDK
+
+The TypeScript SDK, `@surrealdb/fs`, gives TypeScript and JavaScript code a `SurrealFs` class that reads and writes files in an Agent Filesystem database through the SurrealDB JavaScript SDK. It calls the `fn::sfs_*` functions that the database schema defines, so a call is one `RETURN fn::sfs_xxx(...)` statement, and it can also watch changes with live queries and edit files collaboratively with Yjs.
+
+> [!WARNING]
+> The TypeScript SDK is behind the [Python SDK](/docs/agent-filesystem/interfaces/python-sdk) in version 0.2.0. Several methods fail against the current schema (`chmod`, `chown`, `search`, `relate`, `claimMailbox`, and `diff` unless you pass both generations), others behave differently from their Python counterparts, the SDK enforces almost no permissions, and the schema that it embeds is out of date. This page lists each case next to the method it affects, and the [status summary](#status-summary) collects them. For code that must rely on a complete feature set or on permissions, use the Python SDK.
+
+## Status summary
+
+| Area | State in version 0.2.0 |
+| --- | --- |
+| Files and folders | `stat`, `exists`, `ls`, `lsRecursive`, `tree`, `readText`, `writeText`, `appendText`, `editText`, `mkdir`, `rm`, `mv` and `cp` run. `mv` overwrites an existing destination, `cp` of a folder copies no children, and `editText` replaces every occurrence. |
+| Permissions | With the schema from the Python package, `readText`, `grep` and `diff` with two stored generations check the caller. `ls`, `lsRecursive`, `tree`, `stat`, `exists`, `history`, writes, deletes, moves and copies do not, `searchSections` reads `pathPrefix` as the caller's identity, and `/home/<user>` is not private. |
+| Versions | `history` and `restore` run. `diff` does not return a diff. |
+| Search | `grep` runs, but `caseSensitive: false` has little effect. `search` fails. `searchSections` returns zeros for its numeric fields and reads `pathPrefix` as the caller's identity. |
+| Links | `relate` fails, and `backlinks` returns empty fields. |
+| Leases, workspaces, mailboxes, watch, CRDT | Leases, workspaces, file-based mailboxes, `watch` and the CRDT methods run. `claimMailbox` fails. |
+| Metadata | `chmod` and `chown` fail. |
+| Missing | No binary read or write, `touch`, `head`, `tail`, `readRange`, `glob`, `undelete`, `getNeighbors`, `findBrokenLinks`, embedding indexer, or lease and sandbox helpers. |
+
+The rows describe the SDK on SurrealDB 3.2.3 with the SurrealDB JavaScript SDK 2.0.10 and Bun 1.4.
+
+## Requirements
+
+- [Bun](https://bun.sh) 1.x, which runs the SDK's TypeScript source. The sample output on this page comes from Bun 1.4.
+- `git`, to clone the repository.
+- A SurrealDB 3.x server. See [installing SurrealDB](/docs/running/installation) if the `surreal` command is not available.
+- [uv](https://docs.astral.sh/uv/), or Python 3.11 or later with `pip`, to apply the schema.
+
+## Install
+
+The package is not published to npm as of version 0.2.0. The SDK lives in the `packages/sdk-ts` folder of the SurrealFS repository, and Bun runs its TypeScript source directly:
+
+```bash
+git clone --branch next https://github.com/surrealdb/surrealfs.git
+cd surrealfs/packages/sdk-ts
+bun install
+```
+
+The `bun install` command installs the `surrealdb` JavaScript SDK at version 2.x, which talks to a SurrealDB 3.x server, and `yjs`. The repository does not commit the `dist` folder. The `build` script runs `tsc`, which finishes without errors, writes ES module output to `dist`, and does not write the CommonJS file that `main` names in the manifest. The examples on this page import from the source, and you can run the SDK's own tests with `bun test`.
+
+### Apply the schema with the Python package
+
+Define the schema with the Python package, and not with the SDK's `applySchema` function. The schema text that the SDK embeds is an older copy: it has 44 of the 76 database functions and 15 of the 32 tables that the current schema defines, and it lacks the groups, sharing, chunked storage and understanding features. A database that you prepare with it has an older data model than one that you prepare with Python.
+
+```bash
+uvx --from "surrealfs @ git+https://github.com/surrealdb/surrealfs.git@next" \
+  python -m surrealfs.schema --url ws://localhost:8000/rpc --username root --password secret \
+  --namespace agents --database workspace
+```
+
+```text title="Output"
+Applied schema (file) to agents/workspace on ws://localhost:8000/rpc
+```
+
+To use a Python environment instead of `uvx`, install the package with `pip install "surrealfs @ git+https://github.com/surrealdb/surrealfs.git@next"` and run the same `python -m surrealfs.schema` command. The package is not on PyPI, so `pip install surrealfs` does not find it. When the schema is missing, the first call fails with `NotFoundError: Function 'fn::sfs_write' not found`.
+
+## Connect and write a first file
+
+The class takes a connected `Surreal` handle from the `surrealdb` package. Save this script as `first_file.ts` inside the `packages/sdk-ts` folder of the clone, so that it uses the dependencies that `bun install` installed there, and run it from that folder with `bun run first_file.ts`. It assumes that the schema above is applied:
+
+```ts title="first_file.ts"
+import { Surreal } from "surrealdb";
+import { SurrealFs } from "./src/index.ts";
+
+const db = new Surreal();
+await db.connect("ws://localhost:8000/rpc");
+await db.signin({ username: "root", password: "secret" });
+await db.use({ namespace: "agents", database: "workspace" });
+
+const fs = new SurrealFs(db, { user: "alice" });
+const entry = await fs.writeText(
+  "/projects/atlas/plan.md",
+  "# Atlas plan\n\n- Draft the API\n- Review the schema\n",
+);
+console.log(entry.path, entry.generation, entry.contentType);
+console.log(JSON.stringify(await fs.readText("/projects/atlas/plan.md")));
+
+await db.close();
+```
+
+```text title="Output"
+/projects/atlas/plan.md 1 text/plain
+"# Atlas plan\n\n- Draft the API\n- Review the schema\n"
+```
+
+The package name is `@surrealdb/fs`, and the import above points at its source in the clone. The examples that follow continue from this script, after the `fs` line and before `db.close()`. They build on one another, so run them in order: the output of a later block, such as the listing under [Read and list files](#read-and-list-files), includes files that earlier blocks wrote.
+
+> [!NOTE]
+> `SurrealFs.connectServer({ url, token, user })` builds the class over the `/api/rpc` endpoint of a [gateway](/docs/agent-filesystem/interfaces/remote-clients), and not over a SurrealDB connection. In this release the gateway and this client disagree on the name of a field in the answer, so every query comes back empty. `ls` returns `[]`, `exists` returns `false`, `stat` throws `NotFoundError`, `readText` returns an empty string, and `writeText` returns an entry with an empty `path`. Connect with a `Surreal` handle, as above, until that changes.
+
+## Identity and permissions
+
+<Synopsis label="Signature">
+new SurrealFs(db: Surreal, options?: { user?: string; branch?: string })
+</Synopsis>
+
+<OptionsTable
+	title="Constructor options"
+	options={[
+		{ "name": "db", "type": "Surreal", "required": true, "description": "A connected, signed-in handle with a namespace and a database selected." },
+		{ "name": "user", "type": "string", "default": "root", "description": "The identity that calls act as. Unlike the Python class, this has a default, and the default is `root`." },
+		{ "name": "branch", "type": "string", "default": "main", "description": "The workspace branch that writes go to. `setBranch(name)` changes it." }
+	]}
+/>
+
+When `branch` is not `main`, `writeText` writes into the workspace of that name instead of the main tree, and the workspace must already exist.
+
+The SDK calls database functions with the `user` as the caller, and the functions that it calls do not all check it. In the current schema, `fn::sfs_read` checks the read permission, `fn::sfs_grep` filters its matches by it, and `fn::sfs_diff` reads through `fn::sfs_read`. The functions behind `ls`, `stat` and `history`, and the write, remove, move and copy functions, are defined with full permissions and do not check. As a result, a second user can overwrite and delete another user's files, and a folder that the SDK creates under `/home` has mode `0o755`, so it is not private:
+
+```ts title="Writes are not permission-checked"
+const bob = new SurrealFs(db, { user: "bob" });
+
+await fs.writeText("/projects/atlas/shared.md", "Written by alice\n");
+await bob.writeText("/projects/atlas/shared.md", "Overwritten by bob\n");
+console.log((await fs.readText("/projects/atlas/shared.md")).trim());
+```
+
+```text title="Output"
+Overwritten by bob
+```
+
+> [!WARNING]
+> Do not rely on the TypeScript SDK to separate users. Use the Python SDK, or sign in with [record access](/docs/agent-filesystem/security/record-access), where the database itself enforces permissions. Only the Python class applies the owner and mode rules and the private `/home/<user>` rule on every call. See [Permissions](/docs/agent-filesystem/security/permissions).
+
+## Types
+
+Results use camelCase fields, and `FileEntry` has no `group` field:
+
+| Type | Fields |
+| --- | --- |
+| `FileEntry` | `id`, `filename`, `path`, `contentType`, `isFolder`, `owner`, `mode`, `gate` (`"open"` when absent), `hash`, `generation`, `createdAt`, `updatedAt`, `size`, `meta`, `crdt`, and optional `content` and `file`. |
+| `FileVersionEntry` | `generation`, `content` (always an empty string), `createdAt`, `author`, `hash`. |
+| `SearchHit` | `path`, `score`, `snippet`, `generation`, `updatedAt`. |
+| `GrepMatch` | `path`, `lineNumber`, `line`. |
+| `SectionHit` | `path`, `heading`, `content`, `distance`, `score`, `tokenCount`, `startLine`, `endLine`. |
+| `WatchEvent` | `action` (`CREATE`, `UPDATE` or `DELETE`), `path`, `entry`. |
+| `WorkspaceEntry`, `WorkspaceDiff` | `name`, `owner`, `isPublic`, `createdAt`; and `path`, `modified`, `conflict`, `baseGen`, `currentGen`. |
+| `LockInfo` | `holder`, `expiresAt`, `reason`, and `path` for a listed lock. |
+| `GraphRelation` | `source`, `relation`, `target`, `createdAt`. |
+
+## Errors
+
+Errors extend `SurrealFsError`: `NotFoundError`, `PermissionDeniedError`, `ConflictError`, `AlreadyExistsError`, `DirectoryNotEmptyError`, `IsADirectoryError` and `NotADirectoryError`, each with a readonly `path`. The SDK classifies a database error by looking for text in its message, so a failure that the schema reports with a code the SDK does not match becomes a plain `SurrealFsError`. In particular the schema reports a permission failure as `sfs:denied`, which the SDK does not map to `PermissionDeniedError`. There are no classes that correspond to Python's `InvalidPath`, `NotATextFile` or `QueryError`.
+
+```ts title="Catch a conflict and a missing file"
+import { ConflictError, NotFoundError } from "./src/index.ts";
+
+const before = await fs.stat("/projects/atlas/plan.md");
+await fs.appendText("/projects/atlas/plan.md", "- Publish\n");
+
+try {
+  await fs.writeText("/projects/atlas/plan.md", "A stale write\n", { ifGeneration: before.generation });
+} catch (error) {
+  console.log(error instanceof ConflictError, (error as Error).message);
+}
+
+try {
+  await fs.stat("/projects/atlas/missing.md");
+} catch (error) {
+  console.log(error instanceof NotFoundError, (error as Error).message);
+}
+```
+
+```text title="Output"
+true An error occurred: sfs:conflict
+true An error occurred: sfs:not_found
+```
+
+## Read and list files
+
+| Method | Returns | Behaviour |
+| --- | --- | --- |
+| `stat(path)` | `FileEntry` | Metadata without content. Throws `NotFoundError` for a missing path. |
+| `exists(path)` | `boolean` | True when `stat` finds the path. |
+| `ls(path = "/")` | `FileEntry[]` | The children of a folder, not filtered by user, as are `lsRecursive`, `tree` and `exists`. A file returns `[]`, and a missing path throws `NotFoundError`. |
+| `lsRecursive(path = "/", maxDepth = 20)` | `FileEntry[]` | Every entry below the path. |
+| `tree(path = "/", maxDepth = 10)` | `string[]` | An array of paths, and not a drawn tree. It omits the root. |
+| `readText(path)` | `string` | The text. A folder returns an empty string. With the Python-applied schema it throws a plain `SurrealFsError` when the user lacks the read bit. |
+
+```ts title="List a folder"
+await fs.writeText("/projects/atlas/notes.md", "# Notes\n\nThe launch review is on Friday.\n");
+await fs.writeText("/projects/hermes/plan.md", "# Hermes plan\n");
+
+console.log(JSON.stringify((await fs.ls("/projects")).map((e) => e.path)));
+console.log(JSON.stringify(await fs.tree("/projects")));
+console.log(await fs.exists("/projects/atlas/plan.md"), await fs.exists("/projects/nothing.md"));
+```
+
+```text title="Output"
+["/projects/atlas","/projects/hermes"]
+["/projects/atlas","/projects/atlas/notes.md","/projects/atlas/plan.md","/projects/atlas/shared.md","/projects/hermes","/projects/hermes/plan.md"]
+true false
+```
+
+## Write files
+
+| Method | Returns | Behaviour |
+| --- | --- | --- |
+| `writeText(path, content, { ifGeneration?, createParents? })` | `FileEntry` | Creates or replaces a file. New files are `text/plain` with mode `0o644`, and the parent folders get `0o755`. `createParents: false` is ignored, so parents are always created. It does not read frontmatter or record link edges. A generation mismatch throws `ConflictError`. |
+| `appendText(path, suffix, { ifGeneration? })` | `FileEntry` | Appends in one atomic update. |
+| `editText(path, oldText, newText, { ifGeneration? })` | `FileEntry` | Replaces every occurrence of `oldText`, and has no option for the first only. Throws `NotFoundError` when the text is absent, and a `ConflictError` instead on a collaborative file. It returns the entry and not a diff. |
+| `mkdir(path, { parents? })` | `FileEntry` | `parents` defaults to `true`, and `parents: false` is ignored, so missing parents are always created. An existing folder returns its entry without an error. The mode is `0o755`. |
+| `rm(path, { recursive? })` | `void` | Throws `DirectoryNotEmptyError` for a non-empty folder without `recursive`. Not permission-checked. |
+| `mv(src, dst)` | `FileEntry` | Moves or renames. An existing destination is silently replaced. |
+| `cp(src, dst, { recursive? })` | `FileEntry` | Copies a file. A folder with `recursive: true` creates an empty folder and copies no children. |
+
+```ts title="Append, edit, move and remove"
+console.log((await fs.appendText("/projects/atlas/plan.md", "- Announce\n")).generation);
+
+await fs.writeText("/projects/atlas/todo.md", "aXaXa");
+await fs.editText("/projects/atlas/todo.md", "X", "Y");
+console.log(await fs.readText("/projects/atlas/todo.md"));
+
+await fs.mkdir("/projects/atlas/drafts");
+await fs.cp("/projects/atlas/plan.md", "/projects/atlas/drafts/plan.md");
+const moved = await fs.mv("/projects/atlas/drafts/plan.md", "/projects/atlas/drafts/plan-v2.md");
+console.log(moved.path);
+await fs.rm("/projects/atlas/drafts", { recursive: true });
+console.log(await fs.exists("/projects/atlas/drafts"));
+```
+
+```text title="Output"
+3
+aYaYa
+/projects/atlas/drafts/plan-v2.md
+false
+```
+
+> [!WARNING]
+> A recursive `rm` removes the target and its direct children only. Folders and files that are nested deeper stay in the database, and no longer appear in listings. They carry paths that no longer reflect their place. The Python class removes the deepest records first, so it does not have this problem.
+
+`chmod` and `chown` fail in version 0.2.0. `chmod` sends three arguments to a database function that takes two, and the database answers `The function expects 2 arguments`. `chown` calls a function that the schema does not define. Set modes with the Python SDK.
+
+## Search
+
+`grep(pattern, { pathPrefix?, glob?, limit?, isRegex?, caseSensitive? })` returns `GrepMatch[]` and filters results by the caller. As in the Python class, a regular expression is matched against the whole content of a file first, so `^` and `$` anchor to the file. The SDK also compiles the pattern with JavaScript's `RegExp`, which refuses the inline flag `(?m)` that Python accepts and throws a `SyntaxError`. Write the flag as a scoped group instead, such as `(?m:^- Review)`, which Bun 1.4 accepts. The option `caseSensitive: false` has little effect in version 0.2.0: the database chooses the files to scan with a case-sensitive match, so a file is searched only when it also contains the pattern in exactly that case, and lines in other files are never returned.
+
+```ts title="Search the text of files"
+console.log(JSON.stringify(await fs.grep("review", { pathPrefix: "/projects" })));
+```
+
+```text title="Output"
+[{"path":"/projects/atlas/notes.md","lineNumber":3,"line":"The launch review is on Friday."}]
+```
+
+`search(query, { limit?, match? })` fails with `Failed to coerce argument $k: Expected none | int but found 'any'`, because it passes its arguments to the database function in the wrong order. Use `grep` from TypeScript, or run full-text and hybrid search through the [Python SDK](/docs/agent-filesystem/interfaces/python-sdk#search).
+
+`searchSections(vector, { limit?, pathPrefix? })` runs, but it returns `0` for `distance`, `score`, `tokenCount`, `startLine` and `endLine`, because the SDK reads field names that the function does not return. Only `path`, `heading` and `content` are real. The `pathPrefix` option is not a path filter: the SDK passes it to the database function as the identity that the search runs as, and it defaults to an empty string. With the default, the search runs as no user, so it returns only files that everyone can read. With a user name, it returns the files that user can read, so a caller can search as any user by setting `pathPrefix` to that name. Where users must be kept apart, `searchSections` and the `search_sections` tool are unsuitable. There is no TypeScript method to index embeddings.
+
+## Versions
+
+| Method | Returns | Behaviour |
+| --- | --- | --- |
+| `history(path, limit?)` | `FileVersionEntry[]` | The superseded versions, newest first, to any caller. The `content` field is always empty. |
+| `restore(path, version)` | `FileEntry` | Writes an old version back as a new generation. |
+| `diff(path, genA?, genB?)` | `string` | Does not return a diff. With both generations it returns the stored text of the version `genB`, which is the earlier version when `genB` is smaller than `genA`, and an empty string when `genB` has no stored version, such as the current generation. It throws for a caller who cannot read the file. With either generation omitted it fails, because the database function expects an integer or no value for the generation and receives `NULL`. |
+
+```ts title="History and restore"
+for (const version of await fs.history("/projects/atlas/plan.md")) {
+  console.log(version.generation, version.author);
+}
+console.log((await fs.restore("/projects/atlas/plan.md", 1)).generation);
+console.log(JSON.stringify(await fs.readText("/projects/atlas/plan.md")));
+```
+
+```text title="Output"
+2 alice
+1 alice
+4
+"# Atlas plan\n\n- Draft the API\n- Review the schema\n"
+```
+
+There is no `undelete` method. For how versions work, see [Versions and history](/docs/agent-filesystem/concepts/versions-and-history).
+
+## Links
+
+`relate(source, relation, target)` fails with `The function expects 3 arguments`, because the SDK sends four. `backlinks(path)` runs and returns one object for each edge, but its `source` and `target` are empty strings, because the SDK reads field names that the function does not return. Use the [Python SDK](/docs/agent-filesystem/interfaces/python-sdk#links-and-metadata) for edges. The TypeScript `writeText` also does not record the `links_to` edges that the Python class creates from Markdown links.
+
+## Leases
+
+`acquireLock(path, { ttlSeconds?, reason? })` returns a `LockInfo` with `holder`, `expiresAt` and `reason`. Another holder gets a `ConflictError`. `releaseLock(path)` returns `true`, and `listLocks()` returns the live locks. Leases are advisory. See [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases).
+
+```ts title="Take and list a lease"
+const lock = await fs.acquireLock("/projects/atlas/plan.md", { ttlSeconds: 30, reason: "editing the plan" });
+console.log(lock.holder, lock.reason);
+console.log(JSON.stringify((await fs.listLocks()).map((l) => `${l.path} ${l.holder}`)));
+console.log(await fs.releaseLock("/projects/atlas/plan.md"));
+```
+
+```text title="Output"
+alice editing the plan
+["/projects/atlas/plan.md alice"]
+true
+```
+
+## Workspaces
+
+`forkWorkspace(dstBranch, srcBranch = "main")` returns `{ workspace, count }`. `writeWorkspaceText(branch, path, content)` writes the file under `/.workspaces/<branch>/`. `diffWorkspace(branch)` returns a `WorkspaceDiff` for each file, though `currentGen` is always `1`. `mergeWorkspace(branch, target = "main")` returns `{ status }`, and `discardWorkspace(branch)` and `listWorkspaces()` complete the set. The merge has the same limits as in Python: a file that you create inside a workspace does not reach `main`, and the merge still reports `ok`. For the model, see [Workspaces](/docs/agent-filesystem/concepts/workspaces).
+
+```ts title="Edit in a workspace and merge"
+await fs.forkWorkspace("experiment");
+await fs.writeWorkspaceText("experiment", "/projects/atlas/plan.md", "# Atlas plan\n\n- Draft the HTTP API\n");
+
+const changed = (await fs.diffWorkspace("experiment")).filter((d) => d.modified).map((d) => d.path);
+console.log(JSON.stringify(changed));
+console.log(JSON.stringify(await fs.mergeWorkspace("experiment")));
+console.log(JSON.stringify(await fs.readText("/projects/atlas/plan.md")));
+```
+
+```text title="Output"
+["/projects/atlas/plan.md"]
+{"status":"ok"}
+"# Atlas plan\n\n- Draft the HTTP API\n"
+```
+
+## Mailboxes
+
+The file-based mailbox matches the Python one: `sendMessage(agentId, taskName, payload)`, `receiveMessages(agentId, limit = 10)`, `claimMessage(agentId, taskName, consumerId)` and `completeMessage(agentId, taskName, consumerId)` work on files under `/agents/<agentId>/inbox/`, and a claim is a move. See [Mailboxes](/docs/agent-filesystem/concepts/mailboxes).
+
+```ts title="Send, claim and complete a task"
+await fs.sendMessage("indexer", "task-001.json", JSON.stringify({ action: "reindex" }));
+console.log(JSON.stringify((await fs.receiveMessages("indexer")).map((m) => m.path)));
+
+const claimed = await fs.claimMessage("indexer", "task-001.json", "worker-1");
+console.log(claimed.path);
+await fs.completeMessage("indexer", "task-001.json", "worker-1");
+console.log((await fs.receiveMessages("indexer")).length);
+```
+
+```text title="Output"
+["/agents/indexer/inbox/task-001.json"]
+/agents/indexer/inbox/.claimed/worker-1/task-001.json
+0
+```
+
+The SDK also has `postMailbox`, `claimMailbox` and `completeMailbox`, which use a separate `file_mailbox` table that the schema does not define. `postMailbox` creates a record, and `claimMailbox` fails on SurrealDB 3.2.3 with `Missing order idiom priority in statement selection`. Use the file-based methods.
+
+## Watch for changes
+
+`watch(pathPattern, callback)` opens a live query on the `file` table and calls the callback with a `WatchEvent` for each change to a matching path. It returns an object with an `unsubscribe` method. A single write usually produces more than one event. The events are not filtered by permission.
+
+```ts title="Watch a folder"
+const seen: string[] = [];
+const subscription = await fs.watch("/notes/*", (event) => {
+  seen.push(`${event.action} ${event.path}`);
+});
+await new Promise((resolve) => setTimeout(resolve, 500));
+
+await fs.writeText("/notes/today.md", "Ready\n");
+await new Promise((resolve) => setTimeout(resolve, 1000));
+
+console.log(JSON.stringify(seen));
+await subscription.unsubscribe();
+```
+
+```text title="Sample output"
+["UPDATE /notes/today.md","CREATE /notes/today.md"]
+```
+
+## Collaborative editing
+
+`enableCrdt(path)` switches a text file to Yjs-based editing, and `compactCrdt(path)` folds the update log into a snapshot. After `enableCrdt`, `writeText`, `appendText` and `editText` on the file go through the update log. If two writers edit one file at the same moment, the loser usually gets a `ConflictError` that reports a transaction conflict, and sometimes a plain `SurrealFsError` that names the `idx_crdt_seq` index, and the file keeps the winner's text. Read the file before you retry a failed call. In the same situation, the [Python SDK](/docs/agent-filesystem/interfaces/python-sdk#collaborative-editing) can raise an error for a call that had already changed the file. See [Collaborative editing](/docs/agent-filesystem/concepts/collaborative-editing).
+
+```ts title="Enable collaborative editing"
+await fs.writeText("/projects/shared.md", "alpha beta\n");
+await fs.enableCrdt("/projects/shared.md");
+await fs.editText("/projects/shared.md", "alpha", "ALPHA");
+
+console.log(JSON.stringify(await fs.readText("/projects/shared.md")), (await fs.stat("/projects/shared.md")).crdt);
+await fs.compactCrdt("/projects/shared.md");
+```
+
+```text title="Output"
+"ALPHA beta\n" true
+```
+
+## AI tools
+
+`createSurrealFsTools(fs)` returns an object of 12 tools. Each has a `description`, a JSON Schema `parameters` object and an `execute` function, so it can be adapted to an agent framework that takes that shape. This is not the Python [tool registry](/docs/agent-filesystem/interfaces/tool-schemas): it has fewer tools, with different names and argument names, and its results are objects instead of text.
+
+| Tool | Required arguments | Optional arguments | Returns | State |
+| --- | --- | --- | --- | --- |
+| `ls` | `path` | none | Array of `{ filename, path, isFolder, size, updatedAt }` | Works |
+| `read_file` | `path` | none | The text | Works |
+| `write_file` | `path`, `content` | none | `{ path, generation, size }` | Works |
+| `append_file` | `path`, `suffix` | none | `{ path, generation, size }` | Works |
+| `edit_file` | `path`, `old_text`, `new_text` | none | `{ path, generation }` | Works, and replaces every occurrence |
+| `search_text` | `query` | `limit` | Hits | Fails, because it calls `search` |
+| `grep` | `pattern` | `path_prefix`, `glob`, `limit`, `is_regex`, `case_sensitive` | Matches | Works, and `case_sensitive: false` has little effect |
+| `search_sections` | `vector` | `path_prefix`, `limit` | Sections | Runs, with the limits above, and reads `path_prefix` as the caller's identity |
+| `acquire_lease` | `path` | `ttl_seconds`, `reason` | A lock | Works |
+| `release_lease` | `path` | none | `true` | Works |
+| `fork_workspace` | `dst_branch` | `src_branch` | `{ workspace, count }` | Works |
+| `merge_workspace` | `branch` | `target` | `{ status }` | Works |
+
+The `edit_file` description says that it replaces a unique string. The tool does not check uniqueness, and replaces every occurrence.
+
+```ts title="Run two tools"
+import { createSurrealFsTools } from "./src/index.ts";
+
+const tools = createSurrealFsTools(fs);
+console.log(Object.keys(tools).length, tools.read_file.description);
+console.log(JSON.stringify(await tools.write_file.execute({ path: "/notes/a.md", content: "hello" })));
+console.log(await tools.read_file.execute({ path: "/notes/a.md" }));
+```
+
+```text title="Output"
+12 Read the UTF-8 text content of a file
+{"path":"/notes/a.md","generation":1,"size":5}
+hello
+```
+
+## See also
+
+- [Python SDK](/docs/agent-filesystem/interfaces/python-sdk), which has the complete feature set
+- [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas) for the Python tool registry
+- [Record access](/docs/agent-filesystem/security/record-access) for database-enforced permissions
+- The SurrealDB [JavaScript SDK](/docs/reference/javascript) for connection options

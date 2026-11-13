@@ -1,0 +1,297 @@
+---
+position: 0.5
+title: Deployment
+description: "Run the Agent Filesystem gateway on a host or as a Cloudflare Worker: the missing wasm-bindgen build step, Worker settings, database credentials, limits and container status."
+---
+
+This page explains how to run Agent Filesystem as a service beyond a single laptop session. It lists what to decide when the gateway runs on a host and gives a tested recipe for running the gateway as a Cloudflare Worker. It also records what the container files in the repository do in this release.
+
+The gateway is the HTTP program that sits in front of one SurrealDB database. It serves a REST API, a SurrealQL endpoint, an MCP endpoint, WebDAV, S3-style requests and the web interface. Clients reach the files through it without holding database credentials. [Gateway server](/docs/agent-filesystem/interfaces/gateway-server) describes every setting, endpoint and authentication rule, so this page does not repeat them.
+
+> [!NOTE]
+> Agent Filesystem is in beta. The build, schema and local-run commands on this page were run on commit `76d2444` of the `next` branch of the SurrealFS repository, version 0.2.0. They ran on macOS with Rust 1.99.0, against SurrealDB 3.2.3. The Worker ran locally with `wrangler dev`, which uses the `workerd` runtime. The commands `rustup target add`, `openssl rand`, `wrangler secret put` and `wrangler deploy` were not run, and the Worker was not deployed to Cloudflare. No container was built or run.
+
+## Choose a deployment
+
+| Option | What runs | Status | Use it when |
+| --- | --- | --- | --- |
+| Direct connection | Each Python process, MCP server or `surrealfs-rs` command connects to SurrealDB with its own credentials | Ready with limits. See [Configuration reference](/docs/agent-filesystem/operations/configuration). | The clients run next to the database and can hold its credentials. |
+| Native gateway | One `surrealfs-server` process holds the database credential, and clients call it over HTTP | Ready with limits. Every accepted credential can run arbitrary SurrealQL, and the caller name is not proof of identity. See [Security](/docs/agent-filesystem/interfaces/gateway-server#security). | Clients need HTTP, WebDAV or S3-style access, or must not hold the database credential. |
+| Cloudflare Worker | The same gateway compiled for `wasm32-unknown-unknown`, with the web interface served as static assets | Ready with limits when run locally, with the limits of the native gateway. The repository lacks one build step, which this page supplies. Deployment to Cloudflare is not verified. | The gateway should run on Cloudflare in front of a SurrealDB server that is reachable over HTTP. |
+| Containers | The `Dockerfile` and `docker-compose.yml` in the repository | Not available. See [Containers](#containers). | Not applicable: neither file starts the gateway in this release. |
+
+> [!WARNING]
+> Read [Security](/docs/agent-filesystem/interfaces/gateway-server#security) before you expose a gateway to a network. With no `SURREALFS_SERVER_TOKEN`, the gateway accepts every request, as `root` unless the request names another user in the `X-SurrealFS-User` header. With a token, the caller is still the value of that header, so the token authenticates the client and not the user. A client that holds the token can act as any user. The gateway does not check file permissions for writes and removals. Any credential that the gateway accepts can send arbitrary SurrealQL to `/api/rpc`, which runs with the gateway's database credential. These statements hold for the Worker as well, because it runs the same code.
+
+## Run the native gateway on a host
+
+[The quickstart](/docs/agent-filesystem/interfaces/gateway-server#quickstart) builds the gateway and starts it on `127.0.0.1:8787`. The build command for a deployment is `cargo build --release -p surrealfs-server`, which writes `target/release/surrealfs-server`. The `-p` option builds only the gateway and its dependencies, and not the other crates of the workspace. The table below covers what changes when the gateway leaves a laptop.
+
+| Decision | What to do | Reason |
+| --- | --- | --- |
+| Listen address | Set `SURREALFS_BIND` or `--bind`, for example to `0.0.0.0:8787`. | The `--port` flag and `SURREALFS_PORT` listen on `127.0.0.1` only. |
+| TLS | Terminate TLS in a proxy in front of the gateway. | The gateway speaks plain HTTP. |
+| Proxy behaviour | Make the proxy send a `Content-Length` header and not a chunked body. | The gateway does not decode `Transfer-Encoding: chunked`. A chunked `PUT` failed with `400` and a JSON parse error such as `invalid type: integer`, and the text of the error varies with the body. Every response carries `Connection: close`. |
+| Gateway token | Set `SURREALFS_SERVER_TOKEN` to a random value, for example the output of `openssl rand -hex 32`. | Without it every request is accepted. The web interface cannot send the token, so it does not work with one. |
+| Static files | Start the gateway from a directory that has no `surrealfs/browser/static` folder, and set neither `SURREALFS_STATIC_DIR` nor `--static-dir`. | A static directory is served before any credential is checked, and a request with `..` segments can read other files that the process can read. |
+| Database credential | Use a root user, or a token from a database user in `SURREALDB_TOKEN`. Set `SURREALDB_USER` and `SURREALDB_PASS` explicitly. | With no settings, the gateway connects to `http://127.0.0.1:8000` as `root` with the password `root`. A database user with a password is refused. See [Database credentials](#database-credentials). |
+| Database address | Use an `https` address for a database on another host. | The gateway sends the database credential in an `Authorization` header on every request. |
+| Namespace and database | On every program that must see the same files, set `SURREALDB_NS` and `SURREALDB_DB` for `surrealfs-server` and `surrealfs-rs`, and `SURREALDB_NAMESPACE` and `SURREALDB_DATABASE` for the Python tools and the MCP server. | The gateway uses `surrealfs/main`, the Python tools use `surrealfs/demo`, and `surrealfs-rs` uses `surrealfs/surrealfs`. The Python tools ignore `SURREALDB_NS` and `SURREALDB_DB`. |
+| Schema | Take a [database export](/docs/agent-filesystem/operations/backup-and-restore) before you start a binary from a newer release. | The gateway applies the schema at every start. Tables, fields, functions, events, access methods and 32 of the 40 indexes use `OVERWRITE`, so a start replaces their definitions. The HNSW and full-text indexes and the analysers use `IF NOT EXISTS`, so a changed definition of one of them is not applied to a database that has it. |
+| Health check | Use `GET /api/health` for the process, and `POST /api/rpc` with the token for the database. | `/api/health` does not query the database. With `SURREALDB_URL` pointing at a closed port it returned `200`, and `/api/tree` returned `500`. |
+| Logs | Read the startup line, and check for a `Warning: apply_schema returned:` line before it. Log requests in the proxy. | The gateway prints a listening line at startup. A `Warning: apply_schema returned:` line comes first when it could not apply the schema, for example when the database is unreachable. The gateway does not log requests. |
+| Write size | Raise `SURREAL_HTTP_MAX_RPC_BODY_SIZE` on the database for request bodies above 4 MiB. | The gateway writes through the HTTP endpoint of SurrealDB, which answers `413` for a larger request body. Binary content travels as a JSON array, so a binary file reaches the limit at a smaller size. |
+
+The check for the database is a query through `/api/rpc`:
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/api/rpc -H 'Authorization: Bearer local-test-token' \
+  -H 'content-type: application/json' -d '{"sql":"RETURN 1;"}'
+```
+
+```json title="Output"
+{"result":[{"result":1,"status":"OK"}]}
+```
+
+The request limit follows from the default HTTP body limit of SurrealDB, which is 4 MiB. The measurements used text files. A write of 4,194,000 characters succeeded, and a write of 4,200,000 characters failed with `Database error: HTTP RPC invalid JSON`, which is the gateway's report of the `413 Payload Too Large` reply of SurrealDB. After the database started with `SURREAL_HTTP_MAX_RPC_BODY_SIZE=33554432`, which is a value in bytes, a write of 30,000,000 characters succeeded. [Limits and known issues](/docs/agent-filesystem/interfaces/gateway-server#limits-and-known-issues) gives the measurements for binary files.
+
+## Run as a Cloudflare Worker
+
+The Worker is the same gateway, compiled to WebAssembly and called from a small JavaScript module. The repository holds the pieces: `wrangler.toml`, `worker/index.mjs`, and the `surrealfs-server` crate, which builds as a WebAssembly library.
+
+The module `worker/index.mjs` sends a request to the WebAssembly function `handle_worker_request` in these cases:
+
+- The path is `/raw`, `/api`, `/mcp`, `/dav` or `/s3`, or a path below `/api/`, `/mcp/`, `/dav/` or `/s3/`.
+- The request has an `x-amz-content-sha256` header or an `x-amz-date` header.
+- The `Authorization` header starts with `AWS4-HMAC-SHA256`.
+
+The module serves every other request from the static assets, with a single-page-application fallback, so an unknown path returns the web interface. The Worker connects to SurrealDB over HTTP for each request, so it keeps no state between requests.
+
+> [!WARNING]
+> The repository does not contain a step that `worker/index.mjs` needs. The module imports `../pkg/surrealfs_server.js` and `../pkg/surrealfs_server_bg.wasm`, and nothing creates the `pkg` folder: the `[build]` command in `wrangler.toml` and the `just deploy` recipe build only a raw `.wasm` file under `target/`. Running `wrangler dev` without it fails with `Could not resolve "../pkg/surrealfs_server.js"` and `ENOENT: no such file or directory, open '.../pkg/surrealfs_server_bg.wasm'`. `wrangler deploy` bundles the same module, so it is expected to fail in the same way, although deployment was not run. The `wasm-bindgen` step below creates the folder.
+
+### Requirements
+
+- **Rust with the `wasm32-unknown-unknown` target.** Add the target with `rustup target add wasm32-unknown-unknown`.
+- **The `wasm-bindgen` command-line tool, in the version that `Cargo.lock` pins.** The lock file pinned `0.2.129` when this page was written. Find the version with `grep -A1 'name = "wasm-bindgen"' Cargo.lock`.
+- **Bun and Node.js.** Bun builds the web interface, and `npx` runs `wrangler`. The commands were run with `wrangler` 4.151.0.
+- **A SurrealDB 3.x server that the Worker can reach over HTTP.** A `127.0.0.1` address works only under `wrangler dev`. The comment in `wrangler.toml` gives a SurrealDB Cloud address as an example, and the Worker was tested only against a local SurrealDB 3.2.3.
+- **A database that has the schema.** The Worker does not apply it.
+
+### Build and run the Worker locally
+
+Run these steps from the root of the repository.
+
+#### 1. Build the web interface
+
+The `wrangler.toml` file serves the built interface as the static assets of the Worker:
+
+```bash
+cd surrealfs/browser/ui && bun install && bun run build && cd ../../..
+```
+
+#### 2. Build the WebAssembly library
+
+This is the command in the `[build]` section of `wrangler.toml`, so `wrangler` runs it as well:
+
+```bash
+cargo build -p surrealfs-server --target wasm32-unknown-unknown --release
+```
+
+The build writes `target/wasm32-unknown-unknown/release/surrealfs_server.wasm`. It also writes `surrealfs-server.wasm` for the executable target of the package, which the Worker does not use.
+
+#### 3. Generate the pkg folder
+
+Install the `wasm-bindgen` tool in the version that `Cargo.lock` pins, and run it on the library:
+
+```bash
+cargo install wasm-bindgen-cli --version 0.2.129 --locked
+wasm-bindgen --target web --out-dir pkg --out-name surrealfs_server \
+  target/wasm32-unknown-unknown/release/surrealfs_server.wasm
+```
+
+The `--target web` option produces the default `init` export and the named `handle_worker_request` export that `worker/index.mjs` imports. The `--out-name` option gives the file names that the module imports. The `pkg` folder holds four files: `surrealfs_server.js`, `surrealfs_server.d.ts`, `surrealfs_server_bg.wasm` and `surrealfs_server_bg.wasm.d.ts`. The `.wasm` file is 3,266,524 bytes, which is 963,238 bytes after gzip. The repository's `.gitignore` does not list `pkg`.
+
+#### 4. Apply the schema
+
+Apply the schema to the database that the Worker will use. The `wrangler.toml` file sets the namespace `surrealfs` and the database `main`. The `surrealfs-rs init` command applies both schema files, as the native gateway does at startup. [The Rust program](/docs/agent-filesystem/interfaces/command-line#the-rust-program) shows how to install it.
+
+```bash
+export SURREALDB_URL=ws://127.0.0.1:8000/rpc SURREALDB_NS=surrealfs SURREALDB_DB=main
+export SURREALDB_USER=root SURREALDB_PASS=secret
+surrealfs-rs init
+```
+
+```text title="Output"
+SurrealFS schema successfully initialized.
+```
+
+The Python command `python -m surrealfs.schema --database main` applies only `file.surql`, unless you add `--record-auth`. Without the schema, a request returns `500` with `Database error: Database error: The namespace 'surrealfs' does not exist` on a new SurrealDB server, or with `The database 'main' does not exist` when the namespace exists.
+
+#### 5. Set the secrets for local runs
+
+Put the secrets of the Worker in a file named `.dev.vars` at the repository root. The `wrangler` tool loads it for local runs. The repository's `.gitignore` does not list the file, so keep it out of version control.
+
+```ini title=".dev.vars"
+SURREALDB_URL=http://127.0.0.1:8000
+SURREALDB_USER=root
+SURREALDB_PASS=secret
+SURREALFS_SERVER_TOKEN=local-test-token
+```
+
+#### 6. Start the Worker
+
+Start the Worker. The `wrangler` tool runs the `[build]` command, lists the bindings and prints the address:
+
+```bash
+npx wrangler dev --port 8788 --ip 127.0.0.1
+```
+
+```text title="Sample output"
+Using secrets defined in .dev.vars
+Your Worker has access to the following bindings:
+Binding                                                    Resource                  Mode
+env.ASSETS                                                 Assets                    local
+env.SURREALDB_NS ("surrealfs")                             Environment Variable      local
+env.SURREALDB_DB ("main")                                  Environment Variable      local
+env.SURREALFS_EMBED_MODEL ("text-embedding-3-small")       Environment Variable      local
+env.SURREALFS_CHAT_MODEL ("claude-sonnet-4-6")             Environment Variable      local
+env.SURREALDB_URL ("(hidden)")                             Environment Variable      local
+env.SURREALDB_USER ("(hidden)")                            Environment Variable      local
+env.SURREALDB_PASS ("(hidden)")                            Environment Variable      local
+env.SURREALFS_SERVER_TOKEN ("(hidden)")                    Environment Variable      local
+
+[wrangler:info] Ready on http://127.0.0.1:8788
+```
+
+The first request that reaches the WebAssembly module also prints `[WARNING] using deprecated parameters for the initialization function; pass a single object instead`. The generated initialisation function prints it because `worker/index.mjs` passes the module as a positional argument. The warning does not change the result.
+
+#### 7. Test the Worker
+
+The first request needs no credential. The second request is refused, and the other two carry the token:
+
+```bash
+curl -s http://127.0.0.1:8788/api/health
+curl -s http://127.0.0.1:8788/api/tree
+curl -s -X PUT http://127.0.0.1:8788/api/file \
+  -H 'Authorization: Bearer local-test-token' -H 'content-type: application/json' \
+  -d '{"path":"/notes/worker.md","content":"# From the Worker\n\nWritten through workerd.\n"}'
+curl -s -H 'Authorization: Bearer local-test-token' 'http://127.0.0.1:8788/api/search?q=workerd'
+```
+
+```text title="Sample output"
+{"chat_enabled":false,"embeddings_enabled":false,"status":"ok","version":"0.2.0"}
+{"error":"Authentication required"}
+{"content_type":"text/plain","filename":"worker.md","generation":1,"is_folder":false,"path":"/notes/worker.md","size":44,"updated_at":"2026-10-15T01:43:26.377640Z"}
+{"hybrid":false,"results":[{"content_type":"text/plain","filename":"worker.md","generation":1,"is_folder":false,"path":"/notes/worker.md","score":0.281,"size":44,"snippet":"# From the Worker  Written through workerd. ","updated_at":"2026-10-15T01:43:26.439441Z"}]}
+```
+
+Against the local runtime, these requests also worked: `/raw`, `/mcp` (15 tools), `/api/rpc`, the static interface at `/`, and WebDAV with a stored credential. The Worker runs the same code as the native gateway, so the [authentication rules](/docs/agent-filesystem/interfaces/gateway-server#identity-and-authentication) apply to it. A bearer token alone is refused by the WebDAV and S3 handlers, which check any `Authorization` header against the stored credentials: WebDAV answered `401`, and S3 answered `403 AccessDenied`.
+
+### Deploy to Cloudflare
+
+Deployment is `npx wrangler deploy`, or `just deploy`, which builds the web interface first and then runs `wrangler deploy`. It needs a Cloudflare account that `wrangler` is signed in to, and the `pkg` folder from the third step. Deployment was not run, so the behaviour on Cloudflare, the size limits of a Worker and the use of SurrealDB Cloud as the database are not verified. A comment in `wrangler.toml` names the secrets to set with `wrangler secret put`. The commands below set the four that the local test used. `SURREALDB_TOKEN` can replace the user and the password, and [Worker settings](#worker-settings) lists the other variables:
+
+```bash
+npx wrangler secret put SURREALDB_URL
+npx wrangler secret put SURREALDB_USER
+npx wrangler secret put SURREALDB_PASS
+npx wrangler secret put SURREALFS_SERVER_TOKEN
+```
+
+### Worker settings
+
+The module `worker/index.mjs` passes these variables to the WebAssembly function and omits the optional ones that are unset.
+
+| Variable | Kind | Meaning |
+| --- | --- | --- |
+| `SURREALDB_URL` | Secret, required | The address of SurrealDB. Without it every gateway request (`/api`, `/raw`, `/mcp`, `/dav` and `/s3`), `/api/health` included, fails with `500` and `Error: SURREALDB_URL secret/variable is required in Cloudflare Worker environment`. |
+| `SURREALDB_NS`, `SURREALDB_DB` | `[vars]` in `wrangler.toml` | The namespace and the database. The file sets `surrealfs` and `main`, which are also the defaults of the module. |
+| `SURREALDB_USER`, `SURREALDB_PASS` | Secret | A SurrealDB root user. Unlike the native gateway, the Worker has no default user. With no user, no password and no `SURREALDB_TOKEN`, it sends no `Authorization` header to SurrealDB. This comes from the source and was not run. |
+| `SURREALDB_TOKEN` | Secret | A SurrealDB access token, sent as a bearer token. When it is not empty, it replaces the user and the password. |
+| `SURREALFS_SERVER_TOKEN` | Secret | The gateway token. |
+| `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `SURREALFS_EMBED_MODEL` | Secret and `[vars]` | Embeddings. The model is `text-embedding-3-small`. |
+| `ANTHROPIC_API_KEY`, `SURREALFS_CHAT_MODEL` | Secret and `[vars]` | The chat agent. `wrangler.toml` sets the model to `claude-sonnet-4-6`, while the binary's own default is `claude-sonnet-4-5`. |
+
+### Database credentials
+
+The Worker signs in to SurrealDB in one of two ways, because it keeps no session. The tests in this section ran against the native gateway, which uses the same HTTP client as the Worker. A user and a password go out as HTTP Basic authentication, which SurrealDB accepts for a root user. A database user with a password is refused: SurrealDB answered `401`, and the gateway reported `HTTP RPC invalid JSON`. For a user of lower privilege, define the user, sign in once and give the Worker the resulting token. The `DURATION FOR TOKEN` clause sets how long the token lasts:
+
+```bash
+echo "DEFINE USER gateway ON DATABASE PASSWORD 'hunter123' ROLES EDITOR DURATION FOR TOKEN 12h;" \
+  | surreal sql --endpoint http://127.0.0.1:8000 --user root --pass secret --ns surrealfs --db main --hide-welcome
+curl -s -H 'Accept: application/json' -H 'Content-Type: application/json' \
+  -d '{"ns":"surrealfs","db":"main","user":"gateway","pass":"hunter123"}' \
+  http://127.0.0.1:8000/signin
+```
+
+```json title="Sample output"
+{"code":200,"details":"Authentication succeeded","token":"eyJ0eXAiOiJK..."}
+```
+
+The `token` value goes into `SURREALDB_TOKEN`. A token from a database user with the `EDITOR` role read and wrote files, searched, and ran the statements of `/api/rpc`.
+
+The `EDITOR` role cannot define access methods. The native gateway started with such a token on a database with no schema, and it created the tables, fields, functions and events. It did not create the four record-access methods `account`, `indexer`, `projector` and `compactor`. It printed no warning, because it reports a failed request and not a failed statement. To define the access methods, run `surrealfs-rs init` as in [step 4](#4-apply-the-schema) with a root user. The Worker never applies the schema, so this limit concerns the native gateway only.
+
+A token lasts one hour when the user has no `DURATION FOR TOKEN` clause, which `INFO FOR DB` shows as `DURATION FOR TOKEN 1h`. A token from the statement above lasted 12 hours. The Worker does not renew a token, so replace the secret before the token expires.
+
+### Differences from the native gateway
+
+| Area | Native gateway | Worker |
+| --- | --- | --- |
+| Schema | Applied at startup | Applied by you |
+| Static interface | A directory on disk, set with `--static-dir` or `SURREALFS_STATIC_DIR` | The `ASSETS` binding. Unknown paths return the interface. |
+| `/health` | `404` | Returns the interface. Use `/api/health`. |
+| Chunked blobs and `zstd` | The gateway writes none. Only `surrealfs-rs upload` writes chunked blobs, and it compresses a chunk with `zstd` when that makes the chunk smaller. | The WebAssembly build writes chunks with no compression and cannot decompress a `zstd` chunk. |
+| NFS and SFTP | Not served. `--nfs-port` opens a port on `127.0.0.1` that closes every connection, and no code starts an SFTP listener. | Not served |
+| Listener options | `--bind` and `--port` | Not applicable |
+
+The `zstd` limit comes from the source of the `chunking.rs` file. The source returns `zstd decompression is not supported on wasm32` for a `zstd` chunk, and the failure was not reproduced. The gateway reports a file that `surrealfs-rs upload` wrote as a folder, and its range-read code skips folders. [Content storage](/docs/agent-filesystem/concepts/content-storage#chunked-storage) describes the status of that command in this release.
+
+## Containers
+
+The repository contains a `Dockerfile` and a `docker-compose.yml`. Neither file deploys the current release, and the files were not built or run. The `Dockerfile` header and the repository's `docs/docker.md` describe official images. On 14 October 2026 Docker Hub had no `surrealdb/surrealfs` repository, so no such image was found there.
+
+The commands that the files contain were run outside a container. They ran against a throwaway SurrealDB 3.2.3 server, in a virtual environment with a non-editable install of the repository. The `v3.0.0` image that the compose file names was not run.
+
+| Part | Finding |
+| --- | --- |
+| Image contents | The image installs the Python package only. It has no `surrealfs-server` and no `surrealfs-rs`. Its entry point is the Python `surrealfs` command with the default argument `status`. |
+| Install command | The `Dockerfile` installs `.[mcp,browser,embed,agent-memory,crdt]`. The extras `browser` and `embed` no longer exist, so `uv` prints a warning for each and installs the rest. |
+| Web interface | The first stage builds the interface and copies it into the image, but no Python code serves it. The `surrealfs browser` command and the `surrealfs-browser` script were removed. |
+| `surrealfs-init` service | The commands `surrealfs schema apply --record-auth` and `python -m surrealfs.users add` work. They created the schema and the users `agent-1` and `indexer`. |
+| `surrealfs-browser` service | It runs `surrealfs browser --host 0.0.0.0 --port 7933` and fails with `argument command: invalid choice: 'browser'`. |
+| `surrealfs-embed` service | It runs `surrealfs embed` and fails with `argument command: invalid choice: 'embed'`. |
+| `surrealfs-mcp` service | It runs `surrealfs mcp`, a server for standard input and output. With no client attached, the process exits with status 0 at once, and the service has `restart: unless-stopped`. Signed in as a record user, it also prints `could not apply the schema: IAM error: Not enough permissions to perform this action`. |
+| `surrealdb` service | It starts SurrealDB with `--allow-all` and the user `root` with the password `root`, publishes port 8000 and stores data with RocksDB. A start command of this form ran with `surreal` 3.2.3. |
+| `surrealdb` health check | It runs `/surreal isready --url http://127.0.0.1:8000`. The `surreal` 3.2.3 binary rejects `--url` with `unexpected argument '--url' found` and exits with status 2, and its documented option is `--endpoint`. The `v3.0.0` image was not run, so the behaviour of its binary is not verified. If it also rejects the option, the service never becomes healthy, and Compose does not start `surrealfs-init`, which waits for `service_healthy`. |
+| `docs/docker.md` | It describes a sidecar that runs `surrealfs mount` with FUSE. The Python program has no `mount` subcommand, and `surrealfs-rs mount` mounts nothing. |
+
+A container for the gateway needs three things:
+
+- The `surrealfs-server` binary, built for the image's platform.
+- The database settings that [Gateway server](/docs/agent-filesystem/interfaces/gateway-server#the-surrealfs-server-program) lists.
+- A listen address other than loopback, for example `SURREALFS_BIND=0.0.0.0:8787`.
+
+The repository has no Dockerfile for the gateway.
+
+## Troubleshooting
+
+[Gateway server](/docs/agent-filesystem/interfaces/gateway-server#troubleshooting) lists the symptoms of a running gateway. These symptoms belong to the Worker and to the build:
+
+| Symptom | Cause | Resolution |
+| --- | --- | --- |
+| `Could not resolve "../pkg/surrealfs_server.js"` | The `wasm-bindgen` step was skipped. | Generate the `pkg` folder as in [step 3](#3-generate-the-pkg-folder). |
+| `500` with `SURREALDB_URL secret/variable is required` | The Worker has no `SURREALDB_URL`. | Set it in `.dev.vars`, or with `wrangler secret put` for a deployed Worker. |
+| `500` with `The namespace 'surrealfs' does not exist` or `The database 'main' does not exist` | The schema is not applied. The Worker never applies it. | Run `surrealfs-rs init` with the same namespace and database. |
+| `500` with `HTTP RPC invalid JSON` | SurrealDB refused the request with a reply that is not JSON. The cause is `401` for a database user that signs in with a password, or `413` for a request body above 4 MiB. [Gateway server](/docs/agent-filesystem/interfaces/gateway-server#troubleshooting) lists further causes. | Use a root user or a `SURREALDB_TOKEN`, or raise `SURREAL_HTTP_MAX_RPC_BODY_SIZE` on the database. |
+| `401` with `Authentication required` | `SURREALFS_SERVER_TOKEN` is set and the request has no `Authorization` header. | Send `Authorization: Bearer <TOKEN>`. |
+| `401` with `Invalid authentication credentials` | `SURREALFS_SERVER_TOKEN` is set, and the `Authorization` header matches neither the token nor a stored credential. | Send the value of `SURREALFS_SERVER_TOKEN` as `Authorization: Bearer <TOKEN>`, or a stored credential. |
+
+## See also
+
+- [Gateway server](/docs/agent-filesystem/interfaces/gateway-server) describes the settings, endpoints, authentication and security of the gateway.
+- [Remote clients and the gateway](/docs/agent-filesystem/interfaces/remote-clients) describes how clients connect to a gateway.
+- [Configuration reference](/docs/agent-filesystem/operations/configuration) lists the variables of every program.
+- [Backup and restore](/docs/agent-filesystem/operations/backup-and-restore) describes database exports.
+- [Limits and caveats](/docs/agent-filesystem/operations/limits-and-caveats) lists the status of the gateway and of the other features of this release.

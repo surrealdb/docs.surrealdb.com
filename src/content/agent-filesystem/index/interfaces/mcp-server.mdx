@@ -1,0 +1,292 @@
+---
+position: 3
+title: MCP server
+description: "surrealfs-mcp, the stdio MCP server for Agent Filesystem: install, configuration file and variables, selftest, tools, resources and the optional Agent Memory mirror."
+---
+
+# MCP server
+
+`surrealfs-mcp` is a Model Context Protocol (MCP) server that gives any MCP client the Agent Filesystem tools over standard input and output. The client starts the server as a child process, and the server connects to your SurrealDB database. The only setting it requires is the database URL, and nothing in it is specific to one client, so Claude Code, Claude Desktop, Cursor, Zed, Codex and any other client that starts a stdio server are expected to receive the same tools. The examples on this page run the server through a hand-written Python client.
+
+On Claude, the [Claude plugin](/docs/agent-filesystem/interfaces/claude-plugin) installs this server together with two skills in one step. This page covers the server itself: how to install it, what it reads, what it offers and how to check that it works.
+
+> [!NOTE]
+> The package is in beta, and the interface can change between releases. This page describes version 0.2.0 of the `surrealfs` package built from the repository's `next` branch, which has 31 tools. A build from the repository's default branch can have fewer tools, so check the `tools` line of the [selftest](#check-the-server-with-the-selftest) to see which build you run.
+
+## Install
+
+The server is part of the `surrealfs` Python package and needs the `mcp` extra. The `agent-memory` extra adds the HTTP client for the [optional Agent Memory mirror](#optional-agent-memory), and installing it does not turn the mirror on. The package is not on PyPI, so `pip install surrealfs` does not find it. Install from the project's GitHub repository, which needs `git`:
+
+```bash
+pip install "surrealfs[mcp,agent-memory] @ git+https://github.com/surrealdb/surrealfs.git@next"
+```
+
+Replace `@next` with a release tag once the project publishes one. The package requires Python 3.11 or later and a SurrealDB 3.x server, and the `mcp` extra requires `mcp` 2.1 or later. The command `surrealfs-mcp` is then on your path, and `surrealfs mcp` starts the same server.
+
+You can also let `uvx` fetch and run the package when the client starts the server, which the client configuration below does.
+
+## Configure the server
+
+The server reads its settings from environment variables, and from a file that holds the same variables. The file is `~/.config/surrealfs/env`, or `$XDG_CONFIG_HOME/surrealfs/env` when that variable is set, or the path in `SURREALFS_ENV_FILE`. A variable that is set in the environment wins over the file.
+
+Use a file for two reasons. A client launches the server, not your terminal, so a shell profile or a project `.env` file is not reliably in scope, and Claude Desktop starts servers with a bare environment. And `SURREALDB_URL` and its neighbours are the names that every SurrealDB tool reads, so exporting them to configure this one server would repoint your other work at the same database.
+
+```bash title="Write the configuration file"
+mkdir -p ~/.config/surrealfs
+cat > ~/.config/surrealfs/env <<'EOF'
+SURREALDB_URL=wss://your-instance.surreal.cloud/rpc
+SURREALDB_USER=your-user
+SURREALDB_PASS=your-password
+SURREALDB_NAMESPACE=your-namespace
+SURREALDB_DATABASE=your-database
+SURREALFS_AGENT_USER=agent-alice
+EOF
+chmod 600 ~/.config/surrealfs/env
+```
+
+The [`surrealfs init`](/docs/agent-filesystem/interfaces/command-line#init) command can write this file for you, with record access enabled, and it replaces a file that exists. This page writes the file by hand and signs in with a system credential. The file holds a password, so restrict it to your user. The server prints `surrealfs-mcp: <path> is readable by other users; chmod 600 it.` on standard error when other users can read it, and still uses it. Reading the file needs `python-dotenv`, which the `mcp` extra installs. The file is parsed as a dotenv file, so quote a value that contains a space or a `#`, as in `SURREALDB_PASS="pa #ss"`: without the quotes, a ` #` starts a comment, and the password is cut short at that point.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SURREALDB_URL` | none | The SurrealDB server to connect to, for example `ws://localhost:8000/rpc`. The server refuses to start without it. |
+| `SURREALDB_USER`, `SURREALDB_PASS` | `root`, `root` | The credentials. Under record sign-in, these are the record user's name and password. |
+| `SURREALDB_NAMESPACE`, `SURREALDB_DATABASE` | `surrealfs`, `demo` | Where the `file` table lives. |
+| `SURREALDB_AUTH_LEVEL` | `root` | How to sign in: `root`, `namespace`, `database` or `record`. Any other value is an error. |
+| `SURREALFS_AGENT_USER` | The operating-system user name of the process, with characters other than letters, digits, `_` and `-` replaced by `-` | The identity that every tool call acts as, and the owner of `/home/<agent>`. The name `root` is refused. |
+| `SURREALFS_SEMANTIC` | unset | A value of `1`, `true` or `yes` selects the hybrid version of the `search` tool. The server has no embedding function in this release, so the tool still matches words only. See [Tools](#tools). |
+| `SURREALFS_ENV_FILE` | `$XDG_CONFIG_HOME/surrealfs/env` | The path of the configuration file. |
+
+The Agent Memory variables are described in [the section on the mirror](#optional-agent-memory).
+
+Three behaviours to know before the first run:
+
+- **The server refuses to start without a URL.** A fallback to `ws://localhost:8000/rpc` and the `demo` database would connect to an empty filesystem without an error, and an agent that finds an empty filesystem reports that it holds no information.
+- **Every tool call acts as one identity.** The model has the permissions of `SURREALFS_AGENT_USER`, or of the record user when `SURREALDB_AUTH_LEVEL` is `record`. With the default `root` sign-in, the SurrealDB credential is a system credential and the Python class applies the permission rules for the agent user, see [Permissions](/docs/agent-filesystem/security/permissions). With `record` sign-in, SurrealDB enforces the rules itself, see [Record access](/docs/agent-filesystem/security/record-access). Several tools skip the read check, as the [tool schemas](/docs/agent-filesystem/interfaces/tool-schemas) page explains, so use `record` sign-in when agents that share a database must not see each other's private files.
+- **The server tries to apply the schema each time it connects.** The schema statements overwrite their own definitions, so point the server at a database that holds Agent Filesystem data only. A record user has no right to define tables, so under `record` sign-in the attempt fails, the server prints `could not apply the schema` on standard error at every start, and it carries on. Ask an administrator to apply the schema once, see [Record access](/docs/agent-filesystem/security/record-access).
+
+## Connect a client
+
+Every MCP client needs three values: a command, its arguments, and optionally some environment variables. The server reads its own configuration file, so the client configuration needs no `env` block:
+
+```json title="MCP client configuration"
+{
+  "mcpServers": {
+    "surrealfs": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "surrealfs[mcp,agent-memory] @ git+https://github.com/surrealdb/surrealfs.git@next",
+        "surrealfs-mcp"
+      ]
+    }
+  }
+}
+```
+
+If you installed the package with `pip`, set `"command"` to `surrealfs-mcp` and leave out `"args"`. The project's README lists the following locations for the configuration, and your client's own documentation is the authority for its current format:
+
+| Client | Where the configuration goes |
+| --- | --- |
+| Claude Code | `.mcp.json` in the project, or `claude mcp add`. The [Claude plugin](/docs/agent-filesystem/interfaces/claude-plugin) is the simpler route. |
+| Claude Desktop | `claude_desktop_config.json`: `~/Library/Application Support/Claude/` on macOS and `%APPDATA%\Claude\` on Windows. The plugin is the simpler route. |
+| Cursor | `~/.cursor/mcp.json`, or `.cursor/mcp.json` in the project. |
+| Codex CLI | `~/.codex/config.toml`, as a `[mcp_servers.surrealfs]` table. |
+| Zed | `context_servers` in `settings.json`. |
+
+> [!WARNING]
+> Some clients start servers with a minimal `PATH` that does not include `~/.local/bin`, where `uvx` is usually installed. A bare `"command": "uvx"` then fails without writing anything to a log. If the server never starts, give the absolute path of `uvx` or `surrealfs-mcp`.
+
+## Check the server with the selftest
+
+Run `surrealfs-mcp --selftest` in a terminal before you configure a client. It reads the same configuration as the server and prints the file it read, the server and database it reached, the identity it acts as, the number of tools, a listing of `/`, and the state of Agent Memory. It ends with `OK`, or with a line that names the layer that failed, and the exit status is 0 only when everything it checked worked.
+
+The selftest exists because every misconfiguration produces the same symptom, a model that says it has no such tools. The message covers a client that never started the server, a missing configuration file, an unreachable database, a wrong namespace and a bad Agent Memory key. The selftest separates them.
+
+```text title="Sample output of a successful run"
+config    /home/alice/.config/surrealfs/env
+server    ws://localhost:8000/rpc
+database  agents / workspace
+acting as agent-alice
+tools     31
+ls /      home, projects
+memory    not configured (AGENT_MEMORY_CONTEXT_ID / AGENT_MEMORY_API_KEY)
+
+OK        filesystem reachable; agent memory off, so no
+          brain_recall tool. Everything else works.
+```
+
+A database that holds nothing except `/home` prints `WARN` and ends with exit status 1 even though the connection worked, because that state usually means a wrong namespace or database. A brand-new database therefore fails the selftest until one file exists. Write a first file through a client, as in [Try the tools](/docs/agent-filesystem/quickstarts/mcp-and-claude#5-try-the-tools), or run the example from the [Python SDK](/docs/agent-filesystem/interfaces/python-sdk#connect-and-write-a-first-file) page against the same namespace and database. The selftest of an empty database looks like this:
+
+```text title="Sample output for an empty database"
+ls /      home
+
+WARN      connected, but this database is empty apart from /home.
+          Check SURREALDB_NAMESPACE and SURREALDB_DATABASE -- a
+          wrong pair connects successfully to the wrong filesystem.
+```
+
+With no URL in the environment or the file, the selftest prints `FAIL      nothing to connect to` and exits with status 1. Run the selftest as `surrealfs-mcp --selftest`: the `surrealfs mcp` command does not accept the flag.
+
+If the selftest passes and the client still shows no tools, the client never started the server, so read the client's log. For Claude Code, run `claude mcp list` or use `/mcp` in a session. For Claude Desktop on macOS, the project's README names `~/Library/Logs/Claude/mcp.log` and `~/Library/Logs/Claude/mcp-server-surrealfs.log`.
+
+## Tools
+
+The server offers the 31 tools of the [tool registry](/docs/agent-filesystem/interfaces/tool-schemas), listed in this order: `ls`, `glob`, `cat`, `head`, `read_bytes`, `tail`, `write_file`, `append_file`, `write_bytes`, `edit`, `touch`, `mkdir`, `cp`, `mv`, `rm`, `chmod`, `search`, `read_range`, `grep`, `tree`, `history`, `diff`, `restore`, `undelete`, `relate`, `backlinks`, `search_sections`, `acquire_lease`, `release_lease`, `fork_workspace` and `merge_workspace`. The names are not prefixed, because an MCP client namespaces tools by server. With Agent Memory configured, a 32nd tool named `brain_recall` is added. The arguments and results of each tool are on the [tool schemas](/docs/agent-filesystem/interfaces/tool-schemas#tool-reference) page.
+
+Each result is a single text item. A tool that fails because of its arguments or the filesystem, such as `cat` on a missing path, returns text that starts with `Error:`, and the result is not flagged as an error at the protocol level. An exception that the tool does not handle becomes a JSON-RPC error, which is what the `acquire_lease` tool produces in version 0.2.0, see the [known issues](/docs/agent-filesystem/interfaces/tool-schemas#known-issues).
+
+With `SURREALFS_SEMANTIC` set, the server swaps the `search` tool for the hybrid version and the tool count stays at 31. The server builds its tool context with no embedding function and has no setting that supplies one, so the hybrid `search` runs its full-text arm alone. It prints no message about this, and it sends no text to an embedding service. See [Search](/docs/agent-filesystem/concepts/search) for how vectors are stored, and [Semantic search in the tools](/docs/agent-filesystem/interfaces/tool-schemas#semantic-search-in-the-tools) for tools that run in your own code with an embedding function.
+
+## Resources
+
+The server declares one resource template, `surrealfs://{path}`, named `SurrealFS File`, with the description "Read-only access to files stored in SurrealFS" and the media type `text/plain`. The resource list is always empty, so a client reads a file by constructing the URI. Reading `surrealfs://projects/atlas/plan.md` returns the text of `/projects/atlas/plan.md`. A missing file returns a normal result whose text starts with `Error reading resource`, and a URI with another scheme returns `Unsupported URI scheme`. Resources return text only, so a binary file produces an error.
+
+## Try the server from Python
+
+An MCP client library can drive the server directly, which is a quick way to see what a model sees. This script starts `surrealfs-mcp` with its settings in the `env` argument, lists the tools and calls two of them. It uses the `mcp` package, version 2.x, and a SurrealDB server on `localhost:8000` as in the [Python SDK](/docs/agent-filesystem/interfaces/python-sdk#connect-and-write-a-first-file) example:
+
+```python title="mcp_session.py"
+import asyncio
+import os
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+
+async def main():
+    server = StdioServerParameters(
+        command="surrealfs-mcp",
+        env={
+            "PATH": os.environ["PATH"],
+            "SURREALDB_URL": "ws://localhost:8000/rpc",
+            "SURREALDB_USER": "root",
+            "SURREALDB_PASS": "secret",
+            "SURREALDB_NAMESPACE": "agents",
+            "SURREALDB_DATABASE": "workspace",
+            "SURREALFS_AGENT_USER": "alice",
+        },
+    )
+    async with stdio_client(server) as (read, write):
+        async with ClientSession(read, write) as session:
+            init = await session.initialize()
+            print(init.server_info.name, init.server_info.version)
+            print(init.instructions)
+
+            tools = await session.list_tools()
+            print(len(tools.tools), tools.tools[0].name)
+
+            await session.call_tool(
+                "write_file",
+                {"path": "/projects/atlas/plan.md", "content": "# Atlas plan\n\n- Draft the API\n"},
+            )
+            result = await session.call_tool("search", {"query": "draft"})
+            print(result.content[0].text)
+
+            missing = await session.call_tool("cat", {"path": "/projects/atlas/missing.md"})
+            print(missing.is_error, missing.content[0].text)
+
+
+asyncio.run(main())
+```
+
+The server also writes `surrealfs-mcp: Agent memory is not configured, ...` to standard error, and the client library passes that line through to your terminal ahead of the output below.
+
+```text title="Output"
+surrealfs 0.2.0
+A persistent filesystem shared with other agents and with the people who own them. Not the local disk.
+31 ls
+/projects/atlas/plan.md
+    # Atlas plan
+
+- Draft the API
+False Error: No such file or directory: /projects/atlas/missing.md
+```
+
+## Optional: Agent Memory
+
+[Agent Memory](/docs/agent-memory) is SurrealDB's managed memory layer, and it extracts typed, temporal knowledge from documents into a knowledge graph. The server can connect the two products: it files the text of the files it writes into Agent Memory, and it adds a tool that recalls from it. This is off unless you configure it, and everything described above works without it. The relationship between the two products is covered in [Agent Filesystem and Agent Memory](/docs/agent-filesystem/welcome/agent-filesystem-and-agent-memory).
+
+> [!NOTE]
+> The statements in this section about the Agent Memory service, such as the deduplication of uploads and one host for each context, follow the package's source and the Agent Memory documentation. The mirror is not confirmed against a live Agent Memory context.
+
+To turn it on, install the `agent-memory` extra and add the context id and API key to the same configuration file. The service gives each context its own host, so set `AGENT_MEMORY_URL` to the host that your context shows. See the [Agent Memory quickstart](/docs/agent-memory/quickstarts/surrealdb-cloud) for creating a context and a key.
+
+```bash title="Add to the configuration file"
+AGENT_MEMORY_URL=https://<your-context-host>
+AGENT_MEMORY_CONTEXT_ID=<your-context-id>
+AGENT_MEMORY_API_KEY=<your-api-key>
+SURREALFS_MIRROR_ROOT=/brain
+```
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AGENT_MEMORY_CONTEXT_ID` | unset | The context to file into. Memory stays off unless this and the key are both set. |
+| `AGENT_MEMORY_API_KEY` | unset | The bearer token for the context. |
+| `AGENT_MEMORY_URL` | A fixed endpoint built into the package | The base URL of the Agent Memory service. Each context has its own host, so set it to the host of your context, because the API key is sent to whichever host is in use. |
+| `AGENT_MEMORY_SCOPE` | `brain` | The scope path that documents are filed under and that recall is limited to. |
+| `SURREALFS_MIRROR_ROOT` | `/` | Only writes under this path are filed into Agent Memory. |
+
+> [!WARNING]
+> With the default `SURREALFS_MIRROR_ROOT` of `/`, the server files a file into Agent Memory after each `write_file`, `edit` or `touch`, including files under private `/home/<user>` folders. Text that `append_file` adds reaches Agent Memory only when a later `write_file`, `edit` or `touch` of the same file uploads the whole file again. Who can read the scope depends on the Agent Memory context. Set `SURREALFS_MIRROR_ROOT` to the folder that you intend to share, for example `/brain`.
+
+When both values are set, the server advertises `brain_recall` and changes its instructions to mention the memory behind the filesystem. If either value is missing, the server says once on standard error that Agent Memory is not configured and does not advertise `brain_recall`. If both are set and the `httpx` package is missing, the mirror fails loudly and names the extra to install.
+
+### What the mirror files
+
+After `write_file`, `edit` or `touch` succeeds on a path under the mirror root, the server reads the file back as the acting user and uploads it to Agent Memory as a document. The tools `append_file`, `write_bytes`, `cp`, `mv`, `restore`, `undelete`, `chmod` and `rm` do not file anything, so a removal in the filesystem never reaches Agent Memory. An empty file is skipped.
+
+The upload is a multipart `POST` to `/api/v1/{context}/documents` with the API key as a bearer token. The `metadata` part comes first and carries the title, the scope and two labels:
+
+```json title="Metadata of one mirrored file"
+{
+  "title": "/projects/atlas/risks.md",
+  "scopes": [["brain"]],
+  "labels": ["path=/projects/atlas/risks.md", "dir=/projects/atlas"]
+}
+```
+
+The title is the file's path, which is how a recalled hit can name the file to open. Agent Memory deduplicates uploads by content hash, so filing an unchanged file creates nothing, and a changed file becomes a second document instead of replacing the first. The earlier version stays recallable. See [Uploading documents](/docs/agent-memory/ingest/authoritative/uploading-documents) for the service's side.
+
+The first write into a context that has no scope of that name gets a `400` response that mentions the scope. The server then registers the scope with `POST /scopes` and retries once. Any other failure appends `(brain sync failed for <path>: <error>)` to the tool result and does not undo the write to the filesystem.
+
+### The `brain_recall` tool
+
+`brain_recall` queries Agent Memory instead of the filesystem. It answers across every version that was filed and across the entities and relations that Agent Memory extracted, and each hit is labelled with the path of the file it came from, so one question can name the files to open. A hit can be a superseded version of a file, so the file confirms what is current.
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `query` | string, required | What to find out, phrased as a question. |
+| `k` | integer, default 8 | How many results to return. |
+
+The tool sends a hybrid query limited to the configured scope, then looks up the title of each document that a hit cites. A result looks like this:
+
+```text title="Sample output of brain_recall"
+Recalled from agent memory:
+chunk · /projects/atlas/risks.md · 0.81
+    The schema review may slip
+entity · Project/Atlas · 0.00
+    Atlas
+```
+
+Each hit is `<source> · <where> · <score>` followed by its text with whitespace collapsed and cut to 500 characters. For an entity, `<where>` is `<entity type>/<name>`. No hits gives `Nothing recalled from agent memory for '<query>'.`, and a network failure gives `Error: could not reach agent memory: <error>`. Without configuration, a call returns the text `Agent memory is not configured: set AGENT_MEMORY_CONTEXT_ID and AGENT_MEMORY_API_KEY to recall anything beyond the filesystem.`
+
+> [!NOTE]
+> The requests above are the ones that the server sends. For how recall ranks and filters results, see [Recall](/docs/agent-memory/retrieve/recall) and [Contexts and scope](/docs/agent-memory/mental-model/contexts-and-scope).
+
+## Troubleshooting
+
+| Symptom | Cause | Resolution |
+| --- | --- | --- |
+| The server exits with status 2 and `no configuration found at <path>` | No file and no `SURREALDB_URL` | Create the configuration file with the five connection variables, or set them in the client's `env` block. |
+| The server exits with status 2 and `not configured -- SURREALDB_PASS is unset` | A variable arrived as an unexpanded `${...}` placeholder | Put the values in the configuration file, or set them where the client can see them. |
+| The server exits with status 1 and `no agent may act as 'root'` | The agent identity resolved to `root`, which bypasses every permission check | Set `SURREALFS_AGENT_USER` to a real name, or sign in as a record user. |
+| The selftest warns that the database is empty | A wrong namespace or database, or a database that is new | Check `SURREALDB_NAMESPACE` and `SURREALDB_DATABASE`, or write one file. |
+| The client shows no tools and the selftest passes | The client never started the server | Read the client's log, and try the absolute path of `uvx` or `surrealfs-mcp`. |
+| Tool results end with `(brain sync failed ...)` | The mirror could not reach Agent Memory, or `httpx` is missing | Check `AGENT_MEMORY_URL`, the key and the `agent-memory` extra. The write to the filesystem succeeded. |
+
+## See also
+
+- [Claude plugin](/docs/agent-filesystem/interfaces/claude-plugin), which bundles this server with two skills
+- [Tool schemas](/docs/agent-filesystem/interfaces/tool-schemas) for every tool and its arguments
+- [MCP and Claude quickstart](/docs/agent-filesystem/quickstarts/mcp-and-claude)
+- [Configuration](/docs/agent-filesystem/operations/configuration) for every environment variable across the surfaces

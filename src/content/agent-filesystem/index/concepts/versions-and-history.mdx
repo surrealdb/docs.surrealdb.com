@@ -1,0 +1,444 @@
+---
+position: 1
+title: Versions and history
+description: "How Agent Filesystem records earlier versions of files: generations, history, diff, restore, undelete, what rm does, and who can read history."
+---
+
+Agent Filesystem keeps the earlier states of a file. When a write changes a file's content, name, location or mode, or when the file is deleted, the database stores a copy of the state that is being replaced. You can list these versions, compare one with the current file, restore one, or bring back a deleted file. The sections below also describe the cases that history does not cover.
+
+A **generation** is the integer counter that labels a state of a file. A **version** is a stored copy of a replaced state, kept as a record in the `file_version` table. A version holds a replaced state and never the live one, so a file at generation 3 whose content changed twice has versions for generations 1 and 2.
+
+> [!NOTE]
+> Agent Filesystem is in beta, and the behaviour described here can change between releases. The examples use the Python `SurrealFs` client, and [Other clients](#other-clients) lists where the others differ. One limit affects who can read history under a system credential, and another affects how generations behave under record access. [Limits to know about](#limits-to-know-about) describes both.
+
+## How versions are recorded
+
+A database event named `evt_file_version` on the `file` table writes each version, so every client that writes through the database records history, and a client cannot skip it. The event fires when:
+
+- an update changes the `generation`, `content`, `file`, `parent`, `filename` or `mode` field, or
+- a record is deleted.
+
+An update to `meta`, `content_type` or `group` on its own writes no version.
+
+The version holds the state that the write replaced:
+
+| Field | Description |
+| --- | --- |
+| `file` | A link to the `file` record. The link survives a rename. |
+| `generation` | The generation of the replaced state. |
+| `path` | The path of the file. For a delete it is the path before the delete. For an update it is the path after the update, so a rename records the new path. |
+| `content`, `file_bytes` | The text or the bytes of the replaced state. One of them is `NONE`, and both are `NONE` for a folder. |
+| `content_type`, `hash`, `owner`, `mode`, `size` | The values from the replaced state. The size counts characters for text and bytes for binary content. |
+| `gate` | The gate of the replaced state, which [record authentication](/docs/agent-filesystem/security/record-access) uses together with the owner and mode to decide who can see the version. The `FileVersionEntry` object that the Python client returns does not carry it. |
+| `op` | What happened: `write`, `chmod`, `rename` or `delete`. |
+| `author` | Who made the change. See [Author](#author). |
+| `created_at` | When the version was written. |
+
+The `op` value follows a fixed order. A delete is `delete`. Otherwise a change to `mode` is `chmod`, then a change to `filename` or `parent` is `rename`, and everything else is `write`. An update that changes both the mode and the content is labelled `chmod`.
+
+Each version stores the full content of the replaced state. No delta encoding and no retention limit exist in this release. See [Storage and retention](#storage-and-retention).
+
+## Generations
+
+A new file starts at generation 1. The `generation` field rises by 1 when a write changes the content hash. The table shows how common operations affect it:
+
+| Operation | Generation | Version written |
+| --- | --- | --- |
+| First write of a new file | Starts at 1 | None |
+| Write that changes the content | Rises by 1 | `write` |
+| Write that stores identical content | Unchanged | None |
+| `append_text` | Rises by 1 when the content changes | `write` |
+| `edit` | Rises by 1 when the content changes | `write` |
+| `restore` | Rises by 1 when the content differs from the live file | `write` |
+| `chmod` | Unchanged | `chmod` |
+| `mv` | Unchanged | `rename` |
+| `rm` | Not applicable | `delete` |
+| `undelete` | Starts again at 1 on a new record | None |
+
+A rewrite with identical content leaves the generation alone, writes no version, and still sets `updated_at`. A `chmod` or `mv` does not change the generation, so its version carries the generation that is still live afterwards. Two versions of one file can therefore share a generation number.
+
+Clients use the generation for optimistic concurrency. A write that passes `if_generation` succeeds only when the file is still at that generation, and [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases) describes the pattern. Under [record authentication](/docs/agent-filesystem/security/record-access) the generation stays at 1 in this release, so `if_generation` cannot detect a concurrent change there. See [Generations under record access](#generations-under-record-access).
+
+## A worked example
+
+The script below writes a file three times, lists its history, compares generation 1 with the current file, and compares two earlier generations. It assumes a local SurrealDB 3 server whose root password is `secret`, and an installed `surrealfs` package as described in the [Python quickstart](/docs/agent-filesystem/quickstarts/python).
+
+```python title="history.py"
+import asyncio
+
+from surrealdb import AsyncSurreal
+from surrealfs import SurrealFs, apply_schema
+
+
+async def main():
+    db = AsyncSurreal("ws://localhost:8000/rpc")
+    await db.signin({"username": "root", "password": "secret"})
+    await db.use("agents", "history")
+    await apply_schema(db)
+
+    fs = SurrealFs(db, user="alice")
+    path = "/projects/launch/plan.md"
+
+    await fs.write_text(path, "Launch date: 1 October\nOwner: Maya\n")
+    await fs.write_text(path, "Launch date: 15 October\nOwner: Maya\n")
+    current = await fs.append_text(path, "Status: on track\n")
+    print("current generation:", current.generation)
+
+    for version in await fs.history(path):
+        print(version.generation, version.op, version.author, version.size)
+
+    print(await fs.diff(path, 1))
+    print(await fs.diff(path, 1, 2))
+
+    await db.close()
+
+
+asyncio.run(main())
+```
+
+```text title="Output"
+current generation: 3
+2 write alice 36
+1 write alice 35
+--- /projects/launch/plan.md (gen 1)
++++ /projects/launch/plan.md (current)
+@@ -1,2 +1,3 @@
+-Launch date: 1 October
++Launch date: 15 October
+ Owner: Maya
++Status: on track
+
+--- /projects/launch/plan.md (gen 1)
++++ /projects/launch/plan.md (gen 2)
+@@ -1,2 +1,2 @@
+-Launch date: 1 October
++Launch date: 15 October
+ Owner: Maya
+
+```
+
+The history lists generations 2 and 1, newest first. Generation 3 is the live file, so it does not appear. The first write created the file and recorded nothing.
+
+The later sections continue from this script, and each snippet goes before the `await db.close()` line. The snippets build on each other, so run them in order against an empty database. Running the script a second time continues the generation count, and the printed numbers then differ from the ones shown here.
+
+## List the history
+
+The `history` method returns the versions of a path, newest first, ordered by `created_at` and then by generation. The `limit` argument defaults to 20, and the method has no offset argument. To read past the newest `limit` versions, query `file_version` with SurrealQL, as shown below.
+
+```python
+versions = await fs.history("/projects/launch/plan.md", limit=5)
+```
+
+Each entry is a `FileVersionEntry` with the fields `id`, `file`, `generation`, `path`, `content_type`, `hash`, `author`, `owner`, `mode`, `op`, `size` and `created_at`. The entry carries no content. A path with no versions returns an empty list.
+
+The `surrealfs` command prints the same list. It reads its connection settings from the environment, as the [Command-line reference](/docs/agent-filesystem/interfaces/command-line) describes, so the settings of the worked example are exported first:
+
+```bash
+export SURREALDB_URL=ws://localhost:8000/rpc
+export SURREALDB_NAMESPACE=agents
+export SURREALDB_DATABASE=history
+export SURREALDB_USER=root
+export SURREALDB_PASS=secret
+
+surrealfs history /projects/launch/plan.md --limit 5
+```
+
+```text title="Sample output"
+History for /projects/launch/plan.md:
+GEN   OP       AUTHOR          CREATED AT                SIZE/REASON
+---------------------------------------------------------------------------
+2     write    alice           2026-10-14 22:52:18
+1     write    alice           2026-10-14 22:52:18
+```
+
+With another namespace or database in the environment, the command prints `No history found for /projects/launch/plan.md` instead. The last column is empty in this release. Because `file_version` is an ordinary table, SurrealQL can read it directly and can read content that the Python method does not return. The SurrealQL statements on this page run in the `surreal sql` shell that the [Data model](/docs/agent-filesystem/concepts/data-model#a-file-is-one-record) page describes, connected to the namespace `agents` and the database `history`.
+
+```surql
+SELECT generation, op, author, size, created_at
+FROM file_version
+WHERE path = '/projects/launch/plan.md'
+ORDER BY created_at DESC;
+```
+
+```surql title="Sample output"
+[
+    { author: 'alice', created_at: d'2026-10-14T22:52:18.915322Z', generation: 2, op: 'write', size: 36 },
+    { author: 'alice', created_at: d'2026-10-14T22:52:18.909919Z', generation: 1, op: 'write', size: 35 }
+]
+```
+
+```surql
+SELECT generation, content FROM file_version
+WHERE path = '/projects/launch/plan.md' AND generation = 1;
+```
+
+```surql title="Output"
+[
+    { content: 'Launch date: 1 October
+Owner: Maya
+', generation: 1 }
+]
+```
+
+Before SurrealDB 3.3, a field used in an `ORDER BY` clause must also appear in the `SELECT` list, which is why `created_at` is selected in the first query. From 3.3 the field can be left out, as the [SELECT reference](/docs/reference/query-language/statements/select#sort-records-using-the-order-by-clause) describes.
+
+## Compare versions
+
+The `diff` method returns a unified diff as a string. The `from_generation` argument selects the baseline, and `to_generation` selects the target. Without a target, the method compares the baseline with the current file, as in the first diff above. The headers read `<path> (gen N)` and `<path> (current)` or `<path> (gen M)`.
+
+Five details apply:
+
+- Every generation that you name must have a stored version. The current generation has none, so asking for it raises `NotFound` with the message `An error occurred: sfs:not_found`.
+- When two versions carry the same generation, the method uses one of them and the choice has no stated rule. See [Reused paths](#history-follows-paths).
+- The method compares lines with their line endings. When a file has no trailing newline, the removed and added lines run together, as in `-first life v1+second life`.
+- The method reads text only. A diff of a binary file against the current file raises `NotATextFile`, and a diff between two generations of a binary file returns an empty string.
+- A diff against the current file needs read permission on the file. A diff between two earlier generations has no such check under a system credential. See [Limits to know about](#limits-to-know-about).
+
+## Restore a version
+
+The `restore` method writes the content of a version back as a new generation. It does not rewind the file.
+
+```python
+restored = await fs.restore("/projects/launch/plan.md", 1)
+print(restored.generation)
+print(await fs.read_text("/projects/launch/plan.md"), end="")
+```
+
+```text title="Output"
+4
+Launch date: 1 October
+Owner: Maya
+```
+
+The method goes through the ordinary write path, so it has the effects of a write:
+
+- The new generation is the live generation plus 1, and the replaced state is recorded as a version. When the restored content is identical to the live content, the file keeps its generation and the method writes no version.
+- For a text version, the content type is chosen again from the file name and content, and front matter is parsed again into `meta`. For a binary version, the content type resets to `application/octet-stream`.
+- The file keeps its current owner and mode. A restore does not bring back the owner, the mode or the content type of the old version.
+- The method needs write permission on the file.
+- A path with no live file is created again, as generation 1, so `restore` can also bring back a deleted file at a chosen generation.
+
+The `restore` method raises `NotFound` when the path has no version with that generation. The `surrealfs restore PATH GENERATION` command and the MCP `restore` tool call the same method. The command prints the new generation, and the tool prints both the restored and the new generation.
+
+## Delete and undelete
+
+The `rm` method is a hard delete. It removes the record, and the database event writes one `delete` version for every record removed. The method returns the number of records removed.
+
+```python
+removed = await fs.rm("/projects/launch/plan.md")
+for version in await fs.history("/projects/launch/plan.md", limit=2):
+    print(version.generation, version.op)
+```
+
+```text title="Output"
+4 delete
+3 write
+```
+
+Four rules apply:
+
+- A folder that has children needs `recursive=True`. Without it, the method raises `DirectoryNotEmpty`.
+- The permission check of a recursive delete is all-or-nothing. The caller needs read, write and execute permission on every folder that is emptied, or nothing is deleted. The method then removes the deepest records first and writes one `delete` version for each folder and each file. When a child is created while the delete runs, part of the tree can remain, and the method raises `PermissionDenied` with the number of records that it removed.
+- A missing path raises `NotFound`.
+- The caller needs write and execute permission on the containing folder. The file itself can have any mode.
+
+The description of the MCP `rm` tool calls the deletion permanent and not reversible, although `undelete` can recover text and binary files from history.
+
+The `undelete` method creates the file again from the newest version recorded for the path:
+
+```python
+recovered = await fs.undelete("/projects/launch/plan.md")
+print(recovered.generation, oct(recovered.mode), recovered.owner)
+```
+
+```text title="Output"
+1 0o666 alice
+```
+
+The method takes the newest version for the path whatever its `op`, and it checks only that the path does not exist now. It then writes the content as a new file, so the result differs from the original in these ways:
+
+- The new file is a new record at generation 1, and the caller becomes the owner.
+- The mode is the default, and the content type is chosen again. A binary file comes back as bytes with the content type `application/octet-stream`.
+- A deleted folder returns as an empty text file, because a folder has no content to restore.
+- Missing parent folders are created again, with default modes.
+- The newest version is the `delete` version when the file was deleted. When the file was renamed away instead, the newest version for the old path is a `write` version, and `undelete` brings back an older copy of the file at the old path beside the renamed file. Check `history` before you call it.
+
+The method raises `AlreadyExists` when the path exists, and `NotFound` with the message `No version history found to undelete` when the path has no versions. Under record access, a user who cannot see a live file at the path gets a raw `QueryError` for the `child_unique` index instead of `AlreadyExists`.
+
+To recover a deleted tree, undelete each file and leave the folder paths alone. An `undelete` of a folder path creates an empty text file there, and every later `undelete` below that path then fails with `AlreadyExists: Not a directory`. The parent folders are created again on the way. The history of the folder holds only its own `delete` version, so the files below it have to be found with SurrealQL. The statements below delete a small tree and list the files that it held:
+
+```python
+await fs.write_text("/drafts/2026/notes.md", "first\n")
+await fs.write_text("/drafts/2026/notes.md", "second\n")
+await fs.rm("/drafts", recursive=True)
+```
+
+```surql
+SELECT path, generation, created_at FROM file_version
+WHERE op = 'delete'
+    AND string::starts_with(path, '/drafts/')
+    AND content_type != 'inode/directory'
+ORDER BY created_at;
+```
+
+```surql title="Sample output"
+[
+    { created_at: d'2026-10-14T22:53:04.118204Z', generation: 2, path: '/drafts/2026/notes.md' }
+]
+```
+
+## History follows paths
+
+The `history` method looks up versions by path, and each version records the path that the file had when the version was written. Two situations follow from this.
+
+**Renames.** A rename writes a `rename` version under the new path. Earlier versions stay under the old path. When a parent folder is renamed, the folder gets the `rename` version, and its children keep every version under their old paths:
+
+```python
+await fs.write_text("/reports/q3.md", "draft 1\n")
+await fs.write_text("/reports/q3.md", "draft 2\n")
+await fs.write_text("/reports/q3.md", "draft 3\n")
+await fs.mv("/reports", "/archive")
+print([v.generation for v in await fs.history("/archive/q3.md")])
+print([v.generation for v in await fs.history("/reports/q3.md")])
+```
+
+```text title="Output"
+[]
+[2, 1]
+```
+
+Each version also holds a link to its `file` record, and that link does not change when the path does. A query on the link finds the whole history of one file. The `fn::sfs_resolve` function turns the current path into the record ID without scanning the table, as the [Data model](/docs/agent-filesystem/concepts/data-model#looking-up-a-path) page explains:
+
+```surql
+SELECT generation, op, path, created_at FROM file_version
+WHERE file = fn::sfs_resolve('/archive/q3.md')
+ORDER BY created_at DESC;
+```
+
+```surql title="Sample output"
+[
+    { created_at: d'2026-10-14T22:52:30.409227Z', generation: 2, op: 'write', path: '/reports/q3.md' },
+    { created_at: d'2026-10-14T22:52:30.405806Z', generation: 1, op: 'write', path: '/reports/q3.md' }
+]
+```
+
+**Reused paths.** A new file at a path that held a deleted file shares that history. Generation numbers start again at 1 for the new file, so `diff` and `restore` can match a version from the earlier file:
+
+```python
+await fs.write_text("/scratch.md", "first file, version 1\n")
+await fs.write_text("/scratch.md", "first file, version 2\n")
+await fs.rm("/scratch.md")
+await fs.write_text("/scratch.md", "second file\n")
+for version in await fs.history("/scratch.md"):
+    print(version.generation, version.op)
+print(await fs.diff("/scratch.md", 1))
+```
+
+```text title="Output"
+2 delete
+1 write
+--- /scratch.md (gen 1)
++++ /scratch.md (current)
+@@ -1 +1 @@
+-first file, version 1
++second file
+
+```
+
+The history lists the versions of the first file. The new file is at generation 1 and has no versions yet. The `diff` call compares generation 1 of the first file with the current second file.
+
+Once the second file is written again, its first replaced state is also generation 1, and the history holds two versions with that number:
+
+```python
+await fs.write_text("/scratch.md", "second file, version 2\n")
+print([(v.generation, v.op) for v in await fs.history("/scratch.md")])
+print(await fs.diff("/scratch.md", 1))
+```
+
+```text title="Output"
+[(1, 'write'), (2, 'delete'), (1, 'write')]
+--- /scratch.md (gen 1)
++++ /scratch.md (current)
+@@ -1 +1 @@
+-second file
++second file, version 2
+
+```
+
+The `diff` and `restore` methods look a version up by path and generation, and no rule says which of two matching versions they take. In this run both took the version of the newer file, so the first file's generation 1 could no longer be selected by generation. The same ambiguity applies to a `chmod` or `rename` version that shares its generation with a `write` version. When a path has been reused, read the version that you need with SurrealQL, which can order or filter on `created_at` and on the `file` link.
+
+## Author
+
+The `author` field of a version names the user whose write replaced the state, or deleted it. A database connection that signs in as a root, namespace or database user has no user identity, so the event records the owner of the file instead. The Python connection helpers sign in as a root user unless `SURREALDB_AUTH_LEVEL` says otherwise, so that is the default.
+
+In that configuration the `author` field is not an audit trail. When `bob` overwrites a file that `alice` owns, the version that holds `alice`'s text says `alice`. Under [record authentication](/docs/agent-filesystem/security/record-access), the field names the signed-in user who made the change. The `surrealfs init` command sets that mode up: it applies the record-access schema and writes `SURREALDB_AUTH_LEVEL=record` to its settings file, as [Onboarding with `surrealfs init`](/docs/agent-filesystem/security/record-access#onboarding-with-surrealfs-init) describes. A setup made that way, such as the MCP server after `surrealfs init`, therefore runs under the generation limit below.
+
+## Limits to know about
+
+### Who can read history
+
+> [!WARNING]
+> Under a root, namespace or database user, the database does not filter history by the permissions of a file. The functions behind the history calls, `fn::sfs_history` and `fn::sfs_version_content`, apply no read check. Treat the history of a file, and the `undelete` and `restore` methods, as open to every agent that shares one system credential.
+
+This has four consequences:
+
+- The `history` method lists the versions of any path, including the hash, author and size of the earlier states of another user's private file.
+- A `diff` between two earlier generations returns their text.
+- The `rm` method needs only write and execute permission on the containing folder. A user can delete another user's private file in a shared folder and then call `undelete` to read its last content, and the caller becomes the owner of the new file.
+- After the owner deletes a private file, any user who can write to the containing folder can create it again. The `undelete` method restores the last stored content, and `restore` restores the content of any stored generation.
+
+While a file is live, `read_text` and a `diff` against the current file raise `PermissionDenied` for a user who cannot read it, and `restore` needs write permission on it. The `stat` method still returns the owner, mode and size.
+
+Under [record authentication](/docs/agent-filesystem/security/record-access), the database filters `file_version` records by the owner, mode and gate stored on each version. In testing, a record user got no versions of a file in another user's home folder or in a folder with mode `0o700`. Each version carries the mode that the file had when the version was written, so making a file private later does not hide the versions recorded while it was readable. The `chmod` version of such a file holds the content from before the change. Other users can still list those versions and read their content with SurrealQL, and `undelete` can recover them. Under record access, `undelete` can recover only states that are visible to the caller.
+
+### Generations under record access
+
+> [!WARNING]
+> Under record access, the generation of a file does not advance in this release. In testing, four writes with different content by a record user left `generation` at 1, where the same writes by a system user advanced it to 4. Versions are still written, in order, but they all carry generation 1. As a result `if_generation` cannot detect a concurrent change, and `diff` and `restore` cannot select one version by generation. Order the versions by `created_at` to read the sequence.
+
+### Choosing a credential
+
+No credential type gives both private history and a working generation counter in this release. A shared system credential keeps the counter and exposes history to every agent that uses it. Record access hides history from other users but leaves `generation` at 1. With a system credential, history is the wrong place for content that other agents must not read. With record access, order versions by `created_at` and do not rely on `if_generation`.
+
+## Storage and retention
+
+Every version holds the full content of a replaced state, so history grows with each change and with the size of the file. The release has no retention setting, and nothing deletes version records. A user with root, namespace or database credentials can remove them with SurrealQL:
+
+```surql
+DELETE file_version WHERE path = '/projects/launch/plan.md' AND created_at < time::now() - 90d;
+```
+
+A deleted version is gone. `diff`, `restore` and `undelete` can no longer use it, and a `delete` version that you remove is the only copy of a deleted file.
+
+A file that was uploaded in chunks stores no content in its `delete` version, and the data is not recoverable from history. See [Content storage](/docs/agent-filesystem/concepts/content-storage).
+
+## Other clients
+
+The Python client implements every operation on this page. The other surfaces reach a subset of them:
+
+| Surface | History | Diff | Restore | Undelete |
+| --- | --- | --- | --- | --- |
+| Python `SurrealFs` | Yes | Yes | Yes | Yes |
+| `surrealfs` command | Yes | No | Yes | No |
+| MCP and Hermes tools | Yes | Yes | Yes | Yes |
+| `surrealfs-rs` command | Yes | No | Yes | No |
+| TypeScript SDK | Partly | Partly | Yes | No |
+
+The names and arguments differ by surface:
+
+- **`surrealfs` command.** `surrealfs history PATH --limit N` and `surrealfs restore PATH GENERATION`.
+- **MCP and Hermes tools.** The tools are `history`, `diff`, `restore` and `undelete`. The `history` tool takes a `limit` from 1 to 100 with a default of 20, and the `diff` tool takes `from_generation` and an optional `to_generation`. The Hermes plugin names each tool with the prefix `surrealfs_`, so the history tool is `surrealfs_history`.
+- **`surrealfs-rs` command.** `surrealfs-rs history PATH --limit N` and `surrealfs-rs restore PATH VERSION`. The history command prints one line per version that ends with the path, and the restore command prints the new generation.
+- **TypeScript SDK.** The `history(path, limit)` method returns entries whose `content` is always empty. The `diff(path, genA, genB)` method needs both generations, and it returns the stored text of the second one, `genB`, whatever the order, not a difference. A generation with no stored version gives an empty string. The `restore(path, version)` method works as described here, with the differences below.
+
+The Rust and TypeScript clients call the database functions `fn::sfs_restore` and `fn::sfs_diff`. The restore function replaces only the content or bytes of an existing file. It does not choose the content type again or parse front matter, and it raises `sfs:not_found` for a path with no live file. The diff function first checks that the caller can read the current file. It then returns the stored text of the second generation, or the current text when that argument is `NONE`, and it does not compute a difference. The TypeScript method sends `null` for an omitted generation, which the function rejects with a coercion error, so the method needs both.
+
+> [!WARNING]
+> A recursive `rm` from the Rust CLI or the TypeScript SDK deletes the folder and its direct children only. Records deeper in the tree stay in the database with a parent that no longer exists. They disappear from listings and path lookups, but direct queries still return them, and their paths read as if the missing folders were not there. The Python `rm` with `recursive=True` removes the whole tree.
+
+## Related pages
+
+- [Data model](/docs/agent-filesystem/concepts/data-model) describes the `file` table and its fields.
+- [Content storage](/docs/agent-filesystem/concepts/content-storage) covers text, bytes, hashes and chunked uploads.
+- [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases) explains `if_generation` and advisory leases.
+- [Record authentication](/docs/agent-filesystem/security/record-access) describes database-enforced permissions.

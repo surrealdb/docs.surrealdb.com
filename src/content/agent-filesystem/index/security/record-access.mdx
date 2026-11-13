@@ -1,0 +1,288 @@
+---
+position: 2
+title: Record access
+description: "Per-user file permissions enforced by SurrealDB: set up record users, sign in, and see what the database does and does not isolate."
+---
+
+# Record access
+
+By default every client signs in to SurrealDB with a system credential, and the Python library enforces the permission rules on the client side. With record access, each person or agent signs in as a SurrealDB *record user*. The database then applies the rules to the `file` table and to the tables that depend on a file, whichever client or SurrealQL statement sends the query. This page explains when to use it, how to set it up, how to provision users and sign in, which clients can use it, and where the database's guarantee ends.
+
+> [!NOTE]
+> Agent Filesystem is in beta. The API, schema and command-line interface may change in breaking ways between releases. This page describes version 0.2.0 of [SurrealFS](https://github.com/surrealdb/surrealfs), the open source project behind Agent Filesystem, and each limitation that applies is listed where it matters.
+
+## When to use it
+
+Record access is optional. The `PERMISSIONS` clauses on the `file` table are always defined. They have no effect until a client signs in as a record user, because SurrealDB does not apply table permissions to a root, namespace or database user.
+
+| | System credential (default) | Record access |
+| --- | --- | --- |
+| What an agent holds | A root, namespace or database user | A `user` record that it signs in as |
+| Who enforces permissions | The client. The Python library does, other clients mostly do not | The database |
+| A client that sends its own SurrealQL | Can read and change every file | Is limited to what its user may do in the `file` table and the tables that depend on a file. See [What the database does not isolate](#what-the-database-does-not-isolate) |
+| Provisioning | None | An administrator creates each user |
+
+Use record access when several agents or people with different access share one database, or when an agent can send SurrealQL of its own. A single agent in its own database does not need it. The [permissions page](/docs/agent-filesystem/security/permissions#how-permissions-are-enforced) lists which clients enforce permissions without it.
+
+### Clients that can sign in as a record user
+
+The *Python surfaces* are the `surrealfs` command, the MCP server, and the Hermes plugin and memory provider. They read the sign-in from `SURREALDB_*` environment variables.
+
+| Client | Record user sign-in |
+| --- | --- |
+| Python library, and the Python surfaces with `SURREALDB_AUTH_LEVEL=record` | Yes |
+| A script that uses a SurrealDB SDK directly | Yes, through the access method `account` |
+| Rust command-line tool (`surrealfs-rs`) and the WebDAV and S3 servers | No. Over a `ws://` or `wss://` URL they sign in only as a root user |
+
+The group, share, legal hold, encryption and credential commands exist only in the Rust tool. A record user cannot run them, so use a system credential for them.
+
+## Set up
+
+Record access needs a system credential for the setup steps, and the Python package from the [Python quickstart](/docs/agent-filesystem/quickstarts/python). The commands read their connection details from environment variables. See [Configuration](/docs/agent-filesystem/operations/configuration) for the full list.
+
+1. Apply the schema with the record-access option. A system credential does this once for the database:
+
+   ```bash
+   export SURREALDB_URL=ws://localhost:8000/rpc
+   export SURREALDB_NAMESPACE=agents SURREALDB_DATABASE=files
+   export SURREALDB_USER=root SURREALDB_PASS=secret
+   python -m surrealfs.schema --record-auth
+   ```
+
+   ```text title="Output"
+   Applied schema (file + user) to agents/files on ws://localhost:8000/rpc
+   ```
+
+   The `surrealfs schema apply --record-auth` command does the same. The option adds the `user` table and four access methods to the schema of the `file` table. Every definition uses `OVERWRITE` or `IF NOT EXISTS`, so the command is safe to repeat, and a repeat with `--record-auth` replaces the access methods. The seed of `/home` is also repeatable: each run sets the owner of `/home` back to `root` and its mode to `0o777`.
+
+   The Rust command `surrealfs-rs init` applies the same definitions on every run, so a database that the Rust tool initialised needs no extra schema step. It creates no record user.
+
+2. Create a user with a known password. The command creates `/home/<name>` as a private folder, and then the `user` record with a hashed password:
+
+   ```bash
+   python -m surrealfs.users add alice --password hunter123
+   ```
+
+   ```text title="Output"
+   Created user alice with home /home/alice (0700)
+   Sign in with SURREALDB_AUTH_LEVEL=record SURREALDB_USER=alice SURREALDB_PASS=...
+   ```
+
+   The example sets a password so that the check at the end of this page can sign in. For a real user, use `--generate`, which creates a random password and prints it once, or the interactive prompt. Both keep the password out of the shell history and the process list.
+
+3. Sign in as the user. The Python surfaces read the sign-in from environment variables, and the database username becomes the identity of the client:
+
+   ```bash
+   export SURREALDB_AUTH_LEVEL=record SURREALDB_USER=alice SURREALDB_PASS=hunter123
+   ```
+
+   A script that uses the SurrealDB SDK directly signs in with the access method named `account`, as in the example below.
+
+> [!WARNING]
+> The variables in step 3 replace the system credential from step 1. Export them in a separate shell. The `users`, `schema` and `init` commands read the same variables, so with the record user's values they fail. `users add` reports `Permission denied: /home/<name>`, `python -m surrealfs.schema` and `surrealfs init` stop with an authentication error, `surrealfs schema apply` ends in a traceback that names `IAM error: Not enough permissions to perform this action`, and `users list` shows only the signed-in user, which can look as if other users do not exist. Run `unset SURREALDB_AUTH_LEVEL` and export the system credential again before any administrative command.
+
+A record user has no right to define tables, so the schema has to be applied beforehand with a system credential, as in step 1. The Python connection helper does not try to apply the schema when `SURREALDB_AUTH_LEVEL` is `record`.
+
+### Provision users
+
+The `users` command runs with a system credential, because creating a `user` record is exactly what record access forbids. This prevents anyone from registering a name and taking the home directory that carries it. The schema has no self-service sign-up for the same reason.
+
+<Synopsis>
+python -m surrealfs.users add [--password PASSWORD] [--generate] NAME
+python -m surrealfs.users list
+</Synopsis>
+
+| Behaviour | Detail |
+| --- | --- |
+| Password source | In order: `--generate`, which creates a random password and prints it once, then `--password`, then the `SURREALFS_NEW_PASSWORD` environment variable, then an interactive prompt. The prompt keeps the password out of the shell history and the process list |
+| Empty password | Refused with `Refusing to set an empty password.` |
+| Name | A username is one path segment. The command replaces characters other than letters, digits, `_` and `-` with `-` and prints `Using 'carol-smith' (a username is one path segment)` when it changes the name |
+| Reserved names | `root` is refused with `Failed: 'root' is the bypass identity, not a record user`. The command does not refuse `indexer`, `projector` and `compactor`, which only the `account` access method refuses at sign-in. A user with one of those names cannot sign in through `account`, but can sign in through the privileged access of the same name, see [What the database does not isolate](#what-the-database-does-not-isolate), so create such a user only for a component that you run and trust |
+| Existing user | A name that already exists fails with ``Failed: Database record `user:alice` already exists``. The command does not change the password of an existing user |
+| Existing home | A home that already exists and belongs to the same name is kept. A home that belongs to another user is an error, because no `chown` can give it to the new user |
+| `list` | Prints the usernames, or `(no users provisioned)` |
+
+There is no command to delete a user or to change a password. A system credential does both with SurrealQL, for example in `surreal sql --endpoint http://localhost:8000 --user root --pass secret --ns agents --db files` or in Surrealist:
+
+```surql
+-- Remove a user. The home directory and the files stay in place
+DELETE user:alice;
+
+-- Set a new password
+UPDATE user:alice SET password = crypto::argon2::generate('hunter789');
+```
+
+These statements are examples, and not steps of the setup. The check at the end of this page uses `alice` and `bob` with the passwords from the setup, so do not run them on those users before the check.
+
+After `DELETE user:alice`, a new sign-in as `alice` fails, and a session that was already open keeps working until it expires. The schema sets the token lifetime to 15 minutes and the session lifetime to 12 hours. The token lifetime does not end an open connection. The session lifetime does: after 12 hours the next query fails with `The session has expired`, and the client has to sign in again. A deleted user's open session can therefore continue for up to 12 hours.
+
+A home keeps its owner after the user record is deleted. Running `users add alice` again keeps the existing `/home/alice`, so the new `alice` inherits the earlier files.
+
+### Onboarding with `surrealfs init`
+
+The `surrealfs init` command signs in with a system credential, applies the schema with record access, creates one record user, and writes a configuration file that the MCP server reads.
+
+It takes the connection from `--url`, `--username`, `--password`, `--namespace` and `--database`, or from `SURREALDB_URL`, `SURREALDB_USER`, `SURREALDB_PASS`, `SURREALDB_NAMESPACE` and `SURREALDB_DATABASE`. Without them it connects to `ws://localhost:8000/rpc` as `root` with the password `root`, in the namespace `surrealfs` and the database `demo`. Run it in the shell with the system credential from step 1, and not in the shell with the record user's variables. The options `--account` and `--account-pass` name the new record user.
+
+```bash
+surrealfs init --namespace agents --database files --account agent-1 --account-pass <password>
+```
+
+The command writes `~/.config/surrealfs/env` with mode `0600`, and it replaces a file that already exists there. The file holds the sign-in in plain text:
+
+```text title="~/.config/surrealfs/env"
+SURREALDB_URL=ws://localhost:8000/rpc
+SURREALDB_NAMESPACE=agents
+SURREALDB_DATABASE=files
+SURREALDB_AUTH_LEVEL=record
+SURREALDB_USER=agent-1
+SURREALDB_PASS=<password>
+```
+
+A provisioning error does not stop the command. If the account already exists, the command prints `User provisioning:` and the error, prints `SurrealFS initialized successfully.`, exits with status 0, and writes the password that you passed, which is not the password of the existing account. Look for the line `Created user '<name>'.` before you rely on the file.
+
+> [!WARNING]
+> If you omit `--account-pass`, `surrealfs init` sets the password `surrealfs-secret` for whichever account it creates, and if you omit `--account`, the account is named `admin`. The two defaults are independent, so `--account agent-1` on its own creates `agent-1` with the password `surrealfs-secret`. The password is the same in every installation. The `admin` account is an ordinary record user. It has no administrative rights, and it cannot manage credentials or other users. Always pass `--account-pass`.
+
+## Check that it works
+
+The script below signs in as two record users through the SDK. It shows that a read through `SurrealFs`, and raw SurrealQL that bypasses the library, both see only what the signed-in user may see. The user `alice` has the password `hunter123` from step 2. Create the second user with the system credential, in a shell where `SURREALDB_AUTH_LEVEL=record` is not set:
+
+```bash
+python -m surrealfs.users add bob --password hunter456
+```
+
+```python
+import asyncio
+
+from surrealdb import AsyncSurreal
+from surrealfs import NotFound, SurrealFs
+
+
+async def sign_in(user: str, password: str) -> AsyncSurreal:
+    db = AsyncSurreal("ws://localhost:8000/rpc")
+    await db.signin(
+        {
+            "namespace": "agents",
+            "database": "files",
+            "access": "account",
+            "variables": {"user": user, "pass": password},
+        }
+    )
+    await db.use("agents", "files")
+    return db
+
+
+async def main():
+    alice_db = await sign_in("alice", "hunter123")
+    bob_db = await sign_in("bob", "hunter456")
+    alice = SurrealFs(alice_db, user="alice")
+    bob = SurrealFs(bob_db, user="bob")
+
+    await alice.write_text("/home/alice/notes.md", "private notes")
+
+    # Through SurrealFs, as Bob
+    try:
+        await bob.read_text("/home/alice/notes.md")
+    except NotFound as error:
+        print(error)
+
+    # Straight SurrealQL, as Bob, with SurrealFs out of the picture
+    print(await bob_db.query("SELECT path FROM file ORDER BY path"))
+    print(await bob_db.query("DELETE file WHERE filename = 'notes.md'"))
+
+    print(await alice.read_text("/home/alice/notes.md"))
+
+    await alice_db.close()
+    await bob_db.close()
+
+
+asyncio.run(main())
+```
+
+```text title="Output"
+No such file or directory: /home/alice/notes.md
+[[{'path': '/home'}, {'path': '/home/bob'}]]
+[[]]
+private notes
+```
+
+Bob's query lists `/home` and his own home. Alice's folder is absent from the result, and the `DELETE` statement removes nothing, so Alice still reads her file.
+
+## What the database enforces
+
+The `file` table has a rule for each operation. A record user is limited as follows:
+
+| Operation | Rule |
+| --- | --- |
+| Select | The file must be reachable through its ancestors, and the digit that applies to the user, which is the owner, group or other digit, must include read |
+| Create | The `owner` must be the user's own name, the user needs write and execute on the containing folder, and an entry directly under `/home` must carry the user's name |
+| Update | The file must be reachable, and the user needs either the write bit on the file or write and execute on its folder. Each field has a further rule |
+| Delete | The user needs write and execute on the containing folder, the file must have no children, and a file that carries `meta.legal_hold` cannot be deleted |
+| Rename | The user needs write and execute on both the source folder and the destination folder |
+
+The field rules add the following limits. Nobody can update `owner`. Only the owner can update `mode`, and only the owner or `root` can update `group`. A user can update `content`, `file`, `content_type`, `meta` and `size` only with the write bit on the file, and nobody can set `hash` or `generation`. The database also refuses a `DEFINE` statement from a record user.
+
+The same file rules cover the records that depend on a file:
+
+- **Reading:** A record user can read a chunk, a section, a symbol, a digest or a CRDT log entry only when the user can read the file it belongs to. A link is readable only when the user can read both of its files.
+- **Writing:** Chunks, sections, symbols and digests can be written only through the `indexer` access.
+- **Search:** Search functions take the identity from the signed-in user and ignore the identity that a caller passes, so `fn::sfs_search_text` and the other search functions return only readable files. No content, path or file name from other files is returned. Scores are computed over the whole index, so a score can reflect how common a term is among files that the user cannot read.
+
+A record user can read only their own `user` record, which includes the argon2id password hash, and cannot change it. The `credential` table is closed to every record user, so credentials are managed with a system credential. See [Protocol credentials](/docs/agent-filesystem/security/credentials).
+
+### Differences from system credentials
+
+Some results change when a client signs in as a record user:
+
+| Behaviour | System credential | Record access |
+| --- | --- | --- |
+| Identity | A name that the client states | The signed-in user |
+| Listing `/home` | Every user's home appears, as on Unix | Only the user's own home appears |
+| A path the user may not see | `PermissionDenied` | `NotFound`, because the database does not return the record |
+| `generation` | Increases with each content change | Stays at 1, so `if_generation` cannot detect a concurrent change. Every version also reports generation 1, so `history` lists duplicate numbers and `restore` by generation cannot select one version. Order the versions by `created_at`. See [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases) |
+| `author` in `history` | The owner of the file | The user whose write replaced the version |
+| `watch` | Every change | Only changes to files the user may read |
+| Workspace fork | Every file | Only files the user may read |
+| Schema | Some Python surfaces apply it on first use | An administrator applies it once |
+
+The `author` of a version names the user whose write replaced it, and not the user who wrote its content. Take three writes to one file:
+
+1. Alice writes the first text.
+2. Bob replaces it with a second text.
+3. Alice replaces that with a third text.
+
+The saved copy of the first text has the author `bob`, because Bob's write replaced it. The saved copy of the second text has the author `alice`. The third text is the current content and has no version record yet.
+
+## What the database does not isolate
+
+> [!IMPORTANT]
+> The guarantee covers the `file` table and the tables that depend on a file. It does not cover the whole database. The tables and behaviours below are shared across record users in this release.
+
+| Table | Every record user can |
+| --- | --- |
+| `blob` | Read and write. It holds the content of chunked uploads from the Rust `upload` command |
+| `upload` | Read and write. It holds upload sessions and the path of each upload |
+| `usage` and `quota` | Read and write |
+| `share` | Read, which includes every token. Only the creator can change a link |
+| `user_group` and `group_member` | Read. Nobody can write them |
+| `git_commit` | Read |
+| `entity` | Read the name and kind of every entity that a file mentions, including an entity that only a file the user cannot read mentions. The `mentions` link stays hidden. See [Links and entities](/docs/agent-filesystem/concepts/links-and-entities) |
+
+Five further behaviours apply:
+
+- **Earlier versions:** A version of a file keeps the owner, mode and gate that the file had when the version was saved, and the database applies those values. Making a file private later does not hide the versions that were readable. A `chmod` saves a version too, and that version holds the content as it was before the mode changed, under the old mode. Content that must stay private has to be written into a private file or folder from the start, because a `chmod` after the write leaves a readable copy in `history`. Set the permissions of a folder before sensitive files are written into it.
+- **Recreating deleted files:** `undelete` creates a new file, owned by the caller, from the newest version that the caller can read. A user who can create the path can recover the text of a deleted file that was readable when a version was saved.
+- **Chunked uploads:** Because `blob` is open, content that must stay private from other record users should not be stored with the chunked `upload` command.
+- **Groups:** A group member who holds the group write bit can create, rename and remove entries in a folder, but a content update by the member is ignored. See [Groups and sharing](/docs/agent-filesystem/security/groups-and-sharing#where-groups-apply).
+- **Privileged accesses:** The schema defines three more access methods, `indexer`, `projector` and `compactor`. Each signs in only the user with the same name. The `indexer` access reads every file, including private homes, and it can change a file whose mode lets others write to it, even inside a private home. No shipped client signs in through these accesses, so provision users with these names only for a component that you run and trust.
+
+Code that embeds every file, such as a scheduled `reindex_embeddings` pass, runs as `root`, so give it a system credential rather than a record user.
+
+## Related pages
+
+- [Permissions](/docs/agent-filesystem/security/permissions) describes the rules that the database applies.
+- [Groups and sharing](/docs/agent-filesystem/security/groups-and-sharing) describes groups and share links.
+- [Encryption, legal hold and audit](/docs/agent-filesystem/security/encryption-and-legal-hold) describes the history of changes and what each version records.
+- [DEFINE ACCESS ... TYPE RECORD](/docs/reference/query-language/statements/define/access/record) describes the SurrealDB feature that these access methods use.
+- [Permissions and row-level security](/docs/learn/security/authorization/permissions-and-row-level-security) describes table and field `PERMISSIONS` in SurrealDB.

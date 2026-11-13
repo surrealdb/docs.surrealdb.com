@@ -1,0 +1,545 @@
+---
+position: 5
+title: Content analysis
+description: "What Agent Filesystem records after a write and what the gateway adds, plus on-demand type detection, code symbols, CSV tables and folder digests."
+---
+
+# Content analysis
+
+Agent Filesystem can analyse a file as well as store it. The Rust command-line program `surrealfs-rs` can detect the type of the content, extract the symbols of source code, load a CSV or TSV file as queryable records, and list the readable files of a folder with any summaries that their frontmatter sets. These analyses run when a caller asks for them, and the Python library has no calls for them. The gateway, which `surrealfs-rs serve gateway` starts, also runs some of them after each write that goes through it. This page separates what the database does on every write from what the gateway adds and from what runs on request, and it lists the features that exist in the schema or the libraries and have little or no use in this release.
+
+The schema and the command-line tool use the name "understanding pipeline" for the job queue that the database fills on every write. The database only queues that work, and no process in this release runs as a worker on its own, so the analyses on this page run on demand or through the gateway.
+
+> [!NOTE]
+> Agent Filesystem is in beta. The API, schema and command-line interface may change in breaking ways between releases. This page describes version 0.2.0 of [SurrealFS](https://github.com/surrealdb/surrealfs), the open source project behind Agent Filesystem, built from the `next` branch of its repository, and each limitation that applies is listed where it matters.
+
+The commands on this page belong to the `surrealfs-rs` command-line tool, which is the only interface to most of this analysis in this release. The SurrealQL functions behind the commands work from any client. The tool needs a running SurrealDB server and a build of `surrealfs-rs`, which the [command-line quickstart](/docs/agent-filesystem/quickstarts/command-line) describes. The examples use a local server, the namespace `agents` and the database `analysis`:
+
+```bash
+export SURREALDB_URL=ws://127.0.0.1:8000/rpc
+export SURREALDB_USER=root SURREALDB_PASS=secret
+export SURREALDB_NS=agents SURREALDB_DB=analysis
+surrealfs-rs init
+```
+
+The `surrealfs-rs init` command defines the Agent Filesystem schema and the opt-in record-access tables in the database. Run it once for each database, because the other commands fail with a `Function ... not found` error or print an empty list until the schema exists. The tool reads `SURREALDB_NS` and `SURREALDB_DB`, and the Python library reads `SURREALDB_NAMESPACE` and `SURREALDB_DATABASE`. Each setting also has a global option: `--url`, `--ns`, `--db`, `--user` and `--pass`. The `--caller` option, or the `SURREALFS_CALLER` variable, names the user that the `digest`, `symbols`, `definition` and `entities` commands act as, and those commands show only what that user may read. Without it, the commands act as the `--user` name, which is `root` here and reads every file. See [Command line](/docs/agent-filesystem/interfaces/command-line#settings-for-surrealfs-rs).
+
+The SurrealQL statements and the Python statements on this page must run against the same namespace and database as the commands. They run in Surrealist or in `surreal sql`, which takes piped input one line at a time, so a multi-line statement has to be joined into one line there. The outputs assume that the database holds no other files, and in a database that does, counts, job lists and ranks include those files too.
+
+## What happens on every write
+
+When the content of a file changes, the database does the following without any caller action:
+
+| Result | Mechanism | Detail |
+| --- | --- | --- |
+| The `hash` field holds the MD5 hash of the content | The `evt_file_hash` event | For a file that holds bytes, the hash is of the base64 text of the bytes, without `=` padding. |
+| The `generation` field increases by 1 | A field rule | It changes only when the hash changes. See [Concurrency and leases](/docs/agent-filesystem/concepts/concurrency-and-leases). |
+| A `file_version` record keeps the previous state | The `evt_file_version` event | See [Versions and history](/docs/agent-filesystem/concepts/versions-and-history). |
+| The content is added to the full-text index | The `idx_file_content` index | See [File search](/docs/agent-filesystem/concepts/search). |
+| Three `sfs_job` records are queued | The `evt_file_jobs` event | The kinds are `detect`, `chunk` and `symbols`. |
+
+Everything else on this page runs only when a caller asks for it, or when a write goes through the gateway.
+
+## The job queue
+
+The `evt_file_jobs` event upserts three records in the `sfs_job` table when the content or the bytes of a file change. The record id is the array `[file, kind]`, so a file has at most one job of each kind. A write of bytes queues the same three jobs, and so does a write of an empty file.
+
+| Field | Description |
+| --- | --- |
+| `file_id` | The file that the job is for. |
+| `kind` | `detect`, `chunk` or `symbols`. |
+| `source_hash` | The MD5 hash of the content when the job was queued. |
+| `status` | `pending`, `processing`, `completed` or `failed`. |
+| `attempts` | The number of times a worker has claimed the job. |
+| `error` | The message that a worker reported when it failed the job. |
+| `locked_by`, `locked_until` | The worker that holds the job and when its lease ends. |
+| `created_at`, `updated_at` | When the record was created and last changed. |
+
+Under record access, only root and the `indexer` and `projector` [accesses](/docs/agent-filesystem/security/record-access#what-the-database-does-not-isolate) can read or change the table, and a system credential bypasses table permissions. A write queues three pending jobs:
+
+```bash
+surrealfs-rs write /src/engine.py $'class Engine:\n    def run(self):\n        return 1\n'
+```
+
+```surql
+SELECT record::id(id)[1] AS kind, status, attempts FROM sfs_job WHERE file_id.path = '/src/engine.py' ORDER BY kind;
+```
+
+```surql title="Output"
+[
+    { attempts: 0, kind: 'chunk', status: 'pending' },
+    { attempts: 0, kind: 'detect', status: 'pending' },
+    { attempts: 0, kind: 'symbols', status: 'pending' }
+]
+```
+
+### Claim and complete a job
+
+A worker claims jobs and then reports them as complete. The `surrealfs-rs jobs claim` command claims jobs of all three kinds, oldest first, with the options `--worker` (default `cli-worker`) and `--limit` (default 10):
+
+```bash
+surrealfs-rs jobs claim --worker indexer-1 --limit 1
+```
+
+```json title="Sample output"
+[
+  {
+    "id": "sfs_job:['file:e7eccu8lnofsb8hrvy9j', 'detect']",
+    "file_id": "file:e7eccu8lnofsb8hrvy9j",
+    "path": "/src/engine.py",
+    "kind": "detect",
+    "source_hash": "0261ab439cd3d4d08e5eab3074553647",
+    "status": "processing",
+    "attempts": 0,
+    "error": null,
+    "created_at": "2026-10-14T22:54:56.461113Z"
+  }
+]
+```
+
+The stored record has `status` set to `processing`, `locked_by` set to `indexer-1`, and `attempts` increased to 1. The records that the claim returns are read before the update, so they show the value of `attempts` from before the claim:
+
+```surql
+SELECT record::id(id)[1] AS kind, status, attempts, locked_by FROM sfs_job WHERE file_id.path = '/src/engine.py' ORDER BY kind;
+```
+
+```surql title="Output"
+[
+    { attempts: 0, kind: 'chunk', locked_by: NONE, status: 'pending' },
+    { attempts: 1, kind: 'detect', locked_by: 'indexer-1', status: 'processing' },
+    { attempts: 0, kind: 'symbols', locked_by: NONE, status: 'pending' }
+]
+```
+
+The `surrealfs-rs jobs complete JOB_ID` command ends a job. The job id is the record id as a string. With `--error`, the job is marked as failed and keeps the message. The file id in a job id is generated for each file, so replace `file:e7eccu8lnofsb8hrvy9j` in the next commands with the file id of your own `jobs claim` output. The command prints `Completed job` for any id, including an id that matches no job, so check the stored status afterwards:
+
+```bash
+surrealfs-rs jobs complete "sfs_job:['file:e7eccu8lnofsb8hrvy9j', 'detect']"
+surrealfs-rs jobs complete "sfs_job:['file:e7eccu8lnofsb8hrvy9j', 'chunk']" --error "chunker crashed"
+```
+
+```text title="Sample output"
+Completed job sfs_job:['file:e7eccu8lnofsb8hrvy9j', 'detect']
+Completed job sfs_job:['file:e7eccu8lnofsb8hrvy9j', 'chunk']
+```
+
+The second line reads `Completed job` although the job failed. The stored states show the difference:
+
+```surql
+SELECT record::id(id)[1] AS kind, status, attempts, error FROM sfs_job WHERE file_id.path = '/src/engine.py' ORDER BY kind;
+```
+
+```surql title="Output"
+[
+    { attempts: 0, error: 'chunker crashed', kind: 'chunk', status: 'failed' },
+    { attempts: 1, error: NONE, kind: 'detect', status: 'completed' },
+    { attempts: 0, error: NONE, kind: 'symbols', status: 'pending' }
+]
+```
+
+These rules apply to every client:
+
+- **A claim leases a job for 60 seconds.** The length is fixed. A job that is still `processing` after its lease ends is claimed again by the next claim.
+- **A failed job is not claimed again.** There is no limit on attempts and no back-off, and a failed job stays failed until the file is rewritten.
+- **A rewrite resets the jobs.** When the content of the file changes, the three jobs return to `pending` with `attempts` set to 0 and a new `source_hash`. The `error` message of an earlier failure stays on the record.
+- **A job belongs to a whole file.** Jobs are not created for sections.
+- **Deleting a file leaves its jobs.** A claim then returns them with a `path` of `NONE`.
+
+The rewrite below shows the reset. The `chunk` job keeps its error text:
+
+```bash
+surrealfs-rs write /src/engine.py $'"""Core compute engine."""\n\nclass Engine:\n    """Runs jobs."""\n\n    def run(self):\n        return 1\n\n\ndef standalone(x: int) -> int:\n    """Double the input."""\n    return x * 2\n'
+```
+
+```surql
+SELECT record::id(id)[1] AS kind, status, attempts, error FROM sfs_job WHERE file_id.path = '/src/engine.py' ORDER BY kind;
+```
+
+```surql title="Output"
+[
+    { attempts: 0, error: 'chunker crashed', kind: 'chunk', status: 'pending' },
+    { attempts: 0, error: NONE, kind: 'detect', status: 'pending' },
+    { attempts: 0, error: NONE, kind: 'symbols', status: 'pending' }
+]
+```
+
+### Claim jobs from SurrealQL
+
+A worker in any language can use the two functions behind the commands:
+
+<Synopsis label="Signature">
+fn::sfs_job_claim($worker_id: string, $kinds: array<string>, $limit: int)
+fn::sfs_job_complete($job_id: string, $error: option<string>)
+</Synopsis>
+
+An empty `$kinds` array claims jobs of every kind. The next statements claim one `detect` job, which a worker would then run, and report it as done:
+
+```surql
+LET $job = (fn::sfs_job_claim('worker-2', ['detect'], 1))[0];
+fn::sfs_job_complete(<string>$job.id, NONE);
+```
+
+```surql title="Output"
+true
+```
+
+> [!WARNING]
+> Nothing in this release claims or runs these jobs automatically. Every write adds jobs that stay `pending`. The Rust library (`claim_jobs` and `complete_job`) and the `surrealfs-rs jobs` commands claim and complete jobs on request, the gateway claims jobs only when it receives a request, as the next section describes, the Python library and the TypeScript SDK have no job calls, and nothing branches on the `kind` of a claimed job. The queue is the place where a deployment can attach its own workers.
+
+## What the gateway does after a write
+
+The gateway that `surrealfs-rs serve gateway` starts is the one client in this release that analyses a file after it writes it. After a write through its REST API (`PUT /api/file`, `POST /api/file` and `POST /api/restore`), through a WebDAV `PUT` or through an S3 `PUT`, it runs the steps below for the file. It skips a file whose text is empty.
+
+| Step | Result in this release |
+| --- | --- |
+| SimHash fingerprint | A 64-bit integer in `meta.simhash`, which `surrealfs-rs near-dups` compares against. |
+| Code symbols | The `symbol` records of the file are replaced on every write, as `symbols --index` replaces them. |
+| Entities | The extracted entities are recorded, and every write adds a new `mentions` record for each entity again. See [Links and entities](/docs/agent-filesystem/concepts/links-and-entities#entities-and-mentions). |
+| Sections and embeddings | Nothing is stored. The gateway splits the text into sections and, when `OPENAI_API_KEY` is set, requests embeddings of the file and of its sections, but the database rejects its statements because they set a field that the schema does not define or leave out a required field, and the gateway ignores the errors. See [Sections and chunking](/docs/agent-filesystem/concepts/sections-and-chunking#limitations-in-this-release) and [File search](/docs/agent-filesystem/concepts/search#limitations-in-this-release). |
+
+A request to `POST /api/index` without a `path` claims up to 25 jobs of the kinds `embed`, `symbols`, `entities` and `sections`, runs the same steps for the file of each job, and completes the job. A write queues the kinds `detect`, `chunk` and `symbols`, so only the `symbols` jobs are claimed and completed, and the `detect` and `chunk` jobs stay `pending`. Nothing sends the request on its own, so the gateway processes jobs only when a client sends it. The `path` form of the request runs the steps for that file and does not touch the queue.
+
+## Content type and language detection
+
+`surrealfs-rs detect PATH` reports the content type, language and encoding of a file, and whether the path looks generated:
+
+```bash
+surrealfs-rs detect /src/engine.py
+```
+
+```json title="Output"
+{
+  "content_type": "text/x-python",
+  "language": "python",
+  "encoding": "utf-8",
+  "is_generated": false
+}
+```
+
+The detector tries these checks in order, and the first that applies decides the type:
+
+1. **Magic bytes.** Nine formats are recognised from the first bytes of the file: PDF, PNG, JPEG, GIF, ZIP, gzip, SQLite, Parquet and WebAssembly. The encoding is `binary`.
+2. **UTF-8 test.** A file that is not valid UTF-8 is `application/octet-stream` with the encoding `binary`. No other text encoding is detected.
+3. **Shebang.** A first line such as `#!/usr/bin/env python3` identifies Python (`python`, `python3`), JavaScript (`node`, `nodejs`, `deno`, `bun`) or shell (`sh`, `bash`, `zsh`). Only the `env` form and a bare command name match, so `#!/bin/bash` and `#!/usr/bin/python3` fall through to the next check.
+4. **Extension.** The lower-case extension selects the type and language, for example `rs`, `py`, `ts`, `js`, `go`, `md`, `json`, `yaml`, `toml`, `sql`, `surql`, `csv`, `tsv` and `ipynb`. Any other extension gives `text/plain` and no language.
+
+`is_generated` is true for names that end in `.min.js`, `.min.css` or `.map`, for the lock files `Cargo.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `poetry.lock` and `bun.lockb`, and for paths that contain `/dist/`, `/target/`, `/node_modules/`, `/build/` or `/.git/`.
+
+The result is printed and not stored, and the `language` field that the language-specific search indexes read is never written. The detector reports programming languages and `text`, never a natural language such as German. The Python library chooses a content type with its own rules when it writes a file, and some strings differ from the ones that `detect` prints. For example, Python uses `text/javascript` where `detect` uses `application/javascript`.
+
+## Code symbols
+
+A **symbol** is a named definition in source code: a function, a method, a class, a struct and so on. The `symbols` command extracts them from a file and stores them in the `symbol` table, and the `definition` command finds one by name.
+
+<Synopsis>
+surrealfs-rs symbols [--index] PATH
+surrealfs-rs definition NAME
+</Synopsis>
+
+Without `--index`, `symbols` lists the symbols that are already stored. With `--index`, it first reads the file, runs the detector, extracts the symbols, replaces the file's stored symbols and then lists them:
+
+```bash
+surrealfs-rs symbols /src/engine.py --index
+```
+
+```text title="Sample output"
+Indexed 3 symbols in '/src/engine.py'
+[
+  {
+    "id": "symbol:0r5rnohh6olcoiwlxyzy",
+    "file_id": "file:e7eccu8lnofsb8hrvy9j",
+    "path": null,
+    "name": "Engine",
+    "qualified": "engine.Engine",
+    "kind": "class",
+    "language": "python",
+    "signature": "class Engine:",
+    "doc": "Runs jobs.",
+    "line_start": 3,
+    "line_end": 9
+  },
+  {
+    "id": "symbol:3gsrymf5zb6dfco842aw",
+    "file_id": "file:e7eccu8lnofsb8hrvy9j",
+    "path": null,
+    "name": "run",
+    "qualified": "engine.run",
+    "kind": "method",
+    "language": "python",
+    "signature": "def run(self):",
+    "line_start": 6,
+    "line_end": 9
+  },
+  {
+    "id": "symbol:xoj475p9dvidihvlhtbx",
+    "file_id": "file:e7eccu8lnofsb8hrvy9j",
+    "path": null,
+    "name": "standalone",
+    "qualified": "engine.standalone",
+    "kind": "function",
+    "language": "python",
+    "signature": "def standalone(x: int) -> int:",
+    "doc": "Double the input.",
+    "line_start": 10,
+    "line_end": 12
+  }
+]
+```
+
+For a file path, `fn::sfs_symbols` does not return `path`, so the command prints `null` for it. A folder path and the `definition` command return the path.
+
+`definition` matches a bare name or a qualified name exactly. It returns at most 20 symbols, ordered by line number across files, and not by relevance:
+
+```bash
+surrealfs-rs definition standalone
+```
+
+```json title="Sample output"
+[
+  {
+    "id": "symbol:xoj475p9dvidihvlhtbx",
+    "file_id": "file:e7eccu8lnofsb8hrvy9j",
+    "path": "/src/engine.py",
+    "name": "standalone",
+    "qualified": "engine.standalone",
+    "kind": "function",
+    "language": "python",
+    "signature": "def standalone(x: int) -> int:",
+    "doc": "Double the input.",
+    "line_start": 10,
+    "line_end": 12
+  }
+]
+```
+
+The extractor uses one regular expression for each kind of definition, anchored at the start of a line and applied to one line at a time, and it does not parse the code. It handles these languages, and any other language yields no symbols:
+
+| Language | Constructs found | `kind` values |
+| --- | --- | --- |
+| Rust | `fn` with `pub`, `async`, `unsafe`, `extern` and generics, `struct`, `enum`, `trait`, `union` | `function`, `struct`, `enum`, `trait`, and `type` for `union` |
+| Python | `def`, `async def`, `class` | `function`, `method` for a `def` indented by four spaces or a tab, and `class` |
+| TypeScript and JavaScript | `function` with `export`, `default` and `async`, `class`, `interface`, `type` | `function`, `class`, `interface`, `type` |
+| Go | `func`, `type X struct`, `type X interface` | `function`, `method` for `func (`, `struct`, `interface` |
+
+Each symbol has these fields:
+
+| Field | Description |
+| --- | --- |
+| `name` | The identifier. |
+| `qualified` | The file stem and the name, joined with `.` for Python, TypeScript, JavaScript and Go (`engine.run`) and with `::` for Rust (`lib::greet`). The stem is the part of the filename before the first dot. A method is not qualified by its class. |
+| `kind`, `language` | The values in the table above. |
+| `signature` | The trimmed text of the defining line. A definition whose parameter list or base-class list does not close on its first line is not found, so it produces no symbol. |
+| `doc` | The comment of the definition. For Rust it is the `///` lines above, for TypeScript, JavaScript and Go the `//` lines above, and for Python the docstring on the line after the `def` or `class` line. A `/** */` block is not read. |
+| `line_start`, `line_end` | The first and last line of the definition. For languages with braces the end is where the braces balance. For Python it is the line before the next line at the same or a lesser indent, so trailing blank lines are included. |
+
+The extractor has these gaps:
+
+- **Multi-line signatures are skipped.** A definition whose parameter list or base-class list does not close on its first line produces no symbol. This affects a Rust `fn` that `rustfmt` has laid out over several lines, a Python `def` or `class` whose parentheses close on a later line, and a TypeScript, JavaScript or Go function in the same layout.
+- **Arrow functions** such as `const add = (a, b) => a + b` are not found, and neither is Rust `const fn`.
+- **Rust `impl` blocks** are not symbols, and the methods inside them have the kind `function`.
+- **Python methods** are not tied to their class, so two methods with the same name in one file have the same `qualified` value.
+- **A declaration without braces**, such as `type Id = string;`, has a `line_end` that runs to the next line that contains a brace block.
+
+Symbols are a snapshot. They change only when `symbols --index` runs again or when the file is written through the gateway, and a rewrite through any other client does not refresh or remove them.
+
+The functions behind the commands are `fn::sfs_symbols($path, $caller)` and `fn::sfs_definition($name, $caller)`. For a folder path, `fn::sfs_symbols` returns the symbols of every readable file whose path starts with the string, ordered by path and line. The match is a string prefix with no trailing-slash handling, so `/src` also matches `/src2/b.py`. Under a system credential, these functions treat a missing `$caller` as `root`, which is the opposite of the search functions, which refuse a missing identity. Under record access the signed-in user is used instead, and a path that the user cannot read gives `sfs:not_found`.
+
+> [!WARNING]
+> Deleting a file leaves its `symbol` records, and an orphaned record breaks the folder lookup. After the `rm` of an indexed file, `fn::sfs_symbols` for any folder path fails, and `surrealfs-rs symbols FOLDER` prints `[]`.
+
+The failure of `fn::sfs_symbols` reads as follows:
+
+```text title="Error output"
+Incorrect arguments for function string::starts_with(). Argument 1 was the wrong type. Expected `string` but found `NONE`
+```
+
+This statement removes every symbol whose file no longer exists:
+
+```surql
+DELETE symbol WHERE !record::exists(file_id);
+```
+
+## Tables from CSV and TSV files
+
+`surrealfs-rs table-load PATH` reads a CSV or TSV file and stores each line as a `file_row` record. `table-query PATH` returns the stored records:
+
+<Synopsis>
+surrealfs-rs table-load [--max-rows N] PATH
+surrealfs-rs table-query [--limit N] PATH
+</Synopsis>
+
+```bash
+surrealfs-rs write /data/customers.csv $'id,name,plan,seats\n1,Acme,team,12\n2,Globex,enterprise,250\n3,Initech,team,8\n'
+```
+
+```bash
+surrealfs-rs table-load /data/customers.csv
+surrealfs-rs table-query /data/customers.csv --limit 2
+```
+
+```text title="Output"
+Loaded 3 rows for /data/customers.csv
+[
+  {
+    "row_idx": 0,
+    "sheet": null,
+    "data": {
+      "id": 1,
+      "name": "Acme",
+      "plan": "team",
+      "seats": 12
+    }
+  },
+  {
+    "row_idx": 1,
+    "sheet": null,
+    "data": {
+      "id": 2,
+      "name": "Globex",
+      "plan": "enterprise",
+      "seats": 250
+    }
+  }
+]
+```
+
+The `--max-rows` option of `table-load` defaults to 1000 and the `--limit` option of `table-query` defaults to 50. The records are ordinary SurrealDB records, so you can filter on `data` directly:
+
+```surql
+SELECT row_idx, data.name AS name, data.seats AS seats
+FROM file_row
+WHERE file_id.path = '/data/customers.csv' AND data.plan = 'team'
+ORDER BY row_idx;
+```
+
+```surql title="Output"
+[
+    { name: 'Acme', row_idx: 0, seats: 12 },
+    { name: 'Initech', row_idx: 2, seats: 8 }
+]
+```
+
+The loader follows these rules:
+
+- **The first line holds the headers.** Each header is trimmed and loses surrounding double quotes.
+- **The delimiter is a tab** when the header line contains a tab, and a comma otherwise.
+- **Each cell is typed.** A cell that parses as an integer becomes an integer, and one that parses as a finite float becomes a float. `true` and `false` in any letter case become booleans, and anything else stays a string. A value such as `007` therefore becomes `7`.
+- **Short rows are padded** with empty strings, and cells beyond the last header are dropped.
+- **The records are a snapshot.** Rewriting the file does not refresh them, and running `table-load` again replaces them. The `sheet` field is never set.
+- **No content type is checked.** Any text file can be loaded.
+
+> [!WARNING]
+> The loader has no support for quoted fields. A comma inside quotes splits the cell, the columns shift, and the last value is lost. The row `2,"Smith, Bob",false,85,1e3` under the headers `id,name,active,score,code` loads as `{ id: 2, name: 'Smith', active: 'Bob', score: false, code: 85 }`. Multi-line quoted fields and semicolon-delimited files are not supported either.
+
+## Folder digests
+
+`surrealfs-rs digest PATH` describes one folder: its direct children that the caller may read, with a summary for each file that has one. Files that the Python library wrote carry a `meta` object parsed from their frontmatter, and a `summary` key in that frontmatter appears in the digest. The next Python statements write two files with and without a summary. They use a connection like the one in [File search](/docs/agent-filesystem/concepts/search), with the user `alice`:
+
+```python
+from surrealdb import AsyncSurreal
+from surrealfs import SurrealFs, apply_schema
+
+db = AsyncSurreal("ws://localhost:8000/rpc")
+await db.signin({"username": "root", "password": "secret"})
+await db.use("agents", "analysis")
+await apply_schema(db)
+
+alice = SurrealFs(db, user="alice")
+
+await alice.write_text("/docs/overview.md", "---\nsummary: What the service does and who owns it\n---\n\n# Overview\n\nThe sync service copies files between regions.\n")
+await alice.write_text("/docs/api.md", "# API\n\nEndpoints for the sync service.\n")
+await alice.mkdir("/docs/archive")
+```
+
+```bash
+surrealfs-rs digest /docs
+```
+
+```json title="Sample output"
+{
+  "path": "/docs",
+  "folder_id": "file:7i815y4tqdixxefnv99h",
+  "summary": "Folder /docs containing 3 items.",
+  "notable_files": [
+    {
+      "filename": "api.md",
+      "size": 0,
+      "hash": "b63ce84512aa0824d85334a435c815e3",
+      "summary": null,
+      "updated_at": "2026-10-14T22:41:58.846715Z"
+    },
+    {
+      "filename": "overview.md",
+      "size": 0,
+      "hash": "f3c8238b1366579c170d5fcca3098bc4",
+      "summary": "What the service does and who owns it",
+      "updated_at": "2026-10-14T22:41:58.843933Z"
+    }
+  ],
+  "subfolders": [
+    "archive"
+  ],
+  "total_readable": 3,
+  "private_unsummarised": 0,
+  "updated_at": "2026-10-14T22:41:58.955220Z"
+}
+```
+
+A digest has these properties:
+
+- **The folder summary is a template.** It reads `Folder PATH containing N items.`, where `N` counts every readable child, files and folders together. A stored `folder_digest` record for the folder replaces the template, and nothing writes such records.
+- **`notable_files` lists every readable file** in the folder, in no particular order, and is not a selection of important files.
+- **`size` is the stored size**, which is empty for files that were written as text, so it reads `0`. Only chunked uploads store a size.
+- **`private_unsummarised` is the number of children that the caller cannot read.** The digest contains no summary of them. It is always 0 for `root`, which is the default caller. The command `surrealfs-rs --caller bob digest /docs` shows the folder as `bob` sees it.
+- **The root folder has no record**, so `digest /` fails with `sfs:not_found`, and a file path fails with `sfs:not_a_directory`. Name a folder.
+
+## Features with limited use in this release
+
+The following features exist as functions, commands or tables. Apart from the two that the gateway calls after a write, nothing in the release calls them during normal use, and each one produces empty or partial results unless a caller does the missing step.
+
+| Feature | Entry points | What happens in this release |
+| --- | --- | --- |
+| Context packs | `surrealfs-rs pack QUESTION [--budget 4000] [--scope PATH]`, `fn::sfs_pack` | The function selects up to 30 files with a full-text search and returns them. The command prints a heading and one block for each file with an empty body, so it cannot assemble context. |
+| Entity extraction | `surrealfs-rs entities PATH`, the Rust functions `extract_entities_and_tags` and `extract_entities` | The gateway extracts and records entities after a write through it. No other client does, so the command returns `[]` for a file that another client wrote. See [Links and entities](/docs/agent-filesystem/concepts/links-and-entities). |
+| Near-duplicate detection | `surrealfs-rs near-dups PATH_OR_TEXT [--threshold 0.85]`, `compute_simhash`, `set_simhash` | The functions compute a SimHash fingerprint over word triples. The gateway stores a fingerprint after a write through it. A file that another client wrote has none, so the command never returns that file, and it returns `[]` when no file has a fingerprint. |
+| Notebook text extraction | `extract_notebook_cells`, `notebook_to_searchable_text` | No write path, search or command calls them, so an `.ipynb` file is indexed as raw JSON text. |
+| Folder summaries and hashes | The `folder_digest` table | Nothing writes the table, and no folder-level hash is computed. |
+| Language-specific search | The `language` field and the `text_*` fields | Nothing sets `language`. See [File search](/docs/agent-filesystem/concepts/search#language-specific-indexes). |
+
+The pack command on a folder of two matching files shows the empty bodies:
+
+```bash
+surrealfs-rs pack "what does the sync service do" --budget 500 --scope /docs
+```
+
+````text title="Output"
+# Context for: what does the sync service do
+
+### `/docs/overview.md:1-1`
+```md
+
+```
+
+### `/docs/api.md:1-1`
+```md
+
+```
+````
+
+The budgeting code estimates the token count of a block as the larger of one quarter of its characters and its number of words, which is at least 1 for a non-empty text. It reserves the estimated tokens of the question plus 30 tokens for the header, and it skips a block that does not fit. The command passes it empty text, because it reads a field that the search function does not return.
+
+## Limitations in this release
+
+- **The job queue has no automatic worker.** Jobs stay `pending` until a deployment adds a worker, or a caller claims them with `surrealfs-rs jobs` or sends `POST /api/index` to the gateway.
+- **The analyses are Rust commands.** The Python library and the TypeScript SDK have no symbol, table, digest or pack calls.
+- **Results are snapshots.** Symbols and table records do not follow later writes, except that the gateway refreshes symbols after a write through it, and deleting a file leaves its symbols, table records, entities and jobs behind.
+- **Symbol extraction uses regular expressions** and supports five languages.
+- **CSV loading has no quoting.**
+
+## See also
+
+- [File search](/docs/agent-filesystem/concepts/search) covers the full-text index that every write updates.
+- [Sections and chunking](/docs/agent-filesystem/concepts/sections-and-chunking) covers how a file is split for section search. The queued `chunk` job does not create sections.
+- [Links and entities](/docs/agent-filesystem/concepts/links-and-entities) covers relations between files and the entity records.
+- [Command line](/docs/agent-filesystem/interfaces/command-line) describes the `surrealfs-rs` commands and their connection options.
+- [Data model](/docs/agent-filesystem/concepts/data-model) describes the `file` table, its hash and its generation.
