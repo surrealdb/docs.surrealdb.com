@@ -1110,7 +1110,7 @@ CREATE document:2 SET embedding = [0.3, 0.1, 0.2];
 REBUILD INDEX idx_embedding ON document;
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/comparing-floats-with-decimals-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:197
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:207
 /**
 [env]
 clean = true
@@ -1122,7 +1122,7 @@ value = "[false, true, true]"
 [0.1f = 0.1dec, 0.5f = 0.5dec, 1f = 1dec];
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/integer-sums-and-means-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:229
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:239
 /**
 [env]
 clean = true
@@ -1134,7 +1134,7 @@ value = "149.5"
 math::mean([299, -4611686018427387904, 299, 4611686018427387904]);
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/parameters-that-surrealdb-binds-itself-are-protected-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:283
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:293
 /**
 [env]
 clean = true
@@ -1146,7 +1146,7 @@ error = true
 FOR $item IN [1, 2] { LET $parent = $item; };
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/array-ranges-past-the-end-of-an-array-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:307
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:317
 /**
 [env]
 clean = true
@@ -1158,7 +1158,7 @@ value = "[1, 2]"
 [1, 2][0..10];
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/jaccard-and-pearson-ranking-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:374
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:384
 /**
 [env]
 clean = true
@@ -1170,7 +1170,7 @@ value = "0.3333333333333333f"
 vector::similarity::jaccard([1, 1, 0, 0], [1, 0, 1, 0]);
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/paths-over-sets-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:396
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:406
 /**
 [env]
 clean = true
@@ -1188,7 +1188,7 @@ CREATE t:1 SET s = <set>[1, 2, 3];
 SELECT VALUE s.* FROM t;
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/a-record-id-on-an-undefined-table-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:412
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:422
 /**
 [env]
 clean = true
@@ -1200,7 +1200,7 @@ error = true
 SELECT * FROM [missing:1];
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/return-inside-the-value-of-a-let-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:456
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:466
 /**
 [env]
 clean = true
@@ -1215,7 +1215,7 @@ LET $x = { IF true { RETURN 1 }; 2 };
 RETURN $x;
 
 -- ===== test build/migrating/from-old-surrealdb-versions/3x-to-4x/nested-aggregates-in-group-by-1.surql
--- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:529
+-- source: src/content/build/migrating/from-old-surrealdb-versions/3x-to-4x.mdx:539
 /**
 [env]
 clean = true
