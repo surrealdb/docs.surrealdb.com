@@ -22,13 +22,14 @@ Each Context stores its own configuration. These settings are the same on every 
 
 | Area | Fields | Reference |
 | --- | --- | --- |
-| Models and provider keys | `models.extraction`, `models.elaboration_consolidation`, `models.synthesis`, `models.reconciliation`, `models.embedding`, `providers.*` | [Config fields](/docs/agent-memory/reference/configuration#config-fields) |
+| Models and provider keys | `models.extraction`, `models.elaboration_consolidation`, `models.synthesis`, `models.reconciliation`, `models.judge`, `models.embedding`, `providers.*` | [Config fields](/docs/agent-memory/reference/configuration#config-fields) |
 | Token budget | `token_limit`, `billing_anchor_day` | [Config fields](/docs/agent-memory/reference/configuration#config-fields) |
 | Document ingest and extraction | `ingestion_profile`, `chunking_strategy`, `pii_redaction_enabled`, `injection_scan.*`, `reconciliation.confidence_floor` | [Extraction tuning](/docs/agent-memory/reference/configuration#extraction-tuning) |
 | Response cache | `response_cache.*` | [Cache settings](/docs/agent-memory/reference/configuration#cache-settings) |
 | Trace retention | `trace_retention.*` | [Trace retention](/docs/agent-memory/reference/configuration#trace-retention) |
 | Scopes and labels | `scope_limits.*`, `label_limits.*`, `label_dimensions` | [Scope and label limits](/docs/agent-memory/reference/configuration#scope-and-label-limits) |
 | API keys | `allow_self_service_keys`, `max_token_ttl_seconds` | [Key policy](/docs/agent-memory/reference/configuration#key-policy) |
+| Ingest judge and prompt guidance | `judge.*`, `prompt_addendums.*` | [Ingest judge](/docs/agent-memory/operations/ingest-judge) |
 
 Not every stored model setting is applied yet. [Which settings are applied](/docs/agent-memory/tuning/models-per-stage#which-settings-are-applied) shows the stages that use their per-Context model.
 
@@ -70,7 +71,7 @@ A Context can choose its own model for the two worker stages. The deployment def
 
 ### Your own model
 
-The `openai_compatible` provider sends language-model calls to an endpoint that speaks the OpenAI chat API, such as a model gateway or a model server you run. It replaces the language-model stages only. The embedding model stays fixed, as [Fixed behaviour](#fixed-behaviour) shows.
+The `openai_compatible` provider sends language-model calls to an endpoint that speaks the OpenAI chat API, such as a model gateway or a model server you run. It serves the language-model stages, and can also serve [embeddings](#embeddings).
 
 | Setting | Environment variable | Notes |
 | --- | --- | --- |
@@ -90,6 +91,21 @@ Agent Memory checks every connection to this endpoint:
 A model server on the same machine, or one that serves plain HTTP, therefore needs an HTTPS address on your network in front of it.
 
 A Context cannot store its own key for `openai_compatible`. The key is set for the deployment only.
+
+### Embeddings
+
+Embeddings use Gemini unless the deployment chooses its OpenAI-compatible endpoint instead, for example a gateway in front of Azure OpenAI:
+
+| Setting | Environment variable | Default | Notes |
+| --- | --- | --- | --- |
+| Embedding provider | `SPECTRON_EMBEDDINGS_PROVIDER` | `gemini` | `gemini` or `openai_compatible`. |
+| Embedding model | `SPECTRON_EMBEDDINGS_MODEL` | `gemini-embedding-2` with `gemini` | Required with `openai_compatible`, for example `text-embedding-3-large`. The model must return 3072-dimension vectors. |
+| Embedding key | `SPECTRON_EMBEDDINGS_API_KEY` | None | Required with `gemini`. Optional with `openai_compatible`, where it replaces the endpoint's key for embedding calls only. |
+
+With `openai_compatible`, embedding calls go to the endpoint in `SPECTRON_PROVIDER_OPENAI_COMPATIBLE_BASE_URL`, under the same network checks as [your own model](#your-own-model). Their use is recorded under `byom:<model>` and does not count towards a Context's token budget. A Context's `models.embedding` must name the deployment's embedding model. A missing key, model or endpoint, or an unknown provider, stops the service at start-up with the reason.
+
+> [!IMPORTANT]
+> Every stored vector records the model that made it, and a search reads only vectors from the current model. Changing the embedding provider or model on a deployment that already holds data therefore needs every vector embedded again. A deployment that embeds with `openai_compatible` is text only: a text query does not find images, because no image embedder shares that model's vector space.
 
 ### Document and media providers
 
@@ -189,13 +205,20 @@ Every listener serves plain HTTP or gRPC. Terminate TLS in a load balancer, ingr
 | Log filter | `RUST_LOG` | `spectron=info` and a few library filters | Logs are written as text to standard error. |
 | Quiet routes | `SPECTRON_HTTP_QUIET_ROUTES` | None | Comma-separated route templates, such as `/api/v1/health`, whose access logs drop to debug level. Their metrics are still recorded. |
 
+A REST or gRPC request that carries a W3C `traceparent` header continues the caller's trace. The work it starts, including queued jobs and calls to model providers, stays in that trace, and outbound calls carry a `traceparent` of their own. An incoming `tracestate` is dropped and never forwarded. A delegated request records both principals, as `spectron.on_behalf_of.principal.id` on spans and `audit.on_behalf_of.principal.id` on audit events.
+
+Logs, error messages and audit events carry ids and counts rather than stored content, and a provider's error is logged by its status and error code, never its body. The exception is the `ingest_fact` log target:
+
+> [!WARNING]
+> Each fact that is written emits one event on the `ingest_fact` target, with the Context id, the kind of fact, its source, its record id, and its subject, predicate and object. These events contain stored content, and they are always emitted, whatever `RUST_LOG` says, to standard error and to OpenTelemetry. A forget cannot recall an event that was already exported, so check where these logs go before storing personal data.
+
 ## Fixed behaviour
 
 This behaviour is the same on every deployment, and no setting changes it:
 
 | Behaviour | Value |
 | --- | --- |
-| Embedding model | `gemini-embedding-2`, at 3072 dimensions. A Context's `models.embedding` accepts only this value. |
+| Embedding width | 3072 dimensions, whichever [embedding model](#embeddings) the deployment uses. |
 | Expiry of `context` facts | 7 days after the fact's known time, checked every hour. See [Expiry of context facts](/docs/agent-memory/mental-model/memory-lifecycle#expiry-of-context-facts). |
 | Importance decay | Once a day: `context` × 0.95, `knowledge` × 0.995, `identity` unchanged. |
 | Background passes every hour | Context-fact expiry, consolidation, elaboration, removal of duplicate conversation chunks, document clean-up and trace retention. |

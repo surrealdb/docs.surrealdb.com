@@ -1,0 +1,217 @@
+---
+position: 6
+title: Ingest judge
+description: "Classify content as pass, warn, fail or deny before Agent Memory stores it: the input and row gates, judge settings, prompt addendums, the review log, override and replay, holding warned content for approval, and dry-running a prompt change."
+---
+
+# Ingest judge
+
+The ingest judge is a language model that checks content before SurrealDB Agent Memory stores it, and refuses or flags what a Context should not keep, such as card numbers, credentials or prompt injection. This page covers turning the judge on, what it does with each verdict, and how a reviewer works through what it flagged.
+
+The judge is off until a Context turns it on. A Context with no `judge` settings, or with `enabled` set to `false`, judges nothing, and its writes and prompts are unchanged.
+
+## Turn the judge on
+
+Set the `judge` settings in SurrealDB Studio under the Context's **Settings** → **configuration**, or through the SurrealDB Cloud API admin routes. A change is a partial configuration, so this one turns the judge on and leaves every other setting as it is:
+
+```json
+{
+  "judge": { "enabled": true }
+}
+```
+
+With only `enabled` set, the judge checks both the incoming content and the facts extracted from it, refuses a write when the judge itself fails, and keeps a review log for 30 days. The [settings](#judge-settings) below change each of these.
+
+## Verdicts
+
+The judge gives each piece of content one of four verdicts, with reason codes from a fixed list: `payment_card`, `credential`, `personal_data`, `sensitive_inference`, `prompt_injection` and `policy`. A reason is always one of these codes and never free text, so a reason cannot repeat the content it describes.
+
+| Verdict | Effect |
+| --- | --- |
+| `pass` | The write goes ahead. |
+| `warn` | The write goes ahead, and an [uncertainty](/docs/agent-memory/reasoning/instructions-and-uncertainties) records the reason codes but not the content. With `on_warn` set to `hold`, the content is [held for approval](#hold-warned-content-for-approval) instead. |
+| `fail` | The write is refused with `422` and the reason codes. The refusal is audited as `judge.fail`. A document is marked `failed` with the codes. |
+| `deny` | The write is refused with `422` and the fixed message `the request could not be processed`. Nothing is logged, audited, counted or stored. A document is marked `failed` with the same message, and its uploaded original is deleted. |
+
+Use `deny` guidance for content that must leave no trace at all. A `fail` is recorded so that a reviewer can see it and correct the judge, while a `deny` cannot be reviewed, replayed or tested later.
+
+## What the judge checks
+
+The judge runs at two points, called gates. Both are on when the judge is enabled.
+
+### Input gate
+
+The input gate judges content as it arrives, before anything is stored, embedded or sent to the extraction model. It covers `POST /facts`, `POST /facts/batch`, `POST /chat` and its streaming form, and the MCP tools that call them. It judges after [PII redaction](/docs/agent-memory/reference/configuration#extraction-tuning) where the Context turns it on with `pii_redaction_enabled`, so a redacted card number is never sent to the judge. For an uploaded document, it judges the parsed and redacted text before chunking, embedding and extraction.
+
+Long content is judged in windows of 16,000 characters, and the most severe verdict of any window applies to the whole item. Content longer than 8 windows is not judged on its first part only: it is treated as a judge error and follows `on_error`.
+
+### Row gate
+
+The row gate judges the entities, attributes, relations, actions, instructions and uncertainties that an extraction produced, before any of them are written. It runs for every source of facts: conversation turns, documents, reflection, and the background elaboration, consolidation, rollup and gist passes.
+
+Rows with a `fail` or `deny` verdict are dropped, together with every row that names a dropped entity. A `warn` row is written, and one uncertainty records the reason codes. A row gate refusal does not remove the turn or document text that the rows came from, which is what the input gate is for.
+
+Set `rows` to `false` to judge incoming content only. The row gate adds one judge call to each reconciliation, including the background passes, so turning it off lowers the cost of the judge.
+
+## Judge settings
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `judge.enabled` | `false` | Turns both gates on or off. |
+| `judge.input` | `true` | Runs the [input gate](#input-gate). |
+| `judge.rows` | `true` | Runs the [row gate](#row-gate). |
+| `judge.on_error` | `fail` | What happens when the judge call fails, times out or returns an answer that cannot be read. `fail` refuses the write with the reason `judge_unavailable`. `allow` lets the write through unjudged. |
+| `judge.on_warn` | `write` | `write` stores warned content and flags it. `hold` stores it hidden from agents until a reviewer approves it. |
+| `judge.record_pass` | `true` | Records `pass` verdicts in the review log as well as `warn` and `fail`. Turn it off to keep only flagged content. |
+| `judge.retention_days` | `30` | Days a review log entry is kept. `0` keeps entries until they are deleted. |
+| `judge.retain_inputs` | `false` | Keeps the original request of a `warn` or `fail` on `/facts` or `/facts/batch`, so that an approved judgement can [replay](#override-a-verdict-and-replay-a-write) it. |
+| `models.judge` | Deployment default | The model the judge uses for background work, as `{provider, model}`. Judging on the request path, which covers the input gate and the row gate for `/facts` and `/chat`, uses the deployment's judge model. See [Models per stage](/docs/agent-memory/tuning/models-per-stage). |
+
+A configuration that cannot be read refuses the write rather than skipping the judge, whatever `on_error` says.
+
+## Guide the judge with a prompt addendum
+
+A prompt addendum is extra guidance from the Context's operator, added to the system prompt of one stage. The judge's addendum is where a Context says what counts as sensitive for it:
+
+```json
+{
+  "prompt_addendums": {
+    "judge": "Customer account numbers in the form ACC-123456 are personal data. Internal project code names are not sensitive."
+  }
+}
+```
+
+Addendums exist for other stages too: `extraction`, `consolidation`, `elaboration`, `gist`, `rollup` and `chat`, which also applies to `/reflect`. Each is added to the stage's system prompt under a heading that says it adds to the stage's rules and never overrides them, and it is never placed in the user prompt beside untrusted content.
+
+- An addendum is at most 4,000 characters, and may contain no control characters other than newline and tab.
+- Set a stage with a string, clear it with `""`, and omit it to leave it unchanged.
+- A Context with a `chat` addendum does not reuse cached answers, because the [response cache](/docs/agent-memory/tuning/caching-and-invalidation) would otherwise return answers produced under other guidance.
+
+To try a new judge addendum on past content before saving it, use a [dry run](#test-a-prompt-change-with-a-dry-run).
+
+## Review what the judge decided
+
+The review log records each verdict so that a reviewer can check the judge's decisions and improve its addendum. Each entry has the gate (`input` or `row`), the verdict, the reason codes, the source, the write scope, and an excerpt of at most 500 characters taken after redaction. A `deny` is never recorded. The row gate records `warn` and `fail` rows one entry each, and records a whole extraction's passed rows as one entry with a count.
+
+```http
+GET /api/v1/{context_id}/judgements?verdict=fail&stage=input&limit=20
+GET /api/v1/{context_id}/judgements/{judgement_id}
+```
+
+Results come newest first, with the usual page cursor. Every review route needs the **`grant:manage`** grant over the whole Context, because entries carry excerpts of the content.
+
+```bash
+surreal memory judgements list --verdict fail --limit 20
+surreal memory judgements show <id>
+```
+
+## Override a verdict and replay a write
+
+When the judge was wrong, a reviewer records the correct verdict beside the judge's own. The judge's verdict stays visible on the entry, and the override is audited as `judge.override` by id, without the excerpt.
+
+```http
+POST /api/v1/{context_id}/judgements/{judgement_id}/override
+Content-Type: application/json
+
+{ "verdict": "pass", "replay": true }
+```
+
+With `replay` and a `pass` verdict, the override also ingests the refused request, so the caller does not have to send it again. That needs `judge.retain_inputs` on the Context at the time of the original write. The response's `replay` field says what happened:
+
+| `replay` | Meaning |
+| --- | --- |
+| `not_requested` | The override recorded the decision only. |
+| `ingested` | The kept request was ingested. |
+| `not_retained` | No request is kept: the Context does not set `retain_inputs`, the retention period has passed, or it was ingested already. |
+| `not_replayable` | The judgement is not for `/facts` or `/facts/batch`. Chat, document and row judgements cannot be replayed. |
+
+A replay ingests the request at most once, as the original principal, with that principal's current grants narrowed by the original key, so approving a write never gives it more access than it had. The judge does not check the replayed content again. A document that failed must be uploaded again after the judge's addendum is fixed.
+
+```bash
+surreal memory judgements override <id> --verdict pass --replay
+```
+
+> [!WARNING]
+> `retain_inputs` keeps content the judge objected to in the Context database for `retention_days`, after redaction. Turn it on only where that is acceptable. A `deny` never keeps a request.
+
+## Hold warned content for approval
+
+With `on_warn` set to `hold`, warned content is stored but hidden from every agent read until a reviewer approves it:
+
+```json
+{
+  "judge": { "enabled": true, "on_warn": "hold" }
+}
+```
+
+- A warned `/facts` or `/facts/batch` write holds its text, its turn and every row it extracted.
+- A row the row gate warns about holds that fact, relation or action, and the other rows from the same extraction stay visible.
+- An entity that only held rows mention stays hidden as well, until its facts are approved.
+
+Held content is not returned by `/query`, `/profile`, `/state`, chat context or any other agent read, and the background passes do not build on it. A held write replaces nothing, so a held value does not retire the current value it would replace.
+
+```http
+GET  /api/v1/{context_id}/judgements?held=true
+POST /api/v1/{context_id}/judgements/{judgement_id}/approve
+POST /api/v1/{context_id}/judgements/{judgement_id}/reject
+```
+
+Approving releases the held rows and rejecting deletes them. Both return the judgement and a count of the facts, chunks and turns they changed, and a second decision on the same judgement returns `409`.
+
+```bash
+surreal memory judgements list --held
+surreal memory judgements approve <id>
+surreal memory judgements reject <id>
+```
+
+A hold has these limits:
+
+- Chat and document warnings are stored and flagged, not held.
+- A warned entity, instruction or uncertainty cannot be held. A warned instruction or uncertainty in a held write is not stored.
+- Approving a held fact that conflicts with a current one leaves both current until a later write settles them.
+- Held relations are not embedded, so vector search finds them only after they are approved.
+
+## Test a prompt change with a dry run
+
+A dry run judges recorded entries again under a candidate judge addendum, and reports which verdicts would change. It stores nothing and changes nothing.
+
+```http
+POST /api/v1/{context_id}/judgements/dry-run
+Content-Type: application/json
+
+{
+  "addendum": "Treat internal project code names as non-sensitive.",
+  "verdict": "fail",
+  "limit": 20,
+  "compareCurrent": true
+}
+```
+
+| Field | Description |
+| --- | --- |
+| `addendum` | The candidate judge addendum, up to 4,000 characters. An empty string tests the judge with no addendum. |
+| `verdict` | Which recorded verdicts to test: `pass`, `warn` or `fail`. Omitted, the newest `warn` and `fail` entries are tested. |
+| `judgementIds` | Specific entries to test instead of the newest ones. |
+| `limit` | Entries to test, 20 by default and at most 50. |
+| `compareCurrent` | Also judges each entry under the saved addendum, for comparison. |
+
+The response lists each entry's original, candidate and current verdicts, counts how many changed, and gives a matrix of how many moved from each verdict to each other.
+
+```bash
+surreal memory judgements dry-run --addendum-file candidate.txt --verdict fail --compare-current
+```
+
+A dry run tests input gate entries only, and reports row gate entries as skipped. It judges the stored excerpt of at most 500 characters rather than the full original, so a verdict can differ from the first one. Each excerpt is sent to the judge's model again, and the call counts towards the Context's usage.
+
+## Cost and privacy
+
+The judge's calls count towards the Context's [token budget](/docs/agent-memory/reference/configuration), and appear as their own `judge` stage in its usage breakdown. The input gate adds one call to each write, and the row gate one call to each reconciliation.
+
+The content the judge checks is sent to its model provider, after PII redaction where the Context enables it. A `deny` leaves no record in Agent Memory, but the `422` status is visible to infrastructure in front of the service, and an uploaded document exists in storage from its upload until the judge checks it.
+
+## Related reading
+
+- [Forgetting memories](/docs/agent-memory/operations/forget) - remove content that is already stored
+- [Instructions and uncertainties](/docs/agent-memory/reasoning/instructions-and-uncertainties) - where `warn` verdicts are recorded
+- [Models per stage](/docs/agent-memory/tuning/models-per-stage) - choose the judge's model
+- [Configuration](/docs/agent-memory/reference/configuration) - every Context setting
