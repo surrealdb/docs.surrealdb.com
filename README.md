@@ -8,17 +8,7 @@
     </a>
 </p>
 
-<h3 align="center">
-    SurrealDB is the ultimate cloud <br> database for tomorrow's applications
-</h3>
-
-<h3 align="center">Develop easier. &nbsp; Build faster. &nbsp; Scale quicker.</h3>
-
-<br>
-
-<p align="center">The documentation for <a href="https://github.com/surrealdb/surrealdb" target="_blank">SurrealDB</a>, built using <a href="https://vike.dev/" target="_blank">Vike</a>.</p>
-
-<p align="center">If you want to contribute, then please read the <a href="https://github.com/surrealdb/docs.surrealdb.com/blob/main/CONTRIBUTING.md" target="_blank">contributing guidelines</a>.</p>
+<p align="center">The documentation for <a href="https://github.com/surrealdb/surrealdb" target="_blank">SurrealDB</a> and SurrealDB Agent Memory, served at <a href="https://surrealdb.com/docs" target="_blank">surrealdb.com/docs</a>.</p>
 
 <br>
 
@@ -54,229 +44,133 @@
 
 <br>
 
-## Table of Contents
+## Contents
 
-- [Table of Contents](#table-of-contents)
-- [Getting started with SurrealDB](#getting-started-with-surrealdb)
-- [Learn SurrealDB](#learn-surrealdb)
-- [Contributing to the documentation](#contributing-to-the-documentation)
-  - [Good First Issues](#good-first-issues)
-- [Installation](#installation)
-- [Contributing Lab content to SurrealDB Documentation](#contributing-lab-content-to-surrealdb-documentation)
-- [Overview](#overview)
-- [Prerequisites](#prerequisites)
-- [Creating a new Lab](#creating-a-new-lab)
-  - [Using the Lab creation tool](#using-the-lab-creation-tool)
-  - [Manual creation](#manual-creation)
-- [Content guidelines](#content-guidelines)
-  - [Categories](#categories)
-  - [Topics](#topics)
-- [Best practices](#best-practices)
-- [Submitting your contribution](#submitting-your-contribution)
-- [Review process](#review-process)
-- [Need help?](#need-help)
-- [Development](#development)
-  - [Railroad diagrams (reusable)](#railroad-diagrams-reusable)
-- [Building](#building)
-- [Adding a new doc](#adding-a-new-doc)
+- [Getting started](#getting-started)
+- [Commands](#commands)
+- [Before you open a pull request](#before-you-open-a-pull-request)
+- [What CI checks](#what-ci-checks)
+- [Writing documentation](#writing-documentation)
+- [Tested examples](#tested-examples)
+- [Labs](#labs)
 - [File structure](#file-structure)
-- [Linting](#linting)
 
+## Getting started
 
-## Getting started with SurrealDB
-
-Visit [surrealdb.com/docs](https://surrealdb.com/docs/surrealdb/) to get started with SurrealDB. 
-
-
-## Learn SurrealDB
-
-- SurrealDB University: https://surrealdb.com/learn/fundamentals
-- Aeon's Surreal Renaissance (Interative book): https://surrealdb.com/learn/book
-- Documentation: https://surrealdb.com/docs
-
-
-## Contributing to the documentation
-
-Please see our [contributing guidelines](/CONTRIBUTING.md).
-
-### Good First Issues
-
-We have a list of [good first issues](https://github.com/surrealdb/docs.surrealdb.com/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22) that contain bugs that have a relatively limited scope. This is a great place to get started, gain experience, and get familiar with our contribution process.
-
-## Installation
-
-To get started with contributing to the SurrealDB documentation, first install the required packages using the following command. 
-
-> This project uses [Bun](https://bun.sh/) as our package manager. If you haven't installed Bun yet, then please see the [installation guide](https://bun.sh/docs/installation) for your operating system. It also requires Node.js v20.0.0 or higher.
-
-```bash
-bun i 
-```
-
-## Contributing Lab content to SurrealDB Documentation
-
-## Overview
-Labs are a collection of community and official content that helps users learn and work with SurrealDB. This guide will help you contribute your own lab content to the documentation.
-
-## Prerequisites
-- [Bun](https://bun.sh/) installed on your system
-- A GitHub account
-- Basic knowledge of Markdown
-
-## Creating a new Lab
-
-### Using the Lab creation tool
-The easiest way to create a new lab is using the built-in tool:
-
-1. Clone the repository and install dependencies:
+The site is built with [Vike](https://vike.dev/) and React, and its pages are Markdown and MDX files in `src/content`. You need [Bun](https://bun.sh/) 1.3 or later, and Node.js 24 for the build.
 
 ```bash
 git clone https://github.com/surrealdb/docs.surrealdb.com.git
 cd docs.surrealdb.com
 bun install
+bun run dev
 ```
 
-2. Run the lab creation tool:
+The development server runs at [http://localhost:4321/docs](http://localhost:4321/docs) and reloads as you edit a page.
+
+The style guide, the conventions for SurrealQL examples, and how the site is put together are in [`AGENTS.md`](AGENTS.md). Read it before your first change, whether you write by hand or with a coding agent. For a first contribution, the [good first issues](https://github.com/surrealdb/docs.surrealdb.com/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22) have a limited scope.
+
+## Commands
+
+### Everyday
+
+| Command | What it does |
+| --- | --- |
+| `bun run dev` | Start the development server. |
+| `bun run qa` | Format and fix what Biome can fix safely. |
+| `bun run qc` | Check formatting and lint without changing anything. |
+| `bun run qts` | Type-check with TypeScript. |
+| `bun run check:links` | Check every internal link, anchor and short URL in `src/content`. |
+| `bun run build` | Build the site. |
+| `bun run preview` | Build the site and serve the build. |
+
+### Generated files
+
+These write files that are committed, so run them and commit the result with the change that needs them.
+
+| Command | When to run it |
+| --- | --- |
+| `bun run generate:doc-tests` | After any change to a SurrealQL example. Writes `tests/doc-examples.surql`. |
+| `bun run generate:llms` | After a page is added, moved or renamed, or its `description` changes. Writes `public/llms.txt`. |
+| `bun run generate:related` | To refresh the related University lessons and blog posts shown at the end of a page. Writes `src/data/related.json`. |
+| `bun run generate:labs-blog` | After blog posts are published, to list them in Labs. Writes `src/data/labs-blog.json`. |
+| `bun run generate:cli-history` | After a SurrealDB release is tagged, to update the environment variable and flag history chart. |
+
+### Diagrams and screenshots
+
+| Command | What it does |
+| --- | --- |
+| `bun run diagrams:render [name]` | Draw a figure from `scripts/diagrams/figures` as light and dark WebP files. |
+| `bun run diagrams:check` | List the figures whose page sections changed since they were drawn. Use `--accept <name>` when a figure still matches. |
+| `bun run screenshots:check` | List the Studio screenshots whose interface has changed, from a local clone of surrealdb/studio. |
+| `bun run screenshots:capture` | Take the scripted Studio screenshots again. |
+
+### Search and deployment
+
+| Command | What it does |
+| --- | --- |
+| `bun run search:serve` | Serve the search API locally. |
+| `bun run search:index` | Index the content into the search database. Needs the search database credentials. |
+| `bun run build:cloudflare` | Build the Cloudflare Worker. Vercel serves production, and the Worker serves previews. |
+| `bun run test:routes` | Check the route table compiled from `vercel.ts` and `redirects.ts`. |
+
+`bun run build` ends with `postbuild`, which indexes the content for search. It skips itself on Vercel previews and in CI. On your own machine, without the search database credentials, it reports an error after the build has finished, and the build output is still complete.
+
+## Before you open a pull request
+
+Run these, and fix what they report:
 
 ```bash
-bun run make:lab
+bun run qa
+bun run qc
+bun run check:links
+bun run generate:doc-tests
+bun run diagrams:check
 ```
 
-3. Follow the interactive prompts to provide:
-   - Lab name (required)
-   - Description (recommended)
-   - URL (optional) - Link to your project/repository
-   - Stage (required) - Choose from:
-     - Explore
-     - Learn
-     - Prototype
-     - Build
-     - Operate
-   - Format (required) - Choose from:
-     - Source code
-     - Video
-     - Article
-     - Documentation
-     - Interactive demo
-   - Topics (optional) - Select one or more from:
-     - AI
-     - Cloud
-     - Data management
-     - Financial services
-     - Security
-   - Languages (optional) - Select any from:
-     - Python
-     - Rust
-     - TypeScript
-     - Go
-     - Java
-     - PHP
-     - SurrealQL
-   - Author name (required) - Enter "surrealdb" for official content
-   - Author role (required for community content)
+Commit `tests/doc-examples.surql` if it changed. For every figure that `diagrams:check` lists, either update the figure or accept it, as [Keeping figures accurate](AGENTS.md#keeping-figures-accurate) describes.
 
-### Manual creation
+## What CI checks
 
-Alternatively, you can create a lab manually by creating a new Markdown file in [`src/content/labs-items/`](https://github.com/surrealdb/docs.surrealdb.com/tree/main/src/content/labs-items) with the following structure:
+The CI workflow runs on every push, including pushes to a pull request's branch. Merging into `main` needs an approving review, but a failing job does not block the merge, so check that every job has passed before you merge.
 
-```markdown
----
-title: "Your Lab Title"
-description: "A one-line summary of the lab"  # Recommended
-url: "https://your-project-url.com"  # Optional
-stage: "Learn"  # One of the stages below
-format: "Video"  # One of the formats below
-topics:  # Optional
-  - Topic1
-  - Topic2
-languages:  # Optional
-  - TypeScript
-author:
-  name: "Your Name"
-  role: "Your Role"
-  avatar: "your-name-slug"  # Will be automatically generated
----
+| Job | Runs | Fails when | To fix it |
+| --- | --- | --- | --- |
+| Code Quality | `bun run qau` | Biome finds a formatting or lint error that it cannot fix itself. | Run `bun run qa`, then `bun run qc`, and fix what remains. |
+| Build docs | `bun run build` | A page does not build: for example a frontmatter key that `src/utils/schema.ts` does not allow, an `icon` that does not exist, or a component used wrongly. | Run `bun run build` and read the first error. |
+| Route table | `bun run test:routes` | A rule in `redirects.ts` or `vercel.ts` compiles to a route that the Worker would serve differently from Vercel. | Run `bun run test:routes`. |
+| Internal links | `bun run check:links` | A link points at a page that does not exist, an anchor names no heading on its page, or a short URL is broken or missing. | Fix the link. A renamed heading changes its anchor, so update every link to it. |
+| Internal links | `bun run generate:doc-tests --check` | `tests/doc-examples.surql` does not match the examples in `src/content`. | Run `bun run generate:doc-tests` and commit the file. |
 
-Your lab content here...
-```
+A push to `main` also starts the **Re-index docs search** workflow, which updates search from the new content. It can be started by hand for staging from the Actions tab.
 
-> For the author avatar field, you will also need to upload an avatar to /src/assets/img/labs-authors with the same file name as the author property in the lab markdown
+## Writing documentation
 
-## Content guidelines
+Each folder under `src/content` with a `+Content.ts` file is a collection, and each `.md` or `.mdx` file in it is a page. The frontmatter takes `title`, `description`, `position`, `icon` and `hidden`, and nothing else: the schema in `src/utils/schema.ts` refuses an unknown key. A folder's `__category.json` gives the section its title, position and icon in the sidebar.
 
-### Stages
-Choose the stage of the reader's journey that your lab serves best:
-- **Explore**: What SurrealDB is and why to use it - talks, overviews, comparisons, use cases and engineering deep dives
-- **Learn**: Content that teaches a concept - tutorials, courses and walkthroughs
-- **Prototype**: Templates, starter kits and example apps to fork for a proof of concept
-- **Build**: Libraries, SDKs, ORMs, integrations and developer tools for active development
-- **Operate**: Deployment, security, performance and monitoring in production
+- Set `position` on every page you add or move. Positions are whole numbers.
+- A page that moves needs a redirect in `redirects.ts` from its old URL.
+- The `description` does not appear on the page. It is used for search, for `llms.txt` and for the page's meta description, so the first paragraph of the page has to introduce it.
+- Raw HTML is removed when a page renders. Use the components that `AGENTS.md` lists, such as `<YouTube>` for a video.
 
-### Formats
-Choose what kind of thing your lab is:
-- **Source code**: A repository, package or library
-- **Video**: A video or livestream
-- **Article**: A blog post or other written piece
-- **Documentation**: Reference documentation or a guide
-- **Interactive demo**: A page that readers can use, not only read
+Adding a collection, the redirect rules, the components and the writing conventions are all described in [`AGENTS.md`](AGENTS.md).
 
-### Topics
-Select relevant topics to help users find your content:
-- **AI**: Artificial Intelligence related content
-- **Cloud**: content related to cloud deployments and SurrealDB Cloud
-- **Data management**: Data handling and management
-- **Financial services**: Content for banking, insurance, payments, and other financial sectors
-- **Security**: Security features and best practices
+## Tested examples
 
-## Best practices
+Every SurrealQL example in the documentation is a test. `bun run generate:doc-tests` writes them to `tests/doc-examples.surql`, and the language-test runner in the SurrealDB repository runs them against the engine.
 
-1. **Title**: Choose a clear, descriptive title that reflects the content. Keep it short and concise for better readability
-2. **Content** (Only required when no URL is provided):
-   - Start with a brief introduction
-   - Include clear instructions
-   - Add code examples where relevant
-   - Include screenshots or diagrams if helpful
-3. **URL**: If your lab has an associated project, include the URL
-4. **Author Information**: 
-   - Use your real name
-   - Provide a clear role description
-   - For official SurrealDB content, use "surrealdb" as the author name
+- An example has to run as written on an empty database. Put any setup it needs at the top of the block, under a `-- Setup` line, followed by a blank line.
+- A result goes in a fence titled `Output` directly below the example, or on a `//-` line below the statement that returns it.
+- Mark a block `notest` (```` ```surql notest ````) only when it cannot run on its own, such as a template whose values an application supplies.
+- A signature such as `math::abs(number) -> number` goes in a ```` ```syntax ```` fence, which is never a test.
 
-## Submitting your contribution
+[Tested examples](AGENTS.md#tested-examples) in `AGENTS.md` has the full rules.
 
-1. Create a new branch for your lab
-2. Add your lab content
-3. Commit your changes
-4. Push to your fork
-5. Create a pull request
+## Labs
 
-## Review process
+[Labs](https://surrealdb.com/docs/labs) lists projects, articles and videos from SurrealDB and the community. Each entry is a file in `src/content/labs-items`. `bun run make:lab` asks for the details and writes the file, or you can copy an existing entry. Blog posts in Labs come from `src/data/labs-blog.json` instead.
 
-Your lab will be reviewed for:
-- Technical accuracy
-- Content quality
-- Adherence to guidelines
-- Proper categorisation and topics
-
-## Need help?
-
-If you need assistance or have questions:
-- [Open an issue in the repository](https://github.com/surrealdb/docs.surrealdb.com/issues)
-- [Join the SurrealDB community channels](https://discord.com/invite/surrealdb)
-- [Check existing labs for examples](/docs/labs)
-
-Remember, your contribution helps the SurrealDB community grow and learn. Thank you for contributing!
-
-
-## Development
-
-The following command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
-
-```
-bun dev
-```
-
-### Railroad diagrams (reusable)
+### Railroad diagrams
 
 This repo renders SVG railroad diagrams using the JS library by Tab Atkins ([JS README](https://tabatkins.github.io/railroad-diagrams/README-js.html), [project page](https://tabatkins.github.io/railroad-diagrams/)).
 
@@ -309,50 +203,18 @@ Usage in MDX/Markdown content:
 
 The `ast` prop is passed as a JSON string and parsed by the shortcode wrapper before being handed to the underlying `RailroadDiagram` component.
 
-## Building
-
-The following command builds and generates static content into the `build` directory, and can then be served using any static contents hosting service.
-
-```
-bun run build
-```
-
-## Adding a new doc
-
-Documentation pages live in `src/content/` and are loaded via [`vike-content-collection`](https://github.com/welpie21/vike-content-collection). Each top-level folder under `src/content/` is a content collection registered through a `+Content.ts` file that points at a schema in `src/content/config.ts`.
-
-To add a new page, create a `.md` or `.mdx` file inside the appropriate collection folder with frontmatter that matches the collection's schema (see `abstractDoc` and `labCollection` in `src/content/config.ts`). Sidebar ordering is controlled by `position` in frontmatter and `__category.json` files within subdirectories.
-
-If you add a brand new collection, you will also need to register it in `src/content/config.ts` (URL prefix via `urlForCollection`) and add a matching `+onBeforePrerenderStart.ts` so the routes are prerendered.
-
 ## File structure
-
-To contribute to the documentation, most of your changes will be made to the `src/content` directory. Each section of the documentation has its own subdirectory, and each page is a Markdown or MDX file.
 
 ```md
 src/
-    assets/      # Static images, styles, and data files
-    components/  # React components (with co-located *.module.scss)
-    content/     # vike-content-collection collections (one folder per collection)
-    lib/         # Shared API/data helpers
-    modals/      # Modal components
-    pages/       # Vike filesystem-routed pages (+Page.tsx, +data.ts, +config.ts, ...)
-    typings/     # Shared TypeScript types
-    utils/       # Shared utilities (markdown, sidebar, collection helpers, ...)
+    assets/      # Images, including the rendered diagrams
+    components/  # React components, with co-located *.module.scss files
+    content/     # The pages, one folder per collection
+    data/        # Generated data, such as related links and Labs blog posts
+    lib/         # Shared API and data helpers, including the search and feedback handlers
+    pages/       # Vike routes: +Page.tsx, +data.ts, +config.ts and so on
+    utils/       # Markdown pipeline, navigation, schemas and collection helpers
+scripts/         # The commands above
+search/          # The search schema, crawler and handler
+tests/           # The generated doc tests
 ```
-
-## Linting
-
-To ensure the documentation is consistent and follows our style guide, we use `bun run qc` to check for linting errors. You can also use `bun run qa` to automatically fix most of the errors.
-
-Here are the commands for some of the common commands you may need to use.
-
-- `bun install` - Install dependencies, first time or when they change
-- `bun run dev` - Run a development server
-- `bun run build` - Build the website
-- `bun run preview` - Preview a build you made
-- `bun run qc` - Check code quality (fmt + lint)
-- `bun run qa` - Apply safe code quality suggestions
-- `bun run qau` - Apply (un)safe code quality suggestions
-- `bun run qts` - Type-check with TypeScript
-- `bun run check:links` - Check every internal link and anchor in `src/content`
