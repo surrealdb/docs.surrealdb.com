@@ -70,6 +70,18 @@ You can use the HTTP endpoints to perform the following actions:
             <td scope="row" data-label="Description">Streams the datastore's entire keyspace from one snapshot (experimental)</td>
         </tr>
         <tr>
+            <td scope="row" data-label="Function"><a href="#kvexport-exports"><code>PUT /kvexport/exports/:id</code></a></td>
+            <td scope="row" data-label="Description">Writes the datastore's entire keyspace to object storage as a background job (experimental)</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Function"><a href="#kvexport-exports"><code>GET /kvexport/exports/:id</code></a></td>
+            <td scope="row" data-label="Description">Shows the progress of a keyspace export to object storage (experimental)</td>
+        </tr>
+        <tr>
+            <td scope="row" data-label="Function"><a href="#kvexport-exports"><code>DELETE /kvexport/exports/:id</code></a></td>
+            <td scope="row" data-label="Description">Cancels a keyspace export to object storage (experimental)</td>
+        </tr>
+        <tr>
             <td scope="row" data-label="Function"><a href="#signup"><code>POST /signup</code></a></td>
             <td scope="row" data-label="Description">Signs-up as a record user using a specific record access method</td>
         </tr>
@@ -902,6 +914,88 @@ curl -X POST \
       }' \
   http://localhost:8000/kvexport
 ```
+
+## Keyspace exports to object storage {#kvexport-exports}
+
+From SurrealDB 4.1, the server can write a keyspace export to object storage itself, as a background job, instead of streaming it to the caller. The caller starts the export, checks its progress, and can cancel it. The export holds the same data as [`POST /kvexport`](#kvexport) and needs the same `kvexport` experimental capability and root owner credentials, and `--deny-http kvexport` turns these routes off as well.
+
+| Route | What it does |
+| --- | --- |
+| `PUT /kvexport/exports/:id` | Starts an export with the given id. |
+| `GET /kvexport/exports/:id` | Shows the export's state and progress. |
+| `DELETE /kvexport/exports/:id` | Cancels the export, and removes what it has written. |
+
+### Setting the destination
+
+The operator sets the destination when the server starts, in [`SURREAL_KVEXPORT_DESTINATION`](/docs/reference/cli/db/environment-variables#keyspace-export-config), so no request names where the data goes or how to reach it. The value is a bucket address in the form that [`DEFINE BUCKET ... BACKEND`](/docs/reference/query-language/statements/define/bucket) takes, such as an S3, GCS or Azure address or a `file://` folder:
+
+```bash
+SURREAL_KVEXPORT_DESTINATION="s3:/my-bucket?region=eu-west-1&prefix=exports" \
+  surreal db start --allow-experimental kvexport surrealkv:mydatabase.db
+```
+
+Credentials come from the server's environment, such as the standard cloud provider variables, or from the address itself. A `file://` folder must be inside `SURREAL_BUCKET_FOLDER_ALLOWLIST`. A destination in memory, or in the shared `global://` bucket, is refused, as is an address its backend cannot write to, such as an S3 address with no bucket. The server logs a warning at startup when the destination is one it will refuse.
+
+### Starting an export
+
+```bash
+curl -X PUT \
+  -u "root:secret" \
+  -H "Content-Type: application/json" \
+  -d '{ "latest_only": true }' \
+  http://localhost:8000/kvexport/exports/nightly-2026-11-13
+```
+
+The id is 1 to 128 lowercase letters, digits, `.`, `_` or `-`, starting with a letter or a digit. The body is optional, and takes only these fields:
+
+| Field | Description |
+| --- | --- |
+| `chunk_bytes` | The size at which a chunk ends, between 1 MiB and 1 GiB. Defaults to `SURREAL_KVEXPORT_CHUNK_BYTES`, which is 64 MiB. |
+| `latest_only` | Set to `true` to export a datastore that keeps version history, with each key's latest value only. |
+
+A new export answers `202 Accepted` with a `Location` header and its status. The server runs one export at a time, and the other answers are:
+
+| Status | When |
+| --- | --- |
+| `200 OK` | The same id was started with the same body already. Sending a start again after a timeout is therefore safe. |
+| `400 Bad Request` | The id or the body is not valid. |
+| `409 Conflict` | The id was started with a different body, another export is running, or the datastore keeps version history and the body does not set `latest_only`. |
+| `501 Not Implemented` | `SURREAL_KVEXPORT_DESTINATION` is not set. |
+| `500 Internal Server Error` | The destination is one the export refuses. |
+| `503 Service Unavailable` | The server is stopping, or the export could not start in time. |
+
+### Checking and cancelling an export
+
+`GET /kvexport/exports/:id` answers with the export's status:
+
+```json title="Example output"
+{
+  "export_id": "nightly-2026-11-13",
+  "state": "finished",
+  "chunk_bytes": 67108864,
+  "latest_only": true,
+  "keys": 1840213,
+  "chunks": 3,
+  "bytes": 172418905,
+  "destination": "s3:/my-bucket?region=eu-west-1&prefix=exports",
+  "manifest_key": "nightly-2026-11-13/manifest.json",
+  "error": null,
+  "started_at": "2026-11-13T02:00:00Z",
+  "finished_at": "2026-11-13T02:01:42Z"
+}
+```
+
+The `state` is `running`, `finished`, `failed` or `cancelled`. The `destination` shows the scheme, host, path and the `region`, `prefix`, `anonymous`, `use_emulator` and `lowercase_paths` settings, and replaces any credential in the address with `[REDACTED]`. The server holds jobs in memory, so it remembers an ended export for 24 hours, and an id it does not hold, including every id after a restart, answers `404 Not Found`.
+
+`DELETE /kvexport/exports/:id` cancels a running export. It waits up to a minute for the export to stop and remove what it has written, then answers `200 OK` with the final status, or `202 Accepted` if the export is still stopping. An export that runs longer than `SURREAL_KVEXPORT_MAX_DURATION`, 6 hours by default, ends as `failed` and is removed in the same way.
+
+### What an export writes
+
+Under the destination, an export with the id `X` writes numbered chunk objects, `X/chunks/00000000`, `X/chunks/00000001` and so on, and then `X/manifest.json`. The manifest is written last, so an export with a manifest is complete, and a folder with chunks and no manifest is not a usable export. If the destination already holds a manifest for the id, the new export ends as `failed` without writing or removing anything, so a finished export is never overwritten.
+
+Each chunk holds whole key and value records in key order, followed by a check value over them. The manifest lists every chunk with its first and last key, record count, size and check value, along with the totals, the keyspace version and an overall check value. The overall check value is the same as the digest that ends a [`POST /kvexport`](#kvexport) stream of the same snapshot, so the two can be compared.
+
+The whole export is read from one snapshot, so it shows the datastore at one moment however long it runs. A chunk whose upload fails is read again from the same snapshot and uploaded again, up to five times. An export can hold up to 262,144 chunks, which is 16 TiB at the default chunk size, and one that would need more ends as `failed` with a message to start again with a larger `chunk_bytes`.
 
 <br />
 

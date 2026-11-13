@@ -39,9 +39,11 @@ UNIQUE [ NULLS NOT DISTINCT ]
 | FULLTEXT ANALYZER @analyzer [ BM25 [(@k1, @b)] ] [ HIGHLIGHTS ]
 | HNSW DIMENSION @dimension [ TYPE @type ] [ DIST @distance ]
     [ EFC @efc ] [ M @m ]
+    [ QUANTIZER BINARY [ OVERSAMPLE @oversample ] ]
 | DISKANN DIMENSION @dimension [ TYPE @type ] [ DIST @distance ]
     [ DEGREE @degree ] [ L_BUILD @l_build ]
     [ ALPHA @alpha ] [ HASHED_VECTOR ]
+    [ QUANTIZER BINARY [ OVERSAMPLE @oversample ] ]
 | SPATIAL
 ```
 
@@ -1064,6 +1066,7 @@ DEFINE INDEX diskann_pts
 | `L_BUILD` | `100` | Construction search-list size (`> 0`). |
 | `ALPHA` | `1.2` | DiskANN pruning parameter. |
 | `HASHED_VECTOR` | off | Same semantics as for HNSW - hash-stabilised vector - document keys. |
+| `QUANTIZER BINARY` | off | From SurrealDB 4.1. Searches on a sign-bit code of each vector. See [Binary quantization](#binary-quantization). |
 
 Queries use the **same** KNN operator shape as HNSW: `<|K, EF|>` (approximate) or `<|K, DIST|>` when the distance matches the index, letting the optimiser pick the DISKANN graph. The second number in the approximate form bounds the dynamic candidate list during search (analogous to HNSW `EF`).
 
@@ -1083,6 +1086,44 @@ The cache is a single budget **shared across every DISKANN index** in the proces
 | Latency profile | Lowest latency when the graph is hot in cache | Extra I/O; better for throughput to cost on huge corpora |
 | Vector element types | Full set (`F64` … `I16` in docs above) | Compact types (`F32`, `F16`, `I8`, `U8`) |
 | Deployment target | Includes WASM | Server / native binaries only |
+
+### Binary quantization
+
+From SurrealDB 4.1, an HNSW or DISKANN index can keep a binary code of each vector and search with it. The code holds one bit per dimension, recording whether that element is positive. A search compares codes by Hamming distance to choose `k` times `OVERSAMPLE` candidates, then ranks those candidates on the full vectors under the index's `DIST`. The distances a query returns are therefore the same as those of an index without the quantizer.
+
+```surql
+DEFINE INDEX doc_embedding ON document FIELDS embedding
+	HNSW DIMENSION 768 DIST COSINE QUANTIZER BINARY;
+```
+
+`OVERSAMPLE` sets how many candidates are ranked on the full vectors for each neighbour a query asks for. It defaults to `4` and takes a whole number from `1` to `255`. A higher value finds more of the true nearest neighbours, at the cost of more comparisons of full vectors:
+
+```surql
+DEFINE INDEX doc_embedding ON document FIELDS embedding
+	DISKANN DIMENSION 768 DIST COSINE QUANTIZER BINARY OVERSAMPLE 8;
+```
+
+The quantizer and `TYPE` change different things. `TYPE` sets how each vector is stored, and every distance is computed at that precision. `QUANTIZER BINARY` keeps each vector as it is and adds a code beside it of one bit per dimension, which is 96 bytes for a 768-dimension vector. The index therefore takes more storage, and in return a search reads less data and computes faster distances while it looks for candidates. The two can be combined, apart from `TYPE U8`, which is refused with `QUANTIZER BINARY needs a signed TYPE` because an unsigned element has no sign to record.
+
+Binary codes suit embeddings that are centred on zero, such as normalised embeddings, where the sign of each element carries most of its information. On a DISKANN index, the sign-bit code takes the place of the 8-bit code described under [Memory model and cache size](#memory-model-and-cache-size). An HNSW search uses the codes when nothing else narrows it, and walks the full vectors when another condition in the `WHERE` clause or a table permission filters the results.
+
+#### When to use binary quantization
+
+The quantizer pays off when finding candidates is most of the work of a search, and when the signs of an embedding's elements carry enough of its meaning for the right candidates to reach the re-rank. That makes it a good fit for:
+
+- A large set of embeddings from a model with many dimensions, such as 1024 or more, that produces normalised vectors, as most text embedding models for retrieval do.
+- A DISKANN index larger than memory, where the code is the part a search reads at every step. A sign-bit code is an eighth of the size of the 8-bit code, so more of the index fits in the cache.
+- Queries that ask for the nearest records with no other condition, such as `WHERE embedding <|10,40|> $query`.
+
+Leave it off when:
+
+- The model has few dimensions, such as 384 or 512. With fewer signs to compare, the true nearest neighbours can miss the candidate list, and the re-rank cannot bring them back.
+- The elements are not centred on zero, such as image features that are almost all positive. Most vectors then get nearly the same code.
+- Storage is the constraint. The quantizer adds to the size of the index, while a smaller `TYPE` such as `F16` or `I8` reduces it.
+- Most searches on an HNSW index carry another condition or run under a table permission, because those searches walk the full vectors.
+- The table holds few enough vectors that an index without the quantizer already answers quickly.
+
+To decide for a particular model, define the index with and without `QUANTIZER BINARY`, run a sample of real queries against both, and compare how many of the same nearest records each returns. If the quantized index misses too many, raise `OVERSAMPLE`, for example to `8` or `16`. If it still misses them at `16`, the model's embeddings are a poor fit for binary codes. For measurements on published models, see Hugging Face's [embedding quantization](https://huggingface.co/blog/embedding-quantization) post and Qdrant's [binary quantization with OpenAI embeddings](https://qdrant.tech/articles/binary-quantization-openai).
 
 ### Brute Force method
 
